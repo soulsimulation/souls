@@ -85,7 +85,7 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
    {op: 'place', def: 'core/camp-sink@1', name: 'sink', p: [cx + 2.2, cz + 0.1], r: Math.PI / 2},
    {op: 'place', def: 'core/table@1', name: 'table', p: [cx - 2.4, cz + 1.8]}]});
   assert.equal(sc.accepted, true, JSON.stringify(sc.failures?.slice(0, 3))); await tick(60);
-  const cap = (s, c) => { as(s); return edge.capabilities(s).find((x) => x.id === c); };
+  const cap = (s, c, where = (x) => x.id === c) => { as(s); return edge.capabilities(s).find(where); };
   const refused = async (s, c, code, limit = 2000) => { let x; for (let n = 0; n < limit; n++) { x = cap(s, c); if (x && !x.available && x.blocked?.code === code) break; await tick(1); }   // #1077: bounded wait for perception (see offered)
    assert.ok(x && !x.available, c + ' should be refused ' + JSON.stringify(x)); assert.equal(x.blocked?.code, code, JSON.stringify(x)); report.checks.push(`refused ${c.split(':').pop()} (${s.name}): ${code}`); };
   let retries = 0;
@@ -105,20 +105,20 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
   // ---- Ana makes a cup of tea and picks it up ----
   await refused(ana, `object:${id('cup')}:drink`, 'tea.cup-empty');
   await refused(ana, `object:${id('cup')}:wash`, 'tea.cup-clean'.replace('clean', 'clean'));
-  await done(ana, 'make a cup of tea');
+  await done(ana, `object:${id('cup')}:brew`);
   assert.equal(state('cup').tea, 1, 'a cup of tea'); const brewed = state('cup').brewedTick; assert.ok(brewed > 0);
   await refused(ana, `object:${id('cup')}:wash`, 'tea.cup-not-empty');
   // #628: a full cup on the counter is drunk by taking it first (a step, not a refusal)
   { const d = cap(ana, `object:${id('cup')}:drink`); assert.equal(d?.available, true, JSON.stringify(d)); report.checks.push('drink offered with the cup on the counter'); }
-  await done(ana, 'pick up the cup');
+  await done(ana, `pick-up:${id('cup')}`);
   assert.equal(ent('cup').support.by, ana.entityId, 'Ana holds the cup of tea');
 
   // ---- she offers it to Ben; he accepts: entry 41's hand-over, one holder in every tick, the tea unchanged ----
   const holders = new Set();
-  const g = await act(ana, 'offer Ben the tea'); await tick(5);
+  const g = await act(ana, `give:${ben.soulId}`); await tick(5);
   const benOffer = await here(ben); assert.match(benOffer.me?.offer ?? '', /^Ana holds out the .+ for you: accept or decline \(\d+ s\)$/, JSON.stringify(benOffer.me));
   report.contextBytes.benOffered = size(benOffer);
-  const a = await act(ben, 'accept');
+  const a = await act(ben, cap(ben, null, (x) => x.id.startsWith('accept:inv_')).id);
   await until([[ana, g], [ben, a]], 9000, () => { const s = ent('cup').support; assert.equal(s.kind, 'in-hand', 'never out of hand'); holders.add(s.by); });
   assert.equal(ent('cup').support.by, ben.entityId, 'Ben holds it now');
   assert.deepEqual([...holders], [ana.entityId, ben.entityId], 'one holder at a time: Ana, then Ben');
@@ -128,11 +128,11 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
   report.contextBytes.benHoldingTea = size(benHolding); report.cupRowHolding = benCupRow ?? null;
 
   // ---- Ana makes a second cup and picks it up; both drink at the table at once ----
-  await done(ana, 'make a cup of tea'); assert.equal(state('cup-two').tea, 1);
+  await done(ana, `object:${id('cup-two')}:brew`); assert.equal(state('cup-two').tea, 1);
   // #628: she drinks it without picking it up first: the drink takes it from the counter as a step, not a refusal
   assert.notEqual(ent('cup-two').support.kind, 'in-hand');
   const v0 = w.bridge.tea.visits(), tk0 = W().tick;
-  const da = await act(ana, `object:${id('cup-two')}:drink`), db = await act(ben, 'drink the tea');
+  const da = await act(ana, `object:${id('cup-two')}:drink`), db = await act(ben, `object:${id('cup')}:drink`);
   const seen = {ana: [], ben: []}, motion = {}, tableP = W().entities[id('table')].pose.p;
   let midHereBen = null;
   await until([[ana, da], [ben, db]], 9000, (s) => {
@@ -160,7 +160,7 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
   // ---- part-drunk context: a sip from a fresh third cup would do; instead read Ben's here at a part-drunk state ----
   const nearRow = (h, n) => h.objects.find((o) => o.id === id(n));
   // ---- both mugs on the table, empty ----
-  await done(ben, 'put the cup on the table'); await done(ana, 'put the cup on the table');
+  await done(ben, `put-on:${id('table')}`); await done(ana, `put-on:${id('table')}`);
   assert.equal(byName('cup').in.parent, id('table')); assert.equal(byName('cup-two').in.parent, id('table'));
   const emptyHere = await here(ben), emptyRow = nearRow(emptyHere, 'cup') ?? nearRow(emptyHere, 'cup-two');
   assert.deepEqual(emptyRow?.state, {empty: true}, 'an empty mug says so: ' + JSON.stringify(emptyHere.objects));
@@ -169,7 +169,7 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
 
   // ---- Ben washes his mug at the sink and sets it down clean on the table ----
   const benCup = id('cup'); let ran = false;
-  const wash = await done(ben, 'wash the cup', (s) => { if (s.sink && body(ben).human?.cupV1?.stage === 'wash') ran = true; });
+  const wash = await done(ben, `object:${id('cup')}:wash`, (s) => { if (s.sink && body(ben).human?.cupV1?.stage === 'wash') ran = true; });
   assert.ok(ran, 'the tap ran while he held the mug under it'); assert.equal(state('sink').on, false, 'the tap is off again');
   assert.equal(id('cup'), benCup, 'his own mug, the same id');
   assert.deepEqual([state('cup').tea, state('cup').brewedTick, state('cup').bag], [0, -1, false], 'clean: no tea, no stain, no bag');
@@ -185,11 +185,11 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
   // ---- a sip, and the nearby tea fact at a part-drunk level: Ana makes tea in the clean... no: in a fresh mug ----
   const s3 = god.act({ops: [{op: 'place', def: 'core/cup@3', name: 'cup-three', in: {parent: 'counter', slot: 'top'}, p: [0.0, 0.19]}]}); assert.equal(s3.accepted, true); await tick(20);
   await offered(ana, [[`object:${id('cup-three')}:brew`, true], [`object:${id('cup-two')}:brew`, false]]);
-  await done(ana, 'make a cup of tea'); assert.equal(state('cup-three').tea, 1);
+  await done(ana, `object:${id('cup-three')}:brew`); assert.equal(state('cup-three').tea, 1);
   await done(ana, `pick-up:${id('cup-three')}`); assert.equal(ent('cup-three').support.by, ana.entityId);
-  await done(ana, 'have a sip'); assert.equal(state('cup-three').tea, 0.8, 'one sip');
-  await done(ana, 'have a sip'); await done(ana, 'have a sip'); assert.equal(state('cup-three').tea, 0.4);
-  await done(ana, 'put the cup on the table');
+  await done(ana, `object:${id('cup-three')}:sip`); assert.equal(state('cup-three').tea, 0.8, 'one sip');
+  await done(ana, `object:${id('cup-three')}:sip`); await done(ana, `object:${id('cup-three')}:sip`); assert.equal(state('cup-three').tea, 0.4);
+  await done(ana, `put-on:${id('table')}`);
   const partHere = await here(ana), partRow = nearRow(partHere, 'cup-three');
   // here picks at most two things of a kind and six in all (entry 43's limit): with three mugs on the table the third may be
   // in `more`; its fact is then read from the same service here reads
@@ -207,7 +207,7 @@ test('serve, share, drink and wash up: a real cup of tea from hand to hand to em
    assert.deepEqual(p.steps[0], {verb: 'mars:put_item', params: {item: id('cup-two'), surfaceSlot: 'ground'}}, `${action} puts the mug down first`);
   }
   report.checks.push('hands full: filling the kettle and drinking another cup each plan the held mug down first');
-  await done(ana, 'put the cup on the table');
+  await done(ana, `put-on:${id('table')}`);
   assert.deepEqual(f.host.engine.runtime.violations, []);
   report.final = {cup: {id: benCup, ...state('cup'), parent: byName('cup').in.parent}, cup2: {id: id('cup-two'), ...state('cup-two'), parent: byName('cup-two').in.parent}, tick: W().tick};
   report.retries = retries;

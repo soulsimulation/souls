@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {coreAWorld} from '../test/core-a-fixture.ts';
+import {accept} from '../test/native-owner-fixture.ts';
 import {headingOfYaw} from './edge/perception/geometry.ts';
 import {Perception} from './edge/perception/here.ts';
 
@@ -13,6 +14,10 @@ test('intents: nearest free seat near a Soul, front row, go, swim, approach, tur
   const [a, b, c, d] = w.souls;
   const act = async (s: typeof a, body: object) => (await w.http(s, 'POST', '/v1/edge/act', body)).body;
   const dry = async (s: typeof a, body: object) => (await w.http(s, 'POST', '/v1/edge/resolve', body)).body.resolve;
+  // #1911: an act over HTTP is an offered id. The ledger reads the intent (its choice is `chosen`), the act sends the id it
+  // chose, and the receipt is that act's. A refused intent answers the ledger's refusal; the words never reach the route.
+  const byIntent = async (s: typeof a, body: object) => {const d = w.ledger.intents.dryRun(s, body as never) as any; if (!d.ok) return {accepted: false, code: d.code};
+    const out = await act(s, {capability: d.would.capability, ...(d.would.params ? {params: d.would.params} : {})}); return {...out, chosen: {...d.would.chosen, ...out.receipt?.chosen}};};
   const finish = async (s: typeof a, out: any, n = 8000) => {assert.equal(out.accepted, true, JSON.stringify(out)); await w.ticks(n, () => !w.open(s, out.receipt.id)); return w.receipt(s, out.receipt.id);};
   const seatOf = (s: typeof a) => new Perception(w.ledger, s).seat();
   // here.me.seat is the native seat slot (`<entity>#<slot>`, matching a receipt's chosen.slot); compare the entity part to menu targets.
@@ -32,39 +37,42 @@ test('intents: nearest free seat near a Soul, front row, go, swim, approach, tur
   assert.deepEqual({receipts: (w.f.db.db.prepare('SELECT COUNT(*) n FROM edge_receipts_v1').get() as any).n, events: w.f.db.events(w.f.host.worldId).length, at: w.pos(a)}, before, 'resolve changed nothing');
   assert.equal(r1.ok, true, JSON.stringify(r1)); assert.equal(r1.would.capability, 'sit:' + nearest[1].target!.id, 'the nearest FREE seat to B (the nearest is taken)');
   // act on it: the receipt reports the same choice and A ends up in that seat
-  const s1 = await act(a, {verb: 'sit', target: {nearest: 'seat', near: b.name}});
+  const s1 = await byIntent(a, {verb: 'sit', target: {nearest: 'seat', near: b.name}});
   assert.equal(s1.chosen.seat, nearest[1].target!.id, JSON.stringify(s1)); assert.equal(s1.chosen.near.name, b.name);
-  assert.deepEqual((w.receipt(a, s1.receipt.id) as any).chosen.seat, nearest[1].target!.id, 'chosen is kept on the receipt');
+  assert.equal(w.receipt(a, s1.receipt.id).capability, 'sit:' + nearest[1].target!.id, 'the receipt is the chosen seat');
   const s1d = await finish(a, s1); assert.equal(s1d.phase, 'completed'); assert.equal(seatEntity(a), nearest[1].target!.id); assert.equal((s1d.endedAt as any).posture, 'seated');
   // look keeps posture and seat; attention receipts never replace the body's act
-  const lk = await act(a, {verb: 'look', target: c.soulId}); assert.equal(lk.accepted, true, JSON.stringify(lk)); assert.equal(lk.channel, 'attention'); assert.equal(lk.chosen.turned, 'head');
+  const lk = await act(a, {capability: `look:${c.soulId}`}); assert.equal(lk.accepted, true, JSON.stringify(lk)); assert.equal(lk.channel, 'attention'); assert.equal(lk.chosen.turned, 'head');
   assert.equal(seatEntity(a), nearest[1].target!.id); assert.equal(w.body(a).human.gaze?.target, c.entityId); assert.deepEqual(w.body(a).human.attention, [w.body(c).pose.p[0], w.body(c).pose.p[2]]);
   // front row of the classroom: a centre seat in the row nearest the lectern; the second Soul gets the other centre seat
-  const f1 = await act(d, {verb: 'sit', target: {in: 'eden-classroom-1', row: 'front'}}); assert.equal(f1.chosen.row, 1, JSON.stringify(f1));
+  const f1 = await byIntent(d, {verb: 'sit', target: {in: 'eden-classroom-1', row: 'front'}}); assert.equal(f1.chosen.row, 1, JSON.stringify(f1));
   assert.ok(['eden-classroom-seat-02', 'eden-classroom-seat-03'].includes(f1.chosen.seat), f1.chosen.seat);
   await finish(d, f1, 12000); assert.equal(seatEntity(d), f1.chosen.seat);
   const f2 = await dry(b, {verb: 'sit', target: {in: 'eden-classroom-1', row: 'front'}}); assert.equal(f2.would.chosen.row, 1);
   assert.ok(['eden-classroom-seat-02', 'eden-classroom-seat-03'].includes(f2.would.chosen.seat) && f2.would.chosen.seat !== f1.chosen.seat, JSON.stringify(f2));
   const back = await dry(b, {verb: 'sit', target: {in: 'eden-classroom-1', row: 'back'}}); assert.equal(back.would.chosen.row, back.would.chosen.rows);
   // go {place}: route + walk, chosen place and ETA; arrives there
-  const g = await act(b, {verb: 'go', target: {place: 'shore-bank'}}); assert.equal(g.chosen.place, 'shore-bank'); assert.ok(g.chosen.eta && g.chosen.distance > 0, JSON.stringify(g.chosen));
+  const g = await byIntent(b, {verb: 'go', target: {place: 'shore-bank'}}); assert.equal(g.chosen.place, 'shore-bank'); assert.ok(g.chosen.eta && g.chosen.distance > 0, JSON.stringify(g.chosen));
   const gd = await finish(b, g); assert.equal(gd.phase, 'completed'); assert.equal((gd.endedAt as any).place, 'shore-bank');
-  // approach {target, distance}: ends about that far from them
+  // approach {target, distance}: resolve chooses that Soul; going up to them by the offered go-near ends about that far away
   const up = await act(c, {capability: 'stand:here'}); await w.ticks(200, () => !w.open(c, up.receipt.id)); await w.put(c, [-20, 2]);
-  const ap = await act(b, {verb: 'approach', target: c.name, distance: 1.5}); assert.equal(ap.chosen?.target, c.soulId, JSON.stringify(ap) + JSON.stringify([w.pos(b), w.pos(c)]));
+  const apd0 = w.ledger.intents.dryRun(b, {verb: 'approach', target: c.name, distance: 1.5} as never) as any; assert.equal(apd0.would?.chosen?.target, c.soulId, JSON.stringify(apd0));
+  // the menu offers approaching a Soul as go-near:<soul>; resolve's approach:<soul> is not taken by act (#2143)
+  const ap = await act(b, {capability: `go-near:${c.soulId}`}); assert.equal(ap.accepted, true, JSON.stringify(ap) + JSON.stringify([w.pos(b), w.pos(c)]));
   const apd = await finish(b, ap); assert.equal(apd.phase, 'completed', JSON.stringify(apd));
   const gap = Math.hypot(w.pos(b)[0] - w.pos(c)[0], w.pos(b)[1] - w.pos(c)[1]); assert.ok(gap > 0.9 && gap < 2.6, 'gap ' + gap);
   // turn {heading}: a free standing body turns; turn {target: a thing}
-  const tn = await act(b, {verb: 'turn', heading: 270}); assert.equal(tn.chosen.turned, 'body', JSON.stringify(tn)); assert.equal(headingOfYaw(w.body(b).pose.yaw), 270);
-  const tf = await act(b, {verb: 'turn', target: 'fire'}); assert.equal(tf.accepted, true, JSON.stringify(tf)); assert.equal(tf.chosen.kind, 'fire');
+  const tn = await byIntent(b, {verb: 'turn', heading: 270}); assert.equal(tn.chosen.turned, 'body', JSON.stringify(tn)); assert.equal(headingOfYaw(w.body(b).pose.yaw), 270);
+  const tf = await byIntent(b, {verb: 'turn', target: 'fire'}); assert.equal(tf.accepted, true, JSON.stringify(tf)); assert.equal(tf.chosen.kind, 'fire');
   // swim {place, seconds}: laps chosen for the time asked
-  const sw = await act(b, {verb: 'swim', target: {place: 'shore-water', seconds: 120}}); assert.equal(sw.accepted, true, JSON.stringify(sw)); assert.equal(sw.chosen.laps, 5); assert.equal(sw.chosen.place, 'shore-water');
-  const notWater = await act(b, {verb: 'swim', target: {place: 'eden-library-1'}}); assert.equal(notWater.accepted, false); assert.equal(notWater.code, 'swim.not-swimmable');
+  const sw = await byIntent(b, {verb: 'swim', target: {place: 'shore-water', seconds: 120}}); assert.equal(sw.accepted, true, JSON.stringify(sw)); assert.equal(sw.chosen.laps, 5); assert.equal(sw.chosen.place, 'shore-water');
+  const notWater = await byIntent(b, {verb: 'swim', target: {place: 'eden-library-1'}}); assert.equal(notWater.accepted, false); assert.equal(notWater.code, 'swim.not-swimmable');
   const st = await act(b, {capability: 'stand:here'}); assert.equal(st.accepted, true);
   // refusals are honest
-  assert.equal((await act(a, {verb: 'sit', target: {nearest: 'seat', near: 'Nobody Here'}})).code, 'target.not-in-sight');
-  assert.equal((await act(a, {verb: 'look', target: 'the moon'})).code, 'target.not-in-sight');
-  assert.equal((await act(a, {verb: 'sit', target: {in: 'eden-nowhere'}})).code, 'place.unknown');
+  assert.equal((await byIntent(a, {verb: 'sit', target: {nearest: 'seat', near: 'Nobody Here'}})).code, 'target.not-in-sight');
+  assert.equal((await byIntent(a, {verb: 'look', target: 'the moon'})).code, 'target.not-in-sight');
+  assert.equal((await byIntent(a, {verb: 'sit', target: {in: 'eden-nowhere'}})).code, 'place.unknown');
+  assert.equal((await act(a, {verb: 'sit', target: {in: 'eden-classroom-1', row: 'front'}})).code, 'capability.unknown', 'an intent over HTTP is refused by the strict gate');
   assert.deepEqual(w.f.host.engine.runtime.violations, []);
   await w.replayExact();
 });
@@ -78,7 +86,8 @@ test('channels: attention never cancels the body; speech and conversation never 
   const walk = await act(a, {capability: 'walk:shore-bank'}); assert.equal(walk.accepted, true, JSON.stringify(walk));
   await w.ticks(60); assert.equal(w.receipt(a, walk.receipt.id).phase, 'started');
   const start = w.pos(a);
-  for (const q of [{verb: 'look', target: b.name}, {capability: `face:${b.soulId}`}, {capability: `look at ${c.name}`}, {verb: 'turn', face: b.soulId}, {verb: 'look', direction: 'left'}]) {
+  // #1911: the offered attention ids for "look at B", "face B", "look at C", "turn to face B" and "look left"
+  for (const q of [{capability: `look:${b.soulId}`}, {capability: `face:${b.soulId}`}, {capability: `look:${c.soulId}`}, {capability: `turn:${b.soulId}`}, {capability: 'look:left'}]) {
     const r = await act(a, q); assert.equal(r.accepted, true, JSON.stringify(q) + JSON.stringify(r)); assert.equal(r.channel, 'attention', JSON.stringify(r));
     assert.equal(w.receipt(a, walk.receipt.id).phase, 'started', 'the walk goes on after ' + JSON.stringify(q));
   }
@@ -93,7 +102,7 @@ test('channels: attention never cancels the body; speech and conversation never 
   assert.equal(w.ledger.openReceipts(a.soulId).length, 0);
   // auto-face (default on): B and C talk; when C speaks, B's head turns to C
   await w.put(b, [10, 10]); await w.put(c, [12, 10]);
-  await act(b, {verb: 'look', direction: 'ahead'});
+  await act(b, {capability: 'look:ahead'});
   const talk: any = w.comms.conversations.handle(b, {op: 'start', with: [c.soulId], text: 'hello'}); assert.equal(talk.accepted, true, JSON.stringify(talk));
   w.comms.conversations.handle(c, {op: 'accept', conversation: talk.conversation.id});
   w.comms.conversations.handle(c, {op: 'say', conversation: talk.conversation.id, text: 'hi there'}); await w.ticks(5);
@@ -101,8 +110,9 @@ test('channels: attention never cancels the body; speech and conversation never 
   // CONV-UI: free standing bodies turn to face each other too (the speaker included): B east towards C, C west towards B
   assert.ok(Math.abs(w.body(b).pose.yaw) < 0.01, `B faces C: ${w.body(b).pose.yaw}`); assert.ok(Math.abs(Math.abs(w.body(c).pose.yaw) - Math.PI) < 0.01, `C faces B: ${w.body(c).pose.yaw}`);
   // turned off for this conversation: no more auto-face
-  const off = await act(b, {verb: 'auto-face', on: false, conversation: talk.conversation.id}); assert.equal(off.accepted, true, JSON.stringify(off));
-  await act(b, {verb: 'look', direction: 'ahead'}); await w.ticks(5);
+  // auto-face has no offered id (#2143): the setting is the ledger's, read from the intent
+  const off: any = await accept(w.f.host, w.ledger.act(b, {verb: 'auto-face', on: false, conversation: talk.conversation.id} as never)); assert.equal(off.accepted, true, JSON.stringify(off));
+  await act(b, {capability: 'look:ahead'}); await w.ticks(5);
   w.comms.conversations.handle(c, {op: 'say', conversation: talk.conversation.id, text: 'still here'}); await w.ticks(5);
   assert.equal(w.body(b).human.gaze, undefined, 'auto-face off');
   // the attention events are logged and replay exactly

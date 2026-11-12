@@ -42,10 +42,10 @@ test('radio: power and tuning knobs by hand, station cycle, refusal, interruptio
  assert.deepEqual(row0?.state,{on:false},'an off radio shows only that it is off');
  const act=async(cap,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const finish=async(r,name,field,want,limit=600)=>{let motion=null,early=false,root=null;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){motion=m;root=[...body().pose.p];if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<(m.reach??0.65)-0.05&&state(name)[field]===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {motion,early,root,phase:edge.receipt(soul.soulId,r.receipt.id).phase};};
- await act('object:radio:switch-off',false);
- await act('object:radio:change-station',false);
+ await act(`object:${id('radio')}:switch-off`,false);
+ await act(`object:${id('radio')}:change-station`,false);
  // interruption before contact: nothing changes
- await act('object:radio:switch-on');for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);
+ await act(`object:${id('radio')}:switch-on`);for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);
  assert.equal(state('radio').on,false,'interrupted before contact: radio stays off');
  const results=[];
  const run=async(cap,name,field,want,tint)=>{
@@ -57,18 +57,18 @@ test('radio: power and tuning knobs by hand, station cycle, refusal, interruptio
   assert.equal(body().human?.handActuator,undefined);
   results.push({cap,want,knob:tint??null,hold:x.motion.hold??0,handAt:x.motion.at.map(v=>+v.toFixed(3)),root:x.root.map(v=>+v.toFixed(3))});return x;
  };
- await run('object:radio:switch-on','radio','on',true,'valve');
+ await run(`object:${id('radio')}:switch-on`,'radio','on',true,'valve');
  const onRow=(await here()).objects.find(o=>o.id===id('radio'));assert.deepEqual(onRow?.state,{on:true,station:'quiet piano'},'on: the station in a few words');
- await run('object:tap:switch-on','tap','on',true,null);
+ await run(`object:${id('tap')}:switch-on`,'tap','on',true,null);
  const tuned=[];
- for(const want of ['dance band','evening talk','quiet piano','dance band']){const x=await run('object:radio:change-station','radio','station',want,'tuner');tuned.push(x);assert.equal(x.motion.hold,0.9,'the hand holds the tuning knob while it turns');assert.equal(x.motion.reach,1,'a deliberate reach to the knob');}
+ for(const want of ['dance band','evening talk','quiet piano','dance band']){const x=await run(`object:${id('radio')}:change-station`,'radio','station',want,'tuner');tuned.push(x);assert.equal(x.motion.hold,0.9,'the hand holds the tuning knob while it turns');assert.equal(x.motion.reach,1,'a deliberate reach to the knob');}
  const nearOn=await here(),onRow2=nearOn.objects.find(o=>o.id===id('radio'));assert.deepEqual(onRow2?.state,{on:true,station:'dance band'});
  // power and tuning are worked from one place: no shuffle between the knobs
  const roots=results.filter(r=>r.knob).map(r=>r.root),spread=Math.max(...roots.map(p=>Math.hypot(p[0]-roots[0][0],p[2]-roots[0][2])));
  assert.ok(spread<0.06,`one stand point for both knobs (${spread.toFixed(3)} m) ${JSON.stringify(results)}`);
- await run('object:radio:switch-off','radio','on',false,'valve');
+ await run(`object:${id('radio')}:switch-off`,'radio','on',false,'valve');
  const offRow=(await here()).objects.find(o=>o.id===id('radio'));assert.deepEqual(offRow?.state,{on:false});
- await act('object:radio:change-station',false);
+ await act(`object:${id('radio')}:change-station`,false);
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);
  assert.equal(restored.get('radio').state.on,false);assert.equal(restored.get('radio').state.station,'dance band');assert.equal(restored.get('tap').state.on,true);
  assert.deepEqual(f.host.engine.runtime.violations,[]);
