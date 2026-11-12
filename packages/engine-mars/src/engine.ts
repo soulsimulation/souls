@@ -3174,6 +3174,7 @@ export class MarsEngine implements Engine {
     if (!this.isQuiet()) throw new Error('compaction.not-quiet');
     this.finishRecorder();
     this.rt = this.m.compactRuntime(this.rt, this.physical?.services??this.m.servicesFor(this.m.scenes));
+    if(this.rt.world.groundV1)attachGround(this.rt);   // #1325: the fresh Runtime keeps ground/1 as the constructor's does; without it the next placement read no terrain and threw
     this.registry = this.rt.registry; this.cursor = 0; this.quiet = false;
     if(this.sleepSnapshotActive)this.rt.services.nativeSleepSnapshotV1=NATIVE_SLEEP_SNAPSHOT_V1;
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;

@@ -1494,7 +1494,7 @@ const { PROJECTION_BUDGETS, openMemoryFolder } = soulRecords;
 const { buildBrief } = soulBrief;
 const { SUMMARY } = soulConsolidate;
 const { createPeople } = soulPeople;
-// memory.mjs: one memory per Soul across worlds. It keeps the record format of tools/edge-skill/memory-folder.mjs and
+// memory.mjs: one memory per Soul across worlds. It keeps the record format of memory-folder.mjs and
 // feeds it what the client already received: no HTTP, no model. Design: docs/design/soul-context.md section 2.
 //
 // Everything here comes from a world, and a world may lie: this is where its answers are bounded to what a record takes.
@@ -5970,33 +5970,122 @@ async function batch(json) {
 
 // ---------------------------------------------------------------- help and dispatch
 
-const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.
-
-setup     register <world-url> [--global]  create "<Name>" [--for CODE] [--new] [--move]    pair <soulId> [--for CODE] [--move]
-          approval [status|wait|cancel]   status                          guide
-home      list   default <name>   adopt <name|id> [--for CODE] [--move]   doctor [--for CODE]   export <name> [--out dir]   import [folder]   init [--global]   upgrade [world] [--trust]
-          news [--all]   (platform news from the sites this home trusts, unread or the last 50; checked every 6 h without asking)
-          name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"
-memory    memory <words>   remember --person|--place <id|name> "<note>"   remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]   remember --self "<line>"   consolidate [on|off|asked|--force]
-          remember --person <id|name> --promise "<what>" [--by me|them]   remember --kept <promise id> --evidence <receipt or conversation id>
-world     look   find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]   query '<json questions>' [--budget tokens]   catalog [--refresh]
-          (the world is copied to this machine and kept current: these read the copy, make no call that waits on the world, and give the ids act takes)
-sense     here   observe   around|explore [place]   caps [--search w] [--verb v] [--all] [--limit n] [--json]   map   view [--map|--alt-only|--out f]
-          context [query] [--cursor nextCursor]   views <ref> [ref…] [--detail] [--original] [--out picture.png]
-          receipt [id]   events [--since c_N] [--raw]   conversations
-do        act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]   resolve "<words>" [--json] (candidate ids)   inspect <id> [--all]   wait [s] [receiptId] [--json]
-          stop [receiptId]   (ends your own act under way, where you are; nothing else starts)
-          say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]   converse <list|turns|start|say|accept|decline|leave|ask> …   object <id> [action] [json]
-          (a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)
-owner     listen [--after id] [--once] [--take] [--follow]   ack <id> ["reply"] [--close done|failed]   result <id> done|failed "<text>"
-          now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)
-self      profile [name|description|photo …]   body [presets|library|kit|upload|set|look …]   travel [<world>|home]
-resident  serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)
-          plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)
-          wake [add <act-ended|soul-arrives|place-busy> [params-json] [--every s] | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)
-          wake budget <quiet|normal|lively|unlimited|n> | wake budget --day <n>   (the owner's: rule wakes an hour (4, 12, 60, no limit) and a day; over it they merge and wait)
-          pending   (what arrived since you last read, no world call)   batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)
-${REPORTS ? `report    note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})\n` : ""}`;
+/** The help text: one row per printed line, one entry per source line, three spaces apart unless an entry gives its gap. */
+const HELP = [
+  ["setup",
+    [`register <world-url> [--global]`, 2],
+    [`create "<Name>" [--for CODE] [--new] [--move]`, 4],
+    `pair <soulId> [--for CODE] [--move]`,
+  ],
+  ["",
+    `approval [status|wait|cancel]`,
+    [`status`, 26],
+    `guide`,
+  ],
+  ["home",
+    `list`,
+    `default <name>`,
+    `adopt <name|id> [--for CODE] [--move]`,
+    `doctor [--for CODE]`,
+    `export <name> [--out dir]`,
+    `import [folder]`,
+    `init [--global]`,
+    `upgrade [world] [--trust]`,
+  ],
+  ["",
+    `news [--all]`,
+    `(platform news from the sites this home trusts, unread or the last 50; checked every 6 h without asking)`,
+  ],
+  ["",
+    `name a Soul first when several live here: mira here · mira@eden here · @eden create "Ivo"`,
+  ],
+  ["memory",
+    `memory <words>`,
+    `remember --person|--place <id|name> "<note>"`,
+    `remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]`,
+    `remember --self "<line>"`,
+    `consolidate [on|off|asked|--force]`,
+  ],
+  ["",
+    `remember --person <id|name> --promise "<what>" [--by me|them]`,
+    `remember --kept <promise id> --evidence <receipt or conversation id>`,
+  ],
+  ["world",
+    `look`,
+    `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]`,
+    `query '<json questions>' [--budget tokens]`,
+    `catalog [--refresh]`,
+  ],
+  ["",
+    `(the world is copied to this machine and kept current: these read the copy, make no call that waits on the world, and give the ids act takes)`,
+  ],
+  ["sense",
+    `here`,
+    `observe`,
+    `around|explore [place]`,
+    `caps [--search w] [--verb v] [--all] [--limit n] [--json]`,
+    `map`,
+    `view [--map|--alt-only|--out f]`,
+  ],
+  ["",
+    `context [query] [--cursor nextCursor]`,
+    `views <ref> [ref…] [--detail] [--original] [--out picture.png]`,
+  ],
+  ["",
+    `receipt [id]`,
+    `events [--since c_N] [--raw]`,
+    `conversations`,
+  ],
+  ["do",
+    `act <offer:id> [params-json] [--wait [s]] [--for id|none] [--key k] [--json]`,
+    `resolve "<words>" [--json] (candidate ids)`,
+    `inspect <id> [--all]`,
+    `wait [s] [receiptId] [--json]`,
+  ],
+  ["",
+    `stop [receiptId]   (ends your own act under way, where you are; nothing else starts)`,
+  ],
+  ["",
+    `say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]`,
+    `converse <list|turns|start|say|accept|decline|leave|ask> …`,
+    `object <id> [action] [json]`,
+  ],
+  ["",
+    `(a write the world did not confirm is looked up by its key first; the same command again reuses that key, or name one with --key, so the world acts at most once)`,
+  ],
+  ["owner",
+    `listen [--after id] [--once] [--take] [--follow]`,
+    `ack <id> ["reply"] [--close done|failed]`,
+    `result <id> done|failed "<text>"`,
+  ],
+  ["",
+    `now "<public one-line status>" | now --clear   (or add --now "<line>" to act, say, ack, result, wait)`,
+  ],
+  ["self",
+    `profile [name|description|photo …]`,
+    `body [presets|library|kit|upload|set|look …]`,
+    `travel [<world>|home]`,
+  ],
+  ["resident",
+    `serve [--status|--stop|--no-reflex|--reflex]   (one detached process per folder: holds inbox, stream and receipts; wakes listen and ends a wait when something is said to you, and turns you to whoever said it; everything else still works without it)`,
+  ],
+  ["",
+    `plan '["walk:mill",{"id":"sit:bench","params":{"seconds":30}}]' [--for id|none]   (serve runs the steps in order, no model call between them; a refused step stops it: pending shows why, plan '[{"id":"<id>","fixes":<step>}]' replaces it once)`,
+  ],
+  ["",
+    `wake [add <act-ended|soul-arrives|place-busy> [params-json] [--every s] | remove <id>]   (when serve wakes you, besides the owner, speech to you and a refused plan step)`,
+  ],
+  ["",
+    `wake budget <quiet|normal|lively|unlimited|n> | wake budget --day <n>   (the owner's: rule wakes an hour (4, 12, 60, no limit) and a day; over it they merge and wait)`,
+  ],
+  ["",
+    `pending   (what arrived since you last read, no world call)`,
+    `batch '[{"here":{}},{"receipt":"<id>"}]'   (several reads, one call)`,
+  ],
+];
+const helpRow = ([label, ...entries]) => label.padEnd(10) + entries.map((e, i) => { const [text, gap = 3] = typeof e === "string" ? [e] : e; return i < entries.length - 1 ? text + " ".repeat(gap) : text; }).join("");
+const help = () => `eden ${VERSION} — one Soul, one controller. Commands print JSON.\n\n${HELP.map(helpRow).join("\n")}\n` +
+  (REPORTS ? `${helpRow(["report", `note "<expected>" "<observed>"   (optional; this client records its own requests in ${REPORT_FILE})`])}\n` : "");
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
@@ -6270,7 +6359,66 @@ export function enterHome(argv) {
   return line;
 }
 
-const commands = { note, plan, inspect, catalog: catalogCommand, find: findCommand, query: queryCommand, look, now: nowLine, remember, memory: memoryCommand, consolidate: consolidateCommand, register, create, pair, adopt, list: listCommand, default: defaultCommand, doctor: doctorCommand, export: exportCommand, import: importCommand, init: initCommand, upgrade: upgradeCommand, news: newsCommand, approval, status, guide, here, observe, around, explore: around, caps, capabilities: caps, map, view, context, views, receipt, events, conversations, act, stop, resolve, wait, say, converse, object, listen, ack, result, profile, body, travel, version: async () => ({ version: VERSION }), serve, pending, wake: wakeCommand, batch, help: async () => help() };
+const commands = {
+  note,
+  plan,
+  inspect,
+  catalog: catalogCommand,
+  find: findCommand,
+  query: queryCommand,
+  look,
+  now: nowLine,
+  remember,
+  memory: memoryCommand,
+  consolidate: consolidateCommand,
+  register,
+  create,
+  pair,
+  adopt,
+  list: listCommand,
+  default: defaultCommand,
+  doctor: doctorCommand,
+  export: exportCommand,
+  import: importCommand,
+  init: initCommand,
+  upgrade: upgradeCommand,
+  news: newsCommand,
+  approval,
+  status,
+  guide,
+  here,
+  observe,
+  around,
+  explore: around,
+  caps,
+  capabilities: caps,
+  map,
+  view,
+  context,
+  views,
+  receipt,
+  events,
+  conversations,
+  act,
+  stop,
+  resolve,
+  wait,
+  say,
+  converse,
+  object,
+  listen,
+  ack,
+  result,
+  profile,
+  body,
+  travel,
+  version: async () => ({ version: VERSION }),
+  serve,
+  pending,
+  wake: wakeCommand,
+  batch,
+  help: async () => help(),
+};
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line;
