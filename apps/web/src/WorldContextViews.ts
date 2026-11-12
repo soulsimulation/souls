@@ -46,6 +46,9 @@ export class WorldContextViews {
     private generation = 0;
     private requestController: AbortController | null = null;
     private pending = new Map<string, (url: string | null) => void>();
+    /** #2192: ready picture URLs by ref for the world revision they came from; a reopened Explore asks the server nothing. */
+    private ready = new Map<string, { url: string; label?: string }>();
+    private readyRevision: number | null = null;
     private scheduled = false;
     private pictureController = new AbortController();
     private api: (path: string) => string;
@@ -104,6 +107,7 @@ export class WorldContextViews {
             const data: { targets: Target[]; total?: number; revision: number; listingRevision?: string; nextCursor?: string | null } = await response.json();
             if (!active()) return;
             const revision = data.listingRevision ?? data.revision;
+            if (data.revision !== this.readyRevision) { this.ready.clear(); this.readyRevision = data.revision; }
             if (append && revision !== this.revision) {
                 if (restarts < 1) { await this.load(false, restarts + 1); return; }
                 this.nextCursor = null;
@@ -115,7 +119,7 @@ export class WorldContextViews {
                 const camera = t.viewpoint ?? t.camera;
                 return { id: 'context:' + t.ref, regionId: 'context:' + t.ref, label: t.title,
                     previewRevision: revision,
-                    previewLabel: 'Architectural context · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.',
+                    previewLabel: this.ready.get(t.ref)?.label ?? 'Architectural context · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.',
                     target: camera?.at ?? t.point,
                     p: camera?.eye ?? [t.point[0] + t.radius * 1.5, t.point[1] + t.radius, t.point[2] + t.radius * 1.5] as [number, number, number],
                     radius: t.radius, ...(t.enclosed && camera ? { inside: { p: camera.eye, target: camera.at } } : {}) };
@@ -143,6 +147,9 @@ export class WorldContextViews {
     picture(id: string): Promise<string | null> {
         if (!this.supported || this.signal.aborted || !id.startsWith('context:'))
             return Promise.resolve(null);
+        const known = this.ready.get(id.slice(8));
+        if (known)
+            return Promise.resolve(known.url);
         return new Promise(resolve => { const ref = id.slice(8), previous = this.pending.get(ref); this.pending.set(ref, url => { previous?.(url); resolve(url); }); if (!this.scheduled) {
             this.scheduled = true;
             queueMicrotask(() => void this.drain());
@@ -165,12 +172,16 @@ export class WorldContextViews {
                     for (const view of data.views ?? []) {
                         if (view.status === 'pending')
                             continue;
+                        let label: string | undefined;
                         if (view.status === 'ready' && view.photo) {
-                            const label = `Architectural context${view.photo.cutaway ? ' · Cutaway (classified roof/wall removed)' : ''} · ${view.photo.provenance?.camera === 'authored' ? 'authored camera' : 'geometric camera'} · front ${view.photo.provenance?.front ?? 'unknown'} · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.`;
+                            label = `Architectural context${view.photo.cutaway ? ' · Cutaway (classified roof/wall removed)' : ''} · ${view.photo.provenance?.camera === 'authored' ? 'authored camera' : 'geometric camera'} · front ${view.photo.provenance?.front ?? 'unknown'} · fixed daylight · default doors · no Souls or carried objects. Current sight may differ.`;
                             this.locations = this.locations.map(location => location.id === 'context:' + view.ref ? { ...location, previewLabel: label } : location);
                             this.changed();
                         }
-                        waiting.get(view.ref)?.(view.status === 'ready' && view.url ? this.api(view.url) : null);
+                        // #2192: the compact WebP when the server has one; both URLs are content-keyed and cached immutable
+                        const url = view.status === 'ready' && (view.thumb || view.url) ? this.api(view.thumb || view.url) : null;
+                        if (url) this.ready.set(view.ref, { url, label });
+                        waiting.get(view.ref)?.(url);
                         waiting.delete(view.ref);
                     }
                     if (waiting.size)
