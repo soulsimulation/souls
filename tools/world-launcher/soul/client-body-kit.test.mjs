@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {bodyKit,parseKitArgs,rigidStarterGLB,keepClips,KIT_FILES,HUMANOID_SOURCE} from './client-body-kit.mjs';
 
-const root=new URL('../../',import.meta.url);
+const root=new URL('../../../',import.meta.url);
 const src={'SKILL.md':'tools/body-authoring/SKILL.md','validate.mjs':'tools/body-authoring/validate.mjs','upload.mjs':'tools/body-authoring/upload.mjs','example.json':'tools/body-authoring/example.json',
  'admission.ts':'apps/server/src/edge/body/admission.ts','rig.ts':'apps/server/src/edge/body/rig.ts','upload-validation.ts':'apps/server/src/moderation/validate.ts',
  'action-profile.ts':'mars/viewer/engine/bodies/action-profile.ts','motion.ts':'mars/viewer/engine/bodies/motion.ts'};
