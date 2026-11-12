@@ -219,7 +219,8 @@ export function reachStation(rt: Runtime, actor: Entity, target: Vec3, owner: En
   } else {
     const t: Vec2 = [target[0], target[2]];
     const a0 = hyp(me[0] - t[0], me[1] - t[1]) > 1e-6 ? heading(sub2(me, t)) : 0;
-    for (const off of GROUND_STANDOFFS)
+    // #1216 item-approach/1 (a logged runtime policy): the wider rings; without it, the first ring only, as recorded
+    for (const off of rt.services.itemApproachV1 === true ? GROUND_STANDOFFS : [GROUND_STANDOFF])
       for (let k = 0; k < 8; k++) {
         const dk = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2); // 0, +1, −1, +2, −2 … eighths
         const p = add2(t, rot2([off, 0], a0 + (dk * Math.PI) / 4));
