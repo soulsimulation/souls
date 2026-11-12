@@ -156,6 +156,216 @@
     },
     {
       "step": "V5-server-full",
+      "from": "\\#1281 H4: a flag in a secret place is not named until she knows the place",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1281 H4: a flag in a secret room upstairs is not named either",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "knowledge at scales: district summary, far names, memory of visits, look around, secret places",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "Same test; its secret-place section is replaced by the check that a stored secret mark hides nothing (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "god route: mark a place secret by id or name, list, refuse unknown and root",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "The god route that marked a place secret is unmounted (#1262); the replacement shows a stored mark is ignored",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "god world: a secret place is not walked to by name (walk:<ref> offers, plain words, everyday synonyms)",
+      "to": "god world: a place is walked to by name (walk:<ref> offers, plain words)",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a refusal never names an alternative in a secret place the Soul does not know; it names the next one, or none",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "The #1832 hidden hook it tested is removed (#1262); the replacement asserts that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a spot asked for by id in a secret place the Soul does not know gets no reason: not spot.no-room, not spot.taken",
+      "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
+      "reason": "The #1832 hidden hook it tested is removed (#1262); the replacement asserts that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: with no secret place every field is there: the control",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Same control, kept in edge-public-record.test.ts when the secret-place scrub tests were removed (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a secret place is gone from self.placePath, receipts[].endedAt and receipts[].capability, by id and by name; the rest stays",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: what is inside a secret place goes with it, and so do world rows naming it; a Soul's own words stay",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a receipt that ended inside a place built later goes by its position; an open one goes while the Soul is in there",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A2: a Soul's own token still reads everything",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a public place outlives a secret one that sounds like it; words mean nothing in a key or an enum",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a seat goes with its place, by its own id; and a receipt in a public place keeps its path and its verb",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a real seat: its occupier entry goes with the place",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: with a secret place in the world, no receipt carries a chosen target",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "A1: a new field can't bring one back: the scrub works on the answer, not on field names",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1141: a timeline field added later carries no secret place; a title is the Soul's own words and stays",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "\\#1141: on the real record, a journey's fields pass the scrub and a title doesn't",
+      "to": "a walk on the public record keeps its capability, its end place and position",
+      "reason": "Secrecy-only test of the public-record scrub (#1234) removed (#1262: no place is secret); the public record keeps every field, as the replacement checks",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "exact known destinations beat partial Soul names while exact Souls, ambiguity and secrecy retain their meaning",
+      "to": "exact known destinations beat partial Soul names while exact Souls and ambiguity retain their meaning",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "the catalog is served by tag, and a place made secret leaves it",
+      "to": "the catalog is served by tag, and a place with a stored secret mark stays in it",
+      "reason": "Same test; a stored secret mark now leaves the place in the catalog (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a thing upstairs is in the room it stands in; a secret upstairs room takes its things, and what stands under it, out of the catalog",
+      "to": "a thing upstairs is in the room it stands in",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a far spot in a secret place is not known by its id to a Soul that has not been there, and the refusal does not name it",
+      "to": "the catalog is served by tag, and a place with a stored secret mark stays in it",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "the live picture names where a Soul is, and never a secret place",
+      "to": "the live picture names where a Soul is, in a place with a stored secret mark too",
+      "reason": "Same test; a Soul in a place with a stored secret mark is now named with its position and speech (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a thing in a secret room upstairs leaves the live picture with its state (\\#1751, the catalog's outline rule)",
+      "to": "a thing upstairs is in the live picture with its state (\\#1751)",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a secret place, what stands in it and what is done in it are left out",
+      "to": "everything published is public, and the counts match; a place whose data says secret is listed (\\#1262)",
+      "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "everything published is public, and the counts match",
+      "to": "everything published is public, and the counts match; a place whose data says secret is listed (\\#1262)",
+      "reason": "Same test; a place whose data says secret is now counted and listed (#1262)",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "secret ancestors, inherited private room and coordinate construction closure cannot be bypassed",
+      "to": "inherited private room and coordinate construction closure cannot be bypassed",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "protected and masked answers are unchanged: secret, private, construction, aloft, rigid body, faded",
+      "to": "protected and masked answers are unchanged: private, construction, aloft, rigid body, faded",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "a far hand-worked thing: left out of the whole menu, taken by id with a walk, unknown in a secret place",
+      "to": "a far hand-worked thing: left out of the whole menu, taken by id with a walk",
+      "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
+      "pr": "#2016"
+    },
+    {
+      "step": "V5-server-full",
       "from": "CLI BODY authenticates privately and completed plans remain readable by ID",
       "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
       "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
