@@ -113,3 +113,11 @@ local world, each with its own script of `eden.mjs` steps, started together and 
 next command reports the move. `restart`: the world restarts during two Souls' two-minute acts; within 60 s each receipt
 ends and the next act is accepted. `soul-eval.mjs run --battery hostile-v1 --seat scripted --repeats 1` writes each case's
 result and the refusal codes seen. A failed case is a finding for a new issue; its bar stays (`episode.mjs`, `runCase`).
+
+Three cases have bystanders (#1974), each played by a driver in `hostile.mjs` (`"drive"`, tuned by `"params"`).
+`act-spam`: one Soul sends 200 acts in 10 s through eden.mjs; no answer is a 5xx, at most 60 are not 429, and each of three
+bystanders' median act time (its own client trace) stays within 1.5 times its median over the 30 s before. `reconnect-storm`:
+twelve Souls reach the world through a relay that cuts every stream at once and turns reconnects away for 6 s; within 10 s
+of it reopening every copy (`world-live.json`) is received again and hashes as the world's picture does. `god-wall`: a god
+(eden-god.mjs) places a wall across four walking Souls; within 90 s each walk ends (with a reason unless it completed), the
+report gives how long each Soul was held, and each next walk is accepted and moves the Soul 1 m within 30 s.
