@@ -4,6 +4,7 @@
 // #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
 // rule over it, and stay held until a command from another process reaches serve, or go back to the queue after HELD_MS. Each
 // handing to a reader is one delivery and is charged once: the budget's count is the deliveries made, never more than it allows.
+import { newerThan } from "./home.mjs";
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
 export const WAKE_EVERY_S = 300;
@@ -135,6 +136,13 @@ export function deliver(wake, now, { free = false, heldMs = HELD_MS, reader = nu
 export function confirm(wake, reader) {
   const held = (wake?.held ?? []).filter((g) => reader != null && g.reader === reader);
   return held.length === (wake?.held?.length ?? 0) ? wake : { ...wake, held };
+}
+
+/** #1941: platform news serve raises as one ambient wake, within the budget: events, and releases this client is too old for.
+ *  The feed's text is the platform's, not a Soul's: the wake names the newest title and points at `news`. */
+export function newsWakes(items, version, at) {
+  const due = items.filter((i) => i.kind === "event" || (i.kind === "release" && newerThan(i.minClient, version)));
+  return due.length ? [{ id: "news", kind: "news", why: `platform news: ${due.at(-1).title} (read it with news)`, at, count: due.length }] : [];
 }
 
 const speaker = (a) => a.soulId ?? a.from ?? "someone";
