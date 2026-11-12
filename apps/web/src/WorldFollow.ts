@@ -4,6 +4,8 @@ import {springAngle,springStep} from './camera-spring.ts';
 import {SHOT_WEIGHTS,shotScore,walkingDrift,type ShotContext} from './shot-score.ts';
 /** #2201 A4: the most the sky part (.5 when not looked at, 0 or 1 when it is) moves a shot's total (the smallest weight
  *  sum: no sun, not forced). */
+/** #2201 A4: how many better-scored views one search tries while the held view is still kept. */
+const CHALLENGERS=4;
 const SKY_SWING=.5*SHOT_WEIGHTS.sky/(Object.values(SHOT_WEIGHTS).reduce((a,b)=>a+b,0)-SHOT_WEIGHTS.sun)+1e-9;
 /** Camera-only sightline protection. Requested orbit/zoom survives temporary
  * obstruction; the rendered camera may move nearer or around a blocking post. */
@@ -295,7 +297,9 @@ export class WorldFollow {
       best=this.chosen;bestCost=-shotScore(this.chosen!,{...ctx,sky:this.heldSky.sky}).total-.12;}
     // the sky part moves a total by at most SKY_SWING: cast the sky rays only when the best candidates could then win
     if(ranked[0]&&ranked[0].k-SKY_SWING<bestCost){for(const r of ranked.slice(0,3))r.k=-shotScore(r.c,{...ctx,sky:this.skyBehind(target,r.c)}).total;ranked.sort((a,b)=>a.k-b.k);}
-    for(const {c,k} of ranked){if(k>=bestCost)break;if(this.clear(target,c,roots)){best=c;bestCost=k;break;}if(c===asked[0])this.askedBlocked=true;}
+    // while the held view is kept, a search tries at most CHALLENGERS better-scored views (a blocked one costs a ray or two)
+    let tried=0;
+    for(const {c,k} of ranked){if(k>=bestCost||held&&tried++>=CHALLENGERS)break;if(this.clear(target,c,roots)){best=c;bestCost=k;break;}if(c===asked[0])this.askedBlocked=true;}
     // #2201 A3: a challenger to a held view that is still clear wins only at the second search running.
     if(held&&best!==this.chosen){const again=!!this.challenger&&this.challenger.distanceTo(best!)<.1;this.challenger=best!.clone();if(!again)return this.chosen!;}
     this.challenger=null;this.wide=false;
@@ -369,7 +373,7 @@ export class WorldFollow {
       else if(this.chosen.angleTo(wanted)<.02&&c.radius>.97*w.radius){if(this.forced)this.recoverGoal=this.chosen;this.forced=false;}  // the way back is a recovery too
     }
     if(!searching)this.recover(target,wanted,roots);  // #2201 A4: never in the same frame as a search, so the two costs don't add up
-    const goal=this.chosen;
+    const goal=this.chosen!;  // set by the search above (it always runs while there is none)
     this.rule={name:this.recoverGoal&&goal.distanceTo(this.recoverGoal)<.01?'recover':goal.distanceTo(wanted)>.01?'search':'glide'};
     if(!this.rendered){this.rendered=goal.clone();this.rule={name:'start'};this.still();}
     else{
