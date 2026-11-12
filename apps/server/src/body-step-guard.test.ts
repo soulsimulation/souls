@@ -45,7 +45,7 @@ test('boot order: the courtesy event, the edge rules, body-step-guard/1 and hold
   };
   const f = fixture(file); await boot(f);
   const p = policy(f)!;
-  for (const k of ['quietSeatCourtesy', 'quietStallReleaseV1', 'bodyStepGuardV1', 'quarantineV1', 'refusalSettleV1', 'stairWayV1', 'quarantineMarkV1', 'standHeightV1']) assert.equal(p[k], true, `${k} kept in the host's record`);
+  for (const k of ['quietSeatCourtesy', 'quietStallReleaseV1', 'bodyStepGuardV1', 'quarantineV1', 'refusalSettleV1', 'stairWayV1', 'quarantineMarkV1', 'standHeightV1', 'standHeightV2', 'stairPassV1']) assert.equal(p[k], true, `${k} kept in the host's record`);
   const rules = f.db.events(f.host.worldId).filter((e) => e.kind === 'rules').length;
   f.host.stop(); f.db.close();
   const g = fixture(file); t.after(() => { g.host.stop(); g.db.close(); });
@@ -55,7 +55,11 @@ test('boot order: the courtesy event, the edge rules, body-step-guard/1 and hold
   assert.equal(adopting('refusalSettleV1')(g).length, 1, 'hold-settle/1 adopted once, after the guard and quarantine/1');
   assert.equal(adopting('stairWayV1')(g).length, 1, 'stair-way/1 adopted once');
   assert.equal(adopting('quarantineMarkV1')(g).length, 1, 'quarantine-mark/1 adopted once');
-  assert.equal(adopting('standHeightV1')(g).length, 1, 'stand-height/1 adopted once, last');
+  assert.equal(adopting('standHeightV1')(g).length, 1, 'stand-height/1 adopted once');
+  assert.equal(adopting('standHeightV2')(g).length, 1, 'stand-height/2 adopted once');
+  assert.equal(adopting('stairPassV1')(g).length, 1, 'stair-pass/1 adopted once');
+  const lastRules = g.db.events(g.host.worldId).filter((e) => e.kind === 'rules').at(-1);
+  assert.deepEqual(adopting('stairPassV1')(g)[0], lastRules, 'stair-pass/1 is the last adoption, after stand-height/2');
 });
 
 // #1442: hold-settle/1 places settled bodies with the guard's own read (bodyStandsClear), so it is never adopted without it

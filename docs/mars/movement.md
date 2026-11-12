@@ -107,6 +107,44 @@ whose last stretch runs under that floor (the commons deck's front flight): neit
 sees the climber there until it changes level. Carry climbs keep the direction-only check. The policy is prospective. Edge worlds log it at startup (`operator:stair-landing-clearance`)
 after the other stair-traffic rules, except the Little Martians worlds. History before that event replays the old rule.
 
+Under `stair-pass/1` (`stairPassV1`, #1722, adopted at boot last), the landing courtesy that a climber's wait offers a
+blocked floor walker (`yieldLinkLanding`, under `concurrent-link-egress/1`) also covers a walker waiting at the
+climber's flight end to enter that same flight (in `align`, before its first step, waiting `traffic.yield` for the
+climber). Without it the two wait for each other until the blocked-walk bound ends both walks. The walker steps aside to
+a supported spot that is clear of the climber's flight and of the climber's next flight, then enters after the climber
+has stepped off. Because that walker already stands inside the arriving climber's disc, its short route there is planned
+around the other people only. The first step is checked to move it apart, and every actual step keeps its static and
+body checks. Two cases have no room on the landing to pass. In the first, two climbers on adjacent flights each wait for the
+other at the landing between them (published waits naming each other). In the second, the waiter at the flight end has
+no spot clear of both flights. In both, one climber backs down its own flight to its entry at climbing speed (`passBack`).
+It never passes anyone behind it; it waits for them. At the entry it stands on that floor and gives the flight back. It
+then holds in `align`, waiting `traffic.yield` for the other, while the other is still on its flight or on this one (at
+most 1200 ticks), and climbs again after. A climber can yield only when its way back is clear and, if the other's route
+goes on along its flight, that flight's end has a spot clear of the flight to stand aside on (#1723). Otherwise the other
+would step off onto the holder with nowhere for it to go, and both would wait for the hold's bound. Of two that can yield,
+the one nearer its own entry yields, and on a tie the later id. The landing courtesy the other way then has room. The step
+that reaches the entry is still a climb; the hold says `wait` from the next tick, so the engine never sees a `wait` moving
+at climbing speed. A walk yields to the same body at most once, and a climber never backs down for a waiter that has
+already backed down for it. When neither end of a flight has room to pass (tight landings at both ends of a middle
+flight), the pass-back cannot let the other through, so the blocked-walk bound still ends both walks. The same holds for a
+waiter on a tight landing at the foot of a flight whose top is tight too: nobody passes back, and the bound ends both walks.
+Getting them both through would need a retreat over more than one flight.
+A waiter at a flight's end stands at that end's own height, which can differ from its floor's grid height. Floors read
+the world's shared level heights, so in Eden 2026 104 of 392 flight ends, in 74 buildings, sit 4-12 cm off the grid. The
+courtesy therefore takes a waiter standing at its flight's entry at that entry's height as standing on its floor (#1723).
+Before that, it never moved a pass-back holder or an entry waiter there.
+
+Under `stair-pass/1`, a climb cancelled mid-flight (the blocked-walk bound fails its walk, and the action backs off to the
+nearer landing, `cancelTo`) is bounded too (#1723 A3). Before, a body blocking its back-off, often a walker waiting at that
+landing to enter this very flight, kept it waiting with no bound, and the action kept its Soul's reservation, so every later
+act of that Soul was refused `reservation.conflict`. Now:
+- After 100 blocked ticks, the cancelled climb turns to the flight's other end, when its next step that way is clear and
+  that end has supported floor. It turns at most twice.
+- Still blocked after 400 ticks, it fails `route.cancel-blocked`. Its resources and its actor are released, so the Soul's
+  next act is accepted, and the body stays where it stands, on the flight.
+
+A walk from a body left on a flight needs `flight-resume/1` (#1367); without it, that walk is refused `motion.teleport`.
+
 ## Approximations
 
 - The look-ahead predicts the sidestep offset at 0.9 m/s lateral; the hard layer catches the rest (counted in

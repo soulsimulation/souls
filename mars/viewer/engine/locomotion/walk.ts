@@ -139,6 +139,10 @@ type Exec = {
   /** concurrent-link-egress/1: at most one courtesy search per unchanged
    * climber/blocker/geometry episode. Never replan the between-floor body. */
   linkYield?: {link:string;blocker:string;epoch:number;at:number[];other:number[];nearby:Record<string,number[]>};
+  /** #1722 stair-pass/1: two climbers on adjacent flights each waiting for the other at the landing between them. The one
+   *  that yields backs down its own flight to its entry (`back`), then holds there (`hold`) while `by` is still on its flight
+   *  `other` or on this flight `mine`, at most PASS_HOLD_TICKS, and climbs again after. Plain data (snapshot codec). */
+  passBack?: {by:string;other:string;mine:string;stage:'back'|'hold'|'done';since:number};
   /**
    * Head-on encounter decision, latched for the whole encounter (hysteresis): `room` = both walkers'
    * passing spots have clearance, so both keep walking at PASS_SPEED on PASS_OFFSET (side +1 = right)
@@ -149,6 +153,9 @@ type Exec = {
   replanWait?: number;
   /** Set by a cancel during a stair traversal: finish the flight at the nearer landing, then stop (review M2). */
   cancelTo?: 'entry' | 'exit';
+  /** #1723 stair-pass/1 (A3): a cancelled climb that stands blocked: since when (reset by every step it makes), and how often
+   *  it has turned to the other end. Plain data (snapshot codec). */
+  cancelWait?: {since:number;turns:number};
   /**
    * Stepping aside for a directed task this blocked walker stands in the way of (a carry formation,
    * `makeWay` with `clearOf`): walk to `spot`, wait there until `clearOf(goal)` holds (the formation no
@@ -1640,6 +1647,16 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
   const link = leg.link;
   // a turning flight (Link.faceAlong, upper-floors/1) is entered and climbed facing along its steps
   const face = link.faceAlong ? alongYaw(linkGeometry(leg), ex.phase === 'align' ? 0 : ex.climbT, a.pose.yaw) : leg.ascending ? link.heading : wrapAngle(link.heading + Math.PI);
+  if (ex.phase === 'align' && ex.passBack?.stage === 'hold') {
+    const pb = ex.passBack, xe = linkExecOf(rt, pb.by), xl = xe ? (xe.route.legs[xe.leg] as LinkLeg | undefined) : undefined;
+    const still = !!xe && xl?.kind === 'link' && ((xe.phase === 'climb' && xl.link.id === pb.other) || xl.link.id === pb.mine);
+    if (still && rt.tick - pb.since < PASS_HOLD_TICKS) {
+      ex.v = 0; a.human!.activity = 'wait';
+      return blockedWait(rt, ex.id, ex.actor, [pb.by], { code: 'traffic.yield', message: `${ex.actor} stepped back off ${link.id} for ${pb.by} and waits for it to pass`, subjects: [ex.actor, link.id] });
+    }
+    // kept as done: this walk does not yield to the same body again (two tight ends would otherwise trade pass-backs forever)
+    pb.stage = 'done';
+  }
   if (ex.phase === 'align') {
     if (rt.services.occupiedLinkRoutingV1 === true && !ex.cancelTo && !ex.detour && ex.climbT <= 1e-9) {
       const exit = leg.ascending ? link.to : link.from;
@@ -1711,7 +1728,9 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
     // occupy the stair as a single-file resource
     const res = `link:${link.id}`;
     const t = traffic(rt).get(res);
-    if (t && t.actors.size && !t.actors.has(ex.actor) && (t.exclusive || dist2(t.entry, leg.ascending ? link.from.p : link.to.p) > 0.5 || (a.body?.family==='floater' && dot2(t.dir,rot2([1,0],face)) < -0.5))) {
+    // #1723: a body backing down the flight (stair-pass/1 stage 'back') comes towards its entry, so nobody enters behind it there
+    const backing = rt.services.stairPassV1 === true && !!t && [...t.actors].some(id => linkExecOf(rt, id)?.passBack?.stage === 'back');
+    if (t && t.actors.size && !t.actors.has(ex.actor) && (t.exclusive || backing || dist2(t.entry, leg.ascending ? link.from.p : link.to.p) > 0.5 || (a.body?.family==='floater' && dot2(t.dir,rot2([1,0],face)) < -0.5))) {
       ex.phase = 'align';
       return blockedWait(rt, ex.id, ex.actor, [...t.actors], { code: 'traffic.yield', message: `${ex.actor} waits for ${[...t.actors][0]} to finish using ${link.id}`, subjects: [ex.actor, ...(a.body?.family==='floater'?[...t.actors]:[]), link.id] });
     }
@@ -1721,6 +1740,7 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
   }
   const geo = linkGeometry(leg);
   const total = geo.total;
+  if (ex.passBack?.stage === 'back') return stepPassBack(rt, ex, a, leg, geo, face, dt);
   ex.climbT = Math.min(total, ex.climbT + CLIMB_SPEED * dt);
   const next = pointOnLink(geo, ex.climbT);
   // someone standing on / at the end of the stair: wait rather than pass through them
@@ -1730,10 +1750,25 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
   // stair-landing-clearance/1: ask an idle body on the landing to step aside, clear of it (spec §17), once a second.
   if (atLanding && a.body?.family !== 'floater' && rt.tick % 20 === 0) makeWay(rt, atLanding, exitEnd.p);
   if (blocker) {
+    if (onStair && rt.services.stairPassV1 === true && a.body?.family !== 'floater' && passBackDecide(rt, ex, a, leg, geo, onStair, dt)) {
+      ex.climbT = Math.max(0, ex.climbT - CLIMB_SPEED * dt);
+      return stepPassBack(rt, ex, a, leg, geo, face, dt);
+    }
     if(rt.services.concurrentLinkEgressV1===true)yieldLinkLanding(rt,ex,a,leg,blocker);
+    if (rt.services.stairPassV1 === true && a.body?.family !== 'floater' && passBackForWaiter(rt, ex, a, leg, geo, blocker, dt)) {
+      ex.climbT = Math.max(0, ex.climbT - CLIMB_SPEED * dt);
+      return stepPassBack(rt, ex, a, leg, geo, face, dt);
+    }
     if(a.body?.family==='floater')makeWay(rt,blocker,[next[0],next[2]],{by:a.id,subjects:[a.id],landing:{y:rt.world.entities[blocker].pose.p[1],radius:2*ex.profile.radius+.3}});
     ex.climbT = Math.max(0, ex.climbT - CLIMB_SPEED * dt);
     a.human!.activity = 'climb-wait'; // still on the stair: stair geometry, not the floor grid, applies
+    // #1723: blocked on its first step, the body has not left its entry: it waits there in `align`, giving the flight back, so
+    // a climber arriving at that end can ask it to step aside (yieldLinkLanding) as it asks any walker waiting at a flight's end
+    if (rt.services.stairPassV1 === true && a.body?.family !== 'floater' && ex.climbT <= 1e-9) {
+      const res = `link:${link.id}`, t = traffic(rt).get(res);
+      t?.actors.delete(ex.actor); if (t && !t.actors.size) traffic(rt).delete(res);
+      ex.held.delete(res); ex.phase = 'align';
+    }
     return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} waits on ${link.id} for ${blocker} to move`, subjects: [ex.actor, blocker, link.id] });
   }
   a.pose.p = next;
@@ -1755,16 +1790,126 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
   return { status: 'running', phase: 'climb' };
 }
 
+/** #1722 stair-pass/1: `ex` is passing back or holding now, or this walk already yielded to `who` once. */
+const passBackBusy = (ex: Exec, who: string) => !!ex.passBack && (ex.passBack.stage !== 'done' || ex.passBack.by === who);
+/** #1722 stair-pass/1: the walk exec driving `who`, if it is walking. */
+function linkExecOf(rt: Runtime, who: string): Exec | undefined { const task = rt.world.entities[who]?.human?.task; return task ? walkExecs(rt).get(task) : undefined; }
+const PASS_HOLD_TICKS = 1200;
+/** #1723 cause 3: a back-down still blocked this long after it began ends ('done'), and the walk climbs on. */
+const PASS_BACK_TICKS = 400;
+/** #1722 stair-pass/1: `a`, climbing `leg`, is held by `who`, a climber on another flight that waits for `a` in turn (each one's
+ *  next step closes on the other at the landing between their flights). One of the two yields: the one whose way back down its
+ *  own flight is clear, and of two such the one nearer its own entry (then the later id). Returns true when `a` yields. */
+function passBackDecide(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: LinkGeometry, who: string, dt: number): boolean {
+  if (passBackBusy(ex, who) || ex.cancelTo || ex.detour || !publishedWaitsFor(rt, who, a.id, 'traffic.person')) return false;
+  const xe = linkExecOf(rt, who), xl = xe ? (xe.route.legs[xe.leg] as LinkLeg | undefined) : undefined;
+  // #1723 cause 3: a partner backing down (stage 'back') for a third body and blocked by `a` behind it is a climber too; it
+  // cannot go on down until `a` makes room, so `a` yields when its own way back is clear
+  const backing = xe?.passBack?.stage === 'back';
+  if (!xe || xe.phase !== 'climb' || xl?.kind !== 'link' || xl.link.id === leg.link.id || xe.cancelTo || (xe.passBack && xe.passBack.stage !== 'done' && !backing)) return false;
+  const other = rt.world.entities[who]; if (!other) return false;
+  const backClear = (e: Exec, body: Entity, l: LinkLeg) => { const g = linkGeometry(l), at = Math.max(0, e.climbT - 2 * CLIMB_SPEED * dt); return !stairBlocker(rt, body, body.pose.p, pointOnLink(g, at), e.profile.radius); };
+  // #1723 cand-4: a body yields only where the other can then pass it. When the other's route goes on along the yielder's
+  // own flight, it will step off at the very end the yielder holds on: that end needs a spot clear of the flight to stand
+  // aside on (the landing courtesy then moves it there), or the hold only blocks the one it yields to until its bound
+  const canYield = (e: Exec, body: Entity, l: LinkLeg, by: Exec) => backClear(e, body, l) && (!routeGoesOn(by, l.link.id) || endHasRoom(rt, body, l, e.profile.radius, by.profile.radius));
+  const mine = canYield(ex, a, leg, xe), theirs = canYield(xe, other, xl, ex);
+  if (!mine) return false;
+  if (!backing && theirs && (xe.climbT < ex.climbT - 1e-9 || (Math.abs(xe.climbT - ex.climbT) <= 1e-9 && who > a.id))) return false;
+  ex.passBack = { by: who, other: xl.link.id, mine: leg.link.id, stage: 'back', since: rt.tick };
+  return true;
+}
+/** #1722 stair-pass/1: `a`, climbing `leg`, is held by `who`, a walker waiting at this flight's far end to enter it (and so
+ *  waiting for `a`), for whom the landing courtesy found no spot clear of both flights. Then `a` yields the flight instead:
+ *  it backs down to its own entry, and holds there while `who` uses
+ *  the flight. Only after the courtesy search ran for this blocker (`linkYield`) and set no detour. Returns true when `a` yields. */
+function passBackForWaiter(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: LinkGeometry, who: string, dt: number): boolean {
+  if (passBackBusy(ex, who) || ex.cancelTo || ex.detour || ex.linkYield?.blocker !== who || ex.linkYield.link !== leg.link.id || !publishedWaitsFor(rt, who, a.id, 'traffic.yield')) return false;
+  const xe = linkExecOf(rt, who), xl = xe ? (xe.route.legs[xe.leg] as LinkLeg | undefined) : undefined;
+  if (!xe || xe.phase !== 'align' || xe.climbT > 1e-9 || xl?.kind !== 'link' || xl.link.id !== leg.link.id || xe.detour || xe.cancelTo) return false;
+  // the waiter already backed down for `a` (it holds, or held, at that end): `a` backing down too would only make two holds
+  // for each other, then trade pass-backs; `a` keeps the flight, and with no room on either landing both wait for the bound
+  if (xe.passBack?.by === a.id) return false;
+  if (stairBlocker(rt, a, a.pose.p, pointOnLink(geo, Math.max(0, ex.climbT - 2 * CLIMB_SPEED * dt)), ex.profile.radius)) return false;
+  // #1723 cand-4: the waiter climbs this flight next and steps off where `a` would hold: with no spot there to stand aside
+  // on, a pass-back only blocks the waiter until the hold's bound, so `a` keeps the flight and both wait for the walk bound
+  if (!endHasRoom(rt, a, leg, ex.profile.radius, xe.profile.radius)) return false;
+  ex.passBack = { by: who, other: leg.link.id, mine: leg.link.id, stage: 'back', since: rt.tick };
+  return true;
+}
+/** #1722 / #1723: does `e`'s route go on along link `id` after its current leg? */
+const routeGoesOn = (e: Exec, id: string) => e.route.legs.slice(e.leg + 1).some(l => l.kind === 'link' && l.link.id === id);
+/** Clear of a flight's walking path by `need` (m) for a body standing at `q` on a floor at `floorY`: the same vertically
+ *  weighted separation as the stair-person test (the landing courtesy's spot test). */
+function clearOfFlightPath(path: number[][], q: Vec2, floorY: number, need: number): boolean {
+  return path.slice(1).every((p, i) => {
+    const start = path[i], dx = p[0] - start[0], dy = (p[1] - start[1]) * .5, dz = p[2] - start[2], n = dx * dx + dy * dy + dz * dz;
+    const qx = q[0] - start[0], qy = (floorY - start[1]) * .5, qz = q[1] - start[2], t = n ? clamp((qx * dx + qy * dy + qz * dz) / n, 0, 1) : 0;
+    return hypot(qx - t * dx, qy - t * dy, qz - t * dz) >= need;
+  });
+}
+/** #1723 cand-4: at the entry end of `body`'s flight `leg` (where a pass-back holds), is there a standing spot clear of the
+ *  flight for `body` to step aside onto when another climber comes off the flight there? The landing courtesy's candidates
+ *  (rings 0.4-1.6 m, 16 directions) on the entry's floor; free of other bodies; read-only. */
+function endHasRoom(rt: Runtime, body: Entity, leg: LinkLeg, radius: number, otherRadius: number): boolean {
+  const geo = linkGeometry(leg), entry = geo.entry, sp = spatial(rt, body.id), from: Vec2 = [entry.p[0], entry.p[1]], level = entry.level;
+  const floorY = level === 0 && sp.ground ? sp.ground.standY(...from) : sp.levelAt(level, from)?.y ?? entry.y, need = radius + otherRadius + .1;
+  const step = geo.path[1] ?? geo.path[0], away = norm2(sub2(from, [step[0], step[2]])), base = len2(away) > 0 ? away : [1, 0] as Vec2;
+  for (const distance of [.4, .6, .8, 1, 1.2, 1.6]) for (let k = 0; k < 16; k++) {
+    const q = add2(from, scale2(rot2(base, k * Math.PI / 8), distance)), floor = sp.levelAt(level, q);
+    const y = level === 0 && sp.ground ? sp.ground.standY(...q) : floor?.y;
+    if (!floor || y === undefined || Math.abs(y - floorY) > .03 || clearanceAt(floor, q) < radius + PLAN_MARGIN || occupant(rt, body, q, radius + .1, false, level) || !clearOfFlightPath(geo.path, q, floorY, need)) continue;
+    return true;
+  }
+  return false;
+}
+/** #1722 stair-pass/1: back down this flight to its entry at climbing speed, waiting (never passing) for anyone behind; at the
+ *  entry stand on its floor, give the flight back, and hold in `align` until the other climber has passed. */
+function stepPassBack(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: LinkGeometry, face: number, dt: number): StepResult {
+  const at = Math.max(0, ex.climbT - CLIMB_SPEED * dt), next = pointOnLink(geo, at);
+  const behind = stairBlocker(rt, a, a.pose.p, next, ex.profile.radius);
+  if (behind) {
+    a.human!.activity = 'climb-wait'; ex.v = 0;
+    // #1723: a walker waiting at this entry to use the flight is asked to step aside, as a climber arriving at a flight's end asks
+    if (rt.services.stairPassV1 === true && rt.services.concurrentLinkEgressV1 === true) yieldLinkLanding(rt, ex, a, leg, behind);
+    // #1723 cause 3: bounded like the hold; kept as done, so this walk does not pass back for the same body again
+    if (rt.tick - ex.passBack!.since >= PASS_BACK_TICKS) ex.passBack!.stage = 'done';
+    return blockedWait(rt, ex.id, ex.actor, [behind], { code: 'traffic.person', message: `${ex.actor} steps back down ${leg.link.id} for ${ex.passBack!.by} and waits for ${behind} behind`, subjects: [ex.actor, behind, leg.link.id] });
+  }
+  ex.climbT = at; a.pose.p = next; a.pose.yaw = face;
+  a.human!.activity = leg.ascending ? 'climb-down' : 'climb-up';
+  if (at > 1e-9) return { status: 'running', phase: 'climb' };
+  const entry = geo.entry;
+  a.pose.p = [entry.p[0], entry.y, entry.p[1]];
+  a.human!.level = entry.level;
+  const res = `link:${leg.link.id}`, t = traffic(rt).get(res);
+  t?.actors.delete(ex.actor); if (t && !t.actors.size) traffic(rt).delete(res);
+  ex.held.delete(res);
+  ex.phase = 'align'; ex.climbT = 0; ex.passBack!.stage = 'hold'; ex.passBack!.since = rt.tick;
+  // this tick's step reached the entry at climbing pace, so it stays a climb; the hold says 'wait' from the next tick, when
+  // the body is still (a 'wait' published with this tick's speed is refused motion.overspeed, as #1120 found for the detour)
+  return { status: 'running', phase: 'align' };
+}
+
 /** A supported walker can clear a climber while retaining its own departure.
  * Only an actual reciprocal passage wait admits this short physical courtesy;
  * idle/held bodies and arbitrary active programs never become its subjects. */
 function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   if(ex.cancelTo||ex.detour||!['traffic.yield','traffic.person'].some(code=>publishedWaitsFor(rt,who,a.id,code)))return;
   const other=rt.world.entities[who],task=other?.human?.task,walker=task?walkExecs(rt).get(task):undefined,record=task?rt.records.get(task):undefined;
-  if(!other?.human||other.human.grip||other.human.on||other.human.riding||other.human.sleepPose||!walker||record?.verb!=='walk_to'||record.status!=='blocked'||walker.phase!=='walk'||walker.route.legs[walker.leg]?.kind!=='walk'||walker.detour||walker.cancelTo)return;
+  // #1722 stair-pass/1 (logged policy): a walker waiting at this flight's far end to enter the same flight (align, before its
+  // first step) is a body in the climber's way just as a blocked floor walker is; it steps aside the same way, then enters
+  // after the climber has stepped off. Without the policy only a floor walker is asked, and the two wait for each other.
+  const waitingEntry=rt.services.stairPassV1===true&&walker?.phase==='align'&&walker.climbT<=1e-9&&(walker.route.legs[walker.leg] as LinkLeg|undefined)?.kind==='link'&&((walker.route.legs[walker.leg] as LinkLeg).link.id===leg.link.id||entryAtExit(walker.route.legs[walker.leg] as LinkLeg,leg));
+  if(!other?.human||other.human.grip||other.human.on||other.human.riding||other.human.sleepPose||!walker||record?.verb!=='walk_to'||record.status!=='blocked'||!(waitingEntry||(walker.phase==='walk'&&walker.route.legs[walker.leg]?.kind==='walk'))||walker.detour||walker.cancelTo)return;
   const sp=spatial(rt,who),from:Vec2=[other.pose.p[0],other.pose.p[2]],level=other.human.level,g=sp.levelAt(level,from);
   const floorY=level===0&&sp.ground?sp.ground.standY(...from):g?.y;
-  if(!g||floorY===undefined||Math.abs(other.pose.p[1]-floorY)>.03)return;
+  // #1723 stair-pass/1: a walker waiting at this flight's end stands at the end's own height, which can differ from its floor's
+  // grid height by more than the support tolerance (the Tower House's flights end 8-10 cm off its shared level heights). It
+  // stands on that floor all the same, so the courtesy asks it; every step of its detour keeps its static and body checks.
+  const wl=waitingEntry?walker.route.legs[walker.leg] as LinkLeg:undefined,end=wl?(wl.ascending?wl.link.from:wl.link.to):undefined;
+  const atEnd=!!end&&end.level===level&&dist2(from,end.p)<=.05&&Math.abs(other.pose.p[1]-end.y)<=.03;
+  if(!g||floorY===undefined||(Math.abs(other.pose.p[1]-floorY)>.03&&!atEnd))return;
   const prior=ex.linkYield,moved=(p:number[],q:number[])=>hypot(p[0]-q[0],p[1]-q[1],p[2]-q[2])>=.1;
   // A third body leaving a candidate pocket changes its availability even if
   // the two waiting bodies and static geometry have not changed. Retain local
@@ -1777,11 +1922,12 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
   const radius=walker.profile.radius,need=radius+ex.profile.radius+.1,geo=linkGeometry(leg);
   // Clear the whole flight, not only the climber's present centre. Vertical
   // weighting matches the existing stair-person separation; no level snap.
-  const clearFlight=(q:Vec2)=>geo.path.slice(1).every((p,i)=>{
-    const start=geo.path[i],dx=p[0]-start[0],dy=(p[1]-start[1])*.5,dz=p[2]-start[2],n=dx*dx+dy*dy+dz*dz;
-    const qx=q[0]-start[0],qy=(floorY-start[1])*.5,qz=q[1]-start[2],t=n?clamp((qx*dx+qy*dy+qz*dz)/n,0,1):0;
-    return hypot(qx-t*dx,qy-t*dy,qz-t*dz)>=need;
-  });
+  const clearOfPath=(path:number[][],q:Vec2)=>clearOfFlightPath(path,q,floorY,need);
+  // #1722 stair-pass/1: the spot also keeps clear of the climber's next flight (its following link leg), so a body that steps
+  // aside on a switchback landing does not stand on the entry the climber needs next
+  const nextLink=rt.services.stairPassV1===true?ex.route.legs.slice(ex.leg+1).find((l):l is LinkLeg=>l.kind==='link'):undefined;
+  const nextPath=nextLink?linkGeometry(nextLink).path:undefined;
+  const clearFlight=(q:Vec2)=>clearOfPath(geo.path,q)&&(!nextPath||clearOfPath(nextPath,q));
   const away=norm2(sub2(from,[a.pose.p[0],a.pose.p[2]])),base=len2(away)>0?away:[1,0] as Vec2;
   let spot:Vec2|undefined;
   // A narrow landing can have a genuine sub-metre pocket while all of the
@@ -1796,12 +1942,20 @@ function yieldLinkLanding(rt:Runtime,ex:Exec,a:Entity,leg:LinkLeg,who:string){
     if(spot)break;
   }
   if(!spot)return;
-  const around=[{id:a.id,p:[a.pose.p[0],a.pose.p[2]] as Vec2}],route=sp.routeAround(rt.world,walker.profile,{level,p:from},{level,p:spot},around);
+  let around=[{id:a.id,p:[a.pose.p[0],a.pose.p[2]] as Vec2}],route=sp.routeAround(rt.world,walker.profile,{level,p:from},{level,p:spot},around);
+  // #1722 stair-pass/1: a walker waiting at the flight's end already stands inside the arriving climber's disc, so a route
+  // around the climber is walled in from its first point. The spot's first step was checked to move apart (stepAwayClear) and
+  // every actual step keeps its static and body checks, so the route is planned around the other people only.
+  if(!route.ok&&waitingEntry){around=[];route=sp.routeAround(rt.world,walker.profile,{level,p:from},{level,p:spot},around);}
   if(!route.ok||route.route.length>3||route.route.legs.some(l=>l.kind!=='walk'||l.level!==level))return;
   // The existing faceoff detour leaves the contended passage without queuing
   // on it; static and body collision checks still apply to every actual step.
   walker.detour={spot,level,by:a.id,blockers:[a.id],landing:{y:floorY,radius:need},stage:'pending',faceoff:true,egress:true,planned:{epoch:sp.epoch,route:route.route,around}};
+  if(rt.services.stairPassV1===true)delete walker.passBack;   // #1722: a courtesy detour replaces any hold at this entry
 }
+
+/** #1723: does link leg `w` start at the very end where link leg `leg` comes off (a switchback node shared by two flights)? */
+function entryAtExit(w:LinkLeg,leg:LinkLeg){const en=w.ascending?w.link.from:w.link.to,ex=leg.ascending?leg.link.to:leg.link.from;return en.level===ex.level&&dist2(en.p,ex.p)<=.05;}
 
 type LinkGeometry = { entry: LinkLeg['link']['from']; exit: LinkLeg['link']['from']; path: [number, number, number][]; lens: number[]; total: number };
 
@@ -1861,11 +2015,13 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   if (blocker) {
     if(a.body?.family==='floater')makeWay(rt,blocker,[next[0],next[2]],{by:a.id,subjects:[a.id],landing:{y:rt.world.entities[blocker].pose.p[1],radius:2*ex.profile.radius+.3}});
     a.human!.activity = 'climb-wait';
+    if (rt.services.stairPassV1 === true && a.body?.family !== 'floater') { const r = cancelBlocked(rt, ex, a, leg, geo, blocker, dt); if (r) return r; }
     return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} (cancelled) waits on ${leg.link.id} for ${blocker} to move before stepping off at the ${forward ? 'far' : 'near'} landing`, subjects: [ex.actor, blocker, leg.link.id] });
   }
   ex.climbT = at;
   a.pose.p = next;
   a.human!.activity = leg.ascending === forward ? 'climb-up' : 'climb-down';
+  if (ex.cancelWait) ex.cancelWait.since = rt.tick;
   if (forward ? at < geo.total - 1e-9 : at > 1e-9) return { status: 'running', phase: 'cancel-climb' };
   const end = forward ? geo.exit : geo.entry;
   a.pose.p = [end.p[0], end.y, end.p[1]];
@@ -1874,6 +2030,32 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   a.human!.activity = 'idle';
   a.human!.task = undefined;
   return { status: 'completed', outputs: { cancelled: true, stoppedAt: forward ? 'exit' : 'entry', level: end.level, x: end.p[0], z: end.p[1], link: leg.link.id } };
+}
+
+/** #1723 stair-pass/1 (A3): a cancelled climb blocked this long turns to the other end of its flight, when that way is clear. */
+export const CANCEL_TURN_TICKS = 100;
+/** #1723 stair-pass/1 (A3): a cancelled climb that stays blocked this long with no turn left ends, named, and frees its Soul. */
+export const CANCEL_BOUND_TICKS = 400;
+/** #1723 stair-pass/1 (A3): a cancelled climb backing off its flight, blocked by `blocker` (often a walker waiting at that end
+ *  for this very flight, so each waits for the other). After CANCEL_TURN_TICKS it turns to the flight's other end if its next
+ *  step that way is clear and that end has supported floor (at most twice, so two bodies cannot trade turns for ever). Still
+ *  blocked after CANCEL_BOUND_TICKS, the action fails `route.cancel-blocked`: its resources and its actor are released, so the
+ *  Soul's next act is accepted, and the body stays where it stands, on the flight. Undefined = keep waiting this tick. */
+function cancelBlocked(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, geo: LinkGeometry, blocker: string, dt: number): StepResult | undefined {
+  const cw = ex.cancelWait ??= { since: rt.tick, turns: 0 }, waited = rt.tick - cw.since, forward = ex.cancelTo === 'exit';
+  if (waited >= CANCEL_TURN_TICKS && cw.turns < 2) {
+    const back = forward ? geo.entry : geo.exit, sp = spatial(rt, ex.actor), grid = sp.level(back.level);
+    const supported = sp.scene.surfaces.some((s) => s.level === back.level && Math.abs(s.y - back.y) <= 1e-6 && pointInObb(back.p, s.obb));
+    const at = forward ? Math.max(0, ex.climbT - CLIMB_SPEED * dt) : Math.min(geo.total, ex.climbT + CLIMB_SPEED * dt);
+    if (supported && grid && clearanceAt(grid, back.p) >= ex.profile.radius && !stairBlocker(rt, a, a.pose.p, pointOnLink(geo, at), ex.profile.radius)) {
+      ex.cancelTo = forward ? 'entry' : 'exit'; cw.turns++; cw.since = rt.tick;
+      return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} (cancelled) turns back on ${leg.link.id}: ${blocker} holds its ${forward ? 'far' : 'near'} end`, subjects: [ex.actor, blocker, leg.link.id] });
+    }
+  }
+  if (waited < CANCEL_BOUND_TICKS) return undefined;
+  releaseAll(rt, ex);
+  a.human!.activity = 'idle'; a.human!.task = undefined; ex.v = 0;
+  return { status: 'failed', diagnostic: { code: 'route.cancel-blocked', message: `${ex.actor} stopped on ${leg.link.id}: its cancelled climb stayed blocked by ${blocker} at both ends`, subjects: [ex.actor, blocker, leg.link.id] } };
 }
 
 /** Per-tick construction-replan budget (`services.planning.replansPerTick` overrides REPLANS_PER_TICK);
