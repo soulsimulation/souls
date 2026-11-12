@@ -12,7 +12,7 @@ import { dcos, dsin } from '../core/math.ts';
 import { findRouteReference } from './path-reference.ts';
 import { WALK_PERF } from '../locomotion/walk.ts';
 import { Spatial, narrowComponents } from '../spatial/service.ts';
-import { setNavTrustCheck } from '../spatial/nav-trust.ts';
+import { navTrustChecking, setNavTrustCheck } from '../spatial/nav-trust.ts';
 import { stress, buildRuntime } from '../../app/lab/scenarios.ts';
 import { WorldHistory } from '../history/store.ts';
 import { emptyWorld, addAll } from '../world/factory.ts';
@@ -163,9 +163,10 @@ function stressTrace(fast: boolean, n: number, ticks: number) {
 test('#2124: 24 walkers share one people list a tick; every tick\'s state hash === fresh listings per walker', () => {
   const slow = stressTrace(false, 24, 600);
   // the oracle: every reuse of the tick's list is checked against a fresh listing (throws if a step changed the table)
+  const wasChecking = navTrustChecking();
   setNavTrustCheck(true);
   let checked;
-  try { checked = stressTrace(true, 24, 600); } finally { setNavTrustCheck(false); }
+  try { checked = stressTrace(true, 24, 600); } finally { setNavTrustCheck(wasChecking); }
   const fast = stressTrace(true, 24, 600);
   assert.equal(slow.violations, 0);
   for (const run of [checked, fast]) {
@@ -173,8 +174,10 @@ test('#2124: 24 walkers share one people list a tick; every tick\'s state hash =
     const first = run.hashes.findIndex((h, i) => h !== slow.hashes[i]);
     assert.equal(first, -1, `state hash differs from tick ${first + 1}`);
   }
-  // the walkers list the table about once a tick between them, not once each: (24 - 1) x 600 listings saved, less slack
-  assert.ok(slow.listings - fast.listings >= 20 * 600, `listings: ${slow.listings} fresh, ${fast.listings} shared`);
+  // the walkers list the table once a tick between them, not once each: the whole run lists it under 6 times a tick
+  // (measured 4.5: the walkers' one, the invariant pass and the scenario's own reads; a listing per walker step, with
+  // the step snapshot on and the sharing off, is about 27 a tick)
+  assert.ok(fast.listings <= 6 * 600, `listings: ${slow.listings} fresh, ${fast.listings} shared`);
 });
 
 /** Spatial.narrow as it was before PLANNING_BUDGET.md §6, verbatim (frozen reference). */

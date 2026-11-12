@@ -206,8 +206,9 @@ const isPerson = (e: Entity) => e.kind === 'human' || e.human !== undefined;
 /**
  * #2124: one people list per tick for every walker, not one listing of the whole world per walker (23 % of a 24-Soul
  * world's busy thread). Kept while the runtime's nav-trust interval that made it is open (spatial/nav-trust.ts): only
- * nav-pure steps ran since, and a nav-pure step writes only its own actor's body (ActionDef.navPure), so no entity was
- * added, removed or replaced and the list is exactly what a fresh listing would give. Any other code closes the interval
+ * nav-pure steps ran since, and a nav-pure step, with all it triggers (a walk's make-way submit, its hand partner's
+ * step), adds, removes or replaces no entity and gives no entity a person's kind or `human` record (ActionDef.navPure),
+ * so the list is exactly what a fresh listing would give. Any other code closes the interval
  * and the next walker lists afresh; outside an interval (token -1) every step lists afresh. Keyed on the table object,
  * the tick and the token, never on time. SIM_NAV_TRUST_CHECK lists afresh anyway and throws if they differ.
  */
