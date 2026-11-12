@@ -22,6 +22,9 @@ export class WorldFollow {
   private instances=new WorldVisibilityInstances();
   private objects:THREE.Object3D[]=[];
   private hits:THREE.Intersection[]=[];
+  /** #2201 A1: sightline rays cast so far, and in the last resolve call (the camera trace's cost meter). */
+  private cast=0;
+  rays=0;
   reset(){this.decoupled=false;this.gesture=null;this.opening=this.pulled=null;this.requested=this.rendered=this.chosen=this.previousTarget=null;this.userOrbited=false;this.lastSearch=-Infinity;this.chosenClear=false;this.velocity.set(0,0,0);this.userAt=-Infinity;this.instances.reset();}
   /** Same candidates as recursive intersectObjects, minus objects whose hits
    * opaque() always rejects: hidden ancestry or own cameraTransparent. */
@@ -53,7 +56,7 @@ export class WorldFollow {
     // render roots by supplying only architecture, components and fixtures.
     for(const [height,side] of torso?[[0,0]]:[[0,0],[.6,0],[-.45,0],[0,.24],[0,-.24]]){
       const point=target.clone().add(new THREE.Vector3(0,height,0)).addScaledVector(right,side);
-      this.ray.set(point,direction);this.ray.near=.05;this.ray.far=far;
+      this.cast++;this.ray.set(point,direction);this.ray.near=.05;this.ray.far=far;
       // Nearest opaque hit, as intersectObjects(...).sort().find(opaque) would give.
       this.hits.length=0;for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
       let nearest=Infinity;for(const h of this.hits)if(h.distance<nearest&&this.opaque(h.object))nearest=h.distance;this.hits.length=0;
@@ -61,7 +64,7 @@ export class WorldFollow {
       // face looks out at the camera: what the camera sees. Cast torso and head back from the far end too; a drawn
       // face found there blocks every camera beyond it, however close to the body it is.
       if(side===0&&height>=0){
-        this.ray.set(point.clone().addScaledVector(direction,far),reverse);this.ray.near=0;this.ray.far=far-.05;
+        this.cast++;this.ray.set(point.clone().addScaledVector(direction,far),reverse);this.ray.near=0;this.ray.far=far-.05;
         for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
         for(const h of this.hits)if(far-h.distance<nearest&&this.opaque(h.object))nearest=far-h.distance;this.hits.length=0;
       }
@@ -87,7 +90,7 @@ export class WorldFollow {
     // gap between two houses is left to the sightline search (it rises over them).
     const head=target.clone().add(new THREE.Vector3(0,.6,0)),up=new THREE.Vector3(0,1,0);let roofed=false;
     for(const [origin,direction] of [[head,up],[head.clone().addScaledVector(up,8),up.clone().negate()]] as const){
-      this.ray.set(origin,direction);this.ray.near=0;this.ray.far=8;this.hits.length=0;
+      this.cast++;this.ray.set(origin,direction);this.ray.near=0;this.ray.far=8;this.hits.length=0;
       for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
       roofed||=this.hits.some(h=>this.opaque(h.object));this.hits.length=0;
     }
@@ -98,7 +101,7 @@ export class WorldFollow {
         const from=target.clone().add(new THREE.Vector3(0,height,0)),to=target.clone().addScaledVector(offset,1).addScaledVector(right,side*length*.45);
         const ray=to.clone().sub(from),far=ray.length();ray.normalize();
         for(const [origin,direction,flip] of [[from,ray,false],[to,ray.clone().negate(),true]] as const){
-          this.ray.set(origin,direction);this.ray.near=0;this.ray.far=far;this.hits.length=0;
+          this.cast++;this.ray.set(origin,direction);this.ray.near=0;this.ray.far=far;this.hits.length=0;
           for(let o=0;o<this.objects.length;o++)this.instances.intersect(this.objects[o],this.ray,this.hits,o);
           for(const h of this.hits)if(crossing(h)){const along=(flip?far-h.distance:h.distance)*ray.dot(dir);if(along>.3)sideHit=Math.min(sideHit,along);}
           this.hits.length=0;
@@ -146,11 +149,11 @@ export class WorldFollow {
   /** #1316: what moved the camera on the last frame, and with what, for the camera trace (#1317). */
   rule:{name:'start'|'held'|'user'|'collision'|'opening'|'search'|'glide'|'speed-cap';blocked?:boolean;reach?:number;cap?:number}={name:'start'};
   resolve(target:THREE.Vector3,actualOffset:THREE.Vector3,roots:readonly THREE.Object3D[],seconds:number):THREE.Vector3 {
-    if(!actualOffset.toArray().every(Number.isFinite)||actualOffset.length()<.01)return actualOffset.clone();
+    this.rays=0;if(!actualOffset.toArray().every(Number.isFinite)||actualOffset.length()<.01)return actualOffset.clone();
     if(!this.requested||!this.rendered)this.requested=actualOffset.clone();
     for(const root of roots)root.updateWorldMatrix(true,true);
-    this.collect(roots);
-    return this.instances.withQuery(this.objects,()=>this.resolveCollected(target,roots,seconds));
+    this.collect(roots);const cast=this.cast;
+    try{return this.instances.withQuery(this.objects,()=>this.resolveCollected(target,roots,seconds));}finally{this.rays=this.cast-cast;}
   }
   // VF4 (Gene: Follow "goes crazy" in dense streets). The camera never snaps: it picks a clear viewpoint near the
   // requested one (rise first, then orbit a little; scored for clear sight, closeness to where the camera is, the
