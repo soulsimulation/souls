@@ -32,7 +32,6 @@ test('litter: pick up a wrapper and put it in a bin by plain words; the wheelie 
  const done = async (words, each = null) => {const r = await act(words), rc = await finish(r, each); assert.equal(rc.phase, 'completed', words + ' ' + JSON.stringify(rc).slice(0, 600)); return {...rc, capability: r.receipt.capability};};
  const refusals = {}, results = {};
  const refuse = async (words, code) => {const b = await act(words, false); refusals[words] = {code: b.code, reason: b.reason}; if (code) assert.equal(b.code, code, words + ' ' + JSON.stringify(b)); return b;};
- const resolved = async words => {const r = await (await app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: words})})).json(); return r.resolve?.would?.capability ?? null;};
  const held = n => item(n).support?.kind === 'in-hand' && item(n).support.by === soul.entityId;
  // ---- L6: 100 distant bins, each holding a wrapper
  const distant = Array.from({length: 100}, (_, i) => [{op: 'place', def: 'core/bin@2', name: `distant-bin-${i}`, p: [120 + i % 10 * 2, 120 + Math.floor(i / 10) * 2]}, {op: 'place', def: 'core/wrapper@1', name: `distant-wrapper-${i}`, in: {parent: `distant-bin-${i}`, slot: 'in-1'}, p: [0, 0]}]).flat();

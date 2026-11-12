@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// Scripted listening agent (no LLM): the downloaded god and Soul CLIs each keep ONE
-// `listen --follow` running, and a tiny loop acks every JSON line it prints, the way
-// a Claude Code background Monitor would. The owner sends several notes per box;
+// Scripted listening agent (no LLM): the downloaded god CLI and Soul client each keep ONE
+// `listen --follow` running, and a tiny loop acks every message each JSON line carries, the way
+// a Claude Code background Monitor would. For the Soul it tests `serve` with `listen --follow`:
+// eden.mjs `serve` holds the inbox and wakes the one `listen --follow`. The owner sends several notes per box;
 // each must reach `acknowledged` within 10 s with no listener restart.
 //   node tools/test-harness/inbox-follow-walk.mjs [outDir] [port 5960-5968]
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {mkdirSync, rmSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, rmSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {createInterface} from 'node:readline';
 import {startWorld} from '../god-skill/dev-world.mjs';
@@ -18,7 +19,6 @@ const out = resolve(process.argv[2] ?? scratchDir('inbox/follow'));
 const port = Number(process.argv[3] ?? 5962);
 if (!Number.isInteger(port) || port < 5960 || port > 5968) throw Error('This lane owns ports 5960–5969 only');
 mkdirSync(out, {recursive: true});
-process.env.EDGE_CLI_FILE = resolve(root, 'tools/world-launcher/soul/eden-agent.mjs');
 process.env.EDGE_SKILL_FILE = resolve(root, 'tools/world-launcher/soul/skill.md');
 const owned = new Set();
 const stop = async child => { if (!child || child.exitCode !== null || child.signalCode) return; const exited = once(child, 'exit'); child.kill('SIGTERM'); await exited; owned.delete(child); };
@@ -43,19 +43,21 @@ try {
   for (const d of [godDir, soulDir]) { rmSync(d, {recursive: true, force: true}); mkdirSync(d); }
   writeFileSync(resolve(godDir, '.eden-god.json'), JSON.stringify({world: base, token: god}), {mode: 0o600});
   writeFileSync(resolve(soulDir, '.eden-agent.json'), JSON.stringify({world: base, token: soulToken, soul: soul.id, mode: 'edge'}), {mode: 0o600});
-  for (const [dir, name, route] of [[godDir, 'eden-god.mjs', '/god/eden-god.mjs'], [soulDir, 'eden-agent.mjs', '/eden-agent.mjs']]) {
+  for (const [dir, name, route] of [[godDir, 'eden-god.mjs', '/god/eden-god.mjs'], [soulDir, 'eden.mjs', '/eden.mjs']]) {
     const download = await fetch(base + route); assert.equal(download.status, 200);
     const text = await download.text(); assert.match(text, /--follow/, `${route} must ship listen --follow`);
     writeFileSync(resolve(dir, name), text);
   }
-  for (const [kind, dir, cli, ownerPath] of [['god', godDir, 'eden-god.mjs', '/v1/god/inbox'], ['soul', soulDir, 'eden-agent.mjs', `/v1/edge/owner/${soul.id}/inbox`]]) {
+  for (const [kind, dir, cli, ownerPath] of [['god', godDir, 'eden-god.mjs', '/v1/god/inbox'], ['soul', soulDir, 'eden.mjs', `/v1/edge/owner/${soul.id}/inbox`]]) {
     const box = report.boxes[kind] = {acks: [], listenerStarts: 1, lines: 0};
+    if (kind === 'soul') { const s = spawn(process.execPath, [cli, 'serve'], {cwd: dir, stdio: ['ignore', 'pipe', 'pipe']}); let o = ''; s.stdout.on('data', d => o += d); const [code] = await once(s, 'exit'); assert.equal(code, 0, `serve: ${o.slice(0, 300)}`); assert.equal(JSON.parse(o).serving, true); box.serving = true; }
     const listener = spawn(process.execPath, [cli, 'listen', '--follow'], {cwd: dir, stdio: ['ignore', 'pipe', 'pipe']});
     owned.add(listener); let stderr = ''; listener.stderr.on('data', d => stderr += d);
-    // The "agent": every JSON line is one owner note; read it, ack with a short reply.
+    // The "agent": a god line is one owner note; a Soul wake line carries its notes in `messages`. Read each, ack with a short reply.
     createInterface({input: listener.stdout}).on('line', line => {
-      box.lines++; const m = JSON.parse(line);
-      const ack = spawn(process.execPath, [cli, 'ack', m.id, `On it: ${m.text.slice(0, 40)}`], {cwd: dir, stdio: 'ignore'}); owned.add(ack); ack.on('exit', () => owned.delete(ack));
+      const d = JSON.parse(line), notes = kind === 'god' ? [d] : d.messages ?? [];
+      if (notes.length) box.lines++;
+      for (const m of notes) { const ack = spawn(process.execPath, [cli, 'ack', m.id, `On it: ${m.text.slice(0, 40)}`], {cwd: dir, stdio: 'ignore'}); owned.add(ack); ack.on('exit', () => owned.delete(ack)); }
     });
     // Presence is honest: the listener's own long-poll is what marks the agent connected.
     const started = Date.now(); let connected = false;
@@ -79,6 +81,8 @@ try {
 } catch (e) { report.status = 'fail'; report.error = e.stack; throw e; }
 finally {
   for (const child of owned) await stop(child).catch(() => {});
+  // serve is detached: stop it by its own command before its folder goes.
+  if (existsSync(resolve(out, 'soul-cli', 'eden.mjs'))) await once(spawn(process.execPath, ['eden.mjs', 'serve', '--stop'], {cwd: resolve(out, 'soul-cli'), stdio: 'ignore'}), 'exit');
   rmSync(resolve(out, 'data'), {recursive: true, force: true}); rmSync(resolve(out, 'god-cli'), {recursive: true, force: true}); rmSync(resolve(out, 'soul-cli'), {recursive: true, force: true});
   report.endedAt = new Date().toISOString(); writeFileSync(resolve(out, 'report.json'), JSON.stringify(report, null, 2));
 }
