@@ -153,7 +153,7 @@ function tickWindowOf(a: Float64Array): TickWindow | undefined {
 
 /** #1944 A1: marks an act request leaves as it runs (admission.ts starts one per POST /v1/edge/act; the ledger fills it).
  *  Outside an act request getStore() is undefined, so a mark elsewhere costs one lookup. performance.now() ms; 0 = unset. */
-export type ActTiming = {bindMs: number; checkAt: number; routeMisses: number; waitAt: number; takenAt: number};
+export type ActTiming = {bindMs: number; checkAt: number; routeMisses: number; waitAt: number; takenAt: number; cap?: string};
 export const actTiming = new AsyncLocalStorage<ActTiming>();
 export const newActTiming = (): ActTiming => ({bindMs: 0, checkAt: 0, routeMisses: 0, waitAt: 0, takenAt: 0});
 /** The parts of an act answered at `end`, its turn having started at `start`: they sum to end − start. `check` runs from

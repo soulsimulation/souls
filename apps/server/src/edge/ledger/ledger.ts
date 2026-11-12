@@ -2091,6 +2091,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // #1327: a failed clock is refused before anything is written; a retry of an act handed over and not yet recorded
     // gets that act's pending answer, never a second act
     this.clockGate();
+    {const t = actTiming.getStore(); if (t && t.cap === undefined) t.cap = typeof input.capability === 'string' ? input.capability.slice(0, 120) : `intent:${String(input.verb ?? '')}`;}   // #2124 measurement only
     {const pending = this.pendingByRef(soul.soulId, input.clientRef); if (pending) throw pending;}
     const again = this.repeatOf(soul, input);
     if (again) {this.keepRepeatRef(soul.soulId, input.clientRef, again.id); this.comms?.fading.touch?.(soul.soulId); return {accepted: true, receipt: again, repeat: true, ...(again.channel ? {channel: again.channel} : {})};}

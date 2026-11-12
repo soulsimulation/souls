@@ -15,6 +15,23 @@ import { run } from '../lib/proc.mjs';
 import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
+import { summarizeProfile } from './prof-summary.mjs';
+
+// #2124 MEASUREMENT BRANCH ONLY (never merged): the world's own per-request log (act-parts.jsonl), folded by route and by
+// an act's verb; and, in the first repeat of the largest arm, a CPU profile of the world over the load, folded.
+const qs = (xs) => { const a = xs.filter(Number.isFinite).sort((x, y) => x - y), q = (f) => (a.length ? Math.round(10 * a[Math.min(a.length - 1, Math.ceil(f * a.length) - 1)]) / 10 : null); return { n: a.length, p50: q(0.5), p99: q(0.99), max: a.length ? Math.round(10 * a.at(-1)) / 10 : null, sum: Math.round(a.reduce((s, x) => s + x, 0)) }; };
+const verbOf = (cap) => String(cap ?? '?').split(/[:\s]/)[0];
+function perRequest(file, t0, until) {
+  let rows = []; try { rows = readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.at >= t0 && x.at <= until + 15000); } catch { return null; }
+  const routes = {}; for (const x of rows) (routes[x.route ?? '?'] ??= []).push(x.route === 'edge:act' ? x.handler : x.own);
+  const acts = rows.filter((x) => x.route === 'edge:act' && Number.isFinite(x.handler));
+  const g = {}; for (const x of acts) (g[verbOf(x.cap)] ??= []).push(x);
+  const fold = (xs) => ({ handler: qs(xs.map((x) => x.handler)), over300: xs.filter((x) => x.handler > 300).length, over300Ms: Math.round(xs.filter((x) => x.handler > 300).reduce((s, x) => s + x.handler, 0)),
+    over300Parts: ['bind', 'check', 'commit', 'wait'].reduce((m, k) => ({ ...m, [k]: Math.round(xs.filter((x) => x.handler > 300).reduce((s, x) => s + (x[k] ?? 0), 0)) }), {}), bind: qs(xs.map((x) => x.bind)), check: qs(xs.map((x) => x.check)), commit: qs(xs.map((x) => x.commit)), routeMisses: xs.reduce((s, x) => s + (x.routeMisses ?? 0), 0) });
+  const slowest = [...acts].sort((a, b) => b.handler - a.handler).slice(0, 30).map((x) => ({ cap: String(x.cap ?? '').slice(0, 80), status: x.status, handler: Math.round(x.handler), bind: Math.round(x.bind), check: Math.round(x.check), commit: Math.round(x.commit), routeMisses: x.routeMisses }));
+  return { rows: rows.length, routes: Object.fromEntries(Object.entries(routes).map(([k, v]) => [k, qs(v)])), byVerb: Object.fromEntries(Object.entries(g).map(([k, v]) => [k, fold(v)])), slowest };
+}
+const PROF_HOOK = new URL('./prof-hook.mjs', import.meta.url).pathname;
 
 const WORDS = ['bench', 'eat', 'read', 'library', 'windmill', 'bandstand', 'music', 'fire circle', 'pond', 'garden', 'sit on the floor', 'dance'];
 const REPO = resolve(new URL('../../..', import.meta.url).pathname);
@@ -54,7 +71,10 @@ export async function runLoad(o) {
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
+    const prof = rep === first && n === Math.max(...sizes), profDir = join(dir, 'server', 'prof'), prevOpts = process.env.NODE_OPTIONS;
+    if (prof) { mkdirSync(profDir, { recursive: true }); process.env.NODE_OPTIONS = `${prevOpts ? prevOpts + ' ' : ''}--import=${PROF_HOOK}`; process.env.SIM_PROF_DIR = profDir; }
+    let w; try { w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') }); }
+    finally { if (prof) { if (prevOpts === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prevOpts; delete process.env.SIM_PROF_DIR; } }
     const souls = [];
     try {
       // setup is paced at 6 Souls per 30 s: all Souls share one address, and a world pairs at most 20 in any 60 s from one
@@ -67,6 +87,7 @@ export async function runLoad(o) {
         souls[k] = { folder, identity, soulId: s.soulId };
       })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
+      if (prof) writeFileSync(join(profDir, 'prof.start'), '');
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
@@ -75,7 +96,13 @@ export async function runLoad(o) {
       await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts })));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
-      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at), perRequest: perRequest(join(dir, 'server', 'data', 'act-parts.jsonl'), t0, until) };
+      if (prof) {
+        writeFileSync(join(profDir, 'prof.stop'), ''); const pf = join(profDir, 'world.cpuprofile');
+        for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(2000);
+        try { server.profile = summarizeProfile(pf, serverRoot); } catch (e) { server.profile = { error: String(e?.message ?? e).slice(0, 200) }; }
+      }
+      try { server.stalls = readFileSync(join(dir, 'server', 'world.log'), 'utf8').split('\n').filter((l) => /\[stall\]/.test(l)).slice(0, 40).map((l) => l.slice(0, 400)); } catch { /* no log */ }
       const http = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
