@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // The control side of .github/workflows/timed-run.yml (#1943): a timed run (the walk gate or the scripted Soul eval) on
-// a `souls-timed` self-hosted runner, each pinned to cores of its own. It runs from the workflow's own commit, never
+// a `souls-timed` self-hosted runner, each pinned to cores of its own. #1970 adds the eval's load mode, the capacity
+// bench's client load, the meetup workload and the slopes walkers profile; for these four the world under test runs on
+// two of the runner's four physical cores and the load generator on the other two. It runs from the workflow's own commit, never
 // from the ref under measurement. The argument allowlist is not a security boundary (the ref's own scripts run); safety
 // rests on the runner's dedicated, unprivileged account.
 //
@@ -9,10 +11,10 @@
 //   node timed-run.mjs run    --record <file> --out <dir>            the command, `repeats` times (cwd: the ref)
 //   node timed-run.mjs stage  --record <file> --out <dir> --dest <dir>   allowlisted, scrubbed copy; refused on a Soul token
 //   node timed-run.mjs snapshot --snapshot <file> [--exclude <globs>]   this account's entries of the home and /tmp
-//   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot
+//   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot (other jobs': a warning)
 //
 // Pure decisions are exported for timed-run.test.mjs. Nothing here prints a path, host or user name.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname, loadavg, userInfo } from 'node:os';
@@ -20,26 +22,38 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile'];
+/** #1970: the commands whose world runs on two of the runner's physical cores and whose load generator on the other two. */
+export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile'];
 export const LOAD_GATE = 0.25;      // mean busy fraction of the runner's own cores above which a run does not start
 export const SETTLE_WAIT_S = 300;
 export const SAMPLE_S = 5;
 const WALK_WORLDS = ['eden-2026', 'bench-eden', 'eden-2026-genesis', 'bench-hamlet', 'fuzz'];
-/** Per command: each flag allowed in `args`, and the check its value must pass. Nothing else is accepted. */
+const list = (re, max) => (v) => { const xs = v.split(','); return xs.length <= max && xs.every((x) => re.test(x)) && new Set(xs).size === xs.length; };
+const int = (lo, hi) => (v) => /^[1-9]\d{0,3}$/.test(v) && Number(v) >= lo && Number(v) <= hi;
+const FLAG = true;   // a bare flag, no value
+/** Per command: each flag allowed in `args`, and the check its value must pass (FLAG: a bare flag). Nothing else is accepted. */
 export const ARG_ALLOW = {
   walk: { '--world': (v) => v.split(',').every((w) => WALK_WORLDS.includes(w)) && new Set(v.split(',')).size === v.split(',').length },
   'eval-scripted': { '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
+  'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600) },
+  'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
+  meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
+  'slopes-profile': {},
 };
 
-/** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs from its allowlist, once each. */
+/** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
+ *  allowlist, once each. */
 export function checkArgs(command, args) {
   const allow = ARG_ALLOW[command], toks = String(args ?? '').trim().split(/\s+/).filter(Boolean), out = [], seen = new Set();
   for (let i = 0; i < toks.length; i += 2) {
     const f = toks[i], v = toks[i + 1];
     if (!Object.hasOwn(allow, f)) throw new Error(`input args: ${JSON.stringify(f)} is not allowed for ${command} (allowed: ${Object.keys(allow).join(', ') || 'none'})`);
     if (seen.has(f)) throw new Error(`input args: ${f} given twice`);
+    seen.add(f);
+    if (allow[f] === FLAG) { out.push(f); i--; continue; }
     if (v == null || !allow[f](v)) throw new Error(`input args: ${f} ${JSON.stringify(v ?? '')} is not a valid value`);
-    seen.add(f); out.push(f, v);
+    out.push(f, v);
   }
   return out;
 }
@@ -56,11 +70,42 @@ export function parseInputs(env) {
   return { ref, command, repeats: Number(repeats), args: checkArgs(command, env.INPUT_ARGS) };
 }
 
-/** The process to run for one repeat (cwd: the ref). The eval does all its repeats in one invocation. */
+/** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
+export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51 };
+/** The process to run for one repeat (cwd: the ref). Every command but walk does all its repeats in one invocation. The
+ *  eval's load mode keeps its Soul folders (--keep-data) in the per-run directory, so the token refusal can read them. */
 export function commandLine(inp, { out, port }) {
-  if (inp.command === 'walk') return ['tools/test-harness/walk/walk.mjs', ...inp.args];
-  return ['tools/playtest/eval/soul-eval.mjs', 'run', '--repeats', String(inp.repeats), '--out', join(out, 'eval'), '--port', String(port), ...inp.args];
+  const r = ['--repeats', String(inp.repeats)], p = String(port);
+  switch (inp.command) {
+    case 'walk': return ['tools/test-harness/walk/walk.mjs', ...inp.args];
+    case 'eval-scripted': return ['tools/playtest/eval/soul-eval.mjs', 'run', ...r, '--out', join(out, 'eval'), '--port', p, ...inp.args];
+    case 'eval-load': return ['tools/playtest/eval/soul-eval.mjs', 'load', ...r, '--out', join(out, 'eval-load'), '--port', p, '--keep-data', ...inp.args];
+    case 'bench-client': return ['tools/bench/capacity/bench.mjs', '--load', 'client', '--via-launcher', ...r, '--out', join(out, 'bench'), '--port', p, '--child-range', `${port + 1}-${port + 2}`, ...inp.args];
+    case 'meetup': return ['tools/bench/capacity/meetup/meetup.mjs', ...r, '--out', join(out, 'meetup'), '--port', p, '--range', `${port + 1}-${port + 30}`, ...inp.args];
+    case 'slopes-profile': return ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', ...r, '--out', join(out, 'slopes'), '--port', p, ...inp.args];
+  }
+  throw new Error(`no command line for ${inp.command}`);
 }
+/** The log of repeat k: walk writes one per repeat, the others one in all. */
+export const logName = (command, k) => (command === 'walk' ? `walk-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : `${command}.log`);
+
+/** #1970 A2: the runner's own logical CPUs grouped into physical cores (`siblingsOf(cpu)`: that CPU's SMT siblings); the
+ *  first two cores for the world under test, the other two for the load generator. Exactly four cores, else refused. */
+export function splitCores(own, siblingsOf) {
+  const cores = new Map();
+  for (const c of own) { const k = siblingsOf(c).filter((x) => own.includes(x)).sort((a, b) => a - b).join(',') || String(c); cores.set(k, k.split(',').map(Number)); }
+  const byFirst = [...cores.values()].sort((a, b) => a[0] - b[0]);
+  if (byFirst.length !== 4) throw new Error(`the runner has ${byFirst.length} physical core(s) of its own; the world/load split needs 4`);
+  return { physicalCores: 4, world: byFirst.slice(0, 2).flat().join(','), load: byFirst.slice(2).flat().join(',') };
+}
+/** [[pid, ppid], …] → every descendant pid of root. */
+export function descendants(table, root) {
+  const kids = new Map(); for (const [p, pp] of table) kids.set(pp, [...(kids.get(pp) ?? []), p]);
+  const out = [], q = [root]; while (q.length) for (const k of kids.get(q.shift()) ?? []) { out.push(k); q.push(k); }
+  return out;
+}
+/** A world server process (a direct boot, or a child of the launcher), by its NUL-separated command line. */
+export const isWorld = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('apps/server/src/main.ts'));
 
 /** "0-3,8,10-11" → [0,1,2,3,8,10,11]. */
 export function parseCpuList(s) {
@@ -96,12 +141,26 @@ export function soulTokens(out) {
   if (existsSync(out)) walk(out);
   return tokens;
 }
-/** The files a timed run may publish, relative to out. */
-export const allowlist = (out) => ['timed-run.json', 'eval/result.json', 'eval/REPORT.md', 'eval.log', ...[1, 2, 3].map((k) => `walk-r${k}.log`)].filter((f) => existsSync(join(out, f)));
+/** Per command, the files a timed run may publish besides timed-run.json: globs relative to out (`*` stays within one
+ *  path segment). Soul folders, world data, call logs, traces and CPU profiles stay on the runner. */
+export const PUBLISH = {
+  walk: [1, 2, 3].map((k) => `walk-r${k}.log`),
+  'eval-scripted': ['eval/result.json', 'eval/REPORT.md', 'eval.log'],
+  'eval-load': ['eval-load/load-result.json', 'eval-load/LOAD.md', 'eval-load.log'],
+  'bench-client': ['bench/receipt.json', 'bench/REPORT.md', 'bench/*/result.json', 'bench-client.log'],
+  meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
+  'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
+};
+const filesUnder = (d, base = d) => { let es; try { es = readdirSync(d, { withFileTypes: true }); } catch { return []; } return es.flatMap((e) => (e.isDirectory() ? filesUnder(join(d, e.name), base) : e.isFile() ? [join(d, e.name).slice(base.length + 1).split(sep).join('/')] : [])); };
+/** The files a timed run of `command` may publish that exist, relative to out, in PUBLISH order. */
+export function allowlist(out, command) {
+  const all = filesUnder(out).sort();
+  return ['timed-run.json', ...PUBLISH[command]].flatMap((g) => { const t = globTest(g); return all.filter((f) => t(f)); });
+}
 
 /** Copy the allowlisted files into dest, scrubbed; refuse if any still holds a Soul token. Returns the copied list. */
-export function stage({ out, dest, scrubWith }) {
-  const tokens = soulTokens(out), texts = allowlist(out).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
+export function stage({ out, dest, command, scrubWith }) {
+  const tokens = soulTokens(out), texts = allowlist(out, command).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
   for (const [f, t] of texts) if (tokens.some((k) => t.includes(k))) throw new Error(`${f} holds a Soul token; nothing is uploaded`);
   for (const [f, t] of texts) { mkdirSync(join(dest, f, '..'), { recursive: true }); writeFileSync(join(dest, f), t); }
   return texts.map(([f]) => f);
@@ -130,6 +189,16 @@ export function snapshot(roots, { allow = [], exclude = [], uid = null } = {}) {
 }
 /** Entries in `after` that were not in the start snapshot `before`. */
 export const newEntries = (before, after) => { const b = new Set(before); return after.filter((p) => !b.has(p)); };
+/** Splits new entries into the run's own strays (they fail it) and other jobs' leftovers (a warning). The measured
+ *  command runs with TMPDIR and npm's logs dir in the per-run directory, so two kinds of entry cannot be its own: a
+ *  temp dir that os.tmpdir() + mkdtemp made at the top of `tmp` (name `<prefix><sep>XXXXXX`), with its contents, from
+ *  a unit-test job on this account; and an npm debug log under `home`/.npm/_logs. Everything else under the home and
+ *  /tmp is in the measured command's reach and stays a stray. */
+export function sortStrays(found, { home, tmp = '/tmp' }) {
+  const logs = join(home, '.npm', '_logs'), top = (p) => p.startsWith(tmp + sep) ? p.slice(tmp.length + 1).split(sep)[0] : null;
+  const other = (p) => p === logs || p.startsWith(logs + sep) || /^.+[-_.][A-Za-z0-9]{6}$/.test(top(p) ?? '');
+  return { strays: found.filter((p) => !other(p)), others: found.filter(other) };
+}
 
 // ------------------------------------------------------------------ impure side (the workflow's steps)
 const output = (k, v) => { if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${k}=${v}\n`); };
@@ -137,7 +206,29 @@ const arg = (k) => { const i = process.argv.indexOf(`--${k}`); return i < 0 ? nu
 const readJ = (p) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return {}; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ownCpus = () => { const m = /^Cpus_allowed_list:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8')); if (!m) throw new Error('cannot read this process\'s CPU affinity'); return parseCpuList(m[1]); };
-const freePort = () => new Promise((r, j) => { const s = createServer(); s.on('error', j); s.listen(0, 'localhost', () => { const p = s.address().port; s.close(() => r(p)); }); });
+const portFree = (p) => new Promise((r) => { const s = createServer(); s.once('error', () => r(false)); s.listen(p, '127.0.0.1', () => s.close(() => r(true))); });
+/** A base port with `span` consecutive free ports, drawn at random so runs beside each other on one machine rarely collide. */
+async function freePorts(span) {
+  for (let t = 0; t < 100; t++) { const b = 20000 + Math.floor(Math.random() * 30000); let ok = true; for (let k = 0; k < span && ok; k++) ok = await portFree(b + k); if (ok) return b; }
+  throw new Error(`no ${span} consecutive free ports`);
+}
+const siblingsOf = (c) => { try { return parseCpuList(readFileSync(`/sys/devices/system/cpu/cpu${c}/topology/thread_siblings_list`, 'utf8')); } catch { return [c]; } };
+const procTable = () => readdirSync('/proc').filter((d) => /^\d+$/.test(d)).flatMap((d) => { try { return [[Number(d), Number(readFileSync(`/proc/${d}/stat`, 'utf8').split(') ').at(-1).split(' ')[1])]]; } catch { return []; } });
+const allowedOf = (pid) => { try { return /^Cpus_allowed_list:\s*(\S+)/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] ?? null; } catch { return null; } };
+/** #1970 A2: each world process under root, with all its threads, onto the world's cores as soon as it appears (threads
+ *  made later inherit the mask). Returns what was pinned: a count and the allowed lists read back, no pids. */
+function pinWorlds(root, cpus) {
+  const pinned = new Map(), tick = () => {
+    for (const pid of descendants(procTable(), root)) {
+      if (pinned.has(pid)) continue;
+      let cmd; try { cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch { continue; }
+      if (!isWorld(cmd)) continue;
+      try { execFileSync('taskset', ['-a', '-p', '-c', cpus, String(pid)], { stdio: 'ignore' }); pinned.set(pid, allowedOf(pid)); } catch { /* exited */ }
+    }
+  };
+  const iv = setInterval(tick, 250);
+  return { stop: () => { clearInterval(iv); return { worldProcesses: pinned.size, worldAllowed: [...new Set(pinned.values())] }; } };
+}
 const scrubWith = () => { const env = process.env, u = (() => { try { return userInfo().username; } catch { return env.USER; } })();
   return { paths: [[env.PER_RUN, '<per-run>'], [env.GITHUB_WORKSPACE, '.'], [env.RUNNER_WORKSPACE, '<runner-work>'], [env.RUNNER_TEMP, '<runner-temp>'], [env.HOME, '~']], names: [[hostname(), '<host>'], [u, '<user>']] }; };
 
@@ -149,7 +240,9 @@ async function main(cmd) {
     const env = process.env, runnerRoot = env.RUNNER_WORKSPACE ? resolve(env.RUNNER_WORKSPACE, '../..') : null, file = arg('snapshot');
     const now = snapshot([env.HOME, '/tmp'], { allow: [env.RUNNER_TOOL_CACHE, runnerRoot], exclude: (arg('exclude') ?? '').split(','), uid: process.getuid?.() ?? null });
     if (cmd === 'snapshot') { writeFileSync(file, JSON.stringify(now)); console.log(`snapshot: ${now.length} entries`); return; }
-    const found = newEntries(JSON.parse(readFileSync(file, 'utf8')), now), sw = scrubWith();
+    const { strays: found, others } = sortStrays(newEntries(JSON.parse(readFileSync(file, 'utf8')), now), { home: resolve(env.HOME), tmp: '/tmp' }), sw = scrubWith();
+    for (const f of others.slice(0, 50)) console.log(`::warning::another job's leftover, not counted: ${scrub(f, sw)}`);
+    if (others.length) console.log(`::warning::${others.length} entries left by other jobs or npm's own logs, not counted`);
     for (const f of found.slice(0, 50)) console.log(`::error::written outside the per-run directory: ${scrub(f, sw)}`);
     if (found.length) throw new Error(`${found.length} entries written outside the per-run directory`);
     console.log('no entries written outside the per-run directory'); return;
@@ -174,25 +267,35 @@ async function main(cmd) {
     const rec = readJ(rf), out = resolve(arg('out')), env = { ...process.env, BRAIN_MODE: 'fake' }; delete env.GH_TOKEN; delete env.GITHUB_TOKEN;
     if (!rec.startLoad || rec.startLoad.overGate) throw new Error('no passing start-load record; the run does not start');
     mkdirSync(out, { recursive: true });
+    // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the other
+    // two. HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
+    const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf) : null;
+    if (split) {
+      execFileSync('taskset', ['-V'], { stdio: 'ignore' });
+      env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
+      console.log(`cores: world ${split.world}, load generator ${split.load}`);
+    }
     const n = inp.command === 'walk' ? inp.repeats : 1, runs = [];
     for (let k = 1; k <= n; k++) {
-      const argv = commandLine(inp, { out, port: await freePort() }), log = join(out, inp.command === 'walk' ? `walk-r${k}.log` : 'eval.log'), t0 = Date.now();
+      const argv = commandLine(inp, { out, port: await freePorts(PORT_SPAN[inp.command]) }), log = join(out, logName(inp.command, k)), t0 = Date.now();
       console.log(`${inp.command} ${k}/${n}: ${argv.join(' ')}`);
-      const ws = createWriteStream(log), child = spawn(process.execPath, argv, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      const [bin, args] = split ? ['taskset', ['-c', split.load, process.execPath, ...argv]] : [process.execPath, argv];
+      const ws = createWriteStream(log), child = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] }), pins = split ? pinWorlds(child.pid, split.world) : null;
       for (const s of [child.stdout, child.stderr]) s.on('data', (b) => { ws.write(b); process.stdout.write(b); });
       for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
       const code = await new Promise((r) => child.on('close', (c) => r(c ?? 1))); ws.end();
-      runs.push({ repeat: k, exitCode: code, wallMs: Date.now() - t0 });
+      runs.push({ repeat: k, exitCode: code, wallMs: Date.now() - t0, ...(pins ? { cpuSplit: { ...split, ...pins.stop() } } : {}) });
     }
     writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, runs }, null, 1));
     const failed = runs.filter((r) => r.exitCode !== 0);
     if (failed.length) throw new Error(`${failed.length} of ${runs.length} run(s) exited non-zero`);
+    if (runs.some((r) => r.cpuSplit && !r.cpuSplit.worldProcesses)) throw new Error('no world process was seen to pin to the world\'s cores');
     return;
   }
   if (cmd === 'stage') {
     const out = resolve(arg('out')); mkdirSync(out, { recursive: true });
     if (!existsSync(join(out, 'timed-run.json')) && existsSync(rf)) writeFileSync(join(out, 'timed-run.json'), readFileSync(rf));
-    const copied = stage({ out, dest: arg('dest'), scrubWith: scrubWith() });
+    const copied = stage({ out, dest: arg('dest'), command: inp.command, scrubWith: scrubWith() });
     console.log(`staged ${copied.length} file(s): ${copied.join(', ')}`); return;
   }
   throw new Error(`unknown command ${cmd}: inputs | load | run | stage | snapshot | strays`);

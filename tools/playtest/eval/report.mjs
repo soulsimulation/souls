@@ -20,7 +20,25 @@ function routeTable(result) {
 
 const med = (eps) => { const xs = (eps ?? []).map((e) => e.sinceCreateMs).filter(Number.isFinite).sort((p, q) => p - q); return xs.length ? xs[Math.floor((xs.length - 1) / 2)] : null; };
 
+/** A case battery's report (#1950): each case's result against its bar, the refusal codes seen, and every step. */
+export function renderCases(a) {
+  const cases = a.cases ?? [], ok = cases.filter((c) => c.succeeded).length;
+  const L = [`# Soul Client eval: ${a.battery}`, '', `- **Run:** ${a.battery} on ${a.world}; scripted seats; client ${cases.find((c) => c.client)?.client?.cli ?? '?'}; server ${a.serverCommit ?? '?'}; ${a.repeats} repeat(s)`, '',
+    `**Cases passed ${ok} of ${cases.length}.** A failed case is a finding: its bar stays as written.`, '',
+    '| case | repeat | result | refusal codes seen (CLI) | refusals in the client trace | why |', '|---|---|---|---|---|---|'];
+  for (const c of cases) L.push(`| ${c.case} | ${c.repeat} | ${c.error ? 'error' : c.succeeded ? 'pass' : 'FAIL'} | ${codes(c.refusals)} | ${codes(c.tracedRefusals)} | ${(c.error ?? c.why ?? '').replace(/\|/g, '/')} |`);
+  for (const c of cases) {
+    L.push('', `## ${c.case} r${c.repeat}: ${c.error ? 'error' : c.succeeded ? 'pass' : 'FAIL'}`, '', `Bar: ${c.bar}`);
+    if (c.world?.restartAt) L.push('', `World restarted ${c.world.restarted ? `and answered again in ${Math.round(c.world.restartMs / 100) / 10} s` : 'and did not come back'}.`);
+    if (c.measures?.length) L.push('', ...c.measures.map((m) => `- ${m}`));
+    L.push('', '| Soul | at s | step | folder | exit | refusal | check | why |', '|---|---|---|---|---|---|---|---|');
+    for (const s of c.souls ?? []) for (const st of s.steps) L.push(`| ${s.name} | ${st.at} | \`${st.cmd ?? `world ${st.world ?? st.await}`}\` | ${st.in ?? 'own'} | ${st.exit ?? ''} | ${st.refusal ?? ''} | ${st.ok ? 'held' : 'failed'} | ${String(st.why ?? '').replace(/\|/g, '/')} |`);
+  }
+  return L.join('\n') + '\n';
+}
+
 export function renderReport(a, b = null) {
+  if (a.kind === 'cases') return renderCases(a);
   const L = [];
   const head = (x) => `${x.battery} on ${x.world}; seat ${x.seat.adapter}${x.seat.model ? ` (${x.seat.model})` : ''}; client ${x.episodes?.find((e) => e.client)?.client?.cli ?? '?'} / skill ${x.episodes?.find((e) => e.client)?.client?.skill ?? '?'}; server ${x.serverCommit ?? '?'}; ${x.repeats} repeat(s); ${x.warmSec ? `instructions sent at least ${x.warmSec} s after create` : 'instructions sent as soon as the agent is listening (cold)'}${med(x.episodes) != null ? `, median ${Math.round(med(x.episodes) / 1000)} s after create` : ''}; spent $${(x.spentUsd ?? 0).toFixed(3)}`;
   L.push(`# Soul Client eval`, '', `- **Run:** ${head(a)}`);

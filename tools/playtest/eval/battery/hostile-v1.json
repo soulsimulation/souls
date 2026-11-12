@@ -1,0 +1,61 @@
+{
+ "battery": "hostile-v1",
+ "kind": "cases",
+ "world": "eden-2026",
+ "note": "#1950: the first hostile cases. Each case is several scripted Souls on one fresh world, scripted through the served eden.mjs (no model); every step is a check, and a case passes only when every check of every Soul held. A failed case is a finding for a new issue, never a reason to change its bar here.",
+ "items": [
+  {
+   "id": "double-claim",
+   "bar": "A Soul claimed from a second folder is refused soul.held-elsewhere; --move hands it over once; the first folder's next command reports the move.",
+   "souls": [
+    { "id": "wren", "name": "Wren", "folders": ["second"], "script": [
+     { "run": ["pair", "{soul}"], "in": "second", "expect": { "refused": "soul.held-elsewhere" } },
+     { "run": ["pair", "{soul}", "--move"], "in": "second", "expect": "ok" },
+     { "run": ["status"], "in": "second", "expect": { "says": "\"paired\":\\s*true" } },
+     { "run": ["pair", "{soul}", "--move"], "in": "second", "expect": { "says": "already connected" } },
+     { "run": ["here"], "expect": { "refused": "control.revoked" } }
+    ] }
+   ]
+  },
+  {
+   "id": "restart",
+   "bar": "The world restarts during a two-minute act; within 60 s of the restart the act's receipt reaches an end state and the Soul's next act is accepted. Two Souls, both in a two-minute act.",
+   "souls": [
+    { "id": "wren", "name": "Wren", "script": [
+     { "run": ["act", "rest:here", "{\"seconds\":120}"], "expect": "accepted", "keep": true },
+     { "world": "restart", "afterSec": 15 },
+     { "until": ["receipt", "{receipt}"], "phase": "ended", "withinSec": 60, "from": "restart" },
+     { "run": ["act", "wave:here"], "expect": "accepted", "withinSec": 60, "from": "restart" }
+    ] },
+    { "id": "moss", "name": "Moss", "script": [
+     { "run": ["act", "rest:here", "{\"seconds\":120}"], "expect": "accepted", "keep": true },
+     { "await": "restart" },
+     { "until": ["receipt", "{receipt}"], "phase": "ended", "withinSec": 60, "from": "restart" },
+     { "run": ["act", "wave:here"], "expect": "accepted", "withinSec": 60, "from": "restart" }
+    ] }
+   ]
+  },
+  {
+   "id": "act-spam",
+   "bar": "#1974 A1. One Soul sends 200 acts in 10 s through the launcher (eden.mjs, through its serve). Every act over its limits gets a 429 and none a 5xx: no answer to the flood is a 5xx, and at most 60 (the world's act limit a minute) are anything but 429. Three bystanders act every 2 s; each one's median act verdict time during the flood (POST /v1/edge/act in its own client trace) is within 1.5 times its own median over the 30 s before.",
+   "drive": "act-spam",
+   "params": { "acts": 200, "withinSec": 10, "baselineSec": 30, "everySec": 2, "ratio": 1.5, "limitPerMin": 60, "act": ["act", "wave:here"] },
+   "souls": [ { "id": "flint", "name": "Flint" }, { "id": "ash", "name": "Ash" }, { "id": "birch", "name": "Birch" }, { "id": "cedar", "name": "Cedar" } ]
+  },
+  {
+   "id": "reconnect-storm",
+   "bar": "#1974 A2. Twelve Souls' serves reach the world through one relay. Each starts a 4 s rest; the relay cuts every stream at once and turns reconnects away for 6 s, so the rests end while the streams are down. Within 10 s of the relay reopening, every Soul's local copy (world-live.json) has been received again and its check hash equals the hash of the world's own live picture.",
+   "drive": "reconnect-storm",
+   "relay": true,
+   "params": { "restSec": 4, "holdSec": 6, "withinSec": 10 },
+   "souls": [ { "id": "ash", "name": "Ash" }, { "id": "birch", "name": "Birch" }, { "id": "cedar", "name": "Cedar" }, { "id": "dune", "name": "Dune" }, { "id": "elm", "name": "Elm" }, { "id": "fern", "name": "Fern" }, { "id": "gale", "name": "Gale" }, { "id": "heath", "name": "Heath" }, { "id": "iris", "name": "Iris" }, { "id": "juniper", "name": "Juniper" }, { "id": "kestrel", "name": "Kestrel" }, { "id": "linden", "name": "Linden" } ]
+  },
+  {
+   "id": "god-wall",
+   "bar": "#1974 A3. Four Souls walk from where they arrive to the bandstand; once they are moving, a god (eden-god.mjs, dev:admin) places a 30 m garden wall, 2 m high, 8 m ahead of them across their heading. Within 90 s of the wall each walk has ended or been refused with a reason (its receipt in an end state; a reason or code unless it completed), and each Soul's next walk (to the fire circle) is accepted and moves it 1 m within 30 s. The report gives how long each Soul was held after the wall.",
+   "drive": "god-wall",
+   "params": { "to": "g-eden-bandstand", "next": "g-place-social-eden-fire-circle", "def": "garden-wall", "aheadM": 8, "lengthM": 30, "heightM": 2, "holdSec": 90, "nextSec": 30, "moveM": 1 },
+   "souls": [ { "id": "moss", "name": "Moss" }, { "id": "reed", "name": "Reed" }, { "id": "sage", "name": "Sage" }, { "id": "thorn", "name": "Thorn" } ]
+  }
+ ]
+}

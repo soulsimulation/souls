@@ -220,10 +220,13 @@ screenshots or transcripts. Machines without the original run folders can then r
 
 ## Timed runs
 
-Timed runs without a model (the walk gate, the scripted Soul eval) go to the `souls-timed` self-hosted runners through
-the manual `timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk` or `eval-scripted`),
-`repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its own and takes one job; a run records its
-starting load and does not start while its own cores are busy. The runners use a dedicated, unprivileged account: the
+Timed runs without a model (the walk gate, the scripted Soul eval, the eval's load mode, the capacity bench's client
+load, the meetup workload, the slopes tick profile) go to the `souls-timed` self-hosted runners through the manual
+`timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk`, `eval-scripted`, `eval-load`,
+`bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
+own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
+put the world on two of the runner's four physical cores and the load generator on the other two, recorded in
+`timed-run.json`. The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
 

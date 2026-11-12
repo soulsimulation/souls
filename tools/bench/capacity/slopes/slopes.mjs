@@ -18,6 +18,9 @@
 // those ticks (tick-spans.jsonl, profile-walk.cpuprofile). The memory axis (#1973) is that quiet arm, then the world's
 // memory: memory.json (process.memoryUsage() of the main thread and each worker thread, V8 heap spaces, a content hash of
 // every ArrayBuffer by heap snapshot id) and main.heapsnapshot. `--axis memory --repeats 2`: two worlds, one template.
+// #1972: every Soul is the raw-HTTP client Soul of #1945 (../meetup/client-soul.mjs): the catalog and live picture once
+// after it joins, acts by catalog id (strict, keyed), each act's receipt read once after it (outside the probe), the
+// client's headers and retry rules; no resolve.
 // Per arm and repeat: <out>/<arm>-r<k>/{result.json, calls.jsonl, live.jsonl, world.log, profile-*.cpuprofile}.
 // <out>/{receipt.json, results.json, REPORT.md}. No host name, user, home path or token in receipt/results/REPORT.
 import { spawn, execFileSync } from 'node:child_process';
@@ -29,7 +32,8 @@ import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
 import { FIXTURES, outcomeOf, rng } from '../meetup/workload.mjs';
 import { withDistantInventory } from './inventory.mjs';
-import { AXES, ACTS, PROBE_ROUTES, SLOPES, WALK_TICKS, WALK_EVERY_MS, tickSpanTable, subtreeTop, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText } from './report.mjs';
+import { actBody, catalogIds, clientCall, clientHeaders, startPicture } from '../meetup/client-soul.mjs';
+import { AXES, ACTS, PROBE_ROUTES, SLOPES, WALK_TICKS, WALK_EVERY_MS, tickSpanTable, subtreeTop, activePlan, cores, planSeed, probeRoute, qualifies, activeWindow, liveWindow, scheduleFacts, summarizeProfile, reportText, reachedShare } from './report.mjs';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; }, flag = (k) => argv.includes(`--${k}`);
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
@@ -93,19 +97,24 @@ async function bootWorld(dir, { slug, templateFile, port, inspect, extraEnv = {}
   // settled: the boot's perceive catch-up logged, or 30 s up with three calm ticks; cap 300 s
   for (let calm = 0, tc = mono(); !/perceive catch-up/.test(wlog) && mono() - tc < 300_000 && !(mono() - tc > 30_000 && calm >= 3);) { await sleep(1000); const h = (await getJ(`${origin}/healthz`)).j; calm = h?.ok && h.tickMs?.avg < 25 ? calm + 1 : 0; }
   LIVE.delete(booting);   // the caller adds the world it returns
-  return { slug, child, pid: nodePid(child.pid), data, origin, bootS: +bootS.toFixed(1), settledS: +((mono() - t0) / 1000).toFixed(1) };
+  return { slug, child, pid: nodePid(child.pid), data, origin, bootS: +bootS.toFixed(1), settledS: +((mono() - t0) / 1000).toFixed(1), tail: () => { const ls = wlog.trim().split('\n'), ld = ls.filter((l) => l.includes('[load]')).at(-1); return [...(ld ? [ld] : []), ...ls.slice(-3)].map((l) => l.slice(0, 200)).join(' | '); } };
 }
 async function stopWorld(w) {
   if (!w?.child || w.child.exitCode != null) return;
   w.child.kill('SIGTERM'); for (let k = 0; k < 60 && w.child.exitCode == null; k++) await sleep(500);
   if (w.child.exitCode == null) { w.child.kill('SIGKILL'); await sleep(500); }
 }
+/** #2064: a world that has stopped, named by its exit and its log's last lines (black for 60 s is a planned restart, exit 75). */
+const worldExit = (w) => (w?.child && (w.child.exitCode != null || w.child.signalCode) ? `world exited (${w.child.exitCode ?? w.child.signalCode}): ${w.tail?.().split(ROOT).join('.') ?? ''}` : null);
 const LIVE = new Set();   // worlds this process started and has not stopped yet (stopped on SIGINT/SIGTERM too)
 const liveOf = (w) => { try { return JSON.parse(readFileSync(join(w.data, 'live.json'), 'utf8')); } catch { return null; } };
 
 // ------------------------------------------------------------------ the inspector: CPU profiles of the main thread
 async function inspector(port) {
-  const list = (await getJ(`http://127.0.0.1:${port}/json/list`)).j, ws = new WebSocket(list[0].webSocketDebuggerUrl), wait = new Map(), events = new Map(); let id = 0;
+  // #2064: on two cores under 100 walkers the target list can take longer than one 5 s read; read it for up to 60 s
+  let list = null; for (const t0 = mono(); !list?.[0] && mono() - t0 < 60_000;) { list = (await getJ(`http://127.0.0.1:${port}/json/list`, 15_000)).j; if (!list?.[0]) await sleep(2000); }
+  if (!list?.[0]) throw new Error(`the world's inspector listed no target in 60 s`);
+  const ws = new WebSocket(list[0].webSocketDebuggerUrl), wait = new Map(), events = new Map(); let id = 0;
   await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = no; });
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m?.method) events.get(m.method)?.(m.params); const done = typeof m?.id === 'number' ? wait.get(m.id) : undefined; if (typeof done === 'function') { wait.delete(m.id); done(m); } };
   ws.onclose = () => { for (const done of wait.values()) done({ error: 'inspector closed' }); wait.clear(); };
@@ -180,34 +189,31 @@ async function joinSoul(run, w, i) {
   const token = () => { try { return JSON.parse(readFileSync(join(dir, '.eden-agent.json'), 'utf8')).token ?? null; } catch { return null; } };
   for (const t0 = mono(); !token() && mono() - t0 < 120_000;) { const r = await runCli(dir, ['create', `Slope${i}`], 150_000); if (!token()) { log(`soul ${i} create: ${r.code} ${r.err.split(ROOT).join('.')}`); await sleep(2000); } }
   if (!token()) throw new Error(`soul ${i} did not join`);
-  return { i, token: token(), address: `198.51.100.${i + 1}` };
+  const s = { i, token: token(), address: `198.51.100.${i + 1}` }, p = await startPicture(w.origin, s);   // the client's start (#1945)
+  if (!p.catalog) throw new Error(`soul ${i}: catalog ${p.catalogStatus}`);
+  return Object.assign(s, { catalog: p.catalog, liveStatus: p.liveStatus });
 }
 function requestOf(route, n, run) {
-  const act = (capability) => ['POST', '/v1/edge/act', { capability, params: {}, clientRef: `${run.id}-${run.seq++}` }];
+  const act = (capability) => ['POST', '/v1/edge/act', actBody(capability, `${run.id}-${run.seq++}`)];
   if (route === 'here') return ['GET', '/v1/edge/here?include=doHere'];
   if (route === 'observe') return ['GET', '/v1/edge/observe'];
   if (route === 'capabilities') return ['GET', '/v1/edge/capabilities'];
   if (route.startsWith('walk:')) return act(route);
-  if (route === 'resolve') return ['POST', '/v1/edge/resolve', { capability: ['sit down', 'wave', 'look around'][n % 3], params: {} }];
   const a = ACTS[n % ACTS.length];
   return a === 'say' ? ['POST', '/v1/edge/say', { text: 'hello from the slopes bench' }] : act(a);
 }
-// The CLI's etiquette (as the meetup bench): a designed busy answer is waited out for its Retry-After, up to 3 times;
-// the waits are inside the call's time and counted (busyWaits, waitMs, refusals by code).
-const BUSY = /\b(world\.busy|world\.crowded|world\.starting|soul\.busy|soul\.slow-down|rate-limited|client\.rate|account\.rate)\b/;
-async function call(run, w, s, route, n) {
-  const [method, path, body] = requestOf(route, n, run), t = mono(), key = route === 'act' && !body.capability ? `${run.id}-${run.seq++}` : null;
-  let status = 0, code = null, d = null, bytes = 0, busy = 0, waitMs = 0; const refusals = [];
-  for (;;) {
-    try {
-      const r = await fetch(`${w.origin}${path}`, { method, headers: { authorization: `Bearer ${s.token}`, 'content-type': 'application/json', 'x-forwarded-for': s.address, ...(key ? { 'idempotency-key': key } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(60_000) });
-      const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; try { d = JSON.parse(text); } catch { d = null; } code = d?.error?.code ?? d?.code ?? null;
-      if ((status === 429 || status === 503) && BUSY.test(String(code)) && busy < 3) { busy++; refusals.push(code); const ra = Number(r.headers.get('retry-after')), w0 = mono(); await sleep(ra > 0 ? ra * 1000 : 1000 * 2 ** busy); waitMs += mono() - w0; continue; }
-    } catch (e) { status = e?.name === 'TimeoutError' ? -1 : 0; }
-    break;
-  }
-  const accepted = route === 'resolve' ? d?.resolve?.ok : d?.accepted;
-  return { route, ms: Math.round(mono() - t), bytes, status, outcome: outcomeOf({ status, code, accepted }), ...(code ? { code } : {}), ...(busy ? { busyWaits: busy, waitMs: Math.round(waitMs), refusals } : {}) };
+// The client's etiquette (client-soul.mjs clientCall): a designed busy or stalled answer is waited out for its
+// Retry-After, up to 3 times; no answer is tried again with full jitter, up to 6 tries; the waits are inside the call's
+// time and counted (busyWaits, waitMs, refusals by code). An act or say is keyed; an accepted act's receipt is read once
+// after it (receiptMs, receiptStatus; not inside the call's time), except in the probe (one route at a time).
+async function call(run, w, s, route, n, { receipt = true } = {}) {
+  const [method, path, body] = requestOf(route, n, run), t = mono(), key = body?.clientRef ?? (method === 'POST' ? `${run.id}-${run.seq++}` : null);
+  const x = await clientCall(`${w.origin}${path}`, { method, headers: clientHeaders(s, { key }), body, deadlineMs: method === 'GET' ? 60_000 : 90_000 });
+  const { status, code, data: d, bytes, busy, waitMs, refusals } = x;
+  const out = { route, ms: Math.round(mono() - t), bytes, status, outcome: outcomeOf({ status, code, accepted: d?.accepted }), ...(code ? { code } : {}), ...(busy ? { busyWaits: busy, waitMs, refusals } : {}) };
+  const rid = d?.receipt?.id;
+  if (receipt && rid && status >= 200 && status < 300) { const t1 = mono(), r = await clientCall(`${w.origin}/v1/edge/receipts/${encodeURIComponent(rid)}`, { headers: clientHeaders(s), deadlineMs: 60_000 }); Object.assign(out, { receiptMs: Math.round(mono() - t1), receiptStatus: r.status }); }
+  return out;
 }
 
 // ------------------------------------------------------------------ #1961: a walkers arm
@@ -225,14 +231,16 @@ async function walkRun(arm, rep) {
     // joins come from one address, and the world pairs at most 20 a minute per address (http.ts `pair`): 16 a minute here
     for (let i = 0, started = []; i < arm.walkers; i += 4) {
       while (started.filter((t) => mono() - t < 60_000).length + 4 > 16) await sleep(1000);
+      // #2064: on two cores a run of joins can hold the world at red or black; the next four wait for it, up to 5 min
+      for (const t0 = mono(), at = () => getJ(`${W.origin}/healthz`).then((h) => h.j?.load?.level); ['red', 'black'].includes(await at()) && mono() - t0 < 300_000;) { if (worldExit(W)) break; log(`${run.id}: world not ready for joins at ${i}; waiting`); await sleep(10_000); }
+      if (worldExit(W)) throw new Error(`${worldExit(W)}; ${i} of ${arm.walkers} joined`);
       const k4 = Math.min(4, arm.walkers - i); started.push(...Array(k4).fill(mono()));
       // a join that runs out of time while the world is busy (the join proxy answers 502 when the world drops a request) is tried twice more
-      souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
+      souls.push(...await Promise.all(Array.from({ length: k4 }, async (_, k) => { for (let t = 1; ; t++) { try { return await joinSoul(run, W, i + k); } catch (e) { if (t >= 3 || worldExit(W)) throw e; log(`soul ${i + k}: join try ${t} failed, again in 30 s`); await sleep(30_000); } } })));
     }
     await jp.close(); jp = null;
-    const caps = souls.length ? (await getJ(`${W.origin}/v1/edge/capabilities?all=1`, 60_000, { authorization: `Bearer ${souls[0].token}` })).j?.capabilities ?? [] : [];
-    const places = caps.filter((c) => c.verb === 'walk' && c.available && c.id.startsWith('walk:')).map((c) => c.id).sort();
-    if (souls.length && !places.length) throw new Error('no walk places in the first Soul\'s menu');
+    const places = souls.length ? [...catalogIds(souls[0].catalog).walk].sort() : [];
+    if (souls.length && !places.length) throw new Error('no walk places in the first Soul\'s catalog');
     log(`${run.id}: ${souls.length} walkers joined, ${places.length} places; walking`);
     // each walker walks to another place every WALK_EVERY_MS from a seeded offset, so all are moving through the window
     const R = rng(`${SLOPES}|${run.id}|walk`); walking = true;
@@ -241,7 +249,7 @@ async function walkRun(arm, rep) {
     const from = spanRows(spans).at(-1)?.[0] ?? 0;
     prof = PROF ? await inspector(INSPECT) : null; if (prof) await prof.start();
     const w0 = mono();
-    for (const t0 = w0; (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 900_000;) await sleep(2000);
+    for (const t0 = w0; (spanRows(spans).at(-1)?.[0] ?? 0) < from + WALK_TICKS && mono() - t0 < 900_000 && !worldExit(W);) await sleep(2000);
     const windowS = (mono() - w0) / 1000;
     const profile = prof ? await prof.stop() : null; prof?.close(); prof = null;
     walking = false; await walkers; walkers = null;
@@ -249,12 +257,13 @@ async function walkRun(arm, rep) {
     for (const c of calls) appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ phase: 'walk', ...c }) + '\n');
     const rows = spanRows(spans).filter((x) => x[0] > from && x[0] <= from + WALK_TICKS);
     const result = { arm, rep, facts: { walkers: souls.length, places: places.length, ticksPerS: +(WALK_TICKS / windowS).toFixed(1) }, ticks: tickSpanTable(rows), stepProfile: subtreeTop(profile, ROOT),
-      walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
+      walks: calls.reduce((m, c) => ({ ...m, [c.outcome]: (m[c.outcome] ?? 0) + 1 }), {}), reached: reachedShare(calls), host: { loadavgStart: loadStart, loadavgEnd: loadavg().map((x) => +x.toFixed(2)) } };
     if (result.ticks?.ticks !== WALK_TICKS) throw new Error(`${result.ticks?.ticks ?? 0} of ${WALK_TICKS} ticks recorded`);
     if (arm.memory) { const insp = await inspector(INSPECT); try { result.memory = await memoryOf(insp, dir); } finally { insp.close(); } }
     writeFileSync(join(dir, 'result.json'), JSON.stringify(result, null, 1) + '\n');
-    log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}`);
+    log(`${run.id}: tick p50 ${result.ticks.p50Ms} ms, p99 ${result.ticks.p99Ms} ms, shares ${JSON.stringify(result.ticks.shares)}, walks ${JSON.stringify(result.walks)}, reached ${result.reached.ok}/${result.reached.sent} (${result.reached.share ?? '—'})`);
     return result;
+  } catch (e) { const x = worldExit(W); throw x && !String(e.message).includes(x) ? new Error(`${e.message}; ${x}`) : e;
   } finally {
     walking = false; await walkers; await jp?.close(); prof?.close();
     if (W) { await stopWorld(W); LIVE.delete(W); }
@@ -290,7 +299,7 @@ async function oneRun(arm, rep) {
     if (prof) await prof.start();
     const probe = {};
     for (const route of PROBE_ROUTES) {
-      const a = proc(W.pid), cs = []; for (let n = 0; n < PROBE_N; n++) cs.push(await call(run, W, souls[n % souls.length], route, n)); const b = proc(W.pid);
+      const a = proc(W.pid), cs = []; for (let n = 0; n < PROBE_N; n++) cs.push(await call(run, W, souls[n % souls.length], route, n, { receipt: false })); const b = proc(W.pid);
       probe[route] = probeRoute(cs, { cpuS: a && b ? b.cpuS - a.cpuS : null, spanMs: a && b ? b.t - a.t : null, quietCores });
       for (const c of cs) appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({ phase: 'probe', ...c }) + '\n');
     }

@@ -67,9 +67,13 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
   client before 2.25, which keeps no world copy. Each episode records `catalogFrom` (`client` or `reference`).
 - `load --first-repeat 2` numbers a load run's repeats from 2, so a stopped load run can be finished cell by cell. Load
   setup paces Souls at 6 per 30 s, under a world's 20 pairings in any 60 s from one address.
+- A load report also gives the world's own side from its `live.json`: an act's queue, handler, wait and commit at p50
+  and p99 with the acts that waited more than three ticks, and each 10-second tick window ([load.md](../architecture/load.md)).
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
+`run` exits 1, after writing its result, when every episode errored or more than 20% did: a run that measured nothing
+never passes.
 
 A live seat needs `--max-usd`. The run stops before an episode once its spend reaches the cap. Measure on a quiet
 machine, two repeats per arm, and take the playtest lock where the machine is shared.
@@ -101,3 +105,21 @@ Every item starts where a new Soul arrives. Its check is one of `place`, `placeK
 
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.
+
+## Hostile cases
+
+`tools/playtest/eval/battery/hostile-v1.json` is a case battery (#1950): each case puts several scripted Souls on one fresh
+local world, each with its own script of `eden.mjs` steps, started together and judged together. Every step is a check
+(`ok`, `accepted`, `{refused}`, `{says}`; `until` a receipt ends; a world `restart`), and a case passes only when all hold.
+`double-claim`: a second folder's claim is refused `soul.held-elsewhere`, `--move` hands it over once, and the first folder's
+next command reports the move. `restart`: the world restarts during two Souls' two-minute acts; within 60 s each receipt
+ends and the next act is accepted. `soul-eval.mjs run --battery hostile-v1 --seat scripted --repeats 1` writes each case's
+result and the refusal codes seen. A failed case is a finding for a new issue; its bar stays (`episode.mjs`, `runCase`).
+
+Three cases have bystanders (#1974), each played by a driver in `hostile.mjs` (`"drive"`, tuned by `"params"`).
+`act-spam`: one Soul sends 200 acts in 10 s through eden.mjs; no answer is a 5xx, at most 60 are not 429, and each of three
+bystanders' median act time (its own client trace) stays within 1.5 times its median over the 30 s before. `reconnect-storm`:
+twelve Souls reach the world through a relay that cuts every stream at once and turns reconnects away for 6 s; within 10 s
+of it reopening every copy (`world-live.json`) is received again and hashes as the world's picture does. `god-wall`: a god
+(eden-god.mjs) places a wall across four walking Souls; within 90 s each walk ends (with a reason unless it completed), the
+report gives how long each Soul was held, and each next walk is accepted and moves the Soul 1 m within 30 s.
