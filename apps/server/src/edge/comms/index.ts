@@ -36,6 +36,8 @@ export type CommsOptions = {
   inviteTimeoutMs?: number;
   /** Background sweep period; 0 disables the timer (tests call runtime.sweep()). */
   sweepMs?: number;
+  /** #2100: caps on calendar items Souls posted that are not over (defaults 30 per owner, 300 per world). */
+  calendarCaps?: {perOwner?: number; perWorld?: number};
   /** Webhook transport; defaults to global fetch. `null` disables delivery. */
   fetch?: Fetch | null;
   /** Bearer token the steward session presents on /v1/edge/steward/*; unset = 503. */
@@ -205,6 +207,14 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
   // drops for a while when the clock dilates.
   const ticksPerRealMinute = () => 1200 * (deps.host.baseRate > 0 ? deps.host.baseRate : 1);
   const calendarOpen = () => objects.ofKind('calendar-item').filter(o => (o.state as CalendarState).phase !== 'over');
+  // #2100: an aggregate bound beside the per-Soul one. Only items a Soul posted count (steward and god items do not).
+  const perOwnerCap = options.calendarCaps?.perOwner ?? 30, perWorldCap = options.calendarCaps?.perWorld ?? 300;
+  // #2100: a Soul's item is removed a day (real time at the admin's rate) after it ends; steward and god items stay.
+  const CALENDAR_EXPIRE_MINUTES = 24 * 60;
+  const expireCalendar = () => {
+    const before = core.tick() - CALENDAR_EXPIRE_MINUTES * ticksPerRealMinute();
+    for (const o of objects.ofKind('calendar-item')) { const s = o.state as CalendarState; if (s.proposedById && s.phase === 'over' && s.endsAtTick <= before) objects.remove(o.id); }
+  };
   app.get('/v1/edge/calendar', c => {
     const xff = c.req.header('x-forwarded-for'), wait = xff ? calendarReads.take(xff.split(',')[0].trim()) : 0;
     if (wait) { c.header('Retry-After', String(Math.ceil(wait / 1000))); return failure(c, new EdgeError(429, 'rate-limited', 'More than 60 calendar reads a minute from your address; wait a moment.')); }
@@ -235,6 +245,11 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     if (!place) throw new EdgeError(400, 'calendar.unknown-place', `No place "${placeId.slice(0, 100)}" in this world.`);
     const mine = calendarOpen().filter(o => (o.state as CalendarState).proposedById === soul.soulId).length;
     if (mine >= 10) throw new EdgeError(429, 'calendar.too-many-open', 'You already have 10 calendar items that are not over; post again when one ends.');
+    const posted = calendarOpen().filter(o => (o.state as CalendarState).proposedById);
+    if (posted.length >= perWorldCap) throw new EdgeError(429, 'calendar.world-full', `This world already has ${perWorldCap} calendar items from Souls that are not over; post again when one ends.`);
+    const owners = new Map<string, string | undefined>(), ownerOf = (id: string) => { if (!owners.has(id)) owners.set(id, deps.db.soul(id)?.owner); return owners.get(id); };
+    if (posted.filter(o => ownerOf((o.state as CalendarState).proposedById!) === soul.owner).length >= perOwnerCap)
+      throw new EdgeError(429, 'calendar.owner-full', `Your owner's Souls already have ${perOwnerCap} calendar items that are not over; post again when one ends.`);
     const lim = deps.souls.limits.allow(`edge-calendar:${soul.soulId}`, 5, 3600_000);
     if (!lim.ok) { c.header('Retry-After', String(lim.retryAfter)); throw new EdgeError(429, 'rate-limited', 'At most 5 calendar posts an hour.', {retry_after: lim.retryAfter}); }
     const tick = core.tick(), at = now(), perMinute = ticksPerRealMinute(), id = 'cal-' + Math.random().toString(36).slice(2, 10);
@@ -299,6 +314,8 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     try { conversations.sweep(); } catch { /* retried next period */ }
     yield;
     try { if (sliced) yield* objects.sweepSteps(); else objects.sweep(); } catch { /* retried next period */ }
+    yield;
+    try { expireCalendar(); } catch { /* retried next period */ }
     yield;
     try { steward.schedule(); } catch { /* retried next period */ }
     yield;

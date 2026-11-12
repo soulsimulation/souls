@@ -59,7 +59,9 @@ test('a world 300 accelerated days in comes onto real time: every entry survives
   assert.ok(oldDay >= 300, `old day ${oldDay}`);
 
   // what the world holds: reminders (pending world, pending real, delivered), a poster wall and a chalk drawing
-  const reminders = new PersonalReminders(f.db.db, f.host.worldId, { publish: () => {} } as any, () => freshBootClock(f.host as any));
+  // (#2097: the reminders read the same fixed `wall` as the world clock, so the real reminder a day after it is in the future
+  // whatever today's date is)
+  const reminders = new PersonalReminders(f.db.db, f.host.worldId, { publish: () => {} } as any, () => freshBootClock(f.host as any, wall));
   const nowMin = freshBootClock(f.host as any).absoluteWorldMinutes!, today = Math.floor(nowMin / 1440);
   const make = (ref: string, at: unknown) => reminders.create('soul-a', { clientRef: ref, text: ref, at }).reminder as any;
   const tomorrow = make('tomorrow', { clock: 'world', worldDayIndex: today + 1, time: '18:00' });

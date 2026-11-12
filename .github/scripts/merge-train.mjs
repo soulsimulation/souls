@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { loadPolicy, tierFor } from '../../tools/proof/tier.mjs';
 import { APPROVED_LABEL, maintainerApproved } from '../../tools/proof/gate.mjs';
 import { JOBS } from './ci-scope.mjs';
+import { coveredByQueue } from './ci-main.mjs';
 
 // The maintainer gate itself is tools/proof/gate.mjs, enforced by the required `proof-ok` check; the train uses the same
 // rule only to leave unapproved T3-T4 PRs queued instead of waiting on a check that will fail.
@@ -142,9 +143,10 @@ export function mainCiState(runs = [], isFull = () => false) {
   return proven ? { conclusion: 'success', since: null } : { conclusion: 'unproven', since: 'unproven' };
 }
 
-/** A run checked everything: started by hand (ci.yml then scopes to full), or every qualify job ran and succeeded. */
+/** A run checked everything: started by hand (ci.yml then scopes to full), every qualify job ran and succeeded, or the
+ * merge queue's run at the same sha did (ci-main.mjs: the push ran `merge-group-covered` instead). */
 export function fullScope(run, jobs) {
-  if (run.event === 'workflow_dispatch') return true;
+  if (run.event === 'workflow_dispatch' || coveredByQueue(jobs)) return true;
   const ok = new Set(jobs.filter(j => j.conclusion === 'success').map(j => j.name));
   return JOBS.every(j => ok.has(j.name));
 }
