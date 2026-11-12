@@ -1,6 +1,6 @@
 // #1755: the live picture's changes, pushed. A fake ledger (no world): seq and resume, the whole picture on a gap, the
 // hash a client checks, nothing in a secret outline on any floor, and no work while nobody holds the push.
-import {test} from 'node:test';
+import {mock, test} from 'node:test';
 import assert from 'node:assert/strict';
 import {LIVE_RING} from './live.ts';
 import {fakeLiveWorld as fakeWorld} from './live-testing.ts';
@@ -189,4 +189,34 @@ test('a client that stops reading gets nothing past its backlog, then the whole 
     }
     assert.equal(seq, head, 'the copy ends current');
   } finally { w.hub.close(); f.destroy(); }
+});
+
+test('#1918: the live picture carries the world clock; the check frame carries it too, and it sends no frame of its own', async () => {
+  const w = fakeWorld();
+  // A3: no day yet: no world time
+  const none = (await w.get()).clock;
+  assert.equal(none.time, null); assert.equal(none.minuteOfDay, null); assert.equal(none.worldDateTime, null);
+  // a day of 72,000 ticks from tick 0 starts at 06:00; 3,000 ticks (50 a minute) later it is 07:00
+  w.host.living = {origin: 0, dayTicks: 72_000}; w.advance(3_000);
+  const before = Date.now(), pic = await w.get();
+  assert.deepEqual(Object.keys(pic.clock).sort(), ['at', 'minuteOfDay', 'paused', 'realMsPerWorldMinute', 'time', 'weekdayUTC', 'worldDateTime']);
+  assert.equal(pic.clock.minuteOfDay, 7 * 60); assert.equal(pic.clock.time, '07:00'); assert.equal(pic.clock.paused, false);
+  assert.equal(pic.clock.realMsPerWorldMinute, 2_500); assert.equal(pic.clock.weekdayUTC, new Date(pic.clock.worldDateTime).getUTCDay());
+  assert.ok(pic.clock.at >= before && pic.clock.at <= Date.now(), 'A1: when the sample was taken');
+  w.host.paused = true;
+  const paused = (await w.get()).clock;
+  assert.equal(paused.paused, true, 'A3: a paused clock says so (the tick has not moved)'); assert.equal(paused.realMsPerWorldMinute, null);
+  // A2: the check frame carries the clock; the clock moving alone sends no change
+  mock.timers.enable({apis: ['setInterval', 'Date'], now: Date.now()});
+  try {
+    w.host.paused = false;
+    const c = follow(w.hub);
+    w.advance(500); mock.timers.tick(250);
+    const checks = c.got.filter(g => g.data.check), changes = c.got.filter(g => g.event === 'live' && !g.data.check);
+    assert.equal(checks.length, 1); assert.equal(checks[0]!.data.minuteOfDay, undefined);
+    assert.equal(checks[0]!.data.clock.minuteOfDay, 7 * 60 + 10, 'ten world minutes on'); assert.equal(checks[0]!.data.clock.paused, false);
+    assert.deepEqual(changes, [], 'the clock is in no change: no live frame');
+    assert.equal(checks[0]!.data.check, liveHash(await w.get()), 'and not in the hash');
+    c.stop();
+  } finally { mock.timers.reset(); w.hub.close(); }
 });
