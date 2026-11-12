@@ -944,6 +944,12 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       harness: { ref: harnessRef, tree: harnessTree, suiteTree: suite, archiveSha256: sha256(harnessArchive) }, quarantineSha256: sha256(manifestBytes), renamesSha256: sha256(renamesBytes), node, exclusions: EXPECTED_SKIP, scopeExclusions: manifest.scopeExclusions };
     const identity = { schemaVersion: 1, harnessRef, harnessTree, harnessArchiveSha256: sha256(harnessArchive), node };
     const scopeMode = options['--scope'] || 'full';
+    // #1935: the release owner stamps the Soul client once per release; a release head's gate runs stamp.mjs --check on its files
+    const soulFile = path => { try { return execFileSync('git', ['-C', root, 'show', `${candidateSha}:tools/world-launcher/soul/${path}`], { maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+    if (scopeMode === 'full' && soulFile('SOURCES.json')) {
+      const off = (await import(pathToFileURL(join(root, 'tools/world-launcher/soul/stamp.mjs')).href)).problems(soulFile);
+      if (off.length) throw Error(`client stamp: ${off.join('; ')} (the release owner runs node tools/world-launcher/soul/stamp.mjs <version>)`);
+    }
     const scope = scopeMode === 'full' ? { resolved: 'full', steps: [...REQUIRED_STEPS] }
       : scopeFor(git('diff', '--name-only', baselineSha, candidateSha).split('\n'));
     // A full gate takes CI's successful run at the candidate as evidence for the steps CI runs identically (#1463)

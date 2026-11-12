@@ -102,3 +102,17 @@ await test('feed: read counts survive a restart of the launcher (flushed to <dat
   const body = JSON.parse(readFileSync(join(d, 'feed-reads.json'), 'utf8'));
   assert.deepEqual(body.days, { '2026-11-11': { '2.33.0': 1, none: 1 } });
 });
+
+await test('feed: a malformed line is skipped and moves no other id; a line without a stored id keeps its line number (#1993)', async () => {
+  const d = mkdtempSync(join(tmpdir(), 'feed-ids-')), at = () => new Date('2026-11-11T12:00:00Z');
+  const line = (id, title) => JSON.stringify({ ...(id ? { id } : {}), at: '2026-11-10T00:00:00.000Z', kind: 'announcement', title, body: '' });
+  writeFileSync(join(d, 'feed.jsonl'), `${line(null, 'legacy')}\n${line('f2', 'two')}\n{"id":"f3","at":"2026-11-1\n${line('f4', 'four')}\n`);
+  const f = platformFeed({ dataDir: d, now: at });
+  assert.deepEqual(f.page(undefined, 20).items.map((i) => [i.id, i.title]), [['f1', 'legacy'], ['f2', 'two'], ['f4', 'four']]);
+  assert.deepEqual(f.page('f2', 20).items.map((i) => i.id), ['f4'], 'a client that read up to f2 gets f4 next, nothing skipped or repeated');
+  let out; const res = { writeHead: () => res, end: (b) => { out = JSON.parse(b); } };
+  const req = Object.assign([Buffer.from(JSON.stringify({ kind: 'announcement', title: 'five' }))], { headers: {} });
+  await f.op(req, res, 'feed-post', true);
+  assert.equal(out.item.id, 'f5', 'a new item never reuses an id');
+  assert.deepEqual(f.page('f4', 20).items.map((i) => i.id), ['f5']);
+});

@@ -1,16 +1,16 @@
 // CW1 (#735) A2–A6: the meetup workload is fixed data, deterministic per seed, and its accounting hides nothing.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { FIXTURES, PROFILES, DEMAND, phases, souls, schedule, scheduleId, scheduleCounts, account, outcomeOf, quantiles, clockWindow } from './workload.mjs';
+import { FIXTURES, PROFILES, CADENCE_OF, DEMAND, phases, souls, schedule, scheduleId, scheduleCounts, account, outcomeOf, quantiles, clockWindow } from './workload.mjs';
 
 const ROOT = new URL('../../../../', import.meta.url).pathname;
 
-test('ten authored fixtures exist; both profiles total fifty Souls', () => {
+test('ten authored fixtures exist; even and meetup total fifty Souls, real100 a hundred', () => {
   assert.equal(FIXTURES.length, 10);
   for (const f of FIXTURES) assert.ok(existsSync(join(ROOT, 'worlds/templates', `${f.template}.json`)), f.template);
-  assert.deepEqual(Object.values(PROFILES).map((p) => p.reduce((a, b) => a + b, 0)), [50, 50]);
+  assert.deepEqual(Object.values(PROFILES).map((p) => p.reduce((a, b) => a + b, 0)), [50, 50, 100]);
   assert.equal(PROFILES.meetup[0], 20);
   assert.equal(PROFILES.meetup.slice(1).reduce((a, b) => a + b, 0), 30);
   assert.ok(PROFILES.even.every((n) => n === 5));
@@ -48,7 +48,7 @@ test('declared rates: one read per 4 s, one act per 20 s (plus interrupts), thre
     assert.ok(reads.every((o) => o.atMs >= m + DEMAND.burstActWithinMs && o.atMs <= m + DEMAND.burstActWithinMs + DEMAND.burstReadsWithinMs));
     assert.equal(new Set(acts.map((o) => o.soul)).size, 50);
   }
-  assert.deepEqual(new Set(ops.map((o) => o.kind)), new Set(['observe', 'here', 'capabilities', 'resolve', 'walk', 'attention', 'say', 'gesture', 'stand', 'shared', 'meetup']));
+  assert.deepEqual(new Set(ops.map((o) => o.kind)), new Set(['observe', 'here', 'capabilities', 'walk', 'attention', 'say', 'gesture', 'stand', 'shared', 'meetup']));
   // each Soul's calls are in time order (they are sent one at a time, in this order)
   for (let i = 0; i < 50; i++) { const t = ops.filter((o) => o.soul === i).map((o) => o.atMs); assert.deepEqual(t, [...t].sort((x, y) => x - y)); }
 });
@@ -108,9 +108,10 @@ test('clock proof: full clock is 1; a stall is neither clipped nor reset; rate c
   assert.equal(clockWindow(full.slice(0, 1), { from: 0, to: 60_000 }).ratio, null);
 });
 
-test('phases --active-min (#955): the default is the CW2 baseline schedule; a long window keeps rates and repeats meetups', () => {
-  // the schedule sha256 of capacity-qualify run 41915686991 (the CW2 baseline), both profiles, seed cw1
-  const BASE = { even: 'ae3dfd508b0c5f68315eaab8d99c0d6c1083291c685dd5615b052cb831814572', meetup: 'e077d9f729165e0cbf640fa5d9a3ada1c893ce342665d9921338cb602dda8ff8' };
+test('phases --active-min (#955): the default is the 20-min schedule; a long window keeps rates and repeats meetups', () => {
+  // the schedule sha256 of the 20-min window, both profiles, seed cw1. #1972 took resolve out of the read mix, so these
+  // are no longer the CW2 baseline's (capacity-qualify run 41915686991: even ae3dfd50…, meetup e077d9f7…).
+  const BASE = { even: '48e4eea78787302ec48587887a8cebff1605bb1989049c4b4961a176c3d68e81', meetup: 'ce203fb1153d840e0e8c3313965a728aab52ac6812a9cf948b3b7f37aaf795ca' };
   for (const p of ['even', 'meetup']) { assert.equal(scheduleId(schedule(p, 'cw1', phases())), BASE[p]); assert.equal(scheduleId(schedule(p, 'cw1', phases(false, 20))), BASE[p]); }
   const L = phases(false, 60);
   assert.equal(L.activeMs, 60 * 60_000); assert.equal(L.quietMs, phases().quietMs);
@@ -120,4 +121,28 @@ test('phases --active-min (#955): the default is the CW2 baseline schedule; a lo
   assert.equal(per(L, 'read'), 3 * per(phases(), 'read'), 'the same read rate, three times as long');
   for (const bad of [19, 241, 30.5, NaN]) assert.throws(() => phases(false, bad), /--active-min/);
   assert.throws(() => phases(true, 60), /--short/);
+});
+
+test('real100 (#1972): 100 Souls across the ten worlds on the real cadence of #1945; no profile calls resolve', () => {
+  assert.equal(CADENCE_OF.real100, 'real');
+  assert.deepEqual(PROFILES.real100, Array(10).fill(10));
+  const cad = JSON.parse(readFileSync(join(ROOT, 'tools/bench/capacity/profiles/cadence.json'), 'utf8')).real, ph = phases();
+  const ops = schedule('real100', 'cw1', ph);
+  assert.equal(scheduleId(ops), scheduleId(schedule('real100', 'cw1', ph)), 'deterministic for a seed');
+  assert.notEqual(scheduleId(ops), scheduleId(schedule('real100', 'cw2', ph)));
+  assert.equal(scheduleId(ops), 'e9191c85dc8e1187fb6a2fd7d03bf70b671fe841e0fd29fdd373fe93360af31a', 'the pinned 20-min real100 schedule, seed cw1');
+  assert.ok(ops.every((o) => o.cls === 'act'), 'reads are the receipt read after each act, not scheduled polls');
+  assert.deepEqual(new Set(ops.map((o) => o.kind)), new Set([...Object.keys(cad.mix), 'meetup']));
+  const [fmin, fmax] = [cad.firstActS.quantiles[0][1], cad.firstActS.quantiles.at(-1)[1]], [gmin, gmax] = [cad.gapS.quantiles[0][1], cad.gapS.quantiles.at(-1)[1]], gaps = [];
+  for (let i = 0; i < 100; i++) {
+    const mine = ops.filter((o) => o.soul === i), paced = mine.filter((o) => o.burst == null);
+    assert.equal(mine[0].world, Math.floor(i / 10));
+    assert.ok(paced[0].atMs >= fmin * 1000 - 1 && paced[0].atMs <= fmax * 1000 + 1, `soul ${i} first act ${paced[0].atMs}`);
+    for (let k = 1; k < paced.length; k++) gaps.push(paced[k].atMs - paced[k - 1].atMs);
+    assert.equal(mine.filter((o) => o.kind === 'meetup').length, ph.meetupsMs.length, 'every Soul joins every meetup');
+  }
+  assert.ok(gaps.every((g) => g >= gmin * 1000 - 1 && g <= gmax * 1000 + 1), 'act start to act start within the live gap range');
+  const med = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)], p50 = cad.gapS.quantiles.find(([q]) => q === 0.5)[1] * 1000;
+  assert.ok(Math.abs(med - p50) < 5000, `median gap ${med} ms near the live p50 ${p50} ms`);
+  for (const p of Object.keys(PROFILES)) assert.ok(!schedule(p, 'cw1', phases(true)).some((o) => o.kind === 'resolve'), p);
 });
