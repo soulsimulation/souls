@@ -20,7 +20,7 @@ export async function installWalkSettleWaitV1(host,enabled,drive){
 
 export function nativeLifecycleFlagV1(value){if(value!==undefined&&typeof value!=='boolean')throw Error('world.native-lifecycle-flag');return value===true;}
 
-export async function openWorldServer({input,dataDir,worldKey,worldId,port,build='local-multiworld/1',webDir,marsWebDir,publicOrigin,ownerId='dev:admin',seedCast=true,nativeCast=true,runtimePolicies=true,walkSettleWaitV1,nativeLifecycleV1,prepareNativeLifecycle,installLiving=true,cards=true,skillFile,cliFile,instructionsFile,authMode='local-dev',accountAuth,checkOnly=false,worldVariant='legacy',sceneSha256,nativeCastIds,experiencesFile,experiencesSha256,placeData,placeDataSha256,activityData,activityDataSha256,nativeAliases,nativeAliasesSha256,basePath='',launcherChild=false}){
+export async function openWorldServer({input,dataDir,worldKey,worldId,port,build='local-multiworld/1',webDir,marsWebDir,publicOrigin,ownerId='dev:admin',seedCast=true,nativeCast=true,runtimePolicies=true,walkSettleWaitV1,nativeLifecycleV1,prepareNativeLifecycle,installLiving=true,cards=true,skillFile,instructionsFile,authMode='local-dev',accountAuth,checkOnly=false,worldVariant='legacy',sceneSha256,nativeCastIds,experiencesFile,experiencesSha256,placeData,placeDataSha256,activityData,activityDataSha256,nativeAliases,nativeAliasesSha256,basePath='',launcherChild=false}){
  // basePath (world launcher fork, e.g. '/worlds'): served at <basePath>/w/<key> on a launcher child port with the launcher's build id.
  // launcherChild: the same on a launcher that serves the original worlds at the root (basePath '', --old-worlds-root).
  const child=!!basePath||launcherChild===true;
@@ -68,7 +68,7 @@ export async function openWorldServer({input,dataDir,worldKey,worldId,port,build
    publicUrl:`${origin.replace(/\/$/,'')}${basePath}/w/${worldKey}`,engine:'mars',livingWorld:true,seedNatives:false,ownerId,
    brainMode:'fake',budgetUsdPerDay:0,thinkingBudgetCeiling:1,authorizedThinkingWorldId:undefined,typesafeKey:undefined,anthropicKey:undefined,
    ...(exposure.configured?{}:{authProvider:'none',privyAppId:'',privyAppSecret:''}),r2:{prefix:'sim'},archiveTakes:false,inviteRequired:exposure.configured?defaults.inviteRequired:false,maxSoulsPerUser:exposure.configured?defaults.maxSoulsPerUser:50,build,mindDriver:'edge',
-   skillFile:undefined,cliFile:cliFile?resolve(cliFile):undefined,instructionsFile:instructionsFile?resolve(instructionsFile):join(input,'tools/world-launcher/soul/instructions.md')};
+   skillFile:undefined,instructionsFile:instructionsFile?resolve(instructionsFile):join(input,'tools/world-launcher/soul/instructions.md')};
   const {Db}=await load('apps/server/src/db.ts'),{WorldHost}=await load('apps/server/src/world.ts'),native=await load('packages/engine-mars/src/index.ts');
   const {worldDefinition}=await load('apps/server/src/world-config.ts'),definition=worldDefinition(worldKey);
   db=new Db(join(dataDir,'sim.db'));

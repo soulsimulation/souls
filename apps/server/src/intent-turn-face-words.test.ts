@@ -36,12 +36,13 @@ test('F1: "turn to face the bandstand" turns toward the bandstand, also out of s
   assert.equal((await dry('look-at:bandstand')).would.capability, 'look:eden-bandstand');
   const z = await dry('turn to face the zebra'); assert.equal(z.code, 'target.not-in-sight'); assert.match(z.reason, /"zebra"/); assert.doesNotMatch(z.reason, /face/);
   // act: the free standing body turns to the bearing
-  const on = await act(a, 'turn to face the bandstand'); assert.equal(on.accepted, true, JSON.stringify(on)); assert.equal(on.chosen.turned, 'body');
+  // #1911: the act sends the id resolve read the words as (the words themselves are refused over HTTP)
+  const on = await act(a, (w.ledger.intents.dryRun(a, {capability: 'turn to face the bandstand'}).would as {capability: string}).capability); assert.equal(on.accepted, true, JSON.stringify(on)); assert.equal(on.chosen.turned, 'body');
   await w.ticks(60); assert.equal(headingOfYaw(w.body(a).pose.yaw), bearing('eden-bandstand').heading);
   // a place out of sight: the heading is still the bearing to it
   const far = [...w.ledger.places.byId.values()].filter(p => p.parent !== null && p.id !== 'eden-bandstand').find(p => !bearing(p.id).sees);
   assert.ok(far, 'some place is out of sight');
-  const fo = await act(a, `turn to face ${far!.id}`); assert.equal(fo.accepted, true, JSON.stringify(fo)); assert.equal(fo.chosen.id, far!.id);
+  const fo = await act(a, (w.ledger.intents.dryRun(a, {capability: `turn to face ${far!.id}`}).would as {capability: string}).capability); assert.equal(fo.accepted, true, JSON.stringify(fo)); assert.equal(fo.chosen.id, far!.id);
   await w.ticks(60); assert.equal(headingOfYaw(w.body(a).pose.yaw), bearing(far!.id).heading);
   // id forms act too: turn:<degrees>, and an offered face:<soul> still faces that Soul
   const deg = await act(a, 'turn:180'); assert.equal(deg.accepted, true, JSON.stringify(deg)); await w.ticks(60); assert.equal(headingOfYaw(w.body(a).pose.yaw), 180);

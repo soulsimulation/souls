@@ -32,12 +32,41 @@ export function balloonRoute(name: string, home: V3): { route: string; keys: Rou
   return { route: `ring-150`, keys: ring };
 }
 
+/** #2198: a big wheel's own cars, read from its kit: the hub (the pivot of role `wheel`), and its hanging gondolas (kit role
+ *  `gondola`, one pivot each on the rim), the radius they hang at, and how far below its pivot a gondola's floor is. In the
+ *  def's own frame. Null for a wheel without gondolas (the core wheel's round pods turn with the rim). */
+export function wheelCars(def: { make?: { kind?: string; args?: { shapes?: unknown } } } | undefined): { hub: [number, number]; z: number; R: number; drop: number; bottom: number } | null {
+  const shapes = def?.make?.kind === 'gen' && Array.isArray(def.make.args?.shapes) ? def.make.args.shapes as { kind?: string; role?: string; pivot?: number[]; at?: number[]; size?: number[]; h?: number; r?: number }[] : [];
+  const hub = shapes.find((s) => s.role === 'wheel' && s.pivot)?.pivot, cars = new Map<string, { p: number[]; floor: number }>();
+  for (const s of shapes) {
+    if (s.role !== 'gondola' || !s.pivot || !s.at) continue;
+    const half = s.size ? s.size[1] / 2 : s.kind === 'cyl' ? (s.h ?? 1) / 2 : s.kind === 'sphere' ? (s.r ?? 0.5) : 0, key = s.pivot.join(',');
+    const car = cars.get(key) ?? { p: s.pivot, floor: Infinity }; car.floor = Math.min(car.floor, s.at[1] - half); cars.set(key, car);
+  }
+  if (!hub || cars.size < 2) return null;
+  const list = [...cars.values()], R = list.reduce((n, g) => n + Math.hypot(g.p[0] - hub[0], g.p[1] - hub[1]), 0) / list.length;
+  const low = list.reduce((a, b) => (b.p[1] < a.p[1] ? b : a));
+  return { hub: [hub[0], hub[1]], z: list.reduce((n, g) => n + g.p[2], 0) / list.length, R, drop: low.p[1] - low.floor, bottom: Math.atan2(low.p[1] - hub[1], low.p[0] - hub[0]) };
+}
+
 /** E-life B7: a god's ferris wheel or carousel as a ride: its two-place car boards at the front and goes round with the
  *  wheel (once round a ferris wheel at its own 0.8 rpm, 75 s; three turns of a carousel, 45 s), then back. Keys in the
- *  thing's own frame (x across, y up, z out of its front), turned and moved by its world pose. */
-export function attractionRoute(kind: 'ferris-wheel' | 'carousel', wp: { x: number; z: number; yaw: number; s: number }, ground: number, size: [number, number, number]): { home: V3; keys: RouteKey[]; route: string } {
+ *  thing's own frame (x across, y up, z out of its front), turned and moved by its world pose.
+ *  #2198: a wheel with gondolas (`cars`, wheelCars) is ridden in its own bottom gondola: the riders step up from the front
+ *  into it and go round on the gondolas' floor circle in the wheel's plane (the viewer turns the wheel to carry that gondola
+ *  with them). Without gondolas the car goes round in front of the wheel, as before. */
+export function attractionRoute(kind: 'ferris-wheel' | 'carousel', wp: { x: number; z: number; yaw: number; s: number }, ground: number, size: [number, number, number], cars?: ReturnType<typeof wheelCars>): { home: V3; keys: RouteKey[]; route: string } {
   const c = Math.cos(wp.yaw), sn = Math.sin(wp.yaw), W = (x: number, y: number, z: number): V3 => [r2(wp.x + (x * c + z * sn) * wp.s), r2(ground + y * wp.s), r2(wp.z + (-x * sn + z * c) * wp.s)];
   const keys: RouteKey[] = [];
+  if (kind === 'ferris-wheel' && cars) {
+    // home and its timing as before (where riders walk to and wait); 32 keys round so the curve keeps to the circle (< 1 cm)
+    const home = W(0, 0, size[2] / 2 + 3.1), { hub, z, R, drop, bottom } = cars, cy = hub[1] - drop;
+    const on = (a: number) => W(hub[0] + R * Math.cos(a), cy + R * Math.sin(a), z), b = on(bottom), step = W(hub[0] + R * Math.cos(bottom), cy + R * Math.sin(bottom), z + 1.2);
+    keys.push({ t: 0, p: home }, { t: 4, p: step }, { t: 6, p: b });
+    for (let k = 1; k <= 32; k++) keys.push({ t: 6 + k * 75 / 32, p: on(bottom + (k / 32) * Math.PI * 2) });
+    keys.push({ t: 6 + 75 + 2, p: step }, { t: 6 + 75 + 6, p: home });
+    return { home, keys, route: 'ferris-wheel-gondola' };
+  }
   if (kind === 'ferris-wheel') {
     const R = Math.max(2, size[0] / 2 - 1.0), cy = R + 1.0, front = size[2] / 2 + 1.6, home = W(0, 0, front + 1.5);
     keys.push({ t: 0, p: home }, { t: 6, p: W(0, cy - R, front) });
@@ -74,7 +103,7 @@ export function installGodRides(o: { host: WorldHost; edge: EdgeLedger; model: W
       const tags: string[] = def.tags ?? [], attraction = tags.includes('ferris-wheel') ? 'ferris-wheel' : tags.includes('carousel') ? 'carousel' : null;
       if (attraction && e.in.parent === 'world') {
         const wp = model.worldPose(e), name = String(e.name ?? ''), id = /^[a-z0-9][a-z0-9._-]{0,99}$/.test(name) && !model.entities.has(name) ? name : `ride-${e.id.toLowerCase()}`;
-        const baked = model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), r = attractionRoute(attraction, wp, model.terrain.sample(wp.x, wp.z), baked.box as [number, number, number]);
+        const baked = model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), r = attractionRoute(attraction, wp, model.terrain.sample(wp.x, wp.z), baked.box as [number, number, number], attraction === 'ferris-wheel' ? wheelCars(def) : null);
         out.push({ entity: e.id, id, attraction: true, def: 'hot-air-balloon', label: (name || attraction).replace(/-/g, ' '), at: [r.home[0], r.home[2]], y: r.home[1], yaw: wp.yaw - Math.PI / 2, route: r.route, routeKeys: r.keys, waitSeconds: 30 });
         continue;
       }

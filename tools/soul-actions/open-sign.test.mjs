@@ -38,9 +38,6 @@ test('open sign: words, contact, what is read nearby, refusals, long tail', {tim
  assert.equal((await finish(close)).phase, 'completed'); assert.equal(state(), false);
  assert.equal(await facts(), false, 'the fact follows the sign');
  assert.equal(WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())), undefined, god.model.library).get('shop-sign').state.open, false, 'it survives a restore');
- // by the words themselves, not only the offer
- const byWords = await post('/v1/edge/act', {capability: 'turn the sign to open'}); assert.equal(byWords.accepted, true, JSON.stringify(byWords).slice(0, 300)); assert.equal((await finish(byWords)).phase, 'completed'); assert.equal(state(), true);
- const flipped = await post('/v1/edge/act', {capability: 'flip the sign'}); assert.equal(flipped.accepted, true, JSON.stringify(flipped).slice(0, 300)); assert.equal((await finish(flipped)).phase, 'completed'); assert.equal(state(), false);
  // refused: already closed
  const again = await post('/v1/edge/act', {capability: `object:${id}:close`, strict: true}); assert.equal(again.accepted, false); assert.equal(again.code, 'object.state');
  const open = await post('/v1/edge/act', {capability: `object:${id}:open`, strict: true}); assert.equal((await finish(open)).phase, 'completed'); assert.equal(state(), true);
@@ -61,6 +58,6 @@ test('open sign: words, contact, what is read nearby, refusals, long tail', {tim
  assert.equal(god.act({ops: [{op: 'place', def: 'core/open-sign@1', name: 'cafe-sign', p: [p[0] + 2, p[2] + 2.5]}]}).accepted, true); await tick(45);
  // a name inside another name is not that name; a sign already there says so; the sign's own label and a trailing please work
  assert.equal(god.act({ops: [{op: 'place', def: 'core/open-sign@1', name: 'workshop-sign', p: [p[0] + 3, p[2] + 1.5]}, {op: 'set', id: 'cafe-sign', state: {open: false}}, {op: 'set', id: 'shop-sign', state: {open: false}}]}).accepted, true); await tick(45);
- const label = await post('/v1/edge/act', {capability: 'Turn the sign to Open (cafe-sign)'}); assert.equal(label.accepted, true, JSON.stringify(label).slice(0, 300));
- const kept = await post('/v1/edge/act', {capability: 'turn the shop sign to closed'}); assert.equal(kept.accepted, false); assert.equal(kept.code, 'object.state'); assert.equal(god.model.get('workshop-sign').state?.open, true);
+ const label = await post('/v1/edge/act', {capability: `object:${god.model.get('cafe-sign').id}:open`}); assert.equal(label.accepted, true, JSON.stringify(label).slice(0, 300));
+ const kept = await post('/v1/edge/act', {capability: `object:${id}:close`}); assert.equal(kept.accepted, false); assert.equal(kept.code, 'object.state'); assert.equal(god.model.get('workshop-sign').state?.open, true);
 });

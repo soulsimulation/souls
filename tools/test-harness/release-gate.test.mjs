@@ -662,7 +662,8 @@ test('scope: steps follow the changed areas; docs/tools never gate; anything unn
   assert.deepEqual(scopeFor(['apps/server/src/a.ts']).steps, ['V1-types', 'V3-packages', 'V3-walk', 'V5-server-full', ...V6]);
   assert.deepEqual(scopeFor(['packages/kernel/src/a.ts']).steps, ['V1-types', 'V3-packages', 'V3-mars-engine', 'V3-walk', 'V5-server-full']);
   assert.deepEqual(scopeFor(['tools/world-launcher/launcher.mjs']).steps, ['V3-launcher-unit', ...V6]);
-  assert.deepEqual(scopeFor(['tools/edge-skill/a.mjs', 'tools/client-eval/b.mjs']).steps, ['V3-client-cli']);
+  assert.deepEqual(scopeFor(['tools/client-eval/b.mjs']).steps, ['V3-client-cli']);
+  assert.equal(scopeFor(['tools/edge-skill/a.mjs']).resolved, 'none', '#1754: the gate runs no legacy client test');
   assert.deepEqual(scopeFor(['tools/body-authoring/pip/robot.mjs']), { resolved: 'scoped', steps: ['V5-server-full'], diff: { files: 1, byArea: { 'tools/body-authoring/': 1 }, unmapped: [], unmappedCount: 0 } });
   const none = scopeFor(['docs/a.md', 'tools/test-harness/x.mjs', 'tools/ops/y.sh', 'README.md', '']);
   assert.equal(none.resolved, 'none'); assert.deepEqual(none.steps, []); assert.deepEqual(none.diff.byArea, { 'docs/': 2, 'tools/': 2 });

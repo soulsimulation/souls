@@ -1659,6 +1659,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     for (const b of read.bindings.values()) this.addNativeBinding(b,caps,plans,secondsParam);
     caps.push({id: 'stand:here', verb: 'stand', label: 'Stand up / stop what I am doing', available: true});
     plans.set('stand:here', {label: 'Stand up', steps: [], stop: true});
+    // #1916: walk to a point on this level; its plan is built from `at` when acted on (actOnce, as face:)
+    caps.push({id: 'walk-to:here', verb: 'walk-to', label: 'Walk to a point on your level', available: true});
     // CN5 (acceptance): go near anyone in sight within 60 m (a gesture to someone farther off offers this first)
     const myHuman = this.body(soul.entityId)?.human, sitting = !!myHuman && (myHuman.activity === 'sit' || myHuman.baseActivity === 'sit');
     for (const o of this.perceivedBodies(soul.soulId, GO_NEAR_RADIUS)) {
@@ -2234,6 +2236,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // W8: "attend the lecture", "go to class": an audience seat in the classroom (the existing seat-in-room intent)
     if (!caps.some(c => c.id === asked)) {const cls = classWords(asked, this.places.byId.values()); if (cls) return this.intents.act(soul, {...cls, ...(clientRef ? {clientRef} : {})});}
     if (asked.startsWith('face:') && caps.some(c => c.id === asked && c.target?.kind === 'soul')) return this.intents.act(soul, {verb: 'turn', face: caps.find(c => c.id === asked)!.target!.id, ...(clientRef ? {clientRef} : {})});
+    if (asked === 'walk-to:here' && caps.some(c => c.id === asked)) return this.intents.act(soul, {verb: 'walk-to', target: {at: params.at}, ...(clientRef ? {clientRef} : {})});
     // strict/1: an id-shaped target that names nothing in this world is refused, never swapped for something else
     // (SOULSIM-E: unless it is a far place's walk the listing leaves out, which resolveOnDemand below offers: the agent
     // resolved "go to the horse" to walk:land-park-lawns-west and acting on that id was refused, on Eden 2026 / 3.60)
