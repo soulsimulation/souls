@@ -17,10 +17,10 @@ import { makeMove, rng, type MoveType, type TourMove, type TourPose, type TourVi
 
 export const TRACK_TYPES: readonly MoveType[] = ['orbit', 'dolly', 'crane-up', 'push'];
 export const CENTRE_EMA = 1.5, CHECK = 1, GLIDE = 2.5, MOVE_MIN = 10, MOVE_MAX = 20, RETRY = 3;
-/** AIM: the height the shot aims at above the centre's feet. SKY: open sky needed above the hotspot. SEEN_AGAIN: a
- *  sightline is re-cast when eye or centre moved this far. REPLANS: re-solves allowed in RETRY s. SAMPLES: where a move's
+/** AIM: the height the shot aims at above the centre's feet. SKY: open sky needed above the hotspot. SIGHT_EVERY: the
+ *  sightline is re-cast this often (seconds), at the decision rate. REPLANS: re-solves allowed in RETRY s. SAMPLES: where a move's
  *  path is checked. (The eye clearance radius is the scenery's.) */
-const AIM = 1.2, SKY = 40, SEEN_AGAIN = .05, REPLANS = 3, SAMPLES = [0, .2, .4, .6, .8, 1];
+const AIM = 1.2, SKY = 40, SIGHT_EVERY = .1, REPLANS = 3, SAMPLES = [0, .2, .4, .6, .8, 1];
 
 export type TrackChoice = { key: string; label: string; members: readonly string[] };
 /** Gatherings and activity get a moving shot: a group, a game, a talk circle, a Soul busy at something, and a conversation
@@ -77,7 +77,7 @@ export class Tracker {
   private failed = -Infinity;
   private shown = new Map<MoveType, number>();
   get type(): MoveType | null { return this.move?.type ?? null; }
-  reset() { this.seen = null; this.replans = []; this.key = ''; this.centre = null; this.move = null; this.from = null; this.last = null; this.failed = -Infinity; }
+  reset() { this.seen = -Infinity; this.replans = []; this.key = ''; this.centre = null; this.move = null; this.from = null; this.last = null; this.failed = -Infinity; }
 
   /** The tracking pose for hotspot `key` (members' raw centre and spread) at `now` seconds, or null when no move is clear. */
   pose(key: string, raw: readonly number[], spread: number, now: number, s: Scenery): { pose: TourPose; type: MoveType; cut: boolean } | null {
@@ -94,11 +94,10 @@ export class Tracker {
       if (!pathClear(this.move, d(), k, Math.min(1, k + CHECK / this.move.seconds), s)) { if (!this.plan(c, spread, now, s)) return null; k = 0; planned = true; }
     }
     let pose = this.at_(k, d(), now);
-    // Every frame's eye is clear and sees the hotspot (clear points are cached by the scenery, and a sightline is re-cast
-    // only when the eye or the centre moved SEEN_AGAIN): between the path's samples a post can cross the sightline and
-    // the centre moves. Such a frame re-solves from the last good pose; after REPLANS re-solves in RETRY s, or with no
+    // Every frame's eye is clear (clear points are cached by the scenery) and, at the decision rate, sees the hotspot:
+    // between the path's samples a post can cross the sightline and the centre moves. Such a frame re-solves from the last good pose; after REPLANS re-solves in RETRY s, or with no
     // clear move, Broadcast's solver takes over for RETRY s.
-    if (!this.good(pose.position, c, s)) {
+    if (!this.good(pose.position, c, now, s)) {
       this.replans = this.replans.filter(t => now - t < RETRY);
       if (this.replans.length >= REPLANS || !this.plan(c, spread, now, s)) { this.move = null; this.from = null; this.failed = now + RETRY; return null; }
       this.replans.push(now); pose = this.at_(0, d(), now); planned = true;
@@ -106,14 +105,13 @@ export class Tracker {
     this.last = pose;
     return { pose, type: this.move!.type, cut: planned && !this.from };
   }
-  private seen: { eye: readonly number[]; at: readonly number[] } | null = null;
+  private seen = -Infinity;
   private replans: number[] = [];
-  private good(eye: readonly number[], c: readonly number[], s: Scenery) {
+  private good(eye: readonly number[], c: readonly number[], now: number, s: Scenery) {
     if (!s.clear(eye)) return false;
-    const at = [c[0], c[1] + AIM, c[2]];
-    if (this.seen && dist(this.seen.eye, eye) < SEEN_AGAIN && dist(this.seen.at, at) < SEEN_AGAIN) return true;
-    if (!sees(s, eye, at)) return false;
-    this.seen = { eye: [...eye], at }; return true;
+    if (now - this.seen < SIGHT_EVERY && now >= this.seen) return true;
+    if (!sees(s, eye, [c[0], c[1] + AIM, c[2]])) return false;
+    this.seen = now; return true;
   }
   private at_(k: number, d: readonly number[], now: number): TourPose {
     const pose = shift(this.move!.at(k), d);

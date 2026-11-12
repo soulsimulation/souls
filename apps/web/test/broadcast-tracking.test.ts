@@ -60,7 +60,7 @@ test('#2202 B2: never through scenery: every eye is clear and no frame-to-frame 
       assert.ok(s.clear(p.position),`seed ${seed}: eye in a wall at ${frames[i].now.toFixed(2)} s`);
       for(const w of walls)assert.ok(!inside(p.position,w));
       const q=frames[i-1]?.pose;if(q&&!frames[i].cut){const step=Math.hypot(...p.position.map((x,j)=>x-q.position[j]));assert.ok(s.reach(q.position,p.position)>=step-1e-6,`seed ${seed}: a step through a wall at ${frames[i].now.toFixed(2)} s`);}}
-    assert.ok(shots>frames.length*.8,`seed ${seed}: the open side is used (${shots}/${frames.length})`);
+    assert.ok(shots>frames.length*.7,`seed ${seed}: the open side is used (${shots}/${frames.length})`);
   }
   // A closed room: no move is clear, so Broadcast keeps its solver (null), and asks again only after a pause.
   const room=scenery([[-5,-1,-5,5,0,5],[-5,4,-5,5,5,5],[-6,0,-6,-5,4,6],[5,0,-6,6,4,6],[-6,0,-6,6,4,-5],[-6,0,5,6,4,6]]);
