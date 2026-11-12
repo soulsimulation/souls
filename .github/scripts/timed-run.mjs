@@ -37,7 +37,7 @@ export const ARG_ALLOW = {
   walk: { '--world': (v) => v.split(',').every((w) => WALK_WORLDS.includes(w)) && new Set(v.split(',')).size === v.split(',').length },
   'eval-scripted': { '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
   'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600) },
-  'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
+  'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG, '--heap-mb': int(512, 8192) },   // #2164 measurement branch only: --heap-mb
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup', 'real100'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
 };
@@ -147,7 +147,8 @@ export const PUBLISH = {
   walk: [1, 2, 3].map((k) => `walk-r${k}.log`),
   'eval-scripted': ['eval/result.json', 'eval/REPORT.md', 'eval.log'],
   'eval-load': ['eval-load/load-result.json', 'eval-load/LOAD.md', 'eval-load.log'],
-  'bench-client': ['bench/receipt.json', 'bench/REPORT.md', 'bench/*/result.json', 'bench-client.log'],
+  // #2164 measurement branch only: the launcher's log and the world's own log (exits, wedges, holds), scrubbed
+  'bench-client': ['bench/receipt.json', 'bench/REPORT.md', 'bench/*/result.json', 'bench-client.log', 'bench/*/launcher.log', 'bench/*/launcher/logs/*'],
   meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
 };
@@ -161,9 +162,12 @@ export function allowlist(out, command) {
 /** Copy the allowlisted files into dest, scrubbed; refuse if any still holds a Soul token. Returns the copied list. */
 export function stage({ out, dest, command, scrubWith }) {
   const tokens = soulTokens(out), texts = allowlist(out, command).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
-  for (const [f, t] of texts) if (tokens.some((k) => t.includes(k))) throw new Error(`${f} holds a Soul token; nothing is uploaded`);
-  for (const [f, t] of texts) { mkdirSync(join(dest, f, '..'), { recursive: true }); writeFileSync(join(dest, f), t); }
-  return texts.map(([f]) => f);
+  // #2164 measurement branch only: a log that holds a Soul token is withheld (not uploaded); any other file still refuses all
+  const isLog = (f) => /\/launcher(\.log|\/logs\/)/.test(f), held = texts.filter(([f, t]) => isLog(f) && tokens.some((k) => t.includes(k))).map(([f]) => f);
+  for (const f of held) console.log(`withheld ${f}: it holds a Soul token`);
+  for (const [f, t] of texts) if (!held.includes(f) && tokens.some((k) => t.includes(k))) throw new Error(`${f} holds a Soul token; nothing is uploaded`);
+  for (const [f, t] of texts.filter(([f]) => !held.includes(f))) { mkdirSync(join(dest, f, '..'), { recursive: true }); writeFileSync(join(dest, f), t); }
+  return texts.map(([f]) => f).filter((f) => !held.includes(f));
 }
 
 /** A whole-path glob where `*` matches within one path segment → a test. */

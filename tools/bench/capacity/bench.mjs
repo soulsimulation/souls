@@ -218,7 +218,7 @@ function liveHeapMb(w) {   // LOAD-CONTRACT §4 live.json (a world that writes o
 }
 async function launcherView() {   // the launcher's health page JSON for this world (limits, refusal counts, restarts), loopback
   try { const d = await (await fetch(`http://127.0.0.1:${PORT}/__sim/health?json=1`, { signal: AbortSignal.timeout(5000) })).json(); const x = (d.worlds ?? []).find((y) => y.slug === SLUG) ?? null;
-    return x ? { status: x.status, restarts: x.restarts, limits: x.limits ?? null, refused: x.refused ?? null, lastExit: x.lastExit ?? null } : null; } catch { return null; }
+    return x ? { status: x.status, restarts: x.restarts, limits: x.limits ?? null, refused: x.refused ?? null, lastExit: x.lastExit ?? null, restartsByReason: x.restartsByReason ?? null, held: x.held ?? null } : null; } catch { return null; }   // #2164: why it restarted and why it is held
 }
 async function stopWorld(w) {
   if (w.launcherPid) {   // the launcher stops its world; the world is killed by pid only if it outlives the launcher
