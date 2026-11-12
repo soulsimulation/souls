@@ -169,3 +169,15 @@ test("a word that is a verb of the world asks for it first; an act that needs ot
   assert.equal(rows[0]?.verb, "read", JSON.stringify(rows.map((r) => r.act)));
   assert.ok(rows.findIndex((r) => r.verb === "book-club") > rows.findIndex((r) => r.verb === "read"));
 });
+
+test("find --outline: a place's outline and the named spots and things inside it, with positions, from the local copy (#1922)", () => {
+  const pitch = indexCatalog({ ...cat, places: [...cat.places, { id: "g-sports-football", name: "Football Pitch", kind: "sports", parent: "world", at: [61, 112], outline: [[36, 97], [86, 97], [86, 127], [36, 127]] }],
+    things: [...cat.things, { id: "e_goal_w", name: "goal-west", kind: "core-goal", place: "world", at: [36.4, 112] }, { id: "e_goal_e", name: "goal-east", kind: "core-goal", place: "world", at: [86, 112] }, { id: "e_far", name: "far-bench", kind: "core-bench-seat", place: "world", at: [20, 112] }],
+    acts: [...cat.acts, { id: "kick:kick.e_ball", verb: "kick", place: "g-sports-football", thing: "e_ball", at: [61, 112], label: "kick the ball (Football Pitch)" }] });
+  const row = find(pitch, "football pitch", { at, outline: true }).found[0];
+  assert.equal(row.id, "g-sports-football");
+  assert.deepEqual(row.outline, [[36, 97], [86, 97], [86, 127], [36, 127]]);
+  assert.deepEqual(row.inside, [{ name: "kick the ball (Football Pitch)", act: "kick:kick.e_ball", at: [61, 112] }, { name: "goal-west", id: "e_goal_w", at: [36.4, 112] }, { name: "goal-east", id: "e_goal_e", at: [86, 112] }]);
+  assert.equal(find(pitch, "football pitch", { at }).found[0].outline, undefined, "without the flag a place row is as before");
+  assert.ok(find(ix, "library", { at, outline: true }).found[0].inside.some((r) => r.act === "read:read.e_t1"), "a place with no outline lists what its parts hold");
+});

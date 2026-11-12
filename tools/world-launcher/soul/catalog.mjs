@@ -75,9 +75,32 @@ export function bestPlace(ix, words, at) {
   return best?.p ?? null;
 }
 
+/** Whether a point lies inside a polygon or within 1 m of its edge (a goal on the goal line is on the pitch). */
+const inOutline = (pt, poly) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ax, az] = poly[j], [bx, bz] = poly[i], dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((pt[0] - ax) * dx + (pt[1] - az) * dz) / (dx * dx + dz * dz || 1)));
+    if (Math.hypot(pt[0] - ax - t * dx, pt[1] - az - t * dz) <= 1) return true;
+    if ((bz > pt[1]) !== (az > pt[1]) && pt[0] < (ax - bx) * (pt[1] - bz) / (az - bz) + bx) c = !c;
+  }
+  return c;
+};
+/** #1922: a place's outline (`[x, z]`, north is -z, east is +x) and the named spots and things that lie inside it, in it or
+ *  one of its parts or within its outline, each with its position. One row per spot's thing, as `find` gives them. */
+export function outlineOf(ix, id, limit = 24) {
+  const p = ix.place(id); if (!p) return null;
+  const parts = ix.within(p.id), poly = p.outline?.length >= 3 ? p.outline : null;
+  const lies = (place, point) => parts.has(place ?? "") || (!!poly && !!point && inOutline(point, poly));
+  const rows = [], spots = new Set();
+  for (const a of ix.cat.acts) { const key = `${a.verb}|${a.thing ?? a.id}`; if (!spots.has(key) && lies(a.place, a.at)) { spots.add(key); rows.push({ name: a.label, act: a.id, at: a.at }); } }
+  for (const t of ix.cat.things) if (lies(t.place, t.at)) rows.push({ name: t.name, id: t.id, at: t.at });
+  return { ...(p.outline ? { outline: p.outline } : {}), inside: rows.slice(0, limit), ...(rows.length > limit ? { insideMore: rows.length - limit } : {}) };
+}
+
 /** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
- *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. */
-export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = {}) {
+ *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
+ *  place found, `outlineOf` it. */
+export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
@@ -135,7 +158,8 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
-  return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
+  const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
+  return { found, ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 
 /** One place as a small tree: its parts, what can be done in it by verb (with the nearest id), its things by kind. */
