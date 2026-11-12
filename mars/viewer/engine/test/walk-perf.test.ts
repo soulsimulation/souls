@@ -167,7 +167,10 @@ test('#2124: 24 walkers share one people list a tick; every tick\'s state hash =
   setNavTrustCheck(true);
   let checked;
   try { checked = stressTrace(true, 24, 600); } finally { setNavTrustCheck(wasChecking); }
-  const fast = stressTrace(true, 24, 600);
+  // the counted run without the oracle (which lists afresh on purpose), whatever SIM_NAV_TRUST_CHECK says
+  setNavTrustCheck(false);
+  let fast;
+  try { fast = stressTrace(true, 24, 600); } finally { setNavTrustCheck(wasChecking); }
   assert.equal(slow.violations, 0);
   for (const run of [checked, fast]) {
     assert.equal(run.violations, slow.violations);
