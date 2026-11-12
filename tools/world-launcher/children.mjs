@@ -32,6 +32,8 @@ export function portFree(port) {
   });
 }
 
+/** #2164: live.json fresh, serving, and its main thread turned within turnAgeMs. */
+const turning = (live, now, g) => !!live && now - live.at <= g.liveStaleMs && live.phase === 'serving' && Number.isFinite(live.loop?.lastTurnAgeMs) && live.loop.lastTurnAgeMs <= g.turnAgeMs;
 export class ChildPool {
   /**
    * @param {{ root: string, range: [number, number], logDir: string, marsWebDir?: string, publicOrigin: string,
@@ -516,8 +518,11 @@ export class ChildPool {
       const { ok, why: said } = await this.ask(k);
       if (k.child !== c || k.status !== 'running' || k.frozen || k.stopped || k.stopping || this.closing || this.fenced || this.gate) return;   // changed meanwhile
       const now = Date.now(), h = k.health ?? (k.health = { fails: 0, okAt: null });
-      if (ok) { h.fails = 0; h.okAt = now; } else h.fails++;
       k.live = k.world?.dataDir ? readLive(join(k.world.dataDir, 'live.json'), c.pid) : null;
+      // #2164: no watchdog port, the main /healthz unanswered in time, but live.json (the world's watchdog thread) fresh and
+      // its main thread turning: a busy world, not a stuck one, as its watchdog port would say. Never killed for it.
+      const busy = !ok && !k.healthPort && turning(k.live, now, g);
+      if (ok || busy) { h.fails = 0; h.okAt = now; } else h.fails++;
       // #1150: each new rung 3 is an ALERT, shown for as long as a wedge is
       if (k.rewindsSeen !== undefined && (k.live?.rewinds ?? 0) > k.rewindsSeen) k.lastRewind = { at: Date.now(), n: k.live.rewinds }; if (k.live) k.rewindsSeen = k.live.rewinds ?? 0;
       if (said) h.said = said; else if (ok) h.said = null;
