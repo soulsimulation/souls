@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, BUDGETS, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
+import { ACT_ENDED_GRACE_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
 import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine } from './soul/eden.mjs';
 
 const T0 = 1_800_000_000_000;
@@ -194,7 +194,7 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   assert.equal((await w.cli('serve')).code, 0);
   r = await w.cli('wake', 'remove', 'w1');
   assert.equal(r.code, 0, r.err);
-  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'w2'], 'kept across the restart');
+  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w2'], 'kept across the restart');
   assert.equal(r.json.queued, 1, 'the queue too');
   assert.ok(r.json.rules.find((x) => x.id === 'owner-message').lastFired);
 });
@@ -362,6 +362,78 @@ test('#1968 A1, A4: wake budget and status through the CLI; a run killed after p
   assert.deepEqual([w.state().wake.held.length, w.state().wake.delivered.length], [0, 2], 'the delivery made stays counted');
   assert.deepEqual((await w.cli('pending')).json.wakes.map((x) => x.why), ['Ivo arrived at g-yard'], 'delivered again');
   assert.equal(w.state().wake.delivered.length, 3, 'and charged again: the count is the deliveries made');
+});
+
+// #1930: wake on a time, when a plan finishes, and when the Soul has been idle. A fake clock: the rules run every 2 s, as serve's
+// timer runs them, with `since` the time this serve started.
+const MIN = 60_000, iso = (ms) => new Date(ms).toISOString();
+function clock(rules, st) {
+  let r = { rules };
+  return { run(from, to) { const out = []; for (let t = from; t <= to; t += 2_000) out.push(...(r = step(r.rules, st, t)).fired); return out; }, rule: (id) => ruleOf(r, id), get rules() { return r.rules; } };
+}
+
+test('#1930 A1, A4: at fires once at its time on serve\'s timer; a time that passed while serve was not running is dropped, never fired late', () => {
+  const at = iso(T0 + 10 * MIN), st = serveState({ since: T0 }), c = clock([{ id: 'w1', ...parseRule(['at', at]) }], st);
+  assert.deepEqual(c.run(T0, T0 + 10 * MIN - 2_000), [], 'not before');
+  assert.deepEqual(c.run(T0 + 10 * MIN, T0 + 20 * MIN).map((f) => [f.id, f.kind, f.why, f.at]), [['w1', 'at', `it is ${at}`, at]], 'at the time, once');
+  assert.equal(c.rule('w1').ended, 'fired');
+
+  const down = serveState({ since: T0 }), d = clock([{ id: 'w2', ...parseRule(['at', at]) }], down);
+  d.run(T0, T0 + MIN);   // serve stops at one minute and starts again at twenty: ten passed while it was not running
+  down.since = T0 + 20 * MIN;
+  assert.deepEqual(d.run(T0 + 20 * MIN, T0 + 30 * MIN), [], 'dropped, never fired late');
+  assert.equal(view({ ...fresh(), rules: d.rules }).rules[0].ended, 'dropped', 'wake shows it was dropped');
+
+  assert.throws(() => parseRule(['at', 'tomorrow']), /ISO time/);
+  assert.deepEqual(parseRule(['at', '2026-11-12T09:00:00Z']).params, { at: '2026-11-12T09:00:00.000Z' });
+});
+
+test('#1930 A1, A4: every <minutes> (at least 5) fires each period; periods that passed while serve was not running are dropped', () => {
+  assert.throws(() => parseRule(['every', String(EVERY_MIN - 1)]), /at least 5/);
+  assert.throws(() => parseRule(['every', '{"minutes":5}']), /whole minutes/);
+  const st = serveState({ since: T0 }), c = clock([{ id: 'w1', ...parseRule(['every', '5']) }], st);
+  assert.deepEqual(c.run(T0, T0 + 31 * MIN).map((f) => f.at), [5, 10, 15, 20, 25, 30].map((m) => iso(T0 + m * MIN)));
+  st.since = T0 + 52 * MIN;   // serve is down from 31 to 52 minutes: 35, 40, 45 and 50 pass while it is not running
+  assert.deepEqual(c.run(T0 + 52 * MIN, T0 + 60 * MIN).map((f) => f.at), [55, 60].map((m) => iso(T0 + m * MIN)), 'dropped; it carries on at 55');
+});
+
+test('#1930 A1: at, every, plan-finished and idle wakes go through the ambient budget, charged once per delivery', () => {
+  for (const kind of ['at', 'every', 'plan-finished', 'idle']) {
+    const queue = enqueue([], [{ id: 'w1', kind, why: kind, at: iso(T0) }]);
+    const spent = deliver({ ...fresh(), budget: { hour: 'quiet' }, delivered: [1, 2, 3, 4].map((i) => ({ at: T0 - i })), queue }, T0);
+    assert.deepEqual([spent.wakes, spent.over], [[], true], `${kind}: over the budget it waits`);
+    const d = deliver({ ...fresh(), queue }, T0, { reader: 'L' });
+    assert.deepEqual([d.wakes.map((x) => x.kind), d.wake.delivered.length], [[kind], 1], `${kind}: one delivery, one charge`);
+  }
+});
+
+test('#1930 A2, A4: plan-finished wakes when a plan ends done or failed, never when it was replaced; on by default', () => {
+  assert.ok(fresh().rules.some((x) => x.id === 'plan-finished' && !x.always), 'on by default, and removable');
+  assert.equal(change(fresh(), { remove: 'plan-finished' }).removed, 'plan-finished');
+  const st = serveState({ plan: { id: 'p_1', state: 'running', at: 0, steps: [{ id: 'walk:mill', state: 'running' }] } }), c = clock(fresh().rules, st);
+  c.run(T0, T0);
+  st.plan = null; st.planEnded = [{ id: 'p_1', state: 'done', step: 1, of: 1, steps: [{ n: 1, id: 'walk:mill', state: 'done' }] }];
+  assert.deepEqual(c.run(T0 + 2_000, T0 + 6_000).map((f) => [f.id, f.why]), [['plan-finished', 'plan p_1 finished']], 'once per plan');
+  st.planEnded.push({ id: 'p_2', state: 'replaced', step: 1, of: 2, steps: [] });   // p_3 replaced p_2, then failed
+  st.plan = { id: 'p_3', state: 'failed', at: 0, steps: [{ id: 'sit:bench', state: 'refused' }] };
+  assert.deepEqual(c.run(T0 + 8_000, T0 + 10_000).map((f) => f.why), ['plan p_3 ended failed'], 'the replaced plan wakes no one');
+});
+
+test('#1930 A3, A4: idle fires once after that long with no agent command and no running plan, again only after a command; a seated Soul is idle', () => {
+  assert.ok(!fresh().rules.some((x) => x.kind === 'idle'), 'off by default');
+  assert.throws(() => parseRule(['idle']), /minutes/);
+  assert.throws(() => parseRule(['idle', '{"minutes":4}']), /at least 5/, 'the same 5-minute floor as every');
+  assert.equal(parseRule(['idle', '{"minutes":5}']).params.minutes, 5);
+  const sit = { r_sit: { id: 'r_sit', capability: 'sit:bench', phase: 'started', mine: true, read: false } };   // a held sit stays started
+  const st = serveState({ since: T0, receipts: sit, lastCommandAt: T0 + MIN }), c = clock([{ id: 'w1', ...parseRule(['idle', '{"minutes":30}']) }], st);
+  assert.deepEqual(c.run(T0, T0 + 31 * MIN - 2_000), [], 'thirty minutes from the last command, not before');
+  assert.deepEqual(c.run(T0 + 31 * MIN, T0 + 180 * MIN).map((f) => [f.id, f.kind, f.at]), [['w1', 'idle', iso(T0 + 31 * MIN)]], 'seated and idle: once');
+  st.lastCommandAt = T0 + 180 * MIN;
+  assert.deepEqual(c.run(T0 + 182 * MIN, T0 + 240 * MIN).map((f) => f.at), [iso(T0 + 210 * MIN)], 'again after an agent command');
+  st.lastCommandAt = T0 + 300 * MIN; st.plan = { id: 'p_1', state: 'running', at: 0, steps: [] };
+  assert.deepEqual(c.run(T0 + 300 * MIN, T0 + 360 * MIN), [], 'a plan running for an hour is not idle');
+  st.plan = { ...st.plan, state: 'done' };
+  assert.deepEqual(c.run(T0 + 360 * MIN + 2_000, T0 + 420 * MIN).map((f) => f.at), [iso(T0 + 390 * MIN)], 'thirty minutes after it stopped running');
 });
 
 // #1932: the heartbeat. A scheduler gates a run on `pending --check`, which answers by exit code alone and starts serve itself.
