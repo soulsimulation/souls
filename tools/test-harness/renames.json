@@ -363,6 +363,13 @@
       "to": "a far hand-worked thing: left out of the whole menu, taken by id with a walk",
       "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
       "pr": "#2016"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "\\#1150, \\#1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator",
+      "to": "\\#1150, \\#1326, \\#2133 halted: live.json says the clock stopped; a `halted` problem and a restart every time; a halt that repeats at once ends held, named, after breakerN",
+      "reason": "Same test, renamed when a halted world restarts every time and is held only when the halt repeats at once (#2133)",
+      "pr": "#2142"
     }
   ]
 }
