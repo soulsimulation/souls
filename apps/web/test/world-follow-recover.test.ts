@@ -38,6 +38,9 @@ test('#2201 A3: forced over a wall, the camera comes back down to the asked-for 
   assert.ok(back && back.t <= 3, `back at the asked-for view ${back ? back.t.toFixed(2) + ' s' : 'never'} after the wall went`);
   assert.ok(open.some((f) => f.rule === 'recover'), 'the trace records the recovery');
   assert.ok(open.slice(1).every((f, i) => f.offset.distanceTo(open[i].offset) < .25), 'eased, never a jump');
+  const v = open.slice(1).map((f, i) => f.offset.clone().sub(open[i].offset).multiplyScalar(HZ));
+  const turn = Math.max(...v.slice(1).map((x, i) => x.distanceTo(v[i]) * HZ));
+  assert.ok(turn <= 40 + 1e-6, `its velocity, direction included, changes at most 40 m/s per s (${turn.toFixed(1)})`);
 });
 
 test('#2201 A3: a passage with a brief gap does not pull the camera down; a return comes only once space allows twice running', () => {

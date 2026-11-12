@@ -19,6 +19,8 @@ export const SPRING={calm:1.6,blocked:.6,returning:1.2};
  *  camera probes its way back to the asked-for view, the least time between two returns, and the clearance (m) beyond
  *  the camera a rung of that ladder needs ("space allows"). */
 export const DWELL=.5,RECOVER={probe:.5,gap:1.5,margin:.5};
+/** #2201 A3: the most an automatic move's velocity (direction included) changes, in metres per second each second. */
+const TURN=40;
 /** A body (a skinned figure) or anything marked cameraTransient moves through a view; walls, fixtures and ground stay. */
 const transient=(o:THREE.Object3D)=>{for(let p:THREE.Object3D|null=o;p;p=p.parent)if((p as THREE.SkinnedMesh).isSkinnedMesh||p.userData.cameraTransient===true)return true;return false;};
 /** #1316: a pull out is deliberate past these, summed over one gesture (input events less than GESTURE_GAP s apart):
@@ -43,7 +45,8 @@ export class WorldFollow {
   private motion={theta:0,phi:0,radius:0};
   /** The camera's automatic speed on the last frame (m/s, relative to the Soul): the start of the acceleration cap. */
   private eyeSpeed=0;
-  private still(){this.motion.theta=this.motion.phi=this.motion.radius=0;this.eyeSpeed=0;}
+  private eyeVelocity=new THREE.Vector3();
+  private still(){this.motion.theta=this.motion.phi=this.motion.radius=0;this.eyeSpeed=0;this.eyeVelocity.set(0,0,0);}
   /** Same candidates as recursive intersectObjects, minus objects whose hits
    * opaque() always rejects: hidden ancestry or own cameraTransparent. */
   private collect(roots:readonly THREE.Object3D[]){
@@ -387,7 +390,11 @@ export class WorldFollow {
         result.copy(previous).normalize().applyQuaternion(new THREE.Quaternion().slerp(rotation,fraction)).multiplyScalar(from+(to-from)*fraction);
         this.motion.theta*=fraction;this.motion.phi*=fraction;this.motion.radius*=fraction;  // the spring moves on at the capped speed
       }
-      this.eyeSpeed=previous.distanceTo(result)/dt;
+      // #2201 A3: and its velocity turns gently too. A new goal (a search, a recovery) can point the move another way while
+      // the speed is capped; the change of velocity, direction included, is held to TURN m/s per second.
+      const velocity=result.clone().sub(previous).divideScalar(dt),change=velocity.clone().sub(this.eyeVelocity),most=TURN*dt;
+      if(change.length()>most){velocity.copy(this.eyeVelocity).addScaledVector(change,most/change.length());result.copy(previous).addScaledVector(velocity,dt);this.rule={...this.rule,name:'speed-cap'};}
+      this.eyeVelocity.copy(velocity);this.eyeSpeed=velocity.length();
     }
     return result.clone();
   }
