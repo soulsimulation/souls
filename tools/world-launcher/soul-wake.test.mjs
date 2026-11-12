@@ -164,10 +164,8 @@ async function world(t) {
   });
   w.state = () => JSON.parse(readFileSync(join(dir, '.eden-serve.json'), 'utf8'));
   t.after(async () => {
-    await w.cli('serve', '--stop');
-    // --stop answers before serve has exited, and serve writes its state as it goes: removing the folder under it fails with ENOTEMPTY
-    for (let i = 0; i < 100 && existsSync(join(dir, '.eden-serve.lock')); i++) await new Promise((r) => setTimeout(r, 50));
-    server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
+    await w.cli('serve', '--stop');   // #2076: it answers once serve has exited, so the folder goes at once
+    server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true });
   });
   return w;
 }
@@ -364,4 +362,26 @@ test('#1968 A1, A4: wake budget and status through the CLI; a run killed after p
   assert.deepEqual([w.state().wake.held.length, w.state().wake.delivered.length], [0, 2], 'the delivery made stays counted');
   assert.deepEqual((await w.cli('pending')).json.wakes.map((x) => x.why), ['Ivo arrived at g-yard'], 'delivered again');
   assert.equal(w.state().wake.delivered.length, 3, 'and charged again: the count is the deliveries made');
+});
+
+// #2076: --stop answers only after serve has written its state and released its lock: a folder removed right after it goes,
+// 20 times out of 20, with no retry and no wait for the lock.
+test('#2076: serve --stop answers after serve exits; the folder is removed right after, 20 of 20', async (t) => {
+  const w = await world(t), agent = readFileSync(join(w.dir, '.eden-agent.json'), 'utf8');
+  for (let i = 0; i < 20; i++) {
+    const dir = mkdtempSync(join(tmpdir(), 'souls-stop-'));
+    writeFileSync(join(dir, '.eden-agent.json'), agent, { mode: 0o600 });
+    const cli = (...args) => new Promise((done) => {
+      const child = spawn(process.execPath, [fileURLToPath(new URL('./soul/eden.mjs', import.meta.url)), ...args], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] });
+      let out = ''; child.stdout.on('data', (c) => { out += c; }); child.on('exit', (code) => done({ code, out }));
+    });
+    assert.equal((await cli('serve')).code, 0, `round ${i}: serve started`);
+    assert.equal((await cli('wake', 'add', 'soul-arrives')).code, 0, `round ${i}: serve writes its state`);
+    const r = await cli('serve', '--stop');
+    assert.equal(r.code, 0); assert.equal(JSON.parse(r.out).stopping, true);
+    assert.equal(existsSync(join(dir, '.eden-serve.lock')), false, `round ${i}: the lock is released before the answer`);
+    assert.equal(existsSync(join(dir, '.eden-serve.json.tmp')), false, `round ${i}: no state write is under way`);
+    rmSync(dir, { recursive: true });
+    assert.equal(existsSync(dir), false, `round ${i}: removed`);
+  }
 });
