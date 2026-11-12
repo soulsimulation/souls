@@ -23,13 +23,18 @@ const PROXY_VARS = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'N
 const tmp = (t, tag) => { const d = realpathSync(mkdtempSync(join(tmpdir(), `soul-proxy-${tag}-`))); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
 const json = (res, status, v) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); };
 
-/** A self-signed certificate for world.test, made once. */
+/** Self-signed certificates for world.test and for an https proxy at localhost, made once; `file` trusts both. */
 let CERT = null;
 function cert() {
   if (CERT) return CERT;
   const dir = mkdtempSync(join(tmpdir(), 'soul-proxy-cert-'));
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, 'k.pem'), '-out', join(dir, 'c.pem'), '-days', '1', '-subj', '/CN=world.test', '-addext', 'subjectAltName=DNS:world.test'], { stdio: 'ignore' });
-  return (CERT = { dir, file: join(dir, 'c.pem'), key: readFileSync(join(dir, 'k.pem')), cert: readFileSync(join(dir, 'c.pem')) });
+  const make = (name) => {
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', join(dir, `${name}.key`), '-out', join(dir, `${name}.pem`), '-days', '1', '-subj', `/CN=${name}`, '-addext', `subjectAltName=DNS:${name}`], { stdio: 'ignore' });
+    return { key: readFileSync(join(dir, `${name}.key`)), cert: readFileSync(join(dir, `${name}.pem`)) };
+  };
+  const world = make('world.test'), proxy = make('localhost');
+  writeFileSync(join(dir, 'trust.pem'), Buffer.concat([world.cert, proxy.cert]));
+  return (CERT = { dir, file: join(dir, 'trust.pem'), ...world, proxy });
 }
 
 /** world.test over TLS: config, here, catalog, live and an event stream that stays open. */
@@ -42,6 +47,10 @@ async function world(t) {
     if (p === '/v1/edge/here') return json(res, 200, { place: 'green' });
     if (p === '/v1/edge/catalog') return json(res, 200, { contract: 'soul-catalog/1', worldId: 'w_proxied', placeVerbs: [], anywhere: [], places: [{ id: 'p_town', name: 'Town', kind: 'district', parent: null, at: [0, 0] }], things: [], acts: [], counts: {} });
     if (p === '/v1/edge/live') return json(res, 200, { contract: 'soul-live/1', tick: 1, souls: [{ id: 's_ada', name: 'Ada', at: [0, 0], place: 'p_town' }], speech: [] });
+    // a redirect to another origin, and to this one; /echo says what it was sent
+    if (p === '/redir-cross') { res.writeHead(307, { location: 'https://other.test/w/proxied/echo' }); res.end(); return undefined; }
+    if (p === '/redir-same') { res.writeHead(307, { location: '/w/proxied/echo' }); res.end(); return undefined; }
+    if (p === '/echo') return json(res, 200, { host: req.headers.host, authorization: req.headers.authorization ?? null, cookie: req.headers.cookie ?? null });
     if (p === '/v1/edge/events') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('event: hello\ndata: {"cursor":"c_0"}\n\n'); return undefined; }
     return json(res, 404, { error: { code: 'nope', message: p } });
   });
@@ -50,14 +59,16 @@ async function world(t) {
   return { seen, port: server.address().port };
 }
 
-/** A CONNECT proxy that sends world.test to the local world and records each tunnel it was asked for. */
-async function proxy(t, worldPort, { refuse = 0 } = {}) {
+/** A CONNECT proxy that sends world.test (and any of `hosts`) to the local world and records each tunnel it was asked for.
+ *  `refuse` answers the CONNECT with that status; `hangUp` closes the connection without answering. */
+async function proxy(t, worldPort, { refuse = 0, hangUp = false, hosts = ['world.test:443'] } = {}) {
   const tunnels = [];
   const server = createHttp((req, res) => { res.writeHead(405); res.end(); });
   server.on('connect', (req, socket) => {
     tunnels.push({ target: req.url, auth: req.headers['proxy-authorization'] ?? null });
+    if (hangUp) { socket.end(); return; }
     if (refuse) { socket.end(`HTTP/1.1 ${refuse} Forbidden\r\n\r\n`); return; }
-    if (req.url !== 'world.test:443') { socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'); return; }
+    if (!hosts.includes(req.url)) { socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'); return; }
     const up = connect(worldPort, '127.0.0.1', () => { socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); up.pipe(socket); socket.pipe(up); });
     up.on('error', () => socket.destroy()); socket.on('error', () => up.destroy());
   });
@@ -133,8 +144,8 @@ for (const [mode, tunnel] of MODES) {
 
   test(`${mode}: a proxy that cannot be reached, or refuses the tunnel, is said once by its code, without its address, and not retried`, { timeout: 60_000 }, async (t) => {
     const closed = createHttp(); await new Promise((r) => closed.listen(0, '127.0.0.1', r)); const port = closed.address().port; await new Promise((r) => closed.close(r));
-    const w = await world(t), refusing = await proxy(t, w.port, { refuse: 403 });
-    for (const [why, at, code] of [['nothing listening', port, /ECONNREFUSED/], ['403 to CONNECT', refusing.port, /ERR_PROXY_TUNNEL|403/]]) {
+    const w = await world(t), refusing = await proxy(t, w.port, { refuse: 403 }), hanging = await proxy(t, w.port, { hangUp: true });
+    for (const [why, at, code] of [['nothing listening', port, /ECONNREFUSED/], ['403 to CONNECT', refusing.port, /ERR_PROXY_TUNNEL|403/], ['closed without an answer', hanging.port, /ERR_PROXY_TUNNEL|ECONNRESET/]]) {
       const r = await runIn(tmp(t, 'down'), { HTTPS_PROXY: withAuth(at, 's3cret'), EDEN_PROXY_TUNNEL: tunnel })('register', 'https://world.test/w/proxied');
       const said = r.out + r.err;
       assert.equal(r.code, 75, `${why}: ${said}`);
@@ -146,6 +157,34 @@ for (const [mode, tunnel] of MODES) {
       assert.ok(r.ms < 10_000, `${why}: answered in ${Math.round(r.ms)} ms`);
     }
     assert.equal(refusing.tunnels.length, 1, 'the refusing proxy was asked once');
+    assert.equal(hanging.tunnels.length, 1, 'the proxy that hung up was asked once');
+  });
+
+  test(`${mode}: a redirect to another origin carries no Authorization or Cookie; one to the same origin does`, { timeout: 30_000 }, async (t) => {
+    const w = await world(t), px = await proxy(t, w.port, { hosts: ['world.test:443', 'other.test:443'] }), saved = Object.fromEntries(PROXY_VARS.concat('EDEN_PROXY_TUNNEL', 'NODE_TLS_REJECT_UNAUTHORIZED').map((k) => [k, process.env[k]]));
+    for (const k of PROXY_VARS) delete process.env[k];
+    Object.assign(process.env, { HTTPS_PROXY: `http://127.0.0.1:${px.port}`, EDEN_PROXY_TUNNEL: tunnel, NODE_TLS_REJECT_UNAUTHORIZED: '0' });   // other.test is served with world.test's certificate
+    t.after(() => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
+    const headers = { authorization: 'Bearer sim_s_synthetic', cookie: 'a=b' };
+    const cross = await (await netFetch('https://world.test/w/proxied/redir-cross', { headers })).json();
+    assert.deepEqual(cross, { host: 'other.test', authorization: null, cookie: null });
+    const same = await (await netFetch('https://world.test/w/proxied/redir-same', { headers })).json();
+    assert.deepEqual(same, { host: 'world.test', authorization: 'Bearer sim_s_synthetic', cookie: 'a=b' });
+    await assert.rejects(netFetch('https://world.test/w/proxied/redir-same', { headers, redirect: 'error' }), /fetch failed/);
+  });
+
+  test(`${mode}: an http world through an https proxy: the proxy's certificate is checked against the proxy's name`, { timeout: 60_000 }, async (t) => {
+    const asked = [], c = cert();
+    const px = createHttps({ key: c.proxy.key, cert: c.proxy.cert }, (req, res) => {
+      asked.push(req.url);
+      if (req.url === 'http://world.test/w/proxied/v1/config') return json(res, 200, { accountAuthRequired: true, worldId: 'w_proxied', worldName: 'Proxied' });
+      return json(res, 404, {});
+    });
+    await new Promise((r) => px.listen(0, '127.0.0.1', r));
+    t.after(() => { px.closeAllConnections(); px.close(); });
+    const r = await runIn(tmp(t, 'tlsproxy'), { HTTP_PROXY: `https://localhost:${px.address().port}`, EDEN_PROXY_TUNNEL: tunnel })('register', 'http://world.test/w/proxied');
+    assert.equal(r.code, 0, r.out + r.err); assert.equal(r.d.registered, true);
+    assert.deepEqual(asked, ['http://world.test/w/proxied/v1/config'], 'asked in absolute form, through the proxy');
   });
 }
 

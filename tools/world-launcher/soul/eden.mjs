@@ -2567,7 +2567,7 @@ const NATIVE_PROXY = (() => {
 const native = () => NATIVE_PROXY && process.env.EDEN_PROXY_TUNNEL !== "1";   // tests force the tunnel on a runtime that has proxyEnv
 
 const authOf = (p) => (p.username || p.password ? `Basic ${Buffer.from(`${decodeURIComponent(p.username)}:${decodeURIComponent(p.password)}`).toString("base64")}` : null);
-const tunnelRefused = (status) => Object.assign(new Error(status ? `the proxy refused the tunnel (${status})` : "the proxy did not answer the tunnel in HTTP"), { code: "ERR_PROXY_TUNNEL", status });
+const tunnelRefused = (status, why) => Object.assign(new Error(why ?? (status ? `the proxy refused the tunnel (${status})` : "the proxy did not answer the tunnel in HTTP")), { code: "ERR_PROXY_TUNNEL", status });
 
 /** HTTPS through a proxy without Node's proxyEnv: CONNECT host:port, then TLS to the world (its own servername) inside it.
  *  The agent keeps the tunnelled sockets alive like any other. */
@@ -2580,7 +2580,9 @@ class TunnelAgent extends HttpsAgent {
     let head = Buffer.alloc(0), settled = false;
     const fail = (e) => { if (settled) return; settled = true; raw.destroy(); done(e); };
     raw.setTimeout(30_000, () => fail(Object.assign(new Error("the proxy did not answer"), { code: "ETIMEDOUT" })));
-    raw.on("error", fail);
+    // a proxy that hangs up before it answers the CONNECT is said at once, never left to the caller's timeout
+    const hungUp = () => fail(tunnelRefused(0, "the proxy closed the connection before it answered the tunnel"));
+    raw.on("error", fail); raw.once("end", hungUp); raw.once("close", hungUp);
     raw.once(secure ? "secureConnect" : "connect", () => raw.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${auth ? `Proxy-Authorization: ${auth}\r\n` : ""}\r\n`));
     const onData = (chunk) => {
       head = Buffer.concat([head, chunk]);
@@ -2590,7 +2592,7 @@ class TunnelAgent extends HttpsAgent {
       const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(head.subarray(0, end).toString("latin1"))?.[1] ?? 0);
       if (status !== 200) { fail(tunnelRefused(status)); return; }
       if (head.length > end + 4) raw.unshift(head.subarray(end + 4));
-      settled = true; raw.removeListener("error", fail);
+      settled = true; raw.removeListener("error", fail); raw.removeListener("end", hungUp); raw.removeListener("close", hungUp);
       done(null, tlsConnect({ ...options, socket: raw, servername: options.servername || (isIP(host) ? undefined : host) }));
     };
     raw.on("data", onData);
@@ -2632,7 +2634,9 @@ function send(url, options, onResponse) {
   if (proxy && u.protocol === "http:" && !native()) {
     // plain HTTP through a proxy: the request goes to the proxy, in absolute form
     const auth = authOf(proxy), to = new URL(u.href); to.username = ""; to.password = "";
+    // an https proxy's certificate is checked against the proxy's own name, not the Host header's (the world's)
     req = (proxy.protocol === "https:" ? httpsRequest : httpRequest)({ protocol: proxy.protocol, hostname: proxy.hostname, port: proxy.port || undefined, path: to.href, method: options.method, agent,
+      ...(proxy.protocol === "https:" ? { servername: isIP(proxy.hostname) ? "" : proxy.hostname } : {}),
       headers: { host: u.host, ...options.headers, ...(auth ? { "proxy-authorization": auth } : {}) } }, onResponse);
   } else req = (u.protocol === "https:" ? httpsRequest : httpRequest)(u, { ...options, agent }, onResponse);
   req.proxied = !!proxy;
@@ -2642,6 +2646,10 @@ function send(url, options, onResponse) {
 /** fetch, through the proxy when the environment names one for the URL; otherwise the runtime's own fetch, untouched.
  *  The proxied answer is a real Response with a streamed body, so an event stream reads the same either way. */
 function netFetch(input, init) { return fetchVia(input, init, 0); }
+/** What a redirect to another origin drops. */
+const CREDENTIAL_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+/** The most redirects one fetch follows, as fetch does. */
+const MAX_REDIRECTS = 20;
 async function fetchVia(input, init, hops) {
   if (!proxyFor(typeof input === "string" || input instanceof URL ? String(input) : input.url)) return globalThis.fetch(input, init);
   const rq = new Request(input, init), signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
@@ -2660,9 +2668,12 @@ async function fetchVia(input, init, hops) {
   const status = res.statusCode ?? 0;
   if ([301, 302, 303, 307, 308].includes(status) && res.headers.location && rq.redirect !== "manual") {
     res.resume();
-    if (rq.redirect === "error" || hops >= 20) throw new TypeError("fetch failed", { cause: new Error(rq.redirect === "error" ? "unexpected redirect" : "redirect count exceeded") });
-    const toGet = status === 303 || ((status === 301 || status === 302) && rq.method === "POST");
-    return fetchVia(new URL(res.headers.location, rq.url).href, { method: toGet ? "GET" : rq.method, headers: rq.headers, body: toGet ? undefined : body ?? undefined, redirect: rq.redirect, signal }, hops + 1);
+    if (rq.redirect === "error" || hops >= MAX_REDIRECTS) throw new TypeError("fetch failed", { cause: new Error(rq.redirect === "error" ? "unexpected redirect" : "redirect count exceeded") });
+    const toGet = status === 303 || ((status === 301 || status === 302) && rq.method === "POST"), next = new URL(res.headers.location, rq.url);
+    // as fetch does: a redirect to another origin (scheme, host or port) carries no credentials
+    const carried = new Headers(rq.headers);
+    if (next.origin !== new URL(rq.url).origin) for (const h of CREDENTIAL_HEADERS) carried.delete(h);
+    return fetchVia(next.href, { method: toGet ? "GET" : rq.method, headers: carried, body: toGet ? undefined : body ?? undefined, redirect: rq.redirect, signal }, hops + 1);
   }
   const h = new Headers();
   for (let i = 0; i < res.rawHeaders.length; i += 2) { try { h.append(res.rawHeaders[i], res.rawHeaders[i + 1]); } catch { /* a header fetch would not carry */ } }
