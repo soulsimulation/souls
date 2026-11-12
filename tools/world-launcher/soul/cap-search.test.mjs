@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {rankCapabilities,refusalList,shortLabel,searchOrder} from './eden.mjs';
+import {findNext,rankCapabilities,refusalList,shortLabel,searchOrder} from './eden.mjs';
 test('phrase and all terms beat unrelated west noise before truncation, retaining partial fallback',()=>{
  const noise=Array.from({length:90},(_,i)=>({id:`sit:west-library-${i}`,verb:'sit',label:'West library chair'}));
  const bound={id:'sit:land-harbour-west-pier/part-sea-view-seat',verb:'sit',label:'Sit at Sea-View Bench'};
@@ -56,4 +56,12 @@ test('#1412: the places the world names lead in its order, over a better local m
  assert.deepEqual(searchOrder(list,'library',{places:['walk:gone',...['walk:eden-stacks']]}).map(c=>c.id)[0],'walk:eden-stacks','an id not in the list is skipped');
  assert.deepEqual(searchOrder(list,'library',undefined),rankCapabilities(list,'library'),'an old world: the local ranking');
  assert.deepEqual(searchOrder(list,'library',{places:[]}),rankCapabilities(list,'library'));
+});
+
+test('#1948: an id the world refuses with no list is searched for on this machine by its words',()=>{
+ const reason='"walk:eden-pond-north" is not an offer on this Soul right now, so nothing was done. Send an offered id, or find one by its words.';
+ assert.deepEqual(findNext('walk:eden-pond-north',{code:'capability.unknown',reason}),{next:'node eden.mjs find "walk eden pond north"'});
+ assert.deepEqual(findNext('fly:here',{code:'capability.unknown'}),{next:'node eden.mjs find "fly"'});
+ assert.deepEqual(findNext('walk:x',{code:'capability.unknown',did_you_mean:[{id:'walk:y',label:'Y'}]}),{},'a world that still names others: its list');
+ assert.deepEqual(findNext('sit:e_1',{code:'seat.taken'}),{},'a refusal of its own keeps its own words');
 });
