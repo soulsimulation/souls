@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {refusalList,shortLabel} from './eden.mjs';
+import {findNext,refusalList,shortLabel} from './eden.mjs';
 test('#1268: a short label drops the bracketed id, stays under the bound and keeps the distance',()=>{
  const long=`Walk to Cottage Bench [cottage/bench], ${'A two-seat wooden bench outside Knoll Cottage, '.repeat(4)}by knoll (39 m)`;
  const short=shortLabel('walk:cottage/bench',long);
@@ -24,4 +24,12 @@ test('#1268: a refusal is one list: the ids once, the world\'s label, parameter 
  // a choice carries availability on its own entry, and the candidate beside it can say otherwise
  assert.deepEqual(refusalList({code:'capability.choose',did_you_mean:[{id:'walk:far',label:'Far',available:false,reason:'Too far.'}],candidates:[{id:'walk:far',available:true}]}).did_you_mean,[{id:'walk:far',label:'Far',available:false,blocked:{reason:'Too far.'}}]);
  assert.deepEqual(refusalList({code:'capability.choose',did_you_mean:[{id:'walk:far',label:'Far',available:false,reason:'Too far.'}]}).did_you_mean[0].blocked,{reason:'Too far.'},'an act\'s choice has no candidates');
+});
+
+test('#1948: an id the world refuses with no list is searched for on this machine by its words',()=>{
+ const reason='"walk:eden-pond-north" is not an offer on this Soul right now, so nothing was done. Send an offered id, or find one by its words.';
+ assert.deepEqual(findNext('walk:eden-pond-north',{code:'capability.unknown',reason}),{next:'node eden.mjs find "walk eden pond north"'});
+ assert.deepEqual(findNext('fly:here',{code:'capability.unknown'}),{next:'node eden.mjs find "fly"'});
+ assert.deepEqual(findNext('walk:x',{code:'capability.unknown',did_you_mean:[{id:'walk:y',label:'Y'}]}),{},'a world that still names others: its list');
+ assert.deepEqual(findNext('sit:e_1',{code:'seat.taken'}),{},'a refusal of its own keeps its own words');
 });

@@ -9,6 +9,7 @@ import { normalizeCast } from '../../director/swarm/cast.mjs';
 import { providerPolicy } from '../../lib/provider-policy.mjs';
 import { templateNames, dist } from './world-names.mjs';
 import { validateScript } from '../../arena/adapters/scripted-owner.mjs';
+import { validateBattery } from '../../eval/measure.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCENARIOS = resolve(HERE, '..');
@@ -93,6 +94,11 @@ export function validateScenario(s) {
   if (s?.review?.mode !== 'deterministic' && !s?.review?.reviewerModel) errs.push('review.reviewerModel required');
   try { providerPolicy(s); } catch (e) { errs.push(e.message); }
   if (!s?.rails) errs.push('rails required');
+  // #1774: a run judges the owner messages that are battery items with #1752's checks (tools/playtest/eval/)
+  if (s?.battery) {
+    const b = s.battery.file ? (existsSync(resolve(REPO, s.battery.file)) ? JSON.parse(readFileSync(resolve(REPO, s.battery.file), 'utf8')) : null) : s.battery;
+    if (!b) errs.push(`battery.file ${s.battery.file} not found`); else for (const e of validateBattery(b)) errs.push(`battery: ${e}`);
+  }
   return errs;
 }
 

@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -31,6 +32,8 @@ async function world(t) {
     w.calls.push([req.method, p]);
     // #1921: the client never asks the world's resolver or its search; every test's world counts them, and ends at zero
     if (p === '/v1/edge/resolve' || (p === '/v1/edge/capabilities' && url.searchParams.has('search'))) w.resolverCalls++;
+    if (w.deny) return void (res.writeHead(w.deny, { 'content-type': 'application/json' }), res.end(JSON.stringify(w.denyCode === 'unauthorized' ? { error: { code: 'unauthorized', message: 'This Soul is not admitted and ready right now; its pairing is kept. Retry shortly.' } } : { code: 'control.revoked', reason: 'revoked', error: { code: 'control.revoked', message: 'refused' } })));
+    if (w.denyOnce === p) { w.denyOnce = null; res.writeHead(403, { 'content-type': 'application/json' }); return void res.end(JSON.stringify({ error: { code: 'forbidden', message: 'once' } })); }
     if (w.cut.delete(p)) { res.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' }); res.write('{"accepted":tr'); setTimeout(() => res.destroy(), 10); return undefined; }
     const json = (status, v, h = {}) => { if (res.destroyed) return; res.writeHead(status, { 'content-type': 'application/json', ...h }); res.end(JSON.stringify(v)); };
     if (p === '/v1/edge/inbox/listen') {
@@ -62,7 +65,7 @@ async function world(t) {
     if (p === '/v1/edge/live' || p === '/v1/edge/catalog') return json(404, { error: { code: 'not-found', message: 'not published here' } });
     // Everything else is heavy: at most one at a time per Soul, or soul.busy.
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
-    await sleep(10); w.heavyNow--;
+    await sleep(p === '/v1/edge/act' && w.actMs ? w.actMs : 10); w.heavyNow--;
     if (w.busyNext > 0) { w.busyNext--; return json(429, { error: { code: 'soul.busy', message: 'one at a time' } }, { 'retry-after': '0' }); }
     if (p === '/v1/edge/act') {
       const b = body ? JSON.parse(body) : {}, cap = b.capability ?? 'walk:x';
@@ -130,6 +133,55 @@ test('A1: one serve per folder: a second start finds the first, and the listen t
   assert.equal(stopped.json.stopping, true);
   assert.ok(await until(() => !existsSync(join(w.dir, '.eden-serve.sock'))), 'the socket goes with it');
   assert.equal((await w.cli('here')).json.place, 'green', 'and commands go straight to the world again');
+});
+
+// #1928: refused credentials, confirmed by one self/link read, end the resident process; a refusal it can't confirm doesn't.
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+test('#1928 A2: a world that answers 401 to everything: serve is gone within 5 s and says why afterwards', async (t) => {
+  const w = await world(t);
+  const up = await w.cli('serve');
+  assert.equal(up.json.serving, true, up.err);
+  assert.ok(await until(() => w.listens > 0));
+  w.deny = 401; flushWorld(w);
+  const t0 = Date.now();
+  assert.ok(await until(() => !alive(up.json.pid), 5_000), 'the process is gone within 5 s');
+  assert.ok(Date.now() - t0 < 5_000);
+  assert.ok(w.calls.some(([m, p]) => m === 'GET' && p === '/v1/edge/self/link'), 'it confirmed with self/link first');
+  assert.equal(existsSync(join(w.dir, '.eden-serve.sock')), false, 'the socket is removed');
+  assert.equal(existsSync(join(w.dir, '.eden-serve.lock')), false, 'the lock is released');
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.serving, false);
+  assert.equal(s.json.serveEnded?.code, 'control.revoked', s.out);
+  assert.equal((await w.cli('status')).json.serveEnded?.code, 'control.revoked');
+});
+
+test('#1928 review: a 401 `unauthorized` (a valid token whose Soul is not ready, as after a restart) keeps serve running', async (t) => {
+  const w = await world(t);
+  const up = await w.cli('serve');
+  assert.equal(up.json.serving, true, up.err);
+  assert.ok(await until(() => w.listens > 0));
+  w.denyCode = 'unauthorized'; w.deny = 401; flushWorld(w);
+  assert.ok(await until(() => w.calls.some(([m, p]) => m === 'GET' && p === '/v1/edge/self/link')), 'the 401 was checked with self/link');
+  await sleep(1_500);
+  assert.ok(alive(up.json.pid), 'not ended on a refusal that does not name the token gone');
+  w.deny = null; w.denyCode = null;
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.pid, up.json.pid);
+});
+
+test('#1928 A2: a single 403 followed by success leaves serve running', async (t) => {
+  const w = await world(t);
+  w.denyOnce = '/v1/edge/inbox/listen';
+  const up = await w.cli('serve');
+  assert.equal(up.json.serving, true, up.err);
+  assert.ok(await until(() => w.calls.some(([m, p]) => m === 'GET' && p === '/v1/edge/self/link')), 'the 403 was confirmed');
+  assert.equal(w.denyOnce, null);
+  assert.ok(await until(() => w.listens > 0), 'the inbox listen goes on');
+  await sleep(500);
+  assert.ok(alive(up.json.pid));
+  const s = await w.cli('serve', '--status');
+  assert.equal(s.json.pid, up.json.pid);
+  assert.equal(s.json.ended, undefined);
 });
 
 // #1244: the start waits on the child, not a fixed 5 s. The issue's preload, blocking only in the serve child (its
@@ -413,6 +465,49 @@ test('A4: soul.busy is waited out inside serve, and heavy requests never overlap
   w.heavyMax = 0;
   await Promise.all(Array.from({ length: 6 }, () => w.cli('here')));
   assert.equal(w.heavyMax, 1, 'six commands at once reach the world one at a time');
+});
+
+/** One request straight to serve's socket, as a command sends it: the answer and how long it took. */
+const askSock = (w, msg) => new Promise((done) => {
+  const t0 = Date.now(), c = createConnection(join(w.dir, '.eden-serve.sock'));
+  let text = '';
+  c.on('connect', () => c.write(JSON.stringify(msg) + '\n'));
+  c.on('data', (b) => { text += b; const i = text.indexOf('\n'); if (i >= 0) { c.destroy(); done({ a: JSON.parse(text.slice(0, i)), ms: Date.now() - t0 }); } });
+  c.on('error', () => done({ a: null, ms: Date.now() - t0 }));
+  c.on('close', () => done({ a: null, ms: Date.now() - t0 }));
+});
+
+test('#2084: under a flood of its Soul\'s acts every request through serve is answered within its own time, and status and stop stay quick', async (t) => {
+  const w = await world(t);
+  await w.cliEnv({ EDEN_TIME_SCALE: '0.05' }, 'serve');   // the 10 s queue bound becomes 0.5 s
+  w.actMs = 150;   // one act at a time: 40 of them take 6 s, three times what each request gives itself
+  const { world: base, token } = JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8'));
+  const act = (i, timeoutMs = 2_000) => askSock(w, { op: 'http', url: `${base}/v1/edge/act`, method: 'POST', timeoutMs,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'idempotency-key': `flood-${i}` }, body: { capability: 'wave:here', clientRef: `flood-${i}` } });
+  const flood = Array.from({ length: 40 }, (_, i) => act(i));
+  await sleep(100);
+  const t0 = Date.now(), status = await w.cli('serve', '--status'), statusMs = Date.now() - t0;
+  assert.equal(status.json?.serving, true, status.out);
+  assert.ok(statusMs < 2_000, `status answered in ${statusMs} ms during the flood`);
+  const answers = await Promise.all(flood);
+  for (const { a, ms } of answers) {
+    assert.ok(a, 'every request is answered');
+    assert.ok(ms <= 2_500, `answered within its own 2 s (a command waits 5 s more): ${ms} ms`);
+    assert.notEqual(a.status, 0, `an answer, not silence: ${JSON.stringify(a.data)}`);
+    assert.ok(a.status === 200 || (a.status === 429 && a.data.error.code === 'soul.busy' && a.retryAfterMs > 0), JSON.stringify(a));
+  }
+  const refused = answers.filter(({ a }) => a.status === 429).length;
+  assert.ok(refused > 0 && refused < 40, `some acts went through, the rest were refused by serve (${refused} refused)`);
+  assert.equal(w.heavyMax, 1, 'still one heavy request at a time');
+  assert.equal((await w.cli('serve', '--status')).json.busyRefused, refused);
+  // stop, asked in the middle of another flood, ends serve at once
+  const again = Array.from({ length: 40 }, (_, i) => act(100 + i));
+  await sleep(100);
+  const t1 = Date.now(), stop = await w.cli('serve', '--stop'), stopMs = Date.now() - t1;
+  assert.equal(stop.json?.stopping, true, stop.out);
+  assert.ok(stopMs < 2_000, `stop answered in ${stopMs} ms during the flood`);
+  assert.ok(await until(() => !existsSync(join(w.dir, '.eden-serve.sock'))), 'serve is gone');
+  await Promise.all(again);
 });
 
 test('A5 (short form): a killed serve resumes from its cursor: nothing replayed, nothing lost, an open message still pending', async (t) => {

@@ -7,11 +7,11 @@
   "durationSec": 90,
   "seats": [
     { "id": "ada", "adapter": "scripted-owner", "soulName": "Ada", "script": { "rules": [
-      { "match": "moon", "ack": "Trying the moon", "do": [["act", "walk:the-moon", { "onRefused": "continue" }], ["act", "{{prev.did_you_mean[0].id}}", "--wait", "70"]], "result": "No path to the moon; took the world's suggestion instead" } ] } }
+      { "match": "knoll", "ack": "Heading to the knoll", "do": [["act", "walk:cottage-knoll", { "onRefused": "continue" }], ["find", "Cottage Knoll"], ["act", "{{prev.found[0].act}}", "--wait", "70"]], "result": "Guessed the id wrong; found the knoll by its words and walked there" } ] } }
   ],
   "god": null,
   "director": { "mode": "scripted", "script": [
-    { "seat": "ada", "atSec": 5, "channel": "card", "text": "Walk to the moon, please.", "budgetSec": 80 }
+    { "seat": "ada", "atSec": 5, "channel": "card", "text": "Walk to Cottage Knoll, please.", "budgetSec": 80 }
   ] },
   "observer": { "sampleSec": 3, "viewport": [1280, 800], "dpr": 1, "cameras": [] },
   "review": { "mode": "deterministic", "developer": false },
