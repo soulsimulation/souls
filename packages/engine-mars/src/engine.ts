@@ -1280,11 +1280,18 @@ export class MarsEngine implements Engine {
     // #1288 wait-bound/2: a journey (ground_travel, swim_in) runs its walk or swim as a child; the flight check reads the child.
     for (let k = 0; k < 4 && ex?.child && this.rt.live.get(ex.child); k++) ex = this.rt.live.get(ex.child)!.exec as typeof ex;
     const a = this.ents[p.actor], tick = this.rt.tick;
+    // #1367 wait-bound/3: a walk step waiting behind a make-way nudge of its own body (walk.ts makeWay; runtime nudgeHolds) has
+    // no exec, and the nudge's own walk has no bound. Once the nudge is held (blocked), it is cancelled where the body stands,
+    // so the step is planned from there at the end of this tick and is never left without an exec.
+    const nudge = this.cfg.waitBoundV3 === true && rec.verb === 'walk_to' && !ex ? a.human?.task : undefined;
+    if (nudge && nudge !== rec.id && /:make-way:\d+$/.test(nudge) && this.rt.records.get(nudge)?.status === 'blocked' && this.rt.isActive(nudge))
+      this.rt.cancel(nudge, { code: 'traffic.make-way-ended', message: `${WAIT_BOUND_V3}: ${p.actor}'s step aside is held, so it ends and ${p.actor}'s own walk goes on from here`, subjects: [p.actor] });
     const at: [number, number] = [a.pose.p[0], a.pose.p[2]], level: number = a.human?.level ?? 0, w = p.waitBoundV1;
     // #1367 wait-bound/3: a walk's headway is less of its leg left to walk. A body shoved out of the disc (a yield, a collision
     // settle, a step-aside and its walk back) has no less left, so a jam at a stair foot no longer restarts the clock. A step-aside
     // (`detour`) is no headway either: its own route is not measured, and the way back is measured against the old distance.
-    const v3 = this.cfg.waitBoundV3 === true && ex?.route?.legs !== undefined, wl = v3 && !ex!.detour ? waitBoundWayV3(ex, at) : undefined;
+    // A walk step with no exec (waiting to start) gets no headway from its body being moved; a swim (no route) keeps the disc.
+    const v3 = this.cfg.waitBoundV3 === true && (ex ? ex.route?.legs !== undefined : rec.verb === 'walk_to'), wl = v3 && ex && !ex.detour ? waitBoundWayV3(ex, at) : undefined;
     const way = wl?.way, d = wl?.left ?? 0;
     if (way && w && w.step === p.index && (!w.way || w.best === undefined || hypot(way[0] - w.way[0], way[1] - w.way[1]) > WAIT_BOUND_M)) { w.way = way; w.best = d; }   // a new way: measured from here, the clock kept
     const headway = v3 ? !!way && w?.best !== undefined && d < w.best - WAIT_BOUND_M : !w || hypot(at[0] - w.at[0], at[1] - w.at[1]) > WAIT_BOUND_M;

@@ -64,7 +64,9 @@ hit, so the hard separation layer rarely fires.
   of level, not leaving the disc. A shove in a jam at a stair foot (a yield, a collision settle, a step-aside and its walk
   back) leaves no less to walk, so it no longer restarts the clock, and a walk held there by shoves or a wait cycle ends
   `route.blocked` within the same minute. It ends the held walk; it does not clear the jam. A body held mid-flight stays
-  exempt (flight resume, #1453). A swim keeps wait-bound/1's disc.
+  exempt (flight resume, #1453). A swim keeps wait-bound/1's disc. A walk step waiting behind a make-way nudge of its own
+  body gets no headway from the nudge moving it, and once the nudge is held (blocked) it ends where the body stands
+  (`traffic.make-way-ended`), so the step starts from there with its own exec.
 
 ## Speed limits and invariants
 
