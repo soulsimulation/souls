@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
-import { satelliteSettings, satelliteReturnUrl, primaryReturnTarget, primarySignInPage } from './clerk-satellite.mjs';
+import { satelliteSettings, satelliteReturnUrl, primaryReturnTarget, primarySignInPage, homePageHtml } from './clerk-satellite.mjs';
 const domain = 'satellite.example.test', origin = `https://${domain}`, signInUrl = 'https://primary.example.test/sign-in';
 const auth = { clerkPublishableKey: 'pk_live_' + Buffer.from('clerk.example.test$').toString('base64'), clerkIssuer: 'https://clerk.example.test', clerkSatellite: { domain, signInUrl } };
 test('launcher satellite settings require paired safe configuration, exact canonical origin, and separate primary', () => {
@@ -69,4 +69,14 @@ test('explicit legacy satellite returns normalize to canonical without opening o
     assert.deepEqual(signedIn.calls[1], ['replace', canonical]);
     assert.deepEqual((await runPage({pageAuth,hash:'#/?redirect_url=https://evil.test/'})).calls, []);
   }
+});
+
+test('the home page carries the public satellite settings first in <head>, for its presync; nothing without a satellite', () => {
+  const html = '<!doctype html><html><head><meta charset="utf-8"><script id="clerk-presync"></script></head><body></body></html>';
+  const out = homePageHtml(html, { domain, signInUrl, legacyDomains: ['old.example.test'] });
+  assert.equal(out, html.replace('<head>', `<head><script>window.__soulsHomeAuth={"authProvider":"clerk","clerkSatellite":{"domain":"${domain}","signInUrl":"${signInUrl}"}}</script>`));
+  const win = {}; vm.runInNewContext(/<head><script>([^<]*)<\/script>/.exec(out)[1], { window: win });
+  assert.deepEqual(JSON.parse(JSON.stringify(win.__soulsHomeAuth)), { authProvider: 'clerk', clerkSatellite: { domain, signInUrl } });
+  assert.equal(homePageHtml(html, undefined), html);
+  assert.match(homePageHtml(html, { domain, signInUrl: 'https://primary.example.test/</script><script>x' }), /\\u003c\/script\\u003e/, 'escaped in the script');
 });
