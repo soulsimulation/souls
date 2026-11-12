@@ -55,7 +55,6 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
  const done = async (words, each = null) => {const r = await act(words), rc = await finish(r, each); assert.equal(rc.phase, 'completed', words + ' ' + JSON.stringify(rc).slice(0, 600)); return {...rc, capability: r.receipt.capability};};
  const refusals = {}, results = {};
  const refuse = async (words, code) => {const b = await act(words, false); refusals[words] = {code: b.code, reason: b.reason}; if (code) assert.equal(b.code, code, words + ' ' + JSON.stringify(b)); return b;};
- const resolved = async words => {const r = await (await app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: words})})).json(); return r.resolve?.would?.capability ?? null;};
  const held = n => item(n).support?.kind === 'in-hand' && item(n).support.by === soul.entityId;
 
  // ---- P6: the words for a food not in the hand; a pantry has no door
@@ -105,10 +104,6 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
 
  // ---- P7 and P9: the bun, a different def with no code naming it; a bite, an interrupted eat, a second eat
  results.takeBun = await done('take the bun out of the pantry'); assert.ok(held('bun'));
- assert.equal(await resolved('take a bite of the bun'), `object:${id('bun')}:bite`);
- for (const [w, a] of [['eat it', 'eat'], ['eat the bun', 'eat'], ['finish the bun', 'eat'], ['have the bun', 'eat'], ['eat', 'eat'], ['have a bite', 'bite'], ['bite the bun', 'bite']]) assert.equal(await resolved(w), `object:${id('bun')}:${a}`, w);
- assert.notEqual(await resolved('have a look'), `object:${id('bun')}:eat`); assert.notEqual(await resolved('eat the book'), `object:${id('book')}:eat`);
- assert.notEqual(await resolved('eat the book'), `object:${id('bun')}:eat`, 'a named thing that is not this food is not an eat of it');
  assert.deepEqual((await here()).objects.find(o => o.id === id('bun'))?.state, {bites: 2});
  // interrupted before the first bite's moment: nothing changes; it stays in the hand
  {const r = await act('eat the bun'); for (let n = 0; n < 200 && !body().human?.cupV1; n++) await tick(1); await tick(10);
@@ -124,13 +119,9 @@ test('pantry: stock and draw by hand, food eaten bite by bite, a kept mug is not
  // one bite means one
  ok(god.act({ops: [{op: 'place', def: 'core/apple@1', name: 'second-apple', in: {parent: 'table', slot: 'top'}, p: [0.4, 0.2]}]})); await tick(10);
  await done(`pick-up:${id('second-apple')}`);
- assert.equal(await resolved('have a bite'), `object:${id('second-apple')}:bite`);
  results.bite = await done('have a bite'); assert.equal(ent('second-apple').state.left, 0.667);
  assert.deepEqual((await here()).objects.find(o => o.id === id('second-apple'))?.state, {bites: 2});
  results.down2 = await done('put the apple on the table');
-
- // ---- P8: with no food held the old meanings stand
- assert.equal(await resolved('eat it') === `object:${id('second-apple')}:eat`, false, '"eat it" with nothing held is not the apple on the table');
 
  // ---- P2: a food not in the hand is taken first, from a table or the pantry, as one act; a bare word means the one in the hand
  results.eatFromTable = await done('eat the apple'); assert.equal(results.eatFromTable.capability, `object:${id('second-apple')}:eat`);

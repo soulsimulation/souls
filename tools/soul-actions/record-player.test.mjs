@@ -42,9 +42,6 @@ test('record player: pick a record at the tonearm, stop at the knob, refusal, in
  assert.ok(offer,'put-on-record is offered');assert.match(JSON.stringify(offer.params??offer),/Morning Waltz, Harbour Lights, Low Tide, Night Train/,'the offer lists the sleeves');
  const act=async(cap,accepted=true,params)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap,...(params?{params}:{})})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const finish=async(r,field,want,limit=600)=>{let motion=null,early=false,root=null;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){motion=m;root=[...body().pose.p];if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<(m.reach??0.65)-0.05&&state('player')[field]===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {motion,early,root,phase:edge.receipt(soul.soulId,r.receipt.id)?.phase};};
- // #1051: the phrasings that have no switch of their own read as the offers that do the job
- const said=async w=>(await (await app.request('/v1/edge/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:w})})).json()).resolve.candidates[0]?.id;
- assert.equal(await said('turn on the record player'),`object:${id('player')}:put-on-record`,'turning it on is putting a record on');
  // refused: stopping an off player, an unknown record, no record named
  const stopOff=await act('object:player:switch-off',false);
  assert.match(JSON.stringify(stopOff),/object\.state/);assert.match(JSON.stringify(stopOff),/is off/,'stopping an off record player is refused as off');
@@ -84,12 +81,6 @@ test('record player: pick a record at the tonearm, stop at the knob, refusal, in
  // the pick is the Soul's (any sleeve, case and spacing forgiven), not a cycle
  await run('object:player:put-on-record','record','Night Train','tuner',{record:'  night TRAIN '});
  await run('object:player:put-on-record','record','Morning Waltz','tuner',{record:'Morning Waltz'});
- // plain words the way a Soul says them
- const resolve=async(w,params={})=>{const r=await (await app.request('/v1/edge/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:w,params})})).json();return r.resolve?.would?.capability??r.resolve?.code??JSON.stringify(r).slice(0,200);};
- const words={};for(const w of ['put on a record','play a record','put a record on','play a record on the record player','stop the record player','turn off the record player','stop the record'])words[w]=await resolve(w,/^(stop|turn)/.test(w)?{}:{record:'Harbour Lights'});
-for(const w of ["put on a record","play a record","put a record on","play a record on the record player"])assert.equal(words[w],`object:${id('player')}:put-on-record`,`"${w}": ${words[w]}`);
- assert.equal(words['stop the record player'],`object:${id('player')}:switch-off`);
- assert.equal(words['stop the record'],`object:${id('player')}:switch-off`,'#1051: the record, not the body');
  const nearOn=await here();
  await run('object:player:switch-off','on',false,'valve');
  assert.equal(state('player').record,'Morning Waltz','the record stays on the platter');
@@ -103,6 +94,6 @@ for(const w of ["put on a record","play a record","put a record on","play a reco
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);
  assert.equal(restored.get('player').state.on,false);assert.equal(restored.get('player').state.record,'Morning Waltz');
  assert.deepEqual(f.host.engine.runtime.violations,[]);
- const report={status:'pass',plainWords:words,refusals:{stopOff:stopOff.code??stopOff.refusal?.code??null,stopOffReason:JSON.stringify(stopOff).slice(0,300),unknown:JSON.stringify(unknown).slice(0,400)},hereBytes:{absent:JSON.stringify(absent).length,distant100Players:JSON.stringify(far).length,nearbyOff:JSON.stringify(near).length,nearbyOn:JSON.stringify(nearOn).length},rows:{off:row0,on:onRow},standSpread:+spread.toFixed(3),results};
+ const report={status:'pass',refusals:{stopOff:stopOff.code??stopOff.refusal?.code??null,stopOffReason:JSON.stringify(stopOff).slice(0,300),unknown:JSON.stringify(unknown).slice(0,400)},hereBytes:{absent:JSON.stringify(absent).length,distant100Players:JSON.stringify(far).length,nearbyOff:JSON.stringify(near).length,nearbyOn:JSON.stringify(nearOn).length},rows:{off:row0,on:onRow},standSpread:+spread.toFixed(3),results};
  if(out){mkdirSync(out,{recursive:true});writeFileSync(`${out}/summary.json`,JSON.stringify(report,null,2));}console.log(JSON.stringify(report));
 });

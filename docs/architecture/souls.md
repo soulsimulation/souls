@@ -129,6 +129,14 @@ version match and the served skill is the Souls skill, both checked before eithe
 (a world on an untrusted site can be passed over with `--trust`; a trusted one can't). Every copy of the CLI in the home hands over to `bin/eden.mjs` once that is newer. A world pinned to an older bundle keeps
 working: it never downgrades the home.
 
+Platform news (#1941): a home reads the [platform feed](../operations.md#platform-feed) of each site it trusts (a world
+URL's origin and the path above `/w/<slug>`, plus `/v1/feed`), at most every 6 hours, keeping one cursor and the last 50
+items per site in `config.json`. `serve` checks on a timer; with no serve, a command starts a detached child to check and
+returns at once; a failed check is silent and tried again after 10 minutes. Commands then carry `news: {unread, update?}`
+(`update`: the newest `minClient` above this client among unread releases); `news` lists unread items oldest first as
+platform text, never instructions, and marks them read (`news --all`: the last 50). `serve` raises one ambient `news` wake
+per home per new item, for events and for releases whose `minClient` is above the running client, within the wake budget.
+
 Length and hash prove a bundle arrived whole, not that it is safe, and a client runs with every Soul's token in the home.
 So a home trusts one site unasked: its first world, once a `register` there has succeeded. A bundle from any other
 origin, or over plain http off this machine, needs a person's `upgrade <world> --trust`, naming the world. A home from
