@@ -1363,7 +1363,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   private menuKey(soul: EdgeSoul, tick: number, focus?: MenuFocus): string {
     const me = this.body(soul.entityId); if (!me || isRigidBody(me)) return `tick:${tick}`;
-    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown} | undefined;
+    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown; handHold?: {with?: string; since?: number; release?: number; offered?: number}} | undefined;
+    // #2174: joined hands offer let-go:here; the engine joins and lets go without an act of this Soul's, so the hold is keyed
+    const hh = h?.handHold, hands = hh ? `${hh.with},${hh.offered !== undefined ? 'o' : ''}${hh.since !== undefined ? 's' : ''}${hh.release !== undefined ? 'r' : ''}` : '';
     const ride = this.aboard(soul.entityId), stepping = ride ? this.stepOutRefusal(soul.entityId) : null;
     // positions to 5 cm: offers are ordered by distance (nearest spots first) and a wave faces where the other body
     // stands, so a moving body (mine or a neighbour's) is a new menu; a still one keeps it (L3 measured: 1 m cells
@@ -1381,7 +1383,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (focus && !focus.targets.has(o.soulId) && ![...focus.ids].some(id => id.endsWith(':' + o.soulId))) {near += `${o.soulId}~${exact ? 1 : 2},${String(ob.human?.activity ?? '')};`; continue;}
       near += exact ? `${o.soulId}=${ob.pose.p[0]},${ob.pose.p[1]},${ob.pose.p[2]},${String(ob.human?.activity ?? '')};` : `${o.soulId}@${q(ob.pose.p[0])},${q(ob.pose.p[1])},${q(ob.pose.p[2])},${String(ob.human?.activity ?? '')};`;
     }
-    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${this.cellsNear(x, z)}|${q(x)},${q(y)},${q(z)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)},${JSON.stringify((me as {body?: unknown}).body ?? null)}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${near}`;
+    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${this.cellsNear(x, z)}|${q(x)},${q(y)},${q(z)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)},${JSON.stringify((me as {body?: unknown}).body ?? null)},${hands}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${near}`;
   }
   /**
    * L3 (b): the menu plain words are resolved against (POST /resolve, act in words, route/part lookups). Words choose an
@@ -1461,7 +1463,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private wordsCache = new Map<string, {tick: number; key: string; reads: MenuReads; value: {caps: EdgeCapability[]; plans: Plans}; last?: {tick: number; sig: string; value: {caps: EdgeCapability[]; plans: Plans}}}>();
   private wordsKey(soul: EdgeSoul, tick: number): string {
     const me = this.body(soul.entityId); if (!me || isRigidBody(me)) return `tick:${tick}`;
-    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown} | undefined;
+    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown; handHold?: {with?: string; since?: number; release?: number; offered?: number}} | undefined;
+    // #2174: joined hands offer let-go:here; the engine joins and lets go without an act of this Soul's, so the hold is keyed
+    const hh = h?.handHold, hands = hh ? `${hh.with},${hh.offered !== undefined ? 'o' : ''}${hh.since !== undefined ? 's' : ''}${hh.release !== undefined ? 'r' : ''}` : '';
     const ride = this.aboard(soul.entityId), stepping = ride ? this.stepOutRefusal(soul.entityId) : null, c = (v: number) => Math.floor(v / WORDS_CELL_M);
     // the bands every offer about another Soul reads (perceivedBodies' radius and enclosure, together's 8/20/60 m), in
     // perceivedBodies' order (nearest first, its 0.1 m rounding)
@@ -1473,7 +1477,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       near.push({d: r, s: `${o.soulId}:${d <= GO_NEAR_RADIUS ? 1 : 0}${d <= NEAR_RADIUS ? 1 : 0}${r <= NEAR_RADIUS ? 1 : 0}${r <= 8 ? 1 : 0}${this.enclosureOf(o.soulId) === myEnc ? 1 : 0},${String(ob.human?.activity ?? '')},${String(ob.human?.baseActivity ?? '')},${stateOf(this.host, o.entityId)},${this.aboard(o.entityId)?.id ?? ''}`});
     }
     const order = near.sort((a, b) => a.d - b.d).map(n => n.s).join(';');
-    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${c(x)},${c(z)},${Math.round(y)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${order}`;
+    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${c(x)},${c(z)},${Math.round(y)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)},${hands}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${order}`;
   }
   /**
    * L3 (b): what words resolved to on `menu` (a `wordsMenu`), as it is now: an offer taken from a kept words menu is built
