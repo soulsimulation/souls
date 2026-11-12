@@ -27,7 +27,7 @@ export function fileStep(path) {
   if (/^apps\/web\/(?:src|test)\/(?:.+\/)?[^/]+\.test\.(?:ts|tsx|mjs|js)$/.test(path)) return { step: 'V4-web' };
   if ((m = /^packages\/([^/]+)\/src\/(?:core-kit\/)?[^/]+\.test\.ts$/.exec(path)) && PACKAGE_DIRS.has(m[1])) return { step: 'V3-packages', prefix: m[1] === 'catalog' ? 'conformance' : m[1] };
   if (/^mars\/viewer\/engine\/test\/[^/]+\.test\.ts$/.test(path)) return { step: 'V3-mars-engine' };
-  if (/^tools\/(?:edge-skill|client-eval)\/[^/]+\.test\.mjs$/.test(path)) return { step: 'V3-client-cli' };
+  if (/^tools\/(?:edge-skill|client-eval|world-launcher\/soul)\/[^/]+\.test\.mjs$/.test(path)) return { step: 'V3-client-cli' };
   if (/^tools\/world-launcher\/[^/]+\.test\.mjs$/.test(path)) return { step: 'V3-launcher-unit' };
   if (/^tools\/test-harness\/[^/]+\.test\.mjs$/.test(path)) return { step: 'V3-harness' };
   if (path === 'tools/test-harness/walk/walk-gate.test.mjs') return { step: 'V3-walk' };

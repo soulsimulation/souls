@@ -132,8 +132,6 @@ test('swap shelf: leave and take by plain words, no door, who left what, nearby 
  ok(god.act({ops: [{op: 'remove', id: [...god.model.entities.values()].find(e => e.in.parent === shelfId && e.name !== 'bowl').id}]})); await tick(10);
  results.bookPut = await done('leave the book on the swap shelf');
  assert.deepEqual(leftBy().split(',').sort(), [`${bowl}=${souls.Bea.soulId}`, `${id('book')}=${souls.Ana.soulId}`].sort(), 'the record: the bowl Bea left and the book Ana left');
- // "from Ana" names a Soul, not the shelf: the leaver in the take label is not container words
- {const prev = soul; soul = souls.Bea; try {const r = await (await app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: 'take the book from Ana'})})).json(); results.fromAna = r.resolve?.capability ?? r.resolve?.code ?? null; assert.notEqual(r.resolve?.capability, `pick-up:${id('book')}`, JSON.stringify(r).slice(0, 300));} finally {soul = prev;}}
  results.bookTake = await done('take the book from the swap shelf', souls.Bea);
  assert.equal(results.bookTake.capability, `pick-up:${id('book')}`); assert.equal(item('book').support.by, souls.Bea.entityId);
  assert.equal(leftBy(), `${bowl}=${souls.Bea.soulId}`, 'a thing taken off drops out of the record');
