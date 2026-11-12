@@ -183,6 +183,8 @@ type Alternative = {id: string; label: string; why: string; partial?: true};
 export class EdgeLedger implements EdgeLedgerHooks {
   places: PlaceIndex;
   private receiptListeners: ((r: EdgeReceipt) => void)[] = [];
+  /** #2051: receipts ended at boot, handed to listeners that subscribe before the first tick. */
+  private bootEnded?: EdgeReceipt[];
   private placeListeners: ((e: {soulId: string; from: string | null; to: string | null; tick: number}) => void)[] = [];
   private providers: CapabilityProvider[] = [];
   /** L3: each object offer's place, as the object providers last built it (the listing's page ranks object offers by it). */
@@ -491,7 +493,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   });
   readonly spotsRefused: string[];
   /** Stage B (split/read-host.ts): a read worker's ledger over a read-only host. The read code runs unchanged; the
-   *  constructor skips what writes or hooks into a live host (the restart re-arm loop, approach/recovery hooks, the
+   *  constructor skips what writes or hooks into a live host (the restart close-out loop, approach/recovery hooks, the
    *  host listeners) and `replicaSync()` stands in for the per-tick upkeep the read code depends on. */
   readonly readOnly: boolean;
   /** PC04 (#683): shared physical operations (carry-with). Default off (SIM_SHARED_CARRY=1 or the option) until PC05 commits them. */
@@ -510,7 +512,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     db.db.exec(`CREATE INDEX IF NOT EXISTS edge_receipts_v1_soul_at ON edge_receipts_v1 (world_id, soul_id, created_at);
       CREATE INDEX IF NOT EXISTS edge_refusals_v1_soul_at ON edge_refusals_v1 (world_id, soul_id, at);`);
     db.db.exec('CREATE TABLE IF NOT EXISTS edge_owner_control_v1(world_id TEXT NOT NULL,soul_id TEXT NOT NULL,until_ms INTEGER NOT NULL,PRIMARY KEY(world_id,soul_id)) WITHOUT ROWID');
-    // PM-R055: a waiting act's plan is kept with its receipt so a restart re-arms it instead of losing it.
+    // PM-R055: a waiting act's plan is kept with its receipt (a read worker describes it; #2051 ends it at a restart).
     if (!(db.db.prepare('PRAGMA table_info(edge_receipts_v1)').all() as {name: string}[]).some(c => c.name === 'plan')) db.db.exec('ALTER TABLE edge_receipts_v1 ADD COLUMN plan TEXT');
     // intents/1 + strict/1 (Core-A): receipt detail {channel, chosen, endedAt} (JSON)
     if (!(db.db.prepare('PRAGMA table_info(edge_receipts_v1)').all() as {name: string}[]).some(c => c.name === 'detail')) db.db.exec('ALTER TABLE edge_receipts_v1 ADD COLUMN detail TEXT');
@@ -551,16 +553,23 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (this.readOnly) return;
     // D1: the card's doing line names an edge act's approach ("walking to Kitchen chair") from this ledger's plans
     host.approachV1 = m => {const program = host.engine.programOf(m.entityId), r = program ? this.rows("soul_id=? AND phase='started' AND program_id=?", m.soulId, program)[0] : undefined; return r ? this.approachFor(m, r.receipt_id) : null;};
-    // Open receipts from a previous process: a started one whose programme the snapshot carries is still followed;
-    // a waiting one with its plan is re-armed (fresh one-minute wait); anything else cannot be followed honestly.
+    // #2051: open receipts from a previous process end here, before the world serves a request (a terminal row is
+    // already the truth and is never touched). A resumed act would read `started` for its whole remaining length
+    // (a nap, minutes) with no bound tied to the restart; its programme is stopped (a logged `edge-stop` naming it,
+    // so a newer act is never the one stopped) and a plan re-issues the step (`receipt.lost-on-restart` is resumable).
+    // A share of a running carry stays with the shared reconcile (PC05/PC10), which follows or ends it. A hand-contact
+    // act whose bound effect already landed (`contactAppliedV1`: the door opened, only the arm is still coming down)
+    // ends completed, as its programme's end would have. Listeners that subscribe before the first tick (the event
+    // stream, owner loop, plans) are handed these endings too, so a client `wait` sees them at once.
+    const ended: EdgeReceipt[] = [];
+    this.bootEnded = ended;
     for (const r of this.rows("phase IN ('waiting','started')")) {
-      const detail=r.detail?JSON.parse(r.detail):{};if(detail.contactActuatorV1?.motionV1&&!detail.contactAppliedV1||detail.doorPassageV1)this.contactPending.add(r.receipt_id);
+      const detail=r.detail?JSON.parse(r.detail):{};
+      if (r.phase === 'started' && this.together.sharedLive(r.receipt_id)) {if(detail.contactActuatorV1?.motionV1&&!detail.contactAppliedV1||detail.doorPassageV1)this.contactPending.add(r.receipt_id);continue;}
       const m = host.minds.get(r.soul_id);
-      if (r.phase === 'started' && r.program_id && m && host.engine.programOf(m.entityId) === r.program_id) continue;
-      if (r.phase === 'started' && this.together.sharedLive(r.receipt_id)) continue;   // PC05/PC10: a share of a running carry (the shared reconcile follows or ends it)
-      const plan = r.phase === 'waiting' && r.plan ? JSON.parse(r.plan) as {label: string; steps: Program['steps']; navWarm?: true} : null;
-      if (plan && m && !this.pending.has(r.soul_id)) {this.pending.set(r.soul_id, {receipt: r.receipt_id, soul: {soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner}, steps: plan.steps, label: plan.label, deadline: host.engine.world.tick + (plan.navWarm ? NAV_WARM_WAIT_TICKS : WAIT_LIMIT_TICKS), capability: r.capability, ...(plan.navWarm ? {navWarm: true as const} : {})}); continue;}
-      this.update(r.receipt_id, {phase: 'failed', code: 'receipt.lost-on-restart', reason: 'The server restarted before this action could be followed to its end.'});
+      this.update(r.receipt_id, detail.contactAppliedV1 ? {phase: 'completed'} : {phase: 'failed', code: 'receipt.lost-on-restart', reason: 'The world restarted while this action was in progress, so it was stopped; choose again.'});
+      const v = this.receipt(r.soul_id, r.receipt_id); if (v) ended.push(v);
+      if (r.phase === 'started' && r.program_id && m && host.engine.programOf(m.entityId) === r.program_id) try {void host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId: m.entityId, programId: r.program_id, why: 'world.restarted'}).catch(() => {/* best effort */});} catch {/* clock not ready: the programme ends on its own, unreceipted */}
     }
     // Hotfix: in an edge world an engine fault is recovered by attributing it to edge programmes (never a process exit)
     host.recoveryForEdge = true;
@@ -568,7 +577,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       onApplied: e => {this.onRecovery(e);if(e.kind==='body-assignment-v1'&&typeof e.payload?.soulId==='string')this.ownerControlGrace(e.payload.soulId);},
       onDecision: (e, r) => this.onDecision(e, r),
       onProgram: ev => this.onProgram(ev),
-      afterTick: tick => {this.afterTick(tick);this.stallGuard.afterTick(tick);for(const l of this.tickListeners)try{l(tick);}catch{/* a listener fault never stops the clock */}},
+      afterTick: tick => {this.bootEnded = undefined;this.afterTick(tick);this.stallGuard.afterTick(tick);for(const l of this.tickListeners)try{l(tick);}catch{/* a listener fault never stops the clock */}},
     });
   }
   /** Read worker (readOnly): after each applied delta, what main's afterTick keeps for the read code: the faded set (from
@@ -634,8 +643,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private bodyPlans = new Map<string, {capability: string; label: string; steps: Program['steps']}>();
   private planFor(receipt: string, capability: string, label: string, steps: Program['steps']) {
     this.bodyPlans.set(receipt, {capability, label, steps}); if (this.bodyPlans.size > 512) this.bodyPlans.delete(this.bodyPlans.keys().next().value!);
-    // B-facade: kept with the receipt too, so a read worker names the approach as main does (the restart re-arm reads a
-    // plan only for a waiting receipt: a started one's is description only)
+    // B-facade: kept with the receipt too, so a read worker names the approach as main does (description only: since
+    // #2051 a restart ends the receipt instead of re-arming it)
     try {(this.planStmt ??= this.db.db.prepare('UPDATE edge_receipts_v1 SET plan=? WHERE world_id=? AND receipt_id=?')).run(JSON.stringify({label, steps}), this.host.worldId, receipt);} catch {/* the description is best effort */}
   }
   private planStmt: ReturnType<Db['db']['prepare']> | null = null;
@@ -891,8 +900,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #790 (D021): receipts whose body program started but whose body has not visibly begun yet. `started` stays the
    *  engine's program start; the first tick after it at which the body's activity changes or its root moves more than
    *  MOTION_M is kept as the receipt's `firstMotionTick` (detail). A body with no human state is judged by displacement
-   *  only. In memory only: a receipt restored as still running after a restart is not watched again (its pre-restart
-   *  state is unknown, so a later change would be a false first motion) and keeps no `firstMotionTick` unless set before. */
+   *  only. In memory only: since #2051 no receipt but a shared carry's share stays running across a restart, and that
+   *  one is not watched again (its pre-restart state is unknown) and keeps no `firstMotionTick` unless set before. */
   private motionWatch=new Map<string,{entityId:string;activity:string;p:[number,number]}>();
   private watchMotion(id:string,soulId:string){
     const m=this.host.minds.get(soulId),e=m?(this.mw.world as NativeWorld).entities[m.entityId]:undefined;if(!m||!e)return;
@@ -1284,7 +1293,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const c0 = cpuNow(), {core, reads} = this.recordReads(() => this.bindsCore(soul)); menuStats.cap.cpuUs += cpuNow() - c0;
     const value = this.bindsTail(soul, core); this.capCache.set(soul.soulId, {tick, key, reads, value: core, last: {tick, sig, value}}); return value;
   }
-  /** Everything a Soul's menu reads that moves without a version of its own: its body (position to 5 cm, level, activity, ride),
+  /** Everything a Soul's menu reads that moves without a version of its own: its body (position to 5 cm, level, activity, ride, hand hold),
    *  its look (`body`: a seat too high or low for its height is refused, R2 gate use-check),
  *  the bodies within go-near reach (5 cm, activity), the cells versions near it (acts and closed receipts bump
    *  them), the together version, the static world and the menu generation (global clears). Rigid bodies (creatures)
@@ -1363,7 +1372,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   private menuKey(soul: EdgeSoul, tick: number, focus?: MenuFocus): string {
     const me = this.body(soul.entityId); if (!me || isRigidBody(me)) return `tick:${tick}`;
-    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown} | undefined;
+    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown; handHold?: {with?: string; since?: number; release?: number; offered?: number}} | undefined;
+    // #2174: joined hands offer let-go:here; the engine joins and lets go without an act of this Soul's, so the hold is keyed
+    const hh = h?.handHold, hands = hh ? `${hh.with},${hh.offered !== undefined ? 'o' : ''}${hh.since !== undefined ? 's' : ''}${hh.release !== undefined ? 'r' : ''}` : '';
     const ride = this.aboard(soul.entityId), stepping = ride ? this.stepOutRefusal(soul.entityId) : null;
     // positions to 5 cm: offers are ordered by distance (nearest spots first) and a wave faces where the other body
     // stands, so a moving body (mine or a neighbour's) is a new menu; a still one keeps it (L3 measured: 1 m cells
@@ -1381,7 +1392,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (focus && !focus.targets.has(o.soulId) && ![...focus.ids].some(id => id.endsWith(':' + o.soulId))) {near += `${o.soulId}~${exact ? 1 : 2},${String(ob.human?.activity ?? '')};`; continue;}
       near += exact ? `${o.soulId}=${ob.pose.p[0]},${ob.pose.p[1]},${ob.pose.p[2]},${String(ob.human?.activity ?? '')};` : `${o.soulId}@${q(ob.pose.p[0])},${q(ob.pose.p[1])},${q(ob.pose.p[2])},${String(ob.human?.activity ?? '')};`;
     }
-    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${this.cellsNear(x, z)}|${q(x)},${q(y)},${q(z)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)},${JSON.stringify((me as {body?: unknown}).body ?? null)}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${near}`;
+    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${this.cellsNear(x, z)}|${q(x)},${q(y)},${q(z)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)},${JSON.stringify((me as {body?: unknown}).body ?? null)},${hands}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${near}`;
   }
   /**
    * L3 (b): the menu plain words are resolved against (POST /resolve, act in words, route/part lookups). Words choose an
@@ -1461,7 +1472,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private wordsCache = new Map<string, {tick: number; key: string; reads: MenuReads; value: {caps: EdgeCapability[]; plans: Plans}; last?: {tick: number; sig: string; value: {caps: EdgeCapability[]; plans: Plans}}}>();
   private wordsKey(soul: EdgeSoul, tick: number): string {
     const me = this.body(soul.entityId); if (!me || isRigidBody(me)) return `tick:${tick}`;
-    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown} | undefined;
+    const [x, y, z] = me.pose.p, h = me.human as {activity?: unknown; baseActivity?: unknown; level?: unknown; seat?: unknown; handHold?: {with?: string; since?: number; release?: number; offered?: number}} | undefined;
+    // #2174: joined hands offer let-go:here; the engine joins and lets go without an act of this Soul's, so the hold is keyed
+    const hh = h?.handHold, hands = hh ? `${hh.with},${hh.offered !== undefined ? 'o' : ''}${hh.since !== undefined ? 's' : ''}${hh.release !== undefined ? 'r' : ''}` : '';
     const ride = this.aboard(soul.entityId), stepping = ride ? this.stepOutRefusal(soul.entityId) : null, c = (v: number) => Math.floor(v / WORDS_CELL_M);
     // the bands every offer about another Soul reads (perceivedBodies' radius and enclosure, together's 8/20/60 m), in
     // perceivedBodies' order (nearest first, its 0.1 m rounding)
@@ -1473,7 +1486,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       near.push({d: r, s: `${o.soulId}:${d <= GO_NEAR_RADIUS ? 1 : 0}${d <= NEAR_RADIUS ? 1 : 0}${r <= NEAR_RADIUS ? 1 : 0}${r <= 8 ? 1 : 0}${this.enclosureOf(o.soulId) === myEnc ? 1 : 0},${String(ob.human?.activity ?? '')},${String(ob.human?.baseActivity ?? '')},${stateOf(this.host, o.entityId)},${this.aboard(o.entityId)?.id ?? ''}`});
     }
     const order = near.sort((a, b) => a.d - b.d).map(n => n.s).join(';');
-    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${c(x)},${c(z)},${Math.round(y)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${order}`;
+    return `${this.staticVersion()}|${this.menuInputs()}|${this.menuGen}|${this.together.version}|${c(x)},${c(z)},${Math.round(y)},${String(h?.activity ?? '')},${String(h?.baseActivity ?? '')},${String(h?.level ?? '')},${JSON.stringify(h?.seat ?? null)},${hands}|${ride ? `${ride.id},${ride.phase},${ride.riderPhase},${stepping?.code ?? ''}` : ''}|${this.faded.has(soul.soulId) ? 'f' : ''}|${this.clockMinute(tick)}|${order}`;
   }
   /**
    * L3 (b): what words resolved to on `menu` (a `wordsMenu`), as it is now: an offer taken from a kept words menu is built
@@ -3377,7 +3390,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** Last ambient-life decision per Soul (ms): a posture ambient life chose is not the Soul's own choice. */
   private ambientAt = new Map<string, number>();
-  onReceipt(l: (r: EdgeReceipt) => void) {this.receiptListeners.push(l);}
+  onReceipt(l: (r: EdgeReceipt) => void) {this.receiptListeners.push(l);for (const r of this.bootEnded ?? []) try {l(structuredClone(r));} catch {/* listener faults never break the ledger */}}
   private tickListeners: ((tick: number) => void)[] = [];
   /** #1295: a light read of a receipt (no body or outcome facts), for the owner loop's sweep and close guard. */
   receiptBrief(soulId: string, id: string): {id: string; capability: string; phase: string; acceptedTick: number; endedTick: number | null} | null {
