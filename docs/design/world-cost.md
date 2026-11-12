@@ -65,7 +65,7 @@ boot (2.9 s of CPU in the window's first 10 s) and one snapshot tick of 210 ms. 
 | — lifecycle journal `recover`, which runs every tick with nothing to recover | 0.40 |
 | Drain, broadcast, clock, load monitor | about 0.1 |
 
-At 20 ticks/s the steady tick is 4.6 % of a laptop core, which would be about 14 % on eden2 at ×3, or **about 7 ms of
+At 20 ticks/s the steady tick is 4.6 % of a laptop core, which would be about 14 % on the production host at ×3, or **about 7 ms of
 the 12 ms**. Almost all of it is work that is O(entities) and proves nothing happened.
 
 **Unexplained: 12 ms in production against 2–3 ms on the bench.** This is the first thing to measure (task 1 below).
@@ -73,7 +73,7 @@ The candidates, with the evidence for each:
 
 | Candidate | Evidence | Size, *guess* |
 |---|---|---|
-| Slower host cores | `relevant.ts`: the same pass took 3 ms on the laptop and about 9 ms on eden2. `load.md`: a read takes 100–300 ms on eden2 against 33 ms on the laptop | ×3 |
+| Slower host cores | `relevant.ts`: the same pass took 3 ms on the laptop and about 9 ms on the production host. `load.md`: a read takes 100–300 ms on the production host against 33 ms on the laptop | ×3 |
 | Residents and natives | Production Eden has Souls, and every bench quiet arm so far has none. For each Soul, `advanceLives` runs needs and an O(Souls²) proximity test every tick, and an idle Soul gets an ambient act within 400 ticks | unmeasured (task 1) |
 | Snapshots and the recovery copy | one snapshot tick took 210 ms here, and snapshots come about every 400 ticks with activity (#1961) | +0.5 ms on the laptop |
 | Nav re-warm | the warm-up after boot cost 2.9 s of CPU in 10 s; in a long-running world the 25 MB connectivity LRU may evict and recompile | unknown |
@@ -87,7 +87,7 @@ and where they don't, the world keeps ticking.
 
 | # | Design | Saves | Risks | Smallest first step |
 |---|---|---|---|---|
-| **D1** | **A quiet tick costs O(changes).** A table version that every add, remove, replace and field write bumps replaces the per-tick identity scans (`sameArray` via `stableIndices`, `relevantEntities`, the recorder's final-state copy, `recutV1`'s refusal copy). The lifecycle journal's `recover` runs only when the journal has entries. | The scans, the recorder copy and the refusal copy are about 1.5 ms and the journal 0.4 ms of a steady 2.3 ms laptop tick. Target: under 0.5 ms on the laptop, about 2 ms on eden2 (*guess*) | A write that skips the version bump gives a stale memo, and the world diverges. Mitigation: a debug mode re-runs the old scan and asserts, and golden takes stay byte-identical | One counter on `WorldState.entities` writes, with `stableIndices` keyed on it. Measure the step ms on idle0 |
+| **D1** | **A quiet tick costs O(changes).** A table version that every add, remove, replace and field write bumps replaces the per-tick identity scans (`sameArray` via `stableIndices`, `relevantEntities`, the recorder's final-state copy, `recutV1`'s refusal copy). The lifecycle journal's `recover` runs only when the journal has entries. | The scans, the recorder copy and the refusal copy are about 1.5 ms and the journal 0.4 ms of a steady 2.3 ms laptop tick. Target: under 0.5 ms on the laptop, about 2 ms on the production host (*guess*) | A write that skips the version bump gives a stale memo, and the world diverges. Mitigation: a debug mode re-runs the old scan and asserts, and golden takes stay byte-identical | One counter on `WorldState.entities` writes, with `stableIndices` keyed on it. Measure the step ms on idle0 |
 | **D2** | **Exact needs in closed form.** A need is stored as an anchor `(value, tick, rate)`, and `need(t) = clamp(value + rate·(t − tick)/dayTicks)` is evaluated from the anchor. The anchor resets only when activity, company or nourishment changes, and those are events. Stepping and skipping then compute the same expression and give the same bits. Integer fixed point (units of 1/dayTicks) works too | Makes skipping possible for worlds with Souls. Also drops `advanceLives`' per-tick O(Souls²) proximity test to event time | The trajectory moves by float rounding once: a deliberate golden change in its own reviewed commit. The company test needs proximity events (enter or leave 4 m), which the engine already has for bodies | `advanceNeeds` from an anchor, plus a test that 400 single steps and one evaluation are bit-identical |
 | **D3** | **Skip to the next event.** Every deadline (kernel `until`, receipts, weather `until`, calendar, expiries, snapshot, `ambientLife`'s 400-tick idle mark, day and phase boundaries) goes into one timer wheel keyed by tick. When nothing moves, no programme runs and no RNG is drawn before T, `skipTo(T)` sets the tick and nothing else, and everything that is a pure function of time is read lazily. The wall-keyed `body-rule.ts` timers move to ticks first (#2235 audit) | An empty world: about 100 % of its tick CPU. A world whose Souls all sleep: the same until the next wake. A world with awake idle Souls: little, because an ambient act comes at least every 20 s and walking must be stepped | Any time-dependent state missing from the wheel breaks equivalence. Mitigation: #2235 A5′, the same seed ticked and skipped must give equal hashes, run in CI on an empty world, a sleeping world and a native world | `quietUntil()` on the engine, *read-only*, logged next to each tick. It proves the horizon before anything skips |
 | **D4** | **Hibernate on a proven horizon.** When D3's horizon is more than a few minutes away, the launcher exits the world and wakes it at T or on the next request, and the boot runs `skipTo` | Memory and CPU drop to zero while the world hibernates. An empty or sleeping world then costs only disk | A wake is a cold boot (6.8 s median, worst 22 s, #1982). A template pack (D6) makes it cheaper | The launcher reads `quietUntil` and exits only when the horizon is more than 10 min away |
@@ -108,14 +108,14 @@ Assumptions:
   policy gives worlds the whole host less 3.5 GB.
 - CPU: 8 vCPU (Hetzner's listing for cpx42; the repo does not state it), with 6 cores for ticks.
 - A quiet tick is 12 ms in production, so 0.24 of a core at 20 ticks/s.
-- A walking Soul costs 0.38 ms per tick on the laptop (#1961), about 1.1 ms on eden2, which is 0.023 of a core. That
+- A walking Soul costs 0.38 ms per tick on the laptop (#1961), about 1.1 ms on the production host, which is 0.023 of a core. That
   is a world's whole tick budget at about 35 walkers.
 - An idle Soul's cost and a Soul's memory (*guess*: a few MB) are unmeasured.
 - The Souls column gives the walking Souls the CPU left over can carry, with the budget column's worlds running.
 
 Each row includes the rows above it.
 
-| Step | Memory per quiet world | Quiet tick on eden2 | Worlds at the 7.4 GB budget | Worlds at 12.5 GB | Worlds by CPU | Walking Souls by CPU (7.4 GB worlds) | Binds first |
+| Step | Memory per quiet world | Quiet tick in production | Worlds at the 7.4 GB budget | Worlds at 12.5 GB | Worlds by CPU | Walking Souls by CPU (7.4 GB worlds) | Binds first |
 |---|---|---|---|---|---|---|---|
 | Today | 717 MB | 12 ms | **10** | 17 | 25 | 155 | memory |
 | Admit by measured Pss, if Pss ≈ 500 MB | 500 | 12 ms | 14 | 25 | 25 | 115 | memory |
