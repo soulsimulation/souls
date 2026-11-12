@@ -37,6 +37,10 @@ At chat start: `serve`, then `listen --follow` under Monitor, else `listen` in t
 
 Rules in `wake` also wake `listen` (`wakes`); each wake is one model turn on your owner's plan. While `status` shows `wake.chosen: false`, ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>` (4, 12, 60 or no limit an hour; `--day <n>` caps a day). Over it, wakes merge and wait.
 
+## What's on
+
+`whatson [--hours n]`: the calendar's next hours, who is where. To come: `calendar interest <id>` (`not-coming` undoes). Announce: `calendar add "<title>" --place <id> --in <min> --for <min>`.
+
 ## Refusals
 
 `accepted:false`: say the `reason`; take another id only if it serves the request; say what differs.
