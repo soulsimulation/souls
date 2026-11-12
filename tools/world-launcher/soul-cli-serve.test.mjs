@@ -1199,3 +1199,60 @@ test('#1345 A5: the flags are checked before anything is saved', async (t) => {
   assert.equal(st.code, 0, st.err);
   assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, false);
 });
+
+// #1940: serve follows the home's installed client (config.client and its copy in bin/), after an upgrade or a rollback.
+/** The serve world as a home: its Soul imported, commands run as an owner's would (HOME there, beats every second). */
+async function homeWorld(t) {
+  const w = await world(t), legacy = join(w.dir, '.eden-agent.json');
+  writeFileSync(legacy, JSON.stringify({ ...JSON.parse(readFileSync(legacy, 'utf8')), soul: 's_me' }), { mode: 0o600 });
+  w.home = (...args) => w.cliEnv({ HOME: w.dir, SOULS_HOME: '', SOULS_PRINCIPAL: '', EDEN_TIME_SCALE: '0.05' }, ...args);
+  assert.equal((await w.home('import')).code, 0);
+  /** Install a client in bin/ and name it in config.json, as upgrade and upgrade --rollback do. */
+  w.install = (version, bytes) => {
+    writeFileSync(join(w.dir, '.souls/bin/eden.mjs'), bytes, { mode: 0o755 });
+    const cfg = join(w.dir, '.souls/config.json');
+    writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), client: version }));
+  };
+  return w;
+}
+const ours = /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(cli, 'utf8'))[1];
+
+test('#1940 A1-A3: after an upgrade serve hands over to the installed client; its plan and wake rules carry on', async (t) => {
+  const w = await homeWorld(t);
+  const a = await w.home('serve');
+  assert.equal(a.json.serving, true, a.err);
+  assert.equal((await w.home('serve', '--status')).json.version, ours, 'status names the running client');
+  assert.equal((await w.home('wake', 'add', 'act-ended')).json.added, 'w1');
+  w.owner('msg_1', 'Mill then pond');
+  assert.equal((await w.home('plan', JSON.stringify(['walk:mill', 'walk:pond']), '--for', 'msg_1')).json.accepted, true);
+  assert.ok(await until(() => w.acts === 1), 'step 1 is under way in the world, none in flight here');
+  w.install('9.9.9', readFileSync(cli, 'utf8').replace(/^const VERSION = "[0-9.]+";$/m, 'const VERSION = "9.9.9";'));
+  const b = await until(async () => { const s = (await w.home('serve', '--status')).json; return s?.version === '9.9.9' ? s : null; }, 10_000);
+  assert.ok(b, 'the new client is serving within a few beats');
+  assert.notEqual(b.pid, a.json.pid);
+  assert.ok(await until(() => !alive(a.json.pid)), 'the old one exits once the new one answers');
+  assert.ok((await w.home('wake')).json.rules.some((r) => r.id === 'w1'), 'the wake rule survives');
+  const p = (await w.home('pending')).json;
+  assert.equal(p.plan?.state, 'running', JSON.stringify(p.plan)); assert.equal(p.plan.step, 1, 'the pending plan survives at its step');
+  ended(w, 'r_1');
+  assert.ok(await until(() => w.acts === 2), 'the new client runs the plan\'s next step');
+  ended(w, 'r_2');
+  assert.ok(await until(() => w.results.length === 1));
+  assert.equal(w.acts, 2, 'each step acted once across the handover');
+});
+
+test('#1940 A2/A3: a client that fails to start leaves the old serve running, and status says why', async (t) => {
+  const w = await homeWorld(t);
+  const a = await w.home('serve');
+  assert.equal(a.json.serving, true, a.err);
+  assert.equal((await w.home('wake', 'add', 'act-ended')).json.added, 'w1');
+  w.install('2.0.0', 'const VERSION = "2.0.0";\nprocess.exit(3);\n');   // a rollback to a client that cannot start
+  const s = await until(async () => { const x = (await w.home('serve', '--status')).json; return x?.handoverFailed ? x : null; }, 10_000);
+  assert.ok(s, 'the failure is reported in status');
+  assert.equal(s.pid, a.json.pid); assert.equal(s.version, ours);
+  assert.equal(s.handoverFailed.to, '2.0.0'); assert.match(s.handoverFailed.why, /exited \(code 3\) before it answered/);
+  assert.ok(alive(a.json.pid));
+  assert.ok((await w.home('wake')).json.rules.some((r) => r.id === 'w1'), 'and it still answers');
+  await sleep(1500);
+  assert.equal((await w.home('serve', '--status')).json.pid, a.json.pid, 'that version is not tried again');
+});
