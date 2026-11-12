@@ -46,8 +46,9 @@ export class WorldContextViews {
     private generation = 0;
     private requestController: AbortController | null = null;
     private pending = new Map<string, (url: string | null) => void>();
-    /** #2192: ready picture URLs by ref for the world revision they came from; a reopened Explore asks the server nothing. */
-    private ready = new Map<string, { url: string; label?: string }>();
+    /** #2192: settled pictures by ref for the world revision they came from (a URL, or null when the server could not
+     * make one); a reopened Explore asks the server nothing. Pictures still pending are asked for again. */
+    private ready = new Map<string, { url: string | null; label?: string }>();
     private readyRevision: number | null = null;
     private scheduled = false;
     private pictureController = new AbortController();
@@ -180,7 +181,7 @@ export class WorldContextViews {
                         }
                         // #2192: the compact WebP when the server has one; both URLs are content-keyed and cached immutable
                         const url = view.status === 'ready' && (view.thumb || view.url) ? this.api(view.thumb || view.url) : null;
-                        if (url) this.ready.set(view.ref, { url, label });
+                        if (view.status === 'ready' || view.status === 'unavailable') this.ready.set(view.ref, { url, label });
                         waiting.get(view.ref)?.(url);
                         waiting.delete(view.ref);
                     }

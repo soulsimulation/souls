@@ -139,7 +139,7 @@ test('#2192: a reopened Explore reuses ready pictures without asking the server,
     const previous = globalThis.fetch, ac = new AbortController(), posts: string[][] = [];
     let revision = 1;
     globalThis.fetch = async (input, init) => {
-        if (init?.body) { const refs: string[] = JSON.parse(String(init.body)).refs; posts.push(refs); return Response.json({ views: refs.map(ref => ({ ref, status: 'ready', key: 'k', url: '/v1/world/context/image?ref=' + ref, thumb: ref === 'e_old' ? null : '/v1/world/context/thumb?ref=' + ref, photo: { cutaway: true, provenance: { camera: 'authored', front: 'door' } } })) }); }
+        if (init?.body) { const refs: string[] = JSON.parse(String(init.body)).refs; posts.push(refs); return Response.json({ views: refs.map(ref => ref === 'e_none' ? { ref, status: 'unavailable', url: null } : ({ ref, status: 'ready', key: 'k', url: '/v1/world/context/image?ref=' + ref, thumb: ref === 'e_old' ? null : '/v1/world/context/thumb?ref=' + ref, photo: { cutaway: true, provenance: { camera: 'authored', front: 'door' } } })) }); }
         return Response.json({ revision, listingRevision: 'l' + revision, targets: [{ ref: 'e_a', title: 'A', point: [0, 0, 0], radius: 2 }, { ref: 'e_old', title: 'Old', point: [0, 0, 0], radius: 2 }] });
     };
     try {
@@ -147,14 +147,16 @@ test('#2192: a reopened Explore reuses ready pictures without asking the server,
         await client.refresh();
         assert.equal(await client.picture('context:e_a'), '/w/fixture/v1/world/context/thumb?ref=e_a');
         assert.equal(await client.picture('context:e_old'), '/w/fixture/v1/world/context/image?ref=e_old', 'a picture rendered before thumbs falls back to the PNG');
-        assert.equal(posts.length, 2);
+        assert.equal(await client.picture('context:e_none'), null);
+        assert.equal(posts.length, 3);
         client.cancelPictures(); await client.search('');   // close and reopen
         assert.equal(await client.picture('context:e_a'), '/w/fixture/v1/world/context/thumb?ref=e_a');
-        assert.equal(posts.length, 2, 'the second open asks for no views');
+        assert.equal(await client.picture('context:e_none'), null, 'a picture the server could not make is not asked for again');
+        assert.equal(posts.length, 3, 'the second open asks for no views');
         assert.match(client.locations[0].previewLabel ?? '', /Cutaway/, 'the photo label survives the reopen');
         revision = 2; await client.refresh();
         await client.picture('context:e_a');
-        assert.equal(posts.length, 3, 'a new world revision asks again');
+        assert.equal(posts.length, 4, 'a new world revision asks again');
     }
     finally {
         globalThis.fetch = previous;
