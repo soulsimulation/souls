@@ -105,7 +105,6 @@ export function createWorldClient({world,token,fetchImpl=fetch,timeoutMs=65000,s
    }
    if(command==='observe')return request('/v1/edge/observe',{signal});
    if(command==='explore')return request('/v1/edge/around'+(args.query?'?to='+segment(args.query):''),{signal});
-   if(command==='resolve')return request('/v1/edge/resolve',{method:'POST',body:{capability:args.capability,params:args.params??{}},signal,readOnly:true});
    if(command==='receipt')return request('/v1/edge/receipts/'+segment(args.id),{signal});
    if(command==='conversations')return request('/v1/edge/conversations',{signal});
    if(command==='turns')return request('/v1/edge/conversations/'+segment(args.id)+'/turns?after='+segment(args.after??0),{signal});
