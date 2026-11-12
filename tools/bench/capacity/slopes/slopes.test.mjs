@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { COPY_DEFS, CLEARANCE_M, emptySquare, withDistantInventory } from './inventory.mjs';
-import { AXES, CROWD_MS, SLOPES, activePlan, activeWindow, cores, liveWindow, planSeed, probeRoute, qualifies, reportText, scheduleFacts, slopes, summarizeProfile } from './report.mjs';
+import { AXES, CROWD_MS, SLOPES, activePlan, activeWindow, cores, liveWindow, planSeed, probeRoute, qualifies, reachedShare, reportText, scheduleFacts, slopes, summarizeProfile } from './report.mjs';
 
 const ROOT = new URL('../../../../', import.meta.url).pathname;
 const EDEN = JSON.parse(readFileSync(`${ROOT}worlds/templates/eden-2026.json`, 'utf8'));
@@ -148,4 +148,12 @@ test('#911 CodeQL: a backslash before a pipe in a failed run error cannot unesca
   const run = { arm: AXES.inventory[1], rep: 2, error: 'path C:\\tmp\\| tail' };
   const text = reportText({ indicative: true, host: {}, windows: {}, source: {} }, [run]);
   assert.ok(text.split('\n').includes('| inv10000 | 2 | path C:\\\\tmp\\\\\\| tail |'), 'backslashes doubled, then the pipe escaped');
+});
+
+test('a walkers arm reports the share of its walks the world answered and accepted (#2077)', () => {
+  const calls = [{ outcome: 'ok' }, { outcome: 'ok' }, { outcome: 'ok' }, { outcome: 'unreachable' }, { outcome: 'timeout' }];
+  assert.deepEqual(reachedShare(calls), { sent: 5, ok: 3, share: 0.6 });
+  assert.deepEqual(reachedShare([]), { sent: 0, ok: 0, share: null });
+  const x = { arm: AXES.walkers[1], rep: 1, facts: { ticksPerS: 10 }, ticks: { ticks: 2000, shares: {} }, reached: reachedShare(calls) };
+  assert.match(reportText({ indicative: true, host: {}, windows: {}, source: {} }, [x]).split('\n').find((l) => l.startsWith('| walk25 |')), /\| 3\/5 \(0\.6\) \|/);
 });

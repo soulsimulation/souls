@@ -156,6 +156,34 @@
     },
     {
       "step": "V5-server-full",
+      "from": "restart: started receipts keep being followed, waiting receipts are re-armed (clean close)",
+      "to": "restart: in-flight receipts end at boot with a named reason; finished ones are untouched (clean close)",
+      "reason": "#2051: an act in flight at a restart now ends at boot with a named reason instead of resuming; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "mid-exit snapshot and a fresh Node process preserve claims, identity and receipt completion",
+      "to": "mid-exit snapshot and a fresh Node process preserve claims and identity; the stand ends lost-on-restart and the body stands",
+      "reason": "#2051: a stand in flight at a restart ends lost-on-restart instead of completing; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "public read:here preserves server-selected shelf content through an active native restart",
+      "to": "public read:here keeps server-selected shelf content and progress across an active native restart",
+      "reason": "#2051: the shelf read in flight at a restart ends lost-on-restart; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "the exact active native painting receipt and program survive a SQLite/snapshot restart and finish once",
+      "to": "an active native painting at a SQLite/snapshot restart ends lost-on-restart and publishes nothing",
+      "reason": "#2051: a painting in flight at a restart ends lost-on-restart instead of resuming; same test, retitled to the new contract",
+      "pr": "#2056"
+    },
+    {
+      "step": "V5-server-full",
       "from": "\\#1281 H4: a flag in a secret place is not named until she knows the place",
       "to": "knowledge at scales: district summary, far names, memory of visits, look around; a stored secret mark hides nothing",
       "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
@@ -363,6 +391,93 @@
       "to": "a far hand-worked thing: left out of the whole menu, taken by id with a walk",
       "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
       "pr": "#2016"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "\\#1150, \\#1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator",
+      "to": "\\#1150, \\#1326, \\#2133 halted: live.json says the clock stopped; a `halted` problem and a restart every time; a halt that repeats at once ends held, named, after breakerN",
+      "reason": "Same test, renamed when a halted world restarts every time and is held only when the halt repeats at once (#2133)",
+      "pr": "#2142"
+    },
+    {
+      "step": "V4-web",
+      "from": "social crawlers receive the Souls identity and immutable supplied halo without JavaScript",
+      "to": "social crawlers receive the Souls identity and the large starburst card without JavaScript",
+      "reason": "Same test, renamed when the social card changed from the CDN halo to the large starburst (pwa/icon-social.png)",
+      "pr": "#2177"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI BODY authenticates privately and completed plans remain readable by ID",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI body look: show, seeded random, set parts and colours, classic preset, refusal",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-look-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "conversation start keeps the old single form and adds explicit unique group recipients",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "invalid group entries refuse rather than losing a recipient or inventing a target",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "published group argv sends one invitation POST, preserves backend refusals, and never accepts peers for them",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "published CLI normalizes plain words with params exactly once and preserves explicit capability IDs",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-word-params.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI look around / explore: short around frame with walk ids; --full raw; here has district and far",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-knowledge-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "pair-soul <id> from a fresh folder: owner window within one poll, real name, nobody else, Approve connects",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and pair-inwindow-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "single-controller CLI is distinct from retained legacy CLI and instructions preserve window binding",
+      "to": [
+        "single-controller CLI is served and instructions preserve window binding",
+        "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)"
+      ],
+      "reason": "#1754: the legacy CLI is no longer retained; the controller CLI and instructions assertions are kept in the renamed test, the legacy ones become the 404 test",
+      "pr": "#2137"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "new and forked worlds receive independent controller and legacy CLI paths",
+      "to": "new and forked worlds receive the controller CLI path and no legacy CLI path (\\#1754)",
+      "reason": "Same test, reversed by #1754: worlds get no legacy CLI path (EDGE_CLI_FILE) any more; the controller CLI path assertions are unchanged",
+      "pr": "#2137"
     }
   ]
 }
