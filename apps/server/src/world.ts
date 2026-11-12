@@ -1679,16 +1679,16 @@ export class WorldHost {
     return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
   /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
-   *  takes entities out there, one half at a time), at most once a tick; the quarantine event logs it, so a replay reads that. */
-  private thrownAt: {tick: number; ids: string[]} | null = null;
+   *  takes entities out there, one half at a time), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
   private thrownSources(error: unknown): string[] {
     if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
-    const tick = this.engine.world.tick;
-    if (this.thrownAt?.tick !== tick) {
+    const tick = this.engine.world.tick, fault = String(error);
+    if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
       let ids: string[] = [];
       try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
       catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
-      this.thrownAt = {tick, ids};
+      this.thrownAt = {tick, fault, ids};
     }
     return this.thrownAt.ids;
   }
@@ -1866,7 +1866,7 @@ export class WorldHost {
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, ...(this.thrownAt?.tick === tick && this.thrownAt.ids.length ? {thrownReading: this.thrownAt.ids} : {}), stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, ...(this.thrownAt?.tick === tick && this.thrownAt.fault === String(error) && this.thrownAt.ids.length ? {thrownReading: this.thrownAt.ids} : {}), stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
