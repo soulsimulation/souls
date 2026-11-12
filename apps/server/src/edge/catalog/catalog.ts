@@ -15,7 +15,8 @@ export const ANYWHERE: readonly (readonly [string, string])[] = [
   ['rest', 'Rest here'], ['stand', 'Stand up and stop what you are doing'], ['wander', 'Stroll around nearby'], ['wave', 'Wave'],
   ['dance', 'Dance here'], ['jump', 'Jump on the spot'], ['stretch', 'Stretch'], ['jumping-jacks', 'Do jumping jacks'], ['yoga', 'Do yoga'],
   ['pushups', 'Do push-ups'], ['situps', 'Do sit-ups'], ['bow', 'Bow'], ['clap', 'Clap or applaud'], ['nod', 'Nod'],
-  ['shake-head', 'Shake your head'], ['cheer', 'Cheer'], ['point', 'Point at someone or something']];
+  ['shake-head', 'Shake your head'], ['cheer', 'Cheer'], ['point', 'Point at someone or something'],
+  ['walk-to', 'Walk to a point on your level']];
 
 type V2 = readonly [number, number];
 export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: string | null; level: number; polygon: readonly V2[]; aliases?: readonly string[]; description?: string; ref?: string; secret?: boolean; carrier?: unknown};

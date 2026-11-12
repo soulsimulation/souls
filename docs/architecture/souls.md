@@ -355,6 +355,9 @@ withholds. Owner messages and credentials are never in it.
   that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
+- **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, nothing else) walks the Soul to that point on
+  its own level by the engine's own walk, ending at standing room. A point no route reaches is refused as a place walk
+  is (`route.*`). Words never read as it: "walk to the pond" is a walk (#1916).
 - **A thing's act from anywhere.** `object:<thing>:<verb>` sent by id is no longer refused 30 m away; its plan walks
   there and works the thing, also when the Soul's whole menu is kept, and for a thing made a moment ago (its object is
   made at once rather than at the end of the world's catch-up). The change lands where the body is: a thing worked by a
