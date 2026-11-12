@@ -81,3 +81,14 @@ test('compare: metric deltas and issues appeared / persisted / vanished', async 
   assert.ok(c.emergence['narrative.storyRating']);
   assert.match(compareMd(c), /\| speed\.ackSec\.median \| 6 \| 3\.5 \| -2\.5 \|/);
 });
+
+test('REPORT.md §3 points at MEASURES.md when the scenario ran a battery (#1774), and says none ran otherwise', async () => {
+  const { main } = await reviewed();
+  reportRun(main);
+  assert.match(readFileSync(join(main, 'REPORT.md'), 'utf8'), /No frozen battery ran in this session\./);
+  const s = readJson(join(main, 'scenario.json')); writeJson(join(main, 'scenario.json'), { ...s, battery: { file: 'tools/playtest/eval/battery/m4-v1.json' } });
+  reportRun(main);
+  const md = readFileSync(join(main, 'REPORT.md'), 'utf8');
+  assert.match(md, /This session also ran the battery `m4-v1`; its verdicts, read from world state, are in MEASURES\.md\./);
+  assert.doesNotMatch(md, /No frozen battery ran/);
+});

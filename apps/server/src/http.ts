@@ -1,4 +1,5 @@
 import {mountSoulRuntimePublication} from './soul-runtime-publication.ts';
+import {mountClientCounter, type EdgeClients} from './client-version.ts';
 import {soulClientManifest} from './soul-client-manifest.ts';
 import {mountContextViews} from './god/context-views.ts';
 import {AutoPortraits} from './portrait/auto-portraits.ts';
@@ -9,6 +10,7 @@ import {fillInstructions} from './accounts/instructions.ts';
 import {mountWelcomeRoutes} from './welcome.ts';
 import { bodyLimit } from 'hono/body-limit';
 import {admissionMiddleware, WARM_WAIT_KEY, worldBlock, type Admission} from './load/admission.ts';
+import {requestRecordFile, requestRecordMiddleware} from './load/request-record.ts';
 import {apiOf, apiRoute, recordApi} from './load/api-times.ts';
 import {SERVING_BOOT_WAIT_MS, SERVING_WAIT_MS} from './edge/ledger/ledger.ts';
 import type {Level} from './load/shared.ts';
@@ -48,7 +50,6 @@ import {mountStationRoutesV2} from './station-routes-v2.ts';
 import type {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
 import {EDGE_CONTRACT, EdgeError} from './edge/contract.ts';
-import {mountSecretPlaceRoutes} from './edge/perception/secret-routes.ts';
 import { mountGodRoutes } from './god/routes.ts';
 import { RefusalLog, floodGuard } from './flood.ts';
 import { poolOf } from './god/builds.ts';
@@ -128,6 +129,9 @@ export function buildApp(d: Deps) {
   if(d.stationV2&&d.stationV2.host!==d.host)throw new Error('V2 station must belong to selected host');
   if(d.intentV2&&(d.intentV2.host!==d.host||d.intentV2.brain!==d.brain||d.intentV2.souls!==d.souls))throw new Error('intent transport must belong to selected host');
   const app = new Hono();
+  // #1774 A4: a dev world's per-request record for playtests (load/request-record.ts); unset, nothing is mounted
+  const requestRecord = requestRecordFile(process.env, d.auth.devAuth);
+  if (requestRecord) app.use('*', requestRecordMiddleware(requestRecord));
   if(d.cfg.accountAuthRequired)d.souls.accounts??=new WorldAccounts(d.host,d.souls);
   if(d.souls.accounts)d.auth.legacyOwnerAllowed=owner=>d.souls.ownedRows(owner).length>0;
   d.host.profileWorldPath=d.cfg.worldPath;
@@ -176,6 +180,7 @@ export function buildApp(d: Deps) {
   slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
     load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
+  (app as unknown as {edgeClients?: EdgeClients}).edgeClients = mountClientCounter(app, d.db.db, c => d.souls.soulFromToken(bearer(c))?.id ?? null); // #1936: x-soul-client per Soul and day
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
   const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
@@ -238,7 +243,7 @@ export function buildApp(d: Deps) {
   if (d.god) { mountJoinRoutes(app, { worldName, baseOf, soulCliUrl: (c) => (d.cfg.cliFile ? baseOf(c) + '/eden-agent.mjs' : PUBLISHED_SOUL_CLI), souls: () => d.db.liveSouls(d.host.worldId).filter((s) => !travel?.isAway(s.id)), nowOf: (id) => d.host.nowOf(id), bodyOf: (id) => d.edge?.bodyRule?.view(id) ?? null, poseOf: (id) => { const p = (d.host.engine.world.entities as Record<string, { pose?: { p?: number[] } } | undefined>)[id]?.pose?.p; return p ? { x: p[0], y: p[1], z: p[2] } : null; } }); }
   const godRoutes = d.god ? mountGodRoutes(app, { god: d.god, worldName, requireUser, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, baseOf, limitIp, verifyUse: new VerifyUse(d.host, d.souls, d.god, d.edge), lookWorldUrl: `http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}` /* W2 remote looks */ }) : null;
   if(d.god&&d.edge)mountContextViews(app,{god:d.god,edge:d.edge,build:d.cfg.build,artOriginals:{dir:join(defaultAssetDir(),'art'),basePath:d.cfg.worldPath},levelAt:d.contextLevelAt,contextReady:d.contextReady,waitForContext:d.contextWait,worldUrl:`http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}`,soul:c=>{const token=bearer(c);if(!token)return null;return travelGate(edgeSoulResolver(d.host,d.souls,bearer))(c).soulId;},limit:c=>limitIp(c,'context-views',120,60000)});
-  if (d.god && d.edge) { const god = d.god; mountSecretPlaceRoutes(app, { ledger: d.edge, requireGod: (c) => { const who = god.godIdentity(bearer(c)); if (!who) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); if (who.child) throw new ApiError(403, 'helper.scope', 'helper tokens cannot change secret places'); } }); }  // knowledge/1; WD7: helpers refused
+  // #1262: the god route that marked a place secret (secret-routes.ts) is unmounted; no place is secret
   if (d.god) { const god = d.god; mountSharedLibraryRoutes(app, { god, slug: d.cfg.worldKey, dir: process.env.SIM_LIBRARY_DIR, requireGod: (c) => { if (!god.godFromToken(bearer(c))) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); } }); }  // M4 shared library
   if (d.god) { const god = d.god; mountArtRoutes(app, { model: () => god.model, godAct: (ops, note) => god.act({ ops }, note), engineAct: (ops, note) => god.engineAct(ops, note), isGod: (c) => { const w = god.godIdentity(bearer(c)); return !!w && !w.child; }, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, owner: () => god.owner, baseOf, limitIp, dir: join(defaultAssetDir(), 'art') }); }  // W6 art: frames, screens, gallery walls
   if (d.god && d.edge) {

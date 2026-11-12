@@ -78,7 +78,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
       return c.json({contract: EDGE_CONTRACT, error: {code: 'unavailable', message: 'the ledger could not answer; retry'}}, 503);
     }
   };
-  const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
+  // #2083: an act over its limit is refused naming the limit, so a flooding agent sees which act was not taken
+  const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw key === 'act' ? new EdgeError(429, 'rate-limited', `more than ${n} acts a minute: this act was not taken`, {limit: n, window_s: 60}) : new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
   app.get('/v1/edge/observe', wrap(c => {const s = deps.soul(c); limit(s, 'observe', 240); return L.observe(s, new Set((c.req.query('include') ?? '').split(',').filter(Boolean)));}));
   // #1329 part 4 follow-up: a search builds the whole menu and up to 12 walks on main (up to ~0.5 s), so it has its own
   // budget, as around does; a plain listing keeps the capabilities budget
@@ -138,13 +139,13 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const comms = registerEdgeComms(app, deps, {stewardToken: process.env.EDGE_STEWARD_TOKEN || undefined, fading: process.env.EDGE_FADING === '1'});
   L.attachComms(comms);
   // #1737: who is where and what was said, world-wide, for a Soul's client to follow
-  mountLiveRoute(app, deps, comms as never, catalog.version);
+  const live = mountLiveRoute(app, deps, comms as never, catalog.version);
   // LINK BODY: the body follows the agent's listen presence (edge/ledger/body-rule.ts)
   const presence = deps.ownerInbox;
   if (presence?.soulPresence) L.attachPresence({soulPresence: id => presence.soulPresence!(id), onSoulListen: l => presence.onSoulListen?.(l), onSoulSend: l => presence.onSoulSend(l)});
   // EVENTS-v1 (tranche agent-minds M1/M2/M4): push stream (SSE + WS), digest, world.notice, server-side plans, schema.
   let plans: Plans | null = null;
-  const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null,
+  const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null, live,
     bootNotice: process.env.EDGE_BOOT_NOTICE === '1' ? `The world server restarted${deps.build ? ` (${deps.build})` : ''}. Plans and open acts carried on; read the digest if you missed anything.` : null});
   plans = registerEdgePlans(app, deps, comms, events, L);
   // #1313: the owner's card reads the act under way for its newest message from the world's records
@@ -154,7 +155,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   mountSchema(app);
   const capture=options.evidenceCapture?captureNativeEvidence({gate:options.evidenceCapture,db:deps.db,worldId:deps.host.worldId,comms}):null;
   const close = comms.close;
-  return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); eyes.close(); close(); }});
+  return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); live.close(); eyes.close(); close(); }});
 }
 
 /** #1295: the duration an act asked for (`params.seconds`), when it is a number. */
