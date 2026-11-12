@@ -36,8 +36,8 @@ test('noughts and crosses: turns, third player, taken square, win, wipe, read, l
   let retries=0;const act=async(s,capability,params,accepted=true)=>{let b;for(let k=0;k<20;k++){soul=s;const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,...(params?{params}:{})})}));b=await r.json();if(b.code!=='object.admission-failed')break;retries++;await tick(10);}assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  let watch='game';const finish=async(s,receipt,limit=600)=>{let stroke=null,early=false,before=JSON.stringify(state(watch));for(let n=0;n<limit;n++){const m=body(s).human?.handActuator;if(m?.stroke){stroke=m.stroke;if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.65+m.stroke.seconds-0.05&&JSON.stringify(state(watch))!==before)early=true;}const ph=edge.receipt(s.soulId,receipt.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {stroke:stroke&&{kind:stroke.kind,seconds:stroke.seconds},early,phase:edge.receipt(s.soulId,receipt.receipt.id).phase};};
  let makeWayRetries=0;const done=async(s,capability,params)=>{for(let k=0;;k++){const r=await act(s,capability,params);const fr=await finish(s,r),rc=edge.receipt(s.soulId,r.receipt.id);if(fr.phase==='failed'&&rc.code==='reservation.conflict'&&/:make-way:\d+/.test(rc.reason??'')&&k<3){makeWayRetries++;await tick(30);continue;}assert.equal(fr.phase,'completed',capability+' '+JSON.stringify(rc).slice(0,500));return fr;}};
- const mark=(s,square)=>done(s,'mark a square on the game board',{square});
- const refused=async(s,square,re)=>{const b=await act(s,'mark a square on the game board',{square},false);assert.match(b.reason??'',re,JSON.stringify(b).slice(0,300));return b.reason;};
+ const mark=(s,square)=>done(s,`object:${id('game')}:mark`,{square});
+ const refused=async(s,square,re)=>{const b=await act(s,`object:${id('game')}:mark`,{square},false);assert.match(b.reason??'',re,JSON.stringify(b).slice(0,300));return b.reason;};
  assert.ok(edge.capabilities(ana).some(c=>c.id===`object:${id('wb')}:write`),'the whiteboard still offers write (own kind, no clash with the game board)');
  const reasons={};
  const m1=await mark(ana,'centre');assert.equal(m1.early,false,'no mark before the stroke ends');assert.equal(state('game').text,'....X....');
@@ -49,7 +49,7 @@ test('noughts and crosses: turns, third player, taken square, win, wipe, read, l
  reasons.over=await refused(ben,'bottom right',/over: Ana won/);
  const label=edge.capabilities(cy).find(c=>c.id===`read:${id('game')}`)?.label??'';assert.match(label,/won by X/);assert.ok(!/Ana|Ben|O\.X/.test(label),'the offer names the state only');
  const r=await act(cy,`read:${id('game')}`);await finish(cy,r);const read=edge.receipt(cy.soulId,r.receipt.id).outcome?.summary??'';assert.match(read,/Ana \(X\) against Ben \(O\); Ana won/);
- const wipe=await done(cy,'wipe the game board for a new game');assert.equal(wipe.stroke.kind,'wipe');assert.equal(state('game').text,'');
+ const wipe=await done(cy,`object:${id('game')}:erase`);assert.equal(wipe.stroke.kind,'wipe');assert.equal(state('game').text,'');
  await mark(cy,'5');assert.equal(state('game').text,'....X....');assert.equal(state('game').players,'Cy');
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.equal(restored.get('game').state.text,'....X....');
  assert.deepEqual(f.host.engine.runtime.violations,[]);

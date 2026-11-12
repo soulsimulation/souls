@@ -1,5 +1,5 @@
 // CTRL-1 (#1093): a strict act executes offered ids only, with params that fit the offer's schema; words resolve to
-// candidates and never execute; a client that doesn't ask for strict keeps the legacy path; a server flag rolls it back.
+// candidates and never execute. #1911: every act is strict, whether or not the client asks for it; the rollback is gone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
@@ -90,17 +90,18 @@ test('resolve advises: ranked candidates with schemas and availability, and it n
   assert.equal(w.receipts(), before);
 });
 
-test('legacy: without strict the words still execute; the server flag lets a strict client through for one release', async t => {
+test('#1911: without strict, words are refused with the gate\'s code and nothing happens; the offered id acts', async t => {
   const w = await world(t);
   const {capabilities} = await w.get('/v1/edge/capabilities');
   const walk = capabilities.find((c: any) => c.verb === 'walk' && c.available);
-  const legacy = await w.post('/v1/edge/act', {capability: `walk to ${walk.label}`});
-  assert.equal(legacy.accepted, true, JSON.stringify(legacy));
-  process.env.EDGE_FREE_TEXT_ACT = '1';
-  try {
-    const flagged = await w.post('/v1/edge/act', {capability: `walk to ${walk.label}`, strict: true});
-    assert.equal(flagged.accepted, true, JSON.stringify(flagged));
-  } finally {delete process.env.EDGE_FREE_TEXT_ACT;}
+  const before = w.receipts();
+  const words = await w.post('/v1/edge/act', {capability: `walk to ${walk.label}`});
+  assert.equal(words.accepted, false, JSON.stringify(words)); assert.equal(words.code, 'capability.unknown');
+  const intent = await w.post('/v1/edge/act', {verb: 'go', target: {place: walk.target?.id}});
+  assert.equal(intent.accepted, false); assert.equal(intent.code, 'capability.unknown');
+  assert.equal(w.receipts(), before, 'no receipt from words');
+  const ok = await w.post('/v1/edge/act', {capability: walk.id});
+  assert.equal(ok.accepted, true, JSON.stringify(ok)); assert.equal(ok.receipt.capability, walk.id);
 });
 
 test('here carries the shared parameters of the verbs it lists, inside its budget', async t => {
@@ -128,7 +129,7 @@ test('offer schema: only what it states refuses', () => {
   assert.deepEqual(Object.keys(offerParams(carry)), ['to']);
 });
 
-test('through the real CLI: words exit 2 with no act, with the server flag off or on; the client never sends words (#1921)', async t => {
+test('through the real CLI: words exit 2 with no act; the offered id acts', async t => {
   const w = await world(t), {capabilities} = await w.get('/v1/edge/capabilities');
   const walk = capabilities.find((c: any) => c.verb === 'walk' && c.available), words = `walk to ${walk.label}`;
   const server = createServer(getRequestListener(w.app.fetch)); await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
@@ -148,14 +149,9 @@ test('through the real CLI: words exit 2 with no act, with the server flag off o
   assert.equal(refused.exit, 2); assert.equal(refused.code, 'act.not-an-id'); assert.equal(refused.accepted, false);
   assert.ok(refused.candidates.some((c: any) => c.id === walk.id), JSON.stringify(refused.candidates));
   assert.equal(w.receipts(), before, 'nothing happened');
-  // #1921 A2: the client reads words with its local find and never sends them, so the server's rollback flag (the HTTP test
-  // above) does not reach the CLI
-  process.env.EDGE_FREE_TEXT_ACT = '1';
-  try {
-    const flagged = await cli('act', words);
-    assert.equal(flagged.exit, 2, JSON.stringify(flagged)); assert.equal(flagged.accepted, false);
-    assert.equal(w.receipts(), before, 'the flag does not make the client send words');
-  } finally {delete process.env.EDGE_FREE_TEXT_ACT;}
+  const byId = await cli('act', walk.id);
+  assert.equal(byId.accepted, true, JSON.stringify(byId)); assert.equal(byId.exit, 0);
+  assert.equal(w.receipts(), before + 1, 'the id acted');
 });
 
 // Found by the capacity bench on eden-2026: `resolve` named `walk:place-region-vineyard-orchard`, available, and the strict

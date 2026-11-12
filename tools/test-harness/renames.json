@@ -324,36 +324,36 @@
     },
     {
       "step": "V5-server-full",
-      "from": "the catalog is served by tag, and a place made secret leaves it",
-      "to": "the catalog is served by tag, and a place with a stored secret mark stays in it",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > the catalog is served by tag, and a place made secret leaves it",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > the catalog is served by tag, and a place with a stored secret mark stays in it",
       "reason": "Same test; a stored secret mark now leaves the place in the catalog (#1262)",
       "pr": "#2016"
     },
     {
       "step": "V5-server-full",
-      "from": "a thing upstairs is in the room it stands in; a secret upstairs room takes its things, and what stands under it, out of the catalog",
-      "to": "a thing upstairs is in the room it stands in",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > a thing upstairs is in the room it stands in; a secret upstairs room takes its things, and what stands under it, out of the catalog",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > a thing upstairs is in the room it stands in",
       "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
       "pr": "#2016"
     },
     {
       "step": "V5-server-full",
-      "from": "a far spot in a secret place is not known by its id to a Soul that has not been there, and the refusal does not name it",
-      "to": "the catalog is served by tag, and a place with a stored secret mark stays in it",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > a far spot in a secret place is not known by its id to a Soul that has not been there, and the refusal does not name it",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > the catalog is served by tag, and a place with a stored secret mark stays in it",
       "reason": "Secrecy-only test removed (#1262: no place is secret); the replacement asserts the opposite, that a place marked secret is seen like any other",
       "pr": "#2016"
     },
     {
       "step": "V5-server-full",
-      "from": "the live picture names where a Soul is, and never a secret place",
-      "to": "the live picture names where a Soul is, in a place with a stored secret mark too",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > the live picture names where a Soul is, and never a secret place",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > the live picture names where a Soul is, in a place with a stored secret mark too",
       "reason": "Same test; a Soul in a place with a stored secret mark is now named with its position and speech (#1262)",
       "pr": "#2016"
     },
     {
       "step": "V5-server-full",
-      "from": "a thing in a secret room upstairs leaves the live picture with its state (\\#1751, the catalog's outline rule)",
-      "to": "a thing upstairs is in the live picture with its state (\\#1751)",
+      "from": "Eden: far spots by id, and what the catalog and live picture publish > a thing in a secret room upstairs leaves the live picture with its state (\\#1751, the catalog's outline rule)",
+      "to": "Eden: far spots by id, and what the catalog and live picture publish > a thing upstairs is in the live picture with its state (\\#1751)",
       "reason": "Same test, renamed when its secrecy assertions were removed (#1262: no place is secret); its other assertions are kept",
       "pr": "#2016"
     },
@@ -544,10 +544,24 @@
     },
     {
       "step": "V5-server-full",
+      "from": "PM-R057 vocabulary over HTTP: natural names resolve (resolved), unknown gets did_you_mean, object capabilities act via /act",
+      "to": "PM-R057 over HTTP: the walk id of a place acts, an unknown id is refused, object capabilities act via /act",
+      "reason": "Same test, renamed when acts moved from words to offered ids (#1911): a place's walk id acts and an unknown id is refused; the object-capability act via /act is kept",
+      "pr": "#2175"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "legacy: without strict the words still execute; the server flag lets a strict client through for one release",
+      "to": "\\#1911: without strict, words are refused with the gate's code and nothing happens; the offered id acts",
+      "reason": "Same test, reversed by #1911: words no longer act without strict and the server flag is gone; the replacement asserts the refusal and that the offered id acts",
+      "pr": "#2175"
+    },
+    {
+      "step": "V5-server-full",
       "from": "rollback through the real CLI: words exit 2 with no act until the flag is on, then they act; off again, they refuse",
-      "to": "through the real CLI: words exit 2 with no act, with the server flag off or on; the client never sends words (\\#1921)",
-      "reason": "Same test: #1921 A2 removed EDGE_FREE_TEXT_ACT handling from the client, so the CLI never sends words; the server flag itself is still tested over HTTP",
-      "pr": "#2033"
+      "to": "through the real CLI: words exit 2 with no act; the offered id acts",
+      "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
+      "pr": "#2175"
     }
   ]
 }
