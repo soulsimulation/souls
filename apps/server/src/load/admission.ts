@@ -73,7 +73,7 @@ export const SOUL_REFILL_MAX_PER_S = 200;
 const COOL_MS = 60_000, CAPACITY_MS = 2000, GOD_SHARE = 0.25, DEFAULT_EST_MS = 20, ANSWER_MARGIN_MS = 250, ACTIVE_MS = 60_000;
 
 type Job = {key: string; god: boolean; route: RouteClass; arrival: number; deadline: number; closed: () => boolean;
-  settle: (v: 'run' | 'dropped' | Refusal) => void; finished: Promise<void>; finish: () => void;
+  settle: (v: 'run' | 'dropped' | Refusal) => void; finished: Promise<void>; finish: () => void; over: boolean;
   diag: {state: string; at: number; held: Record<string, number>; atRun?: Record<string, number>}};
 type Bucket = {tokens: number; at: number; seen: number};
 type Strikes = {slow: number[]; busy: number[]; coolUntil: number; retryUntil: number};
@@ -88,6 +88,9 @@ export class Admission {
   level: Level = 'green';
   readonly queue: Job[] = [];
   readonly outstanding = new Set<string>();
+  /** #1946: principals whose job has had its turn and been charged (its first yield) and waits for the rest of its answer
+   *  (an act: its tick's commit). Still in flight (`soul.busy`), but nobody else is contended by it. */
+  readonly committing = new Set<string>();
   readonly shed = {reads: 0, acts: 0, busy: 0, slow: 0, dropped: 0, cooled: 0};
   /** Monotonic measured request ms (the monitor's quiet-window test). */
   spentMs = 0;
@@ -149,7 +152,7 @@ export class Admission {
     const now = this.now(), read = r.route.cls === 'C2';
     const cool = this.cooling(r.key, now);
     if (cool) { this.shed.slow++; if (read) this.shed.reads++; else this.shed.acts++; return {refusal: {status: 429, code: 'soul.slow-down', retryAfterS: cool, message: 'this Soul has asked for too much in a short time; the world answers it again in a minute'}}; }
-    if (this.outstanding.has(r.key)) { this.shed.busy++; if (read) this.shed.reads++; this.strike(r.key, r.god, 'busy', now); return this.told(r.key, r.god, now, {status: 429, code: 'soul.busy', retryAfterS: 1, message: 'a previous request from this Soul is still being answered'}); }
+    if (this.outstanding.has(r.key) || this.committing.has(r.key)) { this.shed.busy++; if (read) this.shed.reads++; this.strike(r.key, r.god, 'busy', now); return this.told(r.key, r.god, now, {status: 429, code: 'soul.busy', retryAfterS: 1, message: 'a previous request from this Soul is still being answered'}); }
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
     if (read && this.level === 'black') { this.shed.reads++; return this.told(r.key, r.god, now, busyRefusal(this.level)); }
@@ -172,22 +175,31 @@ export class Admission {
     let settle!: Job['settle'], finish!: () => void;
     const turn = new Promise<'run' | 'dropped' | Refusal>(res => { settle = res; });
     const finished = new Promise<void>(res => { finish = res; });
-    let ranAt = 0, isDone = false;
-    const job: Job = {key: r.key, god: r.god, route: r.route, arrival: now, deadline, closed: r.closed ?? (() => false), finished, finish,
+    let ranAt = 0;
+    const job: Job = {key: r.key, god: r.god, route: r.route, arrival: now, deadline, closed: r.closed ?? (() => false), finished, finish, over: false,
       diag: {state: this.draining ? 'inflight' : 'order', at: now, held: {}},
       settle: v => { if (v === 'run') { ranAt = this.now(); this.note(job, ranAt, 'ran'); const b = this.bucket(job.key, job.god, ranAt); job.diag.atRun = {tokens: Math.round(b.tokens), need: Math.round(this.need(job.route.id)), refillPerS: Math.round(this.refillPerS(job.god) * 10) / 10, active: this.active(), budget: Math.round(this.frameBudget() * 10) / 10, depth: this.queue.length, credit: Math.round(this.credit)}; } settle(v); }};
+    const done = () => { if (job.over) return; job.over = true; this.outstanding.delete(r.key); this.committing.delete(r.key); finish(); this.kick(); };
     this.outstanding.add(r.key);
     // fast path: nothing waiting, the dispatcher idle, frame credit left and nobody else in flight → run now, inline
     // (no hop: the quiet case costs what it did before admission). Green or amber: a lone Soul in a world that is
     // amber (a boot or creation spike still stepping down) is not slowed; red/black always queue (budgets bind).
-    // Charged when it answers.
+    // #1946: charged at its first yield (or its answer, if that comes first), as the dispatcher charges its jobs: the
+    // handler's own turn, not its wait for the tick's commit
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
       settle('run'); ranAt = now;
-      return {turn, waitedMs: () => 0, diag: () => ({fast: true}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now, 'fast'); finish(); this.kick(); }};
+      let charged = false;
+      const charge = () => { if (charged) return; charged = true; this.charge(r.key, r.god, r.route.id, this.now() - now, now, 'fast'); };
+      void Promise.race([finished, this.turnOver()]).then(() => { if (job.over) return; charge(); this.waitCommit(job); this.kick(); });
+      return {turn, waitedMs: () => 0, diag: () => ({fast: true}), done: () => { if (!job.over) charge(); done(); }};
     }
     this.queue.push(job); this.kick();
-    return {turn, waitedMs: () => (ranAt || this.now()) - now, diag: () => ({held: job.diag.held, atRun: job.diag.atRun}), done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
+    return {turn, waitedMs: () => (ranAt || this.now()) - now, diag: () => ({held: job.diag.held, atRun: job.diag.atRun}), done};
   }
+  /** The end of a running job's turn: its first yield (the check phase after it started). */
+  private turnOver() { return this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r)); }
+  /** A job charged at its first yield and not yet answered: one in flight for its Soul, contention for nobody (#1946). */
+  private waitCommit(j: Job) { if (j.over) return; this.outstanding.delete(j.key); this.committing.add(j.key); }
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
@@ -268,9 +280,10 @@ export class Admission {
         const [j] = this.queue.splice(i, 1);
         j.settle('run');
         for (const q of this.queue) if (q.diag.state === 'order') this.note(q, now, 'inflight');
-        await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
+        await Promise.race([j.finished, this.turnOver()]);
         if (j.diag.atRun) j.diag.atRun.charged = Math.round(this.now() - now);
         this.charge(j.key, j.god, j.route.id, this.now() - now, now);
+        this.waitCommit(j);
       }
     } finally { this.draining = false; }
   }
