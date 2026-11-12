@@ -77,6 +77,8 @@ const runIn = (cwd, extra) => (...args) => new Promise((resolve) => {
   child.on('exit', (code) => { let d = null; try { d = JSON.parse(out); } catch { /* words */ } resolve({ code, d, out, err, ms: performance.now() - t0 }); });
 });
 const BASIC = `Basic ${Buffer.from('agent:s3cret pass').toString('base64')}`;
+/** A local proxy's URL with synthetic credentials in its userinfo. */
+const withAuth = (port, password) => Object.assign(new URL(`http://127.0.0.1:${port}`), { username: 'agent', password }).href;
 
 test('NO_PROXY: *, a host, .domain and domain, a port, either case; localhost and 127.0.0.1 are always direct', () => {
   const p = 'http://proxy.example:3128';
@@ -93,7 +95,7 @@ test('NO_PROXY: *, a host, .domain and domain, a port, either case; localhost an
 for (const [mode, tunnel] of MODES) {
   test(`${mode}: register and a catalog read reach world.test only through the proxy, with its credentials`, { timeout: 60_000 }, async (t) => {
     const w = await world(t), px = await proxy(t, w.port);
-    const extra = { HTTPS_PROXY: `http://agent:s3cret%20pass@127.0.0.1:${px.port}`, EDEN_PROXY_TUNNEL: tunnel };
+    const extra = { HTTPS_PROXY: withAuth(px.port, 's3cret pass'), EDEN_PROXY_TUNNEL: tunnel };
     const dir = tmp(t, 'reg'), reg = await runIn(dir, extra)('register', 'https://world.test/w/proxied');
     assert.equal(reg.code, 0, reg.err); assert.equal(reg.d.registered, true, reg.out);
     assert.ok(w.seen.includes('/v1/config'), w.seen.join(' '));
@@ -133,7 +135,7 @@ for (const [mode, tunnel] of MODES) {
     const closed = createHttp(); await new Promise((r) => closed.listen(0, '127.0.0.1', r)); const port = closed.address().port; await new Promise((r) => closed.close(r));
     const w = await world(t), refusing = await proxy(t, w.port, { refuse: 403 });
     for (const [why, at, code] of [['nothing listening', port, /ECONNREFUSED/], ['403 to CONNECT', refusing.port, /ERR_PROXY_TUNNEL|403/]]) {
-      const r = await runIn(tmp(t, 'down'), { HTTPS_PROXY: `http://agent:s3cret@127.0.0.1:${at}`, EDEN_PROXY_TUNNEL: tunnel })('register', 'https://world.test/w/proxied');
+      const r = await runIn(tmp(t, 'down'), { HTTPS_PROXY: withAuth(at, 's3cret'), EDEN_PROXY_TUNNEL: tunnel })('register', 'https://world.test/w/proxied');
       const said = r.out + r.err;
       assert.equal(r.code, 75, `${why}: ${said}`);
       assert.match(said, /this environment sends its traffic through a proxy \(HTTPS_PROXY\), and the client could not reach the world through it/, why);
