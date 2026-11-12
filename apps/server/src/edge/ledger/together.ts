@@ -85,11 +85,12 @@ export const SOLO: Record<string, {seconds: number; seated: boolean; label: stri
   cheer: {seconds: 3, seated: true, label: 'Cheer (params.to: someone)'},
   point: {seconds: 3, seated: true, label: 'Point at someone, a place or a thing (params.at)'},
 };
-/** srv-act-words: every verb an offer of `Together.capabilities` can have. A focused build whose focus names none of them,
- *  no `…:here`/`…:held` id and no target skips the together listing (edge-bind-one-oracle checks the set). */
 /** PC11 (#690): names as a reader says them: "Bo", "Bo and Cy", "Ada, Bo and Cy". */
 export const listed = (names: string[]): string => names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? '';
-export const TOGETHER_VERBS: ReadonlySet<string> = new Set([...Object.keys(PAIRED), ...Object.keys(SOLO), 'accept', 'decline', 'follow', 'ask-to-stop', 'give', 'put-down', 'eat', 'drink', 'pick-up']);
+/** srv-act-words: every verb an offer of `Together.capabilities` can have. A focused build whose focus names none of them
+ *  and no target skips the together listing, so a verb missing here is an offer bindOne never finds (#2174: let-go,
+ *  withdraw and stop-carry were missing, and the strict gate refused them unless a whole menu was built that tick). */
+export const TOGETHER_VERBS: ReadonlySet<string> = new Set([...Object.keys(PAIRED), ...Object.keys(SOLO), 'accept', 'decline', 'withdraw', 'let-go', 'stop-carry', 'follow', 'ask-to-stop', 'give', 'put-down', 'eat', 'drink', 'pick-up']);
 /** srv-act-words: whether a focused build may want an offer of the together listing (always, without a focus). */
 export function togetherMayOffer(f: {ids: ReadonlySet<string>; verbs: ReadonlySet<string>; targets: ReadonlySet<string>; here?: boolean} | null | undefined): boolean {
   if (!f || f.here || f.targets.size) return true;
