@@ -2776,7 +2776,7 @@ return { ALWAYS_DIRECT, bypassed, proxyFor, proxyVariable, NATIVE_PROXY, CANNOT_
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.32.0";
+const VERSION = "2.33.0";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
