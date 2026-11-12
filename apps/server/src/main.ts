@@ -257,9 +257,16 @@ const WRITE_DRAIN_MS = Number(process.env.WRITE_DRAIN_MS ?? 2000);
 // Tests only (write-drain.test.ts): one stdout line as each write is counted in flight and as it closes, so a test can stop
 // the world exactly while one is in flight (#1778: a client-side signal such as 100 Continue did not prove the count).
 const WRITE_DRAIN_TRACE = process.env.WRITE_DRAIN_TRACE === '1';
+// #2169: once the world has begun to stop, a write is refused, never admitted beside the drain and the snapshot (it was
+// counted after the drain took its count, so the log went negative, and could be answered after the snapshot or cut off
+// unanswered). 503 world.busy with Retry-After: eden.mjs waits that out and asks again, a keyed write under its same
+// Idempotency-Key, so it lands once, in the next process. Eden-core worlds refuse reads here too, as before.
+const RESTART_RETRY_S = 5;
 server.on('request', (req, res) => {
-  if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+  const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  if (closing && (edenCore || write)) { res.writeHead(503, {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Retry-After': String(RESTART_RETRY_S), Connection: 'close'})
+    .end(JSON.stringify({error: {code: 'world.busy', message: `the world is restarting; ask again in ${RESTART_RETRY_S} s`, retry_after_s: RESTART_RETRY_S}})); return; }
+  if (write) {
     const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
     if (WRITE_DRAIN_TRACE) console.log(`[world] write in flight: ${writesInFlight.size}`);
     void done.then(() => { writesInFlight.delete(done); if (WRITE_DRAIN_TRACE) console.log(`[world] write closed: ${writesInFlight.size} in flight`); });
