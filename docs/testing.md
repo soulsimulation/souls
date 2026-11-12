@@ -123,7 +123,7 @@ therefore **windowed**:
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
   own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads. A merge-group run is path-scoped over everything in the group since `main`, and
+  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
@@ -132,6 +132,13 @@ Steward procedure: give `ci:run` to the PRs entering the window, normally the ne
 the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
+
+**CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
+the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
+work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
+main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
+full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
+The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
