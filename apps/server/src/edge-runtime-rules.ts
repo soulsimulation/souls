@@ -23,7 +23,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued
  *  together would drop the earlier one's flag from the host's record and log it again at the next boot. After `after` (main's
  *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1, #1369
- *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1 and #1521 stand-height/2 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
+ *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2 and legal-edits/1 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
  *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
  *  already logged in that place. */
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string }): Promise<void> {
@@ -36,5 +36,16 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   await host.enableQuarantineMarkV1('world').catch((e) => console.error('[world] quarantine-mark/1 could not be adopted:', String(e).slice(0, 300)));   // #1440
   await host.enableStandHeightV1('world');   // #1454: each event copies the policy before it
   await host.enableNonFiniteHoldV1('world').catch((e) => console.error('[world] nonfinite-hold/1 could not be adopted:', String(e).slice(0, 300)));   // #1496
-  await host.enableStandHeightV2('world').catch((e) => console.error('[world] stand-height/2 could not be adopted:', String(e).slice(0, 300)));   // #1521, last
+  await host.enableStandHeightV2('world').catch((e) => console.error('[world] stand-height/2 could not be adopted:', String(e).slice(0, 300)));   // #1521
+  await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b, last
+}
+
+/** Legal by construction 1b (docs/design/legal-by-construction.md part 1): legal-edits/1, one logged rules event (prospective,
+ *  host-only: the engine never reads it, so no snapshot binding changes). From it on, a god edit, undo or redo whose off-thread
+ *  preview breaks a rule on a Soul, or that changes what a Soul sits, lies on or holds, is refused, naming the body, the rule
+ *  and the nearest legal place; nobody is walked out. Batches before the event replay as recorded. Repeated calls are no-ops. */
+export function legalEditsV1(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { legalEditsV1?: boolean } | undefined)?.legalEditsV1 === true; }
+export function enableLegalEditsV1(host: WorldHost, author = 'operator:legal-edits'): Promise<unknown> {
+  if (legalEditsV1(host)) return Promise.resolve();
+  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, legalEditsV1: true }, why: 'legal-edits/1 (legal by construction 1b): a god edit that would break a rule on a Soul, or change what one uses, is refused by name, never walked out; retain historical replay before this event' });
 }

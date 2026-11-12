@@ -71,7 +71,9 @@ parameters, slots and actions.
 2. **Commit.** In one transaction (`god/store.ts`): refuse `revision.stale` if the edit sequence moved, check the
    journal budget, write the row to `world_edits_v1` with its inverse, update `world_entities_v1` / `world_defs_v1`.
 3. **Physics.** The engine bridge (`god/engine-bridge.ts`) turns the changed entities into a logged `world-edit` event,
-   so Souls walk around, sit on and use what was built, and replay reproduces it. Residents in the way are walked out.
+   so Souls walk around, sit on and use what was built, and replay reproduces it. Under legal-edits/1 an edit with a resident in its way, or one that
+   changes what a resident uses, is refused by name before the commit (its preview runs off the tick thread); before it,
+   residents in the way were walked out.
 4. **Viewers.** The commit is broadcast as a `world-diff` message to every viewer and on the god's SSE stream.
 
 ### Joints

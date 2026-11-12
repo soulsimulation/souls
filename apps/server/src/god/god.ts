@@ -92,6 +92,11 @@ export type WalkoutPrep = { moved: ResidentMove[]; warnings: string[]; touched: 
 /** R8: what the committed god request was, for the residents' map-change notice (map-notices.ts). */
 export type ApplyContext = { kind: 'edit' | 'undo' | 'redo'; note?: string; build?: string };
 const NO_WALKOUTS: WalkoutPrep = { moved: [], warnings: [], touched: [] };
+/** legal-edits/1: a request whose off-thread preview has not run yet. `checked` waits for it and runs the request again; a
+ *  caller that does not wait gets this refusal (an edit is never accepted unchecked). */
+export const LEGAL_PENDING = 'edit-preview.pending';
+const pendingRefusal = (): Result => ({ accepted: false, failures: [{ op: -1, code: LEGAL_PENDING, field: 'legal-edits/1', detail: 'This edit is checked against the residents off the tick thread before it is made; this caller did not wait for that check, so it was not made.', measured: { retryable: true }, fix: 'Send it through POST /v1/god/act, /undo or /redo, which wait for the check.' }] });
+const isPending = (r: unknown) => (r as { accepted?: boolean; failures?: Failure[] } | null)?.accepted === false && (r as { failures: Failure[] }).failures?.[0]?.code === LEGAL_PENDING;
 
 export class GodMode {
   readonly store: WorldStore;
@@ -121,7 +126,9 @@ export class GodMode {
    *  G1 "god rules": `prepare` plans, on the would-be world, the residents an accepted edit/undo/redo walks out of its
    *  way (listed as `moved` in the durable receipt), and `apply` moves them after the SQL commit in the same request.
    *  Null in worlds without the engine. */
-  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[] } | null = null;
+  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[];
+    /** legal-edits/1 (engine-bridge.ts legalCheck): refusals for an edit about to commit, 'pending' while its preview has not run */
+    legal?: (before: WorldModel, after: WorldModel, diff: Diff) => Failure[] | 'pending' | null; legalRun?: () => Promise<Failure[] | null> } | null = null;
   /** Bridge admission/decoration must run before the accepted receipt is persisted, and never on replay. */
   actGuard: ((batch: unknown) => Result | null) | null = null;
   finalizeAct: ((result: Result, after: WorldModel) => Result) | null = null;
@@ -384,11 +391,28 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   }
   act(batch: unknown, note?: string): Result {
     const result = this.commitBatch(batch, note);
-    if (!result.accepted) {
+    if (!result.accepted && !isPending(result)) {
       const input = batch as { build?: BuildField; preview?: string } | null;
       this.builds.recordRefusal(input?.build ?? (input?.preview ? this.getPreview(input.preview)?.build : this.caller.build), result.failures);
     }
     return result;
+  }
+  /** legal-edits/1: run a god request (an act, undo or redo) and, while its edit's preview is pending, wait for that preview off
+   *  the tick thread and run the request again with the same caller; the world may change between tries, so at most three. */
+  async checked<T>(fn: () => T): Promise<T | Result> {
+    const caller = this.caller;
+    for (let round = 0; ; round++) {
+      const r = this.as(caller, fn);
+      if (!isPending(r)) return r;
+      if (round === 3 || !this.bodies?.legalRun) return { accepted: false, failures: [{ op: -1, code: 'edit-preview.busy', field: 'legal-edits/1', detail: 'The world kept changing while this edit was checked, so it was not made.', measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }] };
+      const refused = await this.bodies.legalRun();
+      if (refused) return { accepted: false, failures: refused };
+    }
+  }
+  /** legal-edits/1: the bridge's refusal of an edit about to commit (null: the rule is off or the edit passes). */
+  private legalGate(after: WorldModel, diff: Diff): Result | null {
+    const v = this.bodies?.legal?.(this.model, after, diff);
+    return !v ? null : v === 'pending' ? pendingRefusal() : { accepted: false, failures: v };
   }
   /** Only server-owned genesis import can request trusted library adoption; request JSON cannot enable it. */
   private commitBatch(batch: unknown, note?: string, trusted = false): Result {
@@ -450,6 +474,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     if (r.result.accepted) r.result.warnings.push(...lifted, ...(repair?.lines ?? []));
     const result = this.finalizeAct?.(r.result, next) ?? r.result;
     if (!result.accepted) return result;
+    if (!trusted) { const legal = this.legalGate(next, r.diff!); if (legal) return legal; }
     const walkouts = this.bodies?.prepare?.(this.model, next, r.diff!, normalized.ops) ?? NO_WALKOUTS, moved = walkouts.moved;
     if (moved.length) result.moved = moved;
     result.warnings.push(...moved.map(movedWarning), ...walkouts.warnings);
@@ -554,6 +579,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
       const check = this.builds.check(admission, this.model, after, diff, ops, true); if ('failure' in check) return check.failure; made = check.made; return null;
     } });
     if (!r.result.accepted) return { ...r.result, failures: r.result.failures.map((f) => ({ ...f, code: f.code.endsWith('.by-body') || f.code.startsWith('body.') || f.code.startsWith('build.') ? f.code : 'undo.conflict' })) };
+    const legal = this.legalGate(next, r.diff!); if (legal) return legal;
     const walkouts = this.bodies?.prepare?.(this.model, next, r.diff!, target.inverse) ?? NO_WALKOUTS, moved = walkouts.moved;
     if (moved.length) r.result.moved = moved;
     r.result.warnings.push(...moved.map(movedWarning), ...walkouts.warnings);
@@ -644,6 +670,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   private commitUndo(preflight: Extract<ReturnType<GodMode['preflightUndo']>, { ok: true }>, notReverted: number[]) {
     // Clear residents once for the complete inverse chain, after every conflict check has passed.
     const combined: Diff = { upserts: [...new Set(preflight.entries.flatMap(e => e.diff.upserts.map(x => x.id)))].flatMap(id => preflight.model.entities.has(id) ? [preflight.model.entities.get(id)!] : []), removes: [...new Set(preflight.entries.flatMap(e => e.diff.removes))].filter(id => !preflight.model.entities.has(id)), defs: [], tiles: [...new Set(preflight.entries.flatMap(e => e.diff.tiles))], answers: [] };
+    const legal = this.legalGate(preflight.model, combined); if (legal) return { reverted: [] as number[], notReverted, ...legal };
     const walkouts = this.bodies?.prepare?.(this.model, preflight.model, combined, preflight.entries.flatMap(e => e.edit.ops)) ?? NO_WALKOUTS, moved = walkouts.moved;
     // What the planner set down in the would-be world (released by a walk-out, or kept out of a resident's hands) is
     // journaled with the chain's last entry.
