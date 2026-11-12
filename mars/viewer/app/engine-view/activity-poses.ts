@@ -58,6 +58,8 @@ export type ActivityFrame = {
   /** Piano contact plane and per-hand lift above it, from the shared audible score. */
   piano?:{height:number;lift:[number,number];weight:number};
   flute?:{weight:number};
+  /** #2197: 0–1, how far the right hand has brought the food up to this rig's own mouth (humans.ts places it from the head). */
+  mouth?: number;
   hands: [HandGoal | null, HandGoal | null] | null;
   /** Feet apart (metres each side) and pelvis lift (metres, a hop) for standing cycles. */
   feetOut: number; hop: number;
@@ -198,8 +200,9 @@ export function activityFrame(activity: string, base: string, seconds: number, i
       else {f.hands=[[.3,-.02,-.18],[.22,-.16,-.36+s]];f.look=.2;}return f; }
     case 'paint': { const k = tri(t * 0.7), s = Math.sin(t * 3.1) * 0.06;
       f.hands = [[0.22, 0.06, -0.42], [0.5, 0.06 + s, -0.08 + 0.12 * k]]; f.look = 0.05; return f; }
-    case 'eat': { const k = S(Math.max(0, Math.sin(t * 0.9)));
-      f.hands = [[0.3, -0.1, down - 0.08], [0.32 - 0.14 * k, -0.08 - 0.08 * k, down - 0.04 + 0.48 * k]]; f.look = 0.3 * (1 - k); return f; }
+    // #2197: seated, the hands rest above the lap (over the thighs, not in them) and the right hand lifts the food to the mouth
+    case 'eat': { const k = S(Math.max(0, Math.sin(t * 0.9))), ground = opts.groundSeat || base === 'sit-ground', lap = ground ? 0.4 : seated ? 0.3 : 0, fwd = ground ? -0.14 : 0;
+      f.hands = [[0.3 + fwd, -0.1, down - 0.08 + lap], [0.32 + fwd * (1 - k) - 0.14 * k, -0.08 - 0.08 * k, down - 0.04 + lap * (1 - k) + 0.48 * k]]; f.mouth = k; f.look = 0.3 * (1 - k); return f; }
     case 'drink': { const k = S(Math.max(0, Math.sin(t * 0.6) * 1.3 - 0.3));
       f.hands = [null, [0.3 - 0.13 * k, -0.06 - 0.1 * k, down + 0.06 + 0.42 * k]]; f.look = -0.15 * k; return f; }
     case 'cook': { const a = t * 2.4;
@@ -278,7 +281,7 @@ let kit: { box: THREE.BoxGeometry; cyl: THREE.CylinderGeometry; sphere:THREE.Sph
 function getKit() {
   if (kit) return kit;
   const m = (color: string, rough = 0.8) => new THREE.MeshStandardMaterial({ color, roughness: rough });
-  kit = { box: new THREE.BoxGeometry(1, 1, 1), cyl: new THREE.CylinderGeometry(1, 1, 1, 10),sphere:new THREE.SphereGeometry(1,16,12), mats: { page: m('#f4eedc', 0.9), cover: m('#7a2f2a'), cover2: m('#2f4f7c'), wood: m('#8a5a36'), metal: m('#9aa0a6', 0.4), cup: m('#e9e2d0', 0.5), tea: m('#6b3f1f', 0.3), plate: m('#f2efe6', 0.5), food: m('#d9a24a'), paint: m('#c8402f'), card: m('#fbfaf5', 0.6), red: m('#c0392b'), stem: m('#4f7a32'), petal: m('#e86a8e', 0.7), bloom: m('#f2c84b'), frisbee: m('#e9712e', 0.5), frisbee2: m('#f39a5c', 0.5) } };
+  kit = { box: new THREE.BoxGeometry(1, 1, 1), cyl: new THREE.CylinderGeometry(1, 1, 1, 10),sphere:new THREE.SphereGeometry(1,16,12), mats: { page: m('#f4eedc', 0.9), cover: m('#7a2f2a'), cover2: m('#2f4f7c'), wood: m('#8a5a36'), metal: m('#9aa0a6', 0.4), cup: m('#e9e2d0', 0.5), tea: m('#6b3f1f', 0.3), plate: m('#f2efe6', 0.5), food: m('#d9a24a'), bread: m('#e6c27e', 0.9), leaf: m('#6fae3f', 0.7), paint: m('#c8402f'), card: m('#fbfaf5', 0.6), red: m('#c0392b'), stem: m('#4f7a32'), petal: m('#e86a8e', 0.7), bloom: m('#f2c84b'), frisbee: m('#e9712e', 0.5), frisbee2: m('#f39a5c', 0.5) } };
   return kit;
 }
 const part = (geo: THREE.BufferGeometry, mat: THREE.Material, sx: number, sy: number, sz: number, x = 0, y = 0, z = 0, rz = 0, ry = 0) => {
@@ -306,8 +309,10 @@ export function makeProp(kind: PropKind): THREE.Group {
       g.add(part(k.cyl, M.stem, 0.006, 0.3, 0.006, 0.02, 0.12, 0)); g.add(part(k.box, M.stem, 0.004, 0.03, 0.05, 0.02, 0.08, 0.02, 0, 0.6));
       for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; g.add(part(k.box, M.petal, 0.03, 0.012, 0.045, 0.02 + Math.cos(a) * 0.022, 0.28, Math.sin(a) * 0.022, 0, -a)); }
       g.add(part(k.cyl, M.bloom, 0.016, 0.02, 0.016, 0.02, 0.285, 0)); break;
-    case 'food': // a bread roll on a napkin
-      g.add(part(k.box, M.card, 0.004, 0.13, 0.13, 0.03, -0.01, 0)); g.add(part(k.cyl, M.food, 0.05, 0.05, 0.05, 0.05, 0.02, 0)); break;
+    case 'food': // #2197: a sandwich held up in the fingers, above the palm so the hand does not hide it: two slices of
+      // bread with lettuce and tomato between them, big enough to read at follow-camera distance
+      for (const x of [0.012, 0.05]) g.add(part(k.box, M.bread, 0.016, 0.095, 0.105, x, 0.07, 0));
+      g.add(part(k.box, M.leaf, 0.008, 0.1, 0.112, 0.027, 0.07, 0)); g.add(part(k.box, M.red, 0.008, 0.085, 0.1, 0.035, 0.068, 0)); break;
     case 'frisbee': g.add(part(k.cyl, M.frisbee, 0.12, 0.018, 0.12, 0.09, 0, 0)); g.add(part(k.cyl, M.frisbee2, 0.08, 0.02, 0.08, 0.09, 0.002, 0)); break;
     case 'rod': // a 2.4 m cane held out over the water, a line from its tip down to a red float on the surface
       g.add(part(k.cyl, M.wood, 0.009, 2.4, 0.009, 1.0, 0.49, 0, -1.15)); g.add(part(k.cyl, M.stem, 0.002, 2.3, 0.002, 2.09, -0.17, 0)); g.add(part(k.sphere, M.red, 0.025, 0.025, 0.025, 2.09, -1.32, 0)); break;
