@@ -393,6 +393,13 @@
       "pr": "#2016"
     },
     {
+      "step": "V3-launcher-unit",
+      "from": "\\#1150, \\#1326 halted: live.json says the clock stopped; a `halted` problem, then one restart per breaker window; a second halt in the window stays up for an operator",
+      "to": "\\#1150, \\#1326, \\#2133 halted: live.json says the clock stopped; a `halted` problem and a restart every time; a halt that repeats at once ends held, named, after breakerN",
+      "reason": "Same test, renamed when a halted world restarts every time and is held only when the halt repeats at once (#2133)",
+      "pr": "#2142"
+    },
+    {
       "step": "V5-server-full",
       "from": "CLI BODY authenticates privately and completed plans remain readable by ID",
       "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
