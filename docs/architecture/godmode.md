@@ -72,6 +72,9 @@ parameters, slots and actions.
    journal budget, write the row to `world_edits_v1` with its inverse, update `world_entities_v1` / `world_defs_v1`.
 3. **Physics.** The engine bridge (`god/engine-bridge.ts`) turns the changed entities into a logged `world-edit` event,
    so Souls walk around, sit on and use what was built, and replay reproduces it. Residents in the way are walked out.
+   A solid of a path or area shape (a wall, fence or hedge) is cut into pieces of at most 1 m that follow the terrain where the ground under it
+   is not flat, and a building's flight entered from the side is climbed along the flight
+   ([#2193](https://github.com/soulsimulation/souls/issues/2193), `god/slope-solids.ts`).
 4. **Viewers.** The commit is broadcast as a `world-diff` message to every viewer and on the god's SSE stream.
 
 ### Joints
