@@ -18,6 +18,7 @@ export const MODULES = [
   ["catalog.mjs", "soulCatalog"],
   ["live.mjs", "soulLive"],
   ["wake.mjs", "soulWake"],
+  ["net.mjs", "soulNet"],
 ];
 
 /** A module as a generated block: node imports hoisted under private names, another inlined module read from its closure,

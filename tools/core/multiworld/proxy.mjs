@@ -37,7 +37,7 @@ export function prepareArtifactOverlay(options){
  for(const [name,pin]of entries){const path=resolve(root,name),actual=realpathSync(path),rel=relative(root,actual);if(rel==='..'||rel.startsWith('..'+sep)||resolve(root,rel)!==actual)throw Error('artifact path escapes root');const data=boundedRead(path,32*1024*1024);if(data.length!==pin.bytes||hash(data)!==pin.sha256)throw Error('artifact bytes differ: '+name);bytes.set(name,data);}
  const index=bytes.get('index.html').toString('utf8');
  for(const match of index.matchAll(/(?:src|href)=["']([^"']+)["']/g)){const url=match[1];if(!url.startsWith('/assets/')||!bytes.has(url.slice(1)))throw Error('artifact index dependency is not manifest-listed');}
- const cli=boundedRead(cliFile,32*1024*1024);if(hash(cli)!==cliSha256)throw Error('artifact CLI hash differs');
+ if(hash(boundedRead(cliFile,32*1024*1024))!==cliSha256)throw Error('artifact CLI hash differs');
  const guideRoutes=new Map(),guideHashes={};
  if(guideArtifacts!==undefined){
   if(!guideArtifacts||guideArtifacts.source!==cliSource||!guideArtifacts.worlds||Object.keys(guideArtifacts.worlds).sort().join('|')!==[...KEYS].sort().join('|'))throw Error('all selected-world guides must match CLI source');
@@ -51,19 +51,18 @@ export function prepareArtifactOverlay(options){
   }
  }
  const indexPaths=new Set(['/',...KEYS.flatMap(k=>[`/w/${k}`,`/w/${k}/`])]);
- const cliPaths=new Set(['/eden-agent.mjs',...KEYS.map(k=>`/w/${k}/eden-agent.mjs`)]);
+ // #1754: the pinned CLI is attribution only (cliSha256, cliSource); its path is not served and falls through to the world, which answers 404.
  const mime={'.md':'text/markdown; charset=utf-8','.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.woff':'font/woff','.woff2':'font/woff2','.mp4':'video/mp4','.webm':'video/webm','.wasm':'application/wasm','.ico':'image/x-icon'};
  const attribution=Object.freeze({frontendSource,cliSource,webManifestSha256,cliSha256,...(guideArtifacts?{guideSource:guideArtifacts.source,guideHashes:Object.freeze(Object.fromEntries(KEYS.map(k=>[k,Object.freeze(guideHashes[k])])))}:{})});
  return Object.freeze({attribution,handle(req,res){
   if(req.method!=='GET'&&req.method!=='HEAD')return false;
   // Inspect raw spelling before URL normalization; traversal never gets an index.
   const rawPath=req.url.split('?')[0];
-  if(!indexPaths.has(rawPath)&&!cliPaths.has(rawPath)&&!guideRoutes.has(rawPath)&&!/^\/(?:w\/(?:eden|mars|littlemartians)\/)?assets(?:\/|$)/.test(rawPath))return false;
+  if(!indexPaths.has(rawPath)&&!guideRoutes.has(rawPath)&&!/^\/(?:w\/(?:eden|mars|littlemartians)\/)?assets(?:\/|$)/.test(rawPath))return false;
   let decoded;try{decoded=decodeURIComponent(rawPath);}catch{res.writeHead(400).end();return true;}
   if(decoded.includes('\\')||decoded.includes('\0')||decoded.split('/').some(p=>p==='.'||p==='..')){res.writeHead(400).end();return true;}
   const path=rawPath;let name,data,cache;
   if(indexPaths.has(path)){name='index.html';data=bytes.get(name);cache='no-cache';}
-  else if(cliPaths.has(path)){name='eden-agent.mjs';data=cli;cache='public, max-age=60';}
   else if(guideRoutes.has(path)){name='guide.md';data=guideRoutes.get(path);cache='public, max-age=60';}
   else{const asset=path.replace(/^\/w\/(?:eden|mars|littlemartians)(?=\/assets\/)/,'').slice(1);if(asset.startsWith('assets/')&&bytes.has(asset)){name=asset;data=bytes.get(asset);cache='public, max-age=31536000, immutable';}}
   if(!data)return false;
