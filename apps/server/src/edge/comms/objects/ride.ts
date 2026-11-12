@@ -146,7 +146,7 @@ export const rideKind: ObjectKind<RideState> = {
         ? `Board the punt: it pushes off by itself ${s.departsInSeconds != null ? `in ~${s.departsInSeconds} s` : `~${s.waitSeconds ?? 45} s after you are aboard`}, rows ${minutes(s.routeSeconds)} on the water and returns to this bank, where you step ashore`
         : `Board the balloon: it lifts off by itself ${s.departsInSeconds != null ? `in ~${s.departsInSeconds} s` : `~${s.waitSeconds ?? 45} s after you are seated`}, ${s.parkedAway ? 'flies home to its launch spot (it is parked where a rider left it) and lands there' : `flies ${minutes(s.routeSeconds)} and lands where it started`}; you cannot get off in the air`,
       available: (s, ctx) => s.riders.some(r => r.soulId === ctx.soul.soulId) ? {code: 'ride.already-aboard', reason: 'You are already in it.'}
-        : s.phase === 'aloft' ? {code: 'ride.departed', reason: s.rowing ? 'It is out on the water; it returns to this bank.' : attraction(s) ? `The ${attraction(s)} is going round; it stops where you boarded.` : 'It is in the air; it lands where it started.'}
+        : s.phase === 'aloft' ? {code: 'ride.departed', reason: s.rowing ? 'It is out on the water; it returns to this bank.' : attraction(s) ? `The ${attraction(s)} is going round; it stops where you boarded.` : s.homebound ? 'It is in the air, flying home to its launch spot.' : 'It is in the air; it lands where it started.'}
         : s.phase === 'landed' ? {code: 'ride.landing', reason: 'It has just returned; its riders are stepping out.'}
         : s.phase === 'closed' ? {code: 'ride.closed', reason: 'This ride is not running.'}
         // VERBS (accept2 brief 10): the world would refuse a new boarding today (a punt whose bank or water no longer qualifies)

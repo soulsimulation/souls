@@ -2995,6 +2995,8 @@ export class MarsEngine implements Engine {
   previewCarrierRerouteV1(spec:CarrierInstallSpec):Diag|null{
     const e=this.ents[spec.id] as any;if(!e?.carrier)return {code:'carrier.unknown',message:`no carrier ${spec.id}`};
     const c=e.carrier;if(c.phase!=='parked'||Object.values(c.seats).some(Boolean)||c.doorBy||c.hold)return {code:'carrier.busy',message:`${spec.id} has riders or boarders`};
+    // park-away/1 (#2196): parked away from home, it re-routes once ridden back (rerouteCarrier refuses it the same way)
+    if(c.steer?.ret&&Math.hypot(e.pose.p[0]-c.home[0],e.pose.p[1]-c.home[1],e.pose.p[2]-c.home[2])>=1e-3)return {code:'carrier.carrier-away',message:`${spec.id} is parked away from its home; it re-routes once ridden back there`};
     // the new home must be clear ground with the carrier itself away (it parks at its old home, often within a step)
     const own=this.ents[spec.id];delete this.ents[spec.id];
     let issue:Diag|null;try{issue=this.previewCarrierV1({...spec,id:`${spec.id}.reroute-preview`});}finally{this.ents[spec.id]=own;this.m.canonicalEntityOrder(this.rt.world);}

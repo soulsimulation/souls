@@ -101,7 +101,11 @@ test('park-away/1: the empty balloon stays where it landed and its rider rides i
  assert.ok(flat(b().pose.p,parked)<1e-9,'boarded where it was parked');
  const st=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:start'});assert.equal(st.accepted,true,JSON.stringify(st));
  assert.ok(await w.run(400,()=>b().carrier.phase==='aloft'),'lifted off with its rider');
- assert.ok(await w.run(6000,()=>b().carrier.phase==='landed'||b().carrier.phase==='parked'),'came home: '+b().carrier.phase);
+ // steered on the way home (a hold here), it still keeps its own route: after the hold it flies home
+ assert.ok(await w.run(400,()=>b().pose.p[1]>5),'climbing');
+ const hold=await w.steer(0,'ride-eden-balloon',{stop:true});assert.equal(hold.accepted,true,JSON.stringify(hold));
+ assert.ok(await w.run(40,()=>b().carrier.steer?.by!==null),'the hold is taken');assert.ok(!String(b().carrier.steer.away.route.id).startsWith('steer'),'kept its own route: '+b().carrier.steer.away.route.id);
+ assert.ok(await w.run(9000,()=>b().carrier.phase==='landed'||b().carrier.phase==='parked'),'came home: '+b().carrier.phase);
  assert.ok(flat(b().pose.p,home)<.5,`landed at home ${b().pose.p}`);
  assert.ok(await w.run(600,()=>!w.ent(0).human.carrier),'rider stepped out at home');
  assert.ok(await w.run(200,()=>b().carrier.phase==='parked'),'parked at home');assert.equal(b().carrier.steer,undefined);

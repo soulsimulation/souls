@@ -662,7 +662,9 @@ const steer: ActionDef<SteerParams, SteerPlan, { carrier: string; id: string; pl
   start(rt, p, prog, id) {
     const e = rt.world.entities[p.carrier], c = state(e)!;
     // where it leaves its own route (or, steered again while flying itself back, that return route), and the steered legs
-    const away = c.steer && !c.steer.ret ? c.steer.away : { route: c.route, elapsed: c.phase === 'aloft' ? c.elapsed : 0, wake: [] as Vec3[] };
+    // park-away/1: steered off a flight back (from a parked spot, or after a hover), it keeps the ride's own route, never the
+    // built return route (which starts where the ride was parked: flown later from home, it would jump there)
+    const away = c.steer && (!c.steer.ret || parkAway(rt)) ? c.steer.away : { route: c.route, elapsed: c.phase === 'aloft' ? c.elapsed : 0, wake: [] as Vec3[] };
     if (!prog.ret) away.wake.push([...e.pose.p] as Vec3);
     c.steer = { by: p.actor, to: prog.to, ...(prog.land ? { land: prog.land } : {}), built: false, ...(prog.ret ? { ret: true as const } : {}), away, ...(prog.landing ? { asked: prog.landing.requested } : {}) };
     delete c.landNote;
