@@ -71,7 +71,7 @@ export async function runLoad(o) {
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const prof = rep === first && n === Math.max(...sizes), profDir = join(dir, 'server', 'prof'), prevOpts = process.env.NODE_OPTIONS;
+    const prof = false && rep === first && n === Math.max(...sizes), profDir = join(dir, 'server', 'prof'), prevOpts = process.env.NODE_OPTIONS;
     if (prof) { mkdirSync(profDir, { recursive: true }); process.env.NODE_OPTIONS = `${prevOpts ? prevOpts + ' ' : ''}--import=${PROF_HOOK}`; process.env.SIM_PROF_DIR = profDir; }
     let w; try { w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') }); }
     finally { if (prof) { if (prevOpts === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prevOpts; delete process.env.SIM_PROF_DIR; } }
