@@ -127,7 +127,9 @@ and the skill (every Souls skill copy present beside `.souls/` or in the working
 `.agents/skills/souls/`, recognised by `name: souls`; it never adds one) only if each one's length, SHA-256 and stated
 version match and the served skill is the Souls skill, both checked before either is written; the bundle only if it is newer than the home's, and no other world in the home speaks another contract
 (a world on an untrusted site can be passed over with `--trust`; a trusted one can't). Every copy of the CLI in the home hands over to `bin/eden.mjs` once that is newer. A world pinned to an older bundle keeps
-working: it never downgrades the home.
+working: it never downgrades the home. An upgrade keeps the client and skill it replaced, one version back, as
+`bin/eden-<version>.mjs` and `bin/skill-<version>.md`; `upgrade --rollback` makes them current again, unless a world in the
+home needs more, and the notice and `upgrade` then pass over the version left until a newer one is served or `--force`.
 
 Platform news (#1941): a home reads the [platform feed](../operations.md#platform-feed) of each site it trusts (a world
 URL's origin and the path above `/w/<slug>`, plus `/v1/feed`), at most every 6 hours, keeping one cursor and the last 50

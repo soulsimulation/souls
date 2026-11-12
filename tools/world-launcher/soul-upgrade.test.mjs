@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +24,7 @@ async function world(t, served) {
     if (path === '/v1/config') return json(res, 200, { devAuth: !w?.noAuth, worldId: 'w', worldName: 'W', ...(w?.manifest ? { soulClient: w.manifest } : {}) });
     if (path === '/eden.mjs' && w.redirect) { res.writeHead(302, { location: w.redirect }); return res.end(); }
     if (path === '/eden.mjs') return res.end(w.bytes);
+    if (path === '/skill.md') return res.end(w.skill);
     json(res, 404, {});
   }); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -285,4 +286,53 @@ test('A5: everyday commands ask nothing about versions', async (t) => {
   w.hits.length = 0;
   await run('list'); await run('status');
   assert.deepEqual(w.hits.filter((p) => !p.startsWith('/v1/feed')), []);   // #1941: the platform feed is news, checked on its own clock
+});
+
+// #1939: the newer client is this one stamped higher, so it can roll back; the skill moves with it.
+const skillAt = (v) => Buffer.from(`---\nname: souls\nmetadata:\n  version: "${v}"\n---\nskill ${v}\n`);
+const stamped = Buffer.from(readFileSync(cli, 'utf8').replace(/^const VERSION = "[0-9.]+";$/m, `const VERSION = "${NEWER}";`));
+const release = () => ({ manifest: { ...describe(stamped, NEWER), skill: describe(skillAt(NEWER), NEWER) }, bytes: stamped, skill: skillAt(NEWER) });
+async function upgraded(t) {
+  const served = { next: release() }, w = await world(t, served), f = folder(t);
+  writeFileSync(join(f.d, 'SKILL.md'), skillAt(ours));
+  await f.run('register', `${w.base}/next`);
+  const up = await f.run('upgrade', 'next');
+  assert.deepEqual([up.d?.upgraded, up.d?.to, up.d?.skill?.to], [true, NEWER, NEWER], up.err);
+  return { ...f, served };
+}
+
+test('#1939 A1 A2 A4: an upgrade keeps the previous client and skill, and a rollback returns to them once', async (t) => {
+  const { d, run } = await upgraded(t), bin = join(d, '.souls/bin');
+  assert.deepEqual(readdirSync(bin).sort(), [`eden-${ours}.mjs`, 'eden.mjs', `skill-${ours}.md`], 'one previous version, nothing older');
+  assert.deepEqual(readFileSync(join(bin, `eden-${ours}.mjs`)), readFileSync(cli));
+  assert.deepEqual([configOf(d).previousClient, configOf(d).previousSkill], [ours, ours]);
+  const back = await run('upgrade', '--rollback');
+  assert.deepEqual([back.d?.rolledBack, back.d?.from, back.d?.to, back.d?.skill?.to, back.d?.skipping], [true, NEWER, ours, ours, NEWER], back.err);
+  assert.deepEqual(readFileSync(join(d, 'SKILL.md')), skillAt(ours));
+  const fromBin = await new Promise((resolve) => { const c = spawn(process.execPath, [join(bin, 'eden.mjs'), 'version'], { cwd: d, env: { ...process.env, HOME: d, SOULS_HOME: '', SOULS_PRINCIPAL: '' }, stdio: ['ignore', 'pipe', 'ignore'] }); let o = ''; c.stdout.on('data', (x) => { o += x; }); c.on('exit', () => resolve(JSON.parse(o))); });
+  const here = await run('version');
+  assert.deepEqual([here.d?.version, fromBin.version], [ours, ours], 'the home copy and .souls/bin both run the old client');
+  assert.equal(here.d.update, undefined, 'the notice stays silent for the version rolled back from');
+  assert.equal((await run('upgrade', 'next')).d?.skipped, NEWER, 'and upgrade passes over it');
+  const again = await run('upgrade', '--rollback');
+  assert.equal(again.code, 1); assert.match(again.err, /Nothing to roll back to/);
+  assert.equal((await run('upgrade', 'next', '--force')).d?.upgraded, true, '--force takes it anyway');
+});
+
+test('#1939 A4: a rollback run through .souls/bin also takes the folder copy back', async (t) => {
+  const { d, run } = await upgraded(t);
+  const back = await new Promise((resolve) => { const c = spawn(process.execPath, [join(d, '.souls/bin/eden.mjs'), 'upgrade', '--rollback'], { cwd: d, env: { ...process.env, HOME: d, SOULS_HOME: '', SOULS_PRINCIPAL: '' }, stdio: ['ignore', 'pipe', 'ignore'] }); let o = ''; c.stdout.on('data', (x) => { o += x; }); c.on('exit', () => resolve(JSON.parse(o))); });
+  assert.deepEqual([back.rolledBack, back.to], [true, ours]);
+  assert.deepEqual(readFileSync(join(d, 'eden.mjs')), readFileSync(cli), 'the folder copy holds the old client');
+  assert.equal((await run('version')).d?.version, ours);
+});
+
+test('#1939 A3: a rollback is refused while a world here needs more than the previous client', async (t) => {
+  const { d, run, served } = await upgraded(t);
+  served.next.manifest = { ...served.next.manifest, minVersion: NEWER };
+  await run('upgrade', 'next');   // the home reads what the world needs now
+  const r = await run('upgrade', '--rollback');
+  assert.equal(r.code, 1); assert.match(r.err, new RegExp(`next needs eden ${NEWER.replaceAll('.', '\\.')} or newer, above the previous client`));
+  assert.deepEqual(readFileSync(join(d, '.souls/bin/eden.mjs')), stamped, 'nothing changed');
+  assert.equal(configOf(d).client, NEWER);
 });
