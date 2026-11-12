@@ -20,6 +20,7 @@ test('#2202 B2: gatherings and activity are tracked; two-shots, gestures, riders
   assert.ok(tracked({key:'talk:a',label:'conversation',members:['a','b']}));
   assert.ok(tracked({key:'soul:a',label:'busy',members:['a']}));
   assert.ok(tracked({key:'conversation:t',label:'conversation',members:['a','b','c']}));
+  assert.ok(tracked({key:'conversation:t',label:'conversation',members:['a','b']},3),'a pair talking among a crowd');
   for(const c of [{key:'conversation:t',label:'conversation',members:['a','b']},{key:'pair:hug:a:b',label:'hug',members:['a','b']},{key:'ride:a',label:'riding',members:['a']},{key:'soul:a',label:'walking',members:['a']},{key:'soul:a',label:'presenting',members:['a']}])
     assert.ok(!tracked(c),c.key);
 });
@@ -64,6 +65,8 @@ test('#2202 B2: never through scenery: every eye is clear and no frame-to-frame 
   // A closed room: no move is clear, so Broadcast keeps its solver (null), and asks again only after a pause.
   const room=scenery([[-5,-1,-5,5,0,5],[-5,4,-5,5,5,5],[-6,0,-6,-5,4,6],[5,0,-6,6,4,6],[-6,0,-6,6,4,-5],[-6,0,5,6,4,6]]);
   assert.equal(new Tracker(1).pose('group:a',[0,0,0],2,0,room),null);
+  // Under a roof on open sides (a pavilion), the framing solver is better: no moving shot.
+  assert.equal(new Tracker(1).pose('group:a',[0,0,0],2,0,scenery([[-2.5,2.6,-2.5,2.5,2.8,2.5]])),null);
   // pathClear sees a wall between two samples
   const m=makeMove(hotspotView([0,0,0],2,0),'orbit',12,1),thin=scenery([[9.5,0,-.05,12,6,.05]]);
   assert.ok(pathClear(m,[0,0,0],0,1,scenery([])));

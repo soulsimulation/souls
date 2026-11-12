@@ -181,8 +181,9 @@ export class WorldBroadcast {
     const ridden = frame[focus] && records[focus]?.body?.family !== 'floater' ? ridingCarrier(frame[focus].p, this.hints?.().carriers ?? []) : null;
     if (ridden) { this.lastTick = tick; this.signature = ''; return { pose: this.riderShot(ridden, frame[focus].p, wallSeconds, movementDt, renderRoots), shot: `${choice.label}:ride-side` }; }
     this.ride = null;
-    if (tracked(choice) && members.length) {
-      const at = members.map(id => frame[id].p), centre = [0, 1, 2].map(i => at.reduce((a, p) => a + p[i], 0) / at.length);
+    const at = members.map(id => frame[id].p), centre = [0, 1, 2].map(i => at.reduce((a, p) => a + p[i], 0) / (at.length || 1));
+    const crowd = people.filter(id => Math.hypot(frame[id].p[0] - centre[0], frame[id].p[2] - centre[2]) < 6).length;
+    if (members.length && tracked(choice, crowd)) {
       const spread = Math.max(...at.map(p => Math.hypot(p[0] - centre[0], p[2] - centre[2])));
       let prepared = false;
       const ready = () => { if (!prepared) { this.rendered.prepare(renderRoots); prepared = true; } };
