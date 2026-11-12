@@ -28,7 +28,8 @@ test('#2201 A3: forced over a wall, the camera comes back down to the asked-for 
   const follow = new WorldFollow();
   const over = frames(follow, [g], 4, asked.clone());
   const risen = over.at(-1)!.offset;
-  assert.ok(new THREE.Spherical().setFromVector3(risen).phi < new THREE.Spherical().setFromVector3(asked).phi - .3, 'the wall forced the camera up');
+  // up over it, or (A4's shot score) round and up: either way more than .3 rad off the asked-for view
+  assert.ok(risen.angleTo(asked) > .3 && risen.y > asked.y, 'the wall forced the camera off the asked-for view, upward');
   const ray = new THREE.Raycaster(target, risen.clone().normalize(), .05, risen.length());
   assert.equal(ray.intersectObject(wall).length, 0, 'and it sees the Soul over the wall');
   wall.visible = false;  // the Soul is out in the open: nothing blocks the asked-for view any more
