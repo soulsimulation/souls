@@ -62,7 +62,9 @@ test('#1367 A2 without wait-bound/3: shoves at the deck foot keep an up-walk ope
 
 test('#1367 A1 wait-bound/3: every up-walk held at the foot ends route.blocked within the bound, named, and nothing teleports or respawns',()=>{
   const {e,walks,jump,bodies}=foot({adoptAt:0});
-  for(const w of walks)assert.ok(w.stale<=BOUND+2,`${w.actor}'s walk ${w.id} stayed open ${w.stale} ticks after it last got nearer the foot`);
+  // The engine measures what is left of the walk's own leg, the scene the straight distance to the foot; 100 ticks (5 s) covers a path that bends.
+  const worst=walks.reduce((a,b)=>b.stale>a.stale?b:a);
+  assert.ok(worst.stale<=BOUND+100,`${worst.actor}'s walk ${worst.id} stayed open ${worst.stale} ticks after it last got 0.5 m nearer the foot`);
   const bound=walks.filter(w=>/^wait-bound\/3: /.test(w.end?.message??''));
   assert.ok(bound.length>0,'the bound ended walks at the foot');
   for(const w of bound){assert.equal(w.end!.kind,'failed');assert.equal(w.end!.code,'route.blocked');assert.match(w.end!.message!,/made no headway for a minute: [a-z.-]+/);}
@@ -80,4 +82,22 @@ test('#1367 wait-bound/3 is a named state-hash input of its own',()=>{
   const two=f.create(f.genesis('wait-bound-3-hash')) as MarsEngine,three=f.create(f.genesis('wait-bound-3-hash')) as MarsEngine;
   two.configureRuntimePolicy(BASE as never);three.configureRuntimePolicy({...BASE,waitBoundV3:true} as never);
   assert.notEqual(two.stateHash(),three.stateHash());
+});
+
+test('#1367 wait-bound/3 does not end a free walk that must first go away from its goal (into the proving ground\'s U cup, slowly)',async()=>{
+  // The goal is inside the cup, 1.2 m away past its back wall. The way round is about 18 m, so at 0.3 m/s (the slowest
+  // walk) the straight distance to the goal does not fall 0.5 m below where it started for most of the bound; a longer wall
+  // would take it past. Less of the leg is left to walk all the time, so the bound's clock restarts every few seconds.
+  const pg=await marsFactory(),w=pg.genesis('wait-bound-3-round'),goal=[-15,14.6];w.entities.h_round0=m.human('h_round0',-15,15.8);
+  const e=pg.create(w) as MarsEngine;e.configureRuntimePolicy({...BASE,waitBoundV3:true} as never);
+  const r=e.perform({actor:'h_round0',label:'round the wall',steps:[{verb:'mars:walk_to',params:{x:goal[0],z:goal[1],speed:.3}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  const events:ProgramEvent[]=[];let best=Infinity,since=0,stale=0,clock=0;
+  for(let i=0;i<6000&&e.programOf('h_round0');i++){
+    events.push(...e.step().programs);const p=e.world.entities.h_round0.pose.p,d=Math.hypot(p[0]-goal[0],p[2]-goal[1]);
+    if(d<best-.5||best===Infinity){best=d;since=e.world.tick;}stale=Math.max(stale,e.world.tick-since);
+    const wb=([...(e as any).programs.values()].find((q:any)=>q.actor==='h_round0'))?.waitBoundV1;if(wb)clock=Math.max(clock,e.world.tick-wb.since);
+  }
+  assert.ok(stale>900,`the straight distance to the goal did not fall for ${stale} ticks`);
+  assert.ok(clock<=100,`the bound's clock ran ${clock} ticks at most`);
+  const end=events.find(x=>x.id===r.id&&x.kind!=='step');assert.equal(end?.kind,'completed',JSON.stringify(end));
 });

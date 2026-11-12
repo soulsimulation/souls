@@ -168,15 +168,17 @@ const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } 
 export const WAIT_BOUND_V1 = 'wait-bound/1', WAIT_BOUND_M = 0.5, WAIT_BOUND_TICKS = 1200;
 /** #1288 wait-bound/2: the same bound for every movement step a go, jog, go-near or swim lowers to, a swim held behind a body in the water included. */
 export const WAIT_BOUND_V2 = 'wait-bound/2', WAIT_BOUND_V2_VERBS: ReadonlySet<string> = new Set(['walk_to', 'swim_to', 'ground_travel', 'swim_in']);
-/** #1367 wait-bound/3: a walk's headway is getting 0.5 m nearer its leg's way (or changing level), not leaving a disc, so a
+/** #1367 wait-bound/3: a walk's headway is 0.5 m less of its leg left to walk (or a change of level), not leaving a disc, so a
  *  shove or a step-aside in a jam at a stair foot no longer restarts the bound's clock. */
 export const WAIT_BOUND_V3 = 'wait-bound/3';
 type WaitBoundLegV3 = { kind: string; points?: [number, number][]; ascending?: boolean; link?: { from: { p: [number, number] }; to: { p: [number, number] } } };
-/** wait-bound/3: the way of a walk exec's current leg, on the body's level: a walk leg's end, or a flight's entry before the climb. */
-const waitBoundWayV3 = (ex: { leg?: number; route?: { legs?: WaitBoundLegV3[] } } | undefined): [number, number] | undefined => {
+/** wait-bound/3: the way of a walk exec's current leg on the body's level (a walk leg's end, or a flight's entry before the
+ *  climb) and how much is left to it: the rest of the walk leg's smoothed path (walk.ts `total - s`, which only walking along
+ *  it shortens; a replan from a shoved spot starts longer), or the straight distance to the flight's entry. */
+const waitBoundWayV3 = (ex: { leg?: number; total?: number; s?: number; route?: { legs?: WaitBoundLegV3[] } } | undefined, at: [number, number]): { way: [number, number]; left: number } | undefined => {
   const leg = ex?.leg !== undefined ? ex.route?.legs?.[ex.leg] : undefined;
-  if (leg?.kind === 'walk' && leg.points?.length) { const q = leg.points[leg.points.length - 1]; return [q[0], q[1]]; }
-  if (leg?.kind === 'link' && leg.link) { const q = (leg.ascending ? leg.link.from : leg.link.to).p; return [q[0], q[1]]; }
+  if (leg?.kind === 'walk' && leg.points?.length) { const q = leg.points[leg.points.length - 1]; return { way: [q[0], q[1]], left: typeof ex!.total === 'number' && typeof ex!.s === 'number' ? Math.max(0, ex!.total - ex!.s) : hypot(at[0] - q[0], at[1] - q[1]) }; }
+  if (leg?.kind === 'link' && leg.link) { const q = (leg.ascending ? leg.link.from : leg.link.to).p; return { way: [q[0], q[1]], left: hypot(at[0] - q[0], at[1] - q[1]) }; }
   return undefined;
 };
 const containedKey = (v: { code: string; subjects?: string[] }) => `${v.code}|${[...(v.subjects ?? [])].sort().join()}`;
@@ -1274,16 +1276,16 @@ export class MarsEngine implements Engine {
    *  rocking by millimetres beside a wall, which restarts the persistent-wait detector, still ends. A body on a stair flight
    *  (climbing, or finishing a cancelled climb) is left out until flight resume (#1453) can set it down there. */
   private waitBoundV1(p: Prog, rec: { id: string; verb: string; status: string; diagnostic?: Diag }): Diag | null {
-    let ex = this.rt.live.get(rec.id)?.exec as { phase?: string; cancelTo?: string; child?: string; detour?: unknown; leg?: number; route?: { legs?: WaitBoundLegV3[] } } | undefined;
+    let ex = this.rt.live.get(rec.id)?.exec as { phase?: string; cancelTo?: string; child?: string; detour?: unknown; leg?: number; total?: number; s?: number; route?: { legs?: WaitBoundLegV3[] } } | undefined;
     // #1288 wait-bound/2: a journey (ground_travel, swim_in) runs its walk or swim as a child; the flight check reads the child.
     for (let k = 0; k < 4 && ex?.child && this.rt.live.get(ex.child); k++) ex = this.rt.live.get(ex.child)!.exec as typeof ex;
     const a = this.ents[p.actor], tick = this.rt.tick;
     const at: [number, number] = [a.pose.p[0], a.pose.p[2]], level: number = a.human?.level ?? 0, w = p.waitBoundV1;
-    // #1367 wait-bound/3: a walk's headway is getting nearer its leg's way. A body shoved out of the disc (a yield, a collision
-    // settle, a step-aside and its walk back) is no nearer, so a jam at a stair foot no longer restarts the clock. A step-aside
+    // #1367 wait-bound/3: a walk's headway is less of its leg left to walk. A body shoved out of the disc (a yield, a collision
+    // settle, a step-aside and its walk back) has no less left, so a jam at a stair foot no longer restarts the clock. A step-aside
     // (`detour`) is no headway either: its own route is not measured, and the way back is measured against the old distance.
-    const v3 = this.cfg.waitBoundV3 === true && ex?.route?.legs !== undefined, way = v3 && !ex!.detour ? waitBoundWayV3(ex) : undefined;
-    const d = way ? hypot(at[0] - way[0], at[1] - way[1]) : 0;
+    const v3 = this.cfg.waitBoundV3 === true && ex?.route?.legs !== undefined, wl = v3 && !ex!.detour ? waitBoundWayV3(ex, at) : undefined;
+    const way = wl?.way, d = wl?.left ?? 0;
     if (way && w && w.step === p.index && (!w.way || w.best === undefined || hypot(way[0] - w.way[0], way[1] - w.way[1]) > WAIT_BOUND_M)) { w.way = way; w.best = d; }   // a new way: measured from here, the clock kept
     const headway = v3 ? !!way && w?.best !== undefined && d < w.best - WAIT_BOUND_M : !w || hypot(at[0] - w.at[0], at[1] - w.at[1]) > WAIT_BOUND_M;
     if (!w || w.step !== p.index || ex?.phase === 'climb' || ex?.cancelTo || level !== w.level || headway) { p.waitBoundV1 = { step: p.index, at, level, since: tick, ...(way ? { way, best: d } : {}) }; return null; }
