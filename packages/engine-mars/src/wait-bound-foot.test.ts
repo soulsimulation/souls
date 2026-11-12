@@ -84,6 +84,42 @@ test('#1367 wait-bound/3 is a named state-hash input of its own',()=>{
   assert.notEqual(two.stateHash(),three.stateHash());
 });
 
+/** A walker's own walk waits behind a make-way nudge of its body (walk.ts makeWay) that is held at the proving ground's
+ *  1.0 m passage, where a body holds the passage and never leaves (as in wait-bound.test.ts). */
+async function heldNudge(policy:Record<string,boolean>){
+  const pg=await marsFactory(),w=pg.genesis('wait-bound-3-nudge'),W='h_walker000',B='h_block0000';
+  w.entities[B]=m.human(B,15,-14.8);w.entities[W]=m.human(W,19,-17);
+  const e=pg.create(w) as MarsEngine,rt=(e as any).rt;e.configureRuntimePolicy({...BASE,...policy} as never);
+  const nudge=`${W}:make-way:1`,move=rt.submit('walk_to',{actor:W,x:14.8,z:-10},{id:nudge});move.internalCause='traffic.make-way';
+  let held=false;
+  for(let i=0;i<200&&rt.records.get(nudge).status!=='blocked';i++){
+    e.step();const ex=rt.services.walkExecs?.get(nudge);
+    if(ex&&!held&&ex.narrows.length){const n=ex.narrows[0];(rt.services.traffic??=new Map()).set(n.res,{actors:new Set([B]),entry:n.entry,dir:[-n.dir[0],-n.dir[1]]});held=true;}
+  }
+  assert.equal(rt.records.get(nudge).status,'blocked','the nudge is held at the passage');
+  const r=e.perform({actor:W,label:'own walk',steps:[{verb:'mars:walk_to',params:{x:19,z:-19}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  const action=()=>[...(e as any).programs.values()].find((q:any)=>q.actor===W)?.action;
+  let execAt:number|undefined,jump=0;const t0=e.world.tick;
+  for(let i=0;i<600&&execAt===undefined;i++){
+    const was=[...e.world.entities[W].pose.p];e.step();const p=e.world.entities[W].pose.p;jump=Math.max(jump,Math.hypot(p[0]-was[0],p[2]-was[2]));
+    const id=action();if(id&&rt.live.get(id))execAt=e.world.tick;
+  }
+  return {e,rt,nudge,execAt,t0,jump};
+}
+
+test('#1367 A1 make-way: a walk step held behind its body\'s blocked make-way nudge is left with no exec without wait-bound/3',async()=>{
+  const {e,rt,nudge,execAt}=await heldNudge({});
+  assert.equal(execAt,undefined,'600 ticks on, the walk step still has no exec');assert.equal(rt.isActive(nudge),true,'the nudge is still held');
+  assert.deepEqual(e.runtime.violations,[]);
+});
+
+test('#1367 A1 make-way: under wait-bound/3 the held nudge ends where the body stands and the walk step gets its exec at once',async()=>{
+  const {e,rt,nudge,execAt,t0,jump}=await heldNudge({waitBoundV3:true});
+  assert.ok(execAt!==undefined&&execAt-t0<=3,`the walk step has an exec ${execAt===undefined?'never':execAt-t0+' ticks on'}`);
+  assert.equal(rt.isActive(nudge),false);assert.equal(rt.records.get(nudge).diagnostic?.code,'traffic.make-way-ended');
+  assert.ok(jump<.3,`no teleport: the largest step was ${jump.toFixed(2)} m`);assert.deepEqual(e.runtime.violations,[]);
+});
+
 test('#1367 wait-bound/3 does not end a free walk that must first go away from its goal (into the proving ground\'s U cup, slowly)',async()=>{
   // The goal is inside the cup, 1.2 m away past its back wall. The way round is about 18 m, so at 0.3 m/s (the slowest
   // walk) the straight distance to the goal does not fall 0.5 m below where it started for most of the bound; a longer wall
