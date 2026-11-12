@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import {windModeOf} from './wind.ts';
+import {readSmokeSources,type SmokeSource} from './smoke-publishers.ts';
 /** One periodic (never per-frame) walk of the rendered scene that collects
  * decorative anchors for the atmosphere: flowers for butterflies, low plants
  * for fireflies, chimney tops for smoke, and the Daylight lights. */
 /** Elevated covers (roofs, ceilings, upper floors) as flat xz boxes [x0,z0,x1,z1,bottomY]: a camera under one is indoors/under eaves. */
 export type Found={covers:number[];lamps:THREE.Vector3[];flowers:THREE.Vector3[];meadow:THREE.Vector3[];roofs:THREE.Vector3[];water:THREE.Vector3[];harbour:THREE.Vector3|null;smoke:{p:THREE.Vector3;scale:number}[];hemi:THREE.HemisphereLight|null;sun:THREE.DirectionalLight|null;fill:THREE.DirectionalLight|null};
-const FLOWER=/flower|bloom|petal/i,MEADOW=/grass|fern|reed|wetland|meadow|broadleaf/i,CHIMNEY=/chimney|stove-?pipe|flue|smoke-?stack/i;
+const FLOWER=/flower|bloom|petal/i,MEADOW=/grass|fern|reed|wetland|meadow|broadleaf/i;
 const m4=new THREE.Matrix4(),v=new THREE.Vector3(),cb=new THREE.Box3();
 /** Is a world point under any elevated cover? */
 export function underCover(covers:readonly number[],p:THREE.Vector3){for(let i=0;i<covers.length;i+=5)if(p.x>covers[i]&&p.x<covers[i+2]&&p.z>covers[i+1]&&p.z<covers[i+3]&&p.y<covers[i+4])return true;return false;}
@@ -33,7 +34,7 @@ function sampleSurface(mesh:THREE.Mesh,out:THREE.Vector3[]){
   if(inside(x+2.5,z)<0||inside(x-2.5,z)<0||inside(x,z+2.5)<0||inside(x,z-2.5)<0)continue;
   out.push(new THREE.Vector3(x,Y[k],z));}
 }
-export function findAnchors(scene:THREE.Scene,skip:(o:THREE.Object3D)=>boolean,wantWater=true):Found{
+export function findAnchors(scene:THREE.Scene,skip:(o:THREE.Object3D)=>boolean,wantWater=true,onSmoke?:(node:THREE.Object3D,sources:SmokeSource[])=>void):Found{
  rs=1;
  const found:Found={covers:[],lamps:[],flowers:[],meadow:[],roofs:[],water:[],harbour:null,smoke:[],hemi:null,sun:null,fill:null};
  for(const c of scene.children){
@@ -42,15 +43,12 @@ export function findAnchors(scene:THREE.Scene,skip:(o:THREE.Object3D)=>boolean,w
  }
  const visit=(o:THREE.Object3D)=>{
   if(skip(o)||!o.visible&&o.parent!==scene)return;
-  const src=o.userData?.edenSmokeSources;
-  if(Array.isArray(src))for(const s of src)if(Array.isArray(s)&&s.length>=3&&s.slice(0,3).every(Number.isFinite))found.smoke.push({p:new THREE.Vector3(s[0],s[1],s[2]).applyMatrix4(o.matrixWorld),scale:Number.isFinite(s[3])?s[3]:1});
+  const smoke=readSmokeSources(o);found.smoke.push(...smoke);onSmoke?.(o,smoke);
   if(!found.harbour&&/harbour|harbor|beach|lighthouse|marina/i.test(o.name)&&!(o as THREE.Mesh).isMesh){const b=new THREE.Box3().setFromObject(o);if(!b.isEmpty())found.harbour=b.getCenter(new THREE.Vector3());}
   const mesh=o as THREE.Mesh;
   if(mesh.isMesh){
    const path=(o.parent?.name??'')+' > '+o.name;
    if(/water/i.test(path)&&!/fountain|bed\b|bank|tower|trough|can\b|bottle|static-decorative/i.test(path)&&wantWater&&found.water.length<200)sampleSurface(mesh,found.water);
-   if(CHIMNEY.test(o.name)){if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();const b=mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld);
-    found.smoke.push({p:new THREE.Vector3((b.min.x+b.max.x)/2,b.max.y+.1,(b.min.z+b.max.z)/2),scale:Math.min(1.2,Math.max(.4,(b.max.x-b.min.x)*1.6))});}
    if(/roof/i.test(o.name)&&!/garden|tile|light|lamp|window|solar/i.test(path)&&!(mesh as THREE.InstancedMesh).isInstancedMesh&&found.roofs.length<40){
     if(!mesh.geometry.boundingBox)mesh.geometry.computeBoundingBox();const b=mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrixWorld),sx=b.max.x-b.min.x,sz=b.max.z-b.min.z;
     if(sx>2.5&&sz>2.5&&sx<22&&sz<22&&b.max.y>2.5&&b.max.y<14)found.roofs.push(new THREE.Vector3((b.min.x+b.max.x)/2,b.max.y+.02,(b.min.z+b.max.z)/2));}

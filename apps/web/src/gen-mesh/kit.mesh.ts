@@ -221,7 +221,7 @@ export function buildKit(input: unknown, ctx: Pick<MeshCtx, 'materials' | 'tint'
   const leafPivot = root.children.find((o) => o.userData.role === 'door');
   if (leafPivot) for (const o of [...root.children]) if (o.userData.role === 'bolt' || o.userData.role === 'thumb' || o.userData.role === 'key') { leafPivot.attach(o); o.userData.restPos = o.position.toArray(); if (o.userData.role === 'key') o.visible = false; }
   root.userData.gait = args.gait;
-  if (smoke.length) root.userData.edenSmokeSources = smokeSources(smoke);
+  if (smoke.length) root.userData.edenSmokeSources = smokeSources(smoke, typeof ctx.params?.smokeScale === 'number' ? ctx.params.smokeScale : undefined);
   for (const sheet of fallingWaterSheets(discs)) root.add(sheet); // W2: tiered fountains overflow
   return root;
 }

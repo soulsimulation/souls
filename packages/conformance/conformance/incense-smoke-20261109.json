@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-09 #1495: the new unmerged core-incense-censer@1 adds the declared smokeScale parameter (default 0.15, min 0.1, max 0.3) after its initial plume failed client appearance review. Exact updated def hash: d63556f502a5b1a5efccc49b6ae1a7259c8e409c2875263ce563d222ffa89e34. The earlier incense-20261109 record remains unchanged as evidence for its earlier draft hash. The scoped run (conformance.mjs --k 2 --filter core-incense-censer) baked, placed and rendered all 7 samples with 0 findings and 0 qualification gaps. This supplement adds no allowed findings or budget changes. Actual attenuated plume and visible hand contact still require client qualification.",
+  "findings": []
+}

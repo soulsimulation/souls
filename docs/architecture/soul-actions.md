@@ -454,6 +454,26 @@ context-size checks below), regression runs, and an uncut real-client recording 
 | Food | Make tea or coffee: fill the kettle at the sink, switch it on, wait for the boil and pour; carry a mug, offer it to someone, drink it in sips, and rinse the mug | "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea", "make a cup of coffee", "offer Ben the tea", "offer Ben the coffee", "drink the coffee", "rinse the mug", "wash up" |
 | Media | Switch a screen on and off by its physical control; the image or video it shows stays the same | "turn on the screen", "switch off the screen" |
 | Making | Paint a picture at an easel and leave it there with a title and credit; draw a picture in chalk on a chalk square, which fades over four world days and washes away | "paint at the easel", "draw in chalk" |
+| Quiet rituals | Light incense in a censer and put it out by hand; its glowing tip and smoke follow its burning state | "light the incense", "put out the incense" |
+
+### Incense (#1495)
+
+`core-incense-censer@1` is an incense bowl on a reachable stand. It uses the same `light`/`put-out` hand contact and
+`on` state as a candle: the hand reaches the actual incense tip, and the state changes at contact. Existing private
+access rules apply. Interrupting the reach before contact preserves the old state. A lit censer stays lit through
+restart until someone puts it out.
+
+The current live viewer binds the authored censer geometry to the observed native action and adjusts the selected
+empty hand toward the tip, preserving the native reach and release times. Missing geometry, stale revisions,
+unsupported poses or other hand owners retain the generic animation. Historical playback has no certified static
+geometry binding for this adjustment and also retains the generic animation; no historical contact guarantee is claimed.
+
+The kit's small glowing tip and smoke source exist only while `on`. Its declared `smokeScale` parameter defaults to
+0.15 (0.1–0.3), attenuating the existing smoke plume; kits without this parameter keep their previous smoke scale.
+The atmosphere draws its rising smoke; there is no flame or crackle. Smoke-bearing roots retain their per-entity
+transform instead of losing effect anchors to geometry instancing. Redraws, attachment and removal refresh smoke on the next rendered frame; unchanged frames
+check only known smoke publishers, without another scene scan. Other eligible geometry keeps using instancing. This adds no authoritative tick pass;
+100 lit censers 120 m away add zero local `here` bytes. Nearby sit/rest offers are separate activities.
 
 ## Making: paintings and chalk
 

@@ -1,4 +1,7 @@
+import {observedQuaternionBlend} from './observed-quaternion.ts';
 import {observedAnimationSample,type AnimationObservation} from './observed-animation.ts';
+import type {IncenseContactObservation} from './incense-contact-observation.ts';
+import type {ArmUnderlay,TipSkin} from './incense-tip-touch.ts';
 import {wavePose,WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 import {actuatorHand,handActuatorFrame,posterLocal,strokeWork,twoHanded,HAND_REACH_SECONDS,HAND_RELEASE_SECONDS,type HandActuatorMotion} from '../../engine/social/hand-actuator.ts';
 import {insidePoint,itemPoseOf,ITEM_RECOVERY_SECONDS,type ItemPoseView} from '../../engine/items/presentation.ts';
@@ -90,6 +93,10 @@ type View = {
   activity: string;
   handActuator?:HandActuatorMotion;
   handActuatorTime?:number;
+  /** Only a certified current-interval native endpoint; never an engine hand point or pose input. */
+  actuatorOnsetHands?:Hands;
+  incenseContact?:IncenseContactObservation;
+  incenseSkin?:Map<Arm,{tip:TipSkin|null;arm:TipSkin;invalid:boolean}>;
   itemPose?:ItemPoseView;
   /** entry 43: render time an opted-in put let go of its item (gestures come back only after the arm has). */
   itemReleasedAt?:number;
@@ -215,6 +222,8 @@ type View = {
 };
 /** Per-frame readout of the pose layers (lab hook `bones()`, e2e). */
 export type Diag = {
+  /** Viewer-only intended/attained fit; native arm targets below remain untouched. */
+  incense?:{target:string;revision:string;reason?:string;rawWrist?:number[];requestedWrist?:number[];attainedWrist?:number[];plannedTip?:number[];chainLength?:number;requestedRatio?:number;attainedRatio?:number};
   expression?: Expression;
   water?: WaterMotion;
   stairShoeCoverage?:{vertices:number;complete:boolean};
@@ -273,6 +282,9 @@ export type SampledHuman = {
   phaseK?: number;
   handActuator?:HandActuatorMotion;
   handActuatorTime?:number;
+  /** Only a certified current-interval native endpoint; never an engine hand point or pose input. */
+  actuatorOnsetHands?:Hands;
+  incenseContact?:IncenseContactObservation;
   itemPose?:ItemPoseView;
   /** Soul Actions 34: a watering-can stage (fill / pour), on the take clock. */
   watering?:WateringMotion;
@@ -453,6 +465,44 @@ const copyHands = (h?: Hands): Hands => ({ ...(h?.left ? { left: [...h.left] as 
 
 /** Entry 42: clip time advanced under a fade-out of length f, r s in: ∫0^r (1 − smoothstep(u/f)) du (f/2 once the fade is over). */
 const heldClip = (r: number, f: number) => { const x = Math.min(1, Math.max(0, r / f)); return Math.max(0, Math.min(r, f)) - f * (x * x * x - x * x * x * x / 2); };
+/** Local underlay arithmetic for the known native/TakePeople current-record path.
+ * This validates observations, never native reservations or other hand owners. */
+type CurrentAbortClockInput = {
+  motion: HandActuatorMotion | undefined;
+  actor: string;
+  observation: AnimationObservation | undefined;
+  sample: ReturnType<typeof observedAnimationSample>;
+  observed: boolean;
+  time: number;
+  reach: number;
+  handoff: ReturnType<typeof handActuatorFrame> | null;
+};
+function currentDefaultAbortOffset(input: CurrentAbortClockInput): number | undefined {
+  const {motion:m,actor,observation:o,sample,observed,time,reach,handoff}=input;
+  const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+  if (!m || typeof m !== 'object' || Array.isArray(m) || typeof actor !== 'string' || !actor ||
+    !o || o.actor !== actor || (o.source !== 'native' && o.source !== 'sampled') ||
+    !finite(o.tick) || !finite(o.dt) || o.dt !== DT || !finite(o.time) ||
+    observed !== true || !sample || typeof sample !== 'object' || sample.kind !== 'sampled' || !finite(sample.time) || !finite(sample.nativeTime) ||
+    !finite(time) || time !== sample.nativeTime ||
+    !finite(m.startTick) || !Number.isInteger(m.startTick) || !finite(reach) ||
+    reach !== time - m.startTick * DT) return undefined;
+  const rawActor = (m as HandActuatorMotion & {actor?:unknown}).actor;
+  if ((rawActor !== undefined && rawActor !== actor) ||
+    typeof m.actionId !== 'string' || !m.actionId || typeof m.target !== 'string' || !m.target ||
+    !Array.isArray(m.at) || m.at.length !== 3 || !finite(m.at[0]) || !finite(m.at[1]) || !finite(m.at[2]) ||
+    (m.hand !== undefined && m.hand !== 'left' && m.hand !== 'right') ||
+    !finite(m.abortedAt) || m.abortedAt < 0 || m.abortedAt >= HAND_REACH_SECONDS ||
+    !finite(m.abortWeight) || m.abortWeight < 0 || m.abortWeight > 1 || reach < m.abortedAt ||
+    (m.reach !== undefined && m.reach !== HAND_REACH_SECONDS) ||
+    (m.release !== undefined && m.release !== HAND_RELEASE_SECONDS) ||
+    (m.hold !== undefined && (!finite(m.hold) || m.hold < 0 || m.hold > 2)) ||
+    m.opening !== undefined || m.slide !== undefined || m.stroke !== undefined ||
+    m.op !== undefined || m.tug !== undefined || m.passage !== undefined ||
+    !handoff || !finite(handoff.idleBlend) || handoff.idleBlend < 0 || handoff.idleBlend > 1) return undefined;
+  const offset = (heldClip(reach, GESTURE_FADE) - reach) * (1 - handoff.idleBlend);
+  return finite(offset) ? offset : undefined;
+}
 /** PERF-EDEN (2026-11-01): the eye, its view and the pose-rate distances (quality-tier.ts bodies). Null: every body is
  *  posed every frame, as before. */
 export type HumanViewer = { eye: THREE.Vector3; frustum: THREE.Frustum; nearM: number; farM: number };
@@ -642,6 +692,8 @@ export class HumanViews {
       v.shoreTime = undefined;
       v.waterTransition = undefined;
       if(v.handActuator&&!e.human?.handActuator)v.lastHandActuator=v.handActuator;else if(e.human?.handActuator)v.lastHandActuator=undefined;
+      v.actuatorOnsetHands=undefined;
+      v.incenseContact=undefined;
       v.handActuator=e.human?.handActuator;v.handActuatorTime=world.tick*DT;v.watering=e.human?.wateringV1;v.wateringTime=world.tick*DT;v.letGo=e.human?.letGoV1;v.letGoTime=world.tick*DT;v.cup=e.human?.cupV1;v.cupTime=world.tick*DT;v.transfer=e.human?.handTransferV1;v.transferTime=world.tick*DT;
       v.itemPose=itemPoseOf(e.human?.itemTransferV1,e.human?.heldItemsV1,world.tick,DT);
       v.handHold=e.human?.handHold;v.rps=e.human?.rps;v.hgTick=world.tick;v.hgDt=DT;{const q=v.handHold?world.entities[v.handHold.with]:undefined;v.holdP=q?new THREE.Vector3(...q.pose.p):undefined;}
@@ -874,6 +926,8 @@ export class HumanViews {
       const walkDur = v.rig.walk.getClip().duration, idleDur = v.rig.idle.getClip().duration;
       v.activity = act;
       if(v.handActuator&&!f.handActuator)v.lastHandActuator=v.handActuator;else if(f.handActuator)v.lastHandActuator=undefined;
+      v.actuatorOnsetHands=f.actuatorOnsetHands;
+      v.incenseContact=v.rig.template===wanted?f.incenseContact:undefined;
       v.handActuator=f.handActuator;v.handActuatorTime=f.handActuatorTime;v.watering=f.watering;v.wateringTime=f.wateringTime;v.letGo=f.letGo;v.letGoTime=f.letGoTime;v.cup=f.cup;v.cupTime=f.cupTime;v.transfer=f.transfer;v.transferTime=f.transferTime;
       v.itemPose=f.itemPose;
       v.sleepPose = f.sleepPose;
@@ -973,6 +1027,10 @@ export class HumanViews {
     // library clips (clip-library.ts): what this body plays now, and what it played just before (crossfade)
     const sample=observedAnimationSample(a.observed,b.observed,alpha,IDLE_VARIETY_ONSET);
     const tSec0 = lerp(a.expressionT, b.expressionT, alpha);
+    // Only canonical observed timestamps may replace a native actuator observation locally.
+    // Already sampled frames keep their absolute fractional timestamp without another interpolation.
+    const actuatorObserved=sample.kind==='sampled'&&!!b.observed&&v.handActuatorTime!==undefined&&Math.abs(v.handActuatorTime-b.observed.tick*b.observed.dt)<=1e-9;
+    const actuatorTime=actuatorObserved&&sample.kind==='sampled'?sample.nativeTime:v.handActuatorTime??tSec0;
     const lib = this.libraryPlan(v, b, tSec0);
     const proneW = !lib.sleep && pr && v.dims && v.spine && v.legs.length >= 2 ? pr.w : 0;
     if (proneW > 0) yaw = lerpAngle(yaw, pr!.yaw, proneW);
@@ -1039,12 +1097,13 @@ export class HumanViews {
     // A hand actuator's reach out of an idle gesture (hand at the hair, folded arms): the gesture fades out over the reach
     // while the arm travels from it to the target. It was cut on the first actuator frame (engine hands, idleBlend 0): the
     // hand dropped from the hair to the hip in one frame, 0.747 m per 50 ms (entry 33, neon switch-off).
-    const reachS = v.handActuator ? (v.handActuatorTime ?? tSec) - v.handActuator.startTick * DT : 0;
+    const reachS = v.handActuator ? actuatorTime - v.handActuator.startTick * DT : 0;
     const handoff = v.handActuator ? handActuatorFrame(v.handActuator, reachS) : null;
+    const abortedOffset=currentDefaultAbortOffset({motion:v.handActuator,actor:h.name,observation:b.observed,sample,observed:actuatorObserved,time:actuatorTime,reach:reachS,handoff});
     // Over GESTURE_FADE, not the 0.65 s reach: folded arms opening in 0.65 s still swung the free hand 0.13 m per 50 ms (0.084 over 1.2 s).
     const transferS = v.transfer ? (v.transferTime ?? tSec) - v.transfer.startTick * DT : -1;
     // Soul Actions 34: an idle gesture fades out the same way over a hand-held item's reach (take_item / put_item)
-    const reachFade = v.handActuator && v.handActuator.abortedAt === undefined && reachS >= 0 && reachS < GESTURE_FADE ? 1 - smooth(reachS / GESTURE_FADE)
+    const reachFade = v.handActuator && (v.handActuator.abortedAt === undefined || abortedOffset !== undefined) && reachS >= 0 && reachS < GESTURE_FADE ? 1 - smooth(reachS / GESTURE_FADE)
       : v.transfer && transferS >= 0 && transferS < GESTURE_FADE ? 1 - smooth(transferS / GESTURE_FADE) : 0;
     // Idle variety also plays on into a walk start (scaled by 1 − walk weight, so it fades out with the walk's ease).
     // An opted-in item transfer (lantern, bowl) keeps its own clock (presentation.ts): idle variety plays on through its
@@ -1087,7 +1146,7 @@ export class HumanViews {
     if (relS >= ITEM_RECOVERY_SECONDS + TRANSFER_HANDOFF) v.itemReleasedAt = undefined;
     // Entry 38: an actuator that hands the body over soon after its arm is down (a board stroke and its step back) keeps
     // the idle handoff fading in after it ends, instead of switching idle variety on at full weight (a 0.31 m palm jump, take 5)
-    const after = !handoff && v.lastHandActuator ? handActuatorFrame(v.lastHandActuator, (v.handActuatorTime ?? tSec) - v.lastHandActuator.startTick * DT).idleBlend : 1;
+    const after = !handoff && v.lastHandActuator ? handActuatorFrame(v.lastHandActuator, actuatorTime - v.lastHandActuator.startTick * DT).idleBlend : 1;
     if (after >= 1) v.lastHandActuator = undefined;
     const idleHandoff = Math.min(putReturn, letGoing ? letIdle : v.itemPose ? (letGone && v.itemPose.take ? 0 : v.itemPose.idleBlend) : (handoff ? (reachS < 0 ? 1 : Math.max(handoff.idleBlend, fadeOut)) : v.transfer?.endTick !== undefined ? smooth(((v.transferTime ?? tSec) - v.transfer.endTick * DT) / TRANSFER_HANDOFF) : v.transfer && transferS >= 0 ? fadeOut : singFade > 0 ? singFade : after));
     v.idleLast = idleHandoff;
@@ -1139,7 +1198,7 @@ export class HumanViews {
     // entry 42 (take 6): a gesture fading out under a hand actuator's reach also slows its own clip to a stop over the fade:
     // a look-around raising the hand kept moving it at its own speed while the arm reached for a drawer knob (0.095 m per 50 ms
     // together). Clip time = the reach start + ∫(1 − fade) — the same pose and speed at the reach start, at rest by its end.
-    const slowed = reachFade > 0 ? heldClip(reachS, GESTURE_FADE) - reachS : 0;   // (weight 0 once the fade is over: back on the clock unseen)
+    const slowed = abortedOffset ?? (reachFade > 0 ? heldClip(reachS, GESTURE_FADE) - reachS : 0);
     if (variantA) libAt(gestureAction(v.rig, variant!.clip), variantW, variantTime(variant!.clip, h.name, gT + slowed));
     if (neutralW > 0) libAt(gestureAction(v.rig, 'Idle_Neutral'), neutralW, gT);
     if (neutralW + variantW > 1e-4) libAt(idleBodyAction(v.rig), neutralW + variantW, idleTime);
@@ -1286,13 +1345,21 @@ export class HumanViews {
     if(water?.kind==='surface-swim')surfaceSwimBody(v,water);
     if(water?.floating)waterLegs(v,water);
     // arms
+    const incense=v.incenseContact,incenseMotion=v.handActuator,depiction=incense?.depiction;
+    const incenseStanding=pz.drop===0&&pz.rise===0&&pz.kneel===0&&Number.isFinite(pz.bend)&&pz.bend>=0&&pz.bend<=BODY_MODEL.bendMax.knees;
+    const incenseDriver=incense&&depiction&&incenseMotion&&actuatorObserved&&incense.context.target===incenseMotion.target&&
+      !v.itemPose&&!v.grip&&!v.on&&!gait&&!fp&&!water&&!waterFrom&&!lib.water&&!lib.sleep&&proneW===0&&sitW===0&&warmW===0&&incenseStanding&&
+      ['idle','reach','operate'].includes(v.activity)?v.arms.find(arm=>armSide(v,v.arms.indexOf(arm))===actuatorHand(incenseMotion.opening,incenseMotion.hand)):undefined;
+    let incenseUnderlay:ArmUnderlay|undefined=incenseDriver?depiction!.armUnderlay(incenseDriver):undefined;
     h.userData.wateringTilt=0;h.userData.wateringFlow=0;h.userData.wateringYaw=0;h.userData.cupPose=undefined;
     const targets: (THREE.Vector3 | null)[] = v.arms.map(() => null);
     let source: Source = null;
-    if (hasHands) {
+    const onsetHands=actuatorObserved&&v.handActuator?v.actuatorOnsetHands:undefined;
+    const targetHands=hasHands?hands:onsetHands;
+    if (targetHands) {
       source = 'hands';
       v.arms.forEach((arm, i) => {
-        const q = armSide(v, i) === 'left' ? hands.left : hands.right;
+        const q = armSide(v, i) === 'left' ? targetHands.left : targetHands.right;
         if (q) targets[i] = new THREE.Vector3(q[0], q[1], q[2]);
         // an empty-handed item pick-up: from the drawn palm to the fixed grasp point on the reach clock (presentation.ts `goal`)
         const g = v.itemPose?.goal;
@@ -1343,7 +1410,7 @@ export class HumanViews {
       } } : expression?.kind === 'planted-dance' ? {girdle:0,pole:arm=>V().copy(_right).multiplyScalar(-arm.side*(.35+expression.elbowLift)).addScaledVector(UP,-.5+expression.elbowLift).addScaledVector(_fwd,.15)} : undefined;
       // Blend the actual arm bones to/from the existing idle/walk clip; lowering a
       // Cartesian hand target alone leaves the elbow/shoulder snapping at release.
-      const actW=v.handActuator?handActuatorFrame(v.handActuator,(v.handActuatorTime??tSec)-v.handActuator.startTick*DT).weight:undefined;
+      const actW=v.handActuator?handActuatorFrame(v.handActuator,actuatorTime-v.handActuator.startTick*DT).weight:undefined;
       const weight=v.itemPose?.weight??actW??1;
       // entry 42: carrying in one hand while the free hand works a drawer or door: that hand takes the actuator's clock,
       // the carrying hand the item's (one weight for both popped the free arm onto the knob in one frame)
@@ -1359,7 +1426,8 @@ export class HumanViews {
       const transferOwns=tw!==null&&!v.itemPose&&!(v.handActuator&&v.handActuator.startTick>=v.transfer!.startTick);
       const armW=(i:number)=>cf&&cm?(armSide(v,i)===cm.hand?1:cm.stage==='wash'?cf.left:weight):wf?(armSide(v,i)==='left'?wf.left:1):transferOwns&&armSide(v,i)===v.transfer!.hand?tw!:actSide&&armSide(v,i)===actSide?actW!:weight;
       h.userData.wateringTilt=wf?.tilt??0;h.userData.wateringFlow=wf?.flow??0;h.userData.wateringYaw=wf?.yaw??0;
-      const armBase=v.arms.some((_,i)=>armW(i)<1)?v.arms.flatMap((arm,i)=>[...(arm.shoulder?[arm.shoulder]:[]),arm.upper,arm.lower,arm.hand].map(o=>({o,w:armW(i)}))).map(({o,w})=>({o,w,q:o.quaternion.clone(),p:o.position.clone()})):[];
+      const armBase=v.arms.some((_,i)=>armW(i)<1)?v.arms.flatMap((arm,i)=>[...(arm.shoulder?[arm.shoulder]:[]),arm.upper,arm.lower,arm.hand].map(o=>({o,w:armW(i),actuator:actuatorObserved&&!!v.handActuator&&!cf&&!wf&&!transferOwns&&(!v.itemPose||armSide(v,i)===actSide)}))).map(({o,w,actuator})=>({o,w,actuator,q:o.quaternion.clone(),p:o.position.clone()})):[];
+      if(incenseDriver)incenseUnderlay=depiction!.armUnderlay(incenseDriver);
       const k = reachTo(v, targets, pz.rise > 0, BODY_MODEL.maxExtension, undefined, pa);
       v.arms.forEach((arm, i) => {
         if (!targets[i] && sitW > 0 && !seatClip) handOnThigh(v, i, sitW);
@@ -1369,7 +1437,11 @@ export class HumanViews {
       // pick-up) keeps the free arm until it has gone: hung at the bend's rate, it dropped 0.11 m per 50 ms
       if (sitW <= 0) dangle(v, proneW > 0 ? Math.max(pz.bend * (1 - proneW), pr!.bend * proneW) : pz.bend, k, v.itemPose?.posture ? 0 : DANGLE_FROM, v.itemPose?.posture ? 1 - clamp01(v.variety ?? 0) : 1);
       v.arms.forEach((arm, i) => flat[i] > 0 && k[i] > 0 && flatHand(v, arm, targets[i]!, h.position.y, flat[i] * k[i], pa!.pole(arm, targets[i]!)));
-      for(const b of armBase){b.o.quaternion.slerp(b.q,1-b.w);b.o.position.lerp(b.p,1-b.w);}if(armBase.length)h.updateMatrixWorld(true);
+      for(const b of armBase){
+        const blended=b.actuator?observedQuaternionBlend(b.q,b.o.quaternion,b.w):null;
+        if(blended?.kind==='sampled')b.o.quaternion.fromArray(blended.q);else b.o.quaternion.slerp(b.q,1-b.w);
+        b.o.position.lerp(b.p,1-b.w);
+      }if(armBase.length)h.updateMatrixWorld(true);
       // the drawn mug sits in the drawn hand: the planned pose moved by where the palm actually got to (an arm short of its
       // target carries the mug short with it, never leaves the hand off the mug)
       if(cupPlan&&cf&&cm){const pm=palm(v.arms[cupPlan.arm],V()),p=cupPlan.pose,dx=pm.x-p.palm[0],dy=pm.y-p.palm[1],dz=pm.z-p.palm[2];
@@ -1488,7 +1560,7 @@ export class HumanViews {
       // placeProp wrote a world matrix: express it in the holder's frame (the prop is the holder's child)
       v.prop.obj.matrix.premultiply(_inv.copy(h.matrixWorld).invert());
     }
-    heldSheet(v, h, tSec);
+    heldSheet(v, h, actuatorTime);
     if (v.spine?.head && Math.abs(gaze) > 1e-5) {
       const head = v.spine.head;
       const axis = new THREE.Vector3(0, 1, 0).applyQuaternion(head.parent!.getWorldQuaternion(new THREE.Quaternion()).invert());
@@ -1515,7 +1587,31 @@ export class HumanViews {
       const lift=sleepHeadRestLift(pr,v.rig.template.name);
       if(lift>0){place(v.spine.head,v.spine.head.getWorldPosition(V()).addScaledVector(UP,lift));v.spine.head.updateWorldMatrix(true,true);}
     }
+    let incenseDiag:Diag['incense'];
+    if(incenseDriver&&incenseUnderlay&&incense&&incenseMotion&&depiction){
+      incenseDiag={target:incense.context.target,revision:incense.context.revision};
+      const rollback=v.arms.flatMap(depiction.armUnderlay),cache=v.incenseSkin??(v.incenseSkin=new Map());
+      const skin=(arm:Arm)=>{let s=cache.get(arm);if(!s){s={tip:depiction.indexTipSkin(h,arm),arm:depiction.incenseArmSkin(h,arm),invalid:false};cache.set(arm,s);}
+        if(s.invalid)return null;
+        if(!s.tip||s.tip.valid?.()===false||s.arm.valid?.()===false)s.invalid=true;return s.invalid?null:s;};
+      const selected=skin(incenseDriver);
+      if(!selected?.tip)incenseDiag.reason='incense.cached-rig-unsupported';
+      else{
+        const fail=(f:{reason:string})=>{incenseDiag!.reason=f.reason;};
+        depiction.poseIncenseTipTouch(incenseDriver,h,incense.context,incenseMotion,actuatorTime-incenseMotion.startTick*DT,incenseUnderlay,selected.tip,g=>{
+          incenseDiag={...incenseDiag!,rawWrist:g.rawWrist.toArray(),requestedWrist:g.requestedWrist.toArray(),attainedWrist:g.attainedWrist.toArray(),plannedTip:g.plannedTip.toArray(),
+            chainLength:g.chainLength,requestedRatio:g.requestedWrist.distanceTo(g.shoulder)/g.chainLength,attainedRatio:g.wristExtension};},fail);
+        if(!incenseDiag.reason)for(const arm of v.arms){const ownership=incense.ownership[armSide(v,v.arms.indexOf(arm))];
+          if(ownership.nativeTarget!==null)continue;
+          const free=skin(arm);if(!free){incenseDiag.reason='incense.cached-rig-unsupported';break;}
+          depiction.clearUnownedIncenseArm(arm,h,incense.context,ownership,free.arm,fail);
+          if(incenseDiag.reason)break;
+        }
+      }
+      if(incenseDiag.reason){for(const b of rollback){b.o.position.copy(b.p);b.o.quaternion.copy(b.q);}h.updateMatrixWorld(true);}
+    }
     v.diag = diagOf(v, gait?.g ?? null, gait?.f.id ?? '', pz, targets, source, fp, proneW > 0 ? pr : null);
+    if(incenseDiag)v.diag.incense=incenseDiag;
     if(expression)v.diag.expression=expression;
     if(water)v.diag.water=water;
     if(hgDiag)v.diag.handGame=hgDiag;
@@ -1777,10 +1873,10 @@ const V = () => new THREE.Vector3();
  *  the sheet rolls up from the top under the palms and the roll is lifted away. The flat part is the same bent sheet the
  *  wall draws (poster-sheet.ts), 1.5 mm proud of it, so the handoff at the commit is invisible. */
 const _sheetM = new THREE.Matrix4(), _sheetQ = new THREE.Quaternion(), _rollAxis = new THREE.Vector3(), _rollY = new THREE.Vector3(0, 1, 0);
-function heldSheet(v: View, h: THREE.Object3D, tSec: number) {
+function heldSheet(v: View, h: THREE.Object3D, actuatorTime: number) {
   const m = v.handActuator, s = m?.stroke;
   if (!m || !s || !twoHanded(s) || !s.sheet || !v.arms.length) { if (v.sheet) { h.remove(v.sheet.group); v.sheet.flat.geometry.dispose(); v.sheet = undefined; } return; }
-  const key = `${m.startTick}:${m.target}:${s.kind}`, el = (v.handActuatorTime ?? tSec) - m.startTick * DT, u = (el - HAND_REACH_SECONDS) / s.seconds, W = s.width, H = s.height, age = s.sheet.age ?? 0;
+  const key = `${m.startTick}:${m.target}:${s.kind}`, el = actuatorTime - m.startTick * DT, u = (el - HAND_REACH_SECONDS) / s.seconds, W = s.width, H = s.height, age = s.sheet.age ?? 0;
   if (!v.sheet || v.sheet.key !== key) {
     if (v.sheet) { h.remove(v.sheet.group); v.sheet.flat.geometry.dispose(); }
     const group = new THREE.Group(); group.name = 'held poster'; group.matrixAutoUpdate = false;

@@ -10,10 +10,12 @@ type Pool = { key: string; parts: Part[]; meshes: THREE.InstancedMesh[]; capacit
 const tmp = new THREE.Matrix4(), tmp2 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 
-/** True when an object can be instanced: only plain meshes (no sprites, no skinning, no animated pivots). */
+/** True when an object can be instanced: plain meshes without per-entity effect anchors. */
 export function instanceable(obj: THREE.Object3D): boolean {
   let ok = true;
   obj.traverse((o) => {
+    // Geometry instancing discards the source hierarchy. Atmosphere smoke needs each anchor's world transform.
+    if (Array.isArray(o.userData.edenSmokeSources) && o.userData.edenSmokeSources.length) ok = false;
     if (o === obj) return;
     if ((o as THREE.Sprite).isSprite || (o as THREE.SkinnedMesh).isSkinnedMesh || (o as THREE.InstancedMesh).isInstancedMesh || o.userData.role) ok = false;
   });

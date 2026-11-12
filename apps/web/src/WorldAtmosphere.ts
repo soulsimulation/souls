@@ -8,6 +8,7 @@ import {Fauna} from './atmosphere/fauna.ts';
 import {Balloons} from './atmosphere/balloons.ts';
 import {Fireflies,Smoke} from './atmosphere/particles.ts';
 import {findAnchors,underCover} from './atmosphere/finder.ts';
+import {SmokePublishers} from './atmosphere/smoke-publishers.ts';
 import {insideBuilding} from './atmosphere/indoors.ts';
 import {installAtmosphereChunks,ATMOS,MIST,SHEEN,DUST,NOISE_MAP} from './atmosphere/chunks.ts';
 import {desertDustAt,parseDustOverride,DESERT_DUST_SEED,type DustSample} from './atmosphere/desert-dust.ts';
@@ -55,7 +56,7 @@ export type AtmosphereFrame={seconds:number;dt:number;daylight:number|null;camer
  indoors?:(x:number,y:number,z:number)=>boolean};
 /** A god's weather as set (apps/server god/world-env.ts): channels 0..1; kind 'storm' brings lightning. */
 export type SetWeather={kind:string;clouds:number;rain:number;wind:number;fog:number;intensity:number};
-export type AtmosphereInspection={bow:number;rainbowThings:number;rainbowThing:number;sun:number[];rainCover:number;profile:'eden'|'world';dust:({profile:'mars-desert';seed:number}&DustSample)|null;set:boolean;lightning:number;active:boolean;rotor:boolean;fountainWater:number;skyClouds:number;kind:WeatherKind|null;state:WeatherState;windMaterials:number;windModes:Record<string,number>;smokeSources:number;flowers:number;meadow:number;roofs:number;water:number;harbour:boolean;scans:number;lightCollects:number;lightRefreshes:number;drawCalls:number};
+export type AtmosphereInspection={bow:number;rainbowThings:number;rainbowThing:number;sun:number[];rainCover:number;profile:'eden'|'world';dust:({profile:'mars-desert';seed:number}&DustSample)|null;set:boolean;lightning:number;active:boolean;rotor:boolean;fountainWater:number;skyClouds:number;kind:WeatherKind|null;state:WeatherState;windMaterials:number;windModes:Record<string,number>;smokeSources:number;smokeRefreshes:number;flowers:number;meadow:number;roofs:number;water:number;harbour:boolean;scans:number;lightCollects:number;lightRefreshes:number;drawCalls:number};
 const SCAN_AT=[0,1.5,5,12,25,45];
 /** W2b: phones skip the sea fog banks (big alpha-blended puffs: fill rate). */
 /** Rainbow life after a shower stops (world seconds): full until HOLD, gone by GONE. */
@@ -81,6 +82,7 @@ export function createWorldAtmosphere(scene:THREE.Scene):{update(frame:Atmospher
  const beacons:Lighthouse[]=[];let lanternKey='';
  let windHeld=0;registerFx('atmosphere',{set(on){smoke.points.visible=on&&smoke.sourceCount>0;for(const b of beacons)b.group.visible=on;if(!on){windHeld=WIND.value.y||windHeld;WIND.value.y=0;}else if(windHeld){WIND.value.y=windHeld;}},stats(){return {smoke:smoke.sourceCount,lighthouses:beacons.length,windMaterials:wind.count};}});
  const fauna=new Fauna(),fireflies=new Fireflies(),smoke=new Smoke(),sky=new SkyDome(),rain=new Rain(),balloons=new Balloons(),halos=new Halos(),lighthouse=new Lighthouse(),fogBanks=new FogBanks();
+ const smokePublishers=new SmokePublishers(scene,sources=>smoke.setSources(sources));
  root.add(sky.mesh,fauna.mesh,fireflies.points,smoke.points,rain.lines,balloons.mesh,halos.mesh,lighthouse.group,fogBanks.mesh);
  // Fog is installed once, before anything compiles, at zero density (inert) so weather never recompiles programs.
  installAtmosphereChunks();sky.uniforms.uNoise.value=NOISE_MAP.value;
@@ -130,10 +132,11 @@ export function createWorldAtmosphere(scene:THREE.Scene):{update(frame:Atmospher
  }}
  function scan(seconds:number){
   wind.scan(scene,scans,scans===0?0:1,own);motion.scan(scene,own);
-  const f=findAnchors(scene,own,!fauna.ducksPlaced);covers=f.covers;
+  smokePublishers.beginScan();
+  const f=findAnchors(scene,own,!fauna.ducksPlaced,smokePublishers.capture);covers=f.covers;
   if(f.sun&&f.sun!==lights.sunLight){lights.sun?.restore();const sun=f.sun;lights.sun=new ScaledNumber(()=>sun.intensity,v=>{sun.intensity=v;});lights.sunLight=sun;}
   if(f.hemi&&!lights.hemi){const hemi=f.hemi;lights.hemi=new ScaledNumber(()=>hemi.intensity,v=>{hemi.intensity=v;});}
-  if(f.flowers.length)fauna.setFlowers(f.flowers);if(f.water.length)fauna.setWater(f.water);if(f.harbour)fauna.setGulls(f.harbour.x,f.harbour.z);if(f.roofs.length)fauna.setPerches(f.roofs);if(f.meadow.length)fireflies.setSites(f.meadow);if(f.lamps.length)fireflies.setLamps(f.lamps);smoke.setSources(f.smoke);
+  if(f.flowers.length)fauna.setFlowers(f.flowers);if(f.water.length)fauna.setWater(f.water);if(f.harbour)fauna.setGulls(f.harbour.x,f.harbour.z);if(f.roofs.length)fauna.setPerches(f.roofs);if(f.meadow.length)fireflies.setSites(f.meadow);if(f.lamps.length)fireflies.setLamps(f.lamps);
   lastFound={flowers:f.flowers.length,meadow:f.meadow.length,roofs:f.roofs.length,water:f.water.length,harbour:!!f.harbour};
   let landing:readonly number[]|null=null;
   scene.traverse(o=>{const p=o.userData?.edenBalloonLanding;if(!landing&&Array.isArray(p)&&p.length===3&&p.every(Number.isFinite)){o.updateWorldMatrix(true,false);const w=new THREE.Vector3(...p as [number,number,number]).applyMatrix4(o.matrixWorld);landing=w.toArray();}});
@@ -290,6 +293,7 @@ export function createWorldAtmosphere(scene:THREE.Scene):{update(frame:Atmospher
    else if(lightPublishers.some(p=>p.node!==scene&&!p.node.parent))collectLights();
    else if(lightPublishers.some(p=>p.node.userData.edenLightSources!==p.list))refreshLights();
    moveLights();
+   smokePublishers.update();
    // Any world can opt in using its admitted sky palette; no Mars identity special case.
    // Explicit owner weather wins over auto, unless a dust review override was requested.
    dustScheduled=!photoFrame&&desert&&!!(dustOverride||(!override&&!setWeather));
@@ -368,8 +372,8 @@ export function createWorldAtmosphere(scene:THREE.Scene):{update(frame:Atmospher
     try{api.update({...real,dt:0});}catch{/* next frame */}lastFlash=was.lastFlash;};
   },
   onLightning:null as ((strength:number,dir:THREE.Vector3)=>void)|null,
-  inspect(){return {bow:sky.uniforms.uBow.value.x,rainbowThings:rainbowThings.count,rainbowThing:rainbowThings.strength,sun:sunDir.toArray(),rainCover:COVER_A.value.w,profile,dust:desert?{profile:'mars-desert' as const,seed:DESERT_DUST_SEED,...dustSample}:null,set:!!setWeather,lightning:lastFlash,active,kind,state:{...state},rotor:motion.rotorFound,fountainWater:motion.waterFound,skyClouds:motion.skyClouds,windMaterials:wind.count,windModes:wind.modes(),smokeSources:smoke.sourceCount,flowers:lastFound.flowers,meadow:lastFound.meadow,roofs:lastFound.roofs,water:lastFound.water,harbour:lastFound.harbour,scans,lightCollects,lightRefreshes,drawCalls:root.children.filter(o=>o.visible).length};},
-  dispose(){if(closed)return;closed=true;if(review&&(globalThis as Record<string,unknown>).edenAtmosphere===api)delete (globalThis as Record<string,unknown>).edenAtmosphere;deactivate();wind.dispose();motion.dispose();fauna.dispose();balloons.dispose();fireflies.dispose();smoke.dispose();sky.dispose();rain.dispose();halos.dispose();lighthouse.dispose();for(const b of beacons)b.dispose();fogBanks.dispose();root.removeFromParent();if(ownsFog&&scene.fog===fog)scene.fog=null;if(scene.onBeforeRender===beforeRender)scene.onBeforeRender=previousBeforeRender;},
+  inspect(){return {bow:sky.uniforms.uBow.value.x,rainbowThings:rainbowThings.count,rainbowThing:rainbowThings.strength,sun:sunDir.toArray(),rainCover:COVER_A.value.w,profile,dust:desert?{profile:'mars-desert' as const,seed:DESERT_DUST_SEED,...dustSample}:null,set:!!setWeather,lightning:lastFlash,active,kind,state:{...state},rotor:motion.rotorFound,fountainWater:motion.waterFound,skyClouds:motion.skyClouds,windMaterials:wind.count,windModes:wind.modes(),smokeSources:smoke.sourceCount,smokeRefreshes:smokePublishers.updates,flowers:lastFound.flowers,meadow:lastFound.meadow,roofs:lastFound.roofs,water:lastFound.water,harbour:lastFound.harbour,scans,lightCollects,lightRefreshes,drawCalls:root.children.filter(o=>o.visible).length};},
+  dispose(){if(closed)return;closed=true;if(review&&(globalThis as Record<string,unknown>).edenAtmosphere===api)delete (globalThis as Record<string,unknown>).edenAtmosphere;deactivate();wind.dispose();motion.dispose();fauna.dispose();balloons.dispose();fireflies.dispose();smokePublishers.dispose();smoke.dispose();sky.dispose();rain.dispose();halos.dispose();lighthouse.dispose();for(const b of beacons)b.dispose();fogBanks.dispose();root.removeFromParent();if(ownsFog&&scene.fog===fog)scene.fog=null;if(scene.onBeforeRender===beforeRender)scene.onBeforeRender=previousBeforeRender;},
  };
  // Review hook (only with ?weather=… or ?atmos in the URL): window.edenAtmosphere.inspect() in the console.
  const review=typeof location!=='undefined'&&/[?&](weather|dust|atmos)\b/.test(location.search);
