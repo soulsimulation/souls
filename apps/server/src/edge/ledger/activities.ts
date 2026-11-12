@@ -128,8 +128,6 @@ export type ActivityWorld = {
   enterable(place: string | undefined): boolean;
   /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
   gone?(spotId: string): boolean;
-  /** #628 (knowledge/1): the spot stands in a secret place this Soul has not been to or found; a refusal never names it. */
-  hidden?(spotId: string, at: V2): boolean;
   /** Nearest free native seat within `radius` m: its sit capability id and plan. */
   /** The nearest free seat within `radius` m; `here` (D2, "sit down" means here): only a seat in the Soul's own room or
    *  within HERE_SEAT_M with no enclosure boundary between (EdgeLedger.seatIsHere). */
@@ -216,17 +214,13 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
   const why = new Map<string, {code: string; reason: string}>();
   if (want?.size) for (const s of data.spots) {
     if (!want.has(s.id)) continue;
-    // knowledge/1: a spot in a secret place this Soul does not know gets no reason at all (no name, no place, not taken or no-room):
-    // the act answers capability.unknown, as the non-strict path does
-    if (w.hidden?.(s.id, s.at)) continue;
     const name = s.label ?? 'that spot';
     if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
     else if (w.taken(s.at, s.id) || besideTaken(s)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
     else if (!ok(s)) {
-      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead; never one in a secret place
-      // this Soul does not know (knowledge/1: nothing names a secret place)
-      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.hidden?.(o.id, o.at) && !w.taken(o.at, o.id))
+      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead
+      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.taken(o.at, o.id))
         .sort((x, y) => d2(x.at, s.at) - d2(y.at, s.at) || x.id.localeCompare(y.id)).find(o => ok(o) && !besideTaken(o));
       why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}: something stands everywhere a step around it, and waiting will not change that, so nothing was done.${alt ? ` The nearest other one is ${alt.label ?? 'another spot'} (${s.activity}:${alt.id}).` : ''}`});
     }

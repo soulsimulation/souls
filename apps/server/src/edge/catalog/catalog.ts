@@ -52,10 +52,10 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   // a ref is published only when it names one place: a lake and its bank can share one, and `walk:<ref>` would then name
   // neither (the world refuses it), while the id always names its place
   const refs = new Map<string, number>(); for (const p of input.places) if (p.ref) refs.set(p.ref, (refs.get(p.ref) ?? 0) + 1);
-  const places: CatalogPlace[] = input.places.filter(p => !p.secret && p.polygon.length >= 1).map(p => ({
+  const places: CatalogPlace[] = input.places.filter(p => p.polygon.length >= 1).map(p => ({
     id: p.id, ...(p.ref && p.ref !== p.id && refs.get(p.ref) === 1 ? {ref: p.ref} : {}), name: p.name, kind: p.kind, parent: p.parent, at: centre(p.polygon), ...(p.level ? {level: p.level} : {}),
     ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const} : {outline: p.polygon.map(v => [r1(v[0]), r1(v[1])] as [number, number])})})).sort(byId);
-  const known = new Set(input.places.filter(p => !p.secret).map(p => p.id));
+  const known = new Set(input.places.map(p => p.id));   // #1262: no place is secret, whatever its data says
   const shown = input.things.filter(t => !t.place || known.has(t.place));
   const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);
   // one entry per kind (`state`: what a thing of it is in until the live picture says otherwise). A revision whose acts or
