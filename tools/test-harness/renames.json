@@ -499,6 +499,13 @@
       "to": "through the real CLI: words exit 2 with no act; the offered id acts",
       "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
       "pr": "#2175"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "calendar interest and not-coming call the item's object act, one request each",
+      "to": "calendar interest and not-coming call the item's object act, one request each; an interest taken reads the calendar once for memory",
+      "reason": "Same test, extended by #1981: an interest taken also reads the calendar once so the item goes to memory; both act calls are unchanged",
+      "pr": "#2187"
     }
   ]
 }
