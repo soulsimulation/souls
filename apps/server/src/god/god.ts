@@ -400,14 +400,14 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   }
   /** legal-edits/1: run a god request (an act, undo or redo) and, while its edit's preview is pending, wait for that preview off
    *  the tick thread and run the request again with the same caller; the world may change between tries, so at most three. */
-  async checked<T>(fn: () => T): Promise<T | Result> {
+  async checked<T>(fn: () => T): Promise<T | (Result & { ok?: false })> {
     const caller = this.caller;
     for (let round = 0; ; round++) {
       const r = this.as(caller, fn);
       if (!isPending(r)) return r;
-      if (round === 3 || !this.bodies?.legalRun) return { accepted: false, failures: [{ op: -1, code: 'edit-preview.busy', field: 'legal-edits/1', detail: 'The world kept changing while this edit was checked, so it was not made.', measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }] };
+      if (round === 3 || !this.bodies?.legalRun) return { accepted: false, ok: false, failures: [{ op: -1, code: 'edit-preview.busy', field: 'legal-edits/1', detail: 'The world kept changing while this edit was checked, so it was not made.', measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }] };
       const refused = await this.bodies.legalRun();
-      if (refused) return { accepted: false, failures: refused };
+      if (refused) return { accepted: false, ok: false, failures: refused };   // `ok`: a build rewind's refusal shape too
     }
   }
   /** legal-edits/1: the bridge's refusal of an edit about to commit (null: the rule is off or the edit passes). */

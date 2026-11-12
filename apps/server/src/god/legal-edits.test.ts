@@ -130,7 +130,7 @@ test('legal-edits/1: a preview that times out refuses the edit with a retryable 
   const r: any = await w.god.checked(() => w.god.act(wall('wall', [5, 5])));
   assert.equal(r.accepted, false, JSON.stringify(r));
   assert.equal(r.failures[0].code, 'edit-preview.worker-unavailable');
-  assert.equal(r.failures[0].measured.retryable, true);
+  assert.equal(r.failures[0].measured.retryable, true); assert.equal(r.ok, false, 'a build rewind client reads ok');
   assert.match(r.failures[0].detail, /no answer within 300 ms/);
   assert.equal(w.god.model.get('wall'), undefined); assert.equal(w.god.model.editSeq, seq, 'nothing committed');
   // with a working preview the same request goes through
