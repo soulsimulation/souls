@@ -40,7 +40,9 @@ why: per changed frame the mode, target, the pose asked for and the pose drawn, 
 it (`held`, `user`, `collision`, `opening`, `search`, `glide`, `speed-cap`) with its parameters, plus the viewer's
 wheel, drag, touch and movement keys. Times are `performance.now()` ms. A small panel lists each automatic move that
 overrode the viewer's input in the last 2 s (more than 0.25 m or 3° off what they asked) and downloads the trace as
-JSONL. Nothing leaves the page unless the viewer downloads it.
+JSONL. It also meters the follow camera (#2201): the milliseconds and sightline rays of each frame's `follow.resolve`,
+with their median and p95 in the panel and as the download's closing `cost` record. Nothing leaves the page unless the
+viewer downloads it.
 Free has no wall near the map's edge: a lost-camera guard (`WorldRtsCamera.keepPivotInBounds`) keeps the eye within one
 far-zoom limit (320–1,400 m) of the world's ground rectangle, far beyond the map; where the pivot sits does not matter.
 On a touch screen in Free (`apps/web/src/touch/WorldTouchFree.ts`), a touch that starts in the lower-left 45 % of the

@@ -36,7 +36,7 @@ test('drum kit: seated play-music offer, two players at once, bounded perception
  const near=await here(ana),id=n=>god.model.get(n).id;
  const caps=edge.capabilities(ana),drumCap=caps.find(c=>/play-music/.test(c.id)&&c.id.includes(id('drums')));assert.ok(drumCap,'the drum kit offers play-music: '+caps.filter(c=>/play/.test(c.id)).map(c=>c.id).join(' '));
  let retries=0;const act=async(s,capability,params,accepted=true)=>{let b;for(let k=0;k<20;k++){soul=s;const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,...(params?{params}:{})})}));b=await r.json();if(b.code!=='object.admission-failed')break;retries++;await tick(10);}assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
- const dr=await act(ana,'play the nearest drums',{seconds:6}),pr=await act(ben,'play the piano',{seconds:6});
+ const dr=await act(ana,drumCap.id,{seconds:6}),pr=await act(ben,`play-piano:play-piano.${id('piano')}`,{seconds:6});
  assert.match(dr.receipt.capability,/play-music/);assert.match(pr.receipt.capability,/play-piano/);
  // both reach their instruments and play at once
  let both=0,seat=null;for(let n=0;n<600;n++){const a=body(ana),b=body(ben);if(a.human?.activity==='play-music'&&b.human?.activity==='play-piano'){both++;seat=a.human.instrument;}const pa=edge.receipt(ana.soulId,dr.receipt.id)?.phase,pb=edge.receipt(ben.soulId,pr.receipt.id)?.phase;if(['completed','failed'].includes(pa)&&['completed','failed'].includes(pb))break;await tick(1);}
