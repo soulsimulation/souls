@@ -123,7 +123,12 @@ both workflows reach `modal_gates_per_day` (PROOF-POLICY.yml), keeps the baselin
 - A failure not listed in `quarantine.json`, even one added to the list in the same change.
 - Missing steps or logs, cancellations, timeouts (each V5 shard has a fixed time envelope).
 - Changed skips or TODOs, removed baseline assertions (unless a reviewed [rename](#renames) is satisfied), test files
-  that fail to load, dropped V6 scenarios.
+  that fail to load, dropped V6 scenarios. A test new since the baseline may skip or be TODO only when `quarantine.json`
+  lists it with that status and a reason; the receipt then counts it as quarantined.
+
+A blocked receipt never ships as is. When the maintainer accepts its removed assertions or unexpected skips, the release
+owner records that in an [accepted-exceptions](../release.md#accepted-exceptions) file bound to the receipt's sha256;
+the receipt itself is never edited, and new failures are never accepted.
 
 Failures are identified by raw TAP leaf ids, so a second failure in an already failing file cannot hide.
 
