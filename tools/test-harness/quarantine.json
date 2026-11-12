@@ -72,6 +72,22 @@
       "reason": "Engine gap: tilted solar modules read flat (solar-panel 1.18x0.65 x8 + 1.18x1.02 x9, pinned 1.59x1.07 x10); plywood-4x8 89 (was 79, W51 re-seed).",
       "owner": "Gene: historical content, parked 2026-09-29 (mars/docs/engineering/OWNER_DECISIONS.md; LAST_MILE LM-182 / LM-184 classed content, engine halves included); re-run recipe HISTORICAL_CONTENT.md §4. Re-triaged by t4-quar 2026-10-21",
       "exit": "§d engine solar frame (solar-frame-45-2x4 + install_panel; a tilted module now reads as a flat 1.18 m panel); then re-pin counts"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "id": "a project skill copy in a read-only folder is a one-line note; SKILL.md beside it is written and no upgrade asks for it again",
+      "status": "skip",
+      "reason": "Environmental: skips when the process runs as root ('root writes anywhere'), and the gate's Modal containers run as root; CI runs it as a non-root user.",
+      "owner": "#2212 (release 0.126 gate, coordinator)",
+      "exit": "#2212: run the read-only case where the gate runs, then remove this entry"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "id": "a frozen file whose sha256 changed since the latest release tag also changed its version",
+      "status": "skip",
+      "reason": "Environmental: skips when no v* tag is reachable from HEAD, and the gate ships git archive (no history, no tags) to Modal; CI checks out with fetch-depth 0 and runs it.",
+      "owner": "#2213 (release 0.126 gate, coordinator)",
+      "exit": "#2213: give the test the last release's frozen versions without git, then remove this entry"
     }
   ],
   "scopeExclusions": [
