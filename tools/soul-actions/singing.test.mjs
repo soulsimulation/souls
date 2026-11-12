@@ -48,8 +48,8 @@ test('mic stand: sing along, one singer per mic, stop when told or when the musi
  assert.equal(seen?.doing,'singing at the microphone',JSON.stringify(seen));
  // a second singer is refused politely, by name, and nobody walks over
  const calAt=[...body(cal).pose.p],second=await act(cal,cap.id);
- // #1911: by the mic's own id the refusal is the spot's (the words' "Ana is already singing at the nearest microphone" read the words)
- assert.equal(second.accepted,false);assert.match(second.reason,/^microphone in .* is taken right now/,second.reason);
+ // #1911: by the mic's own id the act itself refuses (spot.taken), and names the mic; only the words' reading named the singer (#2189)
+ assert.equal(second.accepted,false);assert.equal(second.code,'spot.taken',JSON.stringify(second));assert.match(second.reason,/^microphone in .* is taken right now/,second.reason);
  await tick(20);assert.ok(Math.hypot(body(cal).pose.p[0]-calAt[0],body(cal).pose.p[2]-calAt[2])<0.05,'Cal stays where she is');
  // "stop singing": she stops
  const stopAt=W().tick,stop=await act(ana,'stand:here');assert.equal(stop.accepted,true);
@@ -97,7 +97,7 @@ test('mic stand: sing along, one singer per mic, stop when told or when the musi
  const report={status:'pass',hereBytes:{absent:JSON.stringify(absent).length,distant100MicStands:JSON.stringify(farIdle).length,distantSoulsStandingControl:JSON.stringify(farControl).length,distant100MicsInUse:JSON.stringify(farInUse).length,distantAfterStopping:JSON.stringify(farAfter).length,distantSingers:singers.length,singRetries,distantPianists:2,nearbyBaseline:JSON.stringify(absentHere).length,nearby:JSON.stringify(near).length},
   tickMs:{distantSingingAlong:+singingMs.toFixed(3),sameSoulsStanding:+standingMs.toFixed(3)},singCap:cap.id,label:cap.label,singerPlaceFromPole:+Math.hypot(at[0]-mic.pose.p[0],at[2]-mic.pose.p[2]).toFixed(3),yawToMicErrDeg:+(yawErr*180/Math.PI).toFixed(2),
   noMusic:edge.receipt(ana.soulId,lone.receipt.id).reason,refusal:second.reason,crowdViolations:V.map(v=>v.code+' '+v.message.replace(/h_[0-9a-f]+/,'h_*')),stopSeconds:(stoppedAt-stopAt)*0.05,musicStopSeconds:(endSing-pianoEnd)*0.05,benSees:seen,
-  checks:['the mic stand offers sing (plain words: sing at the microphone)','the singer stands 0.55 m in front of the pole, facing it','no music: refused after 4 s (pose.no-music)','a nearby Soul sees "singing at the microphone"','a second singer is refused by name; nobody walks over','stop singing: stops within 2 s','stops by herself within 3 s of the music stopping','distant mic stands, in use or not: +0 bytes vs the same Souls standing there','no native violations by the singer, the band or Cal (the 14-body crowd may trip the existing wait overspeed check; reported)']};
+  checks:['the mic stand offers sing (plain words: sing at the microphone)','the singer stands 0.55 m in front of the pole, facing it','no music: refused after 4 s (pose.no-music)','a nearby Soul sees "singing at the microphone"','a second singer is refused (spot.taken); nobody walks over','stop singing: stops within 2 s','stops by herself within 3 s of the music stopping','distant mic stands, in use or not: +0 bytes vs the same Souls standing there','no native violations by the singer, the band or Cal (the 14-body crowd may trip the existing wait overspeed check; reported)']};
  if(out)writeFileSync(`${out}/summary.json`,JSON.stringify(report,null,2));console.log(JSON.stringify(report));
  assert.equal(report.hereBytes.distant100MicsInUse,report.hereBytes.distantSoulsStandingControl,'mics in use add +0 bytes');
  assert.equal(report.hereBytes.distant100MicStands,report.hereBytes.absent,'100 distant mic stands add +0 bytes');
