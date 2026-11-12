@@ -3003,6 +3003,7 @@ export function intentionOf(path, body) {
 export function readPending(at = Date.now()) {
   try { const j = JSON.parse(readFileSync(PENDING_FILE, "utf8")); return Array.isArray(j) ? j.filter((x) => x && typeof x.key === "string" && at - x.at < PENDING_MS) : []; } catch { return []; }
 }
+const liveOther = (pid) => { if (!Number.isInteger(pid) || pid === process.pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e?.code === "EPERM"; } };
 function writePending(list) {
   try {
     if (!list.length) { if (existsSync(PENDING_FILE)) unlinkSync(PENDING_FILE); return; }
@@ -3024,11 +3025,12 @@ async function lookupWrite(path, key) {
  *  the world answers a known clientRef with its first receipt. Returns the answer (or the world's record of it) with
  *  `key`, `ref`, `resent` (this key came from an earlier unconfirmed run), `checked` (found by lookup) or `unconfirmed`. */
 async function keyedWrite(path, body, { key: given, ref: givenRef, once = false } = {}) {
-  const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent);
+  // #2083: a key held by a process still running is that process's write, not this one's: concurrent runs never share one
+  const intent = intentionOf(path, body), held = given ? null : readPending().find((x) => x.intent === intent && !liveOther(x.pid));
   const key = given ?? held?.key ?? randomUUID(), ref = once ? givenRef ?? held?.ref ?? key : undefined, resent = !!held;
-  writePending([...readPending().filter((x) => x.intent !== intent), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now() }]);
+  writePending([...readPending().filter((x) => x.intent !== intent || x.key !== key), { intent, key, ...(ref ? { ref } : {}), at: held?.at ?? Date.now(), pid: process.pid }]);
   const r = await call(path, { body: ref ? { ...body, clientRef: ref } : body, key, once });
-  const settle = () => writePending(readPending().filter((x) => x.intent !== intent));
+  const settle = () => writePending(readPending().filter((x) => x.intent !== intent || x.key !== key));
   // a named key the world already holds: its own earlier act (same offered id) is this act's answer; another write's is not
   const reused = !!given && r.status === 409 && codeOf(r.data) === "idempotency-key-reused";
   if (confirmedAnswer(r, !!given) && !reused) { settle(); return { r, key, ref, resent }; }
