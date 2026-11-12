@@ -14,6 +14,7 @@ import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
 import {installPuntActivities} from './punt-install.ts';
 import {centroid} from './edge/ledger/places.ts';
+import {rerouteCarrier} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 
 async function world(t:any,opts:{balloon?:boolean;punt?:boolean}){
  const f=fixture(':memory:',await retainedCommonsShoreFactory().then(nativeSleepSnapshotFactoryV1),{durableClockV1:true});f.souls.enableLifecycle();f.brain.quiesce();t.after(()=>{f.host.stop();f.db.close();});
@@ -78,7 +79,7 @@ test('steer the balloon to a named place and land there; the other rider is refu
 // rider left it, never teleports or respawns, and offers its ride right there; the rider gets back in and flies it home.
 test('park-away/1: the empty balloon stays where it landed and its rider rides it home',{timeout:600000},async t=>{
  const w=await world(t,{balloon:true}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
- await accept<unknown>(w.f.host,(w.f.host as any).enableCarrierParkAwayV1?.('test')??Promise.resolve());
+ await accept<unknown>(w.f.host,w.f.host.enableCarrierParkAwayV1('test'));
  await boardAndLift(w);
  const go=await w.call(0,'POST','/v1/edge/act',{capability:'fly the balloon to the presentation deck and land there'});assert.equal(go.accepted,true,JSON.stringify(go));
  assert.ok(await w.run(6000,()=>b().carrier.phase==='landed'),'came down: '+b().carrier.phase);
@@ -89,7 +90,12 @@ test('park-away/1: the empty balloon stays where it landed and its rider rides i
  await w.run(6000,()=>{moved=Math.max(moved,Math.hypot(b().pose.p[0]-parked[0],b().pose.p[1]-parked[1],b().pose.p[2]-parked[2]));lifted||=b().carrier.phase==='aloft'||b().phase==='carried';return false;});
  assert.equal(lifted,false,'never lifted off with nobody aboard');assert.equal(moved,0,'stayed exactly where it was left');
  assert.equal(b().carrier.phase,'parked');assert.equal(b().pose.yaw,yaw);
- // its ride is offered where it stands, and the rider who left it rides it home
+ // a god re-route never moves it from where it was left (it re-routes once ridden home)
+ const spec={id:'eden-balloon',def:'hot-air-balloon',label:'Red balloon',at:[home[0]+30,home[2]] as [number,number],yaw:Math.PI,route:'commons-hop',waitSeconds:60};
+ assert.equal(rerouteCarrier(w.f.host.engine.world as any,spec,0)?.code,'carrier.carrier-away');assert.deepEqual(b().pose.p,parked);
+ // its ride is offered where it stands, says where it goes, and the rider who left it rides it home
+ const offer=(await w.call(0,'GET','/v1/edge/capabilities')).capabilities.find((c:any)=>c.id==='object:ride-eden-balloon:join');
+ assert.ok(offer?.available,JSON.stringify(offer));assert.match(offer.label,/flies home to its launch spot/,offer.label);
  const back=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:join'});assert.equal(back.accepted,true,JSON.stringify(back));
  assert.ok(await w.run(3000,()=>w.ent(0).human.carrier?.phase==='seated'),'seated at the parked spot');
  assert.ok(flat(b().pose.p,parked)<1e-9,'boarded where it was parked');

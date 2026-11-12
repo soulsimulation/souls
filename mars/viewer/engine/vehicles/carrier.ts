@@ -291,8 +291,10 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
     if (p.holdSeats && p.holdSeats > free - keptSeats(c) - 1) return { ok: false, diagnostic: diag('full', `${e.label ?? e.id} has no room for ${p.holdSeats} more`, [e.id]) };
     const a = rt.world.entities[p.actor];
     const door = doorPoint(e)!;
-    // park-away/1: a balloon parked where a rider left it is boarded at its floor there, not at its home's height
-    if (hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]) > BOARD_REACH || Math.abs(a.pose.p[1] - (c.bank ? door[1] : parkAway(rt) ? e.pose.p[1] : c.home[1])) > 0.05 || (c.bank && hypot(a.pose.p[0] - door[0], a.pose.p[2] - door[2]) > 0.35) || (a.human!.level ?? 0) !== 0)
+    // park-away/1: a balloon parked where a rider left it is boarded from the ground round it there, which may lie up to the
+    // landing's own 1 m level tolerance from its floor (the boarding path climbs it, as a step out at step-out/1 comes down it)
+    const awayLevel = !c.bank && parkedAway(rt, e, c) ? 1 + 0.05 : 0;
+    if (hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]) > BOARD_REACH || Math.abs(a.pose.p[1] - (c.bank ? door[1] : awayLevel ? e.pose.p[1] : c.home[1])) > (awayLevel || 0.05) || (c.bank && hypot(a.pose.p[0] - door[0], a.pose.p[2] - door[2]) > 0.35) || (a.human!.level ?? 0) !== 0)
       return { ok: false, diagnostic: diag('not-at-door', `${p.actor} must stand beside ${e.label ?? e.id} first`, [p.actor]) };
     return { ok: true, program: { slot } };
   },
@@ -591,6 +593,8 @@ function startReturn(c: CarrierState, by: string | null = null) {
 
 /** park-away/1 (#2196, logged runtime policy `carrierParkAwayV1`): adopted, an empty ride that landed away parks there. */
 function parkAway(rt: Runtime): boolean { return rt.services.carrierParkAwayV1 === true; }
+/** park-away/1: on the ground away from its home (only this rule leaves a ride parked anywhere but its home). */
+function parkedAway(rt: Runtime, e: Entity, c: CarrierState): boolean { return parkAway(rt) && (c.phase === 'parked' || c.phase === 'boarding') && !same(e.pose.p, c.home); }
 /** park-away/1: parked away from home with its own route back, and a flight home waiting for the next rider (built at lift-off
  *  from where it stands: up, across, down at home). A rider who steers it before lift-off replaces that flight. */
 function parkHere(c: CarrierState): void {
@@ -692,7 +696,11 @@ export function stepCarriers(rt: Runtime, table?: EntityTable | null): void {
     const riders = Object.values(c.seats).filter((a): a is string => !!a);
     const tick = rt.tick;
     if (c.phase === 'boarding') {
-      if (!riders.length) { c.phase = 'parked'; c.departAtTick = null; c.phaseTick = tick; delete c.hold; continue; }
+      if (!riders.length) {
+        // park-away/1: everyone got out before lift-off; a steer one of them set goes with them, and the flight home waits again
+        if (parkedAway(rt, e, c) && c.steer) parkHere(c);
+        c.phase = 'parked'; c.departAtTick = null; c.phaseTick = tick; delete c.hold; continue;
+      }
       if (c.hold) {
         // together/1: wait for invited companions (all seated), or until the hold runs out / its host is no longer aboard
         const companionsIn = c.hold.filled >= c.hold.seats && riders.every(a => carried(rt.world.entities[a])?.phase === 'seated');
@@ -799,6 +807,8 @@ export function rerouteCarrier(world: { entities: Record<string, Entity> }, spec
   if (!e || !c) return diag('unknown-carrier', `no carrier ${spec.id}`);
   if (spec.def !== e.def) return diag('def-mismatch', `${spec.id} is a ${e.def}, not a ${spec.def}`);
   if (c.phase !== 'parked' || Object.values(c.seats).some(Boolean) || c.doorBy || c.hold) return diag('carrier-busy', `${spec.id} has riders or boarders; it re-routes once parked and empty`, [spec.id]);
+  // park-away/1: parked where a rider left it (never at home before the rule), it is not moved to a new home; it re-routes once ridden home
+  if (c.steer?.ret && !same(e.pose.p, c.home)) return diag('carrier-away', `${spec.id} is parked away from its home; it re-routes once ridden back there`, [spec.id]);
   const next = carrierEntity(spec, tick); if ('code' in next) return next;
   const n = state(next)!;
   c.home = n.home; c.yaw = n.yaw; c.route = n.route; c.elapsed = 0; c.departAtTick = null; c.holding = false;
@@ -811,6 +821,7 @@ export function rerouteCarrier(world: { entities: Record<string, Entity> }, spec
  *  flight (e.g. the brisk eden loop); refused (no change) while boarding, aloft or landed, or for a route not ending at home. */
 export function setCarrierRoute(world: { entities: Record<string, Entity> }, id: string, routeId: string): boolean {
   const e = world.entities[id], c = state(e); if (!e || !c || c.phase !== 'parked' || Object.values(c.seats).some(Boolean)) return false;
+  if (c.steer?.ret && !same(e.pose.p, c.home)) return false;   // park-away/1: parked away, its flight home keeps its own route
   const route = routeAt(routeId, c.home); if (!route) return false;
   const a = route.keys[0].p, b = route.keys[route.keys.length - 1].p;
   if (hypot(a[0] - c.home[0], a[1] - c.home[1], a[2] - c.home[2]) > 1e-6 || hypot(b[0] - c.home[0], b[1] - c.home[1], b[2] - c.home[2]) > 1e-6) return false;

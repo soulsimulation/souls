@@ -24,7 +24,11 @@ export type RideState = {carrier: string; capacity: number; phase: string; rider
   /** landing/1: where a steered landing is aimed (the ground point asked for, and the spot chosen), from the native ride. */
   landing?: {asked: [number, number] | null; at: [number, number]} | null;
   /** landing/1: the native ride's last change to a steered landing (moved, hovering, flying home) and why. */
-  landNote?: {tick: number; code: string; at?: [number, number]; m?: number; why?: string} | null};
+  landNote?: {tick: number; code: string; at?: [number, number]; m?: number; why?: string} | null;
+  /** park-away/1 (#2196): on the ground away from its launch spot, where a rider left it; its next flight goes home. */
+  parkedAway?: boolean;
+  /** park-away/1: boarded where it was parked away; its flight goes home (sticky until it is parked again). */
+  homebound?: boolean};
 export type Vehicle = 'balloon' | 'punt' | 'ferris-wheel' | 'carousel';
 /** RIDE-LABELS: the vehicle of a carrier: its def (punt), the attraction route it was installed with, or the carrier id
  *  (installGodRides names attraction carriers after the wheel or carousel); sticky so a steered or re-routed ride keeps it. */
@@ -49,7 +53,14 @@ function from(state: RideState, v: CarrierView | null): RideState {
     steeredBy: ((v as {steer?: {by: SoulRef | null}}).steer?.by) ?? null,
     ...(state.steerLabel ? {steerLabel: state.steerLabel} : {}),
     landing: awayLanding(v),
-    landNote: (v as {landNote?: RideState['landNote']}).landNote ?? null};
+    landNote: (v as {landNote?: RideState['landNote']}).landNote ?? null,
+    ...(parkedAwayOf(v) ? {parkedAway: true} : {}),
+    ...(parkedAwayOf(v) || (state.homebound && v.phase !== 'parked') ? {homebound: true} : {})};
+}
+/** park-away/1: parked or boarding more than a metre from home (only a balloon left where it landed is). */
+function parkedAwayOf(v: CarrierView): boolean {
+  const p = v.position as number[], h = v.home as number[];
+  return (v.phase === 'parked' || v.phase === 'boarding') && Math.hypot(p[0] - h[0], p[2] - h[2]) > 1;
 }
 /** landing/1: a steered landing away from the ride's home (a flight home, or its own route, is none). */
 function awayLanding(v: CarrierView): RideState['landing'] {
@@ -102,7 +113,7 @@ export const rideKind: ObjectKind<RideState> = {
       // landing/1 (#1329 item 1): the landing says where it really came down: home, or the spot a steer chose
       const away = next.landing ?? state.landing;
       if (next.phase === 'landed' || (state.phase === 'aloft' && next.phase === 'parked')) events.push({to: was, text: next.rowing ? 'The punt has returned to its bank; you are disembarking. Wait for the row receipt and your ashore observation.' : attraction(next) ? `The ${attraction(next)} has stopped where you boarded; you step out.`
-        : next.phase === 'landed' && away ? `The balloon has landed ${landingWords(away.asked, away.at, next.steerLabel)}; you step out.` : 'The balloon has landed back where it started; you step out.'});
+        : next.phase === 'landed' && away ? `The balloon has landed ${landingWords(away.asked, away.at, next.steerLabel)}; you step out.` : state.homebound ? 'The balloon has landed back at its launch spot; you step out.' : 'The balloon has landed back where it started; you step out.'});
     }
     // D1 (playtest 121122 zed-019: "You are in the punt" at accept, rowing ~10 s later): a rider is in only once seated
     const seated = (x: RideState, id: string) => x.riders.some(o => o.soulId === id) && !(x.boarding ?? []).some(o => o.soulId === id);
@@ -133,7 +144,7 @@ export const rideKind: ObjectKind<RideState> = {
         ? `Ride the ${attraction(s)}: it starts by itself ${s.departsInSeconds != null ? `in ~${s.departsInSeconds} s` : `~${s.waitSeconds ?? 45} s after you are seated`}, ${s.vehicle === 'carousel' ? 'turns' : 'goes round'} for ${minutes(s.routeSeconds)} and stops where you boarded; you cannot get off while it ${s.vehicle === 'carousel' ? 'turns' : 'goes round'}`
         : s.rowing
         ? `Board the punt: it pushes off by itself ${s.departsInSeconds != null ? `in ~${s.departsInSeconds} s` : `~${s.waitSeconds ?? 45} s after you are aboard`}, rows ${minutes(s.routeSeconds)} on the water and returns to this bank, where you step ashore`
-        : `Board the balloon: it lifts off by itself ${s.departsInSeconds != null ? `in ~${s.departsInSeconds} s` : `~${s.waitSeconds ?? 45} s after you are seated`}, flies ${minutes(s.routeSeconds)} and lands where it started; you cannot get off in the air`,
+        : `Board the balloon: it lifts off by itself ${s.departsInSeconds != null ? `in ~${s.departsInSeconds} s` : `~${s.waitSeconds ?? 45} s after you are seated`}, ${s.parkedAway ? 'flies home to its launch spot (it is parked where a rider left it) and lands there' : `flies ${minutes(s.routeSeconds)} and lands where it started`}; you cannot get off in the air`,
       available: (s, ctx) => s.riders.some(r => r.soulId === ctx.soul.soulId) ? {code: 'ride.already-aboard', reason: 'You are already in it.'}
         : s.phase === 'aloft' ? {code: 'ride.departed', reason: s.rowing ? 'It is out on the water; it returns to this bank.' : attraction(s) ? `The ${attraction(s)} is going round; it stops where you boarded.` : 'It is in the air; it lands where it started.'}
         : s.phase === 'landed' ? {code: 'ride.landing', reason: 'It has just returned; its riders are stepping out.'}
