@@ -46,3 +46,11 @@ test("#1918: the copy keeps the world's clock from a whole picture and from each
   assert.deepEqual(copy.live.clock, clock(422, 5001));
   assert.equal(liveHash(copy.live), worldHash({ ...p1, clock: undefined }));
 });
+
+test("#1978: a changed row is merged: `now` and `about` left out are kept, null clears", () => {
+  let copy = applyFrame(null, W, "live.full", { ...pic(1, [{ ...row("s_a", [1, 1]), now: "rowing", about: "A miller." }]), epoch: "ep", seq: 1 }, 1).copy;
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 2, base: 1, tick: 2, at: 2, souls: { set: [row("s_a", [2, 2])], del: [] } }, 2).copy;
+  assert.deepEqual(copy.live.souls[0], { ...row("s_a", [2, 2]), now: "rowing", about: "A miller." }, "moving keeps both");
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 3, base: 2, tick: 3, at: 3, souls: { set: [{ ...row("s_a", [2, 2]), now: null }], del: [] } }, 3).copy;
+  assert.deepEqual(copy.live.souls[0], { ...row("s_a", [2, 2]), about: "A miller." }, "null clears the status line");
+});

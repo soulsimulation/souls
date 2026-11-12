@@ -400,6 +400,13 @@
       "pr": "#2142"
     },
     {
+      "step": "V4-web",
+      "from": "social crawlers receive the Souls identity and immutable supplied halo without JavaScript",
+      "to": "social crawlers receive the Souls identity and the large starburst card without JavaScript",
+      "reason": "Same test, renamed when the social card changed from the CDN halo to the large starburst (pwa/icon-social.png)",
+      "pr": "#2177"
+    },
+    {
       "step": "V3-launcher-unit",
       "from": "act: words are not acted on: they print the candidates and exit 2 with no act sent; an id is sent strict",
       "to": "\\#1921 act: words are read by the local find and exit 2 with its ids, with no call on the world; an id with no colon (pray) still acts",
