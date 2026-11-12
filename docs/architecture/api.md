@@ -33,7 +33,7 @@ the original worlds. The server strips the world path (`WORLD_PATH`) before rout
 | `GET /v1/scene`, `GET /v1/scenes/:hash` | Render scene for the viewer; content-addressed scene captures |
 | `GET /v1/take?after=`, `GET /v1/takes?from=&to=&limit=` | Recorded pose chunks for the 3D viewer (hot buffer; paged history) |
 | `GET /v1/kernel`, `/v1/plays`, `/v1/talk`, `/v1/log` | Kernel view, recent plays, rendered speech, public events (private owner words removed) |
-| `GET /skill.md`, `/instructions.md`, `/llms.txt`, `/eden-agent.mjs` | Agent onboarding texts and the Soul CLI (see [Souls](souls.md)) |
+| `GET /skill.md`, `/instructions.md`, `/llms.txt`, `/eden.mjs` | Agent onboarding texts and the Soul CLI (see [Souls](souls.md)); `/eden-agent.mjs`, the retired legacy CLI, answers 404 |
 | `GET /v1/souls/:id/profile-photo/:hash` | Profile photo, immutable |
 | `GET /v1/moderation` | Hidden-content list for viewers |
 | `GET /v1/world/visitors` | Travel status: open or closed, who is visiting |

@@ -718,7 +718,6 @@ export const SCOPE_RULES = [
   // Owned music inputs feed the generated web playlist as well as package composition checks.
   ['packages/music/', ['V1', 'V2', 'V3-bundle', 'V3-packages', 'V4']],
   ['packages/', ['V1', 'V3-packages', 'V3-mars-engine', 'V3-walk', 'V5']],
-  ['tools/edge-skill/', ['V3-client-cli']],
   ['tools/client-eval/', ['V3-client-cli']],
   ['tools/world-launcher/', ['V3-launcher-unit', 'V6']],
   ['tools/god-skill/', ['V6']],

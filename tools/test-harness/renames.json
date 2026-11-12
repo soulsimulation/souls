@@ -405,6 +405,79 @@
       "to": "social crawlers receive the Souls identity and the large starburst card without JavaScript",
       "reason": "Same test, renamed when the social card changed from the CDN halo to the large starburst (pwa/icon-social.png)",
       "pr": "#2177"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI BODY authenticates privately and completed plans remain readable by ID",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI body look: show, seeded random, set parts and colours, classic preset, refusal",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-body-look-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "conversation start keeps the old single form and adds explicit unique group recipients",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "invalid group entries refuse rather than losing a recipient or inventing a target",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "published group argv sends one invitation POST, preserves backend refusals, and never accepts peers for them",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-group-converse.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "published CLI normalizes plain words with params exactly once and preserves explicit capability IDs",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-cli-word-params.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "CLI look around / explore: short around frame with walk ids; --full raw; here has district and far",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and edge-knowledge-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "pair-soul <id> from a fresh folder: owner window within one poll, real name, nobody else, Approve connects",
+      "to": "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)",
+      "reason": "Intended behaviour change (#1754): the legacy client is retired and pair-inwindow-cli.test.ts, which drove it, is deleted; the route it was fetched from is replaced by the assertion that it answers 404",
+      "pr": "#2137"
+    },
+    {
+      "step": "V5-server-full",
+      "from": "single-controller CLI is distinct from retained legacy CLI and instructions preserve window binding",
+      "to": [
+        "single-controller CLI is served and instructions preserve window binding",
+        "the legacy client is retired: /eden-agent.mjs answers 404 on every world (\\#1754)"
+      ],
+      "reason": "#1754: the legacy CLI is no longer retained; the controller CLI and instructions assertions are kept in the renamed test, the legacy ones become the 404 test",
+      "pr": "#2137"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "new and forked worlds receive independent controller and legacy CLI paths",
+      "to": "new and forked worlds receive the controller CLI path and no legacy CLI path (\\#1754)",
+      "reason": "Same test, reversed by #1754: worlds get no legacy CLI path (EDGE_CLI_FILE) any more; the controller CLI path assertions are unchanged",
+      "pr": "#2137"
     }
   ]
 }

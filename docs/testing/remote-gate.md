@@ -178,7 +178,7 @@ the cached baseline.
 | `apps/web/` | V1, V2, V3-bundle, V4 |
 | `packages/` | V1, V3-packages, V3-mars-engine, V3-walk, V5 |
 | `tools/world-launcher/` | V3-launcher-unit, V6 |
-| `tools/edge-skill/`, `tools/client-eval/` | V3-client-cli |
+| `tools/client-eval/` | V3-client-cli |
 | `tools/god-skill/` | V6 |
 | `tools/body-authoring/` (the source of the pinned shared presets) | V5 |
 | other `tools/`, `docs/`, root `*.md`, `LICENSE` | none |
