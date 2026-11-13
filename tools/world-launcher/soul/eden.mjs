@@ -4274,7 +4274,10 @@ function accountCredential(world, soulId = SEAT?.kind === "soul" ? SEAT.id : nul
   if (!safeOrigin(origin)) throw new Error(`account.insecure: ${origin} is plain http off this machine, so no login token is sent there.`);
   return a;
 }
-const LOGIN_WAIT_MS = 15 * 60_000;
+/** #2258: a login or retire request stays open until it is answered, so a wait has no deadline. It ends on the answer:
+ *  ready, or ended by the person (`refused`), its agent (`cancelled`) or this agent's newer request (`replaced`). */
+const requestEnd = (q) => q.status === "cancelled" && ["refused", "cancelled", "replaced"].includes(q.ended) ? q.ended : q.status;
+const REQUEST_ENDED = { refused: "Your person refused it.", cancelled: "It was cancelled.", replaced: "A newer request from this agent replaced it.", expired: "It lapsed under an older world." };
 const loginUsage = () => new Error(`usage: ${CLI} login [<world-url>] [--as <alias>] [--device <name>] [--for <CODE>] | ${CLI} login wait`);
 /** A world older than account login says nothing of it in /v1/config. What a register recorded is asked again only when it was not yes. */
 async function accountLoginOffered(world) {
@@ -4329,7 +4332,8 @@ async function loginWait() {
     if (done) return done;
     throw new Error(`No login waits here. Start one: ${CLI} login`);
   }
-  const body = { requestId: p.requestId, pollSecret: p.input.pollSecret }, deadline = Date.now() + LOGIN_WAIT_MS, key = soulHome.keyOf(home.config().worlds, s.world);
+  const body = { requestId: p.requestId, pollSecret: p.input.pollSecret }, key = soulHome.keyOf(home.config().worlds, s.world);
+  const clear = () => { if (load().pendingLogin?.requestId === p.requestId) save({ pendingLogin: undefined }); };   // a newer one stays
   for (;;) {
     const r = await call("/v1/agent/account/requests/poll", { as: "none", body, timeoutMs: 30_000 });
     const d = r.status === 0 || r.status === 429 || r.status >= 500 ? null : ok(r, "login wait"), q = d?.request ?? {};
@@ -4340,9 +4344,8 @@ async function loginWait() {
       refreshGuide();
       return { login: "connected", alias, account: d.account.id, world: key, active: true, next: `${CLI} list --account` };
     }
-    if (q.status === "ready") { save({ pendingLogin: undefined }); return { login: "ended", requestId: q.id, why: "The login was approved, but it has already ended.", next: `${CLI} login` }; }
-    if (q.status && q.status !== "pending") { save({ pendingLogin: undefined }); return { login: q.status, requestId: q.id, next: `${CLI} login` }; }
-    if (Date.now() >= deadline) return { login: "pending", requestId: p.requestId, next: `Your person has not approved it yet. Run again: ${CLI} login wait` };
+    if (q.status === "ready") { clear(); return { login: "ended", requestId: q.id, why: "The login was approved, but it has already ended.", next: `${CLI} login` }; }
+    if (q.status && q.status !== "pending") { clear(); const end = requestEnd(q); return { login: end, requestId: q.id, ...(REQUEST_ENDED[end] ? { why: REQUEST_ENDED[end] } : {}), next: end === "replaced" ? `${CLI} login wait` : `${CLI} login` }; }
     await pause((d ? p.interval ?? 3 : 3) * 1000);
   }
 }
@@ -4460,19 +4463,19 @@ async function retireWait() {
   }
   const p = load().pendingRetire;
   if (!p) throw new Error(`No retire waits here. Ask for one: ${CLI} retire <name>`);
-  const body = { requestId: p.requestId, pollSecret: p.input.pollSecret }, deadline = Date.now() + LOGIN_WAIT_MS, soul = { id: p.soulId, name: p.name ?? p.soulId };
+  const body = { requestId: p.requestId, pollSecret: p.input.pollSecret }, soul = { id: p.soulId, name: p.name ?? p.soulId };
+  const clear = () => { if (load().pendingRetire?.requestId === p.requestId) save({ pendingRetire: undefined }); };   // a newer one stays
   for (;;) {
     const r = await call("/v1/agent/account/requests/poll", { as: "none", body, timeoutMs: 30_000 });
     const d = r.status === 0 || r.status === 429 || r.status >= 500 ? null : ok(r, "retire wait"), q = d?.request ?? {};
     if (q.status === "ready") {
       const here = !!home.config().souls[p.soulId];
       if (here) home.retireHere(p.soulId);
-      save({ pendingRetire: undefined });
+      clear();
       if (home.principals().some((x) => x.state === "active")) refreshGuide(); else home.refreshGuide();
       return { retire: "ready", soul, retired: true, ...(here ? { here: "marked retired in this home; its memory stays here" } : {}) };
     }
-    if (q.status && q.status !== "pending") { save({ pendingRetire: undefined }); return { retire: q.status, soul, retired: false, why: "Nothing was retired, and nothing changed here." }; }
-    if (Date.now() >= deadline) return { retire: "pending", requestId: p.requestId, soul, next: `Your person has not confirmed it yet. Run again: ${CLI} retire wait` };
+    if (q.status && q.status !== "pending") { clear(); const end = requestEnd(q); return { retire: end, soul, retired: false, why: `${REQUEST_ENDED[end] ? REQUEST_ENDED[end] + " " : ""}Nothing was retired, and nothing changed here.`, ...(end === "replaced" ? { next: `${CLI} retire wait` } : {}) }; }
     await pause((d ? p.interval ?? 3 : 3) * 1000);
   }
 }
@@ -7138,8 +7141,9 @@ Log in once per site, not per Soul. The token is kept in \`.souls/credentials.js
 1. \`${CLI} login <world-url>\` (or \`login\` for the current world; \`--for <CODE>\` sends it to your person's open
    page). It prints an \`approvalURL\` and a four-character \`confirm\` code. Ask your person to approve it there and to
    check the page shows the same code. \`--device "<name>"\` names this computer on that card.
-2. \`${CLI} login wait\` waits up to 15 minutes and prints the login's short name (\`alias\`): \`me\`, \`me-2\`, … or the
-   one you chose with \`--as <alias>\`. Run either again and it says \`already connected\`.
+2. \`${CLI} login wait\` waits until your person answers (the request has no time limit; stop and rerun it any time),
+   then prints the login's short name (\`alias\`): \`me\`, \`me-2\`, … or the one you chose with \`--as <alias>\`.
+   Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
 4. \`${CLI} adopt <name|id>\` brings one of them here with no code: the device that had it is disconnected, and its

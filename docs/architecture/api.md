@@ -94,6 +94,10 @@ SHA-256). The grant lives in the site's shared account registry when the world h
 it is valid in every world of that site; otherwise in the world's own database, valid there only. One live grant per
 account and device id: a newer approved login for the same device revokes the older (`replaced`). `GET /v1/config`
 carries `accountLogin: true`. A dead or unknown token answers 401 `account.revoked` (with `reason`) or `account.unknown`.
+A login or retire request has no expiry (#2258): it stays `pending` until the person approves or refuses it, its agent
+cancels it, or the same device asks again (a login, or a retire of the same Soul), which replaces it. A `cancelled`
+request carries `ended`: `refused`, `cancelled` or `replaced`. The card shows its age and confirm code, and warns above
+its buttons once it is more than a day old.
 
 | Route | Who | Purpose |
 |---|---|---|
