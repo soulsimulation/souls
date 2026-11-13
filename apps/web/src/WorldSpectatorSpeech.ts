@@ -91,6 +91,10 @@ export function speechFromEdge(messages:readonly EdgeSpectatorMessage[],where:(s
   else if(m.kind==='conversation.turn'){const id=String(m.conversation),turn=m.turn as {seq:number;at:number;from:SoulRefMsg;text:string}|undefined;if(!turn||!ref(turn.from))continue;
    const set=members.get(id)??new Set<string>();set.add(turn.from.soulId);members.set(id,set);const p=where(turn.from.soulId);
    out.push({id:`turn:${id}:${turn.seq}`,at:turn.at??m.at,tick:m.tick,speaker:turn.from.soulId,speakerName:turn.from.name,text:String(turn.text??''),within:p?enclosingPlace(p[0],p[1],p[2])?.id??null:null,channel:{kind:'conversation',conversationId:id,members:[...set].sort()}});}
+  // #2269: a private conversation reaches viewers only as who is talking; the bubble shows a cue, never words
+  else if(m.kind==='conversation.talking'){const id=String(m.conversation),from=ref(m.from);if(!from)continue;
+   const set=members.get(id)??new Set<string>();set.add(from.soulId);members.set(id,set);const p=where(from.soulId);
+   out.push({id:`talk:${id}:${m.tick}:${from.soulId}`,at:m.at,tick:m.tick,speaker:from.soulId,speakerName:from.name,text:'…',within:p?enclosingPlace(p[0],p[1],p[2])?.id??null:null,channel:{kind:'conversation',conversationId:id,members:[...set].sort()}});}
   else if(m.kind==='speech'){const from=ref(m.from);if(!from)continue;const ch=m.channel as {kind:string;placeId?:string|null;radius?:number;object?:string;base?:{kind:string;placeId?:string|null}}|undefined;
    const base=ch?.kind==='audience'?ch.base:ch,within=base?.kind==='enclosure'&&base.placeId?base.placeId:null;
    const channel:SpeechChannel=ch?.kind==='audience'?{kind:'audience',placeId:String(base?.placeId??'')}:within?{kind:'enclosure',placeId:within}:{kind:'earshot',radius:Number(ch?.radius)||12};
