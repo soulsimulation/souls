@@ -50,13 +50,13 @@ test('the capture gets the world URL, name and a valid window code; no code or a
 
 test('HTTP: the real published files are served by hash; the guide uses configuration, never the request host', async t => {
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
-  Object.assign(f.souls.cfg, {cliFile: dir + 'eden-agent.mjs', controllerCliFile: dir + 'eden.mjs', skillFile: dir + 'skill.md', instructionsFile: dir + 'instructions.md', publicUrl: 'https://sim.example.test'});
+  Object.assign(f.souls.cfg, {controllerCliFile: dir + 'eden.mjs', skillFile: dir + 'skill.md', instructionsFile: dir + 'instructions.md', publicUrl: 'https://sim.example.test'});
   const onDisk = (file: string) => sha(readFileSync(dir + file));
   assert.equal(sha(Buffer.from(await (await f.request('/eden.mjs')).arrayBuffer())), onDisk('eden.mjs'));
   const described = (await (await f.request('/v1/config')).json() as {soulClient: {sha256: string; skill: {version: string; sha256: string}}}).soulClient;
   assert.equal(described.sha256, onDisk('eden.mjs'), '/v1/config describes the bundle it serves');
   assert.deepEqual([described.skill.version, described.skill.sha256], [skillVersion, onDisk('skill.md')], '#1875: and the skill beside it');
-  assert.equal(sha(Buffer.from(await (await f.request('/eden-agent.mjs')).arrayBuffer())), onDisk('eden-agent.mjs'));
+  assert.equal((await f.request('/eden-agent.mjs')).status, 404, '#1754: the legacy client is not served');
   assert.equal(sha(await (await f.request('/skill.md')).text()), onDisk('skill.md'), 'the 2.1 skill has no templates');
   // CTRL-7 (#1099): a short core (its size limit is a client test now, tools/world-launcher/soul-skill-size.test.mjs, #1935);
   // the reference is its notes plus the generated schema, cacheable by ETag
