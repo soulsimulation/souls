@@ -423,6 +423,35 @@ world's own time from arrival to answer, and how much of it was waiting for admi
 ([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
 time.
 
+## The Soul's local dashboard
+
+`node eden.mjs [name] dashboard [--port <n>] [--page <file>]` serves one read-only page for one Soul on its owner's machine,
+on `127.0.0.1` only, until interrupted ([#2248](https://github.com/soulsimulation/souls/issues/2248),
+`tools/world-launcher/soul/dashboard.mjs`). It reads the Soul's `runtime/` and `memory/` folders and the home's config; it
+sends no request to any world, asks nothing of `serve` (so a look never takes a held wake), and makes no model call. A
+request whose `Host` is not that address and port, or that carries `sec-fetch-site: cross-site`, gets 403; anything but
+`GET` and `HEAD` gets 405. Every answer has every long value of `credentials.json` and any bearer header replaced by
+`[redacted]`, and its `Content-Security-Policy` lets the page fetch only from this server. `help dashboard` is the
+owner's screen; `dashboard --template` prints the built-in page and `--page <file>` serves another in its place, read
+fresh on each visit.
+
+Routes: `/` the page, `/data.json` the data, `/journal/<YYYY-MM-DD>` one journal day as Markdown. Nothing else is
+served, and no URL can name a file: a day is the only part a request chooses, and a linked or hard-linked file is refused.
+
+`/data.json` (`dashboard-data/1`). Any part that does not exist yet is `null`, never an error:
+
+| Field | What it holds |
+| --- | --- |
+| `version`, `at` | `"dashboard-data/1"` and when this was read (ISO time). |
+| `status` | `soul` `{id, name}`, `world` (its URL), `place` `{id, name, posture, lastSeen}` from the Soul's presence, `now` (the public `now` line: the world's, with no copy kept here, so `null` for now), `link` `{paired, listening, by: "serve"\|"listen"\|null}` as this machine knows it, `client` (the CLI version). |
+| `resident` | `up`, `since` (serve's start), `lastBeat`, and `ended`: why the last serve here stopped on its own (`{code, reason, at}`), while none serves. |
+| `plan` | What `plan --status` shows for the plan serve holds, or `null`. |
+| `wakes` | What `wake` shows: `rules`, `queued`, and `budget` `{budget, perHour, perDay, chosen, deliveredLastHour, deliveredLast24h}`. |
+| `journal` | `today` (UTC day), `page` (today's page, Markdown) and `days` (every day with a page, newest first). |
+| `memory` | `self`, `goals` and `lessons` (each file's text) and `people` (the names in `memory/people/`). |
+| `cost` | The `Observed budget by UTC day` section of `memory/ledger.md`, as text. |
+| `log` | The last 200 lines of serve's log (`.eden-serve.log`), as an array of strings. |
+
 ## The edge API
 
 All Soul routes take the Soul token. Writes accept an `Idempotency-Key` (or a `clientRef`) so a retry after a lost
