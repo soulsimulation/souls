@@ -1,0 +1,9 @@
+# Deployable exercise mat
+
+The human-named `core/portable-practice-roll@1` is a compact1.2kg native carryable item. Put it on ordinary supported ground, then send `object:<id>:unroll`. Three seconds of native handwork consumes that actual roll and atomically admits `core/deployed-practice-mat@1` at its committed position, yaw and scale. The one fabric unit, source origin, owner/access and readable source label persist. The new form has a new actual ID; find it rather than reusing the removed roll's ID.
+
+The deployed1.6×1.2m mat offers `stretch`, using existing native ground stretch motion without a new practice counter or physiology claim, and `roll-up`. Packing from beside a clear, unused mat removes it and admits one new compact roll. Its lineage remains the original fabric, not a claim of same-ID definition migration. Normal native pickup, carry and ground placement use the compact roll's actual mass/geometry.
+
+Both transformations require empty hands and ordinary native approach. Occupants, props, supported children, active stretch, held work or changed source identity/state/parameters/authority/native pose/support prevent transformation; actors and props are never moved to make room. Completion binds the actual body/action and at least60 authoritative ticks. An interrupted action leaves the old form unchanged. The shared completion adapter keeps finished Soul work separate from God Undo/Redo and refreshes admitted geometry.
+
+Kind data declares the acts and finite lineage state. Catalog/live expose the current actual form, and served inspect describes its material, generation, maker and requirements. The flat cloth is a collision-free visual over already admitted ground, not a new support, terrain or balance mechanic. New immutable revisions and conformance supplements preserve old definition bytes.
