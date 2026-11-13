@@ -92,3 +92,16 @@ test('each thread keeps its last lines; brain talk only when recent', () => {
   const pair=[...s.threads.values()].find(x=>x.conversation==='talk:s_c|s_d')!;
   assert.deepEqual(pair.lines.map(l=>l.text),['hi 2']);
 });
+
+test('#2269: a private conversation is a sealed thread of talking cues, never words', () => {
+  const s=createDialogueStore();
+  ingestDialogue(s,[
+    {type:'edge',kind:'conversation.start',tick:1,at:1000,conversation:'cv9',from:A,invited:[B],private:true},
+    {type:'edge',kind:'conversation.talking',tick:2,at:1100,conversation:'cv9',from:A,private:true},
+    {type:'edge',kind:'conversation.talking',tick:3,at:1200,conversation:'cv9',from:B,private:true},
+    {type:'edge',kind:'conversation.talking',tick:3,at:1200,conversation:'cv9',from:B,private:true},
+  ],[],2000);
+  const t=[...s.threads.values()][0];
+  assert.deepEqual([t.sealed,t.members,t.lines.map(l=>[l.name,l.text])],[true,['s_a','s_b'],[['Tamsin Quill','…'],['His Duckness','…']]],'one cue per talking message, duplicates dropped');
+  assert.deepEqual(hearingLabel(t,nameOf,2000),{icon:'🔒',text:'private · only they hear'});
+});
