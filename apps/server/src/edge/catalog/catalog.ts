@@ -26,7 +26,7 @@ export type CatalogSpotIn = {id: string; place?: string; activity: string; also?
 export type CatalogKindAct = {verb: string; label: string; params?: Record<string, unknown>; when?: {field: string; is?: unknown; not?: unknown}[]};
 export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; seat?: boolean; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null};
 /** activity-spots/1 `interiors[]`: a building made enterable through its doors (each door a segment `[x0, z0, x1, z1]` across its wall). */
-export type CatalogInteriorIn = {place: string; doors: readonly (readonly number[])[]; shell?: [number, number, number, number]};
+export type CatalogInteriorIn = {place: string; doors: readonly (readonly number[])[]; shell?: [number, number, number, number]; wall?: number};
 export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]; interiors?: readonly CatalogInteriorIn[]};
 /** #2261: a door of a building: the middle of its gap `[x, z]`, its level, and the way it faces out (north is -z, east +x). */
 export type CatalogDoor = {at: [number, number]; level: number; facing: string};
@@ -58,9 +58,10 @@ export const compass = (dx: number, dz: number) => COMPASS[((Math.round(Math.ata
 /** #2261: a building's doors from its interior: each door's middle, and the compass way out through the wall it is on
  *  (the outward normal of the nearest wall of the building's shell, the outline its walls are built on). */
 export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, interior: CatalogInteriorIn): CatalogDoor[] {
-  const shell = interiorShellPolygon({polygon: place.polygon as [number, number][]}, interior) ?? place.polygon;
+  // an invalid shell makes the building a solid box (ledger/nav.ts): no door of it can be walked through
+  const shell = interiorShellPolygon({polygon: place.polygon as [number, number][]}, interior); if (!shell) return [];
   const cx = shell.reduce((s, v) => s + v[0], 0) / shell.length, cz = shell.reduce((s, v) => s + v[1], 0) / shell.length;
-  return interior.doors.map(d => {
+  return interior.doors.flatMap(d => {
     const m: [number, number] = [(d[0]! + d[2]!) / 2, (d[1]! + d[3]!) / 2];
     let best = Infinity, out: [number, number] = [m[0] - cx, m[1] - cz];
     for (let i = 0; i < shell.length; i++) {
@@ -69,7 +70,9 @@ export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, int
       if (gap >= best) continue;
       best = gap; out = [ez, -ex]; if (out[0] * (cx - a[0]) + out[1] * (cz - a[1]) > 0) out = [-ez, ex];   // away from the middle
     }
-    return {at: [r1(m[0]), r1(m[1])], level: place.level ?? 0, facing: compass(out[0], out[1])};
+    // a door not on the shell (shellWalls' reach) is in an inner wall, not a way out
+    if (best > (interior.wall ?? 0.3) + 0.3) return [];
+    return [{at: [r1(m[0]), r1(m[1])], level: place.level ?? 0, facing: compass(out[0], out[1])}];
   });
 }
 
