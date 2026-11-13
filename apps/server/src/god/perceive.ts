@@ -88,6 +88,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  physicalRecords?:import('./physical-records.ts').PhysicalRecords;
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -195,6 +196,8 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      physicalRecords:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.physicalRecords?.plan(soul,id,action,params)??null,
+      physicalRecordsBegun:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.physicalRecords?.expect(soul,id,action,params),
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
