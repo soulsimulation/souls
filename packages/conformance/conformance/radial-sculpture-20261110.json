@@ -1,0 +1,1 @@
+{"schema":"library-conformance-supplement/1","date":"2026-11-10","reason":"Add radial-sculpture v1; native collider keeps the conservative original blank bounds while its eight-band visual profile is instance-owned and solid-cored. Existing revisions unchanged.","findings":[]}
