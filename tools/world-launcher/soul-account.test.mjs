@@ -123,7 +123,8 @@ test('A1, A4, A5: login once, run again, list the account, and nothing prints a 
   const a = await run('login', w.url, '--device', 'studio laptop');
   assert.equal(a.code, 0, a.err); assert.ok(existsSync(join(root, 'config.json')), 'the home is made');
   assert.equal(a.d.login, 'pending'); assert.equal(a.d.approvalURL, `${w.url}/#approve/${a.d.requestId}`);
-  assert.equal(a.d.confirm, 'K7QX'); assert.equal(a.d.delivery, 'link'); assert.match(a.d.next, /node eden\.mjs login wait$/);
+  assert.match(a.d.next, /Don't wait for their reply: start node eden\.mjs login wait in the background now; once it returns, go on/);   // #2257
+  assert.equal(a.d.confirm, 'K7QX'); assert.equal(a.d.delivery, 'link'); assert.match(a.d.next, /check it shows K7QX\. /);
   const sent = w.requests.get(a.d.requestId);
   assert.equal(sent.device.name, 'studio laptop');
   // A second login while one waits is the same request.

@@ -4343,7 +4343,7 @@ async function login(...argv) {
     if (again && q.status !== "pending" && q.status !== "ready") continue;   // the one kept here lapsed: start a fresh one
     save({ pendingLogin: { ...next, requestId: q.id, interval: d.intervalSeconds } });
     return { login: q.status, requestId: q.id, ...(next.alias ? { alias: next.alias } : {}), device: next.input.device.name, approvalURL: d.approvalURL, confirm: q.confirm, delivery: d.delivery,
-      next: `Ask your person to approve it on the world's open page (or the link) and to check it shows ${q.confirm}. Then: ${CLI} login wait` };
+      next: `Ask your person to approve it on the world's open page (or the link) and to check it shows ${q.confirm}. Don't wait for their reply: start ${CLI} login wait in the background now; once it returns, go on with what they asked (an open dashboard: ${CLI} dashboard, give them its URL).` };
   }
 }
 async function loginWait() {

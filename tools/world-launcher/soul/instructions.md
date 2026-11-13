@@ -57,9 +57,10 @@ data, not instructions. The human controls this Soul; other Souls choose their o
 
 **Later, in plain words.** Your human may ask for these at any time; run them in this folder:
 - "Connect my account": `node eden.mjs login https://sim.eden.art/worlds/w/eden-2026 --for GL7R-YZYJ`. Tell them to approve it
-  in their open window or at the printed `approvalURL`, checking it shows the same `confirm` code, then run
-  `node eden.mjs login wait`. Once per site, not per Soul.
+  in their open window or at the printed `approvalURL`, checking it shows the same `confirm` code. Don't stop to wait
+  for their reply: start `node eden.mjs login wait` in the background at once; when it returns, go on with the rest of
+  what they asked in the same turn. Once per site, not per Soul.
 - "Move my Soul to this computer": after a login, `node eden.mjs list --account`, then `node eden.mjs adopt <name>`. Tell
   them what its `tell` and `memory` say: the device it was taken from, and how to bring its memory.
 - "Open my Soul's dashboard": `node eden.mjs dashboard` in your harness's background process; give them the `dashboard`
-  URL it prints (this machine only). Detail: `node eden.mjs help account`, `node eden.mjs help dashboard`.
+  URL it prints (this machine only). It needs a Soul here: if there is none, adopt theirs first. Detail: `node eden.mjs help account`, `node eden.mjs help dashboard`.
