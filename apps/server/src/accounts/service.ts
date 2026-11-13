@@ -1,19 +1,52 @@
 import {hashOf} from '@souls/engine-contract';
 import {realpathSync} from 'node:fs';
 import {hasFreshAttributionProof,type AttributionAccountIdentity} from '../auth.ts';
+import type {DatabaseSync} from 'node:sqlite';
 import {AccountStore,AccountStoreError,type AccountIdentity,type ApprovalDTO} from './store.ts';
+import {AccountLogins,sharedLoginsDb,type AccountGrant} from './logins.ts';
 import {tx,afterCommit} from '../edge/comms/store.ts';
 import {ApiError,type Souls} from '../souls.ts';
 import type {WorldHost} from '../world.ts';
 import type {SoulRow} from '../db.ts';
 /** Shared account associations; canonical birth ownership is never rewritten. */
 export class WorldAccounts {
- readonly host:WorldHost;readonly souls:Souls;readonly store:AccountStore;
+ readonly host:WorldHost;readonly souls:Souls;readonly store:AccountStore;readonly logins:AccountLogins;
  private approving=new Set<string>();
- constructor(host:WorldHost,souls:Souls){
+ /** #2243: `registry` is the site's shared account registry, where account grants live; without one they stay in this world. */
+ constructor(host:WorldHost,souls:Souls,registry?:DatabaseSync|null){
   if(host.db!==souls.db||host!==souls.host)throw Error('Account authority requires the same world and database');
   this.host=host;this.souls=souls;this.store=new AccountStore({db:host.db.db,tx:fn=>tx(host.db.db,fn,{immediate:!host.db.db.isTransaction})},host.worldId,{nameTaken:name=>!!host.db.soulByName(host.worldId,name)});
   for(const row of host.db.liveSouls(host.worldId))if(row.token_hash)this.store.captureLegacyAuthority(row.id,row.owner);
+  this.logins=new AccountLogins(this.store.db,registry?sharedLoginsDb(registry):this.store.db,host.worldId,{soulName:id=>host.db.soul(id)?.name??null});
+ }
+ /** #2243: the account an `sacct_` bearer acts for; `revoked` names why it ended. */
+ agentAccount(bearer:string|undefined|null){const out=this.logins.resolve(bearer);return out&&'grant' in out?{accountId:out.grant.accountId,grant:out.grant}:out;}
+ /** #2243: the identity a grant acts with, from the account's recorded provider identity in this world (fresh, short-lived). */
+ identityFor(accountId:string):AccountIdentity{
+  const row=this.host.db.db.prepare('SELECT issuer,subject FROM account_identities_v1 WHERE account_id=?').get(accountId) as {issuer:string;subject:string}|undefined;
+  if(!row)throw new ApiError(403,'forbidden','This account holds no Soul in this world.');
+  const now=Date.now();return {id:accountId,issuer:row.issuer,subject:row.subject,verifiedAt:now,expiresAt:now+60_000};
+ }
+ private liveHere(soulId:string){const row=this.host.db.soul(soulId);if(!row||row.world_id!==this.host.worldId||row.retired_at!==null)throw new ApiError(404,'soul-not-found',`No Soul ${soulId} lives in this world.`);return row;}
+ private ownedHere(accountId:string,soulId:string){const row=this.liveHere(soulId);if(!this.owns(accountId,row))throw new ApiError(403,'forbidden','Not your Soul.');return row;}
+ /** #2243 move: an already-approved repair for one of the account's own Souls. The agent connected before is disconnected
+  * (`replaced`), wherever it runs: the last device to ask wins (#2242). The device is in the label the Soul card shows. */
+ async pairByGrant(grant:AccountGrant,soulId:string,input:{agentLabel:string;idempotencyKey:string;pollSecret:string}){
+  const row=this.ownedHere(grant.accountId,soulId),identity=this.identityFor(grant.accountId);
+  const approval=this.store.startRepair(identity,row.id,{agentLabel:`${input.agentLabel} on ${grant.device.name}`.slice(0,120),name:row.name,idempotencyKey:input.idempotencyKey,pollSecret:input.pollSecret});
+  return this.approveSettled(identity,approval.id);
+ }
+ revokeByGrant(grant:AccountGrant,soulId:string){const row=this.ownedHere(grant.accountId,soulId);this.revoke(this.identityFor(grant.accountId),row.id);return row.id;}
+ startRetire(grant:AccountGrant,soulId:string,input:{idempotencyKey:string;pollSecret:string}){const row=this.ownedHere(grant.accountId,soulId);return this.logins.startRetire(grant,row.id,input);}
+ /** #2243: a retire request approved by its person retires the Soul by the path DELETE /v1/souls/:id takes. */
+ async approveRetire(identity:AccountIdentity,id:string){
+  let pending:Promise<void>|undefined,owner:string|undefined;
+  const request=this.logins.approveRetire(identity.id,id,soulId=>{
+   const user=this.host.db.user(identity.id);if(!user)throw new ApiError(401,'unauthorized','Sign in first.');this.souls.requireInvited(user);
+   const row=this.liveHere(soulId);if(!this.souls.owns(user.id,row)&&user.role!=='admin')throw new ApiError(403,'forbidden','not your soul');this.souls.requireControlReady(row);owner=row.owner;
+   if(this.souls.lifecycle)this.souls.acceptLifecycleRetire(user.id,row);else pending=this.souls.retire(row);
+  });
+  await pending;return {request,owner};
  }
  owns(accountId:string,row:SoulRow){if(row.world_id!==this.host.worldId)return false;const member=this.host.db.db.prepare('SELECT account_id FROM account_soul_memberships_v1 WHERE world_id=? AND soul_id=?').get(this.host.worldId,row.id) as {account_id:string}|undefined;const validLegacyOwner=row.owner===accountId&&row.token_hash!==null&&this.store.legacyAuthority(row.id,accountId);return member?member.account_id===accountId||validLegacyOwner:row.owner===accountId&&(!accountId.startsWith('dev:')||validLegacyOwner);}
  rows(accountId:string){return this.host.db.liveSouls(this.host.worldId).filter(row=>this.owns(accountId,row));}
