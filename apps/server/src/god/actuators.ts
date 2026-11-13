@@ -106,6 +106,8 @@ export type ActuatorHost = {
   /** W5 water (water.ts): the things involved in moving water, and an atomic commit of several state changes. */
   water?: WaterHost;
   /** Entry 34 (watering.ts): "water <plant>" with a watering can from its hook, as one act of native steps; null = W5. */
+  reedBasket?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
+  reedBasketBegun?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):void;
   watering?(soul: EdgeSoul, plant: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   /** The act was accepted: watch this Soul's body for its watering moments. */
   wateringBegun?(soul: EdgeSoul): void;
@@ -406,6 +408,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       if(host.deferContacts&&def.tags.includes('wall-window')&&s.key&&!host.contactPlan?.(ctx.soul,s.key,a.name))return {code:'contact.out-of-reach',reason:'This window handle is outside standing hand reach from your floor.'};
       if(host.deferContacts&&a.name==='close'&&def.components.opening&&s.key&&host.contactPlan?.(ctx.soul,s.key,a.name)?.noRoom)return {code:'contact.no-room',reason:'There is nowhere to stand clear of it once it is shut.'};
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
+      const basket=s.key?host.reedBasket?.(ctx.soul,s.key,a.name,params):null;if(basket)return 'code'in basket?basket:null;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
@@ -424,6 +427,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
       validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
+        const basket=s.key?host.reedBasket?.(ctx.soul,s.key,a.name,params):null;if(basket&&!('code'in basket))return{state:s,result:{action:a.name,summary:basket.summary},bodies:[{label:a.label,steps:basket.steps}]};
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
@@ -494,6 +498,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     if (host.deferFar) committed(() => host.deferFar!(soul, null));   // a newer act of this Soul's replaces a far act it held
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
+    const basket=host.reedBasket?.(soul,id,a.name,(input.params??{})as Record<string,unknown>);if(basket){if(!('code'in basket))host.reedBasketBegun?.(soul,id,a.name,(input.params??{})as Record<string,unknown>);return out;}
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
