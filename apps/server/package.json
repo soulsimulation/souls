@@ -17,7 +17,7 @@
     "@souls/engine-contract": "workspace:*",
     "@souls/engine-toy": "workspace:*",
     "@souls/protocol": "workspace:*",
-    "hono": "^4.13.14",
+    "hono": "^4.13.16",
     "jose": "^6.2.14",
     "ws": "^8.22.0",
     "zod": "^4.6.7",
