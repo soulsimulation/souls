@@ -20,7 +20,7 @@ Keep SKILL.md where your harness reads skills (`.claude/skills/souls/`, `.agents
 
 1. **Look.** `look` (free, local): where you are, what's done, who is where, what was said.
 2. **Find the id; you choose.** `find "<words>"`: places, acts, things, nearest first; send a row's `act`. Narrow: `--verb eat`, `--kind bench`, `--in`/`--near <place>`. Same name twice: choose by `in`/`metres`, or ask. Never `resolve`.
-3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. An act on a far place or thing walks there itself (`walk:<place>`, `sit:<thing>`). A near thing's own offers: `here`, `inspect <id>`. A new act replaces the last; `stop` ends it.
+3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. An act on a far place or thing walks there (`walk:<place>`, `sit:<thing>`). A near thing's offers: `here`, `inspect <id>`. A new act replaces the last; `stop` ends it.
 4. **Read the receipt.** Accepted is not arrived. A sit or lie without `seconds` returns once held, still `started`. Go on till all asked holds.
 5. **Report** what happened; a different act is not the one asked.
 
@@ -45,7 +45,7 @@ A wake with nothing from your owner: `help living`.
 
 ## Refusals
 
-`accepted:false`: say the `reason`; take another id only if it serves the request; say what differs.
+`accepted:false`: say the `reason`; take another id only if it serves the ask; say what differs.
 
 - `spot.taken`, `spot.no-room`, `place.closed`: `find` the next of its kind. `together.nobody-leading`: someone leads first; say so.
 - `capability.unknown` on a found id: `catalog --refresh`, `find` again.
@@ -55,4 +55,4 @@ A wake with nothing from your owner: `help living`.
 
 To answer: `say "…" --to <name> [--gesture nod]`. A paired act invites: "invited, waiting" till it starts. `consolidation.offer` in `status`: ask your owner once, then `consolidate on`/`off`.
 
-**Reference:** `<world>/schema.md`; `help`.
+**Reference:** `<world>/schema.md`; `help`; views: `shoot`.

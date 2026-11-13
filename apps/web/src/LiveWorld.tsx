@@ -20,7 +20,7 @@ import {constrainOfficeGuardCamera,officeGuardsFromPublication} from './WorldOff
 import {recordedBody,admittedBodyUrl} from '../../../mars/viewer/app/engine-view/recorded-body.ts';
 import {WorldBodyModels} from './WorldBodyModels.ts';
 import {conversationFrame} from './WorldConversationFrame.ts';
-import {WorldEyes} from './WorldEyes.ts';
+import {WorldEyes,type EyesWhere} from './WorldEyes.ts';
 import {WorldHover,type HoverTarget} from './WorldHover.ts';
 import {EDEN_VIEWER_PLACES} from './WorldEdenPlaceData.ts';
 import {WorldSoulAvatars} from './SoulAvatars.ts';
@@ -769,7 +769,12 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const goLive = () => { past.current = null; liveTick = null; setMode('live'); setNote(null); };
 
     const pacer = new FramePacer();
-    const eyes=WorldEyes.fromSearch(location.search,{renderer,camera,scene,body:id=>people?.bodyObject(id)??floaters.object(id)??standIns.getObjectByName(id)??null,souls:()=>[...context.current.sim.conn.replica.souls.values()].map(x=>x.entityId),overlays:()=>[speechLayer.group,ring,fading.group,hover.marker],tick:()=>shown.current.tick,ready:()=>sceneSettled&&drawnTick.current!==null});
+    // #2260: where the public replica draws each Soul, place and thing now, so a client rendering on its own machine places a
+    // camera by name (`?eyes=1`: edenEyes.where(); the page with `?render=1`: edenWhere(), which also gives Soul ids for Follow)
+    const where=():EyesWhere=>{const e=shown.current.entities as Record<string,{p?:readonly number[];yaw?:number}|undefined>,at=(p?:readonly number[]):[number,number,number]|null=>p&&p.length>=3?[p[0],p[1],p[2]]:null;
+      return {souls:[...context.current.sim.conn.replica.souls.values()].flatMap(x=>{const p=at(e[x.entityId]?.p);return p?[{id:x.id,entityId:x.entityId,name:x.name,p,yaw:e[x.entityId]?.yaw??0}]:[];}),places:(controlsApi.current?.locations()??[]).map(l=>({name:l.label,p:l.p,target:l.target})),things:Object.entries(e).flatMap(([id,v])=>{const p=at(v?.p);return p?[{id,p}]:[];})};};
+    const renderWhere=new URLSearchParams(location.search).get('render')==='1';if(renderWhere)(window as unknown as {edenWhere?:unknown}).edenWhere=where;
+    const eyes=WorldEyes.fromSearch(location.search,{renderer,camera,scene,body:id=>people?.bodyObject(id)??floaters.object(id)??standIns.getObjectByName(id)??null,souls:()=>[...context.current.sim.conn.replica.souls.values()].map(x=>x.entityId),overlays:()=>[speechLayer.group,ring,fading.group,hover.marker],tick:()=>shown.current.tick,ready:()=>sceneSettled&&drawnTick.current!==null,where});
     const officeGuardFrom=new THREE.Vector3(),authoredBoundaries=new WorldAuthoredBoundaries();
     let shadowFrame=0;  // P1 phones
     const fixtureInstances=new EngineFixtureInstances(entityLayer.motionInstancer);
@@ -1289,7 +1294,7 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
       releaseTexturePreparation();
       releaseAssetLoader();
       releaseDownloads();
-      eyes?.dispose();
+      eyes?.dispose();if(renderWhere)delete (window as unknown as {edenWhere?:unknown}).edenWhere;
       fixtureInstances.clear();
       waterDetail.dispose();
       games.dispose();
