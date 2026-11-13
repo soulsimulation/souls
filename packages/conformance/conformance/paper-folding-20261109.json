@@ -1,0 +1,22 @@
+{
+  "schema": "library-conformance-supplement/1",
+  "issue": 1643,
+  "reason": "Finite paper folding reuses existing ten-second native craft and normal completed-only consume/create. Five production K=2 samples per new definition qualify fifteen cases with zero findings or gaps. No older supplement, budget or baseline changes.",
+  "definitions": [
+    {
+      "ref": "core-folding-desk@1",
+      "hash": "91de71a2e2f6081b14a4dece7bada4af21bd6cfa99b80c71175a66256828db80"
+    },
+    {
+      "ref": "core-paper-boat@1",
+      "hash": "488c61b78975bacd0e41415d6a700eadf333d84017390940d8d1d42dbc86c695"
+    },
+    {
+      "ref": "core-paper-bird@1",
+      "hash": "5ec4b0a043b026becbcb87567e354bff6460e8a447a3ebbc289b548ff9a019ef"
+    }
+  ],
+  "samples": 15,
+  "findings": [],
+  "qualificationGaps": []
+}
