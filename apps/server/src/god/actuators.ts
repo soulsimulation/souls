@@ -93,6 +93,7 @@ export type ActuatorHost = {
   contactPlan?(soul:EdgeSoul,target:string,action:string,params?:Record<string,unknown>):{params:Record<string,unknown>;root:[number,number,number];level?:number;face?:[number,number];/** entry 32: where to step back to afterwards (a knock) */after?:[number,number];/** #1070: a close with nowhere to stand once it is shut */noRoom?:boolean}|null;
   /** Commit a state change of a god thing as an engine edit. */
   commit(id: string, patch: Record<string, unknown>, note: string): { accepted: boolean };
+  planting?(soul:EdgeSoul,thing:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   /** The thing's actuator state as the world has it now (the object's copy may lag a sync behind). */
   stateOf?(id: string): Record<string, unknown> | null;
   /** LAYERS: why this Soul may not touch it (a private thing of someone else's), or null. */
@@ -408,6 +409,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
+      const planting = s.key ? host.planting?.(ctx.soul,s.key,a.name) : null; if(planting)return 'code' in planting ? planting : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
@@ -428,6 +430,8 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
+        const planting = s.key ? host.planting?.(ctx.soul,s.key,a.name) : null;
+        if(planting&&!('code' in planting))return {state:s,result:{action:a.name,summary:planting.summary},bodies:[{label:a.label,steps:planting.steps}]};
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;

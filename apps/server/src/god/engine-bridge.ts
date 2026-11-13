@@ -23,6 +23,7 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
+import { commitSoulCompletion } from './soul-completion.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
@@ -33,6 +34,7 @@ import { doorInGap, freeDoorOpening, isDoorDef, isShut } from './doors.ts';
 import { dryingOps } from './garden.ts';
 import { fadingIds } from '../art/art.ts';
 import { createWatering, type Watering } from './watering.ts';
+import {createPlanting,type Planting} from './planting.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
@@ -350,6 +352,10 @@ export class EngineBridge {
       reserved: (id, actor) => { const rt = (this.host.engine as unknown as { rt?: { holder(r: string): string[]; records: Map<string, { params?: { actor?: string } }> } }).rt; return !!rt?.holder(`entity:${id}`).some((r) => rt.records.get(r)?.params?.actor !== actor); }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     if (this.edge) this.edge.repairEffects = (r) => this.mending?.effects(r) ?? {};
     this.edge?.onReceipt((r) => { try { this.mending?.onReceipt(r); } catch (e) { this.log(`mending: ${(e as Error).message}`); } });
+    this.planting=createPlanting({model:this.god.model,get engine(){return o.host.engine as never;},levelAt:(x,z,y)=>this.levelAt(x,z,y),
+      soul:id=>this.god.db.soul(id)??undefined,denied:(id,soul)=>this.layers.refusal(id,soul)??this.claimRefusal(id,soul as never),
+      commit:(ops,note,_receiptRef)=>this.commitSoulWork(ops,note),log:message=>this.log(message)});
+    this.edge?.onReceipt(r=>{try{this.planting?.onReceipt(r);}catch(error){this.log(`planting: ${(error as Error).message}`);}});
     // Entry 34: the watering-can act (watering.ts): planned for perceive's offers, its moments committed per tick
     this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     // Entry 43: the tea acts (tea.ts), the same way
@@ -357,6 +363,7 @@ export class EngineBridge {
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
     this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.perceive.bindPlanting(this.planting);
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -486,6 +493,7 @@ export class EngineBridge {
     });
   }
   private watering?: Watering;
+  private planting?:Planting;
   private mending?: Mending;
   /** Entry 43: the tea acts; read by perception for a kettle's and a cup's compact facts. */
   tea?: Tea;
@@ -1633,6 +1641,12 @@ export class EngineBridge {
   }
 
   // ------------------------------------------------------------------ engine → entity world
+
+  /** Completed server-owned Soul work: engine history, current context and derived output geometry.
+   * The family must validate its started receipt/authority and deduplicate before calling this. */
+  commitSoulWork(ops: Op[], note: string): Result {
+    return commitSoulCompletion(this.god, diff => this.onCommit(diff), ops, note);
+  }
 
   /** Trusted engine edit: journaled (by 'engine', never undone by the god), published to viewers, not echoed back. */
   engineAct(ops: Op[], note: string): Result {

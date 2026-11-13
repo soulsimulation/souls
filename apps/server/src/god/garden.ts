@@ -27,7 +27,9 @@ export function dryingOps(model: WorldModel, days: number): Op[] {
     if (f?.type !== 'number') continue;
     gardenStats.planterVisits++;
     const now = typeof e.state?.moisture === 'number' ? e.state.moisture : Number(f.default ?? 0);
-    if (st?.growth?.type === 'number') {
+    // Only the opt-in unsown bed waits for planting; older definitions have no planted field.
+    const unsown = def?.name === 'core-garden-planter' && def.version === 3 && (e.state?.planted ?? st?.planted?.default) === false;
+    if (st?.growth?.type === 'number' && !unsown) {
       const val = (k: string) => (typeof e.state?.[k] === 'number' ? e.state[k] as number : Number(st[k]?.default ?? 0));
       let g = { moisture: now, growth: val('growth'), thirst: val('thirst') };
       for (let d = 0; d < days; d++) g = growDay(g);
