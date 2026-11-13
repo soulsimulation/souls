@@ -105,6 +105,7 @@ export type PerceiveHost = {
   /** VOCAB-MECH: commit a Soul's actuator action on a god thing (engine edit). Without it, things offer no actions. */
   commit?(ops: unknown[], note: string): { accepted: boolean };
   log(m: string): void;
+  coffeeGrinder?:import('./coffee-grinder.ts').CoffeeGrinder;
   /** Entry 34 (watering.ts): "water <plant>" with a watering can from its hook. */
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, and whether a thing is whole (a whole one is no built object). */
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
@@ -195,6 +196,8 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      coffeeGrinder:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.coffeeGrinder?.plan(soul,id,action,params)??null,
+      coffeeGrinderBegun:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.coffeeGrinder?.begin(soul,id,action,params),
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),

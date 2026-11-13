@@ -112,6 +112,8 @@ export type ActuatorHost = {
   /** Entry 43 (tea.ts): "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea" as acts of native steps. */
   tea?(soul: EdgeSoul, thing: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   teaBegun?(soul: EdgeSoul): void;
+  coffeeGrinder?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
+  coffeeGrinderBegun?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):void;
   /** #438 (harvest.ts): "pick the tomatoes", "pick flowers for the vase" as acts of native steps. */
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
@@ -393,6 +395,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
+      if(!s.removed&&s.key){const own=host.coffeeGrinder?.(ctx.soul,s.key,a.name,params);if(own)return 'code'in own?own:null;}
       if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
@@ -424,6 +427,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
       validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
+        const grind=s.key?host.coffeeGrinder?.(ctx.soul,s.key,a.name,params):null;if(grind&&!('code'in grind))return{state:s,result:{action:a.name,summary:grind.summary},bodies:[{label:a.label,steps:grind.steps}]};
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
         const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null;
@@ -495,6 +499,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
+    const grind=host.coffeeGrinder?.(soul,id,a.name,(input.params??{})as Record<string,unknown>);if(grind){if(!('code'in grind))host.coffeeGrinderBegun?.(soul,id,a.name,(input.params??{})as Record<string,unknown>);return out;}
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
