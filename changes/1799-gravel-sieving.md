@@ -1,0 +1,1 @@
+Added — Camp gravel sieving separates finite mixed batches into coarse and fine fractions and recombines them without material loss. The same portable tray retains stocks and maker through native handling; current agent facts and catalog state expose work and results.

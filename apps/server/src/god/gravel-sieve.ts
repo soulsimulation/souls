@@ -1,0 +1,29 @@
+// Native time separates or recombines integral fractions; no loose particles or second movement path.
+import {opSchema,type Op,type StoredDef,type WorldModel} from '@souls/world-compiler';
+import type {EdgeReceipt,EdgeSoul} from '../edge/contract.ts';
+import {ACT_REACH} from './actuators.ts';
+import {supportY} from './nav.ts';
+type Refusal={code:string;reason:string};
+type Body={pose?:{p:number[]};support?:{kind?:string;on?:string;by?:string};human?:{holding?:unknown;hands?:unknown;handActuator?:unknown}};
+export type GravelSieveHost={model:WorldModel;engine:{world:{entities:Record<string,Body>};clearanceAtV1?(x:number,z:number,level?:number):number};levelAt(x:number,z:number,y:number):number;soul(id:string):{id:string;entity_id:string;name:string}|undefined;denied(id:string,soul:{soulId:string;entityId:string;name:string}):Refusal|null;commit(ops:Op[],note:string,clientRef:string):{accepted:boolean};log(message:string):void};
+const actions=['sieve','remix'];
+const isTray=(d:StoredDef|undefined)=>d?.name==='core-gravel-sieve'&&d.version===1;
+export function createGravelSieve(h:GravelSieveHost){
+ const pending=new Map<string,{stamp:string;body:string;target:string;action:string;soul:string;started:number}>();
+ const tray=(id:string)=>{const e=h.model.entities.get(id);return e&&isTray(h.model.resolvedDef(e.def))?e:null;};
+ const stamp=(id:string)=>{const e=tray(id);return e?JSON.stringify([e.def,e.by,e.owner,e.access,e.in,h.model.worldPose(e),e.params,e.state,h.engine.world.entities[id]?.support]):'';};
+ function ready(soul:Pick<EdgeSoul,'soulId'|'entityId'|'name'>,id:string,action:string):Refusal|null{
+  const e=tray(id);if(!e||!actions.includes(action))return{code:'object.gone',reason:'The gravel sieve is no longer there.'};
+  const no=h.denied(id,soul);if(no)return no;
+  if(action==='sieve'?Number(e.state?.mixed)<1:Number(e.state?.coarse)<1||Number(e.state?.fine)<2)return{code:'object.state',reason:action==='sieve'?'No mixed batch remains; remix one coarse and two fine units first.':'Remixing needs one coarse and two fine units; sieve a mixed batch first.'};
+  const support=h.engine.world.entities[id]?.support;
+  if(support?.kind!=='resting-on'||support.on!==e.in.parent)return{code:'object.state',reason:'Put the gravel sieve on a fixed work table first.'};
+  const b=h.engine.world.entities[soul.entityId];if(!b?.human)return{code:'body.unavailable',reason:'Your body is unavailable.'};
+  if(b.human.holding||b.human.hands||b.human.handActuator||Object.values(h.engine.world.entities).some(x=>x.support?.kind==='in-hand'&&x.support.by===soul.entityId))return{code:'object.state',reason:'Empty your hands before sieving or remixing.'};
+  return null;
+ }
+ function plan(soul:EdgeSoul,id:string,action:string){if(!tray(id)||!actions.includes(action))return null;const no=ready(soul,id,action);if(no)return no;const e=tray(id)!,p=h.model.worldPose(e),x=p.x+Math.sin(p.yaw)*1.1*p.s,z=p.z+Math.cos(p.yaw)*1.1*p.s,level=h.levelAt(x,z,supportY(h.model,e));if(h.engine.clearanceAtV1&&h.engine.clearanceAtV1(x,z,level)<.4)return{code:'object.state',reason:'There is no clear standing room beside this sieve.'};return{summary:action==='sieve'?'Separate one mixed batch into one coarse and two fine units.':'Return one coarse and two fine units to one mixed batch.',steps:[{verb:'stand',params:{}},{verb:'mars:walk_to',params:{x,z,level}},{verb:'mars:pose_v1',params:{activity:'operate',seconds:3,base:'idle',release:true,face:[p.x,p.z]}},{verb:'stand',params:{}}]};}
+ function onReceipt(r:EdgeReceipt){const m=/^object:(.+):(sieve|remix)$/.exec(r.capability);if(!m)return;const soul=h.soul(r.soulId),e=tray(m[1]);if(r.phase==='started'){if(soul&&e&&Number.isSafeInteger(r.startedTick)&&!pending.has(r.id)&&!ready({soulId:soul.id,entityId:soul.entity_id,name:soul.name},e.id,m[2]))pending.set(r.id,{stamp:stamp(e.id),body:soul.entity_id,target:e.id,action:m[2],soul:r.soulId,started:r.startedTick!});return;}if(!['completed','failed','replaced','aborted','cancelled'].includes(r.phase))return;const bound=pending.get(r.id);pending.delete(r.id);if(r.phase!=='completed'||!bound||!e||!soul||bound.stamp!==stamp(e.id)||bound.body!==soul.entity_id||bound.target!==e.id||bound.action!==m[2]||bound.soul!==r.soulId||bound.started!==r.startedTick||!Number.isSafeInteger(r.endedTick)||r.endedTick!<0||r.endedTick!<Number(e.state?.lastCompletedTick??-1)||e.state?.lastReceipt===r.id||ready({soulId:soul.id,entityId:soul.entity_id,name:soul.name},e.id,m[2]))return;const at=h.engine.world.entities[soul.entity_id]?.pose?.p,p=h.model.worldPose(e);if(!at||Math.hypot(at[0]-p.x,at[2]-p.z)>ACT_REACH||h.levelAt(at[0],at[2],at[1])!==h.levelAt(p.x,p.z,supportY(h.model,e)))return;const sign=m[2]==='sieve'?1:-1;const done=h.commit([opSchema.parse({op:'set',id:e.id,state:{mixed:Number(e.state?.mixed)-sign,coarse:Number(e.state?.coarse)+sign,fine:Number(e.state?.fine)+2*sign,completed:Number(e.state?.completed)+1,maker:soul.name.slice(0,80),lastReceipt:r.id,lastCompletedTick:r.endedTick}})],`${r.soulId} worked the gravel sieve`,`gravel-sieve:${r.id}`);if(!done.accepted)h.log('gravel-sieve: refused atomic material batch; stocks unchanged');}
+ return{plan,onReceipt,facts(id:string){const e=tray(id);return e?{gravelSieve:`Mixed batches: ${e.state?.mixed}. Coarse units: ${e.state?.coarse}. Fine units: ${e.state?.fine}. Total material units: ${3*Number(e.state?.mixed)+Number(e.state?.coarse)+Number(e.state?.fine)} of 9. Completed operations: ${e.state?.completed}. Maker: ${e.state?.maker||'none'}. Sieve one mixed batch into one coarse and two fine units; remix reverses exactly that. Three completed native seconds on a fixed work table, empty hands, same floor. Interrupted work leaves fractions unchanged. All material is integral to this SAME portable tray; no loose-particle or independent fraction custody.`}:null;}};
+}
+export type GravelSieve=ReturnType<typeof createGravelSieve>;
