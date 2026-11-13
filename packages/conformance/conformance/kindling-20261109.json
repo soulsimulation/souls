@@ -1,0 +1,5 @@
+{
+ "schema":"catalog-conformance-supplement/1",
+ "note":"2026-11-09 (#1614): core-kindling-block@1 and core-kindling-bundle@1 add a fixed preloaded preparation station and a separate real carryable output. Narrow production K=2 placed, baked and rendered all 10 samples with zero findings and zero qualification gaps. No budget holds or baseline changes are added.",
+ "findings":[]
+}
