@@ -1,5 +1,5 @@
 // Cosmetic, random-access motion. Canonical roots, hands and contacts remain inputs.
-import { idPhase } from '../../engine/bodies/pose.ts';
+import { idPhase } from '../../engine/core/math.ts';
 import type { DepictionBeat } from './station-depiction.ts';
 export type ExpressionHands = { left?: readonly number[]; right?: readonly number[] };
 export type Expression = {

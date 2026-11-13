@@ -1,3 +1,4 @@
+import {observedAnimationSample,type AnimationObservation} from './observed-animation.ts';
 import {wavePose,WAVE_BLEND_SECONDS,type WaveSample} from './wave-blend.ts';
 import {actuatorHand,handActuatorFrame,posterLocal,strokeWork,twoHanded,HAND_REACH_SECONDS,HAND_RELEASE_SECONDS,type HandActuatorMotion} from '../../engine/social/hand-actuator.ts';
 import {insidePoint,itemPoseOf,ITEM_RECOVERY_SECONDS,type ItemPoseView} from '../../engine/items/presentation.ts';
@@ -76,7 +77,7 @@ import {PLAY_MOTION, playSeatAt, rideSeat} from './play-motion.ts';
 import {BIKE_SADDLE, crankAngle, makeBicycle, pedalLocal, poseBicycle} from './bicycle.ts';
 
 type Hands = { left?: Vec3; right?: Vec3 };
-type Snap = { p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
+type Snap = { observed?: AnimationObservation; p: [number, number, number]; yaw: number; walkW: number; walkT: number; idleT: number; sitW: number; warmW: number; expressionT: number; pose: Posture; hands: Hands; pr: ProneState | null };
 type View = {
   rig: Rig;
   /** PERF-EDEN: posed at least once (a new body is never left in its bind pose by the pose-rate throttle). */
@@ -243,6 +244,8 @@ type Source = 'hands' | 'grip' | 'frame' | 'sleep' | 'expression' | 'water' | nu
  * function of take time: clip seconds = metres / clip ground speed (feet speed-matched).
  */
 export type SampledHuman = {
+  /** Canonical native timestamp of this already sampled viewer frame; not an elapsed renderer clock. */
+  animationObservation?: {tick:number;dt:number};
   /** Public recorded Soul association, never inferred from a display name/id. */
   publicSoulKey?:string;
   bodyModel?:string;
@@ -591,6 +594,8 @@ export class HumanViews {
         const s: Snap = { p: [...e.pose.p], yaw: e.pose.yaw, walkW: 0, walkT: 0, idleT: (e.id.length * 0.37) % 1, sitW: base === 'sit' ? 1 : 0, warmW: act === 'warm' ? 1 : 0, expressionT: world.tick * DT, pose: NEUTRAL, hands: copyHands(e.human.hands), pr: null };
         const key=(e.human as {soul?:unknown}).soul;
         v = this.make(e.id, s, act,typeof key==='string'?key:undefined);
+        s.idleT=v.cur.idleT=(world.tick*DT+(e.id.length*.37)%1)%v.rig.idle.getClip().duration;
+        s.observed=animationObservation(v,s,'native',world.tick,DT);v.cur.observed=s.observed;
         v.base = base;
         // A live/lab view joining an already active wave has no certified onset.
         // Retain full attained weight, as replay does for a pre-window wave.
@@ -672,7 +677,8 @@ export class HumanViews {
       if (GAIT_ACTS.has(act)) { if (v.walkAge === undefined) { v.walkAge = 0; v.restAgeAtWalk = v.restAge; } else v.walkAge += DT; }
       else v.walkAge = v.restAgeAtWalk = undefined;
       const moving = GAIT_ACTS.has(act) && walkW >= WALK_FULL_LIVE;
-      v.restAge = moving || (!REST_ACTS.has(act) && !GAIT_ACTS.has(act)) ? 0 : v.restAge === undefined ? undefined : v.restAge + DT;
+      const restReset = moving || (!REST_ACTS.has(act) && !GAIT_ACTS.has(act));
+      v.restAge = restReset ? 0 : v.restAge === undefined ? undefined : v.restAge + DT;
       // on a beam: short steps — the stride at half the Walk weight is about half the clip's, so the cadence doubles
       const rate = walking ? Math.max(0.35, v.speed / v.rig.template.walkSpeed) * (act === 'beam-walk' ? BEAM_CADENCE : 1) : 1;
       const dur = v.rig.walk.getClip().duration;
@@ -682,7 +688,7 @@ export class HumanViews {
         yaw: e.pose.yaw,
         walkW,
         walkT: walkW > 0 ? (c.walkT + DT * rate) % dur : 0,
-        idleT: (c.idleT + DT) % v.rig.idle.getClip().duration,
+        idleT: (world.tick*DT+(e.id.length*.37)%1) % v.rig.idle.getClip().duration,
         sitW: clamp01(c.sitW + (sitting ? POSE_BLEND : -POSE_BLEND)),
         expressionT: world.tick * DT,
         warmW: clamp01(c.warmW + (act === 'warm' && !walking ? POSE_BLEND : -POSE_BLEND)),
@@ -691,6 +697,7 @@ export class HumanViews {
         hands: copyHands(e.human.hands),
         pr: this.proneGoal(v, e, world, c.pr, false),
       };
+      v.cur.observed=animationObservation(v,v.cur,'native',world.tick,DT,DT*rate,restReset);
     }
     for (const [id, v] of this.views)
       if (!world.entities[id]) {
@@ -923,6 +930,7 @@ export class HumanViews {
       };
       v.age = 0;
       snap.pr = this.proneGoal(v, e, world, null, true);
+      if(f.animationObservation)snap.observed={...animationObservation(v,snap,'sampled',f.animationObservation.tick,f.animationObservation.dt),restAge:f.restAge};
       v.prev = v.cur = snap;
     }
     for (const [id, v] of this.views)
@@ -965,6 +973,7 @@ export class HumanViews {
     // prone receiver (prone.ts): the lying / rising body may be turned about S toward the hands
     const pr = lerpProne(a.pr, b.pr, alpha);
     // library clips (clip-library.ts): what this body plays now, and what it played just before (crossfade)
+    const sample=observedAnimationSample(a.observed,b.observed,alpha,IDLE_VARIETY_ONSET);
     const tSec0 = lerp(a.expressionT, b.expressionT, alpha);
     const lib = this.libraryPlan(v, b, tSec0);
     const proneW = !lib.sleep && pr && v.dims && v.spine && v.legs.length >= 2 ? pr.w : 0;
@@ -976,13 +985,14 @@ export class HumanViews {
     h.rotation.y = -yaw;
     const w = (a.walkW + (b.walkW - a.walkW) * alpha) * (fp?.kind === 'beam' ? BEAM_WALK_W : 1) * (lib.still ? 0 : 1);
     const { walk, idle, mixer, extra } = v.rig;
-    const wt = b.walkT >= a.walkT ? a.walkT + (b.walkT - a.walkT) * alpha : b.walkT;
+    const wt = sample.kind==='sampled'?sample.walk:b.walkT >= a.walkT ? a.walkT + (b.walkT - a.walkT) * alpha : b.walkT;
+    const idleTime=sample.kind==='sampled'?sample.idle:b.idleT;
     const opening=v.handActuator?.opening;
     const slide=v.handActuator?.slide;
     // pulling a door toward you or a drawer out, the body steps backwards
     const backwards=(opening&&opening.side*(opening.to-opening.from)<0)||(!!slide&&slide.to>slide.from);
     walk.time=backwards?(walk.getClip().duration-wt%walk.getClip().duration)%walk.getClip().duration:wt;
-    idle.time = b.idleT;
+    idle.time = idleTime;
     // Body activity layer (activity-poses.ts): free hands only (engine hand points / grips win), never on a frame or prone.
     const tSec = lerp(a.expressionT, b.expressionT, alpha);
     const engineHands = !!(b.hands.left || b.hands.right || a.hands.left || a.hands.right);
@@ -1088,7 +1098,7 @@ export class HumanViews {
     // Idle variety (Idle_Neutral, fold arms, look around) fades in from when the body came to rest: switched on at full
     // weight it raised or crossed the arms in one frame whenever a walk ended inside a person's variety window
     // (entry 29's shared idle-onset fix, carried by entry 33: a hand-to-hair flash at each walk stop before a reach).
-    const normalRestOnset=v.restAge===undefined?1:smooth(v.restAge/IDLE_VARIETY_ONSET);
+    const normalRestOnset=sample.kind==='sampled'&&sample.restOnset!==undefined?sample.restOnset:v.restAge===undefined?1:smooth(v.restAge/IDLE_VARIETY_ONSET);
     const waveRestOnset=v.waveRestAge===undefined?1:smooth(v.waveRestAge/IDLE_VARIETY_ONSET);
     const restOnset = waveActive ? waveRestOnset : singFade > 0 ? v.singOnset! : normalRestOnset;
     if (v.activity === 'idle') v.singOnset = restOnset; else if (v.activity !== 'sing') v.singOnset = undefined;
@@ -1136,7 +1146,7 @@ export class HumanViews {
     const slowed = reachFade > 0 ? heldClip(reachS, GESTURE_FADE) - reachS : 0;   // (weight 0 once the fade is over: back on the clock unseen)
     if (variantA) libAt(gestureAction(v.rig, variant!.clip), variantW, variantTime(variant!.clip, h.name, gT + slowed));
     if (neutralW > 0) libAt(gestureAction(v.rig, 'Idle_Neutral'), neutralW, gT);
-    if (neutralW + variantW > 1e-4) libAt(idleBodyAction(v.rig), neutralW + variantW, b.idleT);
+    if (neutralW + variantW > 1e-4) libAt(idleBodyAction(v.rig), neutralW + variantW, idleTime);
     if (armsN > 0) libAt(armsAction(v.rig, 'Idle_Neutral'), armsN, tSec);
     if (armsV > 0 && gv) libAt(armsAction(v.rig, gv.clip), armsV, variantTime(gv.clip, h.name, tSec + slowed));
     if (jog) { const sp = jog.getClip().name === 'Sprint_Loop' ? v.rig.template.sprintSpeed : v.rig.template.jogSpeed; libAt(jog, runW, sp ? v.dist / sp : tSec); }
@@ -1770,6 +1780,12 @@ function lerpHands(a: Hands, b: Hands, t: number): Hands {
   return { left: one(a.left, b.left), right: one(a.right, b.right) };
 }
 
+/** Capture clip identity and phase at the same native observation as the existing pose snapshot. */
+function animationObservation(v:View,s:Snap,source:AnimationObservation['source'],tick:number,dt:number,walkAdvance?:number,restReset?:boolean):AnimationObservation {
+  const idle=v.rig.idle.getClip(),walk=v.rig.walk.getClip();
+  return {actor:v.rig.holder.name,source,tick,dt,time:s.expressionT,idle:{identity:idle,duration:idle.duration,phase:s.idleT},
+    walk:{identity:walk,duration:walk.duration,phase:s.walkT},walkWeight:s.walkW,walkAdvance,restAge:v.restAge,restReset};
+}
 const V = () => new THREE.Vector3();
 /** Soul Actions entry 38: the poster in a Soul's hands, from the recorded hand-actuator timeline (posterLocal) and the drawn
  *  palms. Putting up: a roll held between the palms is raised to the slot, its top edge pressed to the wall, and the sheet
