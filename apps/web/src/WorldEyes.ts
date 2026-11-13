@@ -6,7 +6,7 @@ import { compileSceneAsync } from './gen-mesh/texture-budget.ts';
  * body), hides spectator overlays (speech bubbles, selection ring, pivot), draws one frame at the requested size and
  * returns it as a JPEG. Between jobs it draws nothing and the scene updates once a second. Never touches simulation;
  * without `?eyes=1` it does nothing. */
-export type EyesJob = {mode: 'eyes' | 'map'; w: number; h: number; quality?: number; pose: {p: [number, number, number]; yaw: number; pitch: number; vfov: number}; self: string; show: string[]; span?: number};
+export type EyesJob = {mode: 'eyes' | 'map'; w: number; h: number; quality?: number; pose: {p: [number, number, number]; yaw: number; pitch: number; vfov: number}; self: string; show: string[]; span?: number; /** map: the arrow for the Soul at the centre (default on; #2260: off for a map of everyone or a place) */ marker?: boolean};
 export type EyesResult = {ok: true; b64: string; frameTick: number | null; frames: number; ms: number} | {ok: false; error: string};
 export type EyesHost = {
   renderer: THREE.WebGLRenderer; camera: THREE.PerspectiveCamera; scene: THREE.Scene;
@@ -17,7 +17,10 @@ export type EyesHost = {
   /** Spectator-only overlays never shown to a Soul's eyes. */
   overlays(): (THREE.Object3D | null | undefined)[];
   tick(): number | null; ready(): boolean;
+  /** #2260: where the public replica draws each Soul, place and thing now, so a client on its own machine can place a camera by name. */
+  where?(): EyesWhere;
 };
+export type EyesWhere = {souls: {id: string; entityId: string; name: string; p: [number, number, number]; yaw: number}[]; places: {name: string; p: readonly number[]; target: readonly number[]}[]; things: {id: string; p: [number, number, number]}[]};
 type Pending = {job: EyesJob; resolve(r: EyesResult): void; frames: number; started: number};
 // Render on demand (lane soul-eyes-on): between jobs the page asks for NO animation frames; one scene update every
 // IDLE_MS (default 1 s, `?eyes=1&eyesIdle=<ms>`) keeps the replica, buffers and builds current at near-zero CPU, and a job
@@ -38,6 +41,7 @@ export class WorldEyes {
     (window as unknown as {edenEyes?: unknown}).edenEyes = {
       ready: () => !this.disposed && host.ready(),
       capture: (job: EyesJob) => this.capture(job),
+      where: (): EyesWhere => host.where?.() ?? {souls: [], places: [], things: []},
     };
   }
   private capture(job: EyesJob): Promise<EyesResult> {
@@ -94,7 +98,7 @@ export class WorldEyes {
       // copy now (the drawing buffer is valid until this task ends), encode asynchronously
       const out = document.createElement('canvas'); out.width = job.w; out.height = job.h;
       const ctx = out.getContext('2d')!; ctx.drawImage(renderer.domElement, 0, 0, job.w, job.h);
-      if (job.mode === 'map') mapMarker(ctx, job);
+      if (job.mode === 'map' && job.marker !== false) mapMarker(ctx, job);
       this.queue.shift();
       const tick = this.host.tick();
       out.toBlob(blob => {

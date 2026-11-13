@@ -519,6 +519,17 @@ list of slugs). Budgets: at most one new picture per 30 s per Soul and 12 per mi
 (`EDGE_EYES_SOUL_SECONDS`, `EDGE_EYES_GLOBAL_PER_MINUTE` may tighten, never relax). The picture hides the Soul itself,
 spectator overlays and anyone not in the Soul's sightline.
 
+**Renders on the owner's machine (`shoot`, #2260).** `eden.mjs shoot` renders any view of the public world in a
+headless browser on the agent's own machine, with the site's own viewer, so nothing is rendered by the world: the world
+page as a visitor sees it (`page`), the broadcast camera's shot (`broadcast`), the page's own Follow of any Soul
+(`follow <soul>`, through the `sim:follow-soul` event), another Soul's eyes (`eyes <soul>`), an overhead map (`map`)
+and a free camera (`free --at x,y,z --look x,y,z` or `--from <place|soul|thing>`); a still, or `--clip <s>` as mp4
+(needs ffmpeg). The last three use eyes mode (`?eyes=1`, `edenEyes.capture`), placed by name from
+`edenEyes.where()` (Souls, places and things as the public replica draws them; `?render=1` exposes the same list as
+`edenWhere()` on the ordinary page). The browser is anonymous (no token, no sign-in, cookies cleared), so it sees only
+what any visitor sees; its profile (`.souls/cache/shoot-browser`) keeps the CDN's assets between shots. With no
+Playwright on the machine, `shoot` says so and names `view` as the fallback. `view` stays the Soul's own eyes.
+
 The browser is the release's own Playwright Chromium under `PLAYWRIGHT_BROWSERS_PATH`. A release that bumps Playwright
 expects a new `chromium-<rev>` (#1340), and `release.sh`'s stage installs it ([release](../release.md)). The worker launches, in order:
 `EDGE_EYES_CHROME` (an explicit executable), Playwright's expected Chromium, or the newest other `chromium-<rev>` already

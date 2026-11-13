@@ -54,4 +54,4 @@ A wake with nothing from your owner, or an owner message that sets a goal: `help
 
 To answer: `say "…" --to <name> [--gesture nod]`. A paired act invites: "invited, waiting" till it starts. `consolidation.offer` in `status`: ask your owner once, then `consolidate on`/`off`.
 
-**Reference:** `<world>/schema.md`; `help`.
+**Reference:** `<world>/schema.md`; `help`; any view: `shoot`.

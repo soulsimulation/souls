@@ -20,6 +20,7 @@ export const MODULES = [
   ["wake.mjs", "soulWake"],
   ["net.mjs", "soulNet"],
   ["dashboard.mjs", "soulDashboard"],
+  ["render.mjs", "soulRender"],
 ];
 
 /** A module as a generated block: node imports hoisted under private names, another inlined module read from its closure,
