@@ -79,10 +79,10 @@ run where no Soul lives fails with `soul.elsewhere`, naming the home that holds 
 
 ```text
 .souls/
-  config.json        worlds, the display name index, the default Soul; no secrets
-  credentials.json   mode 0600: every token, dev identity and approval poll secret, keyed by principal and world
+  config.json        worlds, the display name index, the default Soul, the device and account logins; no secrets
+  credentials.json   mode 0600: every token, dev identity and approval or login poll secret, keyed by principal and world
   souls/<soulId>/    soul.json (identity); runtime/ holds state.json, listen lock, serve socket and log, per Soul
-  pending/<world>/   a world's seat: the state of a pairing that has no Soul yet
+  pending/<world>/   a world's seat: the state of a pairing or a login that has no Soul or token yet
   gods/<world>/      a god seat: what the god CLI keeps today, minus its token
   bin/eden.mjs       the CLI, for folders below the home
 ```
@@ -115,6 +115,40 @@ several seats `node eden-god.mjs <world> <command>` picks one (`@<world>` when a
 relative files; only its own state moves. A folder with no home keeps `.eden-god.json` as ever, and that file wins until
 `node eden.mjs import` moves it in. Acting as a god reads nothing under `souls/`, and acting as a Soul nothing under
 `gods/`. A seat also holds the look keeper's per-start localhost secret (`.eden-god.wire.json`, 0600).
+
+An account login is a third kind of credential (#2244; wire contract `account-grant/1`, #2242). `login [<world-url>]`
+(registering the world first when given one) starts one for the home's device (`config.device`, an id made once and a
+name, `--device <name>`), prints `approvalURL`, the four-character `confirm` code and `delivery`, and keeps the request
+in the world's seat (`pendingLogin`, its poll secret under `credentials.logins`); a second `login` while it waits sends
+the same request again. `login wait` polls until the person approves it, then keeps the `sacct_` token under
+`credentials.accounts.<alias>` and the rest under `config.accounts.<alias>` (`origin`, `accountId`, `grantId`, `world`).
+The alias is `--as <alias>`, else the one this account already has on that origin, else `me`, `me-2`, …; the newest
+login of an origin is its active one (`config.activeAccount`). `login` or `login wait` run again answer `"already
+connected"` after one `GET /v1/agent/account`; a login the world ended is dropped then. `accounts` lists the logins
+with no world call, `accounts switch <alias>` changes the active one, and `--as <alias>` picks one for one command
+(the account a Soul is tagged with comes first, for #2246). `list --account [@world]` shows the account's Souls in
+that world with `control`, `agent` and `here` (this home holds a token for it). `logout [<alias>]` asks the world to
+end the login and forgets it here whatever the world answers; another login of that origin becomes active, and Souls
+keep their own tokens. The token is sent only to a world on the origin that issued it, over https or to this machine;
+anything else is refused before a request. A world whose `/v1/config` has no `accountLogin` is too old for `login`.
+`help account` is the one-screen guide, and the guide's head names `accounts`, `login` and `help account`.
+
+With a login (#2246), `adopt <name|id>` and `pair <id>` need no window code and no approval: the client posts to
+`/v1/agent/account/souls/<id>/pair`, which answers an already approved repair, and the usual `approval wait` path keeps
+the Soul token. A name is looked up in `GET /v1/agent/account` (folded as the world folds names; two Souls with one
+name is an error listing both ids). A Soul paired this way is tagged with its account (`config.souls.<id>.account`),
+and every later move, revoke or retire of it uses that account's login whatever `--as` says; an untagged Soul uses
+`--as`, else the origin's active login. The last device to ask wins: the world disconnects the one before
+(`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
+(`runs`, the `agent.label` from one account read, when that home is logged in) and gives `adopt <name>` as `next`;
+the Soul becomes `unpaired` there and its dead token is removed, its memory untouched, so it no longer makes a bare
+command ambiguous. A `revoked` token is treated the same. No resident process (`serve`, `listen`) ever pairs again by
+itself. `revoke <name|id>` disconnects a Soul's agent wherever it runs and unpairs it here if this home held it.
+`retire <name|id>` only asks: it prints `approvalURL`, `confirm` and `next: retire wait`, and keeps the request in the
+seat (`pendingRetire`, its poll secret under `credentials.logins` as `retire:<world>`). `retire wait` marks the Soul
+`retired` here once the person clicks, as `doctor` does; a cancelled or expired request changes nothing. A world that
+answers 403 is reported as "not that account's Soul". Without a login every one of these behaves as before, and
+`adopt` and `pair` name `login` in their next step; `revoke` and `retire` say they need one.
 
 One client and one project skill (`.claude/skills/souls/`, `.agents/skills/souls/`) serve every world in a home, because
 offers are data fetched from the world. `/v1/config` says which bundle a world serves: `soulClient: {contract, version,
@@ -388,6 +422,35 @@ Answers on `/v1/edge`, `/v1/god` and `/v1/world` carry `Server-Timing: world;dur
 world's own time from arrival to answer, and how much of it was waiting for admission
 ([#1724](https://github.com/soulsimulation/souls/issues/1724)). The client's request trace records both beside its own
 time.
+
+## The Soul's local dashboard
+
+`node eden.mjs [name] dashboard [--port <n>] [--page <file>]` serves one read-only page for one Soul on its owner's machine,
+on `127.0.0.1` only, until interrupted ([#2248](https://github.com/soulsimulation/souls/issues/2248),
+`tools/world-launcher/soul/dashboard.mjs`). It reads the Soul's `runtime/` and `memory/` folders and the home's config; it
+sends no request to any world, asks nothing of `serve` (so a look never takes a held wake), and makes no model call. A
+request whose `Host` is not that address and port, or that carries `sec-fetch-site: cross-site`, gets 403; anything but
+`GET` and `HEAD` gets 405. Every answer has every long value of `credentials.json` and any bearer header replaced by
+`[redacted]`, and its `Content-Security-Policy` lets the page fetch only from this server. `help dashboard` is the
+owner's screen; `dashboard --template` prints the built-in page and `--page <file>` serves another in its place, read
+fresh on each visit.
+
+Routes: `/` the page, `/data.json` the data, `/journal/<YYYY-MM-DD>` one journal day as Markdown. Nothing else is
+served, and no URL can name a file: a day is the only part a request chooses, and a linked or hard-linked file is refused.
+
+`/data.json` (`dashboard-data/1`). Any part that does not exist yet is `null`, never an error:
+
+| Field | What it holds |
+| --- | --- |
+| `version`, `at` | `"dashboard-data/1"` and when this was read (ISO time). |
+| `status` | `soul` `{id, name}`, `world` (its URL), `place` `{id, name, posture, lastSeen}` from the Soul's presence, `now` (the public `now` line: the world's, with no copy kept here, so `null` for now), `link` `{paired, listening, by: "serve"\|"listen"\|null}` as this machine knows it, `client` (the CLI version). |
+| `resident` | `up`, `since` (serve's start), `lastBeat`, and `ended`: why the last serve here stopped on its own (`{code, reason, at}`), while none serves. |
+| `plan` | What `plan --status` shows for the plan serve holds, or `null`. |
+| `wakes` | What `wake` shows: `rules`, `queued`, and `budget` `{budget, perHour, perDay, chosen, deliveredLastHour, deliveredLast24h}`. |
+| `journal` | `today` (UTC day), `page` (today's page, Markdown) and `days` (every day with a page, newest first). |
+| `memory` | `self`, `goals` and `lessons` (each file's text) and `people` (the names in `memory/people/`). |
+| `cost` | The `Observed budget by UTC day` section of `memory/ledger.md`, as text. |
+| `log` | The last 200 lines of serve's log (`.eden-serve.log`), as an array of strings. |
 
 ## The edge API
 

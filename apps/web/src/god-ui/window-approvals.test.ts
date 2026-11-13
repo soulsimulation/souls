@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import type { Approval } from './join-api.ts';
 (globalThis as { location?: unknown }).location ??= { href: 'http://127.0.0.1/w/test', pathname: '/w/test', hash: '', origin: 'http://127.0.0.1' };
 const { approvalLine, preparingLine, closeApproval, closedApprovals, pickWindowApproval, safePhoto } = await import('./window-approvals.ts');
+const { approvalFromHash, isAccountRequest } = await import('../approval-link.ts');
+const { validRequest } = await import('./join-api.ts');
 
 const memory = () => { const m = new Map<string, string>(); return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) }; };
 const ap = (status: Approval['status'], extra: Partial<Approval> = {}): Approval => ({ id: 'ap_' + 'a'.repeat(32), worldId: 'w', agentLabel: 'Claude Code', name: 'Ana', description: '', mode: 'create', status, soulId: null, expiresAt: 0, ...extra });
@@ -45,4 +47,31 @@ test('the Soul picture comes only from this site or https', () => {
   assert.equal(safePhoto('https://assets.eden.art/p.webp'), 'https://assets.eden.art/p.webp');
   assert.equal(safePhoto('/worlds/w/x/media/p.png'), '/worlds/w/x/media/p.png');
   for (const bad of ['javascript:alert(1)', '//evil.test/p.png', 'http://x.test/p.png', 'data:image/png;base64,AA', null, undefined, '']) assert.equal(safePhoto(bad as string | null | undefined), null);
+});
+
+test('#2245: approvals and account requests are picked together, newest first, skipping what this tab closed', () => {
+  const list = [
+    { id: 'ap_old', status: 'pending', createdAt: 100 },
+    { id: 'aq_login', status: 'pending', createdAt: 300 },
+    { id: 'ap_mid', status: 'pending', createdAt: 200 },
+    { id: 'aq_done', status: 'ready', createdAt: 400 },
+  ];
+  assert.equal(pickWindowApproval(list, new Set()), 'aq_login');
+  assert.equal(pickWindowApproval(list, new Set(['aq_login'])), 'ap_mid');
+  assert.equal(pickWindowApproval(list, new Set(['aq_login', 'ap_mid', 'ap_old'])), null);
+});
+
+test('#2245: #approve/aq_… opens an account request, #approve/ap_… a Soul approval', () => {
+  const aq = 'aq_' + 'b'.repeat(32), apId = 'ap_' + 'c'.repeat(32);
+  assert.equal(approvalFromHash('#approve/' + aq), aq);
+  assert.equal(isAccountRequest(aq), true);
+  assert.equal(approvalFromHash('#approve/' + apId), apId);
+  assert.equal(isAccountRequest(apId), false);
+  for (const bad of ['#approve/aq_short', '#approve/ar_' + 'b'.repeat(32), '#approve/' + aq + '/x', '#pair/' + aq]) assert.equal(approvalFromHash(bad), null);
+  const login = { id: aq, kind: 'login', status: 'pending', agentLabel: 'eden 2.33.0', device: { name: 'studio laptop' }, soul: null, confirm: 'K7QX', createdAt: 0, expiresAt: 0, inWindow: true };
+  assert.equal(validRequest(login, aq), true);
+  assert.equal(validRequest(login, 'aq_' + 'd'.repeat(32)), false);
+  assert.equal(validRequest({ ...login, kind: 'retire' }, aq), false);   // a retire names its Soul
+  assert.equal(validRequest({ ...login, kind: 'retire', soul: { id: 's_1', name: 'Ana' } }, aq), true);
+  assert.equal(validRequest({ ...login, kind: 'other' }, aq), false);
 });
