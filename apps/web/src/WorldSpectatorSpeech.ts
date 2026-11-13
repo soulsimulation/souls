@@ -12,7 +12,7 @@ export type SpeechChannel=
  |{kind:'earshot';radius:number}
  |{kind:'enclosure';placeId:string}
  |{kind:'audience';placeId:string}
- |{kind:'conversation';conversationId:string;members:string[]};
+ |{kind:'conversation';conversationId:string;members:string[];private?:true};
 export type SpectatorSpeech={id:string;at:number;speaker:string;speakerName:string;text:string;channel:SpeechChannel;
  /** World tick of the line (edge feed only). */
  tick?:number;
@@ -33,7 +33,7 @@ export function speechFromTalk(line:TalkLine,speakerAt:readonly [number,number,n
  const members=[line.from,line.to].filter(Boolean).sort();
  const within=speakerAt?enclosingPlace(speakerAt[0],speakerAt[1],speakerAt[2])?.id??null:null;
  return {id:`talk:${line.id}`,at:line.at,speaker:line.from,speakerName:line.fromName,text:line.text,within,
-  channel:members.length>=2?{kind:'conversation',conversationId:'c:'+members.join('|'),members}:within?{kind:'enclosure',placeId:within}:{kind:'earshot',radius:10}};
+  channel:members.length>=2?{kind:'conversation',conversationId:'c:'+members.join('|'),members,private:true}:within?{kind:'enclosure',placeId:within}:{kind:'earshot',radius:10}};
 }
 const PALETTE=['#ffd166','#06d6a0','#4cc9f0','#f78c6b','#c77dff','#90be6d','#f15bb5','#ffb4a2'];
 export function conversationColour(id:string){let h=2166136261;for(let i=0;i<id.length;i++){h^=id.charCodeAt(i);h=Math.imul(h,16777619);}return PALETTE[(h>>>0)%PALETTE.length];}
@@ -42,7 +42,7 @@ export function channelChip(s:SpectatorSpeech,nameOf:(soulId:string)=>string):{t
  const inside=s.within?placeById.get(s.within)?.name:null,where=inside?` · inside ${inside}`:'';
  const heard=s.heardBy?(s.heardBy.length?` · heard by ${s.heardBy.slice(0,4).map(nameOf).join(', ')}${s.heardBy.length>4?` +${s.heardBy.length-4}`:''}`:' · nobody in earshot'):'';
  switch(s.channel.kind){
-  case 'conversation':{const others=s.channel.members.filter(m=>m!==s.speaker).map(nameOf);return {text:others.length?`🔒 private · with ${others.join(', ')}${where} — only they hear`:`🔒 private conversation${where}`,colour:conversationColour(s.channel.conversationId),private:true};}
+  case 'conversation':{const others=s.channel.members.filter(m=>m!==s.speaker).map(nameOf),sealed=!!s.channel.private,label=sealed?'🔒 private':'💬 conversation';return {text:others.length?`${label} · with ${others.join(', ')}${where}${sealed?' — only they hear':''}`:`${label}${where}`,colour:conversationColour(s.channel.conversationId),private:sealed};}
   case 'enclosure':return {text:heard?`🏠 ${inside??'inside'}${heard}`:`🏠 ${inside??'inside'} — only those inside hear`,colour:'#ffe8b0',private:false};
   case 'audience':return {text:`📣 to the audience · ${placeById.get(s.channel.placeId)?.name??''}${heard}`,colour:'#bde0fe',private:false};
   default:return {text:heard?`💬 aloud${heard}`:`💬 aloud — heard within ~${Math.round(s.channel.radius)} m`,colour:'#ffffff',private:false};
@@ -94,7 +94,7 @@ export function speechFromEdge(messages:readonly EdgeSpectatorMessage[],where:(s
   // #2269: a private conversation reaches viewers only as who is talking; the bubble shows a cue, never words
   else if(m.kind==='conversation.talking'){const id=String(m.conversation),from=ref(m.from);if(!from)continue;
    const set=members.get(id)??new Set<string>();set.add(from.soulId);members.set(id,set);const p=where(from.soulId);
-   out.push({id:`talk:${id}:${m.tick}:${from.soulId}`,at:m.at,tick:m.tick,speaker:from.soulId,speakerName:from.name,text:'…',within:p?enclosingPlace(p[0],p[1],p[2])?.id??null:null,channel:{kind:'conversation',conversationId:id,members:[...set].sort()}});}
+   out.push({id:`talk:${id}:${m.tick}:${from.soulId}`,at:m.at,tick:m.tick,speaker:from.soulId,speakerName:from.name,text:'…',within:p?enclosingPlace(p[0],p[1],p[2])?.id??null:null,channel:{kind:'conversation',conversationId:id,members:[...set].sort(),private:true}});}
   else if(m.kind==='speech'){const from=ref(m.from);if(!from)continue;const ch=m.channel as {kind:string;placeId?:string|null;radius?:number;object?:string;base?:{kind:string;placeId?:string|null}}|undefined;
    const base=ch?.kind==='audience'?ch.base:ch,within=base?.kind==='enclosure'&&base.placeId?base.placeId:null;
    const channel:SpeechChannel=ch?.kind==='audience'?{kind:'audience',placeId:String(base?.placeId??'')}:within?{kind:'enclosure',placeId:within}:{kind:'earshot',radius:Number(ch?.radius)||12};

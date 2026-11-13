@@ -21,7 +21,8 @@ test('a private conversation is one thread: members, colour matching its tether,
   const t=[...s.threads.values()][0];
   assert.deepEqual([t.kind,t.colour,t.members,t.lines.map(l=>l.text)],['private',conversationColour('cv1'),['s_a','s_b'],['Can I ask you something quietly?','Of course.','A night swim?']]);
   assert.equal(joinNames(participants(t).map(nameOf)),'Tamsin Quill & His Duckness');
-  assert.deepEqual(hearingLabel(t,nameOf,5000),{icon:'🔒',text:'private · only they hear'});
+  assert.deepEqual(hearingLabel(t,nameOf,5000),{icon:'💬',text:'conversation · out loud'},'out loud by default (#2269)');
+  t.sealed=true;assert.deepEqual(hearingLabel(t,nameOf,5000),{icon:'🔒',text:'private · only they hear'});
   ingestDialogue(s,[{type:'edge',kind:'conversation.closed',tick:9,at:9000,conversation:'cv1',reason:'empty'}],[],9000);
   assert.equal(hearingLabel(t,nameOf).text,'private · ended');
 });

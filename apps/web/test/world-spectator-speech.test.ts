@@ -64,7 +64,7 @@ test('edge feed: a private conversation shows a talking cue between its members,
     {type:'edge',kind:'conversation.member',tick:2,at:1100,conversation:'cv2',soul:B,change:'joined'},
     {type:'edge',kind:'conversation.talking',tick:3,at:1200,conversation:'cv2',from:B,private:true},
   ] as any[],()=>[0,0,0]);
-  assert.deepEqual(out.map(s=>[s.speakerName,s.text,s.channel]),[['Bob','…',{kind:'conversation',conversationId:'cv2',members:['s_a','s_b']}]]);
+  assert.deepEqual(out.map(s=>[s.speakerName,s.text,s.channel]),[['Bob','…',{kind:'conversation',conversationId:'cv2',members:['s_a','s_b'],private:true}]]);
 });
 test('edge feed: fade colours map to ring phases; removed beams, reclaimed falls, green clears', () => {
   const m=fadingFromEdge([
