@@ -112,6 +112,7 @@ export type ActuatorHost = {
   /** Entry 43 (tea.ts): "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea" as acts of native steps. */
   tea?(soul: EdgeSoul, thing: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   teaBegun?(soul: EdgeSoul): void;
+  intervalWorkout?(soul:EdgeSoul,thing:string,action:string):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
   /** #438 (harvest.ts): "pick the tomatoes", "pick flowers for the vase" as acts of native steps. */
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
@@ -409,6 +410,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
+      const workout=s.key?host.intervalWorkout?.(ctx.soul,s.key,a.name):null;if(workout)return 'code'in workout?workout:null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
@@ -430,6 +432,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
+        const workout=s.key?host.intervalWorkout?.(ctx.soul,s.key,a.name):null;if(workout&&!('code'in workout))return{state:s,result:{action:a.name,summary:workout.summary},bodies:[{label:a.label,steps:workout.steps}]};
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
         if (pick && !('code' in pick)) return { state: s, result: { action: a.name, summary: pick.summary }, bodies: [{ label: a.label, steps: pick.steps }] };
         const contact = host.deferContacts && isContactActuator(def, a);

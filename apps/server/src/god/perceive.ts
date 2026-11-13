@@ -14,6 +14,7 @@
 // through the ledger's world-profile hook (as nav.ts's `walk:<path>`).
 import { checkersStatus, containerInside, gameStatus, type Entity, type StoredDef, type WorldModel } from '@souls/world-compiler';
 import { paintingLine } from '../art/art.ts';
+import type {IntervalWorkouts} from './interval-workouts.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { readOnlyObjectAdvance, refreshOnlyObjectAdvance } from '../edge/comms/objects/framework.ts';
@@ -88,6 +89,7 @@ export function signText(e: Entity, def: StoredDef): string | null {
 }
 
 export type PerceiveHost = {
+  intervalWorkouts?:IntervalWorkouts;
   model: WorldModel;
   version?: () => number;
   edge?: EdgeLedger;
@@ -200,6 +202,7 @@ export class GodPerceive {
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
+      intervalWorkout:(soul:EdgeSoul,id:string,action:string)=>this.h.intervalWorkouts?.plan(soul,id,action)??null,
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
