@@ -1,3 +1,4 @@
+import type {Weeding} from './weeding.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -132,6 +133,8 @@ export class GodPerceive {
   private signs = new Map<string, SignRow>();
   constructor(h: PerceiveHost) { this.h = h; }
 
+  private weeding?:Weeding;
+  bindWeeding(service:Weeding){this.weeding=service;}
   private objects() {
     const o = (this.h.edge as any)?.comms?.objects as { kindOf(k: string): unknown; register(k: unknown): void; create(i: unknown): unknown; fresh(): unknown; all(): { id: string; kind: string; name: string; state: unknown }[] } | undefined;
     if (!o) return null;
@@ -194,6 +197,7 @@ export class GodPerceive {
         const busy = ins.slots.some((s) => rt.holder(`surface-slot:${id}#${s.id}`).length) || [...(m.children.get(id) ?? [])].some((c) => slots.has(m.entities.get(c)?.in.slot ?? '') && rt.holder(`entity:${c}`).length);
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
+      weeding:(soul:EdgeSoul,id:string,action:string)=>this.weeding?.plan(soul,id,action)??null,
       deferContacts: !!this.h.edge?.contactActuator,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
