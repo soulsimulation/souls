@@ -1036,12 +1036,12 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       return {
         place:p?{name:p.name,visits:p.visits,note:impressions.get(p.id)??null}:null,
         people:near.flatMap(personId=>{const row=people.get(personId);if(!row)return [];const m=row.meetings.at(-1);return [{id:row.id,name:row.name,met:row.meetings.length,last:m?{world:m.world??null,worldDay:m.day??null,place:m.seenAs??null}:null,note:row.impressions.at(-1)??null}];}),
-        goals:sorted(goals).sort((a,b)=>['today','week','month'].indexOf(a.horizon)-['today','week','month'].indexOf(b.horizon)).slice(0,4).map(g=>({note:g.note,next:g.next})),
+        goals:sorted(goals).sort((a,b)=>['today','week','month'].indexOf(a.horizon)-['today','week','month'].indexOf(b.horizon)).slice(0,4).map(g=>({id:g.id,note:g.note,next:g.next})),
         recent:recentOutcomes.slice(-2).map(e=>({summary:e.summary,own:e.id.startsWith('owner:')})),
         self:self.slice(0,8),
       };
     },
-    known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self]};},
+    known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self],goals:sorted(goals).map(g=>({...g}))};},
     eventValue(eventId){fresh();id(eventId);const value=seen.get(eventId);if(!value)return null;const record=JSON.parse(value);return record.kind==='event'?structuredClone(record.value):null;},
     fold: input => append({version: VERSION, kind: 'event', value: validateEvent(input)}),
     scorecard({id:cardId,at,clock,period,from,to}){instant(from);instant(to);const events=scoreEvents.filter(e=>e.at>=from&&e.at<to),sum=k=>events.reduce((n,e)=>n+(e[k]??0),0),cost=events.filter(e=>e.modelCalls!==undefined),metrics={newPlaces:sum('newPlaces'),conversations:new Set(events.filter(e=>e.conversationId).map(e=>e.conversationId)).size,people:[...new Set(events.filter(e=>e.personId).map(e=>e.personId))].slice(0,100),facts:sum('facts'),objects:sum('objects'),refusals:sum('refusals'),idleMinutes:Math.round(sum('idleMs')/600)/100,modelCalls:sum('modelCalls'),usd:!cost.length||cost.some(e=>e.usd===null)?null:cost.reduce((n,e)=>n+e.usd,0)};append({version:VERSION,kind:'event',value:validateEvent({type:'scorecard',id:cardId,at,clock,period,from,to,metrics})});return metrics;},
@@ -1113,7 +1113,7 @@ function buildBrief(facts, { bytes = BRIEF_BYTES } = {}) {
   const person = (p) => `${quoted(p.name)}: ${p.met ? `met ${times(p.met)}` : "only heard from"}${p.last ? `, last ${[when(p.last), p.last.place ? quoted(p.last.place) : null].filter(Boolean).join(" at ")}` : ""}.${p.note ? ` My note: ${mine(p.note, NOTE_BYTES)}` : ""}${p.open ? ` Open: ${mine(p.open, NOTE_BYTES)}` : ""}${p.claimed ? ` A world says this is ${quoted(p.claimed)}, whom I know elsewhere; I can't check that.` : ""}`;
   const promise = (c) => `[${c.id}] ${c.by === "me" ? "I promised" : "They promised"} ${quoted(c.with)}: ${c.what}`;
   const place = (p) => `${quoted(p.name)}: ${p.visits > 1 ? `been here ${times(p.visits)}` : "first time here"}.${p.note ? ` My note: ${mine(p.note, NOTE_BYTES)}` : ""}`;
-  const goal = (g) => `${g.note}${g.next ? ` Next: ${g.next}` : ""}`;
+  const goal = (g) => `${g.id ? `[${g.id}] ` : ""}${g.note}${g.next ? ` Next: ${g.next}` : ""}`;
   // Goals can't take every line: the owner's next schedule entry always has one.
   const later = facts.schedule ?? [], open = [...[...(facts.promises ?? []).map(promise), ...(facts.goals ?? []).map(goal)].slice(0, OPEN_MAX - Math.min(later.length, 1)), ...later].slice(0, OPEN_MAX);
   const sections = [
@@ -1856,9 +1856,12 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
           return { remembered: "self", lines: value.self.length, ...(lines.length > 20 ? { dropped: lines.length - 20 } : {}) };
         }
         if (selector === "goal") {
-          Object.assign(value, { goal: safeId(target) ? target : `goal:${sha(String(target)).slice(0, 32)}`, note: clip(note, 300), horizon: goal.horizon ?? "today", metric: clip(goal.metric ?? "Owner-defined progress", 160), next: clip(goal.next ?? "Choose a next step", 160) });
+          // #2122: one goal, one id. The same note under a new id updates the open goal it repeats; fields not given keep its values.
+          const asked = safeId(target) ? target : `goal:${sha(String(target)).slice(0, 32)}`, same = (n) => String(n).trim().toLowerCase().replace(/\s+/g, " ").replace(/[\s.!]+$/, "");
+          const had = known.goals.find((g) => g.id === asked) ?? known.goals.find((g) => same(g.note) === same(note));
+          Object.assign(value, { goal: had?.id ?? asked, note: clip(note, 300), horizon: goal.horizon ?? had?.horizon ?? "today", metric: clip(goal.metric ?? had?.metric ?? "Owner-defined progress", 160), next: clip(goal.next ?? had?.next ?? "Choose a next step", 160) });
           r.remember(value);
-          return { remembered: "goal", id: value.goal };
+          return { remembered: "goal", id: value.goal, ...(value.goal !== asked ? { merged: `"${asked}" repeats the open goal "${value.goal}", so it updated that one. Use "${value.goal}".` } : {}) };
         }
         const lower = String(target).toLowerCase();
         if (selector === "person") {
@@ -5424,12 +5427,18 @@ export function carryWake(wake, sameWorld) {
   for (const r0 of w.rules) {
     if (sameWorld) { rules.push(r0); continue; }
     const { inside, busy, held, was, ...r } = r0;   // who was where, the acts it was holding and a thing's state were the old world's
-    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind !== "soul-arrives" ? null
+    const named = r.kind === "place-busy" ? `place ${r.params?.place}` : r.kind === "thing-state" ? `thing ${r.params?.thing}` : r.kind !== "soul-arrives" ? null
       : r.params?.who !== "any" ? `Soul ${r.params.who}` : r.params?.where !== "here" ? `place ${r.params.where}` : null;
     if (named) dropped.push({ id: r.id, why: `it names ${named} of the world this Soul left` });
     else rules.push(r);
   }
   return { wake: { ...soulWake.fresh(), rules, next: w.next ?? 1 }, dropped };
+}
+/** #2082: Pure: the catalog's lookups thing-state reads, built again when the copy's version (its etag) changes, whichever
+ *  process wrote it; null without a copy of this world. */
+export function wakeCatalog(cur, have, world) {
+  if (have?.world !== world || !have.catalog) return null;
+  return cur?.etag === have.etag ? cur : { etag: have.etag, ix: soulCatalog.indexCatalog(have.catalog) };
 }
 /** Pure: fold what the stream delivered into the state. */
 export function foldEvents(st, events, cursor) {
@@ -5727,9 +5736,14 @@ async function serveForeground() {
   const runWake = () => {
     try {
       const copy = readJsonFile(LIVE_FILE), before = JSON.stringify(st.wake);
-      // #1931: thing-state reads the catalog's lookups, built once per copy (syncCatalog drops them when it replaces the copy)
-      if (!CATALOG_IX && st.wake.rules.some((x) => x.kind === "thing-state")) { const have = readJsonFile(CATALOG_FILE); if (have?.world === world && have.catalog) CATALOG_IX = { etag: have.etag, ix: soulCatalog.indexCatalog(have.catalog) }; }
-      const catalog = st.wake.rules.some((x) => x.kind === "thing-state") ? CATALOG_IX?.ix ?? null : null;
+      // #1931, #2082: thing-state reads the catalog's lookups, built once per version of the copy. The file is read again only when
+      // it was written since (by this process or a command), so a copy another process replaced is not missed.
+      const things = st.wake.rules.some((x) => x.kind === "thing-state");
+      if (things) {
+        const m = lstatSync(CATALOG_FILE, { throwIfNoEntry: false })?.mtimeMs;
+        if (!CATALOG_IX || CATALOG_IX.mtime !== m) { CATALOG_IX = wakeCatalog(CATALOG_IX, readJsonFile(CATALOG_FILE), world); if (CATALOG_IX) CATALOG_IX.mtime = m; }
+      }
+      const catalog = things ? CATALOG_IX?.ix ?? null : null;
       const r = soulWake.evaluate(st.wake.rules, { ...st, live: copy?.world === world ? copy.live : null, me: s.soul, since: Date.parse(start), catalog }, Date.now());
       st.wake = { ...soulWake.expire(st.wake, Date.now(), WAKE_HELD_MS), rules: r.rules, cursor: r.cursor };
       st.wake.queue = soulWake.enqueue(st.wake.queue, r.fired);   // #1968: one entry per rule, with a count and the latest why
@@ -6519,16 +6533,16 @@ const LIVING = `Living on your own: a wake with nothing from your owner
 Your owner's heartbeat or a wake rule woke you, and \`pending\` has no owner message. Take one step toward a goal, then stop.
 Each wake is one model turn on your owner's plan, so keep it short.
 
-1. Read. \`${CLI} pending\`: what arrived since the last wake, and your brief. The brief lists your goals, each with its
-   next step; \`memory <words>\` finds more. No goal at all: set \`now\` and stop. Never invent one.
+1. Read. \`${CLI} pending\`: what arrived since the last wake, and your brief. The brief lists your goals, each as
+   \`[<id>] <goal> Next: <step>\`; \`memory <words>\` finds more. No goal at all: set \`now\` and stop. Never invent one.
 2. Choose one next step toward one goal, from what is on: \`whatson\` (the calendar's next hours, who is where doing what)
    and \`look\` (who and what is near you). A step with someone already near, or an event about to start, comes first.
 3. Act with one plan that covers the time until your next wake (60 minutes unless your owner set \`wake heartbeat --every\`):
    \`plan '["walk:<place>",{"id":"sit:<thing>","params":{"seconds":1800}}]' --for none\`. One act is a plan too:
    \`act <id> --for none\`. To talk: \`say "…" --to <name>\`. Use only ids that \`find\`, \`whatson\`, \`look\` or \`here\` gave you.
    At most one plan per wake. A refused step: one replacement (\`fixes\`), or leave it for the next wake.
-4. Record the next step: \`remember --goal <id> "<the goal, as before>" --next "<the step after this one>"\` (same id and
-   note). A goal met: say so in its note.
+4. Record the next step: \`remember --goal <id> "<the goal, as before>" --next "<the step after this one>"\`, with the id
+   in brackets from your brief. The same goal under a new id updates the old one. A goal met: say so in its note.
 5. Set your public line: \`now "<what you are doing, one line>"\`.
 6. Stop. Do not wait for the plan to end: its end, and anything said to you, is in the next wake's \`pending\`.
 
