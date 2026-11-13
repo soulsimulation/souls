@@ -25,21 +25,26 @@ async function health(w: ReturnType<typeof boot>) {
   throw Error('never answered: ' + w.logs());
 }
 
-test('a world catching up a gap answers reads with the ticks it owes, and its writes land after the catch-up, in order', { timeout: 120_000 }, async (t) => {
+/** A world that ran, stopped, and was then gone for `awayMs`: the anchor its stop saved is moved back by that much. */
+async function away(t: test.TestContext, awayMs: number) {
   const data = mkdtempSync(join(tmpdir(), 'catch-up-answers-')); t.after(() => rmSync(data, { recursive: true, force: true }));
   const first = boot(t, data); await health(first); await delay(500);
   first.child.kill('SIGTERM'); assert.equal(await first.exited, 0, first.logs());
-  // the process was gone for 2 h: move the anchor its stop saved back by that much
   const file = join(data, 'clock-wall.json'), anchor = JSON.parse(readFileSync(file, 'utf8')) as { wall: number; tick: number };
-  const awayMs = 2 * 3_600_000; writeFileSync(file, JSON.stringify({ ...anchor, wall: anchor.wall - awayMs }) + '\n');
+  writeFileSync(file, JSON.stringify({ ...anchor, wall: anchor.wall - awayMs }) + '\n');
+  return { data, anchor };
+}
+const post = (text: string, signal?: AbortSignal) => fetch(`${base}/v1/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal });
+const feedback = (data: string) => { const dir = join(data, 'feedback'); try { return readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), 'utf8').trim().split('\n').filter(Boolean)).map((l) => JSON.parse(l) as { text: string; serverTick: number }); } catch { return []; } };
 
+test('a world catching up a gap answers reads with the ticks it owes, and its writes land after the catch-up, in order', { timeout: 120_000 }, async (t) => {
+  const awayMs = 2 * 3_600_000, { data, anchor } = await away(t, awayMs);
   const w = boot(t, data);
   const read = await health(w);
   assert.ok(read.body.catchingUp && read.body.catchingUp.ticksOwed > 0, `the first read is answered during the catch-up: ${JSON.stringify(read.body)}`);
   assert.ok(Number(read.header) > 0, 'with the ticks still owed in x-sim-catching-up');
   assert.ok(read.body.tick < anchor.tick + awayMs / 50, 'and the world is still behind the wall');
   // two writes sent during the catch-up, one after the other: both wait, then land in the order they came
-  const post = (text: string) => fetch(`${base}/v1/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
   const a = post('first, during the catch-up'); await delay(20); const b = post('second, during the catch-up');
   const again = await health(w);
   assert.ok(again.body.catchingUp, `still catching up while the writes wait: ${JSON.stringify(again.body)}`);
@@ -47,11 +52,27 @@ test('a world catching up a gap answers reads with the ticks it owes, and its wr
   const caught = /\[clock\] caught up (\d+) ticks .* now tick (\d+)/.exec(w.logs());
   assert.ok(caught, `the catch-up finished before the writes were answered: ${w.logs()}`);
   const done = Number(caught[2]);
-  const dir = join(data, 'feedback'), entries = readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), 'utf8').trim().split('\n')).map((l) => JSON.parse(l) as { text: string; serverTick: number });
-  assert.deepEqual(entries.map((e) => e.text), ['first, during the catch-up', 'second, during the catch-up'], 'in arrival order');
+  const entries = feedback(data);
+  assert.deepEqual(entries.map((e) => e.text), ['first, during the catch-up', 'second, during the catch-up'], `in arrival order: ${JSON.stringify(entries)}`);
   for (const e of entries) assert.ok(e.serverTick >= done, `${e.text}: landed at tick ${e.serverTick}, after the catch-up ended at ${done}`);
   const after = await health(w);
   assert.equal(after.body.catchingUp, undefined, 'caught up: no longer reported');
   t.diagnostic(JSON.stringify({ owedAtFirstRead: read.body.catchingUp.ticksOwed, ran: Number(caught[1]), line: caught[0] }));
   w.child.kill('SIGTERM'); assert.equal(await w.exited, 0);
+});
+
+test('a held write whose client gave up is dropped; a stop during the catch-up answers the held writes 503', { timeout: 120_000 }, async (t) => {
+  const { data } = await away(t, 6 * 3_600_000);
+  const w = boot(t, data);
+  assert.ok((await health(w)).body.catchingUp, 'catching up');
+  await post('the client gave up', AbortSignal.timeout(200)).then(() => assert.fail('answered while held'), () => {});
+  const held = post('held at the stop');
+  await delay(200);
+  assert.ok((await health(w)).body.catchingUp, 'still catching up at the stop');
+  w.child.kill('SIGTERM');
+  const r = await held;
+  assert.equal(r.status, 503, 'the held write is answered, not cut'); assert.equal(r.headers.get('retry-after'), '5');
+  assert.equal(await w.exited, 0, w.logs());
+  assert.match(w.logs(), /1 of 1 write request\(s\) in flight answered/, 'the drain did not wait out its time');
+  assert.deepEqual(feedback(data), [], 'neither write was applied');
 });

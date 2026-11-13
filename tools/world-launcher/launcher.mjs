@@ -1320,10 +1320,12 @@ export async function openLauncher(cfg = {}) {
   let keeping = false, keepAliveFrom = !adopting;   // a handover keeps nothing alive until it has taken over
   const keepAliveOnce = () => {
     if (keeping || !keepAliveFrom || phase !== 'active' || gate || pool.closing || pool.fenced) return;
-    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status));
+    // (a failed takeover, still adopted, or a world going back to the previous launcher: ensure refuses those, so they
+    // are passed over rather than picked every round ahead of older worlds)
+    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status) && !pool.state(x.slug)?.adopted && !pool.state(x.slug)?.handedBack);
     if (!w || !pool.roomFor(w.slug).ok) return;
     keeping = true;
-    pool.ensure(worldEnv(w)).then((p) => log(`kept ${w.slug} living on :${p}`), (e) => log(`could not keep ${w.slug} living: ${e.message}`)).finally(() => { keeping = false; });
+    pool.ensure(worldEnv(w), { passive: true }).then((p) => log(`kept ${w.slug} living on :${p}`), (e) => log(`could not keep ${w.slug} living: ${e.message}`)).finally(() => { keeping = false; });
   };
   const keepAliveTimer = keepAlive ? setInterval(keepAliveOnce, cfg.keepAliveMs ?? 15_000) : null;
   keepAliveTimer?.unref();
