@@ -2,8 +2,8 @@
 // pace and the launcher's idle freeze and idle exit are gone: no world can prove that nothing but pure time passes
 // while it would be asleep; the audit is on the issue). What remains are gaps no world can avoid: a restart, a deploy,
 // a memory-pressure eviction, a crash. Across those the world is caught up exactly, by ticking: on boot it runs every
-// tick it missed through the ordinary tick (WorldHost.catchUp), listeners and all, before its clock starts and before it
-// serves. Nothing jumps and nothing is approximated: the world state it reaches is the state a world ticked through the
+// tick it missed through the ordinary tick (WorldHost.catchUp), listeners and all, before its clock starts; its port opens
+// meanwhile, reads say how many ticks it still owes, and writes wait until it is done (main.ts). Nothing jumps and nothing is approximated: the world state it reaches is the state a world ticked through the
 // gap would have reached (clock-catchup.test.ts compares the hashes, needs, day turns and moments included). Not yet for
 // listener state kept in memory or on the wall clock (#2236): the edge ambient-life idle clock starts over at the boot,
 // and the body rule's wall timers (doze, asleep, drift) see the whole gap at the first catch-up ticks.

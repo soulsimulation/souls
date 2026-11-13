@@ -85,15 +85,8 @@ for (const how of ['restart', 'crash'] as const) for (const ambient of [false, t
     for (let i = 0; i < gap; i++) { control.host.tickOnce(); await turn(); }    // the control never stopped
     const after = await reboot(t, copy, ambient);
     assert.equal(after.host.engine.world.tick, away.tick, 'booted to where it stopped');
-    // an input that arrives while the world is booting is held through the catch-up and lands at the first tick after it
-    const probe = { why: 'test: an input queued before the catch-up' };
-    void after.host.enqueue('rules', 'test', probe);
     const ran = await after.host.catchUp(control.host.engine.world.tick - after.host.engine.world.tick, turn);
     assert.equal(ran, gap);
-    void control.host.enqueue('rules', 'test', probe);
-    for (const f of [control, after]) { f.host.tickOnce(); await turn(); }
-    const landed = after.db.events(after.host.worldId).find((e) => e.author === 'test');
-    assert.equal(landed?.tick, away.tick + gap, 'the held input is logged at the first tick after the catch-up');
     const inGap = control.db.events(control.host.worldId).filter((e) => e.tick > away.tick && e.tick < away.tick + gap);
     const acts = inGap.filter((e) => (e.payload as { trigger?: string })?.trigger === 'edge-ambient').length;
     const day = inGap.filter((e) => e.kind === 'rules' && e.author === 'world').map((e) => Object.keys(e.payload as object).filter((k) => k !== 'why').join('+'));

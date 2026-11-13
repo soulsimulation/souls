@@ -1309,6 +1309,24 @@ export async function openLauncher(cfg = {}) {
   writeProblems(); const problemsTimer = setInterval(writeProblems, cfg.problemsEveryMs ?? 10_000); problemsTimer.unref();
   const wakeRecent = () => { for (const w of [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).slice(0, cfg.eager ?? 4)) if (pool.status(w.slug).status !== 'running') pool.ensure(worldEnv(w)).then((p) => log(`woke ${w.slug} on :${p}`), (e) => log(`could not wake ${w.slug}: ${e.message}`)); };
   if (!adopting) wakeRecent();   // a handover wakes nothing until it has taken over (takeOverAll)
+  // #2235: every registered world keeps living. Every keepAliveMs, one registered world with no process (never booted
+  // since this launcher started, put to sleep to make room, or crashed past its restarts) is booted, most recent first,
+  // and only into free room: a keep-alive boot never puts another world to sleep, so when the registry does not fit, the
+  // oldest worlds wait until room frees, and a visitor's boot still evicts the least recently used idle world. A world
+  // that comes back catches up the time it was away (apps/server/src/clock-catchup.ts). On for real worlds; off with
+  // --eager 0 or a custom command (tests and harnesses that boot what they use) unless keepAlive is set. A held world
+  // (the breaker) stays held.
+  const keepAlive = cfg.keepAlive ?? (!cfg.command && (cfg.eager ?? 4) > 0);
+  let keeping = false, keepAliveFrom = !adopting;   // a handover keeps nothing alive until it has taken over
+  const keepAliveOnce = () => {
+    if (keeping || !keepAliveFrom || phase !== 'active' || gate || pool.closing || pool.fenced) return;
+    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status));
+    if (!w || !pool.roomFor(w.slug).ok) return;
+    keeping = true;
+    pool.ensure(worldEnv(w)).then((p) => log(`kept ${w.slug} living on :${p}`), (e) => log(`could not keep ${w.slug} living: ${e.message}`)).finally(() => { keeping = false; });
+  };
+  const keepAliveTimer = keepAlive ? setInterval(keepAliveOnce, cfg.keepAliveMs ?? 15_000) : null;
+  keepAliveTimer?.unref();
   // idle worlds sleep (frozen in place) and wake on their next request; see ChildPool.freezeIdle
   const sleepMs = cfg.sleepMs ?? SLEEP_MS;
   // ...and a world asleep for exitMs more exits (its memory given back) and cold-boots on its next request; see ChildPool.releaseIdle
@@ -1412,7 +1430,7 @@ export async function openLauncher(cfg = {}) {
       }
       const lanes = Array.from({ length: Math.max(1, concurrency) }, async () => { while (todo.length) await one(todo.shift()); });
       await Promise.all(lanes);
-      wakeRecent();
+      wakeRecent(); keepAliveFrom = true;
       return { worlds: out };
     },
     /** Open (non-upgraded) requests still being answered here. */
@@ -1424,7 +1442,7 @@ export async function openLauncher(cfg = {}) {
      *  a held port every moment here is refused connections, so it stops at once, as before. After a handover (`gentle`)
      *  the keeper's port is served by the next launcher, so that exit is gentle too. */
     close: async ({ drainMs = 3_000, idleMs = 1_500, gentle = process.env.SIM_PORT_HELD === '1' } = {}) => {
-      if (closed) return; closed = true; clearInterval(sweep); errors.flush();
+      if (closed) return; closed = true; clearInterval(sweep); clearInterval(keepAliveTimer); errors.flush();
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)

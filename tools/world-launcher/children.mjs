@@ -346,15 +346,21 @@ export class ChildPool {
 
   /** Live (or booting) children other than `except`. */
   running(except) { return [...this.kids.values()].filter((k) => k.slug !== except && (k.child || k.adopted || k.status === 'starting' || k.status === 'restarting' || k.status === 'handover')).length; }
+  /** Is there room for one more world under the running cap and the free-memory floor, as things stand? */
+  roomFor(slug) {
+    const { maxRunning = Infinity, minFreeMb = 0 } = this.o;
+    // low: the host under its floor, or (lane P3) the unit within one world of its own MemoryHigh/Max: the worlds share
+    // the unit's cgroup (production 8G/9G), which fills long before the host does, and over MemoryMax a world is killed
+    const room = minFreeMb > 0 ? (this.o.unitRoom ?? cgroupHeadroomMb)() : null;
+    const full = this.running(slug) >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
+    return { full, low, room, ok: !full && !low };
+  }
   /** Make room for one more world under the running cap and the free-memory floor, sleeping idle worlds if needed. */
   async makeRoom(slug) {
     const { maxRunning = Infinity, minFreeMb = 0 } = this.o;
     for (;;) {
-      // low: the host under its floor, or (lane P3) the unit within one world of its own MemoryHigh/Max: the worlds share
-      // the unit's cgroup (production 8G/9G), which fills long before the host does, and over MemoryMax a world is killed
-      const room = minFreeMb > 0 ? (this.o.unitRoom ?? cgroupHeadroomMb)() : null;
-      const full = this.running(slug) >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
-      if (!full && !low) return;
+      const { full, room, ok } = this.roomFor(slug);
+      if (ok) return;
       if (!(await this.evictIdle(slug))) {
         const e = new Error(full ? `all ${maxRunning} world slots are in use; try again in a minute` : `the server is low on memory (under ${minFreeMb} MB free, or ${room ?? '?'} MB under the unit's limit); try again in a minute`);
         e.code = 'capacity'; throw e;

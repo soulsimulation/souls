@@ -558,14 +558,15 @@ export class WorldHost {
   /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
   owedTicks = 0;
   /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
-   *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. Inputs
-   *  queued before the catch-up are held and drain at the first tick after it, the moment they really arrived. */
+   *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
+   *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
+   *  a world that never stopped; outside writes wait at the HTTP edge until the catch-up is done (main.ts). */
   async catchUp(ticks: number, turn: () => Promise<unknown> = () => new Promise((r) => setImmediate(r))): Promise<number> {
     if (this.timer) throw new Error('catch-up.clock-running');
-    const held = this.queue.splice(0); let done = 0;
+    let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
     this.owedTicks = Math.max(0, Math.floor(ticks));
-    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
-    finally { this.owedTicks = 0; this.queue.unshift(...held); }
+    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
+    finally { this.owedTicks = 0; }
     return done;
   }
 

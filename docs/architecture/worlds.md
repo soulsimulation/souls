@@ -103,12 +103,20 @@ switch independent. A previously saved master mute migrates to both switches off
   starts it.
 - **World time never stops (#2235).** A world's clock keeps wall pace whether anyone watches or not: no slower clock
   when unwatched, and no idle freeze or idle exit by default (`--sleep-ms`, `SIM_WORLD_IDLE_EXIT_MIN`, both 0), because
-  no world can yet prove that nothing but pure time would pass while it slept. Children are restarted after a crash
-  (with backoff) and evicted least recently used when a boot needs room. Across a gap no world avoids (restart, deploy,
-  eviction, crash) the world is caught up exactly by ticking: on boot it runs every tick it missed through the ordinary
-  tick, before it serves, from the wall anchor in `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`).
-  The engine, needs and day reach the state a world ticked through the gap would have; listener state kept in memory
-  or on the wall clock (the edge ambient-life idle clock, the body rule's timers) does not yet (#2236).
+  no world can yet prove that nothing but pure time would pass while it slept.
+  - **Every registered world keeps living.** The launcher boots, every 15 s, one registered world with no process: never
+    booted since the launcher started, put to sleep to make room, or crashed past its restarts. It goes most recent
+    first, and only into free room under `--max-running` and the memory floors; a keep-alive boot never evicts. A
+    visitor's boot still evicts the least recently used idle world when the registry does not fit. Crashed worlds
+    restart with backoff, and a world held by the breaker stays held.
+  - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
+    them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
+    `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
+    ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
+    ambient-life idle clock and the body rule's timers (#2236).
+  - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
+    ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
+    and land just after the catch-up.
 - **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event

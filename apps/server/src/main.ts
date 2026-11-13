@@ -260,30 +260,43 @@ const WRITE_DRAIN_MS = Number(process.env.WRITE_DRAIN_MS ?? 2000);
 // Tests only (write-drain.test.ts): one stdout line as each write is counted in flight and as it closes, so a test can stop
 // the world exactly while one is in flight (#1778: a client-side signal such as 100 Continue did not prove the count).
 const WRITE_DRAIN_TRACE = process.env.WRITE_DRAIN_TRACE === '1';
+// #2235 A8: while a boot catches up the ticks it missed (below), the world answers: reads at once, with how many ticks it
+// still owes (x-sim-catching-up; healthz `catchingUp`), and writes wait in arrival order until it is caught up, so an act
+// lands at the wall-correct tick, after the catch-up, never inside it.
+let catchingUp: Promise<void> | null = null;
 server.on('request', (req, res) => {
   if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+  const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  if (write) {
     const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
     if (WRITE_DRAIN_TRACE) console.log(`[world] write in flight: ${writesInFlight.size}`);
     void done.then(() => { writesInFlight.delete(done); if (WRITE_DRAIN_TRACE) console.log(`[world] write closed: ${writesInFlight.size} in flight`); });
   }
+  if (catchingUp) {
+    res.setHeader('x-sim-catching-up', String(host.owedTicks));
+    if (write) { void catchingUp.then(() => serve(req, res)); return; }
+  }
+  serve(req, res);
+});
+function serve(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   req.url = stripWorldPath(req.url);
   if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
   void listener(req, res);
-});
+}
 
 // SIM_BOOT_HASH=1 (measurement only): the engine state this boot restored, to compare with the one its last stop saved
 if (process.env.SIM_BOOT_HASH === '1') console.log(`[boot] state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
 // #2235: world time never stops. The ticks this world missed while it had no process (restart, deploy, eviction) run now,
-// through the ordinary tick with every listener attached, before the clock starts and before the port opens
-// (clock-catchup.ts). host.owedTicks was set right after the boot, so the real-time keeper already reads the caught-up clock.
-// Wall time passes during the boot and the catch-up itself, so it is measured again until nothing whole is owed. The
-// boot mark moves with every tick (boot-progress.ts), so the launcher's stall guard sees a long catch-up as progress.
-{
+// through the ordinary tick with every listener attached, before the clock starts (clock-catchup.ts). host.owedTicks was
+// set right after the boot, so the real-time keeper already reads the caught-up clock. Wall time passes during the boot
+// and the catch-up itself, so it is measured again until nothing whole is owed. A8: the rest of the boot goes on and the
+// port opens meanwhile (writes wait, above); the boot mark moves with every tick (boot-progress.ts), so the launcher's
+// stall guard sees a long catch-up as progress.
+async function catchUpBoot() {
   const at = performance.now(), first = host.owedTicks; let ran = 0, owed = host.paused ? 0 : wallClock.owed();
   const turn = () => { bootTick(host.engine.world.tick); return new Promise<void>((r) => setImmediate(r)); };
   for (let rounds = 0; owed > 0 && rounds < 32; rounds++) {
-    bootPhase('boot:replay', host.engine.world.tick, host.engine.world.tick + owed);
+    if (rounds === 0) bootPhase('boot:replay', host.engine.world.tick, host.engine.world.tick + owed);
     const r = await host.catchUp(owed, turn); ran += r;
     if (r < owed) break;   // paused or halted: a paused clock is owed nothing more, a halted one waits for its fault
     owed = host.paused ? 0 : wallClock.owed();
@@ -293,8 +306,9 @@ if (process.env.SIM_BOOT_HASH === '1') console.log(`[boot] state at tick ${host.
   if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
   if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
 }
-wallClock.start();
-host.start();
+const startClock = () => { wallClock.start(); host.start(); };
+if (host.owedTicks > 0 && !host.paused) catchingUp = catchUpBoot().catch((e) => console.error('[clock] catch-up failed:', e)).finally(() => { catchingUp = null; if (!closing) startClock(); });
+else startClock();
 if (config.seedNatives && db.liveSouls(host.worldId).length === 0) {
   if (config.worldKey === 'toy') {
     for (const n of NATIVES) await souls.create('system', n, true);
