@@ -3028,7 +3028,7 @@ button { font: inherit; margin: 0 6px 6px 0; padding: 2px 8px; border: 1px solid
 button[aria-pressed="true"] { border-color: var(--fg); }
 </style></head>
 <body>
-<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p></header>
+<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p><p id="ago" class="none"></p></header>
 <main>
 <section><h2>Status</h2><div id="status"></div></section>
 <section><h2>Resident</h2><div id="resident"></div></section>
@@ -3045,7 +3045,9 @@ button[aria-pressed="true"] { border-color: var(--fg); }
 <script>
 // Every value here comes from /data.json and is shown as text, never as markup: worlds and other Souls wrote much of it.
 var el = function (id) { return document.getElementById(id); };
-var day = null, lastDays = "";
+var day = null, lastDays = "", read = 0;
+// #2257: the page reads /data.json again every 5 s in place; this line says how long ago, so a person can see it is live.
+function ago() { if (read) el("ago").textContent = "updated " + Math.round((Date.now() - read) / 1000) + " s ago"; }
 function none(text) { var s = document.createElement("span"); s.className = "none"; s.textContent = text || "not yet"; return s; }
 function show(id, value) {
   var box = el(id); box.replaceChildren();
@@ -3067,7 +3069,8 @@ function pick(d) {
 function render(d) {
   var s = d.status || {}, r = d.resident;
   el("name").textContent = (s.soul && (s.soul.name || s.soul.id)) || "Soul";
-  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world") + " · updated " + new Date(d.at).toLocaleTimeString();
+  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world");
+  read = Date.now(); ago();
   el("state").className = r && r.up ? "up" : "down";
   show("status", d.status); show("resident", d.resident); show("plan", d.plan); show("wakes", d.wakes);
   var j = d.journal, days = j ? j.days : [];
@@ -3086,7 +3089,7 @@ function tick() {
   fetch("/data.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(render)
     .catch(function () { el("state").textContent = "The dashboard has stopped; start it again with: node eden.mjs dashboard"; el("state").className = "down"; });
 }
-tick(); setInterval(tick, 5000);
+tick(); setInterval(tick, 5000); setInterval(ago, 1000);
 </script>
 </body></html>
 `;
@@ -7113,10 +7116,11 @@ Never:
 const DASHBOARD = `The dashboard: one Soul's page on this machine, for your owner
 
 It shows the Soul's status, its resident (serve), its plan, its wakes, its journal, its memory, its costs and the last 200
-lines of serve's log, and reads them again every 5 seconds. It is read-only: nothing on it starts, stops or steers the Soul.
+lines of serve's log, and reads them again every 5 seconds in place, saying how long ago. It is read-only: nothing on it
+starts, stops or steers the Soul. Your owner says "open my Soul's dashboard": step 1.
 
-1. \`${CLI} [name] dashboard\` prints a \`dashboard\` URL on 127.0.0.1 and keeps serving it until Ctrl-C. Give that URL to
-   your owner. It works with \`serve\` running or not, and says which. \`--port <n>\` picks the port (any free one if left out).
+1. \`${CLI} [name] dashboard\` prints a \`dashboard\` URL on 127.0.0.1 and keeps serving it until Ctrl-C: run it in your
+   harness's background process. Give that URL to your owner. It works with \`serve\` running or not, and says which. \`--port <n>\` picks the port (any free one if left out).
 2. It answers only this machine at that address. It asks no world, runs no model and sends nothing anywhere: what the
    Soul thinks stays here. No answer carries a token or anything from \`.souls/credentials.json\`.
 3. The data is one endpoint, \`/data.json\` (\`dashboard-data/1\`): \`status\`, \`resident\`, \`plan\`, \`wakes\`, \`journal\`
@@ -7131,6 +7135,7 @@ each visit. The page may fetch only from this server.
 const ACCOUNT = `Account logins: one login lets this home see what your person's account holds in a world
 
 Log in once per site, not per Soul. The token is kept in \`.souls/credentials.json\`; never read or print that file.
+Your person says "connect my account": steps 1 and 2. "Move my Soul to this computer": steps 3 and 4.
 
 1. \`${CLI} login <world-url>\` (or \`login\` for the current world; \`--for <CODE>\` sends it to your person's open
    page). It prints an \`approvalURL\` and a four-character \`confirm\` code. Ask your person to approve it there and to
