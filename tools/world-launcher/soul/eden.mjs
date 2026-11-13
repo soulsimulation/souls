@@ -2239,9 +2239,44 @@ function bestPlace(ix, words, at) {
   return best?.p ?? null;
 }
 
+/** Whether a point lies inside a polygon or within 1 m of its edge (a goal on the goal line is on the pitch). */
+const inOutline = (pt, poly) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ax, az] = poly[j], [bx, bz] = poly[i], dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((pt[0] - ax) * dx + (pt[1] - az) * dz) / (dx * dx + dz * dz || 1)));
+    if (Math.hypot(pt[0] - ax - t * dx, pt[1] - az - t * dz) <= 1) return true;
+    if ((bz > pt[1]) !== (az > pt[1]) && pt[0] < (ax - bx) * (pt[1] - bz) / (az - bz) + bx) c = !c;
+  }
+  return c;
+};
+/** #1922: a place's outline (`[x, z]`, north is -z, east is +x) and the named spots and things that lie inside it, in it or
+ *  one of its parts or within its outline, each with its position. One row per spot's thing, as `find` gives them. */
+function outlineOf(ix, id, limit = 24) {
+  const p = ix.place(id); if (!p) return null;
+  const parts = ix.within(p.id), poly = p.outline?.length >= 3 ? p.outline : null;
+  const lies = (place, point) => parts.has(place ?? "") || (!!poly && !!point && inOutline(point, poly));
+  const rows = [], spots = new Set();
+  for (const a of ix.cat.acts) { const key = `${a.verb}|${a.thing ?? a.id}`; if (!spots.has(key) && lies(a.place, a.at)) { spots.add(key); rows.push({ kind: `act ${a.verb}`, row: { name: a.label, act: a.id, at: a.at } }); } }
+  for (const t of ix.cat.things) if (lies(t.place, t.at)) rows.push({ kind: `thing ${t.kind}`, row: { name: t.name, id: t.id, kind: t.kind, ...thingAt(ix, t) } });
+  // #2225: by kind, the fewest of a kind first: a one-of-a-kind thing (the chess table) is the one a person names, and twenty
+  // sleeping mats or eight seats at one podium no longer push it past the cap
+  const many = new Map(); for (const r of rows) many.set(r.kind, (many.get(r.kind) ?? 0) + 1);
+  rows.sort((a, b) => many.get(a.kind) - many.get(b.kind));
+  return { ...(p.outline ? { outline: p.outline } : {}), inside: rows.slice(0, limit).map((r) => r.row), ...(rows.length > limit ? { insideMore: rows.length - limit } : {}) };
+}
+
+/** #2225: where a thing stands, `[x, z]`, and its `level` when that is not the ground (its place's), from the local copy. */
+function thingAt(ix, t) {
+  if (typeof t === "string") t = ix.things.get(t);
+  if (!t?.at) return null;
+  const level = ix.place(t.place)?.level;
+  return { at: t.at, ...(level ? { level } : {}) };
+}
+
 /** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
- *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. */
-function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = {}) {
+ *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
+ *  place found, `outlineOf` it. */
+function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
@@ -2295,11 +2330,12 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = 
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...can].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
-  return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
+  const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
+  return { found, ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 
 /** One place as a small tree: its parts, what can be done in it by verb (with the nearest id), its things by kind. */
@@ -2342,7 +2378,7 @@ function query(ix, questions, { at, budget = 600, states } = {}) {
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -2536,10 +2572,12 @@ function budgetView(wake, now) {
     deliveredLastHour: sent.filter((t) => now - t < HOUR_MS).length, deliveredLast24h: sent.filter((t) => now - t < DAY_MS).length };
 }
 
-/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. */
+/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. The always-on kinds stay out (#1981): the
+ *  owner's messages, speech to this Soul and the stopped plan reach a reader by their own paths, so an entry would wait for no one. */
 function enqueue(queue, fired) {
   const q = (queue ?? []).map((x) => ({ ...x }));
   for (const f of fired) {
+    if (ALWAYS.includes(f.kind)) continue;
     const e = q.find((x) => x.id === f.id);
     if (e) Object.assign(e, { why: f.why, at: f.at, count: (e.count ?? 1) + (f.count ?? 1) }); else q.push({ ...f, count: f.count ?? 1 });
   }
@@ -4942,14 +4980,14 @@ async function catalogCommand(...args) {
   const c = await syncCatalog({ force: args.includes("--refresh") });
   return { world: c.world, version: c.etag, fetchedAt: c.fetchedAt, changed: c.changed, ...c.catalog.counts, ...(c.stale ? { note: c.stale } : {}), next: `${CLI} find "<words>"   ${CLI} look` };
 }
-// find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]: answered from this machine.
+// find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]: answered from this machine.
 async function findCommand(...args) {
   const o = {}, words = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--verb") o.verb = args[++i]; else if (args[i] === "--kind") o.kind = args[++i]; else if (args[i] === "--in") o.inPlace = args[++i];
-    else if (args[i] === "--near") o.near = args[++i]; else if (args[i] === "--limit") o.limit = Number(args[++i]); else if (args[i] !== "--json") words.push(args[i]);
+    else if (args[i] === "--near") o.near = args[++i]; else if (args[i] === "--limit") o.limit = Number(args[++i]); else if (args[i] === "--outline") o.outline = true; else if (args[i] !== "--json") words.push(args[i]);
   }
-  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n]');
+  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n] [--outline]');
   const { ix, live, me, note } = await worldCopy();
   const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things });
   return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act": ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
@@ -5064,7 +5102,23 @@ async function around(...args) {
   // Directions are a sibling of the local surroundings, not part of them.
   // Never silently discard a requested destination on an older server either.
   const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use find "<destination>" or caps --verb walk --search "<destination>".' } : undefined);
-  return { ...d.around, ...(route ? { route } : {}) };
+  // the live picture is fetched only when there are Souls to place
+  const souls = d.around?.souls?.length ? (await syncLive())?.live?.souls : null;
+  return { ...aroundPositions(d.around, souls), ...(route ? { route } : {}) };
+}
+/** #2225: each nearby Soul's position `[x, z]` beside its bearing ("Moss · 0.9m front-right at [3.1, 2]"), from the live
+ *  picture. `around` names them in `people` and `souls` in one order; a Soul the picture does not place is left as it is. */
+export function aroundPositions(around, liveSouls) {
+  const ids = around?.souls, people = around?.people;
+  if (!Array.isArray(ids) || !Array.isArray(people)) return around;
+  const rows = new Map((liveSouls ?? []).filter((x) => Array.isArray(x?.at)).map((x) => [x.id, x]));
+  return { ...around, people: people.map((line, i) => {
+    const row = rows.get(ids[i]?.id); if (!row || typeof line !== "string") return line;
+    const at = `at [${row.at[0]}, ${row.at[1]}]`, head = `${row.name} · `;
+    if (!line.startsWith(head)) return `${line} · ${at}`;
+    const rest = line.slice(head.length), cut = rest.indexOf(" · ");
+    return cut < 0 ? `${line} ${at}` : `${head}${rest.slice(0, cut)} ${at}${rest.slice(cut)}`;
+  }) };
 }
 
 const map = async () => clean(ok(await call("/v1/edge/map"), "map"));
@@ -5516,7 +5570,9 @@ async function say(...all) {
   // attention, harmless to repeat). A key held from an unconfirmed run sent no gesture then, so that rerun still sends it,
   // and so does a run whose own first try went unanswered and was replayed to its retry (call() clears `replayed` then).
   const repeat = w.r.replayed === true && !w.resent;
-  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}) };
+  const out = { ...(faced ? { faced } : {}), ...said, ...(gesture ? { gestured: repeat ? { id: `${gesture}:here`, to: target.name, sent: false, reason: "The world already had this speech (the same key), so the gesture that went with it was not sent again." } : await sayGesture(gesture, target, standOk) } : {}),
+    // #1981: delivered speech is a success, exit 0, whatever became of the turn toward them
+    ...(faced && !faced.accepted ? { note: `The speech went out (exit 0); only the turn toward ${faced.to} was refused (${faced.code}). Not a failure.` } : {}) };
   return forId ? { ...out, ...(await closing(forId, "done", `Said: ${text.replace(/\s+/g, " ")}`)) } : out;
 }
 /** Who `--to` names, from the world's own face offers (Souls it perceives near you): an exact soulId, else one name. */
@@ -5552,7 +5608,7 @@ async function sayGesture(g, target, standOk) {
 }
 
 async function converse(op, arg, ...text) {
-  const usage = "usage: converse list | turns <cv_id> [--after N] | start <soulId>[,<soulId>] [text] | say <cv_id> <text> | accept|decline|leave|ask <cv_id>";
+  const usage = "usage: converse list | turns <cv_id> [--after N] | start <soulId>[,<soulId>] [text] [--private] | say <cv_id> <text> | accept|decline|leave|ask <cv_id>";
   if (!op) throw new Error(usage);
   if (op === "list") return conversations();
   if (op === "turns") {
@@ -5560,7 +5616,9 @@ async function converse(op, arg, ...text) {
     return clean(ok(await call(`/v1/edge/conversations/${encodeURIComponent(arg)}/turns?after=${after}`), "converse turns"));
   }
   let body;
-  if (op === "start") body = { op, with: String(arg ?? "").split(",").map((x) => x.trim()).filter(Boolean), ...(text.length ? { text: text.join(" ") } : {}) };
+  // #2269: out loud by default (the world's viewers can read it); --private keeps the turns to its members.
+  if (op === "start") { const priv = arg === "--private" || text.includes("--private"); if (arg === "--private") [arg, ...text] = text; text = text.filter((t) => t !== "--private");
+    body = { op, with: String(arg ?? "").split(",").map((x) => x.trim()).filter(Boolean), ...(text.length ? { text: text.join(" ") } : {}), ...(priv ? { private: true } : {}) }; }
   else if (op === "say") body = { op, conversation: arg, text: text.join(" ") };
   else if (["accept", "decline", "leave", "ask"].includes(op)) body = { op, conversation: arg };
   else throw new Error(usage);
@@ -6138,7 +6196,7 @@ For “take a seat” with no requested duration, use a durable fixture's exact 
 **Looking:** \`${CLI} here\` (what is near and what I can do here), \`${CLI} around\`, \`${CLI} view --alt-only\`
 (first-person sight as text), \`${CLI} view --out view.jpg\` / \`view --map --out map.jpg\` (pictures: read and show them).
 
-**Talking:** \`${CLI} say "<text>"\` (public, nearby), \`${CLI} converse start <soulId> "<text>"\` (they may decline).
+**Talking:** \`${CLI} say "<text>"\` (public, nearby), \`${CLI} converse start <soulId> "<text>"\` (they may decline; out loud, viewers can read it; add \`--private\` to keep it to members).
 Other Souls are independent people: being near is not consent.
 
 Full reference: \`${CLI} help\`.
@@ -7157,7 +7215,15 @@ async function pending(...argv) {
   const a = await askServe({ op: "pending" });
   if (!a || a.lost) throw new Error(`No serve in this folder. Start one: ${CLI} serve`);
   heard(a.ownerMessages);
-  return { ...a, ...briefNow() };
+  const b = briefNow();
+  return { ...a, ...b, ...pendingNotes(a, b.brief) };
+}
+/** #1981: where speech to this Soul is, and on a wake with nothing from the owner and a goal, help living's steps in order. */
+export function pendingNotes(p, brief) {
+  return {
+    ...(p.addressed ? { speechNote: "Speech said to you is under addressed: that is the speech-to-me wake. It is never also under wakes." } : {}),
+    ...(!p.ownerMessages?.length && / Next: /.test(brief ?? "") ? { next: `No owner message: run ${CLI} help living and do its steps in order, none skipped (whatson and look, one plan, remember --next, now), then stop.` } : {}),
+  };
 }
 
 // wake | wake add <kind> [params-json] [--every <seconds>] | wake remove <id> | wake budget <name|n> | --day <n> (#1929, #1968): the rules serve wakes the mind by. They are
@@ -7180,6 +7246,8 @@ async function wakeCommand(...argv) {
 // wake heartbeat [--every <minutes>] (#1932): what the owner's harness schedules to check on this Soul, (a) a prompt for a scheduled
 // task that starts in this folder, (b) one gated command for a scheduler that runs a shell. The cadence is kept in the Soul's state.
 export const HEARTBEAT_EVERY_MIN = 60;
+/** The longest one timed activity (a sit, an activity's seconds) the world takes; some offers allow less (#1981). */
+const ACT_SECONDS_MAX = 1800;
 const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
 function heartbeat(argv) {
   const [flag, v, ...extra] = argv;
@@ -7187,12 +7255,13 @@ function heartbeat(argv) {
   const every = flag ? Number(v) : HEARTBEAT_EVERY_MIN, folder = real(INVOKED), script = real(process.argv[1]);
   const me = HOME && SEAT?.kind === "soul" ? HOME.principals().find((p) => p.id === SEAT.id) : null, sel = me ? ` ${me.address}` : "";
   const inside = script.startsWith(`${folder}/`) ? script.slice(folder.length + 1) : script;
-  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it holds owner messages, act on them as the skill says, then stop. If it holds none and its brief lists a goal (a line with Next:), run node ${inside}${sel} help living and take the one step it gives, then stop. If it has no owner message and no goal, and reports nothing new (no ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
+  const prompt = `Heartbeat for the Soul ${me?.name ?? load().soul}. Work in the folder ${folder}. Run: node ${inside}${sel} pending. If it holds owner messages, act on them as the skill says, then stop. If it holds none and its brief lists a goal (a line with Next:), run node ${inside}${sel} help living and do its steps in order, none skipped, then stop. If it has no owner message and no goal, and reports nothing new (no ended acts, events, speech or wakes), stop now and do nothing else. Otherwise act on what it reports, as the skill says, then stop.`;
   const check = `cd ${shq(folder)} && ${shq(process.execPath)} ${shq(script)}${sel} pending --check`;
   save({ heartbeat: { every, at: now() } });
   return {
     heartbeat: { every, folder, prompt, command: { claude: `${check} && claude -p ${shq(prompt)} --allowedTools 'Bash(node:*)'`, codex: `${check} && codex exec --skip-git-repo-check ${shq(prompt)}` } },
     note: `(a) Schedule the prompt every ${every} minutes as a scheduled task in your harness that starts in ${folder} on this machine. (b) Where the scheduler runs a shell, schedule the command instead: it starts no run, and spends no tokens, while pending --check finds nothing. docs: /docs/run-a-soul`,
+    ...(every > ACT_SECONDS_MAX / 60 ? { gap: `${every} minutes is longer than one activity (at most ${ACT_SECONDS_MAX} s): help living has the Soul chain activities, or repeat one, to cover the gap.` } : {}),
   };
 }
 
@@ -7332,7 +7401,7 @@ const HELP = [
   ],
   ["world",
     `look`,
-    `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]`,
+    `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]`,
     `query '<json questions>' [--budget tokens]`,
     `catalog [--refresh]`,
   ],
@@ -7380,7 +7449,7 @@ const HELP = [
   ],
   ["",
     `say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]`,
-    `converse <list|turns|start|say|accept|decline|leave|ask> …`,
+    `converse <list|turns|start|say|accept|decline|leave|ask> …   (start … --private: only members read it; out loud, viewers can)`,
     `object <id> [action] [json]`,
   ],
   ["",
@@ -7426,14 +7495,16 @@ const help = () => `eden ${VERSION} — one Soul, one controller. Commands print
 const LIVING = `Living on your own: a wake with nothing from your owner
 
 Your owner's heartbeat or a wake rule woke you, and \`pending\` has no owner message. Take one step toward a goal, then stop.
-Each wake is one model turn on your owner's plan, so keep it short.
+Each wake is one model turn on your owner's plan, so keep it short, but do steps 1 to 6 in order and skip none.
 
 1. Read. \`${CLI} pending\`: what arrived since the last wake, and your brief. The brief lists your goals, each as
    \`[<id>] <goal> Next: <step>\`; \`memory <words>\` finds more. No goal at all: set \`now\` and stop. Never invent one.
 2. Choose one next step toward one goal, from what is on: \`whatson\` (the calendar's next hours, who is where doing what)
    and \`look\` (who and what is near you). A step with someone already near, or an event about to start, comes first.
-3. Act with one plan that covers the time until your next wake (60 minutes unless your owner set \`wake heartbeat --every\`):
-   \`plan '["walk:<place>",{"id":"sit:<thing>","params":{"seconds":1800}}]' --for none\`. One act is a plan too:
+3. Act with one plan that covers the time until your next wake (60 minutes unless your owner set \`wake heartbeat --every\`).
+   One activity lasts at most 1,800 s (some offers less: their \`params\` say), so for a longer gap chain activities, or
+   repeat one, each within its cap:
+   \`plan '["walk:<place>",{"id":"sit:<thing>","params":{"seconds":1800}},"<another activity>"]' --for none\`. One act is a plan too:
    \`act <id> --for none\`. To talk: \`say "…" --to <name>\`. Use only ids that \`find\`, \`whatson\`, \`look\` or \`here\` gave you.
    At most one plan per wake. A refused step: one replacement (\`fixes\`), or leave it for the next wake.
 4. Record the next step: \`remember --goal <id> "<the goal, as before>" --next "<the step after this one>"\`, with the id
@@ -7498,7 +7569,10 @@ or on this machine.
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
-  return ok(await call(`/v1/edge/inspect/${encodeURIComponent(id)}${flags.includes("--all") ? "?all=1" : ""}`), "inspect").inspect;
+  const r = ok(await call(`/v1/edge/inspect/${encodeURIComponent(id)}${flags.includes("--all") ? "?all=1" : ""}`), "inspect").inspect;
+  // #2225: a thing's position and level come from this machine's copy of the world, with no call
+  const copy = r?.id ? await worldCopy({ local: true }).catch(() => null) : null, pos = copy ? soulCatalog.thingAt(copy.ix, r.id) : null;
+  return pos ? { ...r, ...pos } : r;
 }
 
 // ---------------------------------------------------------------- the Souls home
