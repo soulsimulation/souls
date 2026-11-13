@@ -1,0 +1,3 @@
+// Exact-definition asset projection: one representation per integral tile, purely from authoritative placement state.
+import{JIGSAW_INITIAL,jigsawShapes}from'../../../../packages/world-compiler/src/core-kit/picture-jigsaw.ts';import{buildKit}from'./kit.mesh.ts';import{registerMesh}from'./registry.ts';
+registerMesh({gen:'tag:picture-jigsaw',build(ctx){if(ctx.def.name!=='core-picture-jigsaw'||ctx.def.version!==1)return null;const p=JIGSAW_INITIAL.map((v,i)=>String(ctx.entity.state?.['p'+(i+1)]??v));return buildKit({round:0,shapes:jigsawShapes(p)},ctx);},instanceKey(ctx){return ctx.def.hash+':'+JSON.stringify([ctx.entity.state?.p1,ctx.entity.state?.p2,ctx.entity.state?.p3,ctx.entity.state?.p4]);}});
