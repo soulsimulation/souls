@@ -120,10 +120,12 @@ export function budgetView(wake, now) {
     deliveredLastHour: sent.filter((t) => now - t < HOUR_MS).length, deliveredLast24h: sent.filter((t) => now - t < DAY_MS).length };
 }
 
-/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. */
+/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. The always-on kinds stay out (#1981): the
+ *  owner's messages, speech to this Soul and the stopped plan reach a reader by their own paths, so an entry would wait for no one. */
 export function enqueue(queue, fired) {
   const q = (queue ?? []).map((x) => ({ ...x }));
   for (const f of fired) {
+    if (ALWAYS.includes(f.kind)) continue;
     const e = q.find((x) => x.id === f.id);
     if (e) Object.assign(e, { why: f.why, at: f.at, count: (e.count ?? 1) + (f.count ?? 1) }); else q.push({ ...f, count: f.count ?? 1 });
   }
