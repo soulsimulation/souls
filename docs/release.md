@@ -87,6 +87,8 @@ started by manual dispatch on `main`. A `release` concurrency group lets only on
 | `eyes` | **laptop** | Where the browser checks (probe, walks, poster, stall) run. `laptop`: on a GPU workstation with [`ship/eyes.mjs`](#the-workstations-eyes), handed over by commit status, and ship.sh runs `--no-eyes`. `runner`: on the GitHub runner, as before; it has no GPU, so they fail there (below) |
 | `client_version` | next patch | The Soul client version stamped when the client changed since the last release and is not stamped yet |
 | `receipts` | `receipts-v<version>` | A GitHub release holding the head's publishable `release-receipt.json` |
+| `accept_exceptions` | false | The receipts release also holds the maintainer's [`accepted-exceptions.json`](#accepted-exceptions); the gate may be blocked only by what it accepts, exactly |
+| `receipts_only` | false | Run only preflight and the receipts check for this head, then stop: no production environment, no secret, no ssh. Any branch, so a test cut can use it |
 
 ```sh
 gh workflow run release.yml --ref main -f version=0.123                   # dry run: nothing goes live
@@ -113,6 +115,9 @@ Its jobs:
    live; the summary prints the [rollback](#rollback-without-ssh) command. After the health checks pass, a real ship
    posts the release item to the site feed (`release-client.mjs feed --ssh`, which posts on the host's loopback unless
    the item is already there). A failed post leaves the release live and prints the command to retry.
+   Before it, for a real ship or `receipts_only`, the **receipts** job (no environment, no secret) downloads the receipts
+   and checks them for the head with `root-release.mjs receipt`, or `accepted` with `accept_exceptions`; a refusal stops
+   the run before anything touches the host.
 3. **publish** (real ships only): compiles `changes/` into [`CHANGELOG.md`](../CHANGELOG.md), tags `v<version>` on
    the shipped commit, creates the GitHub Release and opens the changelog commit as a pull request (branch
    `release/changelog-<version>`, as `publish.yml` does). The `main` ruleset requires checks and the merge queue, so
@@ -124,6 +129,18 @@ leave the machine. The release owner derives the publishable release receipt fro
 id, statuses, counts, timestamps and the sha256 of each raw receipt, and `ship-receipt.mjs` refuses to write it unless
 it passes the publication check. The ship job checks it again, and ship.sh's preflight verifies it for the exact head
 (`root-release.mjs receipt`). The host is masked in every log even when `SIM_DEPLOY_HOST` is a variable.
+For a blocked gate the release receipt also lists the gate's count blocker lines and its removed and skipped tests by
+step and id, so the workflow can match [accepted exceptions](#accepted-exceptions) without the raw receipt (#2262).
+
+**Shipping a gate blocked only by accepted exceptions, with no ssh (#2262).** The release owner derives the release
+receipt on the laptop from the gate and laptop V7 receipts, uploads it with `accepted-exceptions.json` (after Gene's
+yes, `accepted_by: maintainer`) to the receipts release, checks, then ships:
+
+```sh
+gh release create receipts-v0.127 --prerelease --title "receipts 0.127" release-receipt.json accepted-exceptions.json
+gh workflow run release.yml --ref main -f version=0.127 -f receipts_only=true -f accept_exceptions=true   # nothing touches production
+gh workflow run release.yml --ref main -f version=0.127 -f dry_run=false -f accept_exceptions=true       # then eyes.mjs as above
+```
 
 ```sh
 node tools/test-harness/ship-receipt.mjs receipt.json v7-receipt.json --public release-receipt.json
@@ -285,7 +302,7 @@ but `compact-backup.sh` has its own hard-coded data path.
 
 A gate can be `blocked` only by something the maintainer accepts, such as V6 steps reworded in place or a new test
 that skips only on Modal. The receipts stay exactly as the tools wrote them. The release owner writes
-`accepted-exceptions.json` in the private release folder, never in git, and passes it as `SHIP_EXCEPTIONS`:
+`accepted-exceptions.json` in the private release folder, never in git, and passes it as `SHIP_EXCEPTIONS` (the release workflow takes it from the receipts release instead):
 
 ```json
 { "schema": "accepted-exceptions/1", "gate_sha256": "<sha256 of the gate's receipt.json>", "cut": "<full candidate sha>",
@@ -294,7 +311,8 @@ that skips only on Modal. The receipts stay exactly as the tools wrote them. The
 ```
 
 The preflight (`root-release.mjs accepted`) reads `receipt.json` and `release-receipt.json` (or `ship-receipt.json`)
-from `SHIP_RECEIPTS`. It passes only when the file names that receipt's sha256 and this cut, `accepted_by` is
+from `SHIP_RECEIPTS`, or `release-receipt.json` alone when the folder has no `receipt.json`, as in the
+[release workflow](#the-release-workflow) (`accept_exceptions`). It passes only when the file names that receipt's sha256 and this cut, `accepted_by` is
 `maintainer`, and the `removed` and `unexpectedSkips` lists match the receipt's exactly. It prints each accepted entry.
 Then the usual verdict runs as if those entries were gone. New failures, any other gate blocker, a failing V7 and a
 missing raw-receipt hash still refuse, even when listed. The release owner writes `accepted_by` as `PENDING-GENE`
