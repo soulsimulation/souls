@@ -29,7 +29,7 @@ export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; pl
 export type CatalogInteriorIn = {place: string; doors: readonly (readonly number[])[]; shell?: [number, number, number, number]; wall?: number};
 export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]; interiors?: readonly CatalogInteriorIn[]};
 /** #2261: a door of a building: the middle of its gap `[x, z]`, its level, and the way it faces out (north is -z, east +x). */
-export type CatalogDoor = {at: [number, number]; level: number; facing: string};
+export type CatalogDoor = {at: [number, number]; level: number; facing: string; /** where to stand in front of it, 1 m out */ approach: [number, number]};
 
 export type CatalogPlace = {id: string; ref?: string; name: string; kind: string; parent: string | null; at: [number, number]; level?: number; aliases?: string[]; what?: string; fixed?: true;
   /** #1915: its polygon, `[x, z]` to 0.1 m. None for a place on a carrier, whose polygon is in the carrier's own frame. */ outline?: [number, number][];
@@ -55,6 +55,13 @@ export const spotThing = (id: string) => /(?:^|\.)(e_[0-9a-z]+)(?:\.|$)/.exec(id
 const COMPASS = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
 /** A direction `[dx, dz]` as one of eight compass words (north is -z, east +x). */
 export const compass = (dx: number, dz: number) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]!;
+/** A door from its middle and its outward direction (any length): `approach` is 1 m out, in front of it. */
+export function doorAt(at: readonly [number, number], out: readonly [number, number], level: number): CatalogDoor {
+  const n = Math.hypot(out[0], out[1]) || 1;
+  return {at: [r1(at[0]), r1(at[1])], level, facing: compass(out[0], out[1]), approach: [r1(at[0] + out[0] / n), r1(at[1] + out[1] / n)]};
+}
+/** The ready move to stand in front of a door. */
+export const doorMove = (d: CatalogDoor) => `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}`;
 /** #2261: a building's doors from its interior: each door's middle, and the compass way out through the wall it is on
  *  (the outward normal of the nearest wall of the building's shell, the outline its walls are built on). */
 export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, interior: CatalogInteriorIn): CatalogDoor[] {
@@ -72,7 +79,7 @@ export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, int
     }
     // a door not on the shell (shellWalls' reach) is in an inner wall, not a way out
     if (best > (interior.wall ?? 0.3) + 0.3) return [];
-    return [{at: [r1(m[0]), r1(m[1])], level: place.level ?? 0, facing: compass(out[0], out[1])}];
+    return [doorAt(m, out, place.level ?? 0)];
   });
 }
 

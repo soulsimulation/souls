@@ -115,13 +115,13 @@ test('native Eden: a building with an interior gives its doors, with position, l
   const {payload} = buildCatalog({worldId: 'eden', places, spots: [], things: [], interiors});
   const place = (id: string) => payload.places.find(p => p.id === id)!;
   // the Library: one door, the middle of its south wall (z -2.8), where #2224 read it from a walk in
-  assert.deepEqual(place('eden-library-1').doors, [{at: [74, -2.8], level: 0, facing: 'south'}]);
+  assert.deepEqual(place('eden-library-1').doors, [{at: [74, -2.8], level: 0, facing: 'south', approach: [74, -1.8]}]);
   // the Yurt: its south wall runs x 64.5..70.5 (middle 67.5); its door is 1.7 m west of the middle
   const yurt = place('eden-yurt');
-  assert.deepEqual(yurt.doors, [{at: [65.8, -15.5], level: 0, facing: 'south'}]);
+  assert.deepEqual(yurt.doors, [{at: [65.8, -15.5], level: 0, facing: 'south', approach: [65.8, -14.5]}]);
   assert.ok(Math.abs(yurt.doors![0]!.at[0] - yurt.at[0]) > 1.5);
   // a door on a side wall faces that way (the Greenhouse's west wall); a place with no interior has none
-  assert.deepEqual(place('eden-greenhouse').doors, [{at: [64, 35], level: 0, facing: 'west'}]);
+  assert.deepEqual(place('eden-greenhouse').doors, [{at: [64, 35], level: 0, facing: 'west', approach: [63, 35]}]);
   assert.equal(payload.places.filter(p => p.doors).length, interiors.length);
   assert.equal(place('region-campus.library-annex').doors, undefined);
 });

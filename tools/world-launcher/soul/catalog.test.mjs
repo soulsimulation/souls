@@ -45,6 +45,12 @@ test("a place's own name finds the place first, with the walk to send", () => {
   assert.ok(r.found.findIndex((x) => x.id === "g-annex") > 0, "the farther library is listed after the nearer one");
 });
 
+test("a building's door row offers the ready move to stand in front of it (#2261)", () => {
+  const door = { at: [70, 5], level: 0, facing: "south", approach: [70, 6] };
+  const one = indexCatalog({ ...cat, places: cat.places.map((p) => (p.id === "g-library" ? { ...p, doors: [door] } : p)) });
+  assert.deepEqual(find(one, "library", { at }).found[0].doors, [{ ...door, act: 'walk-to:here {"at":[70,6]}' }]);
+});
+
 test("two places of one name are both listed, nearest first: the agent chooses", () => {
   const r = find(ix, "windmill", { at });
   assert.deepEqual(r.found.map((x) => x.act), ["walk:windmill-east", "walk:windmill-west"]);

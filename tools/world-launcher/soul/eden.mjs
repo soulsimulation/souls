@@ -2261,7 +2261,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = 
     if (!q.length || !inScope(p.id, p.at)) continue;
     const s = score(q, placeWords(p)); if (!s) continue;
     const here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(p.doors ? { doors: p.doors } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {

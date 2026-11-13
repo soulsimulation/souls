@@ -21,7 +21,7 @@ import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { decorateMeaning, humanTitle } from './meaning.ts';
 import type { Place } from '../edge/ledger/places.ts';
 import type { GodNav, Thing } from './nav.ts';
-import { compass, type CatalogDoor } from '../edge/catalog/catalog.ts';
+import { doorAt, type CatalogDoor } from '../edge/catalog/catalog.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Vec2 = [number, number];
@@ -36,7 +36,7 @@ function placeIndex(list: GodPlace[]) {
   return { list, byRef, byEntity };
 }
 
-const r2 = (v: number) => Math.round(v * 100) / 100, r1 = (v: number) => Math.round(v * 10) / 10;
+const r2 = (v: number) => Math.round(v * 100) / 100;
 const SHORE = 3;                   // m: a water's bank, round it
 const LANDMARK_MIN = 1.5;          // a named point thing at least this wide (m) standing on its own is a landmark
 const NOT_LANDMARKS = /^(sign|signpost|notice-board|lamp-post|lantern|flagpole|bollard|bin|wheelie-bin|mailbox|hydrant|crate|barrel|sack|flower-pot|poster|banner|picture-frame|screen|chalkboard|power-line|poster-wall|wanted-board)$/;   // entry 38: boards stay things, as notice-board does
@@ -289,7 +289,7 @@ export class GodPlaces {
       const pts = rooms.flatMap((p) => p.polygon); if (pts.length < 3) continue;
       const poly = grow(hull(pts), 0.4); if (poly.length < 3) continue;
       push({ ...base, id: GodPlaces.idOf(t.ref), ref: t.ref, of: 'building', entity: t.id, name: t.ref, kind: 'building', polygon: poly, level: t.level,
-        ...(t.doors?.length ? { doors: t.doors.map((d) => ({ at: [r1(d.at[0]), r1(d.at[1])] as Vec2, level: t.level, facing: compass(d.out[0], d.out[1]) })) } : {}) });
+        ...(t.doors?.length ? { doors: t.doors.map((d) => doorAt(d.at, d.out, t.level)) } : {}) });
     }
     // things whose def says they are a place (a gazebo, a pergola, a pavilion, a dome; a pier's deck): their footprint
     for (const t of things) {
