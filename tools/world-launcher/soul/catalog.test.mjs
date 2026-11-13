@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { indexCatalog, find, query, placeView, bestPlace, handActs } from "./catalog.mjs";
+import { indexCatalog, find, query, placeView, bestPlace, handActs, thingAt } from "./catalog.mjs";
+import { aroundPositions } from "./eden.mjs";
 
 const cat = {
   contract: "soul-catalog/1", worldId: "w-1", scope: "public", placeVerbs: ["walk", "hang-out"],
@@ -174,4 +175,47 @@ test("a word that is a verb of the world asks for it first; an act that needs ot
   const rows = find(ix, "read a book in the library").found;
   assert.equal(rows[0]?.verb, "read", JSON.stringify(rows.map((r) => r.act)));
   assert.ok(rows.findIndex((r) => r.verb === "book-club") > rows.findIndex((r) => r.verb === "read"));
+});
+
+test("find --outline: a place's outline and the named spots and things inside it, with positions, from the local copy (#1922)", () => {
+  const pitch = indexCatalog({ ...cat, places: [...cat.places, { id: "g-sports-football", name: "Football Pitch", kind: "sports", parent: "world", at: [61, 112], outline: [[36, 97], [86, 97], [86, 127], [36, 127]] }],
+    things: [...cat.things, { id: "e_goal_w", name: "goal-west", kind: "core-goal", place: "world", at: [36.4, 112] }, { id: "e_goal_e", name: "goal-east", kind: "core-goal", place: "world", at: [86, 112] }, { id: "e_far", name: "far-bench", kind: "core-bench-seat", place: "world", at: [20, 112] }],
+    acts: [...cat.acts, { id: "kick:kick.e_ball", verb: "kick", place: "g-sports-football", thing: "e_ball", at: [61, 112], label: "kick the ball (Football Pitch)" }] });
+  const row = find(pitch, "football pitch", { at, outline: true }).found[0];
+  assert.equal(row.id, "g-sports-football");
+  assert.deepEqual(row.outline, [[36, 97], [86, 97], [86, 127], [36, 127]]);
+  assert.deepEqual(row.inside, [{ name: "kick the ball (Football Pitch)", act: "kick:kick.e_ball", at: [61, 112] }, { name: "goal-west", id: "e_goal_w", kind: "core-goal", at: [36.4, 112] }, { name: "goal-east", id: "e_goal_e", kind: "core-goal", at: [86, 112] }]);
+  assert.equal(find(pitch, "football pitch", { at }).found[0].outline, undefined, "without the flag a place row is as before");
+  assert.ok(find(ix, "library", { at, outline: true }).found[0].inside.some((r) => r.act === "read:read.e_t1"), "a place with no outline lists what its parts hold");
+});
+
+test("find and thingAt give a thing's position, and its level off the ground, from the local copy (#2225 A1)", () => {
+  const up = indexCatalog({ ...cat, places: [...cat.places, { id: "g-library.upper", name: "Upper Reading Room", kind: "room", parent: "g-library", at: [70, 0], level: 1 }],
+    things: [...cat.things, { id: "e_lamp", name: "upper-lamp", kind: "core-lamp", place: "g-library.upper", at: [70.5, -1] }] });
+  const bench = find(up, "promenade bench", { at }).found[0];
+  assert.deepEqual([bench.id, bench.at, bench.level], ["e_b1", [12, 42], undefined], "a thing on the ground has no level");
+  const lamp = find(up, "upper lamp", { at }).found[0];
+  assert.deepEqual([lamp.id, lamp.at, lamp.level], ["e_lamp", [70.5, -1], 1]);
+  assert.deepEqual(thingAt(up, "e_lamp"), { at: [70.5, -1], level: 1 }, "inspect adds this to the world's answer");
+  assert.equal(thingAt(up, "g-library"), null, "a place or a Soul is not a thing");
+});
+
+test("find --outline lists things beside spots, the fewest of a kind first, so a one-of-a-kind thing is not cut (#2225 A2)", () => {
+  const field = indexCatalog({ ...cat, places: [...cat.places, { id: "g-field", name: "Green Field", kind: "walkable", parent: "world", at: [0, 200], outline: [[-30, 170], [30, 170], [30, 230], [-30, 230]] }],
+    things: [...cat.things, ...Array.from({ length: 20 }, (_, i) => ({ id: `e_mat${i}`, name: `mat-${i}`, kind: "eden-sleeping-mat", place: "g-field", at: [-20 + i, 180] })),
+      { id: "e_chess", name: "commons-chess-table", kind: "core-chess-table", place: "g-field", at: [14, 214] }, { id: "e_lights", name: "lights-social-dining", kind: "core-string-lights", place: "g-field", at: [23, 210.5] }],
+    acts: [...cat.acts, ...Array.from({ length: 8 }, (_, i) => ({ id: `attend:attend.e_s${i}`, verb: "attend", place: "g-field", thing: `e_s${i}`, at: [i, 205], label: "attend (a seat at the podium)" }))] });
+  const row = find(field, "green field", { at, outline: true }).found[0];
+  assert.equal(row.inside.length, 24, "the cap stays");
+  assert.equal(row.insideMore, 6, "and says what it left out");
+  assert.deepEqual(row.inside.slice(0, 2), [{ name: "commons-chess-table", id: "e_chess", kind: "core-chess-table", at: [14, 214] }, { name: "lights-social-dining", id: "e_lights", kind: "core-string-lights", at: [23, 210.5] }]);
+  assert.ok(row.inside.some((r) => r.act?.startsWith("attend:")), "spots are still listed");
+});
+
+test("around gives each nearby Soul's position beside its bearing, from the live picture (#2225 A3)", () => {
+  const seen = { people: ["Moss · 0.9m front-right · idle", "Fern · 4m behind · walking", "Ash · 6m left · idle"], souls: [{ id: "s_moss" }, { id: "s_fern" }, { id: "s_ash" }], things: [] };
+  const live = [{ id: "s_moss", name: "Moss", at: [3.1, -2] }, { id: "s_fern", name: "Fern", at: [0, 4.5] }, { id: "s_ash", name: "Ash", at: null }];
+  assert.deepEqual(aroundPositions(seen, live).people, ["Moss · 0.9m front-right at [3.1, -2] · idle", "Fern · 4m behind at [0, 4.5] · walking", "Ash · 6m left · idle"], "a Soul the picture does not place is left as it is");
+  assert.deepEqual(aroundPositions({ people: [], things: [] }, live), { people: [], things: [] }, "no one near: as before");
+  assert.equal(aroundPositions(seen, undefined).people[0], "Moss · 0.9m front-right · idle", "no live picture: as before");
 });

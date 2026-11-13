@@ -275,7 +275,7 @@ test('watchdog ports across a handover: an adopted world keeps its port, held fr
   await p.closeAll();
 });
 
-test('(d) the proxy: Soul calls to a booting world are answered 503 world.starting at once; red sheds C2; a restart ramps C1/C2 back in', async () => {
+test('(d) the proxy: Soul calls to a booting world wait for it (#2231); red sheds C2; a restart ramps C1/C2 back in', async () => {
   const { openLauncher } = await import('./launcher.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'l1-guard-d-'));
   const templatesDir = join(dir, 'templates'); mkdirSync(templatesDir);
@@ -288,13 +288,10 @@ test('(d) the proxy: Soul calls to a booting world are answered 503 world.starti
     await Promise.all(Array.from({ length: 100 }, () => fetch(`${base}/__sim/healthz`).then((r) => r.arrayBuffer())));   // 100 open keep-alive connections: the timing is the launcher's, not connection setup
     const made = fetch(`${base}/__sim/worlds`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Edgey' }) }); made.catch(() => {});   // (an assertion below closes the launcher under it)
     await until(() => L.pool.status('edgey').status === 'starting', 2000, 'booting');
-    const rs = [];   // 100 calls in 10 waves of 10 at once (one test process cannot time 100 at once without measuring itself)
-    for (let w = 0; w < 10; w++) rs.push(...await Promise.all(Array.from({ length: 10 }, (_, i) => soul(w * 10 + i))));
-    const worst = Math.max(...rs.map((r) => r.ms));
-    assert.ok(rs.every((r) => r.status === 503 && r.body?.code === 'world.starting' && r.retry === '5'), JSON.stringify(rs.find((r) => r.body?.code !== 'world.starting')));
-    assert.ok(worst < 50, `slowest answer ${worst.toFixed(1)} ms`);
-    assert.equal(L.pool.status('edgey').status, 'starting', 'all answered while it was still booting');
-    console.log(`# (d) 100 Soul calls during a boot: all 503 world.starting + Retry-After 5, median ${rs.map((r) => r.ms).sort((a, b) => a - b)[50].toFixed(1)} ms, slowest ${worst.toFixed(1)} ms`);
+    // #2231: 100 calls at once during the boot are held and answered by the world once it listens (the fake has no such route)
+    const rs = await Promise.all(Array.from({ length: 100 }, (_, i) => soul(i)));
+    assert.ok(rs.every((r) => r.status === 404), JSON.stringify(rs.find((r) => r.status !== 404)));
+    console.log(`# (d) 100 Soul calls during a boot: all held and answered by the world, slowest ${Math.max(...rs.map((r) => r.ms)).toFixed(0)} ms`);
     assert.equal((await made).status, 201);
     assert.equal((await soul(1)).status, 404, 'served by the world once it is up (the fake has no such route)');
     // red: C2 personal reads shed at the proxy, acts (C1) still go to the world
