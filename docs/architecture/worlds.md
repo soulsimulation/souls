@@ -40,7 +40,9 @@ why: per changed frame the mode, target, the pose asked for and the pose drawn, 
 it (`held`, `user`, `collision`, `opening`, `search`, `glide`, `speed-cap`) with its parameters, plus the viewer's
 wheel, drag, touch and movement keys. Times are `performance.now()` ms. A small panel lists each automatic move that
 overrode the viewer's input in the last 2 s (more than 0.25 m or 3° off what they asked) and downloads the trace as
-JSONL. Nothing leaves the page unless the viewer downloads it.
+JSONL. It also meters the follow camera (#2201): the milliseconds and sightline rays of each frame's `follow.resolve`,
+with their median and p95 in the panel and as the download's closing `cost` record. Nothing leaves the page unless the
+viewer downloads it.
 Free has no wall near the map's edge: a lost-camera guard (`WorldRtsCamera.keepPivotInBounds`) keeps the eye within one
 far-zoom limit (320–1,400 m) of the world's ground rectangle, far beyond the map; where the pivot sits does not matter.
 On a touch screen in Free (`apps/web/src/touch/WorldTouchFree.ts`), a touch that starts in the lower-left 45 % of the
@@ -58,6 +60,10 @@ or previous (right) Soul here; slower drags still orbit. The order is a ring mad
 then the others by the director's interest score, then by distance. A tap on the ground while following hands you the
 camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Broadcast a touch screen's chip reads
 "Now showing <name>" with a Follow button. Mouse clicks keep the card-and-button flow.
+Name plates show selectively (#2195, `WorldCardSight.ts`) and fade in and out. Your own Souls show whenever they are in
+view and not behind scenery; from a high or far camera they show anyway, emphasised. Other Souls are quieter, much
+quieter when asleep, idle or a zombie, and hide behind scenery, well behind the camera's focus, or beyond a reach that
+grows with the camera's height. A hovered, selected or grouped Soul's plate always shows.
 A press, long-press, double-tap or drag anywhere on a world page never selects text or shows a tap highlight. The
 selection, callout and highlight are off on the page, its menus, its modal dialogs and the boot arrival (#1386). Fields,
 code and the copyable start prompt keep their text. The first touch of a page on a touch screen shows three glyphs

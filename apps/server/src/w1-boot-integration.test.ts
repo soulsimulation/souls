@@ -52,9 +52,10 @@ test('W1 mounted boot: canonical cached complete catalogue/pages, fresh authenti
   const out=await resolve({capability:'walk:'+bad});assert.equal(out.ok,false);assert.equal(out.code,'capability.unknown');assert.ok(out.did_you_mean.length>0);
  }
  assert.deepEqual(counts(),baseline,'boot and resolve append no event or receipt');
- const accepted=(await w.http(soul,'POST','/v1/edge/act',{capability:'walk:'+place.name,clientRef:'w1-name-once'})).body;
- assert.ok(accepted.accepted,JSON.stringify(accepted));assert.equal(accepted.receipt.chosen.place,place.id);assert.equal(accepted.receipt.chosen.matchedBy,'name');
- const retry=(await w.http(soul,'POST','/v1/edge/act',{capability:'walk:'+place.name,clientRef:'w1-name-once'})).body;assert.equal(retry.receipt.id,accepted.receipt.id);
+ // #1911: an act is an offered id; a place's name is read by resolve (above), never by act
+ const accepted=(await w.http(soul,'POST','/v1/edge/act',{capability:cap.id,clientRef:'w1-name-once'})).body;
+ assert.ok(accepted.accepted,JSON.stringify(accepted));assert.equal(accepted.receipt.capability,'walk:'+dryName.would.chosen.place);
+ const retry=(await w.http(soul,'POST','/v1/edge/act',{capability:cap.id,clientRef:'w1-name-once'})).body;assert.equal(retry.receipt.id,accepted.receipt.id);
  // Exercise overflowing pagination independently of currently admitted counts.
  const small=paginatedBoot(source);const all=small.pages.length?small.pages.flatMap(p=>JSON.parse(p.serialized).places):small.payload.places;
  assert.deepEqual(all,source.payload.places);

@@ -11,6 +11,10 @@
 # #1970 adds eval-load (the eval's load mode), bench-client (the capacity bench's client load), meetup (the meetup
 # workload) and slopes-profile (the slopes walkers axis with its tick profile): fake minds, scripted Souls. For these the
 # world runs on two of the runner's four physical cores and the load generator on the other two; the artifact records it.
+# `counted` runs a named counted scenario (a kit under tools/playtest/counted/, from this workflow's commit) for `base`
+# and `ref`, `repeats` cells per arm, each cell its own job on its own runner, all at once (one artifact per cell). It
+# scores pass/fail per item, so its starting load is recorded and not gated, and `runner=hosted` may run it on the
+# GitHub-hosted runners. No media and no web build: the workstation's trees ran without them.
 name: timed-run
 on:
   workflow_dispatch:
@@ -20,28 +24,44 @@ on:
         required: true
         default: main
       command:
-        description: walk, eval-scripted, eval-load, bench-client, meetup or slopes-profile (no model in any)
+        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile or counted (no model in any)
         type: choice
-        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile]
+        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, counted]
         default: walk
+      base:
+        description: 'counted only: the base arm, main or an agent/<name> branch (the candidate arm is ref)'
+        default: ''
+      runner:
+        description: souls-timed, or hosted (GitHub-hosted; counted only)
+        type: choice
+        options: [souls-timed, hosted]
+        default: souls-timed
       repeats:
-        description: Repeats, 1 to 3
+        description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none'
+        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; counted --scenario --loop-sec'
         default: ''
 permissions:
   contents: read
 jobs:
   timed:
     if: github.repository == 'soulsimulation/souls'
-    runs-on: [self-hosted, souls-timed]
+    # counted: one job per cell (base-k, cand-k for k up to repeats), each on its own runner; anything else: one job.
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(inputs.command != 'counted' && '["all"]' || inputs.repeats == '3' && '["base-1","cand-1","base-2","cand-2","base-3","cand-3"]' || inputs.repeats == '2' && '["base-1","cand-1","base-2","cand-2"]' || '["base-1","cand-1"]') }}
+    runs-on: ${{ inputs.runner == 'hosted' && 'ubuntu-latest' || fromJSON('["self-hosted","souls-timed"]') }}
     timeout-minutes: 120
     env:
       INPUT_REF: ${{ inputs.ref }}
       INPUT_COMMAND: ${{ inputs.command }}
       INPUT_REPEATS: ${{ inputs.repeats }}
       INPUT_ARGS: ${{ inputs.args }}
+      INPUT_BASE: ${{ inputs.base }}
+      INPUT_RUNNER: ${{ inputs.runner }}
+      INPUT_CELL: ${{ matrix.cell }}
       CTL: ../ctl/.github/scripts/timed-run.mjs
       # The runners share one account home, so A2's check diffs a snapshot of the home and /tmp. Not counted as the job's:
       # - any runner install (a dir holding `.runner`) and the tool cache: the runner service's own _work, _temp, _tool and
@@ -78,7 +98,12 @@ jobs:
             echo "SIM_ASSETS_CACHE=$d/sim-assets"
           } >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { path: ctl, sparse-checkout: .github/scripts, persist-credentials: false }
+        with:
+          path: ctl
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            tools/playtest/counted
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
       - name: Snapshot the shared home and /tmp
@@ -100,13 +125,14 @@ jobs:
         working-directory: src
         run: pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir"
       - name: Pull media
+        if: env.INPUT_COMMAND != 'counted'
         working-directory: src
         timeout-minutes: 15
         run: |
           if [ "$INPUT_COMMAND" = walk ]; then sets=runtime,test; else sets=web,runtime; fi
           timeout 840 pnpm assets:pull --quiet --set "$sets"
       - name: Build the web bundle
-        if: env.INPUT_COMMAND != 'walk'
+        if: env.INPUT_COMMAND != 'walk' && env.INPUT_COMMAND != 'counted'
         working-directory: src
         run: pnpm --filter @souls/web build
       # the capacity benches' worlds refuse genesis without the viewer bundle
@@ -128,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: timed-run-${{ env.INPUT_COMMAND }}-${{ github.run_id }}
+          name: timed-run-${{ env.INPUT_COMMAND }}-${{ github.run_id }}${{ matrix.cell != 'all' && format('-{0}', matrix.cell) || '' }}
           path: ${{ env.ARTIFACT }}/
           if-no-files-found: warn
           retention-days: 30

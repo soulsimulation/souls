@@ -51,34 +51,27 @@ test('litter: pick up a wrapper and put it in a bin by plain words; the wheelie 
  const binId = id('bin'), row = h => h.objects.find(o => o.id === binId), inside = (b = binId) => [...god.model.entities.values()].filter(e => e.in?.parent === b);
 
  // ---- L1: pick it up, put it in the bin
- results.pick = await done('pick up the wrapper'); assert.ok(held('wrapper'));
- results.binIt = await done('put the wrapper in the bin');
+ results.pick = await done(`pick-up:${id('wrapper')}`); assert.ok(held('wrapper'));
+ results.binIt = await done(`put-in:${binId}`);
  assert.match(results.binIt.capability, new RegExp(`put-in:${binId}$`));
  assert.equal(item('wrapper').support.kind, 'resting-on'); assert.equal(item('wrapper').support.on, binId); assert.equal(ent('wrapper').in.parent, binId);
  assert.deepEqual(row(await here())?.state, {holds: ['wrapper']}, 'L3 nearby: what is in the bin');
- // ---- L1 words: "throw it away", "bin it", "throw the wrapper in the bin" are the same put-in
- for (const w of ['throw it away', 'throw away the wrapper', 'bin it', 'throw the wrapper in the bin', 'put the litter in the bin']) {
-  ok(god.act({ops: [{op: 'place', def: 'core/wrapper@1', name: 'w2', p: [ax + 1.0, az + 1.2]}]})); await tick(30);
-  if (inside().length >= 3) {ok(god.act({ops: inside().map(e => ({op: 'remove', id: e.id}))})); await tick(10);}
-  await done(`pick-up:${id('w2')}`); const r = await done(w); assert.match(r.capability, new RegExp(`put-in:${binId}$`), w); assert.equal(item('w2').support.on, binId, w);
-  ok(god.act({ops: [{op: 'remove', id: id('w2')}]})); await tick(10);
- }
  // ---- L5: the wheelie bin, the same code
- results.pick2 = await done('pick up the paper');
- results.wheelie = await done('put the paper in the wheelie bin'); assert.equal(item('paper').support.on, id('wheelie-bin'));
+ results.pick2 = await done(`pick-up:${id('paper')}`);
+ results.wheelie = await done(`put-in:${id('wheelie-bin')}`); assert.equal(item('paper').support.on, id('wheelie-bin'));
  // ---- L1 (amended): a thing is picked up by its name: a god that names it "litter" gets "pick up the litter"
  ok(god.act({ops: [{op: 'place', def: 'core/wrapper@1', name: 'litter', p: [ax + 0.9, az + 1.1]}]})); await tick(30);
- results.pickLitter = await done('pick up the litter'); assert.ok(held('litter'), results.pickLitter.capability);
- results.binScrap = await done('throw it away'); assert.equal(item('litter').support.on, binId);
+ results.pickLitter = await done(`pick-up:${id('litter')}`); assert.ok(held('litter'), results.pickLitter.capability);
+ results.binScrap = await done(`put-in:${binId}`); assert.equal(item('litter').support.on, binId);
  // ---- L4: a full bin, refused (it truly can't take another)
  {const free = ['in-1', 'in-2', 'in-3'].filter(s => !inside().some(e => e.in.slot === s)); ok(god.act({ops: free.map((slot, i) => ({op: 'place', def: 'core/wrapper@1', name: `fill-${i}`, in: {parent: 'bin', slot}, p: [0, 0]}))})); await tick(20);}
  ok(god.act({ops: [{op: 'place', def: 'core/wrapper@1', name: 'one-more', p: [ax + 1.0, az + 1.0]}]})); await tick(30);
  await done(`pick-up:${id('one-more')}`); await refuse(`put-in:${binId}`, 'container.full');
- // the words for a bin, with this one full, find a bin that has room: an answer, not a refusal
- results.wheelie2 = await done('put the wrapper in the bin'); assert.equal(item('one-more').support.on, id('wheelie-bin'), results.wheelie2.capability);
+ // with this one full, the bin that has room takes it
+ results.wheelie2 = await done(`put-in:${id('wheelie-bin')}`); assert.equal(item('one-more').support.on, id('wheelie-bin'), results.wheelie2.capability);
  // ---- L4: a book does not fit
- await done('pick up the book');
- {const b = await refuse('put the book in the bin', 'item.does-not-fit'); assert.match(b.reason, /does not fit in bin/);}
+ await done(`pick-up:${id('book')}`);
+ {const b = await refuse(`put-in:${binId}`, 'item.does-not-fit'); assert.match(b.reason, /does not fit in bin/);}
  const clone = factory.restore(f.host.engine.snapshot()); assert.equal(clone.stateHash(), f.host.engine.stateHash());
  assert.deepEqual(f.host.engine.runtime.violations, []);
  const report = {status: 'pass', hereBytes: {absent: bytes(absent), distant100BinsWithLitter: bytes(far)}, results: Object.fromEntries(Object.entries(results).map(([k, v]) => [k, {capability: v.capability, phase: v.phase}]))};

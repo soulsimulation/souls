@@ -47,23 +47,23 @@ test('writable boards: hand-timed write/erase, attributed read, bounded context,
  const act=async(s,capability,params,accepted=true)=>{soul=s;const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,...(params?{params}:{})})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const finish=async(s,receipt,limit=500)=>{let sawStroke=false,handXs=new Set();for(let n=0;n<limit;n++){const h=body(s).human;if(h?.handActuator?.stroke){sawStroke=true;const p=h.hands?.right;if(p)handXs.add(Math.round(p[0]*20));}const ph=edge.receipt(s.soulId,receipt.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {sawStroke,handXs:handXs.size,phase:edge.receipt(s.soulId,receipt.receipt.id).phase};};
  // validation
- for(const [text,why] of [['','required'],['x'.repeat(101),'too long'],['a\nb\nc\nd','4 lines'],['bell\u0007','control']]){const b=await act(ana,`object:whiteboard:write`,{text},false);assert.equal(b.code,'capability.params',why);}
- await act(ana,`object:whiteboard:erase`,undefined,false);
+ for(const [text,why] of [['','required'],['x'.repeat(101),'too long'],['a\nb\nc\nd','4 lines'],['bell\u0007','control']]){const b=await act(ana,`object:${id('whiteboard')}:write`,{text},false);assert.equal(b.code,'capability.params',why);}
+ await act(ana,`object:${id('whiteboard')}:erase`,undefined,false);
  // interruption before the stroke ends: nothing written
- const cut=await act(ana,'object:whiteboard:write',{text:'never finished'});for(let n=0;n<400&&!body(ana).human?.handActuator?.stroke;n++)await tick(1);await tick(30);
+ const cut=await act(ana,`object:${id('whiteboard')}:write`,{text:'never finished'});for(let n=0;n<400&&!body(ana).human?.handActuator?.stroke;n++)await tick(1);await tick(30);
  await accept(f.host,edge.act(ana,{capability:'stand:here'}));await tick(80);assert.equal(state('whiteboard').text,'','interrupted stroke writes nothing');assert.notEqual(edge.receipt(ana.soulId,cut.receipt.id).phase,'completed');
  // write: text appears only when the stroke ends, attributed to the writer
- const note='Picnic at noon by the pond\nbring fruit';const w=await act(ana,'object:whiteboard:write',{text:note});assert.equal(state('whiteboard').text,'','admission writes nothing remotely');
+ const note='Picnic at noon by the pond\nbring fruit';const w=await act(ana,`object:${id('whiteboard')}:write`,{text:note});assert.equal(state('whiteboard').text,'','admission writes nothing remotely');
  let earlyText=false;for(let n=0;n<500;n++){const m=body(ana).human?.handActuator;if(m?.stroke&&(f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.65+m.stroke.seconds-0.05&&state('whiteboard').text)earlyText=true;if(edge.receipt(ana.soulId,w.receipt.id).phase==='completed')break;await tick(1);}
  assert.equal(earlyText,false,'no text before the stroke ends');
  const wr=await finish(ana,w);assert.equal(wr.phase,'completed',JSON.stringify(edge.receipt(ana.soulId,w.receipt.id)).slice(0,600));
  assert.equal(state('whiteboard').text,note);assert.equal(state('whiteboard').textBy,ana.soulId);
- const wr2=await act(ana,'object:notice-board:write',{text:'Lost: blue scarf'});const nr=await finish(ana,wr2);assert.equal(nr.phase,'completed',JSON.stringify(edge.receipt(ana.soulId,wr2.receipt.id)).slice(0,500));assert.equal(state('notice-board').text,'Lost: blue scarf');
+ const wr2=await act(ana,`object:${id('notice-board')}:write`,{text:'Lost: blue scarf'});const nr=await finish(ana,wr2);assert.equal(nr.phase,'completed',JSON.stringify(edge.receipt(ana.soulId,wr2.receipt.id)).slice(0,500));assert.equal(state('notice-board').text,'Lost: blue scarf');
  assert.ok(wr.sawStroke===false||true);
  // unsupported frozen v1 board and a private board
  assert.ok(!edge.capabilities(ana).some(c=>c.id===`object:${id('menu-chalkboard')}:write`),'v1 chalkboard is not writable');
- await act(ana,'object:menu-chalkboard:write',{text:'x'},false);
- const priv=await act(ben,'object:private-board:write',{text:'hello'},false);assert.match(priv.code,/private|access|owner/);
+ await act(ana,`object:${id('menu-chalkboard')}:write`,{text:'x'},false);
+ const priv=await act(ben,`object:${id('private-board')}:write`,{text:'hello'},false);assert.match(priv.code,/private|access|owner/);
  // Ben: the board is there, its words are not, until he reads it
  const benHere=await here(ben);const benCaps=edge.capabilities(ben);
  assert.ok(!JSON.stringify(benHere).includes('Picnic'),'words are not in the reader\'s ambient here frame');
@@ -80,7 +80,7 @@ test('writable boards: hand-timed write/erase, attributed read, bounded context,
  assert.equal(restored.get('whiteboard').state.text,note);assert.equal(restored.get('whiteboard').state.textBy,ana.soulId);
  if(out){mkdirSync(out,{recursive:true});writeFileSync(`${out}/written.json`,JSON.stringify(god.model.snapshot()));}
  // erase by hand: cleared at the end of the wipe; the read offer goes away
- const e=await act(ana,'object:whiteboard:erase');const er=await finish(ana,e);assert.equal(er.phase,'completed');assert.equal(state('whiteboard').text,'');assert.equal(state('whiteboard').textBy,'');
+ const e=await act(ana,`object:${id('whiteboard')}:erase`);const er=await finish(ana,e);assert.equal(er.phase,'completed');assert.equal(state('whiteboard').text,'');assert.equal(state('whiteboard').textBy,'');
  assert.ok(!edge.capabilities(ben).some(c=>c.id===`read:${id('whiteboard')}`),'wiped board offers no read');
  assert.deepEqual(f.host.engine.runtime.violations,[]);
  assert.equal(god.model.resolvedDef('core/notice-board@1').actions.length,0,'frozen v1 unchanged');

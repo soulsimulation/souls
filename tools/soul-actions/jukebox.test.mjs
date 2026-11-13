@@ -33,11 +33,11 @@ test('jukebox: knob contact, refusal, interruption, persistence, bounded percept
  const boxRow=near.objects.find(o=>o.id===id('jukebox'));assert.deepEqual(boxRow?.state,{on:false},'a nearby jukebox shows only its on fact');
  const act=async(cap,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const finish=async(r,name,want,limit=500)=>{let contact=false,early=false;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){contact=true;if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.6&&state(name).on===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {contact,early,phase:edge.receipt(soul.soulId,r.receipt.id).phase};};
- await act('object:jukebox:switch-off',false);
+ await act(`object:${id('jukebox')}:switch-off`,false);
  // interruption before contact: nothing changes
- const cut=await act('object:jukebox:switch-on');for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('jukebox').on,false,'interrupted before contact: jukebox stays off');
+ const cut=await act(`object:${id('jukebox')}:switch-on`);for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('jukebox').on,false,'interrupted before contact: jukebox stays off');
  const results={};
- for(const [name,cap] of [['jukebox','object:jukebox:switch-on'],['tap','object:tap:switch-on'],['jukebox','object:jukebox:switch-off'],['jukebox','object:jukebox:switch-on']]){
+ for(const [name,cap] of [['jukebox',`object:${id('jukebox')}:switch-on`],['tap',`object:${id('tap')}:switch-on`],['jukebox',`object:${id('jukebox')}:switch-off`],['jukebox',`object:${id('jukebox')}:switch-on`]]){
   const r=await act(cap);assert.notEqual(state(name).on,cap.endsWith('on'),'admission changes nothing remotely');const x=await finish(r,name,cap.endsWith('on'));
   assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.ok(x.contact,'actual hand contact ran');assert.equal(x.early,false,'no change before contact');assert.equal(state(name).on,cap.endsWith('on'));results[cap]=x;
   const m=body().human;assert.equal(m?.handActuator,undefined);
