@@ -15,8 +15,8 @@
 //              there is no next step to recover with. "{{prev.<path>}}" in an argument is replaced from the previous
 //              step's JSON output (a refusal's too), e.g. "{{prev.did_you_mean[0].id}}", reading own properties only; a
 //              placeholder that does not resolve fails its step without running it, and that skipped step leaves no JSON.
-//              A `resolve` step keeps its first candidate's id as "{resolved}" for the steps after it, as an agent reads an
-//              offered id off `resolve` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run. One
+//              A `resolve` step (run as the client's `find`, #1921) keeps its first row's act as "{resolved}" for the steps
+//              after it, as an agent reads an offered id off `find` and acts on it (#1192): `give:<soul>` and `accept:<invitation>` differ every run. One
 //              that reads nothing stops the rule, unless it says onRefused "continue", as a refused act can.
 //   close      "done" (default): `result <id> done|failed` from the steps' outcome. "open": leave the request open (the
 //              activity continues in the world) until a later rule supersedes it or the run ends.
@@ -128,8 +128,8 @@ export function waitWindowSec(args) {
   const i = args.indexOf('--wait'), n = /^\d+$/.test(args[i + 1] ?? '') ? Number(args[i + 1]) : 60;
   return Math.min(60, Math.max(1, n));
 }
-/** The offered id a `resolve` step read its words as, or '' when it read none. */
-export const firstCandidate = (r) => { try { const d = JSON.parse(r.stdout); return (d.candidates ?? d.did_you_mean)?.[0]?.id ?? ''; } catch { return ''; } };
+/** The offered id a `resolve` step read its words as (the first `find` row with an act), or '' when it read none. */
+export const firstCandidate = (r) => { try { return JSON.parse(r.stdout).found?.find((x) => x.act)?.act ?? ''; } catch { return ''; } };
 /** How much of one CLI output a tool result keeps (#371): all of it up to this many characters. It was 4000, which cut
  *  `around` (its route) and `map` (its flags) mid-JSON, so the scorer read output the Soul really got as a broken string. */
 export const OUTPUT_KEEP = 1024 * 1024;
@@ -211,7 +211,8 @@ export async function turn({ cwd, text, script, maxWallSec = 240, diagnostics = 
       if (bound.error) { o = { ok: false, why: bound.error }; prev = null; }
       else {
         const waited = args.includes('--wait'), until = Date.now() + waitWindowSec(args) * 1000;
-        r = await cli(bound.args); prev = stepJson(r);
+        // #1921: the client has no `resolve`: a script's resolve step reads its words with the client's local `find`
+        r = await cli(args[0] === 'resolve' ? ['find', ...bound.args.slice(1)] : bound.args); prev = stepJson(r);
         // #832: woken by an owner message with the act still going: keep waiting on its receipt for the rest of the window.
         // A `wait` would return at once while that card is unacknowledged (the world's rule, so "stop" is never slept
         // through), so check the receipt instead, every POLL_MS, until it ends or the window does.

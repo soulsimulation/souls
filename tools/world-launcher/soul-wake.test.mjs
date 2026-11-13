@@ -8,8 +8,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
-import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine } from './soul/eden.mjs';
+import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway } from './soul/wake.mjs';
+import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState } from './soul/eden.mjs';
+import { indexCatalog } from './soul/catalog.mjs';
 
 const T0 = 1_800_000_000_000;
 /** serve's state as it stands after a first look: the engine's cursor at the end of everything. */
@@ -146,11 +147,14 @@ test('A5: a rule fires at most once per --every window (default 300 s), queued a
 
 /** A stand-in world: an inbox that hands out what the test posts, an event stream with nothing on it. */
 async function world(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'souls-wake-')), w = { dir, inbox: [], env: {} };
+  const dir = mkdtempSync(join(tmpdir(), 'souls-wake-')), w = { dir, inbox: [], env: {}, line: null };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://w'), p = url.pathname;
-    for await (const _ of req) { /* drain */ }
+    let body = ''; for await (const c of req) body += c;
     const json = (status, v) => { if (!res.destroyed) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); } };
+    if (p === '/v1/edge/self/link') return json(200, { link: { state: 'connected' }, now: w.line });   // #1933: the public line
+    if (p === '/v1/edge/self/now') { w.line = JSON.parse(body).text; return json(200, { now: w.line }); }
+    if (/^\/v1\/edge\/inbox\/[^/]+\/ack$/.test(p)) { const b = JSON.parse(body || '{}'); if ('now' in b) w.line = b.now; return json(200, { acked: true }); }
     if (p === '/v1/edge/inbox/listen') { await new Promise((r) => setTimeout(r, Number(url.searchParams.get('timeoutMs')) > 0 ? 200 : 0)); return json(200, { inbox: { connected: true }, backlog: w.inbox }); }
     if (p === '/v1/edge/wait') { await new Promise((r) => setTimeout(r, 200)); return json(200, { events: [], cursor: url.searchParams.get('after') ?? 'c_0' }); }
     return json(404, { error: { code: 'not-found', message: p } });
@@ -194,7 +198,7 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   assert.equal((await w.cli('serve')).code, 0);
   r = await w.cli('wake', 'remove', 'w1');
   assert.equal(r.code, 0, r.err);
-  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w2'], 'kept across the restart');
+  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w2'], 'kept across the restart');
   assert.equal(r.json.queued, 1, 'the queue too');
   assert.ok(r.json.rules.find((x) => x.id === 'owner-message').lastFired);
 });
@@ -509,4 +513,157 @@ test('#2076: serve --stop answers after serve exits; the folder is removed right
     rmSync(dir, { recursive: true });
     assert.equal(existsSync(dir), false, `round ${i}: removed`);
   }
+});
+
+// #1933: the mind is away. A fake clock: T0 is 2027-01-15 08:00 UTC.
+test('#1933 A1, A2: away after 10 minutes of a wake or owner message no acting command answered, or of no command; the line says since when or the next check', () => {
+  let w = saw(fresh(), 'command', T0);
+  assert.equal(awaySince(w, T0 + 9 * MIN, T0), null);
+  assert.equal(awaySince(w, T0 + 10 * MIN, T0), T0, 'no follower and no command for 10 minutes');
+  assert.equal(awaySince(fresh(), T0 + 10 * MIN, T0), T0, 'serve\'s start stands in for a command never seen');
+  w = saw(w, 'owed', T0 + MIN);   // an owner message arrived
+  for (let t = T0 + MIN; t < T0 + 11 * MIN; t += MIN) w = saw(w, 'command', t);   // listen --follow polls, and pending, but nothing acts
+  assert.equal(awaySince(w, T0 + 11 * MIN, T0), T0 + MIN, 'a follower keeps polling: still away, from the message');
+  assert.equal(saw(w, 'owed', T0 + 5 * MIN).mind.owed, T0 + MIN, 'the first unanswered one counts');
+  w = saw(w, 'acting', T0 + 11 * MIN);
+  assert.equal(awaySince(w, T0 + 20 * MIN, T0), null, 'an acting command answered it');
+  assert.equal(AWAY_MS, 10 * MIN);
+
+  assert.equal(awayText(T0 + MIN, undefined, T0 + 11 * MIN), 'mind away since 08:01 UTC');
+  const hb = { every: 60, at: new Date(T0 - 30 * MIN).toISOString() };   // kept at 07:30, every hour
+  assert.equal(awayText(T0 + MIN, hb, T0 + 11 * MIN), 'mind away, next check about 08:30 UTC');
+  assert.equal(awayText(T0 + MIN, hb, T0 + 31 * MIN), 'mind away, next check about 09:30 UTC', 'past 08:30: the next one');
+});
+
+test('#1933 A2, A3: going away keeps the line; the next acting command restores it, only while it still says away', () => {
+  const text = awayText(T0, undefined, T0 + 10 * MIN);
+  const away = wentAway(saw(fresh(), 'command', T0), T0, text, 'rowing to the mill');
+  assert.deepEqual(away.mind.away, { since: T0, text, stored: 'rowing to the mill' });
+  let b = back(away, text);
+  assert.equal(b.restore, 'rowing to the mill', 'restored');
+  assert.equal(b.wake.mind.away, undefined); assert.equal(b.wake.mind.last, T0, 'the rest of the mind state stays');
+  assert.equal(back(wentAway(fresh(), T0, text, null), text).restore, null, 'no line before: the line is cleared');
+  b = back(away, 'gone fishing');
+  assert.equal(b.restore, undefined, 'someone changed the line since: it stays'); assert.equal(b.wake.mind.away, undefined);
+  assert.equal(back(fresh(), text).restore, undefined, 'not away: nothing to restore');
+});
+
+test('#1933 review: while away, a next check that has passed is renewed to a future time, and the kept line still comes back', () => {
+  const hb = { every: 60, at: new Date(T0 - 30 * MIN).toISOString() };   // kept at 07:30, every hour
+  const first = awayText(T0, hb, T0 + 10 * MIN), away = wentAway(fresh(), T0, first, 'rowing to the mill');
+  assert.equal(first, 'mind away, next check about 08:30 UTC');
+  const later = T0 + 95 * MIN, again = awayText(away.mind.away.since, hb, later);   // 09:35: 08:30 has passed
+  assert.equal(again, 'mind away, next check about 10:30 UTC');
+  assert.ok(Date.parse(`2027-01-15T${again.match(/\d\d:\d\d/)[0]}:00Z`) > later, 'a future time');
+  const renewed = wentAway(away, away.mind.away.since, again, away.mind.away.stored);
+  assert.equal(back(renewed, again).restore, 'rowing to the mill');
+});
+
+test('#1933 A3: an acting command that sets its own line wins; the kept one is dropped', () => {
+  const text = awayText(T0, undefined, T0 + 10 * MIN), b = back(wentAway(fresh(), T0, text, 'rowing to the mill'), text, true);
+  assert.equal(b.restore, undefined); assert.equal(b.wake.mind.away, undefined);
+});
+
+test('#1933 A4: wake away off turns it off, and on again', () => {
+  assert.deepEqual(parseAway(['off']), { away: 'off' });
+  assert.throws(() => parseAway(['maybe']), /wake away <on\|off>/);
+  const off = change(saw(fresh(), 'command', T0), parseAway(['off'])).wake;
+  assert.equal(awaySince(off, T0 + 60 * MIN, T0), null, 'off: never away');
+  assert.equal(view(off).away, 'off');
+  const on = change(off, parseAway(['on'])).wake;
+  assert.equal(awaySince(on, T0 + 60 * MIN, T0), T0); assert.equal(view(on).away, 'on');
+});
+
+test('#1933 A2, A3: through serve: the line goes away and an acting command puts it back; one with its own line wins', async (t) => {
+  const w = await world(t);
+  w.env = { EDEN_TIME_SCALE: '0.01' };   // away after AWAY_MS × 0.01 = 6 s, looked at every 0.3 s
+  w.line = 'rowing to the mill';
+  assert.equal((await w.cli('serve')).code, 0);
+  assert.ok(await until(() => /^mind away since \d\d:\d\d UTC$/.test(w.line ?? ''), 15_000), `away: ${w.line}`);
+  assert.equal(w.state().wake.mind.away.stored, 'rowing to the mill');
+  let r = await w.cli('ack', 'msg_1', 'on my way');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(w.line, 'rowing to the mill', 'restored');
+  assert.equal(w.state().wake.mind.away, undefined);
+
+  assert.ok(await until(() => /^mind away/.test(w.line ?? ''), 15_000), 'away again');
+  r = await w.cli('ack', 'msg_2', 'coming', '--now', 'walking over');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(w.line, 'walking over', 'the command\'s own line wins');
+  assert.equal(w.state().wake.mind.away, undefined, 'the kept line is dropped');
+});
+
+// #1931: three more kinds, on recorded state. Envelopes as the world's classified stream sends them (envelope.ts).
+const ambient = (id, soulId, name, text) => ({ id, tick: 9, at: T0, kind: 'speech.ambient', salience: 1, about: { soulId, name }, where: { dist: 6, bearing: 'left' }, text: `${name} (6 m, left): "${text}"`, untrusted: true, raw: 'speech', data: { from: { soulId, name }, text } });
+const starting = (id, title) => ({ id, tick: 9, at: T0, kind: 'schedule.starting', salience: 2, text: `"${title}" is starting now at Commons.`, untrusted: true, raw: 'schedule', data: { placeId: 'g-commons', startsAtTick: 9 } });
+
+test('#1931 A1: the stream reader keeps speech.ambient and schedule.starting in serve\'s state; addressed speech is folded as before', () => {
+  const st = loadServeState.fresh();
+  assert.equal(foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')), true);
+  assert.equal(foldHeard(st, starting('c_2', 'Open mic')), true);
+  assert.equal(foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')), false, 'once each');
+  assert.equal(foldHeard(st, { id: 'c_3', kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, data: { text: 'Ada?' } }), false, 'addressed speech is not one of them');
+  assert.deepEqual(st.heard.map((x) => [x.seq, x.kind, x.from, x.text, x.untrusted]), [[1, 'speech.ambient', 'Bo', 'nice day', true], [2, 'schedule.starting', null, '"Open mic" is starting now at Commons.', true]]);
+  assert.equal(foldAddressed(st, ambient('c_4', 's_bo', 'Bo', 'hm')), false, 'ambient speech never reaches the addressed store');
+  assert.equal(foldAddressed(st, { id: 'c_3', kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, data: { text: 'Ada?' } }), true);
+  assert.deepEqual([st.addressed.length, st.heardSeq], [1, 2]);
+  for (let i = 0; i < 30; i++) foldHeard(st, ambient(`n_${i}`, 's_bo', 'Bo', `line ${i}`));
+  assert.equal(st.heard.length, 20, 'the newest few are kept');
+});
+
+test('#1931 A2, A4: speech-near-me fires on speech in earshot not said to this Soul, off by default, untrusted, and within the budget', () => {
+  assert.ok(!fresh().rules.some((x) => x.kind === 'speech-near-me'), 'off by default');
+  assert.throws(() => parseRule(['speech-near-me', '{"who":"s_bo"}']), /no params/);
+  const st = serveState({ heard: [], heardSeq: 0 }), rules = [{ id: 'w1', ...parseRule(['speech-near-me', '--every', '0']) }];
+  let r = step(rules, st, T0);
+  foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')); foldHeard(st, ambient('c_2', 's_me', 'Me', 'my own words')); foldHeard(st, starting('c_3', 'Open mic'));
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.kind, f.why, f.untrusted]), [['w1', 'speech-near-me', 'Bo said nearby: "nice day"', true]], 'not this Soul\'s own words, not the event');
+  assert.deepEqual(step(r.rules, st, T0 + 4_000).fired, [], 'a line wakes once');
+  // a noisy place: a line every 2 s for an hour, one listen polling and nobody confirming: the budget holds
+  for (const hour of ['quiet', 'normal']) {
+    const s2 = serveState({ heard: [], heardSeq: 0 });
+    let wake = { ...fresh(), rules: [{ id: 'w1', ...parseRule(['speech-near-me', '--every', '0']) }], budget: { hour } }, handed = 0;
+    for (let t = 0; t < HOUR; t += 2_000) {
+      foldHeard(s2, ambient(`c_${t}`, 's_bo', 'Bo', `line ${t}`));
+      const e = evaluate(wake.rules, { ...s2, wake }, T0 + t);
+      wake = { ...wake, rules: e.rules, cursor: e.cursor, queue: enqueue(wake.queue, e.fired) };
+      const d = deliver(confirm(wake, 'L'), T0 + t, { reader: 'L' });
+      if (d.wakes.length) { handed++; assert.equal(d.wakes[0].untrusted, true, 'another Soul\'s words stay labelled'); }
+      wake = d.wake;
+    }
+    assert.equal(handed, BUDGETS[hour], `${hour}: ${handed} deliveries, never more than the budget`);
+  }
+});
+
+test('#1931 A2, A4: event-starting fires on schedule.starting, on by default', () => {
+  assert.ok(fresh().rules.some((x) => x.id === 'event-starting' && !x.always), 'on by default, and removable');
+  assert.equal(change(fresh(), { remove: 'event-starting' }).removed, 'event-starting');
+  const st = serveState({ heard: [], heardSeq: 0 });
+  foldHeard(st, starting('c_0', 'Before this serve looked'));
+  let r = step(fresh().rules, st, T0);
+  assert.deepEqual(r.fired, [], 'a first look starts from now');
+  foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')); foldHeard(st, starting('c_2', 'Open mic'));
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why, f.untrusted]), [['event-starting', '"Open mic" is starting now at Commons.', true]]);
+  assert.deepEqual(step(r.rules, st, T0 + 4_000).fired, []);
+});
+
+test('#1931 A3, A4: thing-state fires when that field of that thing changes, read through thingState with the kind\'s defaults', () => {
+  const catalog = indexCatalog({ places: [{ id: 'g-v', name: 'Village', kind: 'area', at: [0, 0] }], acts: [], things: [{ id: 'e_ch', name: 'porch-chest', kind: 'core-chest', place: 'g-v', at: [1, 0] }],
+    kinds: { 'core-chest': { acts: [{ verb: 'open', label: 'Open' }], state: { open: false, locked: false } } } });
+  assert.throws(() => parseRule(['thing-state', '{"thing":"e_ch"}']), /thing-state takes/);
+  assert.throws(() => parseRule(['thing-state', '{"thing":"e_ch","field":"open","is":{"x":1}}']), /thing-state takes/);
+  const any = { id: 'w1', ...parseRule(['thing-state', '{"thing":"e_ch","field":"open"}', '--every', '0']) }, closed = { id: 'w2', ...parseRule(['thing-state', '{"thing":"e_ch","field":"open","is":false}', '--every', '0']) };
+  const st = serveState({ catalog, live: { souls: [], things: {} } });
+  let r = step([any, closed], st, T0);
+  assert.deepEqual([r.fired, ruleOf(r, 'w1').was], [[], 'false'], 'the first look takes the default in, wakes no one');
+  st.live = { souls: [], things: { e_ch: { open: true } } };
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now true']], 'is:false waits for false');
+  assert.deepEqual((r = step(r.rules, st, T0 + 4_000)).fired, [], 'unchanged: no wake');
+  st.live = { souls: [], things: { e_ch: { locked: true } } };   // the live row no longer names open: the kind's default stands
+  r = step(r.rules, st, T0 + 6_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now false'], ['w2', 'e_ch open is now false']]);
+  assert.deepEqual(step(r.rules, { ...st, catalog: null }, T0 + 8_000).fired, [], 'no catalog copy: nothing is read');
 });
