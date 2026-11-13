@@ -7586,7 +7586,6 @@ Your person says "connect my account": steps 1 and 2. "Move my Soul to this comp
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
 \`${CLI} accounts\` lists them, with no world call; \`accounts switch <alias>\` changes the active one; \`--as <alias>\`
 picks one for a single command. A Soul paired through a login always uses that login.
-
 \`${CLI} logout [<alias>]\` ends a login, here and in the world, even when the world does not answer. Your Souls stay
 connected: their own tokens keep working. A login's token goes only to worlds of the site that issued it, over https
 or on this machine.
