@@ -3933,20 +3933,22 @@ async function startApproval(input, code) {
   if (login) return accountPair(input.soulId, login);
   if (MOVE) input = { ...input, move: true };
   const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
-  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: pairLabel(), idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
   // #1875 A6: a Soul another folder holds now is not taken over unasked. The world refuses it (soul.held-elsewhere) before
   // any request exists; this read, when there is a code, only lets the refusal name the Soul first.
-  if (!resumed && !MOVE && code && (input.soulId || input.name)) {
+  let from = resumed ? s.pendingApproval.from : undefined;
+  if (!resumed && code && (input.soulId || input.name)) {
     const list = await call("/v1/agent/approval/souls", { as: "none", body: { for: code } });
     const it = list.status === 200 ? (list.data?.souls ?? []).find((x) => (input.soulId ? x.id === input.soulId : fold(x.name) === fold(input.name))) : null;
-    if (it?.control?.held) throw heldElsewhere(it);
+    if (it?.control?.held && !MOVE) throw heldElsewhere(it);
+    if (it?.control?.held) from = holderLabel(it);   // #2257 A6: --move takes it; the answer names where from
   }
   const started = await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } });
   if (started.status === 409 && codeOf(started.data) === "soul.held-elsewhere") throw heldElsewhere({ id: input.soulId, name: input.name });
   const r = ok(started, "approval start"), a = r.approval ?? r;
   pending.approvalId = a.id;
-  save({ pendingApproval: pending });
+  save({ pendingApproval: { ...pending, ...(from ? { from } : {}) } });
   const shown = publicApproval(a, s.world), hint = input.soulId || input.existing ? loginHint(s.world) : "";
   return { ...shown, ...(shown.next && hint ? { next: shown.next + hint } : {}), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
 }
@@ -3975,6 +3977,10 @@ async function accountPair(id, a) {
   const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
     : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const { soulId, ...body } = pending.input;
+  if (pending !== was) {   // #2257 A6: who holds it now, so the answer can say where it was taken from
+    const r = await call("/v1/agent/account", { as: "account" }), it = r.status === 200 ? (r.data?.souls ?? []).find((x) => x.id === id) : null;
+    if (it?.control?.held) pending.from = holderLabel(it);
+  }
   const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
@@ -3986,6 +3992,20 @@ async function accountSoulNamed(who, a, what) {
   if (!hits.length) throw new Error(`${what}: your account has no Soul called ${who} in this world. See: ${CLI} list --account`);
   if (hits.length > 1) throw new Error(`${what}: your account has ${hits.length} Souls called ${who}: ${hits.map((x) => x.id).join(", ")}. Say which: ${CLI} ${what} <soulId>`);
   return { id: hits[0].id, name: soulHome.plainName(hits[0].name) || hits[0].id };
+}
+/** #2257 A6: the label an approval leaves on the Soul names this device, so a later move can say where it was taken from (a
+ *  login's pairing gets its device from the grant, world side). */
+const pairLabel = () => (HOME ? `eden ${VERSION} on ${HOME.device().name}` : "eden " + VERSION);
+/** #2257 A6: the device an agent holds a Soul from, as the world labels it. */
+const holderLabel = (it) => String(it.agent?.label ?? "").trim().slice(0, 80) || "another device";
+/** #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person. With no
+ *  memory for it in this home, its memory stayed there: export there, import here. The last device to ask still wins. */
+function takenNotice(id, name, from) {
+  if (!from) return {};
+  const who = soulHome.plainName(name) || id, mem = HOME ? resolvePath(HOME.soul(id).dir, "..", "memory") : null;
+  const hasMemory = (dir) => { try { return readdirSync(dir, { withFileTypes: true }).some((e) => e.isFile() || (e.isDirectory() && hasMemory(joinPath(dir, e.name)))); } catch { return false; } };
+  return { takenFrom: from, tell: `Tell your person: ${who} was taken from ${from}; that device no longer controls it.`,
+    ...(mem && !hasMemory(mem) ? { memory: `${who}'s memory stayed on ${from}: there run ${CLI} export ${who}, bring the folder here, then ${CLI} import <folder>.` } : {}) };
 }
 /** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. A
  *  Soul this home keeps without a working token is most likely its own grant, left in an older copy of this folder. */
@@ -4244,7 +4264,7 @@ async function approval(action = "status") {
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
       if (HOME && p.account) HOME.tagAccount(a.soulId, p.account);   // #2246: paired through a login, it is that account's Soul here
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), ...takenNotice(a.soulId, a.name, p.from), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
@@ -7144,9 +7164,9 @@ Your person says "connect my account": steps 1 and 2. "Move my Soul to this comp
    one you chose with \`--as <alias>\`. Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
-4. \`${CLI} adopt <name|id>\` brings one of them here with no code: the device that had it is disconnected, and its
-   \`status\` says where it went. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs. \`retire <name|id>\`
-   asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` finishes on their click. Each needs a login.
+4. \`${CLI} adopt <name|id>\` brings one here, no code; the device that had it is disconnected. Tell your
+   person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
+   \`retire <name|id>\` asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` ends on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
 \`${CLI} accounts\` lists them, with no world call; \`accounts switch <alias>\` changes the active one; \`--as <alias>\`
