@@ -1,0 +1,5 @@
+# Candle molding
+
+A fixed `core/candle-mold-bench@1` declares `choose-form` (text `pillar` or `taper`), `choose-color` (text `red`, `blue` or `ivory`) and `mold-candle`. Existing native walking and four seconds of handwork precede one admitted batch: consume one selected wax portion plus one wick and place a real `core/molded-candle@1` in the output surface slot. Clear that slot before another candle. The supplied finite stocks have no refill claim.
+
+The created candle retains chosen form/color, one wax unit, one wick, maker and source label. It is independently portable and uses the existing `light`/`put-out` candle faculty on a reachable supported surface. No heating, liquid-wax or fuel-depletion simulation, same-ID source transformation, loaded carrier, new light/contact framework, precision grip or animation contract is introduced. Permissions, body/support/authority stamps, current receipt binding and native duration guard stock changes; refused or interrupted work preserves the finite inputs. Completion uses the shared Soul work adapter, outside God Undo/Redo history.
