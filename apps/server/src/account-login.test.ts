@@ -65,13 +65,27 @@ test('A1 login: start, approve as the signed-in account, poll returns one sacct_
  assert.equal(rows[0].token_hash,createHash('sha256').update(first.data.token).digest('hex'));assert.ok(!JSON.stringify(rows).includes(first.data.token)&&!JSON.stringify(w.f.db.db.prepare('SELECT * FROM account_requests_v1').all()).includes(pollSecret),'only hashes are stored');
  // cancelled: the agent cancels, the person's approve then changes nothing and no token is ever returned
  const cs=secret(),cancelled=(await w.call('/v1/agent/account/login',{...body,idempotencyKey:key('a1c'),pollSecret:cs})).data.request;
- assert.equal((await w.call('/v1/agent/account/requests/cancel',{requestId:cancelled.id,pollSecret:cs})).data.request.status,'cancelled');
+ const byAgent=(await w.call('/v1/agent/account/requests/cancel',{requestId:cancelled.id,pollSecret:cs})).data.request;assert.equal(byAgent.status,'cancelled');assert.equal(byAgent.ended,'cancelled');
  assert.equal((await w.call(`/v1/account/requests/${cancelled.id}/approve`,{},'alice')).data.request.status,'cancelled');
  assert.equal((await w.call('/v1/agent/account/requests/poll',{requestId:cancelled.id,pollSecret:cs})).data.token,undefined);
- // expired: fifteen minutes with no poll
- let now=1_000_000;const db=sharedLoginsDb(new DatabaseSync(':memory:')),logins=new AccountLogins(db,db,'w-expiry',{now:()=>now}),es=secret();
- const old=logins.startLogin({agentLabel:'eden',device:{id:dev,name:'laptop'},idempotencyKey:key('a1e'),pollSecret:es});now+=15*60_000;
- assert.equal(logins.approveLogin('acct_x',old.id).status,'expired');assert.equal(logins.poll(old.id,es).token,undefined);
+ // #2258: no expiry. Three days with no poll, still open, listed and approvable; the DTO carries no expiresAt
+ let now=1_000_000;const db=sharedLoginsDb(new DatabaseSync(':memory:')),logins=new AccountLogins(db,db,'w-open',{now:()=>now}),es=secret();
+ const old=logins.startLogin({agentLabel:'eden',device:{id:dev,name:'laptop'},idempotencyKey:key('a1e'),pollSecret:es});assert.equal('expiresAt' in old,false);now+=3*24*60*60_000;
+ assert.equal(logins.view(old.id).status,'pending');assert.equal(logins.poll(old.id,es).request.status,'pending');
+ assert.equal(logins.approveLogin('acct_x',old.id).status,'ready');assert.match(logins.poll(old.id,es).token??'',/^sacct_/);
+ assert.equal(w.f.db.paidCost(),0);
+});
+
+test('#2258 A1 a request ends only when refused, cancelled or replaced by the same agent\'s newer one',async t=>{
+ const w=await world(t),code=(await w.call('/v1/account/window-code',{},'alice')).data.code,dev=device(),other=device();
+ const start=async(d:string)=>{const pollSecret=secret(),r=await w.call('/v1/agent/account/login',{agentLabel:'eden 2.33.0',device:{id:d,name:'studio laptop'},idempotencyKey:key('replace'),pollSecret,for:code});assert.equal(r.status,200,JSON.stringify(r.data));return {id:r.data.request.id as string,pollSecret};};
+ const first=await start(dev),elsewhere=await start(other),second=await start(dev);
+ const was=(await w.call('/v1/agent/account/requests/poll',{requestId:first.id,pollSecret:first.pollSecret})).data.request;assert.equal(was.status,'cancelled');assert.equal(was.ended,'replaced','the same device asking again replaces its open login');
+ assert.equal((await w.call(`/v1/account/requests/${first.id}/approve`,{},'alice')).data.request.status,'cancelled','a replaced request cannot be approved');
+ assert.deepEqual((await w.call('/v1/account/approvals',undefined,'alice')).data.requests.map((q:any)=>q.id),[second.id,elsewhere.id],'another device keeps its own');
+ const refused=(await w.call(`/v1/account/requests/${second.id}/cancel`,{},'alice')).data.request;assert.equal(refused.status,'cancelled');assert.equal(refused.ended,'refused');
+ assert.equal((await w.call('/v1/agent/account/requests/poll',{requestId:second.id,pollSecret:second.pollSecret})).data.request.ended,'refused','the agent reads who ended it');
+ assert.equal((await w.call('/v1/agent/account/requests/poll',{requestId:elsewhere.id,pollSecret:elsewhere.pollSecret})).data.request.status,'pending');
  assert.equal(w.f.db.paidCost(),0);
 });
 
@@ -128,15 +142,17 @@ test('A3 move: pair through the grant hands a Soul token with no person; the old
 test('A4 retire: an agent only asks; the addressed person approves it by the DELETE path, a cancel changes nothing',async t=>{
  const w=await world(t),{soulId}=await w.born('alice','Dalia'),a=await w.login('alice'),live=()=>w.f.db.soul(soulId)!.retired_at===null;
  const ask=async()=>{const pollSecret=secret(),r=await w.call(`/v1/agent/account/souls/${soulId}/retire`,{idempotencyKey:key('retire'),pollSecret},a.token);assert.equal(r.status,200,JSON.stringify(r.data));return {...r.data,pollSecret};};
- const one=await ask(),two=await ask();
+ const two=await ask();
+ assert.equal((await w.call(`/v1/account/requests/${two.request.id}/cancel`,{},'alice')).data.request.status,'cancelled');
+ assert.equal((await w.call(`/v1/account/requests/${two.request.id}/approve`,{},'alice')).data.request.status,'cancelled');assert.ok(live(),'cancelling changes nothing');
+ const old=await ask(),one=await ask();
  assert.equal(one.request.kind,'retire');assert.equal(one.request.status,'pending');assert.deepEqual(one.request.soul,{id:soulId,name:'Dalia'});assert.equal(one.delivery,'window');assert.ok(one.approvalURL.endsWith('/#approve/'+one.request.id));
- const listed=(await w.call('/v1/account/approvals',undefined,'alice')).data;assert.ok(Array.isArray(listed.approvals));assert.deepEqual(listed.requests.filter((q:any)=>q.kind==='retire').map((q:any)=>q.id),[two.request.id,one.request.id]);
+ assert.equal((await w.call('/v1/agent/account/requests/poll',{requestId:old.request.id,pollSecret:old.pollSecret})).data.request.ended,'replaced','asking again to retire the same Soul replaces the open ask');
+ const listed=(await w.call('/v1/account/approvals',undefined,'alice')).data;assert.ok(Array.isArray(listed.approvals));assert.deepEqual(listed.requests.filter((q:any)=>q.kind==='retire').map((q:any)=>q.id),[one.request.id]);
  assert.deepEqual((await w.call('/v1/account/approvals',undefined,'bob')).data.requests,[],"bob's window never sees it");
  assert.equal((await w.call(`/v1/account/requests/${one.request.id}/approve`,{},'bob')).status,403);
  assert.equal((await w.call(`/v1/account/requests/${one.request.id}/approve`,{},a.token)).status,401,'the account token cannot approve');
  assert.equal((await w.call('/v1/agent/account/requests/poll',{requestId:one.request.id,pollSecret:one.pollSecret})).data.request.status,'pending');assert.ok(live());
- assert.equal((await w.call(`/v1/account/requests/${two.request.id}/cancel`,{},'alice')).data.request.status,'cancelled');
- assert.equal((await w.call(`/v1/account/requests/${two.request.id}/approve`,{},'alice')).data.request.status,'cancelled');assert.ok(live(),'cancelling changes nothing');
  const approved=await w.call(`/v1/account/requests/${one.request.id}/approve`,{},'alice');assert.equal(approved.status,200,JSON.stringify(approved.data));assert.equal(approved.data.request.status,'ready');
  for(let i=0;i<100&&live();i++){w.f.host.drainInputs();w.f.souls.lifecycle?.pump();await setImmediate();}
  assert.ok(!live(),'the Soul is retired');

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Approval } from './join-api.ts';
 (globalThis as { location?: unknown }).location ??= { href: 'http://127.0.0.1/w/test', pathname: '/w/test', hash: '', origin: 'http://127.0.0.1' };
-const { approvalLine, preparingLine, closeApproval, closedApprovals, pickWindowApproval, safePhoto } = await import('./window-approvals.ts');
+const { approvalLine, preparingLine, closeApproval, closedApprovals, pickWindowApproval, safePhoto, requestLine, staleRequestNote, STALE_REQUEST_MS } = await import('./window-approvals.ts');
 const { approvalFromHash, isAccountRequest } = await import('../approval-link.ts');
 const { validRequest } = await import('./join-api.ts');
 
@@ -68,10 +68,25 @@ test('#2245: #approve/aq_… opens an account request, #approve/ap_… a Soul ap
   assert.equal(approvalFromHash('#approve/' + apId), apId);
   assert.equal(isAccountRequest(apId), false);
   for (const bad of ['#approve/aq_short', '#approve/ar_' + 'b'.repeat(32), '#approve/' + aq + '/x', '#pair/' + aq]) assert.equal(approvalFromHash(bad), null);
-  const login = { id: aq, kind: 'login', status: 'pending', agentLabel: 'eden 2.33.0', device: { name: 'studio laptop' }, soul: null, confirm: 'K7QX', createdAt: 0, expiresAt: 0, inWindow: true };
+  const login = { id: aq, kind: 'login', status: 'pending', agentLabel: 'eden 2.33.0', device: { name: 'studio laptop' }, soul: null, confirm: 'K7QX', createdAt: 0, inWindow: true };
   assert.equal(validRequest(login, aq), true);
   assert.equal(validRequest(login, 'aq_' + 'd'.repeat(32)), false);
   assert.equal(validRequest({ ...login, kind: 'retire' }, aq), false);   // a retire names its Soul
   assert.equal(validRequest({ ...login, kind: 'retire', soul: { id: 's_1', name: 'Ana' } }, aq), true);
   assert.equal(validRequest({ ...login, kind: 'other' }, aq), false);
+});
+
+test('#2258: an account request card says who ended it, and warns above its buttons once it is more than a day old', () => {
+  assert.equal(requestLine({ status: 'pending' }), null);
+  assert.equal(requestLine({ status: 'cancelled', ended: 'refused' }), 'Refused');
+  assert.equal(requestLine({ status: 'cancelled', ended: 'replaced' }), 'Replaced by a newer request from the same agent');
+  assert.equal(requestLine({ status: 'cancelled', ended: 'cancelled' }), 'Withdrawn by the agent');
+  assert.equal(requestLine({ status: 'cancelled' }), 'Withdrawn by the agent');
+  assert.equal(requestLine({ status: 'expired' }), 'Timed out', "an older world's lapsed request");
+  const now = 10 * STALE_REQUEST_MS, q = { status: 'pending' as const, confirm: 'K7QX' };
+  assert.equal(staleRequestNote({ ...q, createdAt: now - 23 * 60 * 60_000 }, now), null, 'under a day: no note');
+  assert.equal(staleRequestNote({ ...q, createdAt: now - STALE_REQUEST_MS }, now), null, 'exactly a day: no note');
+  const note = staleRequestNote({ ...q, createdAt: now - STALE_REQUEST_MS - 1 }, now);
+  assert.match(note ?? '', /more than a day old/); assert.match(note ?? '', /K7QX/, 'the note names the code to check');
+  assert.equal(staleRequestNote({ ...q, status: 'cancelled', createdAt: 0 }, now), null, 'only an open request');
 });
