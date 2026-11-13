@@ -106,9 +106,11 @@ switch independent. A previously saved master mute migrates to both switches off
   no world can yet prove that nothing but pure time would pass while it slept.
   - **Every registered world keeps living.** The launcher boots, every 15 s, one registered world with no process: never
     booted since the launcher started, put to sleep to make room, or crashed past its restarts. It goes most recent
-    first, and only into free room under `--max-running` and the memory floors; a keep-alive boot never evicts. A
-    visitor's boot still evicts the least recently used idle world when the registry does not fit. Crashed worlds
-    restart with backoff, and a world held by the breaker stays held.
+    first, and only into free room: under `--max-running`, with the host above `--min-free-mb` and at least 768 MB left
+    under the unit's MemoryHigh (`ChildPool.roomFor`); a keep-alive boot never evicts and is not a use (the least
+    recently used order stays the visitors'). A world whose takeover from the previous launcher failed is passed over. A visitor's boot still evicts the
+    least recently used idle world when the registry does not fit, and that world waits, owing its time, until a round
+    finds room. Crashed worlds restart with backoff, and a world held by the breaker stays held.
   - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
     them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
@@ -119,7 +121,9 @@ switch independent. A previously saved master mute migrates to both switches off
     owner-control window) is still stamped with real time.
   - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
     ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
-    and land just after the catch-up.
+    and are dispatched one at a time after the catch-up, each once the one before it is answered (at most 2 s each). A
+    write whose client gave up while it waited is dropped, and a stop during the catch-up answers the writes still
+    waiting 503.
 - **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event

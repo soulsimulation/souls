@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { soulClientManifest } from '../../apps/server/src/soul-client-manifest.ts';
+import { refusalFor } from '../../apps/server/src/client-minimum.ts';
 import { fixture } from '../../apps/server/test/native-owner-fixture.ts';
 import { stamp } from './soul/stamp.mjs';
 
@@ -60,4 +61,23 @@ test('A2: the released 2.32.0 client upgrades itself to head from the server\'s 
   const after = await run('upgrade', 'compat');
   assert.equal(after.d?.version, HIGHER, `the installed client reports ${HIGHER}: ${after.err}`);
   assert.match(readFileSync(join(d, 'SKILL.md'), 'utf8'), new RegExp(`version: "${HIGHER}"`));
+});
+
+test('#1937: the released 2.32.0 client prints the refusal of a client below the world\'s minimum', async (t) => {
+  // the server's own rule, with the world's minimum above the released client
+  const server = createServer((req, res) => {
+    const no = refusalFor(req.url.replace(/^\/w\/compat/, ''), req.headers['x-soul-client'], { minVersion: HIGHER, version: HIGHER }, () => req.headers.authorization === 'Bearer sim_ada');
+    res.writeHead(no ? 426 : 200, { 'content-type': 'application/json' }); res.end(JSON.stringify(no ?? { ok: true }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-compat-old-'))); t.after(() => rmSync(d, { recursive: true, force: true }));
+  writeFileSync(join(d, 'eden.mjs'), released('eden.mjs'));
+  writeFileSync(join(d, '.eden-agent.json'), JSON.stringify({ world: `http://127.0.0.1:${server.address().port}/w/compat`, accountAuth: true, soul: 's_ada', token: 'sim_ada' }));
+  const { code, err } = await new Promise((resolve) => {
+    const c = spawn(process.execPath, ['eden.mjs', 'here'], { cwd: d, env: { ...process.env, HOME: d, SOULS_HOME: '', SOULS_PRINCIPAL: '' }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let e = ''; c.stderr.on('data', (x) => { e += x; }); c.on('exit', (n) => resolve({ code: n, err: e }));
+  });
+  assert.equal(code, 1);
+  assert.match(err, /client\.upgrade-required: This Soul client is too old for this world\. Run: node eden\.mjs upgrade\n/);
 });

@@ -264,6 +264,22 @@ const WRITE_DRAIN_TRACE = process.env.WRITE_DRAIN_TRACE === '1';
 // still owes (x-sim-catching-up; healthz `catchingUp`), and writes wait in arrival order until it is caught up, so an act
 // lands at the wall-correct tick, after the catch-up, never inside it.
 let catchingUp: Promise<void> | null = null;
+// Held writes are dispatched one at a time, each once the one before it has been answered (or after HELD_STEP_MS, so a
+// streamed reply cannot hold the rest): async body and auth reads must not reorder them. A write that arrives while
+// held ones are still being dispatched joins the end of the line.
+let heldLine: Promise<void> = Promise.resolve(), held = 0;
+const HELD_STEP_MS = 2_000;
+function hold(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, until: Promise<void>) {
+  const before = heldLine; held++;
+  heldLine = new Promise<void>((next) => { void Promise.all([until, before]).then(() => {
+    const step = () => { clearTimeout(timer); next(); }, timer = setTimeout(step, HELD_STEP_MS);
+    // a write whose client has gone (it timed out) is dropped, never applied after the caller gave up; a stop during the
+    // catch-up ends it with the clock never started, so a held write is refused, never applied unticked
+    if (res.destroyed || req.socket.destroyed) return step();
+    res.once('finish', step); res.once('close', step);
+    if (closing) res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); else serve(req, res);
+  }); }).finally(() => { held--; });
+}
 server.on('request', (req, res) => {
   if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
   const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
@@ -272,10 +288,8 @@ server.on('request', (req, res) => {
     if (WRITE_DRAIN_TRACE) console.log(`[world] write in flight: ${writesInFlight.size}`);
     void done.then(() => { writesInFlight.delete(done); if (WRITE_DRAIN_TRACE) console.log(`[world] write closed: ${writesInFlight.size} in flight`); });
   }
-  if (catchingUp) {
-    res.setHeader('x-sim-catching-up', String(host.owedTicks));
-    if (write) { void catchingUp.then(() => serve(req, res)); return; }
-  }
+  if (catchingUp) res.setHeader('x-sim-catching-up', String(host.owedTicks));
+  if (write && (catchingUp || held > 0)) { hold(req, res, catchingUp ?? Promise.resolve()); return; }
   serve(req, res);
 });
 function serve(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
@@ -381,6 +395,9 @@ const shutdown = async (sig: string, exitCode = 0) => {
   if (closing) return; closing = true; bootPhase('stopping', host.engine.world.tick); writeLiveNow(config.dataDir);
   // Lane L5: a durable head first, before any draining that could outlast the launcher's stop grace (then SIGKILL).
   if (host.snapshotAgeMs() > 10_000) { try { host.requestSnapshot(`${sig}: before draining`, { now: true }); } catch (e) { console.error('[world] early snapshot failed', e); } }
+  // #2235 A8: a stop during the boot catch-up ends it first (its clock never started), so the writes it held are
+  // answered 503 now instead of being cut at the exit; the snapshot below keeps the ticks it reached
+  if (catchingUp) { host.stop(); await catchingUp; }
   if (writesInFlight.size) {
     const n = writesInFlight.size, t = performance.now();
     await Promise.race([Promise.all(writesInFlight), new Promise((r) => setTimeout(r, WRITE_DRAIN_MS))]);
