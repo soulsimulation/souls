@@ -1,0 +1,17 @@
+import type { DefInput } from '../schemas.ts';
+const box=(at:number[],size:number[],tint:string,when?:string)=>({kind:'box',at,size,tint,round:0,...(when?{when}:{})});
+const act=(name:string,label:string)=>({name,label,roles:'anyone',reach:'touch',params:{},then:[{op:'set',field:'lastReceipt',value:''}]});
+export const CAMP_SOUP_DEFS:DefInput[]=[{
+ schema:'def/1',name:'core-camp-soup-pot',version:1,form:'point',tags:['camping','cooking','local-fixture'],
+ description:'A fixed supplied hot camp stove and soup pot. Cook three supplied vegetable portions with three water portions for ten seconds, using its one fuel charge. Then place an empty camp soup bowl on the serving shelf and ladle one finite serving with four seconds hand work. No combustion or cooling clock.',
+ make:{kind:'gen',gen:'kit/2',args:{round:0,shapes:[...[-.4,.4].flatMap(x=>[-.22,.22].map(z=>box([x,.45,z],[.05,.9,.05],'iron'))),box([0,.92,0],[.95,.08,.55],'wood'),box([-.22,.98,0],[.38,.04,.4],'iron'),box([-.22,1.01,0],[.27,.025,.27],'fire','@on'),{kind:'lathe',at:[-.22,1.02,0],profile:[[0,0],[.16,0],[.18,.19],[.16,.19],[.14,.025],[0,.025]],segments:8,tint:'iron'},box([-.22,1.08,0],[.23,.08,.23],'raw','!@cooked'),box([-.22,1.17,0],[.25,.02,.25],'soup','@servings>1'),box([-.22,1.11,0],[.23,.02,.23],'soup','@cooked&@servings>0&@servings<=1')]}},
+ palette:{iron:'#454b50',wood:'#a4865c',fire:'#ef8932',raw:'#78a252',soup:'#d88b3b'},params:{},
+ state:{ingredients:{type:'number',min:0,max:3,default:3},water:{type:'number',min:0,max:3,default:3},fuel:{type:'number',min:0,max:1,default:1},on:{type:'bool',default:true},cooked:{type:'bool',default:false},servings:{type:'number',min:0,max:3,default:0},madeBy:{type:'string',max:80,default:''},lastReceipt:{type:'string',max:120,default:''},lastCompletedTick:{type:'number',default:-1}},
+ slots:[{id:'bowl',kind:'surface',p:[.3,.96,0],height:.96,yaw:0,accepts:{maxSize:[.28,.2,.28],maxMass:1},capacity:1},{id:'worker',kind:'stand',p:[0,0,1],yaw:Math.PI,accepts:{},capacity:1}],components:{surface:{height:.96}},size:{box:[.95,1.22,.55]},
+ actions:[act('cook-soup','Cook supplied vegetables and water (10 seconds; empty hands)'),act('ladle-soup','Ladle one serving into the supported empty soup bowl (4 seconds)')]
+} as unknown as DefInput,{
+ schema:'def/1',name:'core-camp-soup-bowl',version:1,form:'point',tags:['camping','item','edible','food','recorded-item'],
+ description:'A reusable portable camp soup bowl. Put it on the camp soup pot serving shelf empty, ladle one serving, pick up and eat two native bites. The same empty bowl remains and can be refilled from remaining pot stock.',
+ make:{kind:'gen',gen:'kit/2',args:{round:0,shapes:[{kind:'lathe',at:[0,0,0],profile:[[0,0],[.065,0],[.12,.1],[.107,.1],[.057,.014],[0,.014]],segments:8,tint:'shell'},{kind:'cyl',at:[0,.075,0],r:.096,h:.018,segments:8,tint:'soup',when:'@left>0.6'},{kind:'cyl',at:[0,.032,0],r:.075,h:.018,segments:8,tint:'soup',when:'@left>0.05&@left<=0.6'}]}},palette:{shell:'#e7ddbd',soup:'#d88b3b'},params:{},state:{left:{type:'number',min:0,max:1,default:0},bites:{type:'number',min:2,max:2,default:2},servedBy:{type:'string',max:80,default:''}},components:{carryable:{mass:.3,grips:1}},size:{box:[.24,.1,.24]},
+ actions:[{name:'bite',label:'Take a bite of soup',when:[{field:'left',gt:0}],then:[{op:'set',field:'left',value:0}]},{name:'eat',label:'Eat remaining soup; retain bowl',when:[{field:'left',gt:0}],then:[{op:'set',field:'left',value:0}]}]
+} as unknown as DefInput];
