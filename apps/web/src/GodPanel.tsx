@@ -154,7 +154,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   // Lane HF (Gene 2026-10-20): the approval stays on screen and on top for everyone, the god included, whatever loads or
   // settles later (Clerk, the god's status, God Mode, the arrival), until approved, refused or closed. Closing drops the link.
   // Lane PUX: a request the person's agent addressed to this window (its window code) shows here too, with no navigation.
-  const waiting = useWindowApprovals(signedIn && session.mode !== 'dev');
+  const waiting = useWindowApprovals(signedIn && session.mode !== 'dev', true);   // #2245: with login and retire requests
   const [windowId, setWindowId] = useState<string | null>(null);
   useEffect(() => { if (!windowId) setWindowId(pickWindowApproval(waiting, closedApprovals())); }, [waiting, windowId]);
   const shownId = approvalId ?? windowId;

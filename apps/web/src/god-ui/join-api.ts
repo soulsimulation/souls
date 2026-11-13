@@ -11,6 +11,14 @@ export type SoulHere = { id: string; entityId: string; name: string; since: numb
 export type Approval = { id: string; worldId: string; agentLabel: string; name: string; description: string; mode: 'create' | 'repair'; status: 'pending' | 'creating' | 'ready' | 'refused' | 'cancelled' | 'expired'; soulId: string | null; expiresAt: number; reason?: { code: string; message: string };
   /** Lane PUX: addressed to this account with a window code, so its open world window shows it; the Soul's picture once it exists. */
   inWindow?: boolean; photo?: string | null };
+/** #2245 (`account-grant/1`, #2242): an agent asks to log in to the account, or to retire one of its Souls. */
+export type AccountRequest = { id: string; kind: 'login' | 'retire'; status: 'pending' | 'ready' | 'cancelled' | 'expired'; agentLabel: string; device: { name: string };
+  soul: { id: string; name: string } | null; confirm: string; createdAt: number; expiresAt: number; inWindow: boolean };
+/** One live account login (grant) of this account. */
+export type ConnectedAgent = { id: string; agentLabel: string; device: { name: string }; createdAt: number; lastUsedAt: number | null };
+/** An error answer: the server's `{ok:false, code, message}`, or the contract's `{error:{code, message}}`. */
+type ErrorBody = { code?: string; message?: string; error?: { code?: string; message?: string } };
+const errorMessage = (d: ErrorBody) => d.error?.message ?? d.message;
 
 /** The signed-in person's Souls in this world; null when nobody is signed in (or the world refuses them). */
 export async function mySouls(): Promise<MySoul[] | null> {
@@ -38,17 +46,52 @@ export async function approval(id: string, action?: 'approve' | 'cancel' | 'rene
   if (!r.ok || !valid(d.approval, id, d.world?.id ?? '')) throw new Error(r.status === 403 ? 'This approval belongs to another account.' : d.message ?? 'This approval is unavailable. Sign in with the intended account and check again.');
   return d.approval;
 }
-/** Lane PUX: the requests waiting for this account in this world (addressed to it with a window code), newest first.
- *  null = this world has no such list (an older server), stop asking. */
-export async function waitingApprovals(): Promise<Approval[] | null> {
-  const headers = await userAuthHeaders(); if (!headers.authorization) return [];
+/** Lane PUX: the requests waiting for this account in this world (addressed to it with a window code), newest first;
+ *  #2245: with the account requests (login, retire) of the same answer. null = this world has no such list (an older
+ *  server), stop asking. */
+export async function waitingApprovals(): Promise<{ approvals: Approval[]; requests: AccountRequest[] } | null> {
+  const none = { approvals: [], requests: [] };
+  const headers = await userAuthHeaders(); if (!headers.authorization) return none;
   try {
     const r = await fetch(apiPath('/v1/account/approvals'), { headers, cache: 'no-store' });
     if (r.status === 404 || r.status === 405) return null;
-    if (!r.ok) return [];
-    const d = await r.json() as { approvals?: Approval[] };
-    return (d.approvals ?? []).filter((a) => a && typeof a.id === 'string' && valid(a, a.id));
-  } catch { return []; }
+    if (!r.ok) return none;
+    const d = await r.json() as { approvals?: Approval[]; requests?: AccountRequest[] };
+    return { approvals: (d.approvals ?? []).filter((a) => a && typeof a.id === 'string' && valid(a, a.id)),
+      requests: (Array.isArray(d.requests) ? d.requests : []).filter((q) => q && typeof q.id === 'string' && validRequest(q, q.id)) };
+  } catch { return none; }
+}
+const KINDS = ['login', 'retire'], REQUEST_STATUSES = ['pending', 'ready', 'cancelled', 'expired'];
+/** A world's answer about one account request is that request, well formed (its texts are the agent's, shown as such). */
+export function validRequest(value: unknown, id: string): value is AccountRequest {
+  const q = value as Partial<AccountRequest> | null;
+  return !!q && typeof q === 'object' && q.id === id && /^aq_[a-f0-9]{32}$/.test(id) && KINDS.includes(q.kind as string) && REQUEST_STATUSES.includes(q.status as string)
+    && typeof q.agentLabel === 'string' && typeof q.device?.name === 'string' && typeof q.confirm === 'string'
+    && (q.kind === 'login' || (typeof q.soul?.id === 'string' && typeof q.soul?.name === 'string'));
+}
+/** #2245: read (or answer) one account request as the signed-in person. */
+export async function accountRequest(id: string, action?: 'approve' | 'cancel'): Promise<AccountRequest> {
+  const headers = await userAuthHeaders(); if (!headers.authorization) throw new Error('Sign in first.');
+  const r = await fetch(apiPath(`/v1/account/requests/${id}${action ? '/' + action : ''}`), { method: action ? 'POST' : 'GET', headers: { ...headers, ...(action ? { 'content-type': 'application/json' } : {}) }, ...(action ? { body: '{}' } : {}), cache: 'no-store' });
+  const d = await r.json().catch(() => ({})) as ErrorBody & { request?: AccountRequest };
+  if (!r.ok || !validRequest(d.request, id)) throw new Error(r.status === 403 ? 'This request belongs to another account.' : errorMessage(d) ?? 'This request is unavailable. Sign in with the intended account and check again.');
+  return d.request;
+}
+/** #2245: the agents logged in to this account (its live grants); null when this world has no such list. */
+export async function connectedAgents(): Promise<ConnectedAgent[] | null> {
+  const headers = await userAuthHeaders(); if (!headers.authorization) return null;
+  try {
+    const r = await fetch(apiPath('/v1/account/agents'), { headers, cache: 'no-store' });
+    if (!r.ok) return null;
+    const d = await r.json() as { agents?: ConnectedAgent[] };
+    return (Array.isArray(d.agents) ? d.agents : []).filter((g) => g && typeof g.id === 'string' && typeof g.agentLabel === 'string' && typeof g.device?.name === 'string');
+  } catch { return null; }
+}
+/** #2245: end one agent's login to this account. */
+export async function disconnectAgent(id: string): Promise<void> {
+  const headers = await userAuthHeaders(); if (!headers.authorization) throw new Error('Sign in first.');
+  const r = await fetch(apiPath(`/v1/account/agents/${encodeURIComponent(id)}/revoke`), { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: '{}', cache: 'no-store' });
+  if (!r.ok) throw new Error(errorMessage(await r.json().catch(() => ({})) as ErrorBody) ?? 'Could not disconnect this agent.');
 }
 /** Lane PUX: this page's window code (ABCD-EFGH), for the New Soul prompt; an agent that passes it reaches this window. */
 export async function windowCode(): Promise<string | null> {

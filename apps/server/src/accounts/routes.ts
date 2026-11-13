@@ -10,8 +10,14 @@ const codeSchema=z.object({for:z.string().max(16)}).strict();
 const UNKNOWN_CODE='That window code is unknown or has expired. Ask your person for the one on their open page.';
 const pollSchema=z.object({approvalId:z.string().regex(/^ap_[a-f0-9]{32}$/),pollSecret:z.string().regex(/^[A-Za-z0-9_-]{43}$/)}).strict();
 /** #1274: a name as a person might retype it. The world's own check folds ASCII case only, and a second Soul is what this prevents. */
+// #2243 (account-grant/1, #2242)
+const secret=z.string().regex(/^[A-Za-z0-9_-]{43}$/),key=z.string().min(16).max(256);
+const loginSchema=z.object({agentLabel:z.string().min(1).max(120),device:z.object({id:z.string().regex(/^dev_[a-f0-9]{32}$/),name:z.string().min(1).max(60)}).strict(),idempotencyKey:key,pollSecret:secret,for:z.string().max(16).optional()}).strict();
+const requestPollSchema=z.object({requestId:z.string().regex(/^aq_[a-f0-9]{32}$/),pollSecret:secret}).strict();
+const grantPairSchema=z.object({agentLabel:z.string().min(1).max(120),idempotencyKey:key,pollSecret:secret}).strict();
+const grantRetireSchema=z.object({idempotencyKey:key,pollSecret:secret}).strict();
 const foldName=(name:string)=>name.trim().normalize('NFC').toLowerCase();
-export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Auth;baseOf:(c:Context)=>string;limit:(c:Context,key:string,max:number,ms:number)=>void;control?:(soulId:string)=>{held:boolean;state:string;since:number|null}|null}){
+export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Auth;baseOf:(c:Context)=>string;limit:(c:Context,key:string,max:number,ms:number)=>void;control?:(soulId:string)=>{held:boolean;state:string;since:number|null}|null;agentOf?:(soulId:string)=>{label:string|null;since:number|null}|null;refreshMe?:(ownerId:string)=>void}){
  const {accounts,auth}=deps;
  const verified=async(c:Context)=>{const account=await auth.accountFromToken(c.req.header('authorization')?.replace(/^Bearer\s+/i,''));if(!account)throw new ApiError(401,'account-signin-required','Sign in with Google or email.');accounts.verifySession(account.identity);return account;};
  const json=async(c:Context)=>{try{return await c.req.json();}catch{throw new ApiError(400,'invalid','Body must be JSON.');}};
@@ -47,9 +53,30 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
  app.get('/v1/account/approvals/:id',c=>wrap(c,async()=>{const {identity}=await verified(c);return {approval:shown(accounts.view(identity,c.req.param('id'))),world:world(c)};}));
  // Lane PUX: the signed-in page's window code (for its person's agent), and the requests addressed to it that wait
  app.post('/v1/account/window-code',c=>wrap(c,async()=>{const {identity}=await verified(c);deps.limit(c,'account-window-code',20,60000);return accounts.store.windowCode(identity);}));
- app.get('/v1/account/approvals',c=>wrap(c,async()=>{const {identity}=await verified(c);return {approvals:accounts.store.waiting(identity).map(shown)};}));
+ app.get('/v1/account/approvals',c=>wrap(c,async()=>{const {identity}=await verified(c);return {approvals:accounts.store.waiting(identity).map(shown),requests:accounts.logins.waiting(identity.id)};}));
  app.post('/v1/account/approvals/:id/renew',c=>wrap(c,async()=>{const {identity}=await verified(c);deps.limit(c,'account-renew',10,60000);return {approval:shown(accounts.store.renew(identity,c.req.param('id'))),world:world(c)};}));
  app.post('/v1/account/approvals/:id/approve',c=>wrap(c,async()=>{const {identity}=await verified(c);deps.limit(c,'account-approve',10,60000);return {approval:shown(await accounts.approveSettled(identity,c.req.param('id'))),world:world(c)};}));
  app.post('/v1/account/approvals/:id/cancel',c=>wrap(c,async()=>{const {identity}=await verified(c);return {approval:shown(accounts.store.cancel(identity,c.req.param('id'))),world:world(c)};}));
  app.post('/v1/account/souls/:id/revoke',c=>wrap(c,async()=>{const {identity}=await verified(c),row=accounts.host.db.soul(c.req.param('id'));if(!row||!accounts.owns(identity.id,row))throw new ApiError(403,'forbidden','Not your Soul.');accounts.revoke(identity,row.id);return {ok:true,soulId:row.id};}));
+ // #2243: an account grant. The agent starts a login, the signed-in person approves it, the agent polls for an sacct_ token.
+ const bearer=(c:Context)=>c.req.header('authorization')?.replace(/^Bearer\s+/i,'');
+ const grantOf=(c:Context)=>{const out=accounts.agentAccount(bearer(c));if(!out)throw new ApiError(401,'account.unknown','This world never issued this account token. Log in again.');if('revoked' in out)throw new ApiError(401,'account.revoked','This account login has ended. Log in again.',{reason:out.revoked});return out.grant;};
+ const requestReply=(c:Context,request:{id:string;inWindow:boolean})=>({request,world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${request.id}`,delivery:request.inWindow?'window':'link',intervalSeconds:3});
+ app.post('/v1/agent/account/login',c=>wrap(c,async()=>{deps.limit(c,'account-login-start',6,60000);const p=parse(loginSchema,await json(c));return requestReply(c,accounts.logins.startLogin({agentLabel:p.agentLabel,device:p.device,idempotencyKey:p.idempotencyKey,pollSecret:p.pollSecret,forCode:p.for}));}));
+ app.post('/v1/agent/account/requests/poll',c=>wrap(c,async()=>{deps.limit(c,'account-login-poll',60,60000);const p=parse(requestPollSchema,await json(c)),{request,...rest}=accounts.logins.poll(p.requestId,p.pollSecret);return {request,world:world(c),...rest};}));
+ app.post('/v1/agent/account/requests/cancel',c=>wrap(c,async()=>{const p=parse(requestPollSchema,await json(c));return {request:accounts.logins.cancel(null,p.requestId,p.pollSecret),world:world(c)};}));
+ app.get('/v1/agent/account',c=>wrap(c,async()=>{const grant=grantOf(c);
+  const souls=accounts.rows(grant.accountId).map(s=>({id:s.id,name:s.name,control:deps.control?.(s.id)??{held:false,state:'disconnected',since:null},agent:deps.agentOf?.(s.id)??null}));
+  return {account:{id:grant.accountId},grant:{id:grant.id,agentLabel:grant.agentLabel,device:grant.device,createdAt:grant.createdAt},world:world(c),souls,maxSouls:accounts.souls.cfg.maxSoulsPerUser};}));
+ app.post('/v1/agent/account/logout',c=>wrap(c,async()=>{accounts.logins.logout(grantOf(c).id);return {ok:true};}));
+ app.post('/v1/agent/account/souls/:id/pair',c=>wrap(c,async()=>{const grant=grantOf(c);deps.limit(c,'account-grant-pair',10,60000);const p=parse(grantPairSchema,await json(c));return {approval:shown(await accounts.pairByGrant(grant,c.req.param('id'),p)),world:world(c),delivery:'account',intervalSeconds:3};}));
+ app.post('/v1/agent/account/souls/:id/revoke',c=>wrap(c,async()=>{const grant=grantOf(c);return {ok:true,soulId:accounts.revokeByGrant(grant,c.req.param('id'))};}));
+ app.post('/v1/agent/account/souls/:id/retire',c=>wrap(c,async()=>{const grant=grantOf(c);deps.limit(c,'account-grant-retire',6,60000);const p=parse(grantRetireSchema,await json(c));return requestReply(c,accounts.startRetire(grant,c.req.param('id'),p));}));
+ app.get('/v1/account/requests/:id',c=>wrap(c,async()=>{const {identity}=await verified(c);return {request:accounts.logins.view(c.req.param('id'),identity.id),world:world(c)};}));
+ app.post('/v1/account/requests/:id/approve',c=>wrap(c,async()=>{const {identity}=await verified(c);deps.limit(c,'account-approve',10,60000);const id=c.req.param('id');
+  if(accounts.logins.kind(id)==='login')return {request:accounts.logins.approveLogin(identity.id,id),world:world(c)};
+  const {request,owner}=await accounts.approveRetire(identity,id);if(owner)deps.refreshMe?.(owner);return {request,world:world(c)};}));
+ app.post('/v1/account/requests/:id/cancel',c=>wrap(c,async()=>{const {identity}=await verified(c);return {request:accounts.logins.cancel(identity.id,c.req.param('id')),world:world(c)};}));
+ app.get('/v1/account/agents',c=>wrap(c,async()=>{const {identity}=await verified(c);return {agents:accounts.logins.agents(identity.id)};}));
+ app.post('/v1/account/agents/:id/revoke',c=>wrap(c,async()=>{const {identity}=await verified(c);accounts.logins.revokeAgent(identity.id,c.req.param('id'));return {ok:true};}));
 }

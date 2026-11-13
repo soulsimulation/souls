@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ACT_ENDED_GRACE_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
-import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, followLine, pendingNotes } from './soul/eden.mjs';
+import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState, pendingNotes } from './soul/eden.mjs';
+import { indexCatalog } from './soul/catalog.mjs';
 
 const T0 = 1_800_000_000_000;
 /** serve's state as it stands after a first look: the engine's cursor at the end of everything. */
@@ -194,7 +195,7 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   assert.equal((await w.cli('serve')).code, 0);
   r = await w.cli('wake', 'remove', 'w1');
   assert.equal(r.code, 0, r.err);
-  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w2'], 'kept across the restart');
+  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w2'], 'kept across the restart');
   assert.equal(r.json.queued, 0, 'nothing waits for a reader that never comes (#1981)');
   assert.ok(r.json.rules.find((x) => x.id === 'owner-message').lastFired);
 });
@@ -541,4 +542,79 @@ test('#1981 A2: help living names the 1,800 s cap and says to chain or repeat ac
   assert.equal(long.gap, '45 minutes is longer than one activity (at most 1800 s): help living has the Soul chain activities, or repeat one, to cover the gap.');
   for (const every of ['30', '15']) assert.equal((await w.cli('wake', 'heartbeat', '--every', every)).json.gap, undefined, `${every} minutes fits one activity`);
   assert.match((await w.cli('wake', 'heartbeat')).json.gap, /^60 minutes/, 'the default heartbeat is longer than one activity');
+});
+
+// #1931: three more kinds, on recorded state. Envelopes as the world's classified stream sends them (envelope.ts).
+const ambient = (id, soulId, name, text) => ({ id, tick: 9, at: T0, kind: 'speech.ambient', salience: 1, about: { soulId, name }, where: { dist: 6, bearing: 'left' }, text: `${name} (6 m, left): "${text}"`, untrusted: true, raw: 'speech', data: { from: { soulId, name }, text } });
+const starting = (id, title) => ({ id, tick: 9, at: T0, kind: 'schedule.starting', salience: 2, text: `"${title}" is starting now at Commons.`, untrusted: true, raw: 'schedule', data: { placeId: 'g-commons', startsAtTick: 9 } });
+
+test('#1931 A1: the stream reader keeps speech.ambient and schedule.starting in serve\'s state; addressed speech is folded as before', () => {
+  const st = loadServeState.fresh();
+  assert.equal(foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')), true);
+  assert.equal(foldHeard(st, starting('c_2', 'Open mic')), true);
+  assert.equal(foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')), false, 'once each');
+  assert.equal(foldHeard(st, { id: 'c_3', kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, data: { text: 'Ada?' } }), false, 'addressed speech is not one of them');
+  assert.deepEqual(st.heard.map((x) => [x.seq, x.kind, x.from, x.text, x.untrusted]), [[1, 'speech.ambient', 'Bo', 'nice day', true], [2, 'schedule.starting', null, '"Open mic" is starting now at Commons.', true]]);
+  assert.equal(foldAddressed(st, ambient('c_4', 's_bo', 'Bo', 'hm')), false, 'ambient speech never reaches the addressed store');
+  assert.equal(foldAddressed(st, { id: 'c_3', kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, data: { text: 'Ada?' } }), true);
+  assert.deepEqual([st.addressed.length, st.heardSeq], [1, 2]);
+  for (let i = 0; i < 30; i++) foldHeard(st, ambient(`n_${i}`, 's_bo', 'Bo', `line ${i}`));
+  assert.equal(st.heard.length, 20, 'the newest few are kept');
+});
+
+test('#1931 A2, A4: speech-near-me fires on speech in earshot not said to this Soul, off by default, untrusted, and within the budget', () => {
+  assert.ok(!fresh().rules.some((x) => x.kind === 'speech-near-me'), 'off by default');
+  assert.throws(() => parseRule(['speech-near-me', '{"who":"s_bo"}']), /no params/);
+  const st = serveState({ heard: [], heardSeq: 0 }), rules = [{ id: 'w1', ...parseRule(['speech-near-me', '--every', '0']) }];
+  let r = step(rules, st, T0);
+  foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')); foldHeard(st, ambient('c_2', 's_me', 'Me', 'my own words')); foldHeard(st, starting('c_3', 'Open mic'));
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.kind, f.why, f.untrusted]), [['w1', 'speech-near-me', 'Bo said nearby: "nice day"', true]], 'not this Soul\'s own words, not the event');
+  assert.deepEqual(step(r.rules, st, T0 + 4_000).fired, [], 'a line wakes once');
+  // a noisy place: a line every 2 s for an hour, one listen polling and nobody confirming: the budget holds
+  for (const hour of ['quiet', 'normal']) {
+    const s2 = serveState({ heard: [], heardSeq: 0 });
+    let wake = { ...fresh(), rules: [{ id: 'w1', ...parseRule(['speech-near-me', '--every', '0']) }], budget: { hour } }, handed = 0;
+    for (let t = 0; t < HOUR; t += 2_000) {
+      foldHeard(s2, ambient(`c_${t}`, 's_bo', 'Bo', `line ${t}`));
+      const e = evaluate(wake.rules, { ...s2, wake }, T0 + t);
+      wake = { ...wake, rules: e.rules, cursor: e.cursor, queue: enqueue(wake.queue, e.fired) };
+      const d = deliver(confirm(wake, 'L'), T0 + t, { reader: 'L' });
+      if (d.wakes.length) { handed++; assert.equal(d.wakes[0].untrusted, true, 'another Soul\'s words stay labelled'); }
+      wake = d.wake;
+    }
+    assert.equal(handed, BUDGETS[hour], `${hour}: ${handed} deliveries, never more than the budget`);
+  }
+});
+
+test('#1931 A2, A4: event-starting fires on schedule.starting, on by default', () => {
+  assert.ok(fresh().rules.some((x) => x.id === 'event-starting' && !x.always), 'on by default, and removable');
+  assert.equal(change(fresh(), { remove: 'event-starting' }).removed, 'event-starting');
+  const st = serveState({ heard: [], heardSeq: 0 });
+  foldHeard(st, starting('c_0', 'Before this serve looked'));
+  let r = step(fresh().rules, st, T0);
+  assert.deepEqual(r.fired, [], 'a first look starts from now');
+  foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')); foldHeard(st, starting('c_2', 'Open mic'));
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why, f.untrusted]), [['event-starting', '"Open mic" is starting now at Commons.', true]]);
+  assert.deepEqual(step(r.rules, st, T0 + 4_000).fired, []);
+});
+
+test('#1931 A3, A4: thing-state fires when that field of that thing changes, read through thingState with the kind\'s defaults', () => {
+  const catalog = indexCatalog({ places: [{ id: 'g-v', name: 'Village', kind: 'area', at: [0, 0] }], acts: [], things: [{ id: 'e_ch', name: 'porch-chest', kind: 'core-chest', place: 'g-v', at: [1, 0] }],
+    kinds: { 'core-chest': { acts: [{ verb: 'open', label: 'Open' }], state: { open: false, locked: false } } } });
+  assert.throws(() => parseRule(['thing-state', '{"thing":"e_ch"}']), /thing-state takes/);
+  assert.throws(() => parseRule(['thing-state', '{"thing":"e_ch","field":"open","is":{"x":1}}']), /thing-state takes/);
+  const any = { id: 'w1', ...parseRule(['thing-state', '{"thing":"e_ch","field":"open"}', '--every', '0']) }, closed = { id: 'w2', ...parseRule(['thing-state', '{"thing":"e_ch","field":"open","is":false}', '--every', '0']) };
+  const st = serveState({ catalog, live: { souls: [], things: {} } });
+  let r = step([any, closed], st, T0);
+  assert.deepEqual([r.fired, ruleOf(r, 'w1').was], [[], 'false'], 'the first look takes the default in, wakes no one');
+  st.live = { souls: [], things: { e_ch: { open: true } } };
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now true']], 'is:false waits for false');
+  assert.deepEqual((r = step(r.rules, st, T0 + 4_000)).fired, [], 'unchanged: no wake');
+  st.live = { souls: [], things: { e_ch: { locked: true } } };   // the live row no longer names open: the kind's default stands
+  r = step(r.rules, st, T0 + 6_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now false'], ['w2', 'e_ch open is now false']]);
+  assert.deepEqual(step(r.rules, { ...st, catalog: null }, T0 + 8_000).fired, [], 'no catalog copy: nothing is read');
 });

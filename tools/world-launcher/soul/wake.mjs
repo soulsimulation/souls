@@ -4,6 +4,9 @@
 // #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
 // rule over it, and stay held until a command from another process reaches serve, or go back to the queue after HELD_MS. Each
 // handing to a reader is one delivery and is charged once: the budget's count is the deliveries made, never more than it allows.
+// #1931: speech in earshot not said to this Soul, an interested event starting, and a thing's state changing are three more
+// ambient kinds, through the same budget and delivery. A wake carrying another Soul's words is marked untrusted.
+import { thingState } from "./catalog.mjs";
 import { newerThan } from "./home.mjs";
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
@@ -15,13 +18,14 @@ const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupt
 const FIRED_KEEP = 200;   // receipt ids act-ended has woken for, so one end wakes once (serve keeps the newest 200 ended receipts)
 /** Kinds that are always on: the three wakes serve had before rules. */
 export const ALWAYS = ["owner-message", "speech-to-me", "plan-stopped"];
-/** Kinds `wake add` takes. act-ended and plan-finished are on by default and can be removed and added again. */
-export const ADDABLE = ["act-ended", "plan-finished", "soul-arrives", "place-busy", "at", "every", "idle"];
+/** Kinds `wake add` takes. act-ended, plan-finished and event-starting are on by default and can be removed and added again. */
+export const ADDABLE = ["act-ended", "plan-finished", "soul-arrives", "place-busy", "at", "every", "idle", "speech-near-me", "event-starting", "thing-state"];
+const DEFAULT_ON = ["act-ended", "plan-finished", "event-starting"];
 /** #1930: `wake add every <minutes>` takes at least this many. */
 export const EVERY_MIN = 5;
 
 export function fresh() {
-  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), ...["act-ended", "plan-finished"].map((kind) => ({ id: kind, kind, every: 0 }))], cursor: null, queue: [], next: 1 };
+  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), ...DEFAULT_ON.map((kind) => ({ id: kind, kind, every: 0 }))], cursor: null, queue: [], next: 1 };
 }
 
 /** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
@@ -66,10 +70,15 @@ export function parseRule(argv) {
   if (text !== undefined) { try { p = JSON.parse(text); } catch { throw new Error(`${kind}: params must be JSON`); } }
   if (!p || typeof p !== "object" || Array.isArray(p)) throw new Error(`${kind}: params must be a JSON object`);
   const id = (v) => typeof v === "string" && /^\S{1,100}$/.test(v);
-  if (kind === "act-ended" || kind === "plan-finished") { if (Object.keys(p).length) throw new Error(`${kind} takes no params`); return { kind, every }; }
+  if (["act-ended", "plan-finished", "event-starting", "speech-near-me"].includes(kind)) { if (Object.keys(p).length) throw new Error(`${kind} takes no params`); return { kind, every }; }
   if (kind === "idle") {
     if (Object.keys(p).some((k) => k !== "minutes") || !Number.isInteger(p.minutes) || p.minutes < EVERY_MIN) throw new Error(`idle takes {"minutes":<n>}, at least ${EVERY_MIN}`);
     return { kind, params: { minutes: p.minutes }, every };
+  }
+  if (kind === "thing-state") {
+    const scalar = (v) => v === null || ["string", "number", "boolean"].includes(typeof v);
+    if (Object.keys(p).some((k) => !["thing", "field", "is"].includes(k)) || !id(p.thing) || !id(p.field) || ("is" in p && !scalar(p.is))) throw new Error('thing-state takes {"thing":"<thingId>","field":"<state field>","is":<value, optional>}');
+    return { kind, params: { thing: p.thing, field: p.field, ...("is" in p ? { is: p.is } : {}) }, every };
   }
   if (kind === "soul-arrives") {
     const params = { who: p.who ?? "any", where: p.where ?? "here" };
@@ -182,8 +191,9 @@ function after(list, cursorId, first) {
 const who = (live, id) => live.souls.find((r) => r.id === id)?.name ?? id;
 
 /** Pure: the rules against serve's state at `now` (ms). state: serve's state ({events, receipts, plan, planEnded, messages,
- *  addressed, addressedSeq, lastCommandAt, wake: {cursor}}) with `live` (the live copy's picture, or null), `me` (this Soul's id)
- *  and `since` (when this serve started, ms: a time that passed before it is dropped, never fired late).
+ *  addressed, addressedSeq, heard, heardSeq, lastCommandAt, wake: {cursor}}) with `live` (the live copy's picture, or null), `me`
+ *  (this Soul's id), `since` (when this serve started, ms: a time that passed before it is dropped, never fired late) and `catalog`
+ *  (the catalog's lookups, for thing-state, or null).
  *  Returns the rules with their last match, last firing and change state, the engine's cursor, and the wakes fired now. */
 export function evaluate(rules, state, now) {
   const prev = state.wake?.cursor ?? null, first = !prev;
@@ -191,18 +201,19 @@ export function evaluate(rules, state, now) {
   const newEvents = after(events, prev?.event, first);
   const newMessages = first ? [] : prev.message && messages.some((m) => m.id === prev.message) ? after(messages, prev.message, false) : messages.filter((m) => (m.seenAt ?? 0) > (prev.messageAt ?? 0));
   const newSpeech = first ? [] : addressed.filter((x) => x.seq > (prev.addressed ?? 0));
+  const newHeard = first ? [] : (state.heard ?? []).filter((x) => x.seq > (prev.heard ?? 0));
   const last = messages.at(-1);
-  const cursor = { event: events.at(-1)?.id ?? prev?.event ?? null, message: last?.id ?? prev?.message ?? null, messageAt: last?.seenAt ?? prev?.messageAt ?? 0, addressed: Math.max(state.addressedSeq ?? 0, prev?.addressed ?? 0) };
+  const cursor = { event: events.at(-1)?.id ?? prev?.event ?? null, message: last?.id ?? prev?.message ?? null, messageAt: last?.seenAt ?? prev?.messageAt ?? 0, addressed: Math.max(state.addressedSeq ?? 0, prev?.addressed ?? 0), heard: Math.max(state.heardSeq ?? 0, prev?.heard ?? 0) };
   const live = Array.isArray(state.live?.souls) ? state.live : null;
   const planReceipts = new Set([state.plan, ...(state.planEnded ?? [])].flatMap((p) => p?.steps ?? []).map((s) => s.receipt).filter(Boolean));
   const fired = [];
   const out = rules.map((r0) => {
     const r = { ...r0 };
-    const fire = (why) => {
+    const fire = (why, untrusted = false) => {
       r.lastMatch = now;
       if (r.every && r.lastFired && now - r.lastFired < r.every * 1000) return false;
       r.lastFired = now;
-      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString() });
+      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString(), ...(untrusted ? { untrusted: true } : {}) });
       return true;
     };
     if (r.kind === "owner-message") for (const m of newMessages) { if (!m.acked) fire(`the owner wrote (${m.id})`); }
@@ -257,6 +268,20 @@ export function evaluate(rules, state, now) {
       if (state.plan?.state === "running") r.planAt = now;
       const key = state.lastCommandAt ?? 0, quietSince = Math.max(key, state.since ?? 0, r.planAt ?? 0);
       if (r.idleFor !== key && now - quietSince >= r.params.minutes * 60_000 && fire(`no command for ${r.params.minutes} minutes`)) r.idleFor = key;
+    } else if (r.kind === "speech-near-me") {
+      // #1931: the world's classified stream says it was said in earshot and not to this Soul; another Soul's words
+      for (const x of newHeard) if (x.kind === "speech.ambient" && x.soulId !== state.me) fire(`${x.from ?? "someone"} said nearby: "${String(x.text ?? "").slice(0, 100)}"`, true);
+    } else if (r.kind === "event-starting") {
+      // #1931: the world sends schedule.starting only to the Souls that marked the item interested; its title is a Soul's words
+      for (const x of newHeard) if (x.kind === "schedule.starting") fire(String(x.text ?? "an event you marked is starting").slice(0, 160), true);
+    } else if (r.kind === "thing-state" && live && state.catalog) {
+      // #1931: the field as the client reads it (the kind's defaults under the live states); the first look only takes it in
+      const t = state.catalog.things.get(r.params.thing), s = t ? thingState(state.catalog, t, live.things) : null;
+      if (s && r.params.field in s) {
+        const v = JSON.stringify(s[r.params.field]);
+        if (r.was !== undefined && v !== r.was && (!("is" in r.params) || v === JSON.stringify(r.params.is))) fire(`${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}`);
+        r.was = v;
+      }
     } else if (r.kind === "soul-arrives" && live) {
       const place = r.params.where === "here" ? live.souls.find((x) => x.id === state.me)?.place : r.params.where;
       if (place) {
