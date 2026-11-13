@@ -1,0 +1,1 @@
+Adds a supplied marshmallow skewer and opt-in campfire: toast the held marshmallow's exposed side, turn it, then toast the other side through completed native work. The same portable wooden stick remains after native eating.

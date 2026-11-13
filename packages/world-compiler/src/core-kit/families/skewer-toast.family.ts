@@ -1,0 +1,2 @@
+import{MARSHMALLOW_FIRE,MARSHMALLOW_SKEWER}from'../skewer-toast.ts';
+export default [MARSHMALLOW_FIRE,MARSHMALLOW_SKEWER];
