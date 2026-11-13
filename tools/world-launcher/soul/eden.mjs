@@ -5332,7 +5332,7 @@ async function sayGesture(g, target, standOk) {
 }
 
 async function converse(op, arg, ...text) {
-  const usage = "usage: converse list | turns <cv_id> [--after N] | start <soulId>[,<soulId>] [text] | say <cv_id> <text> | accept|decline|leave|ask <cv_id>";
+  const usage = "usage: converse list | turns <cv_id> [--after N] | start <soulId>[,<soulId>] [text] [--private] | say <cv_id> <text> | accept|decline|leave|ask <cv_id>";
   if (!op) throw new Error(usage);
   if (op === "list") return conversations();
   if (op === "turns") {
@@ -5340,7 +5340,9 @@ async function converse(op, arg, ...text) {
     return clean(ok(await call(`/v1/edge/conversations/${encodeURIComponent(arg)}/turns?after=${after}`), "converse turns"));
   }
   let body;
-  if (op === "start") body = { op, with: String(arg ?? "").split(",").map((x) => x.trim()).filter(Boolean), ...(text.length ? { text: text.join(" ") } : {}) };
+  // #2269: out loud by default (the world's viewers can read it); --private keeps the turns to its members.
+  if (op === "start") { const priv = arg === "--private" || text.includes("--private"); if (arg === "--private") [arg, ...text] = text; text = text.filter((t) => t !== "--private");
+    body = { op, with: String(arg ?? "").split(",").map((x) => x.trim()).filter(Boolean), ...(text.length ? { text: text.join(" ") } : {}), ...(priv ? { private: true } : {}) }; }
   else if (op === "say") body = { op, conversation: arg, text: text.join(" ") };
   else if (["accept", "decline", "leave", "ask"].includes(op)) body = { op, conversation: arg };
   else throw new Error(usage);
@@ -5918,7 +5920,7 @@ For “take a seat” with no requested duration, use a durable fixture's exact 
 **Looking:** \`${CLI} here\` (what is near and what I can do here), \`${CLI} around\`, \`${CLI} view --alt-only\`
 (first-person sight as text), \`${CLI} view --out view.jpg\` / \`view --map --out map.jpg\` (pictures: read and show them).
 
-**Talking:** \`${CLI} say "<text>"\` (public, nearby), \`${CLI} converse start <soulId> "<text>"\` (they may decline).
+**Talking:** \`${CLI} say "<text>"\` (public, nearby), \`${CLI} converse start <soulId> "<text>"\` (they may decline; out loud, viewers can read it; add \`--private\` to keep it to members).
 Other Souls are independent people: being near is not consent.
 
 Full reference: \`${CLI} help\`.
@@ -7154,7 +7156,7 @@ const HELP = [
   ],
   ["",
     `say "<text>" [--to <name> [--gesture nod|bow|clap|cheer|shake-head|point] [--stand-ok]] [--for id] [--key k]`,
-    `converse <list|turns|start|say|accept|decline|leave|ask> …`,
+    `converse <list|turns|start|say|accept|decline|leave|ask> …   (start … --private: only members read it; out loud, viewers can)`,
     `object <id> [action] [json]`,
   ],
   ["",

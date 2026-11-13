@@ -36,3 +36,13 @@ test('queue refresh takeover preserves definitely unsent conversation pending un
  const q=openClientQueue(root,{scope:'fixture',isPaused:f.isPaused,adapter:{runPublic:st=>runConversationStep(st,{...f,refresh:async()=>{f.conversations.reconcile({conversations:[view('member')]});await Promise.resolve();f.pause();}})}});t.after(()=>q.close());q.enqueue([{converse:'say',id:'cv_fixture',text:'Speak after refresh.'}]);await q.pump();assert.deepEqual(f.calls,[]);assert.equal(q.snapshot().steps[0].status,'pending');assert.equal(q.snapshot().steps[0].result.requestNotSent,true);f.resume();await q.pump();assert.deepEqual(f.calls,['say']);assert.equal(q.snapshot().steps[0].status,'completed');
  q.close();const uncertain=openClientQueue(root,{scope:'fixture',adapter:{runPublic:async()=>({accepted:null,requestNotSent:true,code:'local.attended',reason:'Earlier compound effects unconfirmed',again:false})}});t.after(()=>uncertain.close());uncertain.enqueue([{say:'Compound result not safe to replay'}],{id:'unknown-compound',replace:true});await uncertain.pump();assert.equal(uncertain.snapshot().steps[0].status,'blocked');assert.equal(uncertain.snapshot().notice.reason,'public-step-outcome-uncertain');uncertain.resume();assert.equal(uncertain.snapshot().steps[0].status,'blocked','ordinary resume must not repeat prior unknown effects');
 });
+test('a private start passes private:true; the CLI --private flag sets it and is not opening text (#2269)',async()=>{
+ const {conversationStartBody}=await import('./eden-agent.mjs');
+ assert.deepEqual(conversationStartBody('s_peer','Hello','there','--private'),{op:'start',with:['s_peer'],text:'Hello there',private:true});
+ assert.deepEqual(conversationStartBody('--private','s_peer','Hi'),{op:'start',with:['s_peer'],text:'Hi',private:true});
+ assert.deepEqual(conversationStartBody('--with','s_a,s_b','--private'),{op:'start',with:['s_a','s_b'],private:true});
+ assert.deepEqual(conversationStartBody('s_peer','Hi'),{op:'start',with:['s_peer'],text:'Hi'},'out loud by default');
+ const f=fixture(),args=[];f.converse=async(...a)=>{args.push(a);return {accepted:true,conversation:view('member')};};
+ await runConversationStep({converse:'start',with:['s_peer'],text:'Hi',private:true},{...f,refresh:async()=>{}});
+ assert.deepEqual(args[0],['start',['s_peer'],'Hi','--private']);
+});

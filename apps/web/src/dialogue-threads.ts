@@ -14,6 +14,8 @@ export type DialogueThread={id:string;kind:ThreadKind;conversation:string|null;p
  group:string|null;colour:string;
  /** Current conversation members (private), in join order. */
  members:string[];invited:string[];
+ /** #2269: a conversation its members chose to keep private; viewers get only who is talking (a '…' line). */
+ sealed?:boolean;
  /** Everyone named in the thread (speakers, members, hearers), soulId → name. */
  names:Map<string,string>;
  /** Aloud/inside/audience: who heard recent lines (server `heardBy`), soulId → last line `at`. */
@@ -49,6 +51,7 @@ function keyOf(m:DialogueEdgeMessage):string|null{
   case 'conversation.start':return c?'start:'+c:null;
   case 'conversation.member':{const who=ref(m.soul);return c&&who?`member:${c}:${who.soulId}:${String(m.change)}:${num(m.tick)}`:null;}
   case 'conversation.closed':return c?'closed:'+c:null;
+  case 'conversation.talking':{const who=ref(m.from);return c&&who?`talk:${c}:${who.soulId}:${num(m.tick)}:${num(m.at)}`:null;}
   default:return null;
  }
 }
@@ -114,8 +117,13 @@ export function ingestDialogue(store:DialogueStore,messages:readonly DialogueEdg
     else if(!t.members.includes(from.soulId))t.members.push(from.soulId);
     if(m.state==='closed')t.closed=true;
     addLine(t,{key,tick:num(turn?.tick,tick),at:num(turn?.at,at),soulId:from.soulId,name:from.name,text:said,replay});changed=true;
+   }else if(m.kind==='conversation.talking'){
+    const from=ref(m.from);if(!from)continue;const t=conversationThread(store,conversation,at);t.sealed=true;t.names.set(from.soulId,from.name);
+    if(!t.members.includes(from.soulId))t.members.push(from.soulId);
+    addLine(t,{key,tick,at,soulId:from.soulId,name:from.name,text:'…',replay});changed=true;
    }else if(m.kind==='conversation.start'){
     const t=conversationThread(store,conversation,at),from=ref(m.from),invited=Array.isArray(m.invited)?m.invited.map(ref).filter((r):r is Ref=>!!r):[];
+    if(m.private===true)t.sealed=true;
     if(from){t.names.set(from.soulId,from.name);if(!t.members.includes(from.soulId))t.members.push(from.soulId);}
     for(const r of invited){t.names.set(r.soulId,r.name);if(!t.invited.includes(r.soulId)&&!t.members.includes(r.soulId))t.invited.push(r.soulId);}
     t.closed=false;changed=true;
@@ -132,7 +140,7 @@ export function ingestDialogue(store:DialogueStore,messages:readonly DialogueEdg
  for(const line of talk){
   const key='talk:'+line.id;if(store.seen.has(key))continue;remember(store,key);
   if(!line.from||!line.text?.trim()||now-line.at>30*60_000)continue;
-  const pair=[line.from,line.to].filter(Boolean).sort(),t=conversationThread(store,'talk:'+pair.join('|'),line.at);
+  const pair=[line.from,line.to].filter(Boolean).sort(),t=conversationThread(store,'talk:'+pair.join('|'),line.at);t.sealed=true;
   if(line.to&&line.toName)t.names.set(line.to,line.toName);for(const id of pair)if(!t.members.includes(id))t.members.push(id);
   addLine(t,{key,tick:line.tick,at:line.at,soulId:line.from,name:line.fromName||'someone',text:line.text.trim(),replay:false});changed=true;
  }
@@ -155,7 +163,7 @@ export function participants(t:DialogueThread):string[]{
 export function hearingLabel(t:DialogueThread,nameOf:(soulId:string)=>string,now=Date.now()){
  const where=placeName(t.placeId);
  switch(t.kind){
-  case 'private':return {icon:'🔒',text:t.closed?'private · ended':'private · only they hear'};
+  case 'private':return t.sealed?{icon:'🔒',text:t.closed?'private · ended':'private · only they hear'}:{icon:'💬',text:t.closed?'conversation · ended':'conversation · out loud'};
   case 'inside':return {icon:'🏠',text:`inside ${where??'a room'} · only those inside hear`};
   case 'audience':return {icon:'📣',text:`to the audience${where?` · ${where}`:''}`};
   default:{
