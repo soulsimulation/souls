@@ -1,0 +1,15 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "#1627 final draft: colored weave grid reduced from7x6 (516triangles, existing library400triangle limit FAIL retained) to6x5 (372triangles). Bounds, pattern semantics, native motion, credit and material state unchanged. Existing whole-motion capture retains the earlier tessellation; final actual restart image qualifies the final grid. Both changed cloth revisions each placed/baked/rendered5production K=2 samples with0findings/gaps. No budget or earlier supplement was changed.",
+  "findings": [],
+  "pins": [
+    {
+      "def": "core-striped-cloth@1",
+      "hash": "b3b0de056f44972f55dc114384d8f0e26b78294aaacbdd93e730711475263ce3"
+    },
+    {
+      "def": "core-checked-cloth@1",
+      "hash": "69d921f03e7414903eb57b11d80c4f8659e470b32bd9aa49006dcfb56940c892"
+    }
+  ]
+}
