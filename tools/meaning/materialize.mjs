@@ -52,10 +52,6 @@ export function materialize(name,{patched=true,fixtures=true,seed=`meaning:${nam
   // unrelated objects when a later pond touches their coarse terrain tile. Both
   // arms must start with equal physical worlds; the live patch runs after the fix.
   const hasPlace=ref=>template.batches.some(b=>b.ops.some(op=>op.op==='place'&&op.name===ref));
-  if(fixtures&&name==='mars-two'&&!hasPlace('campus-swimming-pond')){
-    const path=`worlds/patches/unified-affordances-20261027/${name}.json`,batch=read(path);
-    template.batches.unshift(batch);provenance.push({path,sha:hashOf(batch)});
-  }
   const world=replay(template,{seed});
   const snapshot=()=>({...world.snapshot(),worldId:`${name}-1`});
   const append=(batch,note)=>{

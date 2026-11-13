@@ -60,9 +60,13 @@ test('#1281 H3: a walk offered only on demand is route-checked too: none from a 
 });
 
 test('#1281 H1: a water place keeps its walk, though the walk aims at its shore', {timeout: 300000}, async t => {
-  const {put, here, ids} = await world(t, marsTwo);
+  // The water is built here: Mars Two has none of its own (#1984 removed a pond that Mars College does not have).
+  const {w, put, here, ids} = await world(t, marsTwo);
+  const built = w.god.act({ops: [{op: 'place', def: 'core/pond@1', name: 'test-pond', params: {level: -0.2, depth: 2.6, edge: 6}, shape: {area: [[-34, -20], [-39, -13], [-44, -12], [-49, -13], [-54, -20], [-49, -27], [-44, -28], [-39, -27]]}},
+    {op: 'set', id: 'test-pond', about: {title: 'Test Pond', what: 'A body of water beside the main campus.', aliases: ['water'], kind: 'pond', role: 'landmark', salience: 3}}]} as never);
+  assert.equal(built.accepted, true, JSON.stringify(built)); await w.settle(8); w.edge.map();
   await put([450, 2]);
-  assert.ok(ids(here()).includes('walk:campus-swimming-pond'), JSON.stringify(here().far));
+  assert.ok(ids(here()).includes('walk:test-pond'), JSON.stringify(here().far));
 });
 
 test('#1281: on a replica no route issue is not remembered, so a verdict that arrives later counts', {timeout: 300000}, async t => {
