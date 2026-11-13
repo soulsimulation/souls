@@ -1,7 +1,7 @@
 // #2235 A8: no world stays unreachable while it catches up. The real main.ts on the Toy engine: it runs, stops (its wall
 // anchor saved), and the anchor is moved back as if the process had been gone for a while. On the next boot the port
 // opens while the missed ticks are still being ticked: reads are answered at once with the ticks still owed (header
-// x-sim-catching-up, /healthz catchingUp.ticksOwed), and writes wait, in arrival order, and land after the catch-up.
+// x-sim-catching-up, /healthz catchingUp.ticksOwed), and writes wait and land after the catch-up.
 import test from 'node:test'; import assert from 'node:assert/strict'; import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'; import { tmpdir } from 'node:os'; import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -37,14 +37,16 @@ async function away(t: test.TestContext, awayMs: number) {
 const post = (text: string, signal?: AbortSignal) => fetch(`${base}/v1/feedback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal });
 const feedback = (data: string) => { const dir = join(data, 'feedback'); try { return readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), 'utf8').trim().split('\n').filter(Boolean)).map((l) => JSON.parse(l) as { text: string; serverTick: number }); } catch { return []; } };
 
-test('a world catching up a gap answers reads with the ticks it owes, and its writes land after the catch-up, in order', { timeout: 120_000 }, async (t) => {
+test('a world catching up a gap answers reads with the ticks it owes, and its writes land once each, after the catch-up', { timeout: 120_000 }, async (t) => {
   const awayMs = 2 * 3_600_000, { data, anchor } = await away(t, awayMs);
   const w = boot(t, data);
   const read = await health(w);
   assert.ok(read.body.catchingUp && read.body.catchingUp.ticksOwed > 0, `the first read is answered during the catch-up: ${JSON.stringify(read.body)}`);
   assert.ok(Number(read.header) > 0, 'with the ticks still owed in x-sim-catching-up');
   assert.ok(read.body.tick < anchor.tick + awayMs / 50, 'and the world is still behind the wall');
-  // two writes sent during the catch-up, one after the other: both wait, then land in the order they came
+  // two writes sent during the catch-up: both wait, then each lands once, after it. The server dispatches held writes in
+  // the order they arrive, but two requests on separate connections may arrive in either order however far apart they
+  // are sent (it failed once in the merge group with 20 ms), so the test checks the set, not the order.
   const a = post('first, during the catch-up'); await delay(20); const b = post('second, during the catch-up');
   const again = await health(w);
   assert.ok(again.body.catchingUp, `still catching up while the writes wait: ${JSON.stringify(again.body)}`);
@@ -53,7 +55,7 @@ test('a world catching up a gap answers reads with the ticks it owes, and its wr
   assert.ok(caught, `the catch-up finished before the writes were answered: ${w.logs()}`);
   const done = Number(caught[2]);
   const entries = feedback(data);
-  assert.deepEqual(entries.map((e) => e.text), ['first, during the catch-up', 'second, during the catch-up'], `in arrival order: ${JSON.stringify(entries)}`);
+  assert.deepEqual(entries.map((e) => e.text).sort(), ['first, during the catch-up', 'second, during the catch-up'], `each write once: ${JSON.stringify(entries)}`);
   for (const e of entries) assert.ok(e.serverTick >= done, `${e.text}: landed at tick ${e.serverTick}, after the catch-up ended at ${done}`);
   const after = await health(w);
   assert.equal(after.body.catchingUp, undefined, 'caught up: no longer reported');
