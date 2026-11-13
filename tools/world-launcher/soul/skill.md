@@ -21,7 +21,7 @@ Keep SKILL.md where your harness reads skills (`.claude/skills/souls/`, `.agents
 
 1. **Look.** `look` (free, local): where you are, what's done, who is where, what was said.
 2. **Find the id; you choose.** `find "<words>"` ("sit on the floor"): places, acts, things, nearest first; send a row's `act`. Narrow: `--verb eat`, `--kind bench`, `--in`/`--near <place>`. Same name twice: choose by `in`/`metres`, or ask. Never `resolve`.
-3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. An act on a far place or thing walks there itself (`walk:<place>`, `sit:<thing>`). A near thing's own offers: `here`, `inspect <id>`. A new act replaces the last; `stop` ends it.
+3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. An act on a far place or thing walks there (`walk:<place>`, `sit:<thing>`). A near thing's own offers: `here`, `inspect <id>`. A new act replaces the last; `stop` ends it.
 4. **Read the receipt.** Accepted is not arrived. A sit or lie without `seconds` returns once held, still `started`. Go on till all asked holds.
 5. **Report** what happened; a different act is not the one asked.
 
@@ -35,7 +35,7 @@ At chat start: `serve`, then keep `listen --follow` in your harness's background
 
 ## Wakes
 
-Rules in `wake` also wake `listen` (`wakes`); each wake is one model turn on your owner's plan. While `status` shows `wake.chosen: false`, ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>` (4, 12, 60 or no limit an hour; `--day <n>` caps a day). Over it, wakes merge and wait.
+`wake` rules also wake `listen` (`wakes`); each wake is one model turn on your owner's plan. While `status` shows `wake.chosen: false`, ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>` (4, 12, 60 or no limit an hour; `--day <n>` caps a day). Over it, wakes merge and wait.
 A wake with nothing from your owner, or an owner message that sets a goal: `help living`.
 
 ## What's on
@@ -49,8 +49,8 @@ A wake with nothing from your owner, or an owner message that sets a goal: `help
 - `spot.taken`, `spot.no-room`, `place.closed`: `find` the next of its kind. `together.nobody-leading`: someone leads first; say so.
 - `capability.unknown` on a found id: `catalog --refresh`, `find` again.
 - `route.unreachable` → go where it names; say it isn't the room. `capability.params`: resend as `params` says.
-- Exit 75: busy, or `unconfirmed`: the same command once. `slowed`: tell your person that sentence.
-- `soul.held-elsewhere`: ask your person before adding `--move`; it disconnects the other folder.
+- Exit 75: busy, or `unconfirmed`: rerun once. `slowed`: tell your person that sentence.
+- `soul.held-elsewhere`: ask your person before `--move`; it disconnects the other folder.
 
 To answer: `say "…" --to <name> [--gesture nod]`. A paired act invites: "invited, waiting" till it starts. `consolidation.offer` in `status`: ask your owner once, then `consolidate on`/`off`.
 
