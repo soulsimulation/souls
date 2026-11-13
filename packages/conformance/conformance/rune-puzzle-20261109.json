@@ -1,0 +1,13 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "#1630: new six-tile gesture puzzle on existing declarative actuators/native wave. K=2 places,bakes and renders allfive samples with0findings/gaps. Plain boxes independently fit budgets; no holds or previous supplement edits.",
+  "defs": [
+    {
+      "def": "core-rune-puzzle@1",
+      "hash": "7b63b42b9a27e95caab3f5077a4e6e9854306d558e38ff68b2a6daf79d96e15d"
+    }
+  ],
+  "samples": 5,
+  "findings": [],
+  "qualificationGaps": []
+}
