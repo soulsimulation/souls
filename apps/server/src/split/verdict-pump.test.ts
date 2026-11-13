@@ -69,7 +69,9 @@ test('verdict pump: a ReplicaWorld over the stream answers programs, actions, re
   pump.ask(RW.verdicts.misses.values()); await settle(1); flush();
   assert.deepEqual(RW.verdicts.canPerform(other, ''), f.host.engine.canPerform(other), 'the asked verdict arrives with the next delta');
   assert.ok(resyncs.length <= 1, `at most the relocate's resnapshot: ${resyncs}`);
-  assert.ok(pump.cost.ticks > 0 && pump.cost.maxCpuMs < 50, JSON.stringify(pump.cost));
+  assert.ok(pump.cost.ticks > 0, JSON.stringify(pump.cost));
+  // CPU budget is opt-in: a shared CI runner measured 58 ms in a merge-group run and ejected an unrelated PR (#2286).
+  if (process.env.SOULS_TIMING_BUDGETS === '1') assert.ok(pump.cost.maxCpuMs < 50, JSON.stringify(pump.cost));
 });
 
 test('verdict pump follows the host\'s engine: after a rollback replaces it (world.ts restoreBody), rows come from the new one', {timeout: 300000}, async t => {
