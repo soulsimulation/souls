@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGrids, clearanceAt, segmentClearance } from '../spatial/grid.ts';
-import { flightClear, flightLine, holdingSpots, HOLDING_MAX, singleFile } from '../spatial/holding.ts';
+import { holdingSpots, HOLDING_MAX, singleFile } from '../spatial/holding.ts';
 import { linkApproach, PLAN_MARGIN } from '../spatial/path.ts';
 import { HUMAN_PROFILE, type Link, type SpatialScene } from '../spatial/types.ts';
 import type { Vec2 } from '../core/math.ts';
@@ -22,6 +22,13 @@ const scene = (upperHalf: Vec2, link: Link): SpatialScene => ({
 } as SpatialScene);
 
 const d = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+// The flight as a body on `level` meets it, built here from the link's own fields (not holding.ts): that floor's entry and
+// approach points and the steps from a step below the floor to head height above it.
+const flightOn = (link: Link, level: number): Vec2[] => {
+  const y = link.from.level === level ? link.from.y : link.to.y;
+  const steps = link.path.filter(s => s[1] >= y - 0.3 && s[1] <= y + HUMAN_PROFILE.height).map((s): Vec2 => [s[0], s[2]]);
+  return [...(link.from.level === level ? [linkApproach(link, true).approach, link.from.p] : []), ...steps, ...(link.to.level === level ? [link.to.p, linkApproach(link, false).approach] : [])];
+};
 const lineDist = (pts: Vec2[], q: Vec2) => Math.min(...pts.slice(1).map((b, i) => {
   const a = pts[i], dx = b[0] - a[0], dz = b[1] - a[1], n = dx * dx + dz * dz, t = n ? Math.min(1, Math.max(0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dz) / n)) : 0;
   return Math.hypot(q[0] - a[0] - t * dx, q[1] - a[1] - t * dz);
@@ -37,7 +44,8 @@ test('#2263 each end of a flight on roomy floors has three holding spots, out of
     for (const s of spots) {
       assert.ok(clearanceAt(g, s) >= R + PLAN_MARGIN, 'standing room');
       assert.ok(d(s, approach) >= BODY && d(s, entry.p) >= BODY, 'a body width from the approach and entry points');
-      assert.ok(lineDist(flightLine(link, entry.level), s) >= flightClear(link), 'clear of the flight');
+      const line = flightOn(link, entry.level); assert.ok(line.length > 2);
+      assert.ok(lineDist(line, s) >= link.width / 2 + R, 'clear of the flight');
       assert.ok(segmentClearance(g, s, approach) >= R, 'a clear walk to the approach point');
       for (const o of spots) if (o !== s) assert.ok(d(s, o) >= BODY, 'apart from each other');
     }

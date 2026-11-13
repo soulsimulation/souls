@@ -169,7 +169,7 @@ export class Spatial {
     this.restoredEpoch = undefined;
     if (e === undefined || e === this.epoch) return;
     this.epoch = e;
-    this.aroundCache.clear(); this.outside.clear(); this.narrowCache.clear(); this.routeMemo?.map.clear();   // an epoch may come back
+    this.aroundCache.clear(); this.outside.clear(); this.narrowCache.clear(); this.routeMemo?.map.clear(); this.holding.clear();   // an epoch may come back
   }
   /** Set by `rt.profile = true`: wall ms per method (spatial.route includes its spatial.sync). */
   prof?: Profiler;
@@ -290,7 +290,7 @@ export class Spatial {
     this.outside.clear();
     this.sync(world);
     this.epoch = s.navEpoch;
-    this.routeMemo?.map.clear();   // #1770: the epoch is set from outside and may repeat one seen before
+    this.routeMemo?.map.clear(); this.holding.clear();   // #1770: the epoch is set from outside and may repeat one seen before
     return true;
   }
 
