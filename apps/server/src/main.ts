@@ -274,7 +274,8 @@ server.on('request', (req, res) => {
   }
   if (catchingUp) {
     res.setHeader('x-sim-catching-up', String(host.owedTicks));
-    if (write) { void catchingUp.then(() => serve(req, res)); return; }
+    // a stop during the catch-up ends it with the clock never started: a held write is refused, never applied unticked
+    if (write) { void catchingUp.then(() => closing ? res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.') : serve(req, res)); return; }
   }
   serve(req, res);
 });

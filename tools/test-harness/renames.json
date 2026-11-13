@@ -499,6 +499,13 @@
       "to": "through the real CLI: words exit 2 with no act; the offered id acts",
       "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
       "pr": "#2175"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "the exit time: SIM_WORLD_IDLE_EXIT_MIN minutes, default 60, 0 = never",
+      "to": "the exit time: SIM_WORLD_IDLE_EXIT_MIN minutes, default 0 = never (#2235: world time never stops)",
+      "reason": "Intended behaviour change: idle exit is off by default because world time never stops (#2235 A3); the same test now asserts the new default",
+      "pr": "#2238"
     }
   ]
 }
