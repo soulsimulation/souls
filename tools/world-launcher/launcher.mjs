@@ -86,7 +86,7 @@
 //
 // Local only: binds 127.0.0.1, edge minds (owners' agents think; the world pays for none), no credentials, no tunnels.
 import { authorizedPartiesOverride, publicAuthEnvironment } from './clerk-public-env.mjs';
-import { satelliteSettings, primarySignInPage } from './clerk-satellite.mjs';
+import { satelliteSettings, primarySignInPage, homePageHtml } from './clerk-satellite.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Agent, createServer, request } from 'node:http';
@@ -1242,7 +1242,14 @@ export async function openLauncher(cfg = {}) {
         // per request, so a world listed or unlisted appears or drops out at once.
         if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' }).end(req.method === 'HEAD' ? undefined : robotsTxt({ origin: publicOrigin, base: B })); return; }
         if (path === '/sitemap.xml') { res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : sitemapXml({ origin: publicOrigin, base: B, pages: docsPages(), worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) })); return; }
-        if (path === '/' || path === '/index.html') { if (serveFile(res, join(webDir, 'index.html'), 'no-cache')) return; res.writeHead(500, { 'content-type': 'text/plain' }).end('The web app is not built: pnpm --filter @souls/web build'); return; }
+        if (path === '/' || path === '/index.html') {
+          // a Clerk satellite: the page carries its public settings, so it syncs from <head> before it loads (clerk-satellite.mjs)
+          const sat = auth?.public?.clerkSatellite;
+          if (sat) { let html = null; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { /* not built: below */ }
+            if (html !== null) { const body = homePageHtml(html, sat); res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': Buffer.byteLength(body) }).end(req.method === 'HEAD' ? undefined : body); return; } }
+          else if (serveFile(res, join(webDir, 'index.html'), 'no-cache')) return;
+          res.writeHead(500, { 'content-type': 'text/plain' }).end('The web app is not built: pnpm --filter @souls/web build'); return;
+        }
         // #896: the docs, llms.txt and the changelog's Markdown twin, all built into the web build (apps/web/src/docs-site.ts).
         // A page answers as HTML, or as its Markdown twin at <path>.md or for `Accept: text/markdown`.
         if (path === '/llms-full.txt' && serveFile(res, join(webDir, 'llms-full.txt'), 'no-cache', req)) return;

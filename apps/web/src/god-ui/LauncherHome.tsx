@@ -7,6 +7,7 @@ import { BASE } from '../base-path.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
+import { startHomeSignIn, takeNewWorldIntent } from './home-sign-in.ts';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
 export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
@@ -41,17 +42,15 @@ function AccountMenu({ label, onSignOut }: { label: string | null; onSignOut: ()
 
 export function LauncherHome({ initial }: { initial: LauncherList }) {
   const [list, setList] = useState(initial);
-  const [dialog, setDialogRaw] = useState(() => new URLSearchParams(location.search).has('new'));
+  // "+ New world" signed in first: its intent (?new) opens the dialog once and leaves the address (home-sign-in.ts)
+  const [dialog, setDialogRaw] = useState(() => { const t = takeNewWorldIntent(location); if (t.address !== null) history.replaceState(history.state, '', t.address); return t.open; });
   // Clerk: a new world belongs to whoever makes it, so making one starts with signing in.
   const session = useSession();
   const needsSignIn = (session.mode === 'clerk' || session.mode === 'dev') && !session.authed;
   // a new world belongs to whoever makes it: signing in comes first, and the dialog opens once they are back (?new)
+  const signIn = (newWorld: boolean) => startHomeSignIn(session, newWorld, location, { assign: (url) => location.assign(url), replaceAddress: (url) => history.replaceState(history.state, '', url) });
   const setDialog = (open: boolean) => {
-    if (open && needsSignIn) {
-      if (session.signInUrl) location.assign(session.signInUrl + '?new=1');
-      else { history.replaceState(null, '', location.pathname + '?new=1'); session.login(); }
-      return;
-    }
+    if (open && needsSignIn) { signIn(true); return; }
     setDialogRaw(open);
   };
   useEffect(() => { if (dialog && needsSignIn && session.ready) setDialogRaw(false); }, [dialog, needsSignIn, session.ready]);
@@ -71,8 +70,8 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
           {session.authed ? <AccountMenu label={session.label} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
-              : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
-            : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => session.login()}>Sign in</button>}
+              : <button className="lh-signin" data-home-signin="1" onClick={() => signIn(false)}>Sign in</button>)
+            : session.mode === 'dev' && <button className="lh-signin" data-home-signin="1" onClick={() => signIn(false)}>Sign in</button>}
         </div>
       </header>
       {worlds.length === 0 && (
@@ -107,7 +106,7 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
         <nav className="lh-footer-links"><a href={`${BASE}/docs`} data-docs-link="1">Docs</a><a href={`${BASE}/docs/for-agents`} data-for-agents-link="1">For agents</a><a href={`${BASE}/changelog`} data-changelog-link="1">Changelog</a><a href="https://x.com/soulsimulation" rel="noopener" target="_blank">X</a><a href="https://github.com/soulsimulation/souls" rel="noopener" target="_blank">GitHub</a></nav>
         <p className="lh-credit">Souls is an experiment by <a href="https://genekogan.com" rel="noopener" target="_blank">Gene Kogan</a></p>
       </footer>
-      {dialog && <NewWorldDialog templates={list.templates} onClose={() => { setDialog(false); const q = new URLSearchParams(location.search); if (q.has('new')) history.replaceState(null, '', location.pathname); }} />}
+      {dialog && <NewWorldDialog templates={list.templates} onClose={() => setDialog(false)} />}
     </main>
   );
 }

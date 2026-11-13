@@ -27,9 +27,10 @@ test('social crawlers receive the Souls identity and the large starburst card wi
   assert.ok(html.includes('<link rel="canonical" href="https://soul.game/"'));
 });
 
+// The world list's bar lives in styles.css (#2190: the loading state draws it before launcher-home.css arrives).
 test('the top-left Souls halo always sits in a solid black circle, in a world and on the world list (#1034)', () => {
   const css = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
-  for (const [path, selector] of [['./world-chrome.css', '.human-world .eden-mark'], ['./god-ui/launcher-home.css', '.lh-title .eden-mark']]) {
+  for (const [path, selector] of [['./world-chrome.css', '.human-world .eden-mark'], ['./styles.css', '.lh-title .eden-mark']]) {
     const rules = [...css(path).matchAll(/([^{}]*)\{([^{}]*)\}/g)].filter(m => m[1].split(',').some(s => s.trim() === selector));
     assert.ok(rules.length > 0, `${path} styles ${selector}`);
     const backgrounds = rules.flatMap(m => [...m[2].matchAll(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/g)].map(b => b[1].trim()));
