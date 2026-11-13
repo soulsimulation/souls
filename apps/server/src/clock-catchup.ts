@@ -4,9 +4,9 @@
 // a memory-pressure eviction, a crash. Across those the world is caught up exactly, by ticking: on boot it runs every
 // tick it missed through the ordinary tick (WorldHost.catchUp), listeners and all, before its clock starts; its port opens
 // meanwhile, reads say how many ticks it still owes, and writes wait until it is done (main.ts). Nothing jumps and nothing is approximated: the world state it reaches is the state a world ticked through the
-// gap would have reached (clock-catchup.test.ts compares the hashes, needs, day turns and moments included). Not yet for
-// listener state kept in memory or on the wall clock (#2236): the edge ambient-life idle clock starts over at the boot,
-// and the body rule's wall timers (doze, asleep, drift) see the whole gap at the first catch-up ticks.
+// gap would have reached (clock-catchup.test.ts compares the hashes, needs, day turns and moments included), the edge
+// listeners too (#2236): the ambient-life idle clock is kept in edge_ambient_v1, and the body rule's wall timers read the
+// wall time of the tick being caught up (WorldHost.wallAt).
 //
 // How many ticks it missed comes from the wall anchor in <DATA_DIR>/clock-wall.json: a (wall time, tick) pair saved
 // every few seconds while the world runs and once more as it stops. The ticks owed on boot are the wall time since the

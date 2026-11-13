@@ -564,7 +564,7 @@ export class WorldHost {
   async catchUp(ticks: number, turn: () => Promise<unknown> = () => new Promise((r) => setImmediate(r))): Promise<number> {
     if (this.timer) throw new Error('catch-up.clock-running');
     let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
-    this.owedTicks = Math.max(0, Math.floor(ticks));
+    this.owedTicks = Math.max(0, Math.floor(ticks)); this.catchUpWall = null;   // anchored at the first read of this run
     try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
     finally { this.owedTicks = 0; this.catchUpWall = null; }
     return done;

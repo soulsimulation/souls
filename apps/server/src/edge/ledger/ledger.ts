@@ -455,6 +455,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
     this.ambientClock.set(soulId, {since, at});
     if (!this.readOnly) this.db.db.prepare('INSERT INTO edge_ambient_v1(world_id,soul_id,idle_since,acted_at) VALUES(?,?,?,?) ON CONFLICT(world_id,soul_id) DO UPDATE SET idle_since=excluded.idle_since,acted_at=excluded.acted_at').run(this.host.worldId, soulId, since, at);
   }
+  /** A read-only ledger (a read worker) reads the row: main writes it. */
+  private ambientActedAt(soulId: string) {
+    if (!this.readOnly) return this.ambientClock.get(soulId)?.at ?? 0;
+    return (this.db.db.prepare('SELECT acted_at FROM edge_ambient_v1 WHERE world_id=? AND soul_id=?').get(this.host.worldId, soulId) as {acted_at: number} | undefined)?.acted_at ?? 0;
+  }
   private ambientActed(soulId: string) {const c = this.ambientClock.get(soulId); this.ambientSave(soulId, c ? c.since : null, this.wallNow());}
   private readonly controlNow:()=>number;
   /** #2236: wall time for the wall-timed edge rules: during a catch-up, that of the tick being caught up (WorldHost.wallAt). */
@@ -3404,7 +3409,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (!['seated', 'lying', 'sleeping', 'swimming'].includes(state)) return null;
     // the latest act that moved the body (lasting marks, object moves and answers leave the body as it was)
     const last = this.rows('soul_id=? ORDER BY created_at DESC LIMIT 8', soulId).find(r => {const v = r.capability.split(':')[0]!; return !['make', 'decline', 'ask-to-stop'].includes(v) && !(v === 'object' && r.program_id === null);});
-    if (!last || last.phase === 'failed' || (this.ambientClock.get(soulId)?.at ?? 0) > last.created_at) return null;
+    if (!last || last.phase === 'failed' || this.ambientActedAt(soulId) > last.created_at) return null;
     return POSTURE_VERBS.has(last.capability.split(':')[0]!) ? state : null;
   }
   onReceipt(l: (r: EdgeReceipt) => void) {this.receiptListeners.push(l);for (const r of this.bootEnded ?? []) try {l(structuredClone(r));} catch {/* listener faults never break the ledger */}}

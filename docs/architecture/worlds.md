@@ -115,7 +115,8 @@ switch independent. A previously saved master mute migrates to both switches off
     ticked through the gap would have reached, and so do the edge listeners' clocks (#2236): ambient life keeps each
     Soul's idle clock in `edge_ambient_v1`, and the body rule, which runs on wall time, reads during a catch-up the wall
     time of the tick being caught up (`WorldHost.wallAt`), so its doze, drift, zombie and asleep transitions land on the
-    ticks they would have fired live.
+    ticks they would have fired live. Outside input that arrives during the catch-up (a listen, an owner's message, an
+    owner-control window) is still stamped with real time.
   - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
     ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
     and land just after the catch-up.
