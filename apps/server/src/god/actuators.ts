@@ -78,6 +78,8 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  hanoi?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
+  hanoiBegun?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):void;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
@@ -409,6 +411,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
+      const hanoi=s.key?host.hanoi?.(ctx.soul,s.key,a.name,params):null;if(hanoi)return 'code'in hanoi?hanoi:null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
@@ -430,6 +433,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if (can && !('code' in can)) return { state: s, result: { action: a.name, summary: can.summary }, bodies: [{ label: a.label, steps: can.steps }] };
         const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null;
         if (tea && !('code' in tea)) return { state: s, result: { action: a.name, summary: tea.summary }, bodies: [{ label: a.label, steps: tea.steps }] };
+        const hanoi=s.key?host.hanoi?.(ctx.soul,s.key,a.name,params):null;if(hanoi&&!('code'in hanoi)){host.hanoiBegun?.(ctx.soul,s.key!,a.name,params);return{state:s,result:{action:a.name,summary:hanoi.summary},bodies:[{label:a.label,steps:hanoi.steps}]};}
         const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null;
         if (pick && !('code' in pick)) return { state: s, result: { action: a.name, summary: pick.summary }, bodies: [{ label: a.label, steps: pick.steps }] };
         const contact = host.deferContacts && isContactActuator(def, a);
@@ -500,6 +504,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // Entry 43: so does a tea act (tea.ts)
     if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
     // #438: and a picking act (harvest.ts)
+    if(host.hanoi?.(soul,id,a.name,(input.params??{})as Record<string,unknown>))return out;
     const pick = host.harvest?.(soul, id, a.name, (input.params ?? {}) as Record<string, unknown>);
     if (pick) { if (!('code' in pick)) host.harvestBegun?.(soul); return out; }
     // W5: water moves between two things (tank → can, can → planter) in one commit, planned again at commit time
