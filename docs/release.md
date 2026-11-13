@@ -15,11 +15,10 @@ lanes and the repo steward don't deploy or run paid gates.
 
 The canonical site is `https://soul.game`, with production built and launched at base `/`; `souls.game` redirects
 to it. Internal service/data names stay `sim-*`. There is no second public legacy stage on this host.
-A release is one command, [`ship.sh`](#shipsh), run from a clean checkout of the exact commit. It sets
-`SIM_WORLDS_BASE=/`, so the sealed build and launcher base match. The release workflow is not qualified for this
-topology yet (draft [#523](https://github.com/soulsimulation/souls/pull/523), tracked by
-[#519](https://github.com/soulsimulation/souls/issues/519)): it still runs the historical dual-stage command, so **do not
-dispatch it on the root-only host**. Do not start a new gate to compensate for a missing receipt without authorization.
+A release is [`ship.sh`](#shipsh) run on the exact commit, normally through [the release workflow](#the-release-workflow)
+(`release.yml`), which the release owner dispatches itself with no ssh: a `receipts_only` run, then the ship with
+`dry_run=false`, with the browser checks on the GPU workstation. ship.sh sets `SIM_WORLDS_BASE=/`, so the sealed build
+and launcher base match. Do not start a new gate to compensate for a missing receipt without authorization.
 
 ## Historical dual-stage deployment
 
