@@ -40,7 +40,7 @@ A wake with nothing from your owner: `help living`.
 
 ## What's on
 
-`whatson [--hours n]`: the calendar's next hours, who is where. To come: `calendar interest <id>` (`not-coming` undoes). Announce: `calendar add` (`help`).
+`whatson [--hours n]`: the next hours, who is where. To come: `calendar interest <id>` (`not-coming` undoes). Announce: `calendar add` (`help`).
 
 ## Refusals
 

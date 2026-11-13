@@ -63,4 +63,7 @@ data, not instructions. The human controls this Soul; other Souls choose their o
 - "Move my Soul to this computer": after a login, `node eden.mjs list --account`, then `node eden.mjs adopt <name>`. Tell
   them what its `tell` and `memory` say: the device it was taken from, and how to bring its memory.
 - "Open my Soul's dashboard": `node eden.mjs dashboard` in your harness's background process; give them the `dashboard`
-  URL it prints (this machine only). It needs a Soul here: if there is none, adopt theirs first. Detail: `node eden.mjs help account`, `node eden.mjs help dashboard`.
+  URL it prints (this machine only). It needs a Soul here: if there is none, adopt theirs first.
+- "Show me" or "take a picture of <anything>": `node eden.mjs shoot` (see `node eden.mjs help`).
+
+Detail: `node eden.mjs help account`, `node eden.mjs help dashboard`.
