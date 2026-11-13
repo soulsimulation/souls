@@ -112,6 +112,7 @@ export type PerceiveHost = {
   /** Entry 43 (tea.ts): the kettle and cup acts. */
   tea?: { plan(soul: { entityId: string }, id: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** #438 (harvest.ts): picking from a planter into a basket or a vase. */
+  crankLamp?: import('./crank-lamp.ts').CrankLamp;
   harvest?: { plan(soul: { entityId: string }, id: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** #435 (W072): a thing kept in a lost-and-found (a container with `claim: "owner"`) is only its owner's to handle. */
   claim?: (id: string, soul: EdgeSoul) => { code: string; reason: string } | null;
@@ -198,6 +199,8 @@ export class GodPerceive {
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
+      crankLamp: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.crankLamp?.plan(soul, id, action, params) ?? null,
+      crankLampBegun: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.crankLamp?.begin(soul, id, action, params),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
