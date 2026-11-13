@@ -20,7 +20,7 @@ export const ANYWHERE: readonly (readonly [string, string])[] = [
   ['walk-to', 'Walk to a point on your level']];
 
 type V2 = readonly [number, number];
-export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: string | null; level: number; polygon: readonly V2[]; aliases?: readonly string[]; description?: string; ref?: string; secret?: boolean; carrier?: unknown};
+export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: string | null; level: number; polygon: readonly V2[]; /** #2261: doors the place data already gives (a god's building) */ doors?: readonly CatalogDoor[]; aliases?: readonly string[]; description?: string; ref?: string; secret?: boolean; carrier?: unknown};
 export type CatalogSpotIn = {id: string; place?: string; activity: string; also?: readonly string[]; at: V2; label?: string; title?: string; together?: {need: number}; requires?: string};
 /** #1751: an act a kind of thing takes by hand, sent as `object:<thing>:<verb>`; `when` is the state it needs. */
 export type CatalogKindAct = {verb: string; label: string; params?: Record<string, unknown>; when?: {field: string; is?: unknown; not?: unknown}[]};
@@ -53,6 +53,8 @@ const byId = (a: {id: string}, b: {id: string}) => a.id < b.id ? -1 : a.id > b.i
 export const spotThing = (id: string) => /(?:^|\.)(e_[0-9a-z]+)(?:\.|$)/.exec(id)?.[1];
 
 const COMPASS = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
+/** A direction `[dx, dz]` as one of eight compass words (north is -z, east +x). */
+export const compass = (dx: number, dz: number) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]!;
 /** #2261: a building's doors from its interior: each door's middle, and the compass way out through the wall it is on
  *  (the outward normal of the nearest wall of the building's shell, the outline its walls are built on). */
 export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, interior: CatalogInteriorIn): CatalogDoor[] {
@@ -67,8 +69,7 @@ export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, int
       if (gap >= best) continue;
       best = gap; out = [ez, -ex]; if (out[0] * (cx - a[0]) + out[1] * (cz - a[1]) > 0) out = [-ez, ex];   // away from the middle
     }
-    const k = ((Math.round(Math.atan2(out[1], out[0]) / (Math.PI / 4)) % 8) + 8) % 8;
-    return {at: [r1(m[0]), r1(m[1])], level: place.level ?? 0, facing: COMPASS[k]!};
+    return {at: [r1(m[0]), r1(m[1])], level: place.level ?? 0, facing: compass(out[0], out[1])};
   });
 }
 
@@ -83,7 +84,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   const places: CatalogPlace[] = input.places.filter(p => p.polygon.length >= 1).map(p => ({
     id: p.id, ...(p.ref && p.ref !== p.id && refs.get(p.ref) === 1 ? {ref: p.ref} : {}), name: p.name, kind: p.kind, parent: p.parent, at: centre(p.polygon), ...(p.level ? {level: p.level} : {}),
     ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const} : {outline: p.polygon.map(v => [r1(v[0]), r1(v[1])] as [number, number])}),
-    ...(interiors.has(p.id) && !p.carrier ? {doors: placeDoors(p, interiors.get(p.id)!)} : {})})).sort(byId);
+    ...(p.carrier ? {} : p.doors?.length ? {doors: p.doors.map(d => ({...d}))} : interiors.has(p.id) ? {doors: placeDoors(p, interiors.get(p.id)!)} : {})})).sort(byId);
   const known = new Set(input.places.map(p => p.id));   // #1262: no place is secret, whatever its data says
   const shown = input.things.filter(t => !t.place || known.has(t.place));
   const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);

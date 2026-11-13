@@ -109,10 +109,10 @@ test('a ref two places share is published for neither: walk:<id> names its place
   assert.deepEqual(payload.places.map(p => [p.id, p.ref ?? null]), [['g-jetty', 'jetty'], ['g-lake', null], ['g-lake.bank', null]]);
 });
 
-test('Eden 2026: a building gives its doors, with position, level and facing; the Yurt\'s is off the middle of its wall (#2261)', () => {
+test('native Eden: a building with an interior gives its doors, with position, level and facing, from its door gaps (#2261)', () => {
   const read = (f: string) => JSON.parse(readFileSync(new URL(`../../../../../worlds/eden/${f}`, import.meta.url), 'utf8'));
   const {places} = read('places.v1.json') as {places: CatalogInput['places']}, {interiors} = read('activity-spots.v1.json') as {interiors: NonNullable<CatalogInput['interiors']>};
-  const {payload} = buildCatalog({worldId: 'eden-2026', places, spots: [], things: [], interiors});
+  const {payload} = buildCatalog({worldId: 'eden', places, spots: [], things: [], interiors});
   const place = (id: string) => payload.places.find(p => p.id === id)!;
   // the Library: one door, the middle of its south wall (z -2.8), where #2224 read it from a walk in
   assert.deepEqual(place('eden-library-1').doors, [{at: [74, -2.8], level: 0, facing: 'south'}]);

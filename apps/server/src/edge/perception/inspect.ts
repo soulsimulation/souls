@@ -37,8 +37,9 @@ function identify(L: EdgeLedger, soul: EdgeSoul, id: string, caps: EdgeCapabilit
       .filter(([cid, e]) => e.pose && e.def && !e.human && !e.support?.on && e.support?.kind !== 'in-hand' && !L.concealedThing?.(cid) && (() => {const at = L.places.containing(e.pose!.p[0]!, e.pose!.p[2]!, 0); return at.some(p => p.id === id) && at.every(p => L.knowledge.knows(soul.soulId, p.id));})())
       .sort(([, a], [, b]) => away(a.pose!.p) - away(b.pose!.p));
     const contents = standing.slice(0, PLACE_CONTENTS).map(([cid, e]) => child(cid, e));
-    const interior = place.carrier ? undefined : L.spots.interiors.find(i => i.place === id && i.doors.length);
-    return {id, kind: 'place', name: place.name, ...(interior ? {doors: placeDoors(place, interior)} : {}), ...(parts.length ? {parts} : {}), ...(contents.length ? {contents} : {}), ...(standing.length > PLACE_CONTENTS ? {cutOff: standing.length - PLACE_CONTENTS} : {})};
+    const given = (place as {doors?: CatalogDoor[]}).doors, interior = place.carrier || given?.length ? undefined : L.spots.interiors.find(i => i.place === id && i.doors.length);
+    const doors = place.carrier ? undefined : given?.length ? given : interior ? placeDoors(place, interior) : undefined;
+    return {id, kind: 'place', name: place.name, ...(doors ? {doors} : {}), ...(parts.length ? {parts} : {}), ...(contents.length ? {contents} : {}), ...(standing.length > PLACE_CONTENTS ? {cutOff: standing.length - PLACE_CONTENTS} : {})};
   }
   const mind = L.host.minds.get(id);
   if (mind) {
