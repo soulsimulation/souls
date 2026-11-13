@@ -1,3 +1,4 @@
+import type { RabbitCare } from './rabbit-care.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -107,6 +108,7 @@ export type PerceiveHost = {
   log(m: string): void;
   /** Entry 34 (watering.ts): "water <plant>" with a watering can from its hook. */
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, and whether a thing is whole (a whole one is no built object). */
+  rabbitCare?: RabbitCare;
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
@@ -202,6 +204,8 @@ export class GodPerceive {
       teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
+      rabbitCare: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.rabbitCare?.plan(soul,id,action,params) ?? null,
+      rabbitCareBegun: (soul: EdgeSoul,id:string,action:string,params:Record<string,unknown>) => this.h.rabbitCare?.begin(soul,id,action,params),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
       policy:(id:string,soul:EdgeSoul,action:string)=>this.h.edge?.contactActuator?.policy(soul,id,action)??null,
       wholeMenu: () => this.wholeMenu,

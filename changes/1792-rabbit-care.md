@@ -1,0 +1,1 @@
+Souls can feed an opt-in garden rabbit from finite supplied stock. Completed native feeding conserves portions, records the actual animal and feeder, and lets the same rabbit rest; cold exact IDs, interruption, access and God Undo remain authoritative.
