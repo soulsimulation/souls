@@ -2230,6 +2230,17 @@ function score(q, fields) {
   for (const w of q) { if (hit(w, fields.name)) s += 5; else if (hit(w, fields.id) || hit(w, fields.alias ?? [])) s += 4; else if (hit(w, fields.kind ?? [])) s += 2; else if (hit(w, fields.what ?? [])) s += 1; else return 0; }
   return s + (fields.name.join(" ") === q.join(" ") ? 6 : 0);
 }
+/** #2274: does a place's whole name stand in the words, as a run ("north door of eden house 3 kitchen")? Its length, or 0. */
+const nameIn = (q, name) => { const n = name.length; if (n < 2 || n > q.length) return 0; for (let i = 0; i + n <= q.length; i++) if (name.every((w, j) => w === q[i + j])) return n; return 0; };
+const PREFIXES = new WeakMap();
+/** #2274: places in the same place whose names share this one's as a prefix, or it theirs (Eden House 3, Eden House 3 Kitchen). */
+function namesake(ix, p) {
+  let by = PREFIXES.get(ix);
+  if (!by) { by = new Map(); for (const o of ix.cat.places) { const k = o.parent ?? ""; if (!by.has(k)) by.set(k, []); by.get(k).push([placeWords(o).name.join(" "), o.name]); } PREFIXES.set(ix, by); }
+  const me = placeWords(p).name.join(" "), out = new Set();
+  if (me.includes(" ")) for (const [name, shown] of by.get(p.parent ?? "") ?? []) if (name.includes(" ") && (name.startsWith(me + " ") || me.startsWith(name + " "))) out.add(shown);
+  return [...out].slice(0, 6);
+}
 /** The place words name best, or null: the anchor of "near the pond" and "in the library". */
 function bestPlace(ix, words, at) {
   const q = tokensOf(words); if (!q.length) return null;
@@ -2259,9 +2270,11 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = 
   const rest = q.filter((w) => !SYNONYMS[w] && !verbWords.has(w) && !verbWords.has(stem(w))), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
     if (!q.length || !inScope(p.id, p.at)) continue;
-    const s = score(q, placeWords(p)); if (!s) continue;
-    const here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    // #2274: the full name first, then the longest name the words hold whole, then the rest
+    const name = placeWords(p).name, full = name.join(" ") === q.join(" "), inside = nameIn(q, name);
+    const s = full ? 100 + score(q, placeWords(p)) : inside ? 50 + inside : score(q, placeWords(p)); if (!s) continue;
+    const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
