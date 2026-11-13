@@ -320,7 +320,7 @@ whole world, wherever the Soul's body is. Each answer carries `scope: "public"`,
 withholds. Owner messages and credentials are never in it.
 
 - **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
-  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier), things (id, name, kind, place, position) and the acts that can be
+  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier; a building's `doors`, each `{at: [x, z], level, facing}` with facing a compass word), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A thing upstairs is
   located on its level. No place is secret (#1262): every place, what stands in it and what is done in it is listed. A `ref` two places share (a lake and its bank) is left off both, so
