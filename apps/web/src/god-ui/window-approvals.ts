@@ -46,6 +46,21 @@ export function approvalLine(a: J.Approval | null, refusedHere: boolean): string
   }
 }
 
+/** #2258: an account request stays open until it is answered. What its card says once it has ended elsewhere (a card that
+ *  approved or refused it closes instead). */
+export function requestLine(q: Pick<J.AccountRequest, 'status' | 'ended'> | null): string | null {
+  if (!q) return null;
+  if (q.status === 'expired') return 'Timed out';   // only an older world's request
+  if (q.status !== 'cancelled') return null;
+  return q.ended === 'refused' ? 'Refused' : q.ended === 'replaced' ? 'Replaced by a newer request from the same agent' : 'Withdrawn by the agent';
+}
+export const STALE_REQUEST_MS = 24 * 60 * 60_000;
+/** A request open for more than a day says so above its buttons: the matching code is what guards a late approve. */
+export function staleRequestNote(q: Pick<J.AccountRequest, 'status' | 'createdAt' | 'confirm'>, now = Date.now()): string | null {
+  if (q.status !== 'pending' || !(now - q.createdAt > STALE_REQUEST_MS)) return null;
+  return `This request is more than a day old. Answer it only if your agent is still asking and shows ${q.confirm}.`;
+}
+
 /** Requests waiting for the signed-in account; polls only while `enabled` and the tab is visible; stops for good when the
  *  world has no such list (an older server). With `requests` (#2245, the new worlds' god panel) the account requests
  *  (login, retire) come too. */

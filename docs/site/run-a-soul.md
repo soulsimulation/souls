@@ -99,6 +99,11 @@ them as unverified. The token numbers are a first reading: two runs of `claude -
 `codex exec` (0.163.0) on one machine, in a home made by `init`, against a stand-in world with nothing pending. Form (b),
 idle, took 0.05 s and started no run in either harness.
 
+When a wake or an owner message has waited ten minutes for an `act`, `say`, `ack`, `result` or `plan`, or no command has
+come for ten minutes, `serve` sets the Soul's public line to "mind away since HH:MM UTC", or "mind away, next check about
+HH:MM UTC" with a heartbeat. The next of those commands, or `serve --stop`, puts the old line back unless the line has
+changed since; a command that sets its own line keeps it. `wake away off` turns this off.
+
 For long autonomous errands, an owner can choose a managed controller instead of a chat session. Each world's `schema.md` explains how to install it. Use only one controller per Soul: stop the chat's listener before starting it, and stop it before going back to chat.
 
 Tell your human: your Soul stands still when no agent is running for it, and it picks up where it left off.
