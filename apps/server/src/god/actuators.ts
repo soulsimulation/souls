@@ -78,6 +78,8 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 }
 
 export type ActuatorHost = {
+  knifeHoning?(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>):{steps:{verb:string;params:Record<string,unknown>}[];summary:string}|Refusal|null;
+  knifeHoningBegun?(soul:EdgeSoul,id:string,params:Record<string,unknown>):void;
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
@@ -393,7 +395,13 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     if (!ACTION_NAME.test(a.name)) continue;
     // #438: `params` (validate only) carries a picking act's named planter; availability checks without it
     const check = (s: BuiltLike, ctx: { soul: EdgeSoul }, params?: Record<string, unknown>): Refusal | null => {
-      if (s.removed || !s.at) return { code: 'object.gone', reason: 'It is not there any more.' };
+      if (s.removed) return { code: 'object.gone', reason: 'It is not there any more.' };
+      if (!s.at) {
+        // A real held stone is unavailable, not gone. Only its refusal may return here;
+        // admissible work still passes the ordinary visibility/access/busy/policy checks below.
+        const honing = s.key ? host.knifeHoning?.(ctx.soul, s.key, a.name, params) : null;
+        return honing && 'code' in honing ? honing : { code: 'object.gone', reason: 'It is not there any more.' };
+      }
       const me = host.bodyAt(ctx.soul); if (!me) return { code: 'body.unavailable', reason: 'Your body is unavailable.' };
       const d = Math.hypot(s.at[0] - me[0], s.at[1] - me[1]);
       // #1751: a thing's act is taken by id from anywhere and walks there as part of the act (the plan's own walk). A whole
@@ -408,6 +416,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const policy = s.key ? host.policy?.(s.key, ctx.soul, a.name) : null; if (policy) return policy;
       const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null; if (fix) return 'code' in fix ? fix : null;
       const can = s.key && a.name === 'water' ? host.watering?.(ctx.soul, s.key, a.name) : null; if (can) return 'code' in can ? can : null;
+      const honing=s.key?host.knifeHoning?.(ctx.soul,s.key,a.name,params):null;if(honing)return 'code'in honing?honing:null;
       const tea = s.key ? host.tea?.(ctx.soul, s.key, a.name) : null; if (tea) return 'code' in tea ? tea : null;
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
@@ -437,6 +446,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         if(motion){const me=host.bodyAt(ctx.soul)!,far=(motion.level??0)>0||Math.hypot(me[0]-motion.root[0],me[1]-motion.root[2])>.1;
           return {state:s,result:{action:a.name,...(def.tags?.includes('notebook')?{}:{set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul)}),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
 
+        const honing=s.key?host.knifeHoning?.(ctx.soul,s.key,a.name,params):null;if(honing&&!('code'in honing))return{state:s,result:{action:a.name,summary:honing.summary},bodies:[{label:a.label,steps:honing.steps}]};
         // Solo flute is an access-checked object action, not an unguarded global activity spot.
         const flute=def.name==='core-flute-stand'&&def.version===1&&a.name==='play-flute';
         const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = flute ? Math.hypot(to[0]-me[0],to[1]-me[1])>.15 : Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
@@ -495,6 +505,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     const t = find(id), a = t ? actionsOf(t.def).find((x) => x.name === input.action) : undefined;
     if (!t || !a) return out;
     if (host.deferContacts && isContactActuator(t.def, a)) return out;
+    const honing=host.knifeHoning?.(soul,id,a.name,(input.params??{})as Record<string,unknown>);if(honing){if(!('code'in honing))host.knifeHoningBegun?.(soul,id,(input.params??{})as Record<string,unknown>);return out;}
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
