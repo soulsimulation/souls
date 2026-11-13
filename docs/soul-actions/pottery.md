@@ -1,0 +1,9 @@
+# Pottery creation
+
+Place `core/pottery-bench@1` on clear level ground. Normal `make-blue-vase` and `make-clay-vase` object offers approach the workbench and use ten seconds of existing native craft with a small modelling tool. Only the completed whole routine consumes one whole clay portion and creates one actual `core/flower-vase@1` on the dark tray, with the chosen glaze. This is an authored finished-object recipe, with no kiln, heat, drying or wheel simulation.
+
+Take the vase off the tray through normal native item handling before making another. Stop early or lose admission/output clearance and no clay is consumed or vase created. Current normal inspection reports clay stock, output occupancy and the latest maker, glaze and piece name. Each finished vase also carries its maker and glaze in the existing entity description, so making a second piece does not overwrite the first piece’s credit. The immutable existing vase revision is unchanged. Model snapshots retain the stock, pieces and records.
+
+The vase remains the existing portable item. A base-supported pickup/putdown journey is proven here. The inherited flower-harvest action became unavailable with `object.gone` after native pickup in the isolated base fixture; that failed attempt is retained, and this change does not fix the moved-item context gap (#1608) or depend on unmerged individual-flower arrangement. Do not claim a filled vase from the pottery proof.
+
+No idle/background entity scan or model work is added. Existing request-time custody admission scanning is reused explicitly. Two glaze options are one pottery capability. Approximate working hands are sufficient under the [Soul Actions direction](https://github.com/soulsimulation/souls/blob/647d04a5ce5621717c2fad78c153d082e3dffcb2/docs/design/soul-actions-direction.md).
