@@ -236,6 +236,8 @@ export function parseKitArgs(args: Record<string, unknown>): ReturnType<typeof k
   return r;
 }
 
+const isLeafArt=(ctx:MeshCtx)=>ctx.def.name==='core-leaf-art'&&ctx.def.version===1;
+
 registerMesh({
   gen: 'kit/2',
   build(ctx) {
@@ -243,13 +245,15 @@ registerMesh({
     const key = kitCacheKey(ctx, parsed.data);
     let proto = cache.get(key);
     if (!proto) {
-      proto = buildKit(parsed.data, { ...ctx, state: ctx.entity.state ?? {}, flameHint: flameHint(ctx.def), plant: isPlantDef(ctx.def), smokeFx: !ctx.def.components.route && !ctx.def.tags.includes('moving') });
+      proto = buildKit(isLeafArt(ctx)?{...parsed.data,shapes:parsed.data.shapes.slice(0,1)}:parsed.data, { ...ctx, state: ctx.entity.state ?? {}, flameHint: flameHint(ctx.def), plant: isPlantDef(ctx.def), smokeFx: !ctx.def.components.route && !ctx.def.tags.includes('moving') });
       // lane PERF-MATERIALS: a kit of several static casters casts as one proxy (shadow-proxy.ts); role parts keep their own
       try { addShadowProxy(proto, { generated: true }); } catch (e) { console.warn('kit shadow proxy skipped', e); }
       cache.set(key, proto);
     }
     // clone shares geometry and materials; pivots are cloned so each instance animates on its own
     const obj = proto.clone(true); obj.userData = { ...proto.userData };
+    // Free-coordinate leaves belong to this instance; only the fixed soil enters the prototype cache.
+    if(isLeafArt(ctx))obj.add(buildKit({...parsed.data,shapes:parsed.data.shapes.slice(1)}, {...ctx,state:ctx.entity.state??{}}));
     // W2: flame parts burn (fx/flames.ts); not on a building site. A fire lit by hand catches (entry 22); entry 33: only
     // when this viewer saw it out before (a fire already burning when a viewer arrives burns at full); a torch smokes.
     const hand = ctx.def.tags.includes('hand-operated'), lit = ctx.entity.state?.on === true, catchUp = hand && lit && wasOut.get(ctx.entity.id) === true;
@@ -257,10 +261,11 @@ registerMesh({
     if (ctx.params.condition !== 'construction') mountFlames(obj, ctx.entity.id, catchUp, ctx.def.tags.includes('torch'));
     return obj;
   },
-  instanceKey(ctx) { const a = parseKitArgs(ctx.args); return a.success ? kitCacheKey(ctx, a.data) : null; },
+  instanceKey(ctx) { if(isLeafArt(ctx))return null; const a = parseKitArgs(ctx.args); return a.success ? kitCacheKey(ctx, a.data) : null; },
 });
 
 // K2: $params can change geometry; both prototype and instance identity include numeric values.
 function kitCacheKey(ctx: MeshCtx, args: KitProgramArgs): string {
+  if(isLeafArt(ctx))return ctx.def.hash+':leaf-base';
   return ctx.def.hash + ':' + JSON.stringify(Object.fromEntries(Object.entries(ctx.params).filter(([, v]) => typeof v === 'number' || typeof v === 'string' && /^#/.test(v)).sort(([a], [b]) => a.localeCompare(b)))) + ':' + kitWhenKey(args, ctx.params, ctx.entity.state);
 }
