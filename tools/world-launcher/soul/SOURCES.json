@@ -31,15 +31,15 @@
   },
   "instructions": {
     "file": "instructions.md",
-    "version": "2.3.0",
-    "sha256": "1c9fd6ab3b2bfde7db31b4b6f89c66aa9884cb169d3b24db23ac107d4c8393d6",
+    "version": "2.4.0",
+    "sha256": "f7a6a56c85d5f54ab90de7061a9a665ca32acde2281230dd2a5c9da5aef999a0",
     "from": "the Soul client rewrite handover (private records), INSTRUCTIONS-v2.md",
     "capture": {
       "base": "https://sim.eden.art/worlds/w/eden-2026",
       "world": "Eden 2026",
       "code": "GL7R-YZYJ"
     },
-    "note": "a rendered capture, published byte for byte. The world recognises it by its exact opening lines (apps/server/src/accounts/instructions.ts CAPTURE, which must equal capture above) and per request replaces only those literals: the world URL from server configuration, the world name, and the captured --for code with the requested valid window code (none: the flag is dropped and the open-window sentence becomes the approval-link sentence). Replaces the 1.9 instructions below. 2.0.1 (2026-10-25): step 1 says what to do when .eden-agent.json exists but status shows paired: false. 2.0.2 (L6 polite client): step 4 adds one listen per Soul and no retry loops (busy = slow, not broken). 2.0.3: step 5 names an offered id; strict act refuses words. 2.1.0 (#1134): step 1 knows a `.souls/` home. 2.2.0 (#1136): one client and skill per home, skill folder souls, register's upgrade hint. 2.2.1 (#1328): step 4: an unconfirmed act is run once more as the same command; an unconfirmed say is checked first. 2.2.2 (#1354): step 5: say --to turns to someone and speaks in one command. 2.2.3 (#1753): step 4 does each owner message in one call with act --for; no ack or result. 2.3.0 (#1927): names no harness tool: SKILL.md goes where the harness reads skills; listen --follow in its background process, or serve and pending each turn."
+    "note": "a rendered capture, published byte for byte. The world recognises it by its exact opening lines (apps/server/src/accounts/instructions.ts CAPTURE, which must equal capture above) and per request replaces only those literals: the world URL from server configuration, the world name, and the captured --for code with the requested valid window code (none: the flag is dropped and the open-window sentence becomes the approval-link sentence). Replaces the 1.9 instructions below. 2.0.1 (2026-10-25): step 1 says what to do when .eden-agent.json exists but status shows paired: false. 2.0.2 (L6 polite client): step 4 adds one listen per Soul and no retry loops (busy = slow, not broken). 2.0.3: step 5 names an offered id; strict act refuses words. 2.1.0 (#1134): step 1 knows a `.souls/` home. 2.2.0 (#1136): one client and skill per home, skill folder souls, register's upgrade hint. 2.2.1 (#1328): step 4: an unconfirmed act is run once more as the same command; an unconfirmed say is checked first. 2.2.2 (#1354): step 5: say --to turns to someone and speaks in one command. 2.2.3 (#1753): step 4 does each owner message in one call with act --for; no ack or result. 2.3.0 (#1927): names no harness tool: SKILL.md goes where the harness reads skills; listen --follow in its background process, or serve and pending each turn. 2.4.0 (#2257): a closing list maps plain asks to login, adopt and dashboard, and a taken Soul's notice to the person; login wait starts in the background at once and the agent goes on in the same turn; \"show me\" maps to shoot."
   },
   "legacy": {
     "note": "1.9 Soul guides replaced by 2.0.0 (SOUL3); provenance kept as published.",

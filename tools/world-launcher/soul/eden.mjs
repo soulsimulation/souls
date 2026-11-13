@@ -3113,7 +3113,7 @@ button { font: inherit; margin: 0 6px 6px 0; padding: 2px 8px; border: 1px solid
 button[aria-pressed="true"] { border-color: var(--fg); }
 </style></head>
 <body>
-<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p></header>
+<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p><p id="ago" class="none"></p></header>
 <main>
 <section><h2>Status</h2><div id="status"></div></section>
 <section><h2>Resident</h2><div id="resident"></div></section>
@@ -3130,7 +3130,9 @@ button[aria-pressed="true"] { border-color: var(--fg); }
 <script>
 // Every value here comes from /data.json and is shown as text, never as markup: worlds and other Souls wrote much of it.
 var el = function (id) { return document.getElementById(id); };
-var day = null, lastDays = "";
+var day = null, lastDays = "", read = 0;
+// #2257: the page reads /data.json again every 5 s in place; this line says how long ago, so a person can see it is live.
+function ago() { if (read) el("ago").textContent = "updated " + Math.round((Date.now() - read) / 1000) + " s ago"; }
 function none(text) { var s = document.createElement("span"); s.className = "none"; s.textContent = text || "not yet"; return s; }
 function show(id, value) {
   var box = el(id); box.replaceChildren();
@@ -3152,7 +3154,8 @@ function pick(d) {
 function render(d) {
   var s = d.status || {}, r = d.resident;
   el("name").textContent = (s.soul && (s.soul.name || s.soul.id)) || "Soul";
-  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world") + " · updated " + new Date(d.at).toLocaleTimeString();
+  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world");
+  read = Date.now(); ago();
   el("state").className = r && r.up ? "up" : "down";
   show("status", d.status); show("resident", d.resident); show("plan", d.plan); show("wakes", d.wakes);
   var j = d.journal, days = j ? j.days : [];
@@ -3171,7 +3174,7 @@ function tick() {
   fetch("/data.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(render)
     .catch(function () { el("state").textContent = "The dashboard has stopped; start it again with: node eden.mjs dashboard"; el("state").className = "down"; });
 }
-tick(); setInterval(tick, 5000);
+tick(); setInterval(tick, 5000); setInterval(ago, 1000);
 </script>
 </body></html>
 `;
@@ -4246,20 +4249,22 @@ async function startApproval(input, code) {
   if (login) return accountPair(input.soulId, login);
   if (MOVE) input = { ...input, move: true };
   const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
-  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: pairLabel(), idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
   // #1875 A6: a Soul another folder holds now is not taken over unasked. The world refuses it (soul.held-elsewhere) before
   // any request exists; this read, when there is a code, only lets the refusal name the Soul first.
-  if (!resumed && !MOVE && code && (input.soulId || input.name)) {
+  let from = resumed ? s.pendingApproval.from : undefined;
+  if (!resumed && code && (input.soulId || input.name)) {
     const list = await call("/v1/agent/approval/souls", { as: "none", body: { for: code } });
     const it = list.status === 200 ? (list.data?.souls ?? []).find((x) => (input.soulId ? x.id === input.soulId : fold(x.name) === fold(input.name))) : null;
-    if (it?.control?.held) throw heldElsewhere(it);
+    if (it?.control?.held && !MOVE) throw heldElsewhere(it);
+    if (it?.control?.held) from = holderLabel(it);   // #2257 A6: --move takes it; the answer names where from
   }
   const started = await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } });
   if (started.status === 409 && codeOf(started.data) === "soul.held-elsewhere") throw heldElsewhere({ id: input.soulId, name: input.name });
   const r = ok(started, "approval start"), a = r.approval ?? r;
   pending.approvalId = a.id;
-  save({ pendingApproval: pending });
+  save({ pendingApproval: { ...pending, ...(from ? { from } : {}) } });
   const shown = publicApproval(a, s.world), hint = input.soulId || input.existing ? loginHint(s.world) : "";
   return { ...shown, ...(shown.next && hint ? { next: shown.next + hint } : {}), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
 }
@@ -4288,6 +4293,10 @@ async function accountPair(id, a) {
   const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
     : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const { soulId, ...body } = pending.input;
+  if (pending !== was) {   // #2257 A6: who holds it now, so the answer can say where it was taken from
+    const r = await call("/v1/agent/account", { as: "account" }), it = r.status === 200 ? (r.data?.souls ?? []).find((x) => x.id === id) : null;
+    if (it?.control?.held) pending.from = holderLabel(it);
+  }
   const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
@@ -4299,6 +4308,20 @@ async function accountSoulNamed(who, a, what) {
   if (!hits.length) throw new Error(`${what}: your account has no Soul called ${who} in this world. See: ${CLI} list --account`);
   if (hits.length > 1) throw new Error(`${what}: your account has ${hits.length} Souls called ${who}: ${hits.map((x) => x.id).join(", ")}. Say which: ${CLI} ${what} <soulId>`);
   return { id: hits[0].id, name: soulHome.plainName(hits[0].name) || hits[0].id };
+}
+/** #2257 A6: the label an approval leaves on the Soul names this device, so a later move can say where it was taken from (a
+ *  login's pairing gets its device from the grant, world side). */
+const pairLabel = () => (HOME ? `eden ${VERSION} on ${HOME.device().name}` : "eden " + VERSION);
+/** #2257 A6: the device an agent holds a Soul from, as the world labels it. */
+const holderLabel = (it) => String(it.agent?.label ?? "").trim().slice(0, 80) || "another device";
+/** #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person. With no
+ *  memory for it in this home, its memory stayed there: export there, import here. The last device to ask still wins. */
+function takenNotice(id, name, from) {
+  if (!from) return {};
+  const who = soulHome.plainName(name) || id, mem = HOME ? resolvePath(HOME.soul(id).dir, "..", "memory") : null;
+  const hasMemory = (dir) => { try { return readdirSync(dir, { withFileTypes: true }).some((e) => e.isFile() || (e.isDirectory() && hasMemory(joinPath(dir, e.name)))); } catch { return false; } };
+  return { takenFrom: from, tell: `Tell your person: ${who} was taken from ${from}; that device no longer controls it.`,
+    ...(mem && !hasMemory(mem) ? { memory: `${who}'s memory stayed on ${from}: there run ${CLI} export ${who}, bring the folder here, then ${CLI} import <folder>.` } : {}) };
 }
 /** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. A
  *  Soul this home keeps without a working token is most likely its own grant, left in an older copy of this folder. */
@@ -4557,7 +4580,7 @@ async function approval(action = "status") {
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
       if (HOME && p.account) HOME.tagAccount(a.soulId, p.account);   // #2246: paired through a login, it is that account's Soul here
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), ...takenNotice(a.soulId, a.name, p.from), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
@@ -4639,7 +4662,7 @@ async function login(...argv) {
     if (again && q.status !== "pending" && q.status !== "ready") continue;   // the one kept here lapsed: start a fresh one
     save({ pendingLogin: { ...next, requestId: q.id, interval: d.intervalSeconds } });
     return { login: q.status, requestId: q.id, ...(next.alias ? { alias: next.alias } : {}), device: next.input.device.name, approvalURL: d.approvalURL, confirm: q.confirm, delivery: d.delivery,
-      next: `Ask your person to approve it on the world's open page (or the link) and to check it shows ${q.confirm}. Then: ${CLI} login wait` };
+      next: `Ask your person to approve it on the world's open page (or the link) and to check it shows ${q.confirm}. Don't wait for their reply: start ${CLI} login wait in the background now; once it returns, go on with what they asked (an open dashboard: ${CLI} dashboard, give them its URL).` };
   }
 }
 async function loginWait() {
@@ -7527,10 +7550,11 @@ Never:
 const DASHBOARD = `The dashboard: one Soul's page on this machine, for your owner
 
 It shows the Soul's status, its resident (serve), its plan, its wakes, its journal, its memory, its costs and the last 200
-lines of serve's log, and reads them again every 5 seconds. It is read-only: nothing on it starts, stops or steers the Soul.
+lines of serve's log, and reads them again every 5 seconds in place, saying how long ago. It is read-only: nothing on it
+starts, stops or steers the Soul. Your owner says "open my Soul's dashboard": step 1.
 
-1. \`${CLI} [name] dashboard\` prints a \`dashboard\` URL on 127.0.0.1 and keeps serving it until Ctrl-C. Give that URL to
-   your owner. It works with \`serve\` running or not, and says which. \`--port <n>\` picks the port (any free one if left out).
+1. \`${CLI} [name] dashboard\` prints a \`dashboard\` URL on 127.0.0.1 and keeps serving it until Ctrl-C: run it in your
+   harness's background process. Give that URL to your owner. It works with \`serve\` running or not, and says which. \`--port <n>\` picks the port (any free one if left out).
 2. It answers only this machine at that address. It asks no world, runs no model and sends nothing anywhere: what the
    Soul thinks stays here. No answer carries a token or anything from \`.souls/credentials.json\`.
 3. The data is one endpoint, \`/data.json\` (\`dashboard-data/1\`): \`status\`, \`resident\`, \`plan\`, \`wakes\`, \`journal\`
@@ -7545,6 +7569,7 @@ each visit. The page may fetch only from this server.
 const ACCOUNT = `Account logins: one login lets this home see what your person's account holds in a world
 
 Log in once per site, not per Soul. The token is kept in \`.souls/credentials.json\`; never read or print that file.
+Your person says "connect my account": steps 1 and 2. "Move my Soul to this computer": steps 3 and 4.
 
 1. \`${CLI} login <world-url>\` (or \`login\` for the current world; \`--for <CODE>\` sends it to your person's open
    page). It prints an \`approvalURL\` and a four-character \`confirm\` code. Ask your person to approve it there and to
@@ -7554,14 +7579,13 @@ Log in once per site, not per Soul. The token is kept in \`.souls/credentials.js
    Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
-4. \`${CLI} adopt <name|id>\` brings one of them here with no code: the device that had it is disconnected, and its
-   \`status\` says where it went. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs. \`retire <name|id>\`
-   asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` finishes on their click. Each needs a login.
+4. \`${CLI} adopt <name|id>\` brings one here, no code; the device that had it is disconnected. Tell your
+   person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
+   \`retire <name|id>\` asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` ends on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
 \`${CLI} accounts\` lists them, with no world call; \`accounts switch <alias>\` changes the active one; \`--as <alias>\`
 picks one for a single command. A Soul paired through a login always uses that login.
-
 \`${CLI} logout [<alias>]\` ends a login, here and in the world, even when the world does not answer. Your Souls stay
 connected: their own tokens keep working. A login's token goes only to worlds of the site that issued it, over https
 or on this machine.
