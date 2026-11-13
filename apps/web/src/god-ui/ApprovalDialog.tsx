@@ -26,9 +26,11 @@ const agentName = (label: string | undefined) => (label ?? '').trim().slice(0, 6
 const askedAt = (a: J.Approval) => { const t = (a as { createdAt?: unknown }).createdAt; return typeof t === 'number' && Number.isFinite(t) ? t : null; };
 
 type CardProps = { id: string; signedIn: boolean; signIn?: ReactNode; onDone: () => void; embedded?: boolean };
-/** #2245: an `aq_` id is an account request (a login or a retire), anything else a Soul approval. */
+/** #2245: an `aq_` id is an account request (a login or a retire), anything else a Soul approval. The Soul card's hooks run
+ *  in this component itself (as before #2245: account-approval-lifecycle.test.mjs renders it with its own hook
+ *  dispatcher); every caller keys the card by its id, so one instance never switches between the two. */
 export function ApprovalCard(props: CardProps) {
-  return isAccountRequest(props.id) ? <RequestCard {...props} /> : <SoulApprovalCard {...props} />;
+  return isAccountRequest(props.id) ? <RequestCard {...props} /> : SoulApprovalCard(props);
 }
 
 function SoulApprovalCard({ id, signedIn, signIn, onDone, embedded = false }: CardProps) {
