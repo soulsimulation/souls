@@ -298,12 +298,14 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // Re-deliver only persisted post-feature terminal projections whose event marker was not committed.
     if(this.db.db.prepare("SELECT 1 FROM sqlite_master WHERE name='edge_comms_receipts_seen'").get())for(const r of this.db.db.prepare("SELECT r.* FROM edge_receipts_v1 r JOIN edge_outcomes_v1 o ON o.world_id=r.world_id AND o.receipt_id=r.receipt_id LEFT JOIN edge_comms_receipts_seen seen ON seen.world_id=r.world_id AND seen.receipt_id=r.receipt_id AND seen.phase=r.phase WHERE r.world_id=? AND seen.receipt_id IS NULL ORDER BY r.created_at,r.receipt_id").all(this.host.worldId) as Row[])this.emit(this.view(r));
     // intents/1 auto-face: conversation members turn their heads to whoever speaks (default on)
-    try {(c as unknown as {onSpectator?(l: (m: {kind: string; conversation?: string; turn?: {from?: {soulId: string}}}) => void): void}).onSpectator?.(m => {
-      if (m.kind !== 'conversation.turn' || !m.conversation || !m.turn?.from) return;
+    try {(c as unknown as {onSpectator?(l: (m: {kind: string; conversation?: string; turn?: {from?: {soulId: string}}; from?: {soulId: string}}) => void): void}).onSpectator?.(m => {
+      // a private conversation's viewers get `conversation.talking` (who, no text) instead of the turn (#2269)
+      const from = m.kind === 'conversation.turn' ? m.turn?.from : m.kind === 'conversation.talking' ? m.from : undefined;
+      if (!m.conversation || !from) return;
       const members = this.coreA.conversations().find(x => x.id === m.conversation)?.members ?? [];
       // LINK BODY: a turn addressed to a member ends its idle reflex
-      for (const id of members) if (id !== m.turn.from.soulId) try {this.bodyRule?.poke(id);} catch {/* best effort */}
-      try {this.intents.onTurn(m.conversation, m.turn.from.soulId, members);} catch {/* attention is best effort */}
+      for (const id of members) if (id !== from.soulId) try {this.bodyRule?.poke(id);} catch {/* best effort */}
+      try {this.intents.onTurn(m.conversation, from.soulId, members);} catch {/* attention is best effort */}
     });} catch {/* no spectator hook: auto-face off */}
     // C9 body effects (fading itself only runs when Comms' fading flag is on — Gene has not approved it).
     const fading = (c as unknown as {fading?: {onFade?(l: (e: {soulId: string; change: string}) => void): void; gone?(): string[]; onTouch?(l: (soulId: string) => void): void; addKept?(k: (soulId: string) => string | null): void}}).fading;

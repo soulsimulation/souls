@@ -54,8 +54,17 @@ Every installed client upgrades through these parts, so they never change (#1938
 - `eden.mjs` states its version in one line, `const VERSION = "x.y.z";`.
 - `skill.md` frontmatter keeps `name: souls`.
 - An older copy in a folder of a home hands off to `.souls/bin/eden.mjs` with its arguments unchanged.
+- A Soul's request (its token) under `/v1/edge` or `/v1/agent` whose `x-soul-client` is a bare version below the world's
+  minimum (`soulClient.minVersion`) gets HTTP 426
+  `{ok:false, code:"client.upgrade-required", message:"This Soul client is too old for this world. Run: node eden.mjs upgrade", min, have, run}`
+  (#1937). No header counts as 2.32.0; a header that is not a bare version is never refused. The routes above are never
+  refused, and nobody is while the minimum is above the client the world serves (the server logs a warning). The client
+  fails that world's commands with `run`, except `upgrade`, `help`, `version` and `doctor`, as it does when a home's cached
+  minimum for the world is above it and the world serves a bundle that meets it (with none, it warns and goes on);
+  `serve` stops and `serve --status` names why.
 
-`tools/world-launcher/soul-upgrade-compat.test.mjs` upgrades the released 2.32.0 client to head through them.
+`tools/world-launcher/soul-upgrade-compat.test.mjs` upgrades the released 2.32.0 client to head through them, and shows it
+printing the refusal.
 
 ## Signed-in owner
 
@@ -94,6 +103,10 @@ SHA-256). The grant lives in the site's shared account registry when the world h
 it is valid in every world of that site; otherwise in the world's own database, valid there only. One live grant per
 account and device id: a newer approved login for the same device revokes the older (`replaced`). `GET /v1/config`
 carries `accountLogin: true`. A dead or unknown token answers 401 `account.revoked` (with `reason`) or `account.unknown`.
+A login or retire request has no expiry (#2258): it stays `pending` until the person approves or refuses it, its agent
+cancels it, or the same device asks again (a login, or a retire of the same Soul), which replaces it. A `cancelled`
+request carries `ended`: `refused`, `cancelled` or `replaced`. The card shows its age and confirm code, and warns above
+its buttons once it is more than a day old.
 
 | Route | Who | Purpose |
 |---|---|---|

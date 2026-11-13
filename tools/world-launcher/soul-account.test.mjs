@@ -95,8 +95,8 @@ async function world(t, { accountLogin = true } = {}) {
   const tokenOf = (accountId) => [...grants.values()].filter((g) => g.accountId === accountId).at(-1)?.token;
   const revoke = (accountId) => { for (const g of grants.values()) if (g.accountId === accountId) g.live = false; };
   const count = (method, path) => hits.filter((h) => h.method === method && h.path === path).length;
-  /** The fake person answers a retire request: ready, or cancelled. */
-  const decide = (requestId, status) => { requests.get(requestId).status = status; };
+  /** The fake person answers a retire request: ready, or cancelled (and who ended it, #2258). */
+  const decide = (requestId, status, ended) => { Object.assign(requests.get(requestId), { status }, ended ? { ended } : {}); };
   return { base, url: `${base}/acct`, requests, grants, souls, approvals, holder, hits, approve, approveSoul, decide, tokenOf, revoke, count, close,
     secrets: () => [...[...grants.values()].map((g) => g.token), ...[...requests.values()].map((q) => q.pollSecret), ...[...approvals.values()].flatMap((a) => [a.pollSecret, a.token])].filter(Boolean) };
 }
@@ -345,4 +345,29 @@ test('#2257 A6: adopt and pair --move name the device a Soul was taken from, and
   w.souls.set('s_acct7', { name: 'Ivo', account: 'acct_1' });
   const fresh = await two('adopt', 'Ivo');
   assert.equal(fresh.d?.status, 'ready', fresh.out + fresh.err); assert.equal(fresh.d.takenFrom, undefined); assert.equal(fresh.d.tell, undefined);
+});
+
+test('#2258 A3: login wait and retire wait keep polling while the request is open, and stop cleanly when refused or replaced', async (t) => {
+  const w = await world(t), home = tmp(t), run = runIn(home, home), root = join(home, '.souls'), seat = () => read(join(root, 'pending', 'acct'), 'state.json');
+  const polls = () => w.count('POST', '/v1/agent/account/requests/poll');
+  const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 25)); assert.ok(ok(), 'timed out waiting in the test'); };
+  // login wait has no deadline: it keeps asking while the person has not answered, then reports their refusal
+  const asked = await run('login', w.url); assert.equal(asked.d.login, 'pending', asked.out + asked.err);
+  const waiting = run('login', 'wait');
+  await until(() => polls() >= 5);
+  w.decide(asked.d.requestId, 'cancelled', 'refused');
+  const refused = await waiting;
+  assert.equal(refused.code, 0, refused.err); assert.equal(refused.d.login, 'refused'); assert.match(refused.d.why, /refused/); assert.match(refused.d.next, /node eden\.mjs login$/);
+  assert.equal(seat().pendingLogin, undefined, 'a refused login is forgotten');
+  // retire wait: replaced by this agent's newer ask, the old wait stops and leaves the newer one waiting
+  await logIn(w, run, 'acct_1');
+  w.souls.set('s_kai', { name: 'Kai', account: 'acct_1' });
+  const first = await run('retire', 's_kai'); assert.equal(first.d?.retire, 'pending', first.out + first.err);
+  const before = polls(), old = run('retire', 'wait');
+  await until(() => polls() >= before + 3);
+  const state = seat(); state.pendingRetire = { ...state.pendingRetire, requestId: 'aq_' + '0'.repeat(32) }; writeFileSync(join(root, 'pending', 'acct', 'state.json'), JSON.stringify(state));
+  w.decide(first.d.requestId, 'cancelled', 'replaced');
+  const replaced = await old;
+  assert.equal(replaced.code, 0, replaced.err); assert.equal(replaced.d.retire, 'replaced'); assert.equal(replaced.d.retired, false); assert.match(replaced.d.why, /newer request/);
+  assert.equal(seat().pendingRetire?.requestId, 'aq_' + '0'.repeat(32), 'the newer request stays in the seat');
 });
