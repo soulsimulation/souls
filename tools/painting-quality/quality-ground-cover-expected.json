@@ -8,7 +8,7 @@
     "tools/context-views/fixture.mjs": "afa6f2ab92625461f2d49e18b9636f7b8a3f61e738916b312764636f7157e51f",
     "apps/web/src/gen-mesh/building.mesh.ts": "1e6d2174a4e0b157e0da68f4a61ec38da5a0b185a85ac258f2e046f5af304e37",
     "apps/web/src/gen-mesh/building-kit.ts": "93ed954c0e822b103c8f7e6d0f0cbc2c45e9724e694dac2daa47f4505babd70b",
-    "apps/web/src/gen-mesh/building-buffers.ts": "81c4868b7c6a9987dadb55447f871f4288528dae7b1fd1572f56dd39c16c09b1",
+    "apps/web/src/gen-mesh/building-buffers.ts": "7ffe49aa8cebfabe628e1f6aa26c8e769100eb272316651576a53e75ba20cbd1",
     "apps/web/src/gen-mesh/building-looks.json": "d053be8fa7cddb445f7f4986b55c71438a9544375bd9997f39b01c93236baa74",
     "apps/web/src/gen-mesh/kit.mesh.ts": "ea1d4120a0d173878bb032f8ab55b1d6cd11ecb0e166b5a5c4730c291e74fd20",
     "apps/web/src/gen-mesh/kit-surfaces.ts": "1ad538a4fade9c583d45f965c3d0670c2b6d4150ff01f5c28ca0d4561c8a65c3",
@@ -343,6 +343,15 @@
       "integratedCommit": null,
       "reviewed": false,
       "reason": "Not reviewed. The pinned bytes are on no ref in this repository, so what changed cannot be read from history. Scene equivalence with the retained baseline is unknown."
+    },
+    {
+      "path": "apps/web/src/gen-mesh/building-buffers.ts",
+      "baselineSha256": "875b4a0d32f04cb39d194f8297376e61f89c7172b7d6ab4a27ae6bc1e14aa88b",
+      "candidateSha256": "7ffe49aa8cebfabe628e1f6aa26c8e769100eb272316651576a53e75ba20cbd1",
+      "originalCommit": null,
+      "integratedCommit": null,
+      "reviewed": true,
+      "reason": "#2282: an outside door's leaf hangs shut on the wall's outer face instead of standing open into the room. Only the door leaf of an exterior doorway moves; walls, ground cover and every other face are unchanged."
     }
   ]
 }
