@@ -2239,9 +2239,44 @@ function bestPlace(ix, words, at) {
   return best?.p ?? null;
 }
 
+/** Whether a point lies inside a polygon or within 1 m of its edge (a goal on the goal line is on the pitch). */
+const inOutline = (pt, poly) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ax, az] = poly[j], [bx, bz] = poly[i], dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((pt[0] - ax) * dx + (pt[1] - az) * dz) / (dx * dx + dz * dz || 1)));
+    if (Math.hypot(pt[0] - ax - t * dx, pt[1] - az - t * dz) <= 1) return true;
+    if ((bz > pt[1]) !== (az > pt[1]) && pt[0] < (ax - bx) * (pt[1] - bz) / (az - bz) + bx) c = !c;
+  }
+  return c;
+};
+/** #1922: a place's outline (`[x, z]`, north is -z, east is +x) and the named spots and things that lie inside it, in it or
+ *  one of its parts or within its outline, each with its position. One row per spot's thing, as `find` gives them. */
+function outlineOf(ix, id, limit = 24) {
+  const p = ix.place(id); if (!p) return null;
+  const parts = ix.within(p.id), poly = p.outline?.length >= 3 ? p.outline : null;
+  const lies = (place, point) => parts.has(place ?? "") || (!!poly && !!point && inOutline(point, poly));
+  const rows = [], spots = new Set();
+  for (const a of ix.cat.acts) { const key = `${a.verb}|${a.thing ?? a.id}`; if (!spots.has(key) && lies(a.place, a.at)) { spots.add(key); rows.push({ kind: `act ${a.verb}`, row: { name: a.label, act: a.id, at: a.at } }); } }
+  for (const t of ix.cat.things) if (lies(t.place, t.at)) rows.push({ kind: `thing ${t.kind}`, row: { name: t.name, id: t.id, kind: t.kind, ...thingAt(ix, t) } });
+  // #2225: by kind, the fewest of a kind first: a one-of-a-kind thing (the chess table) is the one a person names, and twenty
+  // sleeping mats or eight seats at one podium no longer push it past the cap
+  const many = new Map(); for (const r of rows) many.set(r.kind, (many.get(r.kind) ?? 0) + 1);
+  rows.sort((a, b) => many.get(a.kind) - many.get(b.kind));
+  return { ...(p.outline ? { outline: p.outline } : {}), inside: rows.slice(0, limit).map((r) => r.row), ...(rows.length > limit ? { insideMore: rows.length - limit } : {}) };
+}
+
+/** #2225: where a thing stands, `[x, z]`, and its `level` when that is not the ground (its place's), from the local copy. */
+function thingAt(ix, t) {
+  if (typeof t === "string") t = ix.things.get(t);
+  if (!t?.at) return null;
+  const level = ix.place(t.place)?.level;
+  return { at: t.at, ...(level ? { level } : {}) };
+}
+
 /** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
- *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. */
-function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = {}) {
+ *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
+ *  place found, `outlineOf` it. */
+function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
@@ -2295,11 +2330,12 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = 
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...can].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
-  return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
+  const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
+  return { found, ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 
 /** One place as a small tree: its parts, what can be done in it by verb (with the nearest id), its things by kind. */
@@ -2342,7 +2378,7 @@ function query(ix, questions, { at, budget = 600, states } = {}) {
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -4732,14 +4768,14 @@ async function catalogCommand(...args) {
   const c = await syncCatalog({ force: args.includes("--refresh") });
   return { world: c.world, version: c.etag, fetchedAt: c.fetchedAt, changed: c.changed, ...c.catalog.counts, ...(c.stale ? { note: c.stale } : {}), next: `${CLI} find "<words>"   ${CLI} look` };
 }
-// find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]: answered from this machine.
+// find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]: answered from this machine.
 async function findCommand(...args) {
   const o = {}, words = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--verb") o.verb = args[++i]; else if (args[i] === "--kind") o.kind = args[++i]; else if (args[i] === "--in") o.inPlace = args[++i];
-    else if (args[i] === "--near") o.near = args[++i]; else if (args[i] === "--limit") o.limit = Number(args[++i]); else if (args[i] !== "--json") words.push(args[i]);
+    else if (args[i] === "--near") o.near = args[++i]; else if (args[i] === "--limit") o.limit = Number(args[++i]); else if (args[i] === "--outline") o.outline = true; else if (args[i] !== "--json") words.push(args[i]);
   }
-  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n]');
+  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n] [--outline]');
   const { ix, live, me, note } = await worldCopy();
   const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things });
   return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act": ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
@@ -4854,7 +4890,23 @@ async function around(...args) {
   // Directions are a sibling of the local surroundings, not part of them.
   // Never silently discard a requested destination on an older server either.
   const route = d.route ?? (args.length ? { query: args.join(" "), found: false, reason: 'This world did not return directions for this query. Use find "<destination>" or caps --verb walk --search "<destination>".' } : undefined);
-  return { ...d.around, ...(route ? { route } : {}) };
+  // the live picture is fetched only when there are Souls to place
+  const souls = d.around?.souls?.length ? (await syncLive())?.live?.souls : null;
+  return { ...aroundPositions(d.around, souls), ...(route ? { route } : {}) };
+}
+/** #2225: each nearby Soul's position `[x, z]` beside its bearing ("Moss · 0.9m front-right at [3.1, 2]"), from the live
+ *  picture. `around` names them in `people` and `souls` in one order; a Soul the picture does not place is left as it is. */
+export function aroundPositions(around, liveSouls) {
+  const ids = around?.souls, people = around?.people;
+  if (!Array.isArray(ids) || !Array.isArray(people)) return around;
+  const rows = new Map((liveSouls ?? []).filter((x) => Array.isArray(x?.at)).map((x) => [x.id, x]));
+  return { ...around, people: people.map((line, i) => {
+    const row = rows.get(ids[i]?.id); if (!row || typeof line !== "string") return line;
+    const at = `at [${row.at[0]}, ${row.at[1]}]`, head = `${row.name} · `;
+    if (!line.startsWith(head)) return `${line} · ${at}`;
+    const rest = line.slice(head.length), cut = rest.indexOf(" · ");
+    return cut < 0 ? `${line} ${at}` : `${head}${rest.slice(0, cut)} ${at}${rest.slice(cut)}`;
+  }) };
 }
 
 const map = async () => clean(ok(await call("/v1/edge/map"), "map"));
@@ -7129,7 +7181,7 @@ const HELP = [
   ],
   ["world",
     `look`,
-    `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n]`,
+    `find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]`,
     `query '<json questions>' [--budget tokens]`,
     `catalog [--refresh]`,
   ],
@@ -7291,7 +7343,10 @@ or on this machine.
 
 async function inspect(id, ...flags) {
   if (!id) throw new Error("usage: inspect <id> [--all]");
-  return ok(await call(`/v1/edge/inspect/${encodeURIComponent(id)}${flags.includes("--all") ? "?all=1" : ""}`), "inspect").inspect;
+  const r = ok(await call(`/v1/edge/inspect/${encodeURIComponent(id)}${flags.includes("--all") ? "?all=1" : ""}`), "inspect").inspect;
+  // #2225: a thing's position and level come from this machine's copy of the world, with no call
+  const copy = r?.id ? await worldCopy({ local: true }).catch(() => null) : null, pos = copy ? soulCatalog.thingAt(copy.ix, r.id) : null;
+  return pos ? { ...r, ...pos } : r;
 }
 
 // ---------------------------------------------------------------- the Souls home
