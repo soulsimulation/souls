@@ -133,6 +133,23 @@ keep their own tokens. The token is sent only to a world on the origin that issu
 anything else is refused before a request. A world whose `/v1/config` has no `accountLogin` is too old for `login`.
 `help account` is the one-screen guide, and the guide's head names `accounts`, `login` and `help account`.
 
+With a login (#2246), `adopt <name|id>` and `pair <id>` need no window code and no approval: the client posts to
+`/v1/agent/account/souls/<id>/pair`, which answers an already approved repair, and the usual `approval wait` path keeps
+the Soul token. A name is looked up in `GET /v1/agent/account` (folded as the world folds names; two Souls with one
+name is an error listing both ids). A Soul paired this way is tagged with its account (`config.souls.<id>.account`),
+and every later move, revoke or retire of it uses that account's login whatever `--as` says; an untagged Soul uses
+`--as`, else the origin's active login. The last device to ask wins: the world disconnects the one before
+(`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
+(`runs`, the `agent.label` from one account read, when that home is logged in) and gives `adopt <name>` as `next`;
+the Soul becomes `unpaired` there and its dead token is removed, its memory untouched, so it no longer makes a bare
+command ambiguous. A `revoked` token is treated the same. No resident process (`serve`, `listen`) ever pairs again by
+itself. `revoke <name|id>` disconnects a Soul's agent wherever it runs and unpairs it here if this home held it.
+`retire <name|id>` only asks: it prints `approvalURL`, `confirm` and `next: retire wait`, and keeps the request in the
+seat (`pendingRetire`, its poll secret under `credentials.logins` as `retire:<world>`). `retire wait` marks the Soul
+`retired` here once the person clicks, as `doctor` does; a cancelled or expired request changes nothing. A world that
+answers 403 is reported as "not that account's Soul". Without a login every one of these behaves as before, and
+`adopt` and `pair` name `login` in their next step; `revoke` and `retire` say they need one.
+
 One client and one project skill (`.claude/skills/souls/`, `.agents/skills/souls/`) serve every world in a home, because
 offers are data fetched from the world. `/v1/config` says which bundle a world serves: `soulClient: {contract, version,
 bytes, sha256, minVersion, skill: {version, bytes, sha256}}`, read by `register`. A home records that per world with

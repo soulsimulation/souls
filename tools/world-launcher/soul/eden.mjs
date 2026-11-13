@@ -37,7 +37,7 @@ const RUNTIME_LOCKS = [".listen.lock", ".eden-serve.lock"];
 const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
-const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval", "login"]);
+const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval", "login", "revoke", "retire"]);
 /** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
 const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
@@ -211,12 +211,15 @@ const norm = (s) => String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-
 
 /** A state split into what may sit on disk with the Soul and what only credentials.json may hold. */
 function splitSecrets(s) {
-  const { token, identity, home, pendingApproval, pendingLogin, ...open } = s;
+  const { token, identity, home, pendingApproval, pendingLogin, pendingRetire, ...open } = s;
   if (home) open.home = { world: home.world, soul: home.soul };
   if (pendingApproval) { const { pollSecret, ...input } = pendingApproval.input ?? {}; open.pendingApproval = { ...pendingApproval, input }; }
   if (pendingLogin) { const { pollSecret, ...input } = pendingLogin.input ?? {}; open.pendingLogin = { ...pendingLogin, input }; }
-  return { open, secrets: { token, identity, homeToken: home?.token, pollSecret: pendingApproval?.input?.pollSecret, ...(pendingLogin ? { loginSecret: pendingLogin.input?.pollSecret } : {}) } };
+  if (pendingRetire) { const { pollSecret, ...input } = pendingRetire.input ?? {}; open.pendingRetire = { ...pendingRetire, input }; }
+  return { open, secrets: { token, identity, homeToken: home?.token, pollSecret: pendingApproval?.input?.pollSecret, ...(pendingLogin ? { loginSecret: pendingLogin.input?.pollSecret } : {}), ...(pendingRetire ? { retireSecret: pendingRetire.input?.pollSecret } : {}) } };
 }
+/** #2246: a waiting retire's poll secret sits in credentials.logins beside the seat's login, under its own key. */
+const retireKey = (seatKey) => `retire:${seatKey}`;
 /** #2244: an account's short name in this home, as a person types it after --as. */
 const ALIAS = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -341,15 +344,16 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
     }
     if (s.pendingApproval) { const pollSecret = creds.approvals[key]?.pollSecret; if (pollSecret) s.pendingApproval = { ...s.pendingApproval, input: { ...s.pendingApproval.input, pollSecret } }; }
     if (s.pendingLogin) { const pollSecret = creds.logins[key]?.pollSecret; if (pollSecret) s.pendingLogin = { ...s.pendingLogin, input: { ...s.pendingLogin.input, pollSecret } }; }
+    if (s.pendingRetire) { const pollSecret = creds.logins[retireKey(key)]?.pollSecret; if (pollSecret) s.pendingRetire = { ...s.pendingRetire, input: { ...s.pendingRetire.input, pollSecret } }; }
     return s;
   }
 
   /** The first token in a seat makes a Soul: its directory, its index entry. The seat stays for the world's next Soul. */
   function promote(ctx, open) {
     const id = open.home?.soul ?? open.soul;
-    const { world, worldId, accountAuth, pendingLogin } = open;
-    delete open.pendingLogin;   // a login waiting in this seat stays in the seat
-    writeJson(join(ctx.dir, STATE_FILE), Object.fromEntries(Object.entries({ world, worldId, accountAuth, pendingLogin }).filter(([, v]) => v !== undefined)));
+    const { world, worldId, accountAuth, pendingLogin, pendingRetire } = open;
+    delete open.pendingLogin; delete open.pendingRetire;   // a login or a retire waiting in this seat stays in the seat
+    writeJson(join(ctx.dir, STATE_FILE), Object.fromEntries(Object.entries({ world, worldId, accountAuth, pendingLogin, pendingRetire }).filter(([, v]) => v !== undefined)));
     Object.assign(ctx, soul(id));
     process.chdir(ctx.dir);
     // A kept Soul paired again in the same world goes on from where it was: same Soul, same stream, same cursor.
@@ -388,6 +392,8 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
       else if (seatKey) delete c.approvals[seatKey];
       if (seatKey && secrets.loginSecret) c.logins[seatKey] = { pollSecret: secrets.loginSecret };
       else if (seatKey) delete c.logins[seatKey];
+      if (seatKey && secrets.retireSecret) c.logins[retireKey(seatKey)] = { pollSecret: secrets.retireSecret };
+      else if (seatKey) delete c.logins[retireKey(seatKey)];
       if (ctx.kind !== "soul") return;
       const mine = (c.souls[ctx.id] ??= {}), homeKey = open.home ? keyOf(config().worlds, open.home.world) ?? key : key;
       if (secrets.token) (mine[key] ??= {}).token = secrets.token;
@@ -751,11 +757,20 @@ function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics.wait(n
   function setActiveAccount(alias) {
     return updateConfig((c) => { if (!c.accounts[alias]) throw unknownAlias(alias, c); c.activeAccount[c.accounts[alias].origin] = alias; return c.accounts[alias].origin; });
   }
+  /** #2246: control of a Soul moved to another device or was ended. It stays here unpaired, its memory untouched; its dead token goes. */
+  function unpair(id) {
+    updateCredentials((c) => { for (const w of Object.values(c.souls[id] ?? {})) delete w.token; });
+    updateConfig((c) => { if (c.souls[id]) c.souls[id].state = "unpaired"; });
+  }
+  /** #2246: a Soul paired through an account login is that account's: its later moves, revokes and retires use that login. */
+  const tagAccount = (id, accountId) => updateConfig((c) => { if (c.souls[id] && accountId) c.souls[id].account = accountId; });
+  /** #2246: the world retired a Soul on its person's click; the same mark doctor makes. */
+  const retireHere = (id) => updateConfig((c) => { if (c.souls[id]) Object.assign(c.souls[id], { state: "retired", retiredAt: new Date().toISOString() }); });
   /** The Souls this home holds a token for. */
   const heldSouls = () => new Set(Object.entries(credentials().souls).filter(([, w]) => Object.values(w ?? {}).some((x) => x?.token)).map(([id]) => id));
 
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, device, accounts, accountFor, aliasFor, saveAccount, dropAccount, setActiveAccount, heldSouls, refreshGuide, config, noteConsolidation, claimFeeds, noteFeed, readNews, claimNews, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, device, accounts, accountFor, aliasFor, saveAccount, dropAccount, setActiveAccount, heldSouls, unpair, tagAccount, retireHere, refreshGuide, config, noteConsolidation, claimFeeds, noteFeed, readNews, claimNews, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }
 return { HOME_NAME, RUNTIME_LOCKS, SEAT_COMMANDS, LOCAL_READS, HOME_COMMANDS, IMPORTED_FIELDS, guideHomeHead, findHome, globalRoot, soulsIn, knownHomes, rememberHome, emptyHome, skillVersionOf, SKILL_COPIES, isSoulsSkill, createHome, slugOf, keyOf, originOf, newerThan, FEED_EVERY_MS, siteOf, feedSites, feedDue, newsOf, plainName, norm, splitSecrets, ALIAS, selectSoul, looksLikeSelector, chooseContext, runtimeLocks, openHome, LEGACY_STATE, STATE_FILE, CREDENTIALS, FEED_RETRY_MS, FEED_KEEP };
 })();
@@ -3381,12 +3396,12 @@ function unconfirmed(what, w) {
 
 // as: "soul" (default, the Soul's delegated token), "owner" (account routes under /v1/agent, same token),
 // "dev" (legacy self-made identity), "account" (#2244: this home's account login for the world's origin), "none".
-// retry: false hands every answer back at once (listen runs its own loop).
-async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext, key, once = false, keepSlowed = false } = {}) {
+// retry: false hands every answer back at once (listen runs its own loop). soul: the Soul an "account" call is about (#2246).
+async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = false, retry = true, slowedNext, key, once = false, keepSlowed = false, soul } = {}) {
   const s = load();
   if (as === "soul") ({ path, body } = withNow(path, body));
   const url = need(s, "world", `Run: ${CLI} register <world-url>`) + path;
-  const account = as === "account" ? accountCredential(s.world) : null;
+  const account = as === "account" ? accountCredential(s.world, ...(soul ? [soul] : [])) : null;
   method ??= body ? "POST" : "GET";
   const cls = retry ? retryClass(method, path) : "none";
   timeoutMs ??= cls === "read" ? 25_000 : cls === "keyed" ? 40_000 : 90_000;
@@ -3705,7 +3720,8 @@ function forOption(argv) {
 // Account worlds: ask the owner's open Sim window (or the printed link) to approve a new
 // Soul or a reconnection. The server mints the Soul's delegated token when approved.
 async function startApproval(input, code) {
-  const s = load();
+  const s = load(), login = input.soulId ? loginFor(s.world, input.soulId) : null;
+  if (login) return accountPair(input.soulId, login);
   if (MOVE) input = { ...input, move: true };
   const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
   const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
@@ -3722,7 +3738,45 @@ async function startApproval(input, code) {
   const r = ok(started, "approval start"), a = r.approval ?? r;
   pending.approvalId = a.id;
   save({ pendingApproval: pending });
-  return { ...publicApproval(a, s.world), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
+  const shown = publicApproval(a, s.world), hint = input.soulId || input.existing ? loginHint(s.world) : "";
+  return { ...shown, ...(shown.next && hint ? { next: shown.next + hint } : {}), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
+}
+/** #2246: the login this home uses for Soul `soulId` (or for the world's account when null) in `world`; null without one. */
+function loginFor(world, soulId = null) {
+  if (!HOME || !world) return null;
+  const a = HOME.accountFor({ origin: soulHome.originOf(world), as: AS, soulId });
+  return a?.token ? a : null;
+}
+/** #2246: on a world that offers account login, a home without one hears that one login makes these moves codeless. */
+function loginHint(world) {
+  const c = HOME?.config();
+  if (!c || c.worlds[soulHome.keyOf(c.worlds, world)]?.accountLogin !== true || HOME.accountFor({ origin: soulHome.originOf(world) })?.token) return "";
+  return `. To bring your Souls here with no code from now on, log in once: ${CLI} login`;
+}
+/** #2246: an account login answers 401 once it has ended, and 403 for a Soul that is not its account's. */
+function accountOk(r, what, a, id) {
+  if (r.status === 401) throw new Error(`${what}: the login ${a.alias} has ended (${codeOf(r.data) ?? "http-401"}). Run: ${CLI} logout ${a.alias}, then ${CLI} login`);
+  if (r.status === 403) throw new Error(`${what}: forbidden — ${id} is not that account's Soul (login ${a.alias}). The world refused it; nothing changed.`);
+  return ok(r, what);
+}
+/** #2246 (account-grant/1): with a login, one of the account's Souls comes here with no code and no click. The world answers
+ *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. The last device to ask wins. */
+async function accountPair(id, a) {
+  const s = load(), was = s.pendingApproval;
+  const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
+    : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const { soulId, ...body } = pending.input;
+  const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
+  save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
+  return approval("wait");
+}
+/** #2246: one of the account's Souls in this world by name, folded as the world folds names. Two with one name is the person's to choose. */
+async function accountSoulNamed(who, a, what) {
+  const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
+  const d = accountOk(await call("/v1/agent/account", { as: "account" }), what, a, who), hits = (d.souls ?? []).filter((x) => fold(x.name) === fold(who));
+  if (!hits.length) throw new Error(`${what}: your account has no Soul called ${who} in this world. See: ${CLI} list --account`);
+  if (hits.length > 1) throw new Error(`${what}: your account has ${hits.length} Souls called ${who}: ${hits.map((x) => x.id).join(", ")}. Say which: ${CLI} ${what} <soulId>`);
+  return { id: hits[0].id, name: soulHome.plainName(hits[0].name) || hits[0].id };
 }
 /** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. A
  *  Soul this home keeps without a working token is most likely its own grant, left in an older copy of this folder. */
@@ -3894,7 +3948,9 @@ async function adopt(...argv) {
   if (kept) return pair(kept.id, ...forCode);
   const s = load();
   if (s.accountAuth) {
-    if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>`);
+    const login = loginFor(s.world);   // #2246: with a login the account says which Soul the name is, and no code is needed
+    if (login) return pair((await accountSoulNamed(who, login, "adopt")).id);
+    if (!code) throw new Error(`Finding ${who} by name takes your person's window code: ${CLI} adopt ${who} --for <CODE>${loginHint(s.world)}`);
     try { return await startApproval({ name: who, existing: true }, code); }
     catch (e) { if (/HTTP 400/.test(e.message) && soulHome.newerThan("2.23.5", HOME.config().worlds[SEAT?.key]?.bundle)) throw new Error(`This world is older than this client and adopts by id only: ${CLI} adopt <soulId> --for <CODE>`); throw e; }
   }
@@ -3977,8 +4033,9 @@ async function approval(action = "status") {
     if (a.status === "ready" && token) {
       if (!token.startsWith(`sim_${a.soulId}_`)) throw new Error("Approval returned a credential for a different Soul; nothing saved.");
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
+      if (HOME && p.account) HOME.tagAccount(a.soulId, p.account);   // #2246: paired through a login, it is that account's Soul here
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move ? { moved: "Control moved here; the folder that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
@@ -3991,7 +4048,7 @@ async function approval(action = "status") {
 
 /** `--as <alias>` names one login for one command; enterHome takes it out of the line for these commands. */
 let AS = null;
-const ACCOUNT_COMMANDS = new Set(["login", "logout", "accounts", "list"]);
+const ACCOUNT_COMMANDS = new Set(["login", "logout", "accounts", "list", "adopt", "pair", "revoke", "retire"]);
 function takeAs(line) {
   if (!ACCOUNT_COMMANDS.has(line[0])) return line;
   const out = [];
@@ -4005,8 +4062,8 @@ function takeAs(line) {
 }
 /** An account token goes only to a world on the origin that issued it, and only over https or to this machine. */
 const safeOrigin = (origin) => /^https:/.test(origin) || /^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|$)/.test(origin);
-function accountCredential(world) {
-  const origin = soulHome.originOf(world), a = needHome().accountFor({ origin, as: AS, soulId: SEAT?.kind === "soul" ? SEAT.id : null });
+function accountCredential(world, soulId = SEAT?.kind === "soul" ? SEAT.id : null) {
+  const origin = soulHome.originOf(world), a = needHome().accountFor({ origin, as: AS, soulId });
   if (!a?.token) throw new Error(`No login here for ${origin}. Run: ${CLI} login`);
   if (a.origin !== origin) throw new Error(`account.origin: the login ${a.alias} was issued by ${a.origin}, and its token goes to no other site. Log in to this one: ${CLI} login --as <new alias>`);
   if (!safeOrigin(origin)) throw new Error(`account.insecure: ${origin} is plain http off this machine, so no login token is sent there.`);
@@ -4131,6 +4188,90 @@ async function listAccount(argv) {
   return { world: key, account: { alias: a.alias, id: d.account?.id ?? a.accountId }, souls: (d.souls ?? []).map((x) => ({ name: soulHome.plainName(x.name) || x.id, id: x.id, control: x.control ?? null, agent: x.agent ?? null, here: held.has(x.id) })), maxSouls: d.maxSouls ?? null };
 }
 
+// ---------------------------------------------------------------- moving, disconnecting, retiring (#2246)
+
+const adoptLine = (name) => `${CLI} adopt ${/[\s"']/.test(name) ? JSON.stringify(name) : name}`;
+/** The world says another device took this Soul (`replaced`) or its agent was disconnected (`revoked`). It stays in this
+ *  home unpaired, memory untouched, so a command for another Soul here is never ambiguous over it. Nothing pairs again by itself. */
+async function movedAway(id, why) {
+  HOME.unpair(id);
+  const s = load(), name = HOME.config().souls[id]?.name ?? id, a = loginFor(s.world, id);
+  let runs = null;
+  if (a) {
+    try {
+      const r = await call("/v1/agent/account", { as: "account", soul: id, retry: false, timeoutMs: STATUS_WAIT_MS });
+      if (r.status === 200) runs = (r.data?.souls ?? []).find((x) => x.id === id)?.agent?.label ?? null;
+    } catch { /* where it runs now is a courtesy; the move stands without it */ }
+  }
+  const moved = why === "replaced";
+  return {
+    paired: false, control: why,
+    why: moved ? `Control of ${name} moved to another device${runs ? ` (${runs})` : ""}. Its memory stays here.` : `${name}'s agent was disconnected from the account. Its memory stays here.`,
+    ...(runs ? { runs } : {}),
+    next: a ? adoptLine(name) : `${CLI} adopt ${id} --for <CODE>${moved ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)`,
+  };
+}
+/** The Soul a revoke or retire names, and the login it goes with. A Soul this home keeps speaks from its own world's seat. */
+async function accountTarget(who, what) {
+  const home = needHome();
+  const kept = home.principals().filter((p) => p.state !== "retired" && (p.id === who || soulHome.norm(p.name) === soulHome.norm(who)) && (!AT_WORLD || p.world === AT_WORLD));
+  if (kept.length > 1) throw new Error(`${who} could mean ${kept.map((p) => `${p.id} in ${p.world}`).join(" or ")}. Say which: ${CLI} ${what} <soulId>`);
+  if (kept[0]) await seatFor(kept[0]);
+  const s = load(), id = kept[0]?.id ?? (/^s_[A-Za-z0-9_-]+$/.test(who) ? who : null);
+  if (!s.world) throw new Error(`Register its world first: ${CLI} register <world-url>`);
+  const a = loginFor(s.world, id);
+  if (!a) throw new Error(`${what} needs a login here for ${soulHome.originOf(s.world)}, and this home has none. Run: ${CLI} login`);
+  return { soul: id ? { id, name: kept[0]?.name ?? id } : await accountSoulNamed(who, a, what), a, kept: kept[0] ?? null };
+}
+/** revoke <name|id>: the Soul's agent is disconnected wherever it runs. If this home held it, it stays here unpaired. */
+async function revoke(...argv) {
+  if (argv.length !== 1) throw new Error(`usage: ${CLI} revoke <name|soulId> [--as <alias>]`);
+  const { soul, a, kept } = await accountTarget(argv[0], "revoke");
+  accountOk(await call(`/v1/agent/account/souls/${soul.id}/revoke`, { as: "account", soul: soul.id, body: {} }), "revoke", a, soul.id);
+  const held = !!kept && (kept.state === "active" || HOME.heldSouls().has(soul.id));
+  if (held) HOME.unpair(soul.id);
+  return { revoked: true, soul, account: a.alias, ...(held ? { here: "unpaired; its memory stays here" } : {}), next: `${adoptLine(soul.name)}   (brings it back here)` };
+}
+/** retire <name|id>: asks; the person confirms in their window. Nothing is retired until they click. */
+async function retireCommand(...argv) {
+  if (argv[0] === "wait" && argv.length === 1) return retireWait();
+  if (argv.length !== 1) throw new Error(`usage: ${CLI} retire <name|soulId> [--as <alias>] | ${CLI} retire wait`);
+  const { soul, a } = await accountTarget(argv[0], "retire"), p = load().pendingRetire;
+  for (const again of p?.soulId === soul.id && p.input?.pollSecret ? [true, false] : [false]) {
+    const next = again ? p : { soulId: soul.id, name: soul.name, input: { idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+    const d = accountOk(await call(`/v1/agent/account/souls/${soul.id}/retire`, { as: "account", soul: soul.id, body: next.input }), "retire", a, soul.id), q = d.request ?? {};
+    if (again && q.status !== "pending" && q.status !== "ready") continue;   // the one kept here lapsed: ask afresh
+    save({ pendingRetire: { ...next, requestId: q.id, interval: d.intervalSeconds } });
+    return { retire: q.status, requestId: q.id, soul, approvalURL: d.approvalURL, confirm: q.confirm, delivery: d.delivery,
+      next: `Ask your person to confirm it on the world's open page (or the link) and to check it shows ${q.confirm}. Nothing is retired until they click. Then: ${CLI} retire wait` };
+  }
+}
+/** retire wait: on the person's click the Soul is marked retired here, as doctor marks it; a cancelled or expired request changes nothing. */
+async function retireWait() {
+  const home = needHome();
+  if (!load().pendingRetire) {
+    const waiting = Object.keys(home.config().worlds).filter((k) => home.seatState(k).pendingRetire);
+    if (waiting.length === 1) { SEAT = home.seat(waiting[0]); process.chdir(SEAT.dir); }
+  }
+  const p = load().pendingRetire;
+  if (!p) throw new Error(`No retire waits here. Ask for one: ${CLI} retire <name>`);
+  const body = { requestId: p.requestId, pollSecret: p.input.pollSecret }, deadline = Date.now() + LOGIN_WAIT_MS, soul = { id: p.soulId, name: p.name ?? p.soulId };
+  for (;;) {
+    const r = await call("/v1/agent/account/requests/poll", { as: "none", body, timeoutMs: 30_000 });
+    const d = r.status === 0 || r.status === 429 || r.status >= 500 ? null : ok(r, "retire wait"), q = d?.request ?? {};
+    if (q.status === "ready") {
+      const here = !!home.config().souls[p.soulId];
+      if (here) home.retireHere(p.soulId);
+      save({ pendingRetire: undefined });
+      if (home.principals().some((x) => x.state === "active")) refreshGuide(); else home.refreshGuide();
+      return { retire: "ready", soul, retired: true, ...(here ? { here: "marked retired in this home; its memory stays here" } : {}) };
+    }
+    if (q.status && q.status !== "pending") { save({ pendingRetire: undefined }); return { retire: q.status, soul, retired: false, why: "Nothing was retired, and nothing changed here." }; }
+    if (Date.now() >= deadline) return { retire: "pending", requestId: p.requestId, soul, next: `Your person has not confirmed it yet. Run again: ${CLI} retire wait` };
+    await pause((d ? p.interval ?? 3 : 3) * 1000);
+  }
+}
+
 /** How long `status` gives the world. A person is waiting on it, and a busy world still answers well inside this. */
 const STATUS_WAIT_MS = 5_000;
 async function status() {
@@ -4140,7 +4281,7 @@ async function status() {
   if (!s.token && s.pendingCreate) return { paired: false, world: s.world, arriving: s.pendingCreate.name, next: `${ARRIVING}: ${CLI} create "${s.pendingCreate.name}" to keep waiting` };
   if (!s.token && SEAT?.kind === "soul") {
     const e = HOME.config().souls[SEAT.id], asked = HOME.seatState(e?.world).pendingApproval?.input, waiting = asked?.soulId === SEAT.id || (!!asked?.name && asked.name === e?.name);
-    return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
+    return { soul: { id: SEAT.id, name: e?.name }, paired: false, world: s.world, why: "This home has no token for this Soul. Its memory is safe here.", next: waiting ? `${CLI} approval wait` : loginFor(s.world, SEAT.id) ? adoptLine(e?.name ?? SEAT.id) : `${CLI} adopt ${SEAT.id} --for <CODE>   (the code is on your person's open world page)` };
   }
   if (!s.token) return { paired: false, world: s.world, pending: s.pendingApproval?.approvalId ?? null, next: s.pendingApproval ? `${CLI} approval wait` : `${CLI} create "<Name>" --for <CODE>` };
   // One quick try, straight to the world: status is how a Soul finds out what is wrong, and a serve busy with a long write
@@ -4150,6 +4291,7 @@ async function status() {
   if (r.status < 200 || r.status >= 300) {
     const said = codeOf(r.data) ?? (r.status ? `http-${r.status}` : "unreachable");
     const local = { soul: { id: s.soul, name: HOME?.config().souls[SEAT?.id ?? s.soul]?.name }, world: s.world, client: VERSION, ...whereIWas(), ...briefNow(), ...wakeNow() };
+    if (r.status === 401 && HOME && SEAT?.kind === "soul" && codeOf(r.data) === "control.revoked" && ["replaced", "revoked"].includes(r.data?.reason)) return { ...local, ...lastServeEnd(), ...(await movedAway(SEAT.id, r.data.reason)) };
     if (r.status === 401) return { ...local, ...lastServeEnd(), paired: false, control: r.data?.reason ?? said, why: r.data?.message ?? "The world refused this folder's token.", next: r.data?.reason === "retired" ? "This Soul was retired. Its memory stays here." : `${CLI} ${HOME ? "adopt" : "pair"} ${SEAT?.id ?? s.soul} --for <CODE>${r.data?.reason === "replaced" ? " --move   (takes control back from the folder that holds it now, which disconnects it" : "   (takes control back"}; the code is on your person's open world page)` };
     if (isBusy(r.status, r.data) || r.status === 429) return { ...local, paired: true, reachable: true, busy: said, ...listenerNow(), note: "The world is up but too busy to say more just now. It is slow, not broken: try once more in a minute." };
     return { ...local, paired: true, reachable: false, ...(r.status ? { worldSaid: said } : {}), ...listenerNow(), note: "The world is not answering, so nothing I do reaches it now. Who I am and what I remember are here. It may be restarting: try once more in a minute, not in a loop." };
@@ -6589,6 +6731,9 @@ const HELP = [
     `accounts [switch <alias>]`,
     `logout [alias]`,
     `list --account [@world]`,
+    `adopt <name|id>   (logged in: no code)`,
+    `revoke <name|id>`,
+    `retire <name|id> · retire wait`,
     `(help account)`,
   ],
   ["",
@@ -6730,15 +6875,17 @@ Log in once per site, not per Soul. The token is kept in \`.souls/credentials.js
    one you chose with \`--as <alias>\`. Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
+4. \`${CLI} adopt <name|id>\` brings one of them here with no code: the device that had it is disconnected, and its
+   \`status\` says where it went. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs. \`retire <name|id>\`
+   asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` finishes on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
 \`${CLI} accounts\` lists them, with no world call; \`accounts switch <alias>\` changes the active one; \`--as <alias>\`
-picks one for a single command.
+picks one for a single command. A Soul paired through a login always uses that login.
 
 \`${CLI} logout [<alias>]\` ends a login, here and in the world, even when the world does not answer. Your Souls stay
-connected: their own tokens keep working.
-
-A login's token goes only to worlds of the site that issued it, over https or on this machine.
+connected: their own tokens keep working. A login's token goes only to worlds of the site that issued it, over https
+or on this machine.
 `;
 
 async function inspect(id, ...flags) {
@@ -7041,6 +7188,8 @@ const commands = {
   list: listCommand,
   login,
   logout: logoutCommand,
+  revoke,
+  retire: retireCommand,
   accounts: accountsCommand,
   default: defaultCommand,
   doctor: doctorCommand,
