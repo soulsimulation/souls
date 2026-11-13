@@ -12,7 +12,7 @@
 // card is open it is drawn inside that card (`embedded`, pairing-slot.ts), never as a second dialog over it.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import * as J from './join-api.ts';
-import { approvalLine, preparingLine, safePhoto } from './window-approvals.ts';
+import { approvalLine, preparingLine, requestLine, safePhoto, staleRequestNote } from './window-approvals.ts';
 import { requestFollowSoul } from '../follow-soul-request.ts';
 import { countPairing, pairingTaken } from '../visitor-counts.ts';
 import { approvalTitle, isAccountRequest } from '../approval-link.ts';
@@ -130,7 +130,7 @@ function RequestCard({ id, signedIn, signIn, onDone, embedded = false }: CardPro
     closed.current = true; done.current();
   }, [q]);
   const title = q ? (q.kind === 'retire' ? q.soul?.name ?? 'Your Soul' : deviceName(q)) : signedIn ? '…' : 'Your agent is asking';
-  const line = q?.status === 'expired' ? 'Timed out' : q?.status === 'cancelled' ? 'Withdrawn by the agent' : null;
+  const line = requestLine(q), stale = q ? staleRequestNote(q) : null;
   return (
     <div className={'ap-card' + (embedded ? ' ap-embedded' : '')} data-approval={id} data-approval-status={q?.status ?? ''} data-request-kind={q?.kind ?? ''}>
       {!embedded && <button type="button" className="ap-close" data-approval-close="1" aria-label="Close" onClick={onDone}>×</button>}
@@ -142,10 +142,10 @@ function RequestCard({ id, signedIn, signIn, onDone, embedded = false }: CardPro
         </div>
       </div>
       {pending && q && <>
-        <p className="ap-state"><span className="ap-pairing"><i aria-hidden="true" />{q.kind === 'login' ? 'Login' : 'Retire'}</span><span className="ap-dim">{`asked ${ageText(q.createdAt)}`}</span></p>
+        <p className="ap-state"><span className="ap-pairing"><i aria-hidden="true" />{q.kind === 'login' ? 'Login' : 'Retire'}</span><span className="ap-dim" data-request-age={q.createdAt}>{`asked ${ageText(q.createdAt)}`}</span></p>
+        <p className="ap-ask ap-code" data-request-confirm={q.confirm}>Code <b>{q.confirm}</b>: check it matches the one your agent shows.</p>
         {q.kind === 'login' ? <>
           <p className="ap-ask" data-approval-copy="1">An agent calling itself <b>{agentName(q.agentLabel)}</b> on <b>{deviceName(q)}</b> asks to connect to your account.</p>
-          <p className="ap-ask ap-code" data-request-confirm={q.confirm}>Code <b>{q.confirm}</b>: check it matches the one your agent shows.</p>
           <p className="ap-ask">It will be able to see your Souls on this site, reconnect or disconnect them, and ask you to retire one.</p>
           <p className="ap-warn">Approve only if you started it yourself.</p>
         </> : <>
@@ -154,6 +154,7 @@ function RequestCard({ id, signedIn, signIn, onDone, embedded = false }: CardPro
         </>}
       </>}
       {!signedIn && <><p className="ap-line">Sign in to answer.</p>{signIn && <div className="ap-signin">{signIn}</div>}</>}
+      {pending && stale && <p className="ap-warn" data-request-stale="1">{stale}</p>}
       {pending && q && <div className="ap-actions">
         <button type="button" className={'ap-btn ' + (q.kind === 'retire' ? 'ap-danger' : 'ap-primary')} data-approve-agent={id} disabled={busy} onClick={() => void check('approve')}>{q.kind === 'retire' ? 'Retire' : 'Approve'}</button>
         <button type="button" className="ap-btn" data-refuse-agent={id} disabled={busy} onClick={() => void check('cancel')}>Refuse</button>

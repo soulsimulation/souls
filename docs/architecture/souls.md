@@ -120,7 +120,8 @@ An account login is a third kind of credential (#2244; wire contract `account-gr
 (registering the world first when given one) starts one for the home's device (`config.device`, an id made once and a
 name, `--device <name>`), prints `approvalURL`, the four-character `confirm` code and `delivery`, and keeps the request
 in the world's seat (`pendingLogin`, its poll secret under `credentials.logins`); a second `login` while it waits sends
-the same request again. `login wait` polls until the person approves it, then keeps the `sacct_` token under
+the same request again. `login wait` polls with no deadline while the request is open (#2258; it may be stopped and run
+again), reports `refused`, `cancelled` or `replaced` if it ends that way, and on approval keeps the `sacct_` token under
 `credentials.accounts.<alias>` and the rest under `config.accounts.<alias>` (`origin`, `accountId`, `grantId`, `world`).
 The alias is `--as <alias>`, else the one this account already has on that origin, else `me`, `me-2`, …; the newest
 login of an origin is its active one (`config.activeAccount`). `login` or `login wait` run again answer `"already

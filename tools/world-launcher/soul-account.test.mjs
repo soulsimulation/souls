@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -94,8 +94,8 @@ async function world(t, { accountLogin = true } = {}) {
   const tokenOf = (accountId) => [...grants.values()].filter((g) => g.accountId === accountId).at(-1)?.token;
   const revoke = (accountId) => { for (const g of grants.values()) if (g.accountId === accountId) g.live = false; };
   const count = (method, path) => hits.filter((h) => h.method === method && h.path === path).length;
-  /** The fake person answers a retire request: ready, or cancelled. */
-  const decide = (requestId, status) => { requests.get(requestId).status = status; };
+  /** The fake person answers a retire request: ready, or cancelled (and who ended it, #2258). */
+  const decide = (requestId, status, ended) => { Object.assign(requests.get(requestId), { status }, ended ? { ended } : {}); };
   return { base, url: `${base}/acct`, requests, grants, souls, approvals, holder, hits, approve, approveSoul, decide, tokenOf, revoke, count, close,
     secrets: () => [...[...grants.values()].map((g) => g.token), ...[...requests.values()].map((q) => q.pollSecret), ...[...approvals.values()].flatMap((a) => [a.pollSecret, a.token])].filter(Boolean) };
 }
@@ -304,4 +304,29 @@ test('#2246 A3, A4: two accounts in one home; a tagged Soul uses its own login; 
   assert.equal(waited.d?.retire, 'cancelled', waited.out + waited.err); assert.equal(waited.d.retired, false);
   assert.equal(read(root, 'config.json').souls.s_kai.state, 'unpaired', 'nothing changed here');
   assert.deepEqual(Object.keys(read(root, 'credentials.json').logins), [], 'the retire poll secret is gone');
+});
+
+test('#2258 A3: login wait and retire wait keep polling while the request is open, and stop cleanly when refused or replaced', async (t) => {
+  const w = await world(t), home = tmp(t), run = runIn(home, home), root = join(home, '.souls'), seat = () => read(join(root, 'pending', 'acct'), 'state.json');
+  const polls = () => w.count('POST', '/v1/agent/account/requests/poll');
+  const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 25)); assert.ok(ok(), 'timed out waiting in the test'); };
+  // login wait has no deadline: it keeps asking while the person has not answered, then reports their refusal
+  const asked = await run('login', w.url); assert.equal(asked.d.login, 'pending', asked.out + asked.err);
+  const waiting = run('login', 'wait');
+  await until(() => polls() >= 5);
+  w.decide(asked.d.requestId, 'cancelled', 'refused');
+  const refused = await waiting;
+  assert.equal(refused.code, 0, refused.err); assert.equal(refused.d.login, 'refused'); assert.match(refused.d.why, /refused/); assert.match(refused.d.next, /node eden\.mjs login$/);
+  assert.equal(seat().pendingLogin, undefined, 'a refused login is forgotten');
+  // retire wait: replaced by this agent's newer ask, the old wait stops and leaves the newer one waiting
+  await logIn(w, run, 'acct_1');
+  w.souls.set('s_kai', { name: 'Kai', account: 'acct_1' });
+  const first = await run('retire', 's_kai'); assert.equal(first.d?.retire, 'pending', first.out + first.err);
+  const before = polls(), old = run('retire', 'wait');
+  await until(() => polls() >= before + 3);
+  const state = seat(); state.pendingRetire = { ...state.pendingRetire, requestId: 'aq_' + '0'.repeat(32) }; writeFileSync(join(root, 'pending', 'acct', 'state.json'), JSON.stringify(state));
+  w.decide(first.d.requestId, 'cancelled', 'replaced');
+  const replaced = await old;
+  assert.equal(replaced.code, 0, replaced.err); assert.equal(replaced.d.retire, 'replaced'); assert.equal(replaced.d.retired, false); assert.match(replaced.d.why, /newer request/);
+  assert.equal(seat().pendingRetire?.requestId, 'aq_' + '0'.repeat(32), 'the newer request stays in the seat');
 });

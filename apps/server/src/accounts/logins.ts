@@ -10,13 +10,17 @@ import {AccountStoreError,WINDOW_CODE} from './store.ts';
 /** A database and its outer transaction (BEGIN IMMEDIATE, or a savepoint inside an open one). */
 export type LoginsDb={db:DatabaseSync;tx<T>(operation:()=>T):T};
 export type RequestKind='login'|'retire';
+/** `expired` is kept only for requests that lapsed before #2258: a request now stays open until it is answered. */
 export type RequestStatus='pending'|'ready'|'cancelled'|'expired';
-export type RequestDTO={id:string;kind:RequestKind;status:RequestStatus;agentLabel:string;device:{name:string};soul:{id:string;name:string}|null;confirm:string;createdAt:number;expiresAt:number;inWindow:boolean};
+/** Who ended a cancelled request: the person (`refused`), its agent (`cancelled`), or the same agent's newer one (`replaced`). */
+export type RequestEnded='refused'|'cancelled'|'replaced';
+export type RequestDTO={id:string;kind:RequestKind;status:RequestStatus;agentLabel:string;device:{name:string};soul:{id:string;name:string}|null;confirm:string;createdAt:number;inWindow:boolean;ended?:RequestEnded};
 export type AccountGrant={id:string;accountId:string;agentLabel:string;device:{id:string;name:string};createdAt:number;lastUsedAt:number|null};
 export type LoginInput={agentLabel:string;device:{id:string;name:string};idempotencyKey:string;pollSecret:string;forCode?:string};
-type RequestRow={id:string;world_id:string;kind:RequestKind;status:RequestStatus;agent_label:string;device_id:string;device_name:string;soul_id:string|null;target_account_id:string|null;account_id:string|null;grant_id:string|null;nonce:string;poll_hash:string;idempotency_hash:string;input_hash:string;created_at:number;expires_at:number};
+type RequestRow={id:string;world_id:string;kind:RequestKind;status:RequestStatus;agent_label:string;device_id:string;device_name:string;soul_id:string|null;target_account_id:string|null;account_id:string|null;grant_id:string|null;nonce:string;poll_hash:string;idempotency_hash:string;input_hash:string;created_at:number;expires_at:number;ended_by:RequestEnded|null};
 type GrantRow={id:string;account_id:string;agent_label:string;device_id:string;device_name:string;token_hash:string|null;created_at:number;issued_at:number|null;last_used_at:number|null;revoked_at:number|null;revoked_reason:string|null};
-const CODE_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',LAST_USED_STEP_MS=30_000;
+// #2258: a request has no expiry. expires_at stays in the table for older rows and is written as "never".
+const CODE_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',LAST_USED_STEP_MS=30_000,NEVER=Number.MAX_SAFE_INTEGER;
 const sha=(value:string)=>createHash('sha256').update(value).digest('hex');
 const nonce=(prefix:string)=>prefix+randomBytes(16).toString('hex');
 function fail(code:string,message:string):never{throw new AccountStoreError(code,message);}
@@ -30,9 +34,9 @@ export function sharedLoginsDb(db:DatabaseSync):LoginsDb{
 
 export class AccountLogins {
  readonly world:LoginsDb;readonly grants:LoginsDb;readonly worldId:string;
- private now:()=>number;private ttlMs:number;private soulName:(id:string)=>string|null;
- constructor(world:LoginsDb,grants:LoginsDb,worldId:string,options:{now?:()=>number;ttlMs?:number;soulName?:(id:string)=>string|null}={}){
-  this.world=world;this.grants=grants;this.worldId=text(worldId,'worldId');this.now=options.now??Date.now;this.ttlMs=options.ttlMs??15*60_000;this.soulName=options.soulName??(()=>null);
+ private now:()=>number;private soulName:(id:string)=>string|null;
+ constructor(world:LoginsDb,grants:LoginsDb,worldId:string,options:{now?:()=>number;soulName?:(id:string)=>string|null}={}){
+  this.world=world;this.grants=grants;this.worldId=text(worldId,'worldId');this.now=options.now??Date.now;this.soulName=options.soulName??(()=>null);
   this.world.tx(()=>this.world.db.exec(`
    CREATE TABLE IF NOT EXISTS account_requests_v1 (
     id TEXT PRIMARY KEY, world_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('login','retire')),
@@ -42,6 +46,7 @@ export class AccountLogins {
     input_hash TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, UNIQUE(world_id,idempotency_hash)
    );
    CREATE INDEX IF NOT EXISTS account_requests_target_v1 ON account_requests_v1(world_id,target_account_id,status);`));
+  this.world.tx(()=>{if(!(this.world.db.prepare('PRAGMA table_info(account_requests_v1)').all() as {name:string}[]).some(c=>c.name==='ended_by'))this.world.db.exec('ALTER TABLE account_requests_v1 ADD COLUMN ended_by TEXT');});
   this.grants.tx(()=>this.grants.db.exec(`
    CREATE TABLE IF NOT EXISTS account_agent_logins_v1 (
     id TEXT PRIMARY KEY, account_id TEXT NOT NULL, agent_label TEXT NOT NULL, device_id TEXT NOT NULL, device_name TEXT NOT NULL,
@@ -52,14 +57,10 @@ export class AccountLogins {
  private time(){const now=this.now();if(!Number.isSafeInteger(now)||now<0)fail('invalid-clock','Invalid account clock');return now;}
  private row(id:string){text(id,'request');return this.world.db.prepare('SELECT * FROM account_requests_v1 WHERE world_id=? AND id=?').get(this.worldId,id) as RequestRow|undefined;}
  private required(id:string){return this.row(id)??fail('not-found','Request not found');}
- private fresh(row:RequestRow){
-  if(row.status==='pending'&&row.expires_at<=this.time()){this.world.db.prepare("UPDATE account_requests_v1 SET status='expired' WHERE world_id=? AND id=? AND status='pending'").run(this.worldId,row.id);return this.required(row.id);}
-  return row;
- }
  /** Four characters of the window-code alphabet from sha256(request id): the agent prints it, the card shows it. */
  static confirm(id:string){return [...createHash('sha256').update(id).digest().subarray(0,4)].map(b=>CODE_ALPHABET[b%CODE_ALPHABET.length]).join('');}
  private dto(row:RequestRow):RequestDTO{
-  return {id:row.id,kind:row.kind,status:row.status,agentLabel:row.agent_label,device:{name:row.device_name},soul:row.soul_id?{id:row.soul_id,name:this.soulName(row.soul_id)??row.soul_id}:null,confirm:AccountLogins.confirm(row.id),createdAt:row.created_at,expiresAt:row.expires_at,inWindow:!!row.target_account_id};
+  return {id:row.id,kind:row.kind,status:row.status,agentLabel:row.agent_label,device:{name:row.device_name},soul:row.soul_id?{id:row.soul_id,name:this.soulName(row.soul_id)??row.soul_id}:null,confirm:AccountLogins.confirm(row.id),createdAt:row.created_at,inWindow:!!row.target_account_id,...(row.status==='cancelled'&&row.ended_by?{ended:row.ended_by}:{})};
  }
  private codeAccount(code:unknown){
   if(typeof code!=='string'||!WINDOW_CODE.test(code))return null;
@@ -73,11 +74,13 @@ export class AccountLogins {
    if(previous){
     if(!hashMatches(pollSecret,previous.poll_hash))fail('poll-secret','Request retry credential invalid');
     if(previous.input_hash!==inputHash)fail('idempotency-conflict','Request retry changed its request');
-    return this.dto(this.fresh(previous));
+    return this.dto(previous);
    }
    const id=nonce('aq_'),now=this.time();
+   // A newer request from the same agent (device) replaces its open one: a login, or a retire of the same Soul.
+   this.world.db.prepare("UPDATE account_requests_v1 SET status='cancelled',ended_by='replaced' WHERE world_id=? AND kind=? AND device_id=? AND soul_id IS ? AND status='pending'").run(this.worldId,kind,fields.deviceId,fields.soulId);
    this.world.db.prepare("INSERT INTO account_requests_v1(id,world_id,kind,status,agent_label,device_id,device_name,soul_id,target_account_id,nonce,poll_hash,idempotency_hash,input_hash,created_at,expires_at) VALUES (?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?)")
-    .run(id,this.worldId,kind,fields.agentLabel,fields.deviceId,fields.deviceName,fields.soulId,fields.target,nonce('an_'),sha(pollSecret),idempotencyHash,inputHash,now,now+this.ttlMs);
+    .run(id,this.worldId,kind,fields.agentLabel,fields.deviceId,fields.deviceName,fields.soulId,fields.target,nonce('an_'),sha(pollSecret),idempotencyHash,inputHash,now,NEVER);
    return this.dto(this.required(id));
   });
  }
@@ -96,17 +99,17 @@ export class AccountLogins {
   if(row.target_account_id&&row.target_account_id!==accountId)fail('forbidden','This request is for another account');
   if(row.account_id&&row.account_id!==accountId)fail('forbidden','This request belongs to another account');
  }
- view(id:string,accountId?:string):RequestDTO{return this.world.tx(()=>{const row=this.required(id);if(accountId!==undefined)this.addressed(row,accountId);return this.dto(this.fresh(row));});}
+ view(id:string,accountId?:string):RequestDTO{return this.world.tx(()=>{const row=this.required(id);if(accountId!==undefined)this.addressed(row,accountId);return this.dto(row);});}
  kind(id:string){return this.required(id).kind;}
  /** Pending requests addressed to this account, newest first, at most five. */
  waiting(accountId:string):RequestDTO[]{
-  return this.world.tx(()=>(this.world.db.prepare("SELECT * FROM account_requests_v1 WHERE world_id=? AND target_account_id=? AND status='pending' ORDER BY created_at DESC,rowid DESC LIMIT 5").all(this.worldId,accountId) as RequestRow[]).map(row=>this.fresh(row)).filter(row=>row.status==='pending').map(row=>this.dto(row)));
+  return this.world.tx(()=>(this.world.db.prepare("SELECT * FROM account_requests_v1 WHERE world_id=? AND target_account_id=? AND status='pending' ORDER BY created_at DESC,rowid DESC LIMIT 5").all(this.worldId,accountId) as RequestRow[]).map(row=>this.dto(row)));
  }
  /** One live grant per account and device: approving a login for a device that has one revokes the older (`replaced`). */
  approveLogin(accountId:string,id:string):RequestDTO{
   text(accountId,'account',1,256);
   return this.world.tx(()=>{
-   const row=this.fresh(this.required(id));this.addressed(row,accountId);
+   const row=this.required(id);this.addressed(row,accountId);
    if(row.kind!=='login')fail('invalid','Not a login request');
    if(row.status!=='pending')return this.dto(row);
    const grantId=nonce('ag_'),now=this.time();
@@ -120,22 +123,21 @@ export class AccountLogins {
  }
  /** `retire` performs the world's retire (it re-checks the Soul); the request becomes ready only if it returns. */
  approveRetire(accountId:string,id:string,retire:(soulId:string)=>void):RequestDTO{
-  const row=this.world.tx(()=>{const row=this.fresh(this.required(id));this.addressed(row,accountId);if(row.kind!=='retire')fail('invalid','Not a retire request');return row;});
+  const row=this.world.tx(()=>{const row=this.required(id);this.addressed(row,accountId);if(row.kind!=='retire')fail('invalid','Not a retire request');return row;});
   if(row.status!=='pending')return this.dto(row);
   retire(row.soul_id!);
   return this.world.tx(()=>{this.world.db.prepare("UPDATE account_requests_v1 SET status='ready',account_id=? WHERE world_id=? AND id=? AND status='pending'").run(accountId,this.worldId,id);return this.dto(this.required(id));});
  }
- /** The agent cancels with its secret; a person with their session (a request addressed elsewhere is not theirs). */
+ /** The agent cancels with its secret; a person refuses with their session (a request addressed elsewhere is not theirs). */
  cancel(accountId:string|null,id:string,pollSecret?:string):RequestDTO{
   return this.world.tx(()=>{
-   const row=this.required(id);
-   if(pollSecret!==undefined){if(!hashMatches(pollSecret,row.poll_hash))fail('poll-secret','Request credential invalid');}
+   const current=this.required(id);
+   if(pollSecret!==undefined){if(!hashMatches(pollSecret,current.poll_hash))fail('poll-secret','Request credential invalid');}
    else if(accountId===null)fail('identity','Verified account identity required');
-   else this.addressed(row,accountId);
-   const current=this.fresh(row);
+   else this.addressed(current,accountId);
    if(current.status==='cancelled'||current.status==='expired')return this.dto(current);
    if(current.status!=='pending')fail('cannot-cancel','The request was approved; cancelling cannot undo it');
-   this.world.db.prepare("UPDATE account_requests_v1 SET status='cancelled' WHERE world_id=? AND id=? AND status='pending'").run(this.worldId,id);
+   this.world.db.prepare("UPDATE account_requests_v1 SET status='cancelled',ended_by=? WHERE world_id=? AND id=? AND status='pending'").run(pollSecret!==undefined?'cancelled':'refused',this.worldId,id);
    return this.dto(this.required(id));
   });
  }
@@ -145,8 +147,7 @@ export class AccountLogins {
   return this.world.tx(()=>{
    const existing=this.row(id);
    if(!existing||!hashMatches(pollSecret,existing.poll_hash))fail('poll-secret','Request credential invalid');
-   let row=this.fresh(existing);
-   if(row.status==='pending'){this.world.db.prepare("UPDATE account_requests_v1 SET expires_at=MAX(expires_at,?) WHERE world_id=? AND id=? AND status='pending'").run(this.time()+this.ttlMs,this.worldId,id);row=this.required(id);}
+   const row=existing;
    const request=this.dto(row);
    if(row.kind!=='login'||row.status!=='ready'||!row.grant_id||!row.account_id)return {request};
    const grant=this.grantRow(row.grant_id);
