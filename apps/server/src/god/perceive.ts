@@ -1,3 +1,4 @@
+import type {BlockPrint} from './block-print.ts';
 // What Souls perceive of god-built things (party lane F1). On an entity world the god's fountain, lamps, signs, statues,
 // houses, ponds and plazas are walk targets (nav.ts); here they also become things a Soul can look at, name and read:
 //
@@ -107,6 +108,7 @@ export type PerceiveHost = {
   log(m: string): void;
   /** Entry 34 (watering.ts): "water <plant>" with a watering can from its hook. */
   /** #442 (mending.ts): "repair <thing>" with the tool in hand, and whether a thing is whole (a whole one is no built object). */
+  blockPrint?:BlockPrint;
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
@@ -195,6 +197,7 @@ export class GodPerceive {
         return busy ? { code: 'container.in-use', reason: `Someone's hand is in ${e.name ? m.pathOf(id) : 'it'}; wait until they are done.` } : null;
       },
       deferContacts: !!this.h.edge?.contactActuator,
+      blockPrint:(soul:EdgeSoul,id:string,action:string)=>this.h.blockPrint?.plan(soul,id,action)??null,
       repair: (soul: EdgeSoul, id: string) => this.h.mending?.plan(soul, id) ?? null,
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
