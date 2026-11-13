@@ -112,8 +112,10 @@ switch independent. A previously saved master mute migrates to both switches off
   - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
     them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
-    ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
-    ambient-life idle clock and the body rule's timers (#2236).
+    ticked through the gap would have reached, and so do the edge listeners' clocks (#2236): ambient life keeps each
+    Soul's idle clock in `edge_ambient_v1`, and the body rule, which runs on wall time, reads during a catch-up the wall
+    time of the tick being caught up (`WorldHost.wallAt`), so its doze, drift, zombie and asleep transitions land on the
+    ticks they would have fired live.
   - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
     ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
     and land just after the catch-up.

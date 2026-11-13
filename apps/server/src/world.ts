@@ -566,8 +566,18 @@ export class WorldHost {
     let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
     this.owedTicks = Math.max(0, Math.floor(ticks));
     try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
-    finally { this.owedTicks = 0; }
+    finally { this.owedTicks = 0; this.catchUpWall = null; }
     return done;
+  }
+  private catchUpWall: number | null = null;
+  /** #2236: the wall time of the tick running now, for wall-timed edge rules (the body rule, ambient life's last act).
+   *  Live, `now` itself. During a catch-up, the wall time that tick would have run at in a world that never stopped: the
+   *  wall at the catch-up's first read, less the ticks still owed after this one, so each wall-timed transition lands on
+   *  the tick it would have fired live rather than in the first catch-up ticks. */
+  wallAt(now: number): number {
+    if (this.owedTicks <= 0) return now;
+    this.catchUpWall ??= now;
+    return this.catchUpWall - ((this.owedTicks - 1) * TICK_MS) / (this.baseRate > 0 ? this.baseRate : 1);
   }
 
   // ------------------------------------------------------------ the loop

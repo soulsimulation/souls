@@ -377,7 +377,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         return steps;
       },
       decide: (soul, option, label, steps) => {
-        this.ambientAt.set(soul.soulId, Date.now());   // a posture the rule chose is not the Soul's own choice (postureHold)
+        this.ambientActed(soul.soulId);   // a posture the rule chose is not the Soul's own choice (postureHold)
         const guard = (): true => {const m = this.host.minds.get(soul.soulId); if (!m || !live(m) || this.pending.has(soul.soulId) || this.openReceipts(soul.soulId).length || this.faded.has(soul.soulId)) throw Error('edge.body-stale'); return true;};
         try {void this.host.enqueueChecked('decision', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, option, label, steps, reevalTicks: 1e9, fallback: false, trigger: 'edge-body'}, guard).catch(() => {/* best effort */});} catch {/* clock not ready */}
       },
@@ -386,7 +386,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         try {(this.comms as unknown as {core?: {spectate(m: object): void}} | undefined)?.core?.spectate({kind: 'body', tick: this.host.engine.world.tick, soulId, ...view});} catch {/* spectators never break the ledger */}
         this.host.markSoulDirty?.(soulId);
       },
-    }, {now: this.controlNow, knobs: {...env, ...(knobs ?? {})}});
+    }, {now: () => this.wallNow(), knobs: {...env, ...(knobs ?? {})}});
     this.host.publicBodyOf = id => this.bodyRule?.view(id) ?? null;
     inbox.onSoulListen?.(id => {try {this.bodyRule?.listen(id);} catch {/* best effort */}});
     inbox.onSoulSend?.(id => {try {this.bodyRule?.poke(id);} catch {/* best effort */}});
@@ -445,8 +445,20 @@ export class EdgeLedger implements EdgeLedgerHooks {
   readonly knowledge: PlaceKnowledge;
   /** Ambient life reflex (Gene: Souls visibly alive between agent decisions); the edge server turns it on. */
   readonly ambient: boolean;
-  private idleSince = new Map<string, number>();
+  /** #2236: ambient life's per-Soul clock, kept in edge_ambient_v1 so a restart or crash leaves it as it was: `since`, the
+   *  sweep tick its idle time counts from (null: busy at its last sweep, which `lastBusy` holds, or after a reboot the
+   *  sweep before the first idle one, as sweeps run every 20 ticks); `at`, the wall time (ms) of its last ambient or
+   *  body-rule act (postureHold). Written only when it changes, so a busy Soul costs no write per sweep. */
+  private ambientClock = new Map<string, {since: number | null; at: number}>();
+  private lastBusy = new Map<string, number>();
+  private ambientSave(soulId: string, since: number | null, at: number) {
+    this.ambientClock.set(soulId, {since, at});
+    if (!this.readOnly) this.db.db.prepare('INSERT INTO edge_ambient_v1(world_id,soul_id,idle_since,acted_at) VALUES(?,?,?,?) ON CONFLICT(world_id,soul_id) DO UPDATE SET idle_since=excluded.idle_since,acted_at=excluded.acted_at').run(this.host.worldId, soulId, since, at);
+  }
+  private ambientActed(soulId: string) {const c = this.ambientClock.get(soulId); this.ambientSave(soulId, c ? c.since : null, this.wallNow());}
   private readonly controlNow:()=>number;
+  /** #2236: wall time for the wall-timed edge rules: during a catch-up, that of the tick being caught up (WorldHost.wallAt). */
+  private wallNow() {const now = this.controlNow(); return typeof this.host.wallAt === 'function' ? this.host.wallAt(now) : now;}
   /** Short real-time UI window; affects only new ambient admission, never running work or replay. */
   ownerControlGrace(soulId:string){this.db.db.prepare('INSERT INTO edge_owner_control_v1(world_id,soul_id,until_ms) VALUES(?,?,?) ON CONFLICT(world_id,soul_id) DO UPDATE SET until_ms=MAX(until_ms,excluded.until_ms)').run(this.host.worldId,soulId,this.controlNow()+10000);}
   /** entry 35: a Soul holding hands is not idle (ambient life leaves the pair be). */
@@ -512,6 +524,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     db.db.exec(`CREATE INDEX IF NOT EXISTS edge_receipts_v1_soul_at ON edge_receipts_v1 (world_id, soul_id, created_at);
       CREATE INDEX IF NOT EXISTS edge_refusals_v1_soul_at ON edge_refusals_v1 (world_id, soul_id, at);`);
     db.db.exec('CREATE TABLE IF NOT EXISTS edge_owner_control_v1(world_id TEXT NOT NULL,soul_id TEXT NOT NULL,until_ms INTEGER NOT NULL,PRIMARY KEY(world_id,soul_id)) WITHOUT ROWID');
+    db.db.exec('CREATE TABLE IF NOT EXISTS edge_ambient_v1(world_id TEXT NOT NULL,soul_id TEXT NOT NULL,idle_since INTEGER,acted_at INTEGER NOT NULL,PRIMARY KEY(world_id,soul_id)) WITHOUT ROWID');
+    for (const r of db.db.prepare('SELECT soul_id,idle_since,acted_at FROM edge_ambient_v1 WHERE world_id=?').all(host.worldId) as {soul_id: string; idle_since: number | null; acted_at: number}[]) this.ambientClock.set(r.soul_id, {since: r.idle_since, at: r.acted_at});
     // PM-R055: a waiting act's plan is kept with its receipt (a read worker describes it; #2051 ends it at a restart).
     if (!(db.db.prepare('PRAGMA table_info(edge_receipts_v1)').all() as {name: string}[]).some(c => c.name === 'plan')) db.db.exec('ALTER TABLE edge_receipts_v1 ADD COLUMN plan TEXT');
     // intents/1 + strict/1 (Core-A): receipt detail {channel, chosen, endedAt} (JSON)
@@ -1018,10 +1032,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if(!row||row.retired_at!==null||row.owner!==m.owner||row.entity_id!==m.entityId||row.world_id!==this.host.worldId)continue;
       const busy = this.ownerControls(m.soulId) || this.faded.has(m.soulId) || !!this.bodyRule?.reflexOwns(m.soulId) || this.pending.has(m.soulId) || !!this.aboard(m.entityId) || !!this.host.engine.programOf(m.entityId) || !!this.host.engine.actorBorrowed?.(m.entityId) || this.openReceipts(m.soulId).length > 0 || this.together.awaiting(m.soulId) || !!this.together.handsWith(m.entityId);
       const b = this.body(m.entityId), state = stateOf(this.host, m.entityId);
-      if (busy || !b || state === 'sleeping' || state === 'absent' || state === 'swimming') {this.idleSince.set(m.soulId, tick); continue;}
-      const since = this.idleSince.get(m.soulId); if (since === undefined) {this.idleSince.set(m.soulId, tick); continue;}
-      if (tick - since < 400) continue;
-      this.idleSince.set(m.soulId, tick);
+      const clock = this.ambientClock.get(m.soulId);
+      if (busy || !b || state === 'sleeping' || state === 'absent' || state === 'swimming') {this.lastBusy.set(m.soulId, tick); if (!clock || clock.since !== null) this.ambientSave(m.soulId, null, clock?.at ?? 0); continue;}
+      if (!clock) {this.ambientSave(m.soulId, tick, 0); continue;}   // first seen idle
+      const since = clock.since ?? this.lastBusy.get(m.soulId) ?? tick - 20;   // idle from its last busy sweep
+      if (tick - since < 400) {if (clock.since === null) this.ambientSave(m.soulId, since, clock.at); continue;}
+      this.ambientSave(m.soulId, tick, clock.at);
       const soul: EdgeSoul = {soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner};
       // P0c: in a conversation with someone close by, ambient life only turns towards them (never walks a partner away).
       const partners = (talking.get(m.soulId) ?? []).map(id => this.host.minds.get(id)).filter((x): x is Mind => !!x && !!this.body(x.entityId));
@@ -1029,7 +1045,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (partners.length && !near) continue;                      // partner further away: stay put rather than wander off
       const pick = near ? {id: 'face:' + near.x.soulId, label: `Turn towards ${near.x.name}`, steps: [{verb: 'wave', params: {at: near.x.entityId, seconds: 1}}] as Program['steps']} : ambientChoice(this, soul, b, tick);
       if (!pick) continue;
-      this.ambientAt.set(soul.soulId, Date.now());
+      this.ambientActed(soul.soulId);
       const guard=():true=>{const current=this.db.soul(soul.soulId);
         if(!current||current.retired_at!==null||current.owner!==soul.owner||current.entity_id!==soul.entityId||current.world_id!==this.host.worldId||this.ownerControls(soul.soulId)||this.host.engine.programOf(soul.entityId)||this.host.engine.actorBorrowed?.(soul.entityId)||this.pending.has(soul.soulId)||this.openReceipts(soul.soulId).length||this.together.awaiting(soul.soulId)||!!this.together.handsWith(soul.entityId)||this.faded.has(soul.soulId))throw Error('edge.ambient-stale');return true;};
       void this.host.enqueueChecked('decision', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, option: pick.id, label: pick.label, steps: pick.steps, reevalTicks: 1e9, fallback: false, trigger: 'edge-ambient'},guard).catch(() => {/* best effort */});
@@ -3388,11 +3404,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (!['seated', 'lying', 'sleeping', 'swimming'].includes(state)) return null;
     // the latest act that moved the body (lasting marks, object moves and answers leave the body as it was)
     const last = this.rows('soul_id=? ORDER BY created_at DESC LIMIT 8', soulId).find(r => {const v = r.capability.split(':')[0]!; return !['make', 'decline', 'ask-to-stop'].includes(v) && !(v === 'object' && r.program_id === null);});
-    if (!last || last.phase === 'failed' || (this.ambientAt.get(soulId) ?? 0) > last.created_at) return null;
+    if (!last || last.phase === 'failed' || (this.ambientClock.get(soulId)?.at ?? 0) > last.created_at) return null;
     return POSTURE_VERBS.has(last.capability.split(':')[0]!) ? state : null;
   }
-  /** Last ambient-life decision per Soul (ms): a posture ambient life chose is not the Soul's own choice. */
-  private ambientAt = new Map<string, number>();
   onReceipt(l: (r: EdgeReceipt) => void) {this.receiptListeners.push(l);for (const r of this.bootEnded ?? []) try {l(structuredClone(r));} catch {/* listener faults never break the ledger */}}
   private tickListeners: ((tick: number) => void)[] = [];
   /** #1295: a light read of a receipt (no body or outcome facts), for the owner loop's sweep and close guard. */
