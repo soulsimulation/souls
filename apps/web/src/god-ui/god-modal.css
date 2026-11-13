@@ -59,6 +59,14 @@
 .gm-out svg { width: 12px; height: 12px; margin-left: 3px; vertical-align: -1px; opacity: .7; }
 .god-modal .gm-copy { flex: none; min-height: 0; padding: 8px 16px; border: 0; border-radius: 999px; background: var(--fg); color: var(--bg); font: 650 13px system-ui, sans-serif; cursor: pointer; }
 .gm-connect .gm-prompt { margin-top: 8px; }
+/* #2279: the gateway's state and its steps (the console waits until the agent is connected) */
+.gm-state { margin-left: auto; flex: none; white-space: nowrap; padding: 3px 10px; border-radius: 999px; font: 600 12px/1.4 system-ui, sans-serif; color: var(--gm-off); background: color-mix(in srgb, var(--gm-off) 10%, transparent); }
+.gm-state.connecting { color: var(--gm-prog); background: color-mix(in srgb, var(--gm-prog) 12%, transparent); }
+.gm-steps { margin: 0 0 8px; padding-left: 22px; color: var(--gm-dim); font-size: 13.5px; }
+.gm-connect-line ~ .gm-steps { margin: 10px 0 0; }
+.gm-steps li { margin: 3px 0; }
+.gm-steps li.now { color: var(--fg); font-weight: 600; }
+.gm-steps li.done { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent); }
 
 /* undo/redo and the weather: two small groups under the command box */
 .gm-tools { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 12px 0 0; }

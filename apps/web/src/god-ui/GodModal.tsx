@@ -54,38 +54,53 @@ export function OwnerGod({ banner, connectUrl, tools, prayers, more, forsake, pa
   const pill = paired && inbox ? <span className={'gm-pill ' + (connected ? 'on' : 'off')} data-agent-pill={connected ? 'connected' : 'away'} data-presence={inbox.presence ?? ''} role="status">
     <i aria-hidden="true" />{presenceWord(inbox.presence, connected)}
   </span> : null;
+  // #2279: until the agent is paired and connected the sheet is only the gateway (the steps and their state); the prayers,
+  // the command box and its tools appear once it is connected, and a drop brings the gateway back (the draft is kept)
+  const live = paired && connected;
   return <Frame label="God Mode" wide>
     <Head right={pill} />
-    <div className="gm-scroll" data-god-panel="1" data-section="agent">
+    <div className="gm-scroll" data-god-panel="1" data-section="agent" data-gateway={live ? undefined : '1'}>
       {banner}
-      {connectUrl && <Connect url={connectUrl} />}
-      <GodConsole paired={paired} tools={tools} prayers={prayers} />
-      {more}
+      {!live && connectUrl && <Connect url={connectUrl} state={!paired ? 'not-paired' : 'connecting'} />}
+      {live && <GodConsole paired={paired} tools={tools} prayers={prayers} />}
+      {live && more}
       {forsake && <footer className="gm-foot"><button type="button" className="gm-forsake-open" data-forsake-open="1" onClick={() => showSection('forsake')}>Forsake world</button></footer>}
     </div>
   </Frame>;
 }
 
-/** Until the agent is connected: the one line to give it, and the skill it names. */
-function Connect({ url }: { url: string }) {
+const STATE_WORD = { 'not-paired': 'Not paired', connecting: 'Connecting' } as const;
+/** Until the agent is connected: its state, the one line to give it, and the steps after it. */
+function Connect({ url, state }: { url: string; state: keyof typeof STATE_WORD }) {
   const line = `Read ${url} and follow its God mode section to control this world.`;
   const [copied, setCopied] = useState(false), [manual, setManual] = useState(false);
   useEffect(() => { if (!copied) return; const t = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(t); }, [copied]);
   const copy = async () => { if (await copyText(line)) setCopied(true); else setManual(true); };
   return <section className="gm-connect" data-connect="1" aria-labelledby="gm-connect-h">
-    <h3 id="gm-connect-h"><i className="gm-connect-dot" aria-hidden="true" />Connect your agent to God mode</h3>
+    <h3 id="gm-connect-h"><i className="gm-connect-dot" aria-hidden="true" />Connect your agent to God mode
+      <span className={'gm-state ' + state} data-gateway-state={state} role="status">{STATE_WORD[state]}</span></h3>
+    <ol className="gm-steps">
+      <li className={state === 'not-paired' ? 'now' : 'done'}>Give your agent this line:</li>
+    </ol>
     <div className="gm-connect-line">
       <p data-connect-line={line}>Read <a href={url} target="_blank" rel="noreferrer" data-skill-link="1">{url}<span className="gm-out">{OUT}</span></a> and follow its God mode section to control this world.</p>
       <button type="button" className="gm-copy" data-connect-copy="1" onClick={() => void copy()} aria-label="Copy the line for your agent">{copied ? 'Copied' : 'Copy'}</button>
     </div>
     {manual && <input className="gm-prompt" aria-label="Line for your agent" value={line} readOnly autoFocus onFocus={(e) => e.target.select()} />}
+    <ol className="gm-steps" start={2}>
+      <li className={state === 'not-paired' ? '' : 'done'}>Approve the pairing request it makes; it shows here, above.</li>
+      <li className={state === 'connecting' ? 'now' : ''}>Wait for it to start listening. Prayers and the command box appear once it is connected.</li>
+    </ol>
   </section>;
 }
 
+/** #2279: what the person typed, kept while the gateway covers the console (a dropped connection) or the sheet is closed. */
+let draft = '';
 /** The command box (undo/redo and weather under it), prayers waiting, and the ticket log, newest first. */
 function GodConsole({ paired, tools, prayers }: { paired: boolean; tools: ReactNode; prayers?: ReactNode }) {
   const { inbox, inboxError, open } = useGod();
-  const [text, setText] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('');
+  const [text, setTextState] = useState(draft), setText = (t: string) => { draft = t; setTextState(t); };
+  const [sending, setSending] = useState(false), [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
   const box = useRef<HTMLTextAreaElement>(null);
   // phones: no focus on open, so the keyboard does not cover the sheet
