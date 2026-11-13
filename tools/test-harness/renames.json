@@ -499,6 +499,13 @@
       "to": "through the real CLI: words exit 2 with no act; the offered id acts",
       "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
       "pr": "#2175"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "from": "(d) the proxy: Soul calls to a booting world are answered 503 world.starting at once; red sheds C2; a restart ramps C1/C2 back in",
+      "to": "(d) the proxy: Soul calls to a booting world wait for it (#2231); red sheds C2; a restart ramps C1/C2 back in",
+      "reason": "Same test, renamed when a Soul call to a booting world began waiting for it instead of answering 503 world.starting (#2231)",
+      "pr": "#2234"
     }
   ]
 }
