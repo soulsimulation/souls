@@ -14,7 +14,7 @@ export const RUNTIME_LOCKS = [".listen.lock", ".eden-serve.lock"];
 const SERVE_SOCKET = ".eden-serve.sock";
 const SOUL_ID = /^s_[A-Za-z0-9_-]+$/;
 /** Run in a seat (the world's waiting room), never as a Soul: they make or pair one. */
-export const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval", "login"]);
+export const SEAT_COMMANDS = new Set(["register", "create", "pair", "adopt", "approval", "login", "revoke", "retire"]);
 /** What a Soul brought in by import can do before it is paired: it knows itself and its memory, and needs no world for that. */
 export const LOCAL_READS = new Set(["status", "memory"]);
 /** Work on the home itself, as no one in particular. */
@@ -188,12 +188,15 @@ export const norm = (s) => String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+
 
 /** A state split into what may sit on disk with the Soul and what only credentials.json may hold. */
 export function splitSecrets(s) {
-  const { token, identity, home, pendingApproval, pendingLogin, ...open } = s;
+  const { token, identity, home, pendingApproval, pendingLogin, pendingRetire, ...open } = s;
   if (home) open.home = { world: home.world, soul: home.soul };
   if (pendingApproval) { const { pollSecret, ...input } = pendingApproval.input ?? {}; open.pendingApproval = { ...pendingApproval, input }; }
   if (pendingLogin) { const { pollSecret, ...input } = pendingLogin.input ?? {}; open.pendingLogin = { ...pendingLogin, input }; }
-  return { open, secrets: { token, identity, homeToken: home?.token, pollSecret: pendingApproval?.input?.pollSecret, ...(pendingLogin ? { loginSecret: pendingLogin.input?.pollSecret } : {}) } };
+  if (pendingRetire) { const { pollSecret, ...input } = pendingRetire.input ?? {}; open.pendingRetire = { ...pendingRetire, input }; }
+  return { open, secrets: { token, identity, homeToken: home?.token, pollSecret: pendingApproval?.input?.pollSecret, ...(pendingLogin ? { loginSecret: pendingLogin.input?.pollSecret } : {}), ...(pendingRetire ? { retireSecret: pendingRetire.input?.pollSecret } : {}) } };
 }
+/** #2246: a waiting retire's poll secret sits in credentials.logins beside the seat's login, under its own key. */
+const retireKey = (seatKey) => `retire:${seatKey}`;
 /** #2244: an account's short name in this home, as a person types it after --as. */
 export const ALIAS = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
@@ -318,15 +321,16 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
     }
     if (s.pendingApproval) { const pollSecret = creds.approvals[key]?.pollSecret; if (pollSecret) s.pendingApproval = { ...s.pendingApproval, input: { ...s.pendingApproval.input, pollSecret } }; }
     if (s.pendingLogin) { const pollSecret = creds.logins[key]?.pollSecret; if (pollSecret) s.pendingLogin = { ...s.pendingLogin, input: { ...s.pendingLogin.input, pollSecret } }; }
+    if (s.pendingRetire) { const pollSecret = creds.logins[retireKey(key)]?.pollSecret; if (pollSecret) s.pendingRetire = { ...s.pendingRetire, input: { ...s.pendingRetire.input, pollSecret } }; }
     return s;
   }
 
   /** The first token in a seat makes a Soul: its directory, its index entry. The seat stays for the world's next Soul. */
   function promote(ctx, open) {
     const id = open.home?.soul ?? open.soul;
-    const { world, worldId, accountAuth, pendingLogin } = open;
-    delete open.pendingLogin;   // a login waiting in this seat stays in the seat
-    writeJson(join(ctx.dir, STATE_FILE), Object.fromEntries(Object.entries({ world, worldId, accountAuth, pendingLogin }).filter(([, v]) => v !== undefined)));
+    const { world, worldId, accountAuth, pendingLogin, pendingRetire } = open;
+    delete open.pendingLogin; delete open.pendingRetire;   // a login or a retire waiting in this seat stays in the seat
+    writeJson(join(ctx.dir, STATE_FILE), Object.fromEntries(Object.entries({ world, worldId, accountAuth, pendingLogin, pendingRetire }).filter(([, v]) => v !== undefined)));
     Object.assign(ctx, soul(id));
     process.chdir(ctx.dir);
     // A kept Soul paired again in the same world goes on from where it was: same Soul, same stream, same cursor.
@@ -365,6 +369,8 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
       else if (seatKey) delete c.approvals[seatKey];
       if (seatKey && secrets.loginSecret) c.logins[seatKey] = { pollSecret: secrets.loginSecret };
       else if (seatKey) delete c.logins[seatKey];
+      if (seatKey && secrets.retireSecret) c.logins[retireKey(seatKey)] = { pollSecret: secrets.retireSecret };
+      else if (seatKey) delete c.logins[retireKey(seatKey)];
       if (ctx.kind !== "soul") return;
       const mine = (c.souls[ctx.id] ??= {}), homeKey = open.home ? keyOf(config().worlds, open.home.world) ?? key : key;
       if (secrets.token) (mine[key] ??= {}).token = secrets.token;
@@ -728,9 +734,18 @@ export function openHome(root, { reserved = new Set(), sleepMs = (ms) => Atomics
   function setActiveAccount(alias) {
     return updateConfig((c) => { if (!c.accounts[alias]) throw unknownAlias(alias, c); c.activeAccount[c.accounts[alias].origin] = alias; return c.accounts[alias].origin; });
   }
+  /** #2246: control of a Soul moved to another device or was ended. It stays here unpaired, its memory untouched; its dead token goes. */
+  function unpair(id) {
+    updateCredentials((c) => { for (const w of Object.values(c.souls[id] ?? {})) delete w.token; });
+    updateConfig((c) => { if (c.souls[id]) c.souls[id].state = "unpaired"; });
+  }
+  /** #2246: a Soul paired through an account login is that account's: its later moves, revokes and retires use that login. */
+  const tagAccount = (id, accountId) => updateConfig((c) => { if (c.souls[id] && accountId) c.souls[id].account = accountId; });
+  /** #2246: the world retired a Soul on its person's click; the same mark doctor makes. */
+  const retireHere = (id) => updateConfig((c) => { if (c.souls[id]) Object.assign(c.souls[id], { state: "retired", retiredAt: new Date().toISOString() }); });
   /** The Souls this home holds a token for. */
   const heldSouls = () => new Set(Object.entries(credentials().souls).filter(([, w]) => Object.values(w ?? {}).some((x) => x?.token)).map(([id]) => id));
 
   if (!existsSync(at("config.json"))) rediscover();
-  return { root, device, accounts, accountFor, aliasFor, saveAccount, dropAccount, setActiveAccount, heldSouls, refreshGuide, config, noteConsolidation, claimFeeds, noteFeed, readNews, claimNews, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
+  return { root, device, accounts, accountFor, aliasFor, saveAccount, dropAccount, setActiveAccount, heldSouls, unpair, tagAccount, retireHere, refreshGuide, config, noteConsolidation, claimFeeds, noteFeed, readNews, claimNews, installBundle, rollback, skillVersions, skillBehind, installSkill, trustOrigin, madeFor, ensureGod, dropGod, godSeat, godSecrets, saveGodSecrets, importGod, ensureWorld, setCurrentWorld, seat, soul, seatState, load, save, named, principals, list, setDefault, importLegacy, exportSoul, importExport, doctor };
 }

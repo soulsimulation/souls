@@ -21,6 +21,8 @@ const MARK = 'zq9acct';
 /** /w/acct: an account world. Login requests, grants and their tokens, the account's Souls, and Soul approvals. */
 async function world(t, { accountLogin = true } = {}) {
   const requests = new Map(), byKey = new Map(), grants = new Map(), souls = new Map(), approvals = new Map(), live = new Map(), hits = [];
+  // #2246: the agent that holds each Soul now, and why each older Soul token stopped working.
+  const holder = new Map(), ended = new Map();
   let base = '';
   const shown = ({ pollSecret, grant, ...q }) => q;
   const server = createServer((req, res) => { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
@@ -49,15 +51,36 @@ async function world(t, { accountLogin = true } = {}) {
       if (!g.live) return json(res, 401, { ok: false, code: 'account.revoked', message: 'This account login has ended.' });
       if (path === '/v1/agent/account/logout' && req.method === 'POST') { g.live = false; return json(res, 200, { ok: true }); }
       if (path === '/v1/agent/account') return json(res, 200, { account: { id: g.accountId }, grant: { id: g.id, agentLabel: 'eden', device: g.device, createdAt: 0 }, world: at, maxSouls: 5,
-        souls: [...souls].filter(([, s]) => s.account === g.accountId).map(([id, s]) => ({ id, name: s.name, control: { held: live.has(id), state: live.has(id) ? 'connected' : 'disconnected', since: null }, agent: live.has(id) ? { label: 'eden', since: 0 } : null })) });
+        souls: [...souls].filter(([, s]) => s.account === g.accountId).map(([id, s]) => ({ id, name: s.name, control: { held: live.has(id), state: live.has(id) ? 'connected' : 'disconnected', since: null }, agent: holder.has(id) ? { label: holder.get(id).label, since: 0 } : null })) });
+      const one = /^\/v1\/agent\/account\/souls\/([^/]+)\/(pair|revoke|retire)$/.exec(path);
+      if (one && req.method === 'POST') {
+        const [, id, what] = one, s = souls.get(id);
+        if (!s) return json(res, 404, { ok: false, code: 'soul-not-found', message: `No Soul ${id} lives in this world.` });
+        if (s.account !== g.accountId) return json(res, 403, { ok: false, code: 'forbidden', message: 'Not your Soul.' });
+        if (what === 'pair') {
+          let a = [...approvals].find(([, x]) => x.idempotencyKey === body.idempotencyKey);
+          if (!a) { a = [`ap_${approvals.size + 1}`, { ...body, soulId: id, name: s.name, status: 'ready', agentLabel: `${body.agentLabel} on ${g.device.name}` }]; approvals.set(...a); }
+          return json(res, 200, { approval: { id: a[0], status: 'ready', soulId: id, name: s.name, mode: 'repair' }, world: at, delivery: 'account', intervalSeconds: 3 });
+        }
+        if (what === 'revoke') { if (holder.has(id)) ended.set(holder.get(id).token, 'revoked'); holder.delete(id); live.delete(id); return json(res, 200, { ok: true, soulId: id }); }
+        const q = { id: `aq_${hex(16)}`, kind: 'retire', status: 'pending', agentLabel: 'eden', device: g.device, soul: { id, name: s.name }, confirm: 'R3TX', createdAt: 0, expiresAt: 0, inWindow: true, pollSecret: body.pollSecret, by: g.accountId };
+        requests.set(q.id, q);
+        return json(res, 200, { request: shown(q), world: at, approvalURL: `${base}/acct/#approve/${q.id}`, delivery: 'window', intervalSeconds: 3 });
+      }
     }
     if (path === '/v1/agent/approval/start') { const id = `ap_${approvals.size + 1}`; approvals.set(id, { ...body, status: 'pending' }); return json(res, 200, { approval: { id, status: 'pending', name: body.name } }); }
     if (path === '/v1/agent/approval/poll') {
       const a = approvals.get(body.approvalId); if (a.pollSecret !== body.pollSecret) return json(res, 403, {});
       if (a.status !== 'ready') return json(res, 200, { approval: { id: body.approvalId, status: 'pending' } });
-      return json(res, 200, { approval: { id: body.approvalId, status: 'ready', soulId: a.soulId, name: a.name }, token: a.token ??= `sim_${a.soulId}_${MARK}${hex(8)}` });
+      if (!a.token) {   // a new Soul token replaces the one before it: the last device to ask wins
+        a.token = `sim_${a.soulId}_${MARK}${hex(8)}`;
+        if (holder.has(a.soulId)) { ended.set(holder.get(a.soulId).token, 'replaced'); live.delete(a.soulId); }
+        holder.set(a.soulId, { token: a.token, label: a.agentLabel?.includes(' on ') ? a.agentLabel : 'eden' });
+      }
+      return json(res, 200, { approval: { id: body.approvalId, status: 'ready', soulId: a.soulId, name: a.name }, token: a.token });
     }
     const me = /^Bearer (sim_(s_[a-z0-9]+)_\S+)$/.exec(auth ?? '');
+    if (path === '/v1/agent/me' && me && ended.has(me[1])) return json(res, 401, { ok: false, code: 'control.revoked', reason: ended.get(me[1]), message: 'This Soul token no longer controls the Soul.' });
     if (path === '/v1/agent/me' && me && souls.has(me[2])) { live.set(me[2], me[1]); return json(res, 200, { soul: { id: me[2], name: souls.get(me[2]).name }, inbox: {} }); }
     json(res, 404, { ok: false, code: 'no-route', message: path });
   }); });
@@ -71,7 +94,9 @@ async function world(t, { accountLogin = true } = {}) {
   const tokenOf = (accountId) => [...grants.values()].filter((g) => g.accountId === accountId).at(-1)?.token;
   const revoke = (accountId) => { for (const g of grants.values()) if (g.accountId === accountId) g.live = false; };
   const count = (method, path) => hits.filter((h) => h.method === method && h.path === path).length;
-  return { base, url: `${base}/acct`, requests, grants, souls, approvals, hits, approve, approveSoul, tokenOf, revoke, count, close,
+  /** The fake person answers a retire request: ready, or cancelled. */
+  const decide = (requestId, status) => { requests.get(requestId).status = status; };
+  return { base, url: `${base}/acct`, requests, grants, souls, approvals, holder, hits, approve, approveSoul, decide, tokenOf, revoke, count, close,
     secrets: () => [...[...grants.values()].map((g) => g.token), ...[...requests.values()].map((q) => q.pollSecret), ...[...approvals.values()].flatMap((a) => [a.pollSecret, a.token])].filter(Boolean) };
 }
 const runIn = (cwd, home, printed = []) => (...args) => new Promise((resolve) => {
@@ -197,4 +222,86 @@ test('A4, A5: an account token never goes to another origin; no login says so; a
   const tooOld = await run('login', old.url);
   assert.equal(tooOld.code, 1); assert.match(tooOld.err, /too old for account login/);
   assert.equal(old.count('POST', '/v1/agent/account/login'), 0);
+});
+
+// #2246: with a login a Soul moves between homes with no code; the home it left says where it went and unpairs it.
+/** create, the fake person approves it for `account`, approval wait: the Soul lives in this home. */
+async function make(w, run, name, account) {
+  const asked = await run('create', name); assert.equal(asked.d?.status, 'pending', asked.out + asked.err);
+  w.approveSoul(asked.d.approvalId, account);
+  const done = await run('approval', 'wait'); assert.equal(done.d?.paired, true, done.out + done.err);
+  return done.d.soul;
+}
+
+test('#2246 A1, A2: adopt moves a Soul with no code; the home it left unpairs it, says where it runs, and its other Soul answers', async (t) => {
+  const w = await world(t), printed = [], homes = tmp(t), dir = (n) => { const d = join(homes, n); mkdirSync(d); return d; };
+  const one = runIn(dir('one'), homes, printed), two = runIn(dir('two'), homes, printed), three = runIn(dir('three'), homes, printed), rootOne = join(homes, 'one', '.souls'), rootTwo = join(homes, 'two', '.souls');
+  assert.equal((await one('register', w.url)).code, 0);
+  const mira = await make(w, one, 'Mira', 'acct_1'), ivo = await make(w, one, 'Ivo', 'acct_1');
+  await logIn(w, one, 'acct_1');
+  assert.match((await one('status')).err, /soul\.ambiguous/, 'two Souls live in home one');
+  // A1: home two logs in once and adopts by name: no code, no approval by the person, one pair route.
+  await logIn(w, two, 'acct_1', w.url, '--device', 'desk');
+  const moved = await two('adopt', 'Mira');
+  assert.equal(moved.code, 0, moved.out + moved.err); assert.equal(moved.d.status, 'ready'); assert.deepEqual(moved.d.soul, mira);
+  assert.equal(w.count('POST', `/v1/agent/account/souls/${mira.id}/pair`), 1);
+  assert.equal(read(rootTwo, 'config.json').souls[mira.id].account, 'acct_1', 'tagged with the account');
+  assert.equal(read(rootTwo, 'config.json').souls[mira.id].state, 'active');
+  for (const args of [['adopt', 'Mira'], ['pair', mira.id], ['adopt', mira.id]]) {
+    const again = await two(...args);
+    assert.equal(again.d?.reconnection, 'already connected', `${args}: ${again.out}${again.err}`);
+  }
+  assert.equal(w.count('POST', `/v1/agent/account/souls/${mira.id}/pair`), 1, 'run again, nothing is paired');
+  // A2: home one hears it moved, where it runs now, and the way back; Mira is unpaired there with her memory, her token gone.
+  const left = await one('mira', 'status');
+  assert.equal(left.code, 0, left.err); assert.equal(left.d.paired, false); assert.equal(left.d.control, 'replaced'); assert.match(left.d.why, /^Control of Mira moved to another device \(.* on desk\)/);
+  assert.match(left.d.runs, / on desk$/); assert.equal(left.d.next, 'node eden.mjs adopt Mira');
+  assert.equal(read(rootOne, 'config.json').souls[mira.id].state, 'unpaired');
+  assert.deepEqual(Object.values(read(rootOne, 'credentials.json').souls[mira.id] ?? {}).filter((x) => x.token), [], 'the dead token is removed');
+  assert.ok(existsSync(join(rootOne, 'souls', mira.id)), 'her memory folder stays');
+  const other = await one('status');
+  assert.equal(other.code, 0, other.err); assert.equal(other.d.soul.id, ivo.id, 'a bare command now speaks for the other Soul');
+  // Without a login nothing changes, and the next step names login. revoke and retire say they need one.
+  assert.equal((await three('register', w.url)).code, 0);
+  const byName = await three('adopt', 'Mira');
+  assert.equal(byName.code, 1); assert.match(byName.err, /--for <CODE>.*node eden\.mjs login/);
+  const coded = await three('pair', mira.id, '--for', 'K7QX-M2PA');
+  assert.equal(coded.d?.status, 'pending', coded.out + coded.err); assert.match(coded.d.next, /approval wait.*node eden\.mjs login$/);
+  for (const cmd of ['revoke', 'retire']) { const no = await three(cmd, mira.id); assert.equal(no.code, 1); assert.match(no.err, /needs a login.*node eden\.mjs login/, cmd); }
+  assert.equal(w.count('POST', `/v1/agent/account/souls/${mira.id}/pair`), 1);
+  const secrets = w.secrets();
+  assert.deepEqual(printed.filter((p) => secrets.some((s) => p.text.includes(s)) || p.text.includes(MARK)).map((p) => p.args), [], 'no command prints a token or a poll secret');
+});
+
+test('#2246 A3, A4: two accounts in one home; a tagged Soul uses its own login; --as the other is refused; a cancelled retire changes nothing', async (t) => {
+  const w = await world(t), home = tmp(t), run = runIn(home, home), root = join(home, '.souls');
+  await logIn(w, run, 'acct_1', w.url);
+  await logIn(w, run, 'acct_2', '--as', 'work');   // newest: the active one
+  w.souls.set('s_kai', { name: 'Kai', account: 'acct_1' }); w.souls.set('s_lu', { name: 'Lu', account: 'acct_2' });
+  const token = (alias) => read(root, 'credentials.json').accounts[alias].token, sentWith = (path) => w.hits.filter((h) => h.path === path).map((h) => h.auth);
+  // Untagged: the active login, or --as. The world refuses another account's Soul and the client says so.
+  const wrong = await run('adopt', 's_kai');
+  assert.equal(wrong.code, 1); assert.match(wrong.err, /not that account's Soul \(login work\)/);
+  const kai = await run('adopt', 's_kai', '--as', 'me');
+  assert.equal(kai.d?.status, 'ready', kai.out + kai.err);
+  assert.equal(read(root, 'config.json').souls.s_kai.account, 'acct_1');
+  // Tagged: its own login whatever --as says.
+  const off = await run('revoke', 'Kai', '--as', 'work');
+  assert.equal(off.code, 0, off.err); assert.equal(off.d.revoked, true); assert.equal(off.d.account, 'me'); assert.match(off.d.here, /unpaired/);
+  assert.deepEqual(sentWith('/v1/agent/account/souls/s_kai/revoke'), [`Bearer ${token('me')}`]);
+  assert.equal(read(root, 'config.json').souls.s_kai.state, 'unpaired'); assert.deepEqual(Object.values(read(root, 'credentials.json').souls.s_kai ?? {}).filter((x) => x.token), []);
+  const theirs = await run('revoke', 's_lu', '--as', 'me');
+  assert.equal(theirs.code, 1); assert.match(theirs.err, /not that account's Soul \(login me\)/);
+  assert.equal((await run('revoke', 's_lu')).d?.revoked, true, 'the active login is work');
+  // retire: asks, prints the link and the code; a cancel changes nothing here.
+  const asked = await run('retire', 'Kai', '--as', 'work');
+  assert.equal(asked.code, 0, asked.err); assert.equal(asked.d.retire, 'pending'); assert.equal(asked.d.confirm, 'R3TX');
+  assert.equal(asked.d.approvalURL, `${w.url}/#approve/${asked.d.requestId}`); assert.match(asked.d.next, /node eden\.mjs retire wait$/);
+  assert.equal(w.requests.get(asked.d.requestId).by, 'acct_1', 'asked with the tagged login');
+  assert.equal(read(join(root, 'pending', 'acct'), 'state.json').pendingRetire.input.pollSecret, undefined, 'the poll secret is not in the seat');
+  w.decide(asked.d.requestId, 'cancelled');
+  const waited = await run('retire', 'wait');
+  assert.equal(waited.d?.retire, 'cancelled', waited.out + waited.err); assert.equal(waited.d.retired, false);
+  assert.equal(read(root, 'config.json').souls.s_kai.state, 'unpaired', 'nothing changed here');
+  assert.deepEqual(Object.keys(read(root, 'credentials.json').logins), [], 'the retire poll secret is gone');
 });
