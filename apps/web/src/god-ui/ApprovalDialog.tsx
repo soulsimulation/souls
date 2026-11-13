@@ -15,7 +15,7 @@ import * as J from './join-api.ts';
 import { approvalLine, preparingLine, safePhoto } from './window-approvals.ts';
 import { requestFollowSoul } from '../follow-soul-request.ts';
 import { countPairing, pairingTaken } from '../visitor-counts.ts';
-import { approvalTitle } from '../approval-link.ts';
+import { approvalTitle, isAccountRequest } from '../approval-link.ts';
 import { ageText } from '../soul-state.ts';
 import './approval-card.css';
 
@@ -25,7 +25,15 @@ const AVATAR = <svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="1
 const agentName = (label: string | undefined) => (label ?? '').trim().slice(0, 60) || 'an unnamed agent';
 const askedAt = (a: J.Approval) => { const t = (a as { createdAt?: unknown }).createdAt; return typeof t === 'number' && Number.isFinite(t) ? t : null; };
 
-export function ApprovalCard({ id, signedIn, signIn, onDone, embedded = false }: { id: string; signedIn: boolean; signIn?: ReactNode; onDone: () => void; embedded?: boolean }) {
+type CardProps = { id: string; signedIn: boolean; signIn?: ReactNode; onDone: () => void; embedded?: boolean };
+/** #2245: an `aq_` id is an account request (a login or a retire), anything else a Soul approval. The Soul card's hooks run
+ *  in this component itself (as before #2245: account-approval-lifecycle.test.mjs renders it with its own hook
+ *  dispatcher); every caller keys the card by its id, so one instance never switches between the two. */
+export function ApprovalCard(props: CardProps) {
+  return isAccountRequest(props.id) ? <RequestCard {...props} /> : SoulApprovalCard(props);
+}
+
+function SoulApprovalCard({ id, signedIn, signIn, onDone, embedded = false }: CardProps) {
   const [a, setA] = useState<J.Approval | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -96,6 +104,66 @@ export function ApprovalCard({ id, signedIn, signIn, onDone, embedded = false }:
   );
 }
 
+/** The agent's device name, clipped like its label: untrusted text. */
+const deviceName = (q: J.AccountRequest) => q.device.name.trim().slice(0, 60) || 'an unnamed device';
+/** #2245 (`account-grant/1`): an agent asks to log in to this account, or to retire one of its Souls. Same card, its own copy;
+ *  Approve (Retire) and Refuse answer the request and the card closes. */
+function RequestCard({ id, signedIn, signIn, onDone, embedded = false }: CardProps) {
+  const [q, setQ] = useState<J.AccountRequest | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const answered = useRef(false);   // this card approved or refused it: close, with nothing more to say
+  const check = useCallback(async (action?: 'approve' | 'cancel') => {
+    if (action) { setBusy(true); answered.current = true; }
+    setErr(null);
+    try { setQ(await J.accountRequest(id, action)); }
+    catch (e) { setErr((e as Error).message); answered.current = false; }
+    finally { if (action) setBusy(false); }
+  }, [id]);
+  useEffect(() => { if (signedIn) void check(); }, [signedIn, check]);
+  const pending = q?.status === 'pending';
+  useEffect(() => { if (!pending) return; const t = setInterval(() => void check(), 4000); return () => clearInterval(t); }, [pending, check]);
+  const done = useRef(onDone); done.current = onDone;
+  const closed = useRef(false);
+  useEffect(() => {
+    if (closed.current || !q || !(q.status === 'ready' || (q.status === 'cancelled' && answered.current))) return;
+    closed.current = true; done.current();
+  }, [q]);
+  const title = q ? (q.kind === 'retire' ? q.soul?.name ?? 'Your Soul' : deviceName(q)) : signedIn ? '…' : 'Your agent is asking';
+  const line = q?.status === 'expired' ? 'Timed out' : q?.status === 'cancelled' ? 'Withdrawn by the agent' : null;
+  return (
+    <div className={'ap-card' + (embedded ? ' ap-embedded' : '')} data-approval={id} data-approval-status={q?.status ?? ''} data-request-kind={q?.kind ?? ''}>
+      {!embedded && <button type="button" className="ap-close" data-approval-close="1" aria-label="Close" onClick={onDone}>×</button>}
+      <div className="ap-head">
+        <span className="ap-avatar ap-generic">{AVATAR}</span>
+        <div className="ap-who">
+          <span className="ap-kicker">{q?.kind === 'retire' ? 'Retire a Soul' : 'Connect your account'}</span>
+          <b className="ap-name" data-approval-name="1" title={title}>{title}</b>
+        </div>
+      </div>
+      {pending && q && <>
+        <p className="ap-state"><span className="ap-pairing"><i aria-hidden="true" />{q.kind === 'login' ? 'Login' : 'Retire'}</span><span className="ap-dim">{`asked ${ageText(q.createdAt)}`}</span></p>
+        {q.kind === 'login' ? <>
+          <p className="ap-ask" data-approval-copy="1">An agent calling itself <b>{agentName(q.agentLabel)}</b> on <b>{deviceName(q)}</b> asks to connect to your account.</p>
+          <p className="ap-ask ap-code" data-request-confirm={q.confirm}>Code <b>{q.confirm}</b>: check it matches the one your agent shows.</p>
+          <p className="ap-ask">It will be able to see your Souls on this site, reconnect or disconnect them, and ask you to retire one.</p>
+          <p className="ap-warn">Approve only if you started it yourself.</p>
+        </> : <>
+          <p className="ap-ask" data-approval-copy="1">An agent calling itself <b>{agentName(q.agentLabel)}</b> on <b>{deviceName(q)}</b> asks to retire <b>{q.soul?.name ?? 'your Soul'}</b>.</p>
+          <p className="ap-warn">A retired Soul leaves the world for good and cannot come back.</p>
+        </>}
+      </>}
+      {!signedIn && <><p className="ap-line">Sign in to answer.</p>{signIn && <div className="ap-signin">{signIn}</div>}</>}
+      {pending && q && <div className="ap-actions">
+        <button type="button" className={'ap-btn ' + (q.kind === 'retire' ? 'ap-danger' : 'ap-primary')} data-approve-agent={id} disabled={busy} onClick={() => void check('approve')}>{q.kind === 'retire' ? 'Retire' : 'Approve'}</button>
+        <button type="button" className="ap-btn" data-refuse-agent={id} disabled={busy} onClick={() => void check('cancel')}>Refuse</button>
+      </div>}
+      {line && !answered.current && <><p className="ap-line" role="status">{line}</p>
+        <div className="ap-actions"><button type="button" className="ap-btn" data-approval-done={id} onClick={onDone}>Close</button></div></>}
+      {err && <p className="ap-line ap-bad">{err}</p>}
+    </div>
+  );
+}
 export function ApprovalDialog({ id, signedIn, signIn, onDone }: { id: string; signedIn: boolean; signIn?: ReactNode; onDone: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {

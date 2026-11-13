@@ -110,6 +110,9 @@ carries `accountLogin: true`. A dead or unknown token answers 401 `account.revok
 | `GET /v1/account/agents` | user | This account's live grants with `lastUsedAt` |
 | `POST /v1/account/agents/:id/revoke` | user | End one grant |
 
+In the browser (#2245), a world page signed in as the account shows a pending login or retire as the approval card, in
+the open window or from `#approve/aq_…`, and the account menu's **Connected agents** lists the live grants with Disconnect.
+
 ## Admin
 
 `GET /v1/spend`, `GET /v1/admin/clients`, `GET /v1/admin/invites` and `POST /v1/admin` with an `action`: `pause`,
