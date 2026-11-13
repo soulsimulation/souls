@@ -37,7 +37,13 @@ function fixture(t: TestContext, warm?: (budget: number, tick: number) => boolea
   t.mock.method(state, 'navRescueSouls', () => { rescues++; return 2; });
   t.mock.method(state, 'navLines', (spots: Point[], stepped: number) => { notices.push({ spots: structuredClone(spots), stepped }); return ['completed navigation notice']; });
   t.after(() => { host.stop(); db.close(); });
-  const tick = () => { const before = host.engine.world.tick; host.tickOnce(); assert.equal(host.engine.world.tick, before + 1); };
+  // A slice's budget is what is left of the tick's 40 ms, read from the wall clock. Each tick here runs with that clock
+  // held still, so the budget is the one the scheduler's state and tick count choose, however slow the machine is.
+  const tick = () => {
+    const before = host.engine.world.tick, at = performance.now(), held = t.mock.method(performance, 'now', () => at);
+    try { host.tickOnce(); } finally { held.mock.restore(); }
+    assert.equal(host.engine.world.tick, before + 1);
+  };
   const changed: Diff = { upserts: [], removes: ['removed-test-geometry'], defs: [], tiles: [], answers: [] };
   const rearm = () => god.bodies!.navNote!(changed);
   return { host, state, calls, logs, notices, tick, rearm, rescues: () => rescues, flushes: () => flushes };

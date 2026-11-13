@@ -54,7 +54,9 @@ export interface ActionDef<Params = unknown, Program = unknown, Exec = unknown> 
   /** Whether reserved hand resources drive hand poses. Defaults true; composites may reserve only, and transfers may drive only selected published phases. */
   drivesReservedHands?: boolean | ((record: ActionRecord) => boolean);
   /** Its `step` moves only its own actor's body and never changes a static entity (an obstacle, a construction phase, a
-   *  support or connection): the runtime lets the walk planner skip its static-world scan meanwhile (spatial/nav-trust.ts). */
+   *  support or connection): the runtime lets the walk planner skip its static-world scan meanwhile (spatial/nav-trust.ts).
+   *  Nor does it, or anything it triggers, add, remove or replace an entity or give one a `human` record: walkers share
+   *  one people list while only nav-pure steps run (locomotion/walk.ts peopleNow). */
   navPure?: boolean;
   /** Resources required (actors, entities, interaction slots, work zones). */
   reservations(world: WorldState, params: Params): Reservation[];

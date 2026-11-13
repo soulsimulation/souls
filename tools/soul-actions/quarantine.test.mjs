@@ -201,3 +201,26 @@ for (const [name, corrupt] of Object.entries(CHAOS))
     if (bystander) { const e = h.engine.world.entities[Ada.entityId]; assert.ok(e.human && e.pose.p.every(Number.isFinite), 'the broken body is whole again'); assert.ok((h.glitches.byRule['entity.corrupt']?.contained ?? 0) <= 2, report); }
     if (process.env.CHAOS_REPORT) console.info(`[chaos] ${name}: ${JSON.stringify(h.glitches.byRule)}`);
   });
+
+// #1377: an invariant that throws whenever it reads one body names nobody (`engine.thrown`). With restores working, as on a
+// real world, rung 3 went back and stopped every programme. What it was reading is found on a scratch restore of the head,
+// so that body alone is quarantined, and a bystander walking all along gets there.
+test('#1377 an invariant that throws reading one body stops that body alone: a bystander walking all along arrives, nothing is stopped world-wide, and every boot agrees', {timeout: 300000}, async (t) => {
+  quiet(t); const path = onDisk(t), w = await world(t, {path}), h = w.f.host, {Ada, Bo, Cy} = w.souls;
+  const walk = ok(await act(w, Ada, {capability: 'walk:shed'})), far = ok(await act(w, Bo, {capability: 'walk:yard'})); await w.tick(10);
+  const seq0 = h.seq, from = h.engine.world.tick + 1, to = from + 300;   // by tick, so every replay meets the same throws
+  w.control.every = (r) => { if (r.tick >= from && r.tick < to && r.world.entities[Ada.entityId]) throw new Error('fixture.invariant-bug on one body'); return []; };
+  await w.tick(20);
+  const later = ok(await act(w, Cy, {capability: 'walk:shed'}));
+  await w.tick(600);
+  const events = w.f.db.events(worldId, seq0), report = JSON.stringify({glitches: h.glitches, bo: read(w, Bo, far), rules: events.filter((e) => e.kind === 'rules').map((e) => [e.author, Object.keys(e.payload ?? {})])});
+  assert.ok(running(h), report); assert.equal(byRung(h).halt ?? 0, 0, report); assert.equal(byRung(h).rewind ?? 0, 0, report);
+  assert.ok(!events.some((e) => e.payload?.lastRungInPlace || e.payload?.recovery?.lastRung), `no stop-all, in place or by a rewind: ${report}`);
+  const q = events.filter((e) => e.payload?.quarantineV1); assert.ok(q.length >= 1, report);
+  for (const e of q) assert.deepEqual(e.payload.quarantineV1.bodies, [Ada.entityId], 'only the body the invariant was reading');
+  assert.equal(read(w, Ada, walk).code, 'world.quarantined');
+  assert.equal(read(w, Bo, far).phase, 'completed', `the bystander walking all along arrives: ${report}`);
+  assert.equal(read(w, Cy, later).phase, 'completed', report);
+  assert.ok(!w.comms.streams.read(Bo.soulId, 0).events.some((e) => e.kind === 'world.quarantined' || e.kind === 'world.rewound'), 'Bo hears nothing');
+  h.drainInputs(); h.saveSnapshot(true); bootsAgree(w, path);
+});

@@ -4,12 +4,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, BUDGETS, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
-import { FOLLOW_MAX, followLine } from './soul/eden.mjs';
+import { ACT_ENDED_GRACE_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
+import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState } from './soul/eden.mjs';
+import { indexCatalog } from './soul/catalog.mjs';
 
 const T0 = 1_800_000_000_000;
 /** serve's state as it stands after a first look: the engine's cursor at the end of everything. */
@@ -160,7 +161,7 @@ async function world(t) {
   w.cli = (...args) => new Promise((done) => {
     const child = spawn(process.execPath, [fileURLToPath(new URL('./soul/eden.mjs', import.meta.url)), ...args], { cwd: dir, env: { ...process.env, ...w.env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', (c) => { err += c; });
-    child.on('exit', (code) => { let j = null; try { j = JSON.parse(out); } catch { /* text */ } done({ code, err, json: j }); });
+    child.on('exit', (code) => { let j = null; try { j = JSON.parse(out); } catch { /* text */ } done({ code, err, json: j, out }); });
   });
   w.state = () => JSON.parse(readFileSync(join(dir, '.eden-serve.json'), 'utf8'));
   t.after(async () => {
@@ -194,7 +195,7 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   assert.equal((await w.cli('serve')).code, 0);
   r = await w.cli('wake', 'remove', 'w1');
   assert.equal(r.code, 0, r.err);
-  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'w2'], 'kept across the restart');
+  assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w2'], 'kept across the restart');
   assert.equal(r.json.queued, 1, 'the queue too');
   assert.ok(r.json.rules.find((x) => x.id === 'owner-message').lastFired);
 });
@@ -364,6 +365,131 @@ test('#1968 A1, A4: wake budget and status through the CLI; a run killed after p
   assert.equal(w.state().wake.delivered.length, 3, 'and charged again: the count is the deliveries made');
 });
 
+// #1930: wake on a time, when a plan finishes, and when the Soul has been idle. A fake clock: the rules run every 2 s, as serve's
+// timer runs them, with `since` the time this serve started.
+const MIN = 60_000, iso = (ms) => new Date(ms).toISOString();
+function clock(rules, st) {
+  let r = { rules };
+  return { run(from, to) { const out = []; for (let t = from; t <= to; t += 2_000) out.push(...(r = step(r.rules, st, t)).fired); return out; }, rule: (id) => ruleOf(r, id), get rules() { return r.rules; } };
+}
+
+test('#1930 A1, A4: at fires once at its time on serve\'s timer; a time that passed while serve was not running is dropped, never fired late', () => {
+  const at = iso(T0 + 10 * MIN), st = serveState({ since: T0 }), c = clock([{ id: 'w1', ...parseRule(['at', at]) }], st);
+  assert.deepEqual(c.run(T0, T0 + 10 * MIN - 2_000), [], 'not before');
+  assert.deepEqual(c.run(T0 + 10 * MIN, T0 + 20 * MIN).map((f) => [f.id, f.kind, f.why, f.at]), [['w1', 'at', `it is ${at}`, at]], 'at the time, once');
+  assert.equal(c.rule('w1').ended, 'fired');
+
+  const down = serveState({ since: T0 }), d = clock([{ id: 'w2', ...parseRule(['at', at]) }], down);
+  d.run(T0, T0 + MIN);   // serve stops at one minute and starts again at twenty: ten passed while it was not running
+  down.since = T0 + 20 * MIN;
+  assert.deepEqual(d.run(T0 + 20 * MIN, T0 + 30 * MIN), [], 'dropped, never fired late');
+  assert.equal(view({ ...fresh(), rules: d.rules }).rules[0].ended, 'dropped', 'wake shows it was dropped');
+
+  assert.throws(() => parseRule(['at', 'tomorrow']), /ISO time/);
+  assert.deepEqual(parseRule(['at', '2026-11-12T09:00:00Z']).params, { at: '2026-11-12T09:00:00.000Z' });
+});
+
+test('#1930 A1, A4: every <minutes> (at least 5) fires each period; periods that passed while serve was not running are dropped', () => {
+  assert.throws(() => parseRule(['every', String(EVERY_MIN - 1)]), /at least 5/);
+  assert.throws(() => parseRule(['every', '{"minutes":5}']), /whole minutes/);
+  const st = serveState({ since: T0 }), c = clock([{ id: 'w1', ...parseRule(['every', '5']) }], st);
+  assert.deepEqual(c.run(T0, T0 + 31 * MIN).map((f) => f.at), [5, 10, 15, 20, 25, 30].map((m) => iso(T0 + m * MIN)));
+  st.since = T0 + 52 * MIN;   // serve is down from 31 to 52 minutes: 35, 40, 45 and 50 pass while it is not running
+  assert.deepEqual(c.run(T0 + 52 * MIN, T0 + 60 * MIN).map((f) => f.at), [55, 60].map((m) => iso(T0 + m * MIN)), 'dropped; it carries on at 55');
+});
+
+test('#1930 A1: at, every, plan-finished and idle wakes go through the ambient budget, charged once per delivery', () => {
+  for (const kind of ['at', 'every', 'plan-finished', 'idle']) {
+    const queue = enqueue([], [{ id: 'w1', kind, why: kind, at: iso(T0) }]);
+    const spent = deliver({ ...fresh(), budget: { hour: 'quiet' }, delivered: [1, 2, 3, 4].map((i) => ({ at: T0 - i })), queue }, T0);
+    assert.deepEqual([spent.wakes, spent.over], [[], true], `${kind}: over the budget it waits`);
+    const d = deliver({ ...fresh(), queue }, T0, { reader: 'L' });
+    assert.deepEqual([d.wakes.map((x) => x.kind), d.wake.delivered.length], [[kind], 1], `${kind}: one delivery, one charge`);
+  }
+});
+
+test('#1930 A2, A4: plan-finished wakes when a plan ends done or failed, never when it was replaced; on by default', () => {
+  assert.ok(fresh().rules.some((x) => x.id === 'plan-finished' && !x.always), 'on by default, and removable');
+  assert.equal(change(fresh(), { remove: 'plan-finished' }).removed, 'plan-finished');
+  const st = serveState({ plan: { id: 'p_1', state: 'running', at: 0, steps: [{ id: 'walk:mill', state: 'running' }] } }), c = clock(fresh().rules, st);
+  c.run(T0, T0);
+  st.plan = null; st.planEnded = [{ id: 'p_1', state: 'done', step: 1, of: 1, steps: [{ n: 1, id: 'walk:mill', state: 'done' }] }];
+  assert.deepEqual(c.run(T0 + 2_000, T0 + 6_000).map((f) => [f.id, f.why]), [['plan-finished', 'plan p_1 finished']], 'once per plan');
+  st.planEnded.push({ id: 'p_2', state: 'replaced', step: 1, of: 2, steps: [] });   // p_3 replaced p_2, then failed
+  st.plan = { id: 'p_3', state: 'failed', at: 0, steps: [{ id: 'sit:bench', state: 'refused' }] };
+  assert.deepEqual(c.run(T0 + 8_000, T0 + 10_000).map((f) => f.why), ['plan p_3 ended failed'], 'the replaced plan wakes no one');
+});
+
+test('#1930 A3, A4: idle fires once after that long with no agent command and no running plan, again only after a command; a seated Soul is idle', () => {
+  assert.ok(!fresh().rules.some((x) => x.kind === 'idle'), 'off by default');
+  assert.throws(() => parseRule(['idle']), /minutes/);
+  assert.throws(() => parseRule(['idle', '{"minutes":4}']), /at least 5/, 'the same 5-minute floor as every');
+  assert.equal(parseRule(['idle', '{"minutes":5}']).params.minutes, 5);
+  const sit = { r_sit: { id: 'r_sit', capability: 'sit:bench', phase: 'started', mine: true, read: false } };   // a held sit stays started
+  const st = serveState({ since: T0, receipts: sit, lastCommandAt: T0 + MIN }), c = clock([{ id: 'w1', ...parseRule(['idle', '{"minutes":30}']) }], st);
+  assert.deepEqual(c.run(T0, T0 + 31 * MIN - 2_000), [], 'thirty minutes from the last command, not before');
+  assert.deepEqual(c.run(T0 + 31 * MIN, T0 + 180 * MIN).map((f) => [f.id, f.kind, f.at]), [['w1', 'idle', iso(T0 + 31 * MIN)]], 'seated and idle: once');
+  st.lastCommandAt = T0 + 180 * MIN;
+  assert.deepEqual(c.run(T0 + 182 * MIN, T0 + 240 * MIN).map((f) => f.at), [iso(T0 + 210 * MIN)], 'again after an agent command');
+  st.lastCommandAt = T0 + 300 * MIN; st.plan = { id: 'p_1', state: 'running', at: 0, steps: [] };
+  assert.deepEqual(c.run(T0 + 300 * MIN, T0 + 360 * MIN), [], 'a plan running for an hour is not idle');
+  st.plan = { ...st.plan, state: 'done' };
+  assert.deepEqual(c.run(T0 + 360 * MIN + 2_000, T0 + 420 * MIN).map((f) => f.at), [iso(T0 + 390 * MIN)], 'thirty minutes after it stopped running');
+});
+
+// #1932: the heartbeat. A scheduler gates a run on `pending --check`, which answers by exit code alone and starts serve itself.
+const sh = (cmd, env) => new Promise((done) => {
+  const child = spawn('sh', ['-c', cmd], { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = ''; child.stdout.on('data', (c) => { out += c; }); child.stderr.on('data', () => {});
+  child.on('exit', (code) => done({ code, out }));
+});
+
+test('#1932 A1: pending --check starts serve, exits 1 when there is nothing and 0, silent, when there is; it takes nothing', async (t) => {
+  const w = await world(t);
+  assert.equal((await w.cli('serve', '--status')).json.serving, false);
+  let r = await w.cli('pending', '--check');
+  assert.deepEqual([r.code, r.out], [1, ''], 'nothing to do: exit 1, nothing printed');
+  assert.equal((await w.cli('serve', '--status')).json.serving, true, 'it started serve');
+  w.inbox.push({ id: 'msg_1', text: 'come to the hall', sentAt: T0 });
+  r = await until(async () => { const x = await w.cli('pending', '--check'); return x.code === 0 && x; });
+  assert.deepEqual([r.code, r.out], [0, ''], 'an owner message: exit 0, nothing printed');
+  assert.equal((await w.cli('pending', '--check')).code, 0, 'the check read nothing: it still finds it');
+  assert.deepEqual((await w.cli('pending')).json.ownerMessages.map((m) => m.id), ['msg_1'], 'pending still hands it over');
+});
+
+test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps the cadence, and the command starts no run when idle', async (t) => {
+  const w = await world(t), folder = realpathSync(w.dir);
+  let r = await w.cli('wake', 'heartbeat');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json.heartbeat.every, HEARTBEAT_EVERY_MIN);
+  r = await w.cli('wake', 'heartbeat', '--every', '15');
+  const { every, prompt, command } = r.json.heartbeat;
+  assert.equal(every, 15);
+  assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).heartbeat.every, 15, 'the cadence is in the Soul\'s state');
+  assert.ok(prompt.split(/\s+/).length <= 120, `${prompt.split(/\s+/).length} words`);
+  assert.ok(prompt.includes(folder), 'it names the Soul\'s folder');
+  // #2119 A4: one paragraph; with a goal and nothing from the owner it goes to help living, with no goal and nothing new it stops at once.
+  assert.ok(!prompt.includes('\n'), 'one paragraph');
+  assert.match(prompt, /pending\. If it holds owner messages, act on them as the skill says, then stop\./);
+  assert.match(prompt, /If it holds none and its brief lists a goal \(a line with Next:\), run node \S+ help living and take the one step it gives, then stop\./);
+  assert.match(prompt, /If it has no owner message and no goal, and reports nothing new \(no ended acts, events, speech or wakes\), stop now and do nothing else\. Otherwise act on what it reports, as the skill says, then stop\.$/);
+  assert.equal((await w.cli('wake', 'heartbeat', '--every', '0')).code, 1);
+
+  // The harness is a stand-in that leaves a mark: idle, the gated command never starts it; with a message waiting, it does.
+  const bin = join(w.dir, 'bin'), mark = join(w.dir, 'ran');
+  mkdirSync(bin);
+  for (const h of ['claude', 'codex']) { writeFileSync(join(bin, h), `#!/bin/sh\necho "$@" >> '${mark}'\n`); chmodSync(join(bin, h), 0o755); }
+  const env = { PATH: `${bin}:${process.env.PATH}` };
+  for (const h of ['claude', 'codex']) assert.equal((await sh(command[h], env)).code, 1, `${h}: idle, the check stops the line`);
+  assert.equal(existsSync(mark), false, 'no harness run started: no tokens');
+  w.inbox.push({ id: 'msg_1', text: 'come to the hall', sentAt: T0 });
+  assert.ok(await until(async () => (await w.cli('pending', '--check')).code === 0));
+  for (const h of ['claude', 'codex']) assert.equal((await sh(command[h], env)).code, 0);
+  const runs = readFileSync(mark, 'utf8').trim().split('\n');
+  assert.equal(runs.length, 2, 'one run per harness');
+  assert.ok(runs.every((x) => x.includes(prompt)), 'each with the heartbeat prompt');
+});
+
 // #2076: --stop answers only after serve has written its state and released its lock: a folder removed right after it goes,
 // 20 times out of 20, with no retry and no wait for the lock.
 test('#2076: serve --stop answers after serve exits; the folder is removed right after, 20 of 20', async (t) => {
@@ -384,4 +510,79 @@ test('#2076: serve --stop answers after serve exits; the folder is removed right
     rmSync(dir, { recursive: true });
     assert.equal(existsSync(dir), false, `round ${i}: removed`);
   }
+});
+
+// #1931: three more kinds, on recorded state. Envelopes as the world's classified stream sends them (envelope.ts).
+const ambient = (id, soulId, name, text) => ({ id, tick: 9, at: T0, kind: 'speech.ambient', salience: 1, about: { soulId, name }, where: { dist: 6, bearing: 'left' }, text: `${name} (6 m, left): "${text}"`, untrusted: true, raw: 'speech', data: { from: { soulId, name }, text } });
+const starting = (id, title) => ({ id, tick: 9, at: T0, kind: 'schedule.starting', salience: 2, text: `"${title}" is starting now at Commons.`, untrusted: true, raw: 'schedule', data: { placeId: 'g-commons', startsAtTick: 9 } });
+
+test('#1931 A1: the stream reader keeps speech.ambient and schedule.starting in serve\'s state; addressed speech is folded as before', () => {
+  const st = loadServeState.fresh();
+  assert.equal(foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')), true);
+  assert.equal(foldHeard(st, starting('c_2', 'Open mic')), true);
+  assert.equal(foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')), false, 'once each');
+  assert.equal(foldHeard(st, { id: 'c_3', kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, data: { text: 'Ada?' } }), false, 'addressed speech is not one of them');
+  assert.deepEqual(st.heard.map((x) => [x.seq, x.kind, x.from, x.text, x.untrusted]), [[1, 'speech.ambient', 'Bo', 'nice day', true], [2, 'schedule.starting', null, '"Open mic" is starting now at Commons.', true]]);
+  assert.equal(foldAddressed(st, ambient('c_4', 's_bo', 'Bo', 'hm')), false, 'ambient speech never reaches the addressed store');
+  assert.equal(foldAddressed(st, { id: 'c_3', kind: 'speech.to-me', about: { soulId: 's_bo', name: 'Bo' }, data: { text: 'Ada?' } }), true);
+  assert.deepEqual([st.addressed.length, st.heardSeq], [1, 2]);
+  for (let i = 0; i < 30; i++) foldHeard(st, ambient(`n_${i}`, 's_bo', 'Bo', `line ${i}`));
+  assert.equal(st.heard.length, 20, 'the newest few are kept');
+});
+
+test('#1931 A2, A4: speech-near-me fires on speech in earshot not said to this Soul, off by default, untrusted, and within the budget', () => {
+  assert.ok(!fresh().rules.some((x) => x.kind === 'speech-near-me'), 'off by default');
+  assert.throws(() => parseRule(['speech-near-me', '{"who":"s_bo"}']), /no params/);
+  const st = serveState({ heard: [], heardSeq: 0 }), rules = [{ id: 'w1', ...parseRule(['speech-near-me', '--every', '0']) }];
+  let r = step(rules, st, T0);
+  foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')); foldHeard(st, ambient('c_2', 's_me', 'Me', 'my own words')); foldHeard(st, starting('c_3', 'Open mic'));
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.kind, f.why, f.untrusted]), [['w1', 'speech-near-me', 'Bo said nearby: "nice day"', true]], 'not this Soul\'s own words, not the event');
+  assert.deepEqual(step(r.rules, st, T0 + 4_000).fired, [], 'a line wakes once');
+  // a noisy place: a line every 2 s for an hour, one listen polling and nobody confirming: the budget holds
+  for (const hour of ['quiet', 'normal']) {
+    const s2 = serveState({ heard: [], heardSeq: 0 });
+    let wake = { ...fresh(), rules: [{ id: 'w1', ...parseRule(['speech-near-me', '--every', '0']) }], budget: { hour } }, handed = 0;
+    for (let t = 0; t < HOUR; t += 2_000) {
+      foldHeard(s2, ambient(`c_${t}`, 's_bo', 'Bo', `line ${t}`));
+      const e = evaluate(wake.rules, { ...s2, wake }, T0 + t);
+      wake = { ...wake, rules: e.rules, cursor: e.cursor, queue: enqueue(wake.queue, e.fired) };
+      const d = deliver(confirm(wake, 'L'), T0 + t, { reader: 'L' });
+      if (d.wakes.length) { handed++; assert.equal(d.wakes[0].untrusted, true, 'another Soul\'s words stay labelled'); }
+      wake = d.wake;
+    }
+    assert.equal(handed, BUDGETS[hour], `${hour}: ${handed} deliveries, never more than the budget`);
+  }
+});
+
+test('#1931 A2, A4: event-starting fires on schedule.starting, on by default', () => {
+  assert.ok(fresh().rules.some((x) => x.id === 'event-starting' && !x.always), 'on by default, and removable');
+  assert.equal(change(fresh(), { remove: 'event-starting' }).removed, 'event-starting');
+  const st = serveState({ heard: [], heardSeq: 0 });
+  foldHeard(st, starting('c_0', 'Before this serve looked'));
+  let r = step(fresh().rules, st, T0);
+  assert.deepEqual(r.fired, [], 'a first look starts from now');
+  foldHeard(st, ambient('c_1', 's_bo', 'Bo', 'nice day')); foldHeard(st, starting('c_2', 'Open mic'));
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why, f.untrusted]), [['event-starting', '"Open mic" is starting now at Commons.', true]]);
+  assert.deepEqual(step(r.rules, st, T0 + 4_000).fired, []);
+});
+
+test('#1931 A3, A4: thing-state fires when that field of that thing changes, read through thingState with the kind\'s defaults', () => {
+  const catalog = indexCatalog({ places: [{ id: 'g-v', name: 'Village', kind: 'area', at: [0, 0] }], acts: [], things: [{ id: 'e_ch', name: 'porch-chest', kind: 'core-chest', place: 'g-v', at: [1, 0] }],
+    kinds: { 'core-chest': { acts: [{ verb: 'open', label: 'Open' }], state: { open: false, locked: false } } } });
+  assert.throws(() => parseRule(['thing-state', '{"thing":"e_ch"}']), /thing-state takes/);
+  assert.throws(() => parseRule(['thing-state', '{"thing":"e_ch","field":"open","is":{"x":1}}']), /thing-state takes/);
+  const any = { id: 'w1', ...parseRule(['thing-state', '{"thing":"e_ch","field":"open"}', '--every', '0']) }, closed = { id: 'w2', ...parseRule(['thing-state', '{"thing":"e_ch","field":"open","is":false}', '--every', '0']) };
+  const st = serveState({ catalog, live: { souls: [], things: {} } });
+  let r = step([any, closed], st, T0);
+  assert.deepEqual([r.fired, ruleOf(r, 'w1').was], [[], 'false'], 'the first look takes the default in, wakes no one');
+  st.live = { souls: [], things: { e_ch: { open: true } } };
+  r = step(r.rules, st, T0 + 2_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now true']], 'is:false waits for false');
+  assert.deepEqual((r = step(r.rules, st, T0 + 4_000)).fired, [], 'unchanged: no wake');
+  st.live = { souls: [], things: { e_ch: { locked: true } } };   // the live row no longer names open: the kind's default stands
+  r = step(r.rules, st, T0 + 6_000);
+  assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now false'], ['w2', 'e_ch open is now false']]);
+  assert.deepEqual(step(r.rules, { ...st, catalog: null }, T0 + 8_000).fired, [], 'no catalog copy: nothing is read');
 });

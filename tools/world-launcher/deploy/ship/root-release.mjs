@@ -3,6 +3,7 @@
 // the activation preconditions. Each command reads local files, prints what it found and exits 1 with the reason.
 //   node root-release.mjs receipts <gate receipt> <ship receipt> <sha>
 //   node root-release.mjs receipt <release-receipt.json> <sha>   (the publishable release receipt, ship-receipt.mjs --public)
+//   node root-release.mjs accepted <receipts folder> <accepted-exceptions.json> <sha>   (a gate blocked only by accepted exceptions)
 //   node root-release.mjs snapshot <healthz.json> <remote.json> <label sha> <out.json> [accepted host codes, comma-separated]
 //   node root-release.mjs drift <snapshot.json> <healthz.json> <remote.json>
 //   node root-release.mjs backup <backup.log> <quick-check.log> <snapshot.json> <label> <out.json>
@@ -12,6 +13,7 @@
 //   node root-release.mjs rehearsed <rehearse.json> <build>
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const read = f => JSON.parse(readFileSync(f, 'utf8'));
@@ -63,6 +65,53 @@ export function releaseReceiptProblems(r, sha) {
   if (!/^[0-9a-f]{64}$/.test(g.sha256 ?? '') || !/^[0-9a-f]{64}$/.test(v.sha256 ?? '')) out.push('release receipt lacks the raw receipts\' sha256');
   if (v.status !== 'pass' || v.dirty !== false || v.source !== sha || !(v.checks > 0) || v.failed !== 0) out.push(`V7 ${v.status}, source ${v.source}, dirty ${v.dirty}, ${v.checks} checks, ${v.failed} failed`);
   return out;
+}
+
+/** The gate blockers the maintainer may accept: the receipt list that holds them and the gate's blocker line for it.
+ *  New failures, every other gate blocker, a failing V7 and a missing raw receipt hash are never acceptable. */
+export const ACCEPTABLE = { removed: 'baseline assertions removed', unexpectedSkips: 'unexpected test skip(s)/TODO(s)' };
+
+/** A BLOCKED gate passes only when accepted-exceptions.json (docs/release.md#accepted-exceptions) names this gate receipt
+ *  by sha256 and this cut, says `accepted_by: maintainer`, and covers every blocker exactly. The receipts are read as the
+ *  tools wrote them; the accepted entries are cleared in memory and the usual verdict runs on what is left.
+ *  `companion` is the release receipt (release-receipt/1) or, without one, the ship receipt. */
+export function acceptedProblems(gate, gateSha256, companion, x, sha) {
+  const out = [], lines = [], key = t => `${t?.step}: ${t?.id}`;
+  if (x?.schema !== 'accepted-exceptions/1') out.push('not an accepted-exceptions file (accepted-exceptions/1)');
+  if (x?.accepted_by !== 'maintainer') out.push(`accepted_by is ${x?.accepted_by}, not maintainer`);
+  if (!/^\d{4}-\d\d-\d\d$/.test(x?.date ?? '')) out.push(`date ${x?.date} is not YYYY-MM-DD`);
+  if (x?.cut !== sha) out.push(`the exceptions are for cut ${x?.cut}, not this commit`);
+  if (x?.gate_sha256 !== gateSha256) out.push('the exceptions name a different gate receipt (sha256)');
+  if (gate?.status !== 'blocked') out.push(`gate status ${gate?.status}: nothing to accept`);
+  if (gate?.newFailures?.length) out.push(`gate has ${gate.newFailures.length} new failures: never accepted`);
+  const listed = { removed: new Set(), unexpectedSkips: new Set() };
+  for (const e of Array.isArray(x?.exceptions) && x.exceptions.length ? x.exceptions : [{}]) {
+    if (!Object.hasOwn(ACCEPTABLE, e?.kind)) { out.push(`exception kind ${e?.kind} is never accepted`); continue; }
+    if (!e.reason?.trim?.() || !/^#\d+$/.test(e.ref ?? '') || !e.tests?.length) out.push(`each ${e.kind} exception needs a reason, a ref (#issue or #PR) and its tests`);
+    for (const t of e.tests ?? []) listed[e.kind].add(key(t));
+    lines.push(`ACCEPTED ${e.kind} (${e.ref}): ${e.reason}`, ...(e.tests ?? []).map(t => `   ${key(t)}`));
+  }
+  const ours = new Set();
+  for (const [k, phrase] of Object.entries(ACCEPTABLE)) {
+    const entries = gate?.[k] ?? [], inReceipt = new Set(entries.map(key));
+    for (const t of inReceipt) if (!listed[k].has(t)) out.push(`not accepted: ${k} ${t}`);
+    for (const t of listed[k]) if (!inReceipt.has(t)) out.push(`accepted but not in the receipt: ${k} ${t}`);
+    if (entries.length) ours.add(`${entries.length} ${phrase}`);
+  }
+  for (const b of gate?.blockers ?? []) if (!ours.has(b)) out.push(`gate blocker is never accepted: ${b}`);
+  if (out.length) return { problems: out, lines };
+  // once the accepted entries are gone, so are the two lines a blocked gate puts in the ship verdict (ship-receipt.mjs)
+  const status = gate.quarantined?.length ? 'quarantined' : 'pass', fromGate = ['gate status blocked', `gate has ${gate.blockers.length} blocker(s)`];
+  if (companion?.schema === 'release-receipt/1') {
+    const g = companion.gate ?? {};
+    if (g.sha256 !== gateSha256) return { problems: ['the release receipt names a different gate receipt'], lines };
+    if (companion.blockers !== fromGate.length || ['blockers', 'removed', 'unexpectedSkips'].some(k => g[k] !== (gate[k]?.length ?? 0)))
+      return { problems: [`the release receipt blocks beyond the accepted gate blockers (${companion.blockers} blockers)`], lines };
+    return { problems: releaseReceiptProblems({ ...companion, status, blockers: 0, gate: { ...g, status, blockers: 0, removed: 0, unexpectedSkips: 0 } }, sha), lines };
+  }
+  const extra = (companion?.blockers ?? []).filter(b => !fromGate.includes(b));
+  if (extra.length) return { problems: extra.map(b => `ship receipt blocker is never accepted: ${b}`), lines };
+  return { problems: receiptProblems({ ...gate, status, blockers: [], removed: [], unexpectedSkips: [] }, { ...companion, status, blockers: [] }, sha, gateSha256), lines };
 }
 
 export function snapshotProblems(health, remote, sha = '', accepted = []) {
@@ -119,7 +168,13 @@ const fail = lines => { for (const l of lines) console.log(l); process.exit(1); 
 export function main(argv) {
   const [cmd, ...a] = argv;
   if (cmd === 'receipt') { const p = releaseReceiptProblems(read(a[0]), a[1]); if (p.length) fail(p); console.log('the release receipt is clean for this commit'); }
-  else if (cmd === 'receipts') { const p = receiptProblems(read(a[0]), read(a[1]), a[2], digest(a[0])); if (p.length) fail(p); console.log('gate and ship receipts are clean for this commit'); }
+  else if (cmd === 'accepted') {
+    const gate = join(a[0], 'receipt.json'), release = join(a[0], 'release-receipt.json');
+    const { problems, lines } = acceptedProblems(read(gate), digest(gate), read(existsSync(release) ? release : join(a[0], 'ship-receipt.json')), read(a[1]), a[2]);
+    if (problems.length) fail(problems);
+    for (const l of lines) console.log(l);
+    console.log('the receipts are clean for this commit apart from the exceptions the maintainer accepted');
+  } else if (cmd === 'receipts') { const p = receiptProblems(read(a[0]), read(a[1]), a[2], digest(a[0])); if (p.length) fail(p); console.log('gate and ship receipts are clean for this commit'); }
   else if (cmd === 'snapshot') {
     const accepted = (a[4] ?? '').split(',').filter(Boolean), health = read(a[0]), remote = read(a[1]), p = snapshotProblems(health, remote, a[2], accepted); if (p.length) fail(p);
     if (existsSync(a[3])) { const aside = `${a[3]}.${Date.now()}`; renameSync(a[3], aside); console.log(`kept the earlier snapshot as ${aside.split('/').pop()}`); }

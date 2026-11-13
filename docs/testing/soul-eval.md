@@ -67,6 +67,8 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
   client before 2.25, which keeps no world copy. Each episode records `catalogFrom` (`client` or `reference`).
 - `load --first-repeat 2` numbers a load run's repeats from 2, so a stopped load run can be finished cell by cell. Load
   setup paces Souls at 6 per 30 s, under a world's 20 pairings in any 60 s from one address.
+- A load report also gives the world's own side from its `live.json`: an act's queue, handler, wait and commit at p50
+  and p99 with the acts that waited more than three ticks, and each 10-second tick window ([load.md](../architecture/load.md)).
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
 
 The battery is checked against each world's own catalog before its episode, so a missing place fails fast.
@@ -96,10 +98,12 @@ world appears as `local:<template>`.
 
 - #1724's five instructions;
 - from the #1097 scorecard: a seat (a bench), a thing activity (music), a plain walk, a place that can't be walked into (the
-  West Lake), a ride that isn't offered ("fly"), and a two-step errand.
+  West Lake), a ride that isn't offered ("fly"), and a two-step errand;
+- #1924: what is on in the next hour, saying it will come to the first thing (another Soul announces it first, `calendar`).
 
 Every item starts where a new Soul arrives. Its check is one of `place`, `placeKind`, `posture`, `receipt`
-(`{verb, thingKind?}`) or `card`, composed with `all` and `any` (`tools/playtest/eval/measure.mjs`). No item needs `resolve`.
+(`{verb, thingKind?}`), `card` or `calendarInterest` (`"first"`), composed with `all` and `any`
+(`tools/playtest/eval/measure.mjs`). No item needs `resolve`.
 
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.
