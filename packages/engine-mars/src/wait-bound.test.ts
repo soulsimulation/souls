@@ -146,3 +146,15 @@ test('#2032 item 2: a walk retried after the blocked-walk timeout starts its own
   assert.ok(endTick>=retry.at+1199,`the retried walk lasted its own bound (${retry.at} to ${endTick})`);
   assert.deepEqual(e.runtime.violations,[]);
 });
+
+test('#2294 a walk held inside its wait bound keeps the world from being still (stillnessV1)',()=>{
+  const {e,id}=yieldBesideWall({heldActivitiesV1:true,waitBoundV1:true,waitBoundV2:true});
+  let held=0;const rt=(e as any).rt;
+  for(let i=0;i<1100;i++){
+    e.step();const ex=execOf(e,W);
+    if(ex&&!rt.services.traffic?.size&&ex.narrows.length){const n=ex.narrows[0];(rt.services.traffic??=new Map()).set(n.res,{actors:new Set([B]),entry:n.entry,dir:[-n.dir[0],-n.dir[1]]});}
+    const rec=ex?rt.records.get(ex.id):undefined;
+    if(rec?.status==='blocked'){held++;assert.equal(e.stillnessV1().still,false,`tick ${e.world.tick}: a held walk is not still`);}
+  }
+  assert.ok(held>800,`the walk was held inside its bound (${held} ticks)`);assert.equal(e.programOf(W),id,'and still under way');
+});
