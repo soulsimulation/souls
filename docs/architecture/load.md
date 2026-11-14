@@ -8,7 +8,7 @@ Shared contract for how worlds handle load. The launcher, in-world load, hot pat
 
 | Level | Enter when any holds | Leave when all below |
 |---|---|---|
-| amber | tick service < 0.8 · loop delay p99 > 200 ms · heap > 70 % of limit · oldest queued request > 2 s | 0.9 · 100 ms · 60 % (queue age never holds a level) |
+| amber | tick service < 0.8 · loop delay p99 > 200 ms · heap > 70 % of limit · oldest queued request > 2 s (after a step down to green, queue age raises amber again only once the oldest request has been ≤ 2 s; a backlog that never clears at green gets no hint from queue age) | 0.9 · 100 ms · 60 % (queue age never holds a level) |
 | red | service < 0.5 · loop p99 > 1 s · heap > 85 % (queue age is an amber-only signal since 2026-10-31: at red the request budget is 8 ms/frame, so a queue red itself starved kept red forever — the eden2 bench held red for whole windows at tick service 1.0 while the launcher shed every read) | 0.7 · 400 ms · 75 % |
 | black | heap > 92 % with GC share > 40 % over 10 s · service < 0.2 for 30 s | 0.4 · — · 85 % |
 
