@@ -208,7 +208,7 @@ export class LoadMonitor {
   /** #1944 A3: the open tick window: its start (wall), each tick's own ms, late ticks, the longest gap, ms at each level
    *  (by RANK) and when that was last counted; the previous tick's start and due time (mono) and whether it was late. */
   private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], amberMs: {service: 0, loop: 0, heap: 0, dwell: 0} as Record<AmberHold, number>,
-    entries: {service: 0, loop: 0, heap: 0, queue: 0, red: 0} as Record<AmberEntry, number>, levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0};
+    entries: {service: 0, loop: 0, heap: 0, queue: 0, red: 0} as Record<AmberEntry, number>, levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0, prevTick: undefined as number | undefined};
   /** The last completed tick window (also in live.json and /healthz as `api.ticks`). */
   tickWindow: TickWindow | null = null;
   constructor(o: MonitorOpts) { this.o = o; this.a = o.shared ?? sharedLoad; this.now = o.now ?? Date.now; this.windowMs = o.windowMs ?? 5000; this.baseline = new QuietBaseline(o.baselineMs); this.state.baselineMs = this.baseline.value; }
@@ -331,11 +331,13 @@ export class LoadMonitor {
     const rate = (h.clockRate ?? h.baseRate) * h.pace, interval = rate > 0 ? TICK_MS / rate : 0;
     if (interval !== w.interval) { w.interval = interval; w.prevStart = 0; }   // a new pace or rate: the next tick is due from now
     if (w.prevStart && interval) {
-      const gap = start - w.prevStart, due = (w.prevLate && gap < interval / 2 ? w.prevDue : w.prevStart) + interval;
+      // #2298: a jump's landing completes every tick it covered, so it is due that many intervals on
+      const steps = Math.max(1, h.engine.world.tick - (w.prevTick ?? h.engine.world.tick - 1));
+      const gap = start - w.prevStart, due = (w.prevLate && gap < interval / 2 ? w.prevDue : w.prevStart) + interval * steps;
       w.prevLate = start - due > LATE_TICK_MS; if (w.prevLate) w.late++;
       w.prevDue = due; if (gap > w.maxGap) w.maxGap = gap;
     } else { w.prevLate = false; w.prevDue = start; }
-    w.prevStart = start; w.ms.push(own);
+    w.prevStart = start; w.prevTick = h.engine.world.tick; w.ms.push(own);
   }
   /** #1944 A3: count the time since the last sample at the level it was at; close and publish a full window. */
   private tickWindowSample(now: number, owing: boolean) {

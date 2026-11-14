@@ -626,6 +626,10 @@ export class WorldHost {
   /** #2298 A4b: the most ticks one jump covers on the live clock (one second), so a viewer's clock and sky keep moving and
    *  the tick's age (healthz, the load monitor, the launcher's stall test) stays under a second. */
   jumpCap = 20;
+  /** #2298 A4b: true while a viewer is connected (main.ts: the hub's clients). Then a jump covers at most one broadcast batch
+   *  and lands on its boundary, so batches and the time of day go out as often as when every tick ran. */
+  watched?: () => boolean;
+  private jumpFrom = 0;
   /** #2298: while true the world has been still since its last jump (no ordinary tick outside a jump's landing). */
   stillStretch = false;
   private landing = false;
@@ -642,7 +646,7 @@ export class WorldHost {
    *  otherwise one ordinary tick. Returns the ticks advanced. `inputsAtTarget`: queued inputs arrived at the target (the
    *  live clock), so they drain at the landing tick, not the next. A Soul whose needs still add up every tick (before
    *  need-anchor/1) keeps the world ticking. */
-  advanceStep(target: number, o: { inputsAtTarget?: boolean; cap?: number } = {}): number {
+  advanceStep(target: number, o: { inputsAtTarget?: boolean; cap?: number; align?: number } = {}): number {
     const tick = this.engine.world.tick;
     if (target <= tick) return 0;
     if (this.skip && target - tick >= 2 && tick >= this.askAfter && !this.paused && this.clockAvailable && this.needsJumpable()) {
@@ -650,10 +654,11 @@ export class WorldHost {
       if (!s.still) this.askAfter = tick + 10;
       else {
         let land = target; if (s.untilTick !== null) land = Math.min(land, s.untilTick); if (o.cap) land = Math.min(land, tick + o.cap);
+        if (o.align && land < target) { const a = land - (land % o.align); if (a - 1 > tick) land = a; }
         const skip = land - 1 > tick ? (this.engine as unknown as { skipToV1?(t: number): { ok: boolean } }).skipToV1?.(land - 1) : undefined;
         if (skip?.ok) {
           const st = this.skipStats; st.ticksJumped += land - 1 - tick; st.jumps++; st.lastHorizon = s.untilTick;
-          this.stillStretch = true; this.stillClaim = s.untilTick ?? Infinity;
+          this.stillStretch = true; this.stillClaim = s.untilTick ?? Infinity; this.jumpFrom = tick;
           this.landing = true; try { this.tickOnce(); } finally { this.landing = false; }
           return this.engine.world.tick - tick;
         }
@@ -663,12 +668,12 @@ export class WorldHost {
     return this.engine.world.tick - tick;
   }
   /** #2298: advance to `target` now (jumps and ordinary ticks, synchronously). */
-  advanceTo(target: number, o: { inputsAtTarget?: boolean; cap?: number } = {}) {
+  advanceTo(target: number, o: { inputsAtTarget?: boolean; cap?: number; align?: number } = {}) {
     while (this.engine.world.tick < target && !this.paused && this.clockAvailable) if (!this.advanceStep(target, o)) break;
   }
   /** #2298 A4: any request first brings a still world's clock to now (the ticks it owes the wall since its last jump). */
   settle() {
-    if (!this.lag || this.frameBatch || !this.timer) return;
+    if (!this.lag || this.frameBatch || !this.timer || this.paused || !this.clockAvailable) return;
     const target = this.engine.world.tick + this.lag; this.lag = 0; this.stillClaim = null;
     this.advanceTo(target, { inputsAtTarget: true });
   }
@@ -685,7 +690,7 @@ export class WorldHost {
     if (this.timer) throw new Error('catch-up.clock-running');
     let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
     this.owedTicks = Math.max(0, Math.floor(ticks));
-    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { const n = this.advanceStep(this.engine.world.tick + this.owedTicks); this.owedTicks -= n; done += n; await turn(); } }
+    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { const n = Math.max(1, this.advanceStep(this.engine.world.tick + this.owedTicks)); this.owedTicks -= n; done += n; await turn(); } }
     finally { this.owedTicks = 0; }
     return done;
   }
@@ -720,7 +725,7 @@ export class WorldHost {
       // #2298 A4: a still world only counts what it owes until a second has gone, its horizon nears or an input waits
       if (this.stillClaim === null && this.engine.world.tick >= this.askAfter && this.needsJumpable()) { const s = this.stillUntil(); if (s.still) this.stillClaim = s.untilTick ?? Infinity; else this.askAfter = this.engine.world.tick + 10; }
       const t = this.engine.world.tick + this.lag + due;
-      if (this.stillClaim !== null && !this.queue.length && t < this.stillClaim && this.lag + due < this.jumpCap) { this.lag += due; return; }
+      if (this.stillClaim !== null && !this.queue.length && t < this.stillClaim && this.lag + due < (this.watched?.() ? BATCH_TICKS : this.jumpCap)) { this.lag += due; return; }
       due += this.lag; this.lag = 0; this.stillClaim = null;
     }
     if (due > 0) {
@@ -733,7 +738,7 @@ export class WorldHost {
     if (this.frameBatch !== batch || batch.generation !== this.clockGeneration || !this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (this.holdClock?.()) return; // park; the interval polls the hold without an immediate spin
-    try { batch.remaining -= this.skip ? Math.max(1, this.advanceStep(this.engine.world.tick + batch.remaining, { inputsAtTarget: true, cap: this.jumpCap })) : (this.tickOnce(), 1); }
+    try { batch.remaining -= this.skip ? Math.max(1, this.advanceStep(this.engine.world.tick + batch.remaining, this.watched?.() ? { inputsAtTarget: true, cap: BATCH_TICKS, align: BATCH_TICKS } : { inputsAtTarget: true, cap: this.jumpCap })) : (this.tickOnce(), 1); }
     catch (error) { this.cancelFrameBatch(); throw error; }
     if (this.frameBatch !== batch) return; // a listener may have stopped/restarted or paused the host
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
@@ -801,8 +806,11 @@ export class WorldHost {
     for (const l of this.listeners) l.afterTick?.(now, tickContext);
     if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
-    if (now % BATCH_TICKS === 0) this.flush();
-    if (now % HEARTBEAT_TICKS === 0) this.heartbeat();
+    // #2298: a jump's landing sends what the ticks it covered would have (a batch, a heartbeat, the periodic kernel view)
+    const prev = this.landing ? this.jumpFrom : now - 1, crossed = (n: number) => Math.floor(now / n) > Math.floor(prev / n);
+    if (this.landing && crossed(200)) this.kernelDirty = true;
+    if (crossed(BATCH_TICKS)) this.flush();
+    if (crossed(HEARTBEAT_TICKS)) this.heartbeat();
     if (span) span[4] = performance.now() - ts;
     if (this.snapshotDue(now) && !(this.landing && this.seq === this.snapshotSeq)) { if (span) span[5] = 1; this.schedulePeriodicSnapshot(); }   // #2298 A4: nothing new since the last
     this.tickMs.push(performance.now() - t0);

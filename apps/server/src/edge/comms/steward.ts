@@ -48,10 +48,10 @@ export class Steward {
   }
   /** #2297: the first tick of the next digest slot (the world's 07:00 or 18:00), where `schedule` queues new work. */
   nextDigestTick(): number {
-    const living = this.core.deps.host.living, origin = living?.origin ?? 0, dayTicks = living?.dayTicks ?? DAY_TICKS, c = this.clock(), hourTicks = dayTicks / 24;
-    const slot = (day: number, hour: number) => origin + Math.ceil(day * dayTicks + hour * hourTicks);
-    const next = c.hour < MORNING_HOUR ? slot(c.day, MORNING_HOUR) : c.hour < EVENING_HOUR ? slot(c.day, EVENING_HOUR) : slot(c.day + 1, MORNING_HOUR);
-    return Math.max(this.core.tick() + 1, next);
+    const living = this.core.deps.host.living, origin = living?.origin ?? 0, dayTicks = living?.dayTicks ?? DAY_TICKS, c = this.clock(), hourTicks = dayTicks / 24, tick = this.core.tick();
+    // #2298: a world day starts at 06:00 (clockAt), so an hour is (hour - 6) hours into its day; the earliest slot still ahead
+    const slot = (day: number, hour: number) => origin + Math.ceil(day * dayTicks + ((hour - 6 + 24) % 24) * hourTicks);
+    return Math.min(...[c.day, c.day + 1].flatMap((d) => [slot(d, MORNING_HOUR), slot(d, EVENING_HOUR)]).filter((x) => x > tick));
   }
     /** Queue the digest for the current in-world slot (idempotent per day+slot). */
   schedule(): string | null {

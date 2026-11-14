@@ -165,6 +165,7 @@ const server = createServer();
 const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, config.worldPath);
 server.on('upgrade', req => { req.url = stripWorldPath(req.url); });
 hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
+host.watched = () => hub.clients.size > 0;   // #2298 A4b
 hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPersist;
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).

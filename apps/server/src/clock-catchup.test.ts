@@ -178,12 +178,12 @@ test('wind-down/1: a world stopped and cold-booted twice between the last agent 
 // #2298: a still world's clock is jumped, not stepped (WorldHost.advanceStep, the engine's skipToV1). The same god world,
 // once ticked straight through and once brought forward by the boot catch-up, which jumps where the world is still, reaches
 // the same state hash and the same log; again when the jumping run is stopped and cold-booted halfway. JUMP_FULL=1: three
-// real days (1,728,000 ticks each, about an hour of ticking per case); otherwise three 24,000-tick days (the same deadlines
-// and day turns at a smaller scale).
+// real days (1,728,000 ticks each, about an hour of ticking per case); otherwise three 2,400-tick days as above (JUMP_DAY to
+// change it; the same deadlines and day turns at a smaller scale).
 const JUMP_FULL = process.env.JUMP_FULL === '1';
-const JUMP_DAY = JUMP_FULL ? 1_728_000 : 24_000;
+const JUMP_DAY = JUMP_FULL ? 1_728_000 : Number(process.env.JUMP_DAY) || 2_400;
 const KNOBS = { wanderTicks: 400, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 1500 };
-async function godWorld(t: test.TestContext, path: string, souls: number | null) {
+async function godWorld(t: test.TestContext, path: string, souls: number | null, day = JUMP_DAY) {
   const { Hono } = await import('hono'), { mountEdgeRoutes } = await import('./edge/routes.ts'), { GodMode } = await import('./god/god.ts'), { installEngineBridge } = await import('./god/engine-bridge.ts');
   const f = fixture(path, undefined, { durableClockV1: true }); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
   const ledger = new EdgeLedger(f.host, f.db), rule = ledger.startBodyRule(KNOBS)!;
@@ -195,7 +195,7 @@ async function godWorld(t: test.TestContext, path: string, souls: number | null)
   if (souls !== null) {   // a fresh world: a day, held activities, the Souls and each one's last act (a ten-second read)
     // a day gives every Soul needs, which add up every tick until need-anchor/1 (#2296) and so keep the world ticking: the
     // worlds with Souls here have no day until it lands (the empty world has the day turns and moments)
-    if (!souls) await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: JUMP_DAY, customs: [], zone: 'UTC' }, why: 'test: a day' }));
+    if (!souls) await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: day, customs: [], zone: 'UTC' }, why: 'test: a day' }));
     for (const p of [f.host.enableContinuousDayV1(), f.host.enableHeldActivitiesV1()]) await accept<unknown>(f.host, p);
     for (const n of ['ana', 'ben'].slice(0, souls)) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
     for (const m of f.host.minds.values()) await accept(f.host, f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
@@ -247,9 +247,10 @@ for (const [name, souls, settle, span] of [
     const jumpedMs = performance.now() - jt;
     t.diagnostic(JSON.stringify({ name, how, span, jumped, computed, tickedMs: Math.round(tickedMs), jumpedMs: Math.round(jumpedMs) }));
     assert.equal(run.f.host.engine.world.tick, end);
-    assert.ok(jumped > span * 0.8, `most of the span was jumped (${jumped} of ${span})`);
     if (souls) assert.deepEqual(asleep(run), asleep(control));
     assert.deepEqual(state(run.f), state(control.f), 'state hash and full log equal');
+    // a short day's moments and day turns fall every few hundred ticks, each an ordinary tick and a re-ask
+    assert.ok(jumped > span * 0.5, `most of the span was jumped (${jumped} of ${span})`);
   });
 }
 
@@ -259,11 +260,12 @@ for (const [name, souls, settle, span] of [
 test('#2298 A4a: a jumping world never reads as stalled, and an input right after a jump is accepted', { timeout: 120_000 }, async (t) => {
   const { STALL_MIN_MS } = await import('./load/monitor.ts');
   const dir = mkdtempSync(join(tmpdir(), 'jump-a4-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const { f } = await godWorld(t, join(dir, 'world.db'), 0), h = f.host;
+  const { f } = await godWorld(t, join(dir, 'world.db'), 0, 1_728_000), h = f.host;   // a real-time day
   const hour = 72_000, c0 = h.skipStats.ticksComputed;
   await h.catchUp(hour, turn);
   assert.ok(h.skipStats.ticksComputed - c0 < 200, `an hour away took ${h.skipStats.ticksComputed - c0} ordinary ticks`);
-  const done: number[] = []; h.listeners.push({ afterTickComplete: () => { done.push(performance.now()); } });
+  const done: number[] = [], batches: number[] = []; let beats = 0;
+  h.listeners.push({ afterTickComplete: () => { done.push(performance.now()); }, onBatch: () => { batches.push(performance.now()); }, onHeartbeat: () => { beats++; } });
   const t0 = performance.now(), tick0 = h.engine.world.tick, j0 = h.skipStats.ticksJumped;
   h.start(); await new Promise((r) => setTimeout(r, 2500));
   const e = await h.enqueue('rules', 'world', { why: 'test: an input after a jump' });
@@ -275,4 +277,12 @@ test('#2298 A4a: a jumping world never reads as stalled, and an input right afte
   assert.ok(gap < Math.min(STALL_MIN_MS, 1500), `the longest gap between completed ticks was ${Math.round(gap)} ms`);
   assert.ok(ran >= wall / 50 - 25, `the clock kept wall pace (${ran} ticks in ${Math.round(wall)} ms)`);
   assert.ok(h.skipStats.ticksJumped - j0 > ran * 0.8 && done.length < ran * 0.2, 'most of it was jumped');
+  assert.ok(beats >= Math.floor(ran / 100) - 1, `a heartbeat for every hundred (${beats})`);
+  // A4b: watched, a jump covers one batch and lands on its boundary, so batches go out every half second as before
+  h.watched = () => true; batches.length = 0;
+  const w0 = performance.now(), wt = h.engine.world.tick; h.start(); await new Promise((r) => setTimeout(r, 2000)); h.stop();
+  let bgap = batches[0] - w0; for (let i = 1; i < batches.length; i++) bgap = Math.max(bgap, batches[i] - batches[i - 1]);
+  t.diagnostic(JSON.stringify({ watched: true, ran: h.engine.world.tick - wt, batches: batches.length, maxBatchGapMs: Math.round(bgap) }));
+  assert.ok(bgap < 800, `watched: the longest gap between batches was ${Math.round(bgap)} ms`);
+  assert.ok(batches.length >= Math.floor((h.engine.world.tick - wt) / 10) - 2);
 });
