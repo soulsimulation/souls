@@ -388,7 +388,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const rule = this.bodyRule;
     this.host.listeners.push({onApplied: e => {try {rule.applied(e);} catch {/* best effort */}},
       // #2297: the rule's waits live outside the engine: its next step (from the logged wind-down) is a deadline that moves a body
-      stillness: () => {const t = rule.nextMoveTick(); return t === null ? [] : [{name: 'body.wind-down', tick: t, move: true}];}});
+      stillness: () => {if (rule.pending()) return [{name: 'body.pending', busy: true}]; const t = rule.nextMoveTick(); return t === null ? [] : [{name: 'body.wind-down', tick: t, move: true}];}});
     this.host.publicBodyOf = id => this.bodyRule?.view(id) ?? null;
     return this.bodyRule;
   }
