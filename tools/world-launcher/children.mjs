@@ -48,6 +48,7 @@ export class ChildPool {
    * sleepMs (lane P3): freezeIdle() freezes a world nobody asked anything for that long (see there); 0/absent: never.
    * exitMs (lane SLEEP): releaseIdle() lets a world frozen that long more exit, giving its memory back (see there).
    * guard (lane L1): overrides of guard.mjs GUARD (tests); random: the backoff's jitter source (tests).
+   * beforeStop(k) (#2299): awaited by stop() before SIGTERM, while the world still answers (its errors are ignored).
    */
   constructor(o) {
     this.o = o;
@@ -626,7 +627,8 @@ export class ChildPool {
     k.stopped = true; if (k.timer) { clearTimeout(k.timer); k.timer = null; }
     this.settlePending(k, Object.assign(new Error(`world ${slug} was stopped`), { code: 'stopping' }));
     const c = k.child; if (!c) { if (!k.held) k.status = 'stopped'; return; }
-    k.stopping = this.stopChild(k, c).finally(() => { k.stopping = null; });
+    // #2299: beforeStop(k) (the launcher, with --unload-still) records the world's horizon while it still answers; bounded there
+    k.stopping = (async () => { if (this.o.beforeStop) await this.o.beforeStop(k).catch(() => {}); await this.stopChild(k, c); })().finally(() => { k.stopping = null; });
     return k.stopping;
   }
   async stopChild(k, c) {
