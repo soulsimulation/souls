@@ -118,6 +118,19 @@ whose last stretch runs under that floor (the commons deck's front flight): neit
 sees the climber there until it changes level. Carry climbs keep the direction-only check. The policy is prospective. Edge worlds log it at startup (`operator:stair-landing-clearance`)
 after the other stair-traffic rules, except the Little Martians worlds. History before that event replays the old rule.
 
+The `2r − 0.02` ellipsoid weights height by half, so on a steep or turning flight a follower could close to about 0.99 m
+under a climber waiting ahead, at about 0.2 m across. `collision.human-human` flags that pair, and hold-settle/1 then
+settled the follower off the flight. Under the runtime policy `climb-spacing/1` (`climbSpacingV1`, #1530),
+`stairBlocker` also refuses any climbing step that the invariant's own read would flag against a body of the same level
+id: within 1.0 m in height and horizontally closer than the two radii less 0.08 m, with a 2 cm margin. The only
+exception is a step that widens the horizontal gap between two bodies the invariant already flags. A step from just
+outside the height band into it is refused, however the gap moves. The follower waits behind (`climb-wait`), and a way
+that never clears ends its walk by the usual blocked-walk bound. Under the same policy a stopped (cancelled) climb backing
+off to its landing asks an idle body standing on that landing's floor, which holds its last step, to make way, as
+`stair-landing-clearance/1` does for the landing itself. So a climber with a body at the stair foot behind it can still
+step off and walk again. Edge worlds log the policy at startup, last (`operator:climb-spacing`); history before that
+event replays the old rule.
+
 ## Approximations
 
 - The look-ahead predicts the sidestep offset at 0.9 m/s lateral; the hard layer catches the rest (counted in
