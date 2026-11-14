@@ -145,6 +145,11 @@ const WORLD_CODES = { held: 'world.held', starting: 'world.waking', capacity: 'w
 const SLOW_DOWN_HINT = Object.freeze({ header: 'soul.slow-down', retryAfterMs: 5000, message: 'The world is busy and asked you to slow down for 5 s between reads' });
 /** LOAD-CONTRACT §1 levels; at HOT ones the proxy sheds C2 and caches C3 for 2 s. After a restart, C1/C2 ramp up over RAMP_MS. */
 const LEVELS = ['green', 'amber', 'red', 'black'], HOT = new Set(['red', 'black']), RAMP_MS = 60_000;
+/** A viewer's arrival reads (#2308 follow-up): a snapshot part is content-addressed and immutable (kept for the world
+ *  process's life, at most PART_TTL_MS); /v1/config is the world's public settings, kept as briefly as a C3 read. */
+const PART_PATH = /^\/v1\/world\/part\/[0-9a-f]{32}$/, PART_TTL_MS = 3600_000;
+/** Only a public answer is shared between callers: none that sets a cookie or says it is private or not to be kept. */
+const shareable = (r) => !r.headers['set-cookie'] && !/\b(private|no-store)\b/i.test(String(r.headers['cache-control'] ?? ''));
 function hostHealth(dataDir) {
   try { const h = JSON.parse(readFileSync(join(dataDir, 'host-health.json'), 'utf8')); const stale = Date.now() - Date.parse(h.at) > 30 * 60e3; return stale ? { ...h, ok: false, stale: true, codes: ['stale'] } : h; } catch { return null; }
 }
@@ -262,6 +267,7 @@ export async function openLauncher(cfg = {}) {
   // lane L1, LOAD-CONTRACT §2b: exact ceilings on the Soul API per address, Soul, account and world (registry `limits`)
   const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log });
   const c3 = new MicroCache();
+  const partCache = new MicroCache({ maxEntries: 256, maxTotalBytes: 64 * 2 ** 20 });   // snapshot parts: long-lived, so bounded in bytes too
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
   const feed = platformFeed({ dataDir, log });   // #1876: the platform feed, feed.mjs
   const usage = usageRollup({ dataDir, log, startMs: cfg.usageStartMs, everyMs: cfg.usageEveryMs });   // #1942: <data>/usage.sqlite, usage.mjs
@@ -1042,6 +1048,14 @@ export async function openLauncher(cfg = {}) {
     const again = !retried && (req.method === 'GET' || req.method === 'HEAD') ? () => void toWorld(req, res, slug, url, true).catch(() => { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); }) : undefined;
     const lim = ceilings.limits(slug);
     if (gated?.cls === 'C3' && req.method === 'GET') { void cachedRead(req, res, p, slug, url, HOT.has(levelOf(slug)) ? Math.max(lim.c3CacheMs, 2000) : lim.c3CacheMs); return; }
+    // #2308 follow-up: a viewer's other arrival reads. Keyed as a C3 read (its token, if any, is part of the key) and by the
+    // world process (a restart may be a new build); config also by the host headers its URLs are made from.
+    if (req.method === 'GET' && (rest === '/v1/config' || PART_PATH.test(rest))) {
+      const st = pool.status(slug), gen = `${st.pid ?? ''}:${st.upSince ?? ''}`, part = rest !== '/v1/config';
+      const key = `${c3Key(req, slug, url)} ${gen}${part ? '' : ` ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`}`;
+      void cachedRead(req, res, p, slug, url, part ? PART_TTL_MS : HOT.has(levelOf(slug)) ? Math.max(lim.c3CacheMs, 2000) : lim.c3CacheMs, { cache: part ? partCache : c3, key, storable: shareable });
+      return;
+    }
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
     const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
@@ -1147,12 +1161,11 @@ export async function openLauncher(cfg = {}) {
    *  Public on /__sim/healthz (counts only, no Soul, account or address): sim-watch alerts on their growth. */
   function refusedByWorld() { const out = {}; for (const w of registry.worlds) { const r = ceilings.refused(w.slug); if (Object.keys(r).length) out[w.slug] = r; } return out; }
   /** A C3 public read from the micro-cache (LOAD-CONTRACT §2): one world call per URL per ttl, shared by every caller. */
-  async function cachedRead(req, res, p, slug, url, ttlMs) {
-    const key = c3Key(req, slug, url);
+  async function cachedRead(req, res, p, slug, url, ttlMs, { cache = c3, key = c3Key(req, slug, url), storable } = {}) {
     const xff = behindProxy && req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] : (req.socket.remoteAddress ?? '127.0.0.1');
     let r;
     try {
-      r = await c3.get(key, ttlMs, () => new Promise((yes, no) => {
+      r = await cache.get(key, ttlMs, () => new Promise((yes, no) => {
         // One flight serves every caller waiting on it, so it always asks for the whole answer: a world's 304 to one would be the others' empty page.
         const { 'if-none-match': _inm, ...asked } = hopless(req.headers);
         const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...asked, 'x-forwarded-for': xff } }, (u) => {
@@ -1160,7 +1173,7 @@ export async function openLauncher(cfg = {}) {
           u.on('end', () => { sawLoad(slug, u.headers['x-sim-load']); const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers; const body = Buffer.concat(chunks); yes({ status: u.statusCode ?? 502, headers: { ...headers, 'content-length': String(body.length) }, body }); });
         });
         up.setTimeout(30_000, () => up.destroy(new Error('timeout'))); up.on('error', no); up.end();
-      }));
+      }), storable);
     } catch { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); return; }
     if (r.status === 200 && residentRead(url.pathname.slice(wp(slug).length), 'GET') === 'live') keepLive(key, r);   // #1997
     if (clientGone(req, res)) return;
