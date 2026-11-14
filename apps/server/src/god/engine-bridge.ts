@@ -1633,17 +1633,22 @@ export class EngineBridge {
    *  (a carrier or boat follows a route, not a spot). Most edits are far from every Soul: no snapshot, no worker, one round. */
   private draftNearWatched(before: WorldModel, draft: WorldEditV1): boolean {
     const boxes: number[][] = [], old = this.physics?.byEntity ?? {}, ents = this.engine.world.entities;
-    const pt = (x: number, z: number) => boxes.push([x, z, x, z]);
+    const pt = (x: number, z: number, r = 0) => boxes.push([x - r, z - r, x + r, z + r]);
+    // a fixture's obstacle is its asset's box (catalog-adapter.ts `size`), so it counts by its half-diagonal round its spot;
+    // an asset this side cannot see is never skipped
+    const assets = { ...this.physics?.assets, ...draft.assets } as Record<string, { size?: number[] } | undefined>;
+    let unknown = false;
+    const fixture = (def: string, x: number, z: number) => { const size = assets[def]?.size; if (!size) { unknown = true; return; } pt(x, z, Math.hypot(size[0], size[2]) / 2); };
     const obb = (o: OBB2) => { const ca = Math.abs(Math.cos(o.yaw)), sa = Math.abs(Math.sin(o.yaw)), hx = o.half[0] * ca + o.half[1] * sa, hz = o.half[0] * sa + o.half[1] * ca; boxes.push([o.c[0] - hx, o.c[1] - hz, o.c[0] + hx, o.c[1] + hz]); };
     const part = (b: { surfaces?: { obb: OBB2 }[]; solids?: { obb: OBB2 }[]; links?: { from: { p: Vec2 }; to: { p: Vec2 } }[] } | null | undefined) => {
       if (!b) return; for (const x of b.surfaces ?? []) obb(x.obb); for (const x of b.solids ?? []) obb(x.obb); for (const l of b.links ?? []) { pt(l.from.p[0], l.from.p[1]); pt(l.to.p[0], l.to.p[1]); }
     };
     for (const [id, now] of Object.entries(draft.set)) {
       part(now); part(old[id]);
-      if (now?.fixture) pt(now.fixture.p[0], now.fixture.p[2]);
-      const e = ents[id]; if (e?.pose) pt(e.pose.p[0], e.pose.p[2]);
+      if (now?.fixture) fixture(now.fixture.def, now.fixture.p[0], now.fixture.p[2]);
+      const e = ents[id]; if (e?.pose) { pt(e.pose.p[0], e.pose.p[2]); fixture(e.def, e.pose.p[0], e.pose.p[2]); }
     }
-    if (!boxes.length) return true;
+    if (unknown || !boxes.length) return true;
     for (const e of Object.values(ents)) {
       if (e.carrier || e.boat) return true;
       if (e.kind === 'fixture' && before.entities.has(e.id) && !e.reservedBy && e.support?.kind !== 'held' && !e.human && !e.body) continue;
