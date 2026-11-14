@@ -17,7 +17,7 @@ export function zoomStep(d, h, zin) {
   return open(d, h) ? null : 'out';
 }
 import { mkdirSync, writeFileSync } from 'node:fs'; import { fileURLToPath } from 'node:url'; import { loadavg } from 'node:os';
-import { chromium as playwrightChromium, lease } from './browser.mjs';
+import { chromium as playwrightChromium, launchOptions, lease } from './browser.mjs';
 const eye = (p) => p.evaluate(() => { const c = globalThis.__soulsCamera, g = globalThis.__soulsCameraGround; if (!c?.p || !c.pivot) return null;
   return { d: +Math.hypot(c.p[0] - c.pivot[0], c.p[1] - c.pivot[1], c.p[2] - c.pivot[2]).toFixed(1), h: g?.ground == null ? null : +(c.p[1] - g.ground).toFixed(1) }; }).catch(() => null);
 async function zoomOpen(p) {
@@ -37,7 +37,7 @@ const [out, ...specs] = process.argv.slice(2); mkdirSync(out, { recursive: true 
 const release = await lease('ship-walk'); let b; const log = [];
 const slugOf = (u) => { const x = new URL(u); return (x.pathname.split('/').filter(Boolean).pop() ?? 'root') + (x.search ? '-' + x.search.replace(/\W+/g, '') : ''); };
 try {
-  b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  b = await chromium.launch(launchOptions(['--ignore-gpu-blocklist']));
   for (const spec of specs) {
     const [url, picks = ''] = spec.split('='); const slug = slugOf(url);
     for (const dpr of (process.env.DPRS ?? '1,2').split(',').map(Number)) {

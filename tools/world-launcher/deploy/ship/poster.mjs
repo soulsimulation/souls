@@ -1,12 +1,12 @@
 // poster.mjs <outDir> <url> [runs=3] : phone 390x844 dpr3 (CPU env = throttle). From navigation, css-scale screenshots for WIN ms (default 7000);
 // records page errors, console warnings count, sim:* performance marks, and when .viewer-arrival-stage was ever seen.
 import { mkdirSync } from 'node:fs';
-import { chromium as playwrightChromium, lease } from './browser.mjs';
+import { chromium as playwrightChromium, launchOptions, lease } from './browser.mjs';
 const chromium = playwrightChromium();
 const [out, url, runs = '3'] = process.argv.slice(2); mkdirSync(out, { recursive: true });
 const release = await lease('ship-poster'); let b;
 try {
-  b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  b = await chromium.launch(launchOptions(['--ignore-gpu-blocklist']));
   for (let k = 1; k <= Number(runs); k++) {
     const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
     const p = await ctx.newPage(); if (process.env.CPU) await (await ctx.newCDPSession(p)).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.CPU) });

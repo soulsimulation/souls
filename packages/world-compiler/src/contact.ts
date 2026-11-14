@@ -23,7 +23,7 @@ export function contactStateKey(def:{tags?:readonly string[];components?:{light?
   return null;
 }
 /** Entry 37: besides `on`/`open`, the other fields a hand contact sets that viewers depict on the same clock. */
-export const CONTACT_EXTRA_FIELDS=['station','record'] as const;
+export const CONTACT_EXTRA_FIELDS=['station','record','channel'] as const;   // #2281: a television says its picture
 /** Soul Actions entry 42: a hand-operated container's storage (its `shelf` slots, the mouth and what fits), else null.
  *  Shared by the server (offers, refusals, perception), the engine adapter (interior surface slots) and the viewer. */
 export type ContainerInside={lip:number;face:number;stand:[number,number];fit:[number,number,number];word:string;slots:{id:string;p:readonly number[]}[]};

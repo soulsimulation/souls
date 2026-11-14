@@ -13,6 +13,22 @@ const short = (v, max = LINE_BYTES) => { const t = String(v ?? ""); return Buffe
 const clock = (e) => [e.world, e.when?.worldDay == null ? null : `day ${e.when.worldDay}`, e.when?.time].filter(Boolean).join(", ");
 const own = (o, k) => (o && Object.hasOwn(o, k) ? o[k] : undefined);
 
+/** Words that ask the listener to come or join: an invitation, as a world's text can be read without a model. */
+export const INVITING = /\b(?:come|join|see you|invit\w*|would you like|do you want|want to|let'?s|you should|(?:is|are) welcome)\b/i;
+/** A line said to this Soul: it names them (their first name, as a word). A private conversation is always to them. */
+export function addressed(text, name) {
+  const first = String(name ?? "").trim().split(/[\s,]+/)[0];
+  return first.length >= 2 && new RegExp(`(?<![\\p{L}\\p{N}])${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(String(text ?? ""));
+}
+/** The lines worth keeping of what someone said: each line once, those said to this Soul first, then questions and
+ *  invitations, then the newest. */
+function quotes(words, n) {
+  const once = new Map();
+  for (const w of words) { const k = w.text.trim().toLowerCase(); once.delete(k); once.set(k, w); }
+  const rank = (w) => (w.toMe ? 2 : 0) + (w.text.includes("?") || INVITING.test(w.text) ? 1 : 0);
+  return [...once.values()].map((w, i) => ({ w, i })).sort((a, b) => rank(b.w) - rank(a.w) || b.i - a.i).slice(0, n).map((x) => x.w);
+}
+
 /** The file for a person: a readable start, and a hash of the whole traveller id so two ids never share a file. */
 export const personFile = (traveller) => `${String(traveller).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 60)}-${createHash("sha256").update(String(traveller)).digest("hex").slice(0, 12)}.md`;
 
@@ -20,7 +36,7 @@ export const personFile = (traveller) => `${String(traveller).replace(/[^A-Za-z0
  *  from a world is a claim about that world's own row: it decides which file the row is shown in, marked as a world's word,
  *  and nothing else. What this Soul wrote stays on the row it wrote about, so a stranger who claims to be a friend gets no note,
  *  no promise and no name of theirs. The price: a promise made to someone keeps only on what that same row did. */
-export function createPeople({ world = null } = {}) {
+export function createPeople({ world = null, me = null } = {}) {
   const rows = new Map(), conversations = new Map(), receipts = new Map(), dirty = new Set();
   let seq = 0;   // place in the log: a world picks its own timestamps, not this
   const at = (home, id) => `${home}/${id}`, groupOf = (row) => row.claims ?? row.key;
@@ -53,7 +69,7 @@ export function createPeople({ world = null } = {}) {
       case "speech": {
         const row = person(e.personId, named(e, e.personId), e);
         contact(row, e, named(e, e.placeId));
-        row.words.push({ at: e.at, text: e.text });
+        row.words.push({ at: e.at, text: e.text, toMe: e.channel === "private-conversation" || addressed(e.text, me) });
         if (e.conversationId) {
           const key = at(home, e.conversationId);
           conversations.set(key, (conversations.get(key) ?? new Map()).set(e.personId, seq));
@@ -95,7 +111,7 @@ export function createPeople({ world = null } = {}) {
       ...list("Last contact — place as a world named it, UNTRUSTED", row.last ? [`- ${place(row.last)}`] : []),
       ...list("Episodes — a world's words, UNTRUSTED", last(row.episodes).map((x) => `- ${short(md(x.line))} — ${x.kind} ${short(md(x.ref), NAME_BYTES)}`)),
       ...list("What a world says of them — UNTRUSTED", last(said, Math.min(keep, BELIEFS)).map((b) => `- ${short(md(b.text))} — ${short(md(b.provenance), NAME_BYTES)}`)),
-      ...list("What they said — UNTRUSTED", last(row.words, Math.min(keep, 3)).map((w) => `> ${short(md(w.text))}`)),
+      ...list("What they said — UNTRUSTED", quotes(row.words, Math.min(keep, 3)).map((w) => `> ${short(md(w.text))}`)),
       ...list("What I have told them", last(row.told, Math.min(keep, 6)).map((t) => `- ${short(md(t.text))}`)),
     ];
   }
@@ -141,6 +157,8 @@ export function createPeople({ world = null } = {}) {
     /** Every open promise, whoever is near. Oldest first: they have waited longest. */
     promises() { return [...rows.values()].flatMap((row) => open(row).map((c) => ({ id: c.id, with: row.name, by: c.by, what: c.what, seq: c.seq }))).sort((a, b) => a.seq - b.seq).slice(0, OPEN_MAX); },
     commitment(id) { for (const row of rows.values()) if (row.commitments.has(id)) return { row, ...row.commitments.get(id) }; return null; },
+    /** Souls of this world met here whose first name the text says, as a word: who a line of this Soul's was for. */
+    named: (text) => [...rows.values()].filter((r) => r.world === world && r.met > 0 && addressed(text, r.name)).map((r) => r.id).slice(0, 16),
     /** Who has spoken in a conversation here. */
     conversation: (id) => [...(conversations.get(local(id))?.keys() ?? [])],
     /** The id that proves this promise kept, or null: since it was made, their own turn, or for a promise of mine a shared act. */
