@@ -85,7 +85,8 @@ async function getJ(url, ms = 3000) { try { const r = await fetch(url, { signal:
 function program(form) {
   const P = { form, worlds: new Map(), host: null, exits: [], hostExit: null };
   const pids = () => (form === 'baseline' ? [...P.worlds.values()].filter((w) => w.child?.exitCode == null).map((w) => w.child.pid) : P.host && P.hostExit == null ? [P.host.pid] : []);
-  P.mem = () => smaps(pids());
+  /** Memory after a full GC of every live world's heap (faults.mjs `gc`), so a large heap limit's waiting garbage is not counted. */
+  P.mem = async () => { for (const w of P.worlds.values()) if (P.alive(w)) try { writeFileSync(join(w.data, 'colocate-fault'), 'gc'); } catch { /* gone */ } await sleep(2500); return smaps(pids()); };
   P.memOf = (w) => (form === 'baseline' && w.child?.exitCode == null ? smaps([w.child.pid]) : null);
   P.alive = (w) => (form === 'baseline' ? w.child?.exitCode == null : P.hostExit == null && !w.ended);
   function startHost() {
@@ -210,21 +211,21 @@ async function runForm(form) {
     for (const [i, [id, kind]] of SIX.entries()) {
       const w = await P.load(await worldSpec(form, id, kind, i)); W[id] = w;
       await sleep(SHORT ? 3000 : 15_000);
-      const m = P.mem(); R.loads.push({ id, kind, loadS: w.loadS, pssAfterMb: m?.pssMb ?? null, rssAfterMb: m?.rssMb ?? null, own: P.memOf(w) });
+      const m = await P.mem(); R.loads.push({ id, kind, loadS: w.loadS, pssAfterMb: m?.pssMb ?? null, rssAfterMb: m?.rssMb ?? null, own: P.memOf(w) });
       log(`${form}: ${id} (${kind}) up in ${w.loadS} s; program Pss ${m?.pssMb ?? '—'} MB`);
     }
     const six = Object.values(W), small = six.filter((w) => w.kind === 'small'), eden = six.filter((w) => w.kind === 'eden');
     // quiet: settle, then a tick window of every world, then memory
     await sleep(Math.max(0, SETTLE_S - 60) * 1000);
     R.ticks.quiet = await tickWindow(six, SHORT ? 15_000 : 60_000);
-    R.memory.quiet = { total: P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])) };
+    R.memory.quiet = { total: await P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])) };
     log(`${form}: quiet Pss ${R.memory.quiet.total?.pssMb ?? '—'} MB; ticks ${JSON.stringify(Object.fromEntries(Object.entries(R.ticks.quiet).map(([k, v]) => [k, v?.p50Ms])))}`);
     const ended = () => (form !== 'baseline' && P.hostExit ? `the program ended (${P.hostExit.code ?? P.hostExit.sig})` : null);
     try {
     // one Soul walking in a small world and in an Eden world
     const [ws, we] = [small[0], eden[0]], sS = await joinSouls(ws, 1, 0), sE = await joinSouls(we, 1, 0);
     const stopA = walk(ws, sS), stopB = walk(we, sE); await sleep(WALK_S * 1000);
-    R.memory.walking = { total: P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])), walks: { [ws.id]: null, [we.id]: null } };
+    R.memory.walking = { total: await P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])), walks: { [ws.id]: null, [we.id]: null } };
     // busy: the first Eden world with BUSY walkers; tick time of the others meanwhile
     const more = await joinSouls(we, BUSY - 1, 1), stopC = walk(we, more); await sleep(10_000);
     R.ticks.busy = await tickWindow(six, SHORT ? 15_000 : 60_000);
@@ -235,9 +236,9 @@ async function runForm(form) {
     try {
     for (const [j, [id, kind]] of MORE.entries()) {
       if (ended()) throw new Error(ended());
-      const others = [...P.worlds.values()].filter((w) => P.alive(w)), stopWatch = watch(others), m0 = P.mem();
+      const others = [...P.worlds.values()].filter((w) => P.alive(w)), m0 = await P.mem(), stopWatch = watch(others);
       const w = await P.load(await worldSpec(form, id, kind, SIX.length + j)); const seen = await stopWatch(); await sleep(SHORT ? 3000 : 15_000);
-      const m1 = P.mem();
+      const m1 = await P.mem();
       R.oneMore.push({ id, kind, loadS: w.loadS, othersMaxGapMs: Math.max(...Object.values(seen).map((x) => x.maxGapMs)), othersFailedPolls: Object.values(seen).reduce((s, x) => s + x.fail, 0), pssAddedMb: m0 && m1 ? r1(m1.pssMb - m0.pssMb) : null, pssAfterMb: m1?.pssMb ?? null });
       log(`${form}: one more ${id} (${kind}) up in ${w.loadS} s; others' longest /healthz gap ${R.oneMore.at(-1).othersMaxGapMs} ms`);
     }
@@ -279,7 +280,7 @@ log('done: REPORT.md');
 export function report({ receipt: rc, results: rs }) {
   const f = (x) => (x == null ? '—' : String(x)), mean = (xs) => { const v = xs.filter((x) => x != null); return v.length ? r1(v.reduce((s, x) => s + x, 0) / v.length) : null; };
   const L = [`# Several worlds in one program (#2300)`, '', `commit ${f(rc.commit?.slice(0, 9))} · node ${rc.node} · ${rc.cpus} CPUs · ${rc.memGb} GB · load ${rc.loadBefore.join(' ')} → ${f(rc.loadAfter?.join(' '))} · settle ${rc.settleS} s · walk ${rc.walkS} s · busy ${rc.busy} walkers${rc.short ? ' · SHORT (indicative)' : ''}`, ''];
-  L.push('## Memory (Pss, MB)', '', 'Program totals; per world for the baseline is each world program\'s own Pss, for the forms the rise in the program\'s Pss as each world loaded (15 s after its first /healthz).', '',
+  L.push('## Memory (Pss, MB)', '', 'After a full GC of every world\'s heap. Program totals; per world for the baseline is each world program\'s own Pss, for the forms the rise in the program\'s Pss as each world loaded (15 s after its first /healthz).', '',
     '| form | six quiet | six, 1 walker small + 1 Eden | per small (first · next three) | per Eden (first · second) | walking adds |', '|---|---|---|---|---|---|');
   for (const r of rs) {
     if (r.error && !r.memory.quiet) { L.push(`| ${r.form} | error: ${r.error.slice(0, 160)} |||||`); continue; }
