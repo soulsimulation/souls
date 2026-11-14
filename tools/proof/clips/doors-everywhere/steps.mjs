@@ -1,7 +1,8 @@
 // Clip kit (#2383): in Eden 2026, two building types whose outside doorways now hold real doors, both closed: the A-frame
 // cottage (core/cottage@2) and the bakery (core/hall@3). Before the take, admin's Soul Clara runs to the bakery's front.
 // On camera (Ctrl+K, Enter follows Clara) she walks into the bakery's shop, opening its door by hand and closing it
-// behind her, back out, then into the A-frame cottage the same way.
+// behind her, back out to the A-frame cottage's door, then into the cottage the same way (one closed door per walk:
+// two in a row wait for #2370's multi-door walk).
 import { execFile, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { cast } from '../_shared/cast.mjs';
@@ -39,8 +40,10 @@ export default async function steps(page, { mark }) {
   await eden(['act', 'walk:int-bakery/shop', '--wait', '60', '--json'], 70_000);
   mark('inside the bakery, door closed behind');
   await page.waitForTimeout(3000);
-  mark('walk to the A-frame cottage (core/cottage@2) and into its living room');
-  await eden(['act', 'walk:eden-a-frame/living', '--wait', '90', '--json'], 100_000);
+  mark('walk out to the A-frame cottage (core/cottage@2) door, closed');
+  await eden(['act', 'walk:eden-a-frame-door-1', '--wait', '90', '--json'], 100_000);
+  mark('walk into the cottage living room');
+  await eden(['act', 'walk:eden-a-frame/living', '--wait', '60', '--json'], 70_000);
   mark('inside the cottage, door closed behind');
   await page.waitForTimeout(3000);
 }
