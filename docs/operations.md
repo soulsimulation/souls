@@ -202,7 +202,9 @@ manager is the copy that counts. To restore after losing the host, put that pass
 the bucket (`RESTIC_REPOSITORY=<the destination>`, `RESTIC_PASSWORD_FILE=<that file>`, the key pair in the
 environment), then follow [disaster recovery](operations/disaster-recovery.md#4-data).
 
-Restore drills from the off-site copy: none yet (the first runs when this workflow is first dispatched).
+Restore drills from the off-site copy: 14 Nov 2026, first copy and drill (9 snapshots, 445 MiB stored; 13 of 13
+databases passed `quick_check`; one world booted healthy with fake minds).
+Run one again after any change to the backup settings.
 
 ## Logs
 
