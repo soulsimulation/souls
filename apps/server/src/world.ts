@@ -680,8 +680,10 @@ export class WorldHost {
   }
   /** #2298 A4: any request first brings a still world's clock to now (the ticks it owes the wall since its last jump). */
   settle() {
+    this.stillClaim = null;   // a request may change what is due (a reminder, a plan): the next frame asks again
     if (!this.lag || this.frameBatch || !this.timer || this.paused || !this.clockAvailable) return;
-    const target = this.engine.world.tick + this.lag; this.lag = 0; this.stillClaim = null;
+    if (this.holdClock?.()) return;
+    const target = this.engine.world.tick + this.lag; this.lag = 0;
     this.advanceTo(target, { inputsAtTarget: true });
   }
   private needsJumpable(): boolean {

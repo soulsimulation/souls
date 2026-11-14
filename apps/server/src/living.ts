@@ -15,6 +15,7 @@ export class LivingWorld {
   /** #2297 A4: the last tick (a multiple of 200) at which the engine could snapshot. The overdue quiet is timed from it, never
    *  from when a snapshot was taken, so the snapshot schedule (wall paced) can never change the log. */
   private resumableAt = -1;
+  private sampled = -1;
   host: WorldHost;
   camp = false;
   constructor(host: WorldHost) {
@@ -46,6 +47,9 @@ export class LivingWorld {
   }
   private afterTick(tick: number) {
     const h = this.host, living = h.living; if (!living) return;
+    // #2298: a jump's landing samples at the last multiple of 200 it covered, as the tick there would have
+    if (this.sampled < 0) this.sampled = tick - 1;
+    const m = tick - (tick % 200), crossed = m > this.sampled; this.sampled = tick;
     if (this.capture) { this.capture = false; h.saveSnapshot(true); }
     const c = clockAt(tick, living.origin, living.dayTicks);
     if (h.extra.continuousDayV1) {
@@ -69,8 +73,8 @@ export class LivingWorld {
     // #2297 A4: overdue when the engine has not been able to snapshot for 12,000 ticks (checked every 200 ticks), whenever
     // snapshots were taken; a boot counts as able (it started from a durable head)
     let overdue = false;
-    if (!h.extra.continuousDayV1 && h.engine.canSnapshot && tick % 200 === 0) {
-      if (this.resumableAt < 0 || h.engine.canSnapshot()) this.resumableAt = tick; else overdue = tick - this.resumableAt > 12000;
+    if (!h.extra.continuousDayV1 && h.engine.canSnapshot && crossed) {
+      if (this.resumableAt < 0 || h.engine.canSnapshot()) this.resumableAt = m; else overdue = m - this.resumableAt > 12000;
     }
     if (!h.extra.continuousDayV1 && !this.queued && (c.day > living.lastDay || overdue)) {
       this.queued = true;
