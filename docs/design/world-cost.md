@@ -89,6 +89,10 @@ in the program. The load gauges are one per program.
 | `process.env` read after boot: `http.ts`, `auth.ts`, `hub.ts`, `edge/routes.ts`, `edge/eyes/routes.ts`, `god/assets.ts`, `moderation/store.ts`, `god/workbench.ts`, `god/real-clock.ts`, `god/layers.ts`, `god/ground-host.ts`, `edge/ledger/ledger.ts`, `packages/engine-mars/src/engine.ts` | World name, steward token, data paths and rule flags come from the one process env | Form 2; form 1 only with a per-worker env |
 | `apps/server/src/god/host-render-slot.ts`, `god/look-renderer.ts` | Lock liveness is checked by pid, so a dead world's lock is never stale while the program lives | Both |
 | Content caches: `packages/engine-mars/src/ground-bridge.ts` (`RECIPES`, `FIELDS`), `catalog-adapter.ts` / `CATALOG`, `mars/viewer/engine/spatial/grid.ts`, `path.ts`, the library and the generator memos | Keyed by content, so sharing them is the point of form 2. But their byte caps become shared, and a registry can let a world resolve a hash it never logged | Shareable |
+| `apps/server/src/load/watchdog.ts` (`faultGuard`, `installFaultGuard`), `load/watchdog-worker.ts` (the kill), `main.ts` (`/__sim/fault`) (#2366) | One fault guard per program: the `uncaughtException` and `unhandledRejection` handlers cannot tell which world threw, and its storm restart (exit 75) ends every world. The watchdog's hard limits end the whole process | Form 2 |
+| `apps/server/src/god/edit-preview.ts` (`live`, `pending`) | One preview worker and `PREVIEW_MAX_PENDING` (2) per program: one world's previews refuse another's | Form 2 |
+| `apps/server/src/edge/ledger/vocabulary.ts` (`knownMemo`, `synonymWords`, `stepVerbs`), `god/mirror.ts` (`lastGroundHashed`) | One-slot memos. Keyed by their input, so never wrong, but two worlds taking turns rebuild them every call | Form 2 (cost) |
+| `apps/server/src/moderation/classifier.ts` (`selected`), `god/context-timing.ts` (`emitted`) | The upload classifier and the timing budget are per program | Form 2 |
 
 ### Recommendation
 
@@ -126,3 +130,45 @@ today's unit or 12.5 GB with the whole host, and shards of 8. Form 2's shard cos
 
 Joined Souls add memory in every form. The first walking Soul in a small world and one in an Eden world added 210 to
 260 MB here. Moving bodies are what the host's memory limits once still worlds unload (#2241).
+
+## A world that does not crash (#2366)
+
+The base the shards need: one world on today's launcher survives its own errors and comes back fast and exactly from a
+hang or a memory runaway.
+
+- **Errors are contained.** A tick that throws past the engine's own fault handling (#1150: a listener, the drain, the
+  broadcast) is reported through `WorldHost.onFault` and the clock goes on with the next frame. A timer, a rejected
+  promise or a request handler that throws reaches the world's fault guard (`load/watchdog.ts` `faultGuard`, installed
+  once the world serves; a boot that throws still exits). Each is logged as
+  `[world] fault world.fault.<tick|uncaught|rejection|request> (n in 60 s): <stack>`, the stack once a minute per name;
+  a request gets 500. Fifty in a minute is a broken world: a planned restart (snapshot, exit 75). Engine invariant
+  corruption keeps its own handling: rewind, quarantine, a named halt (#1150).
+- **Hard limits in the watchdog thread.** It still sees the world while the main thread is stuck. A serving world
+  whose main thread has not turned for `SIM_HANG_KILL_MS` (10 s), or whose heap has stayed at `SIM_HEAP_KILL_PCT`
+  (95) % of the old-space cap for `SIM_HEAP_KILL_MS` (5 s), is ended with SIGKILL. A rule holds only over two looks in a
+  row, and a gap between looks (the process was frozen) starts it again. live.json gets `killed`; the launcher
+  restarts the world as `wedged`, and the stall stack (#457, after 2 s) names the frame it was stuck in. A SIGKILL
+  loses nothing accepted: acts are logged before they are answered, and the boot replays the log and catches the
+  clock up (#2235).
+- `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak`.
+
+**Measured** (`tools/world-launcher/crash-proof.test.mjs`): a real fake-mind Eden core world with its durable clock,
+under the launcher's `ChildPool`, a 5 s hang limit and a 768 MB heap cap. The workstation was loaded (load average 28 on
+16 cores), so the boots are slower than a runner's (#2300: 3 s small, 13 s Eden).
+
+| Fault | Fault to process gone | Fault to serving again | Ended by | Exact |
+|---|---|---|---|---|
+| Tick, timer, promise, request handler throws | not ended | not ended | | Same process, still ticking |
+| 10-minute busy loop | 5.7 s | 21.5 s | hang rule | Log prefix kept; boot hash = live frontier hash (tick 44); 656 ticks caught up in 9.6 s |
+| Runaway allocation in one turn | 5.6 s | 24.4 s | hang rule (GC thrash) | Same (tick 703); 709 ticks in 11.5 s |
+| Heap growing across turns | 10.7 s | 27.2 s | heap rule, 733 of 864 MB | Same (tick 1447); 562 ticks in 8.0 s |
+
+"Exact" is asserted each time: every event logged before the fault is in the log after the restart, in order, with
+the Soul admitted before the faults; the restarted boot's engine hash at the frontier tick equals the hash the live
+world wrote to its durable clock frontier before it was killed; and no replay difference is logged. The catch-up ran
+every tick it owed. Earlier runs at load 25 caught up at 3 ticks a second and stopped after 32 rounds with ticks owed
+(#2235's limit), so an overloaded host still loses clock time on a restart. Without a heap cap, the same leak ran 45 s
+to 3.9 GB before the heap rule ended it. With the default 10 s limit, a hang ends about 5 s later than above.
+
+For the shards (B5), every limit here ends the whole program, as the table above (A4) says: one world's hang, heap or
+fault storm ends its shard, and the launcher reloads all of its worlds.

@@ -713,6 +713,9 @@ export class WorldHost {
   /** When it answers true the frame is skipped and its wall time carried to the next one (the hub, while a visitor's join set
    *  is still going out: lane P5). Holds stay well under the 1 s elapsed cap, so the same ticks run, only later. */
   holdClock?: () => boolean;
+  /** #2366 A1: a served world's tick that throws past the engine's own fault handling (#1150: a listener, the drain, the
+   *  broadcast) is reported here and the clock goes on with the next frame. Unset (tests, tools): it throws, as before. */
+  onFault?: (name: string, error: unknown) => void;
   private frame() {
     if (!this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); this.last = performance.now(); return; }
@@ -753,7 +756,7 @@ export class WorldHost {
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (this.holdClock?.()) return; // park; the interval polls the hold without an immediate spin
     try { batch.remaining -= this.skip ? Math.max(1, this.advanceStep(this.engine.world.tick + batch.remaining, this.watched?.() ? { inputsAtTarget: true, cap: BATCH_TICKS, align: BATCH_TICKS } : { inputsAtTarget: true, cap: this.jumpCap })) : (this.tickOnce(), 1); }
-    catch (error) { this.cancelFrameBatch(); throw error; }
+    catch (error) { this.cancelFrameBatch(); if (!this.onFault) throw error; this.onFault('world.fault.tick', error); return; }   // #2366 A1: the next frame goes on
     if (this.frameBatch !== batch) return; // a listener may have stopped/restarted or paused the host
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (batch.remaining <= 0) { this.frameBatch = null; return; }
