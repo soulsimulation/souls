@@ -1,0 +1,1 @@
+{ "adapter": "codex-headless", "wake": true, "note": "#2364: live Codex seat (the CLI's default model, subscription billing: tokens reported, dollars not). wake: true so the harness plays the background listen as it does for Claude. Launch under live.sh; codex reads its own sign-in, --ignore-user-config keeps the operator's settings out." }
