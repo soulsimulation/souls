@@ -44,9 +44,6 @@ export function strictCheck(ledger: EdgeLedger, soul: EdgeSoul, input: string, c
 }
 
 // ------------------------------------------------------------------ CTRL-1 (#1093): strict offers
-/** Rollback for one release: `EDGE_FREE_TEXT_ACT=1` lets a strict client's words execute again. The CLI refuses words before
- *  it posts them, so `resolve` tells it the flag is on (`freeTextAct`), and it then posts them. */
-export const freeTextAct = () => process.env.EDGE_FREE_TEXT_ACT === '1';
 /** An offered id is `<verb>:<target>` with no spaces. */
 export const OFFER_ID = /^[a-z][\w-]*:\S+$/i;
 /** Attention never touches the body, and its target is any direction or thing in sight (the intent path checks it). */
@@ -91,11 +88,20 @@ export function offerCheck(L: EdgeLedger, soul: EdgeSoul, input: {capability?: u
     const verb = asked.slice(0, asked.indexOf(':'));
     if (ATTENTION_ID.test(asked) || ANSWER_ID.test(asked) || L.bodyVerbProblem(soul, verb)) return null;
   }
-  const cap = asked ? L.bindOne(soul, asked)?.cap ?? L.coreA.binds(soul).caps.find(c => c.id === asked) : undefined;
+  const cap = asked ? L.bindOne(soul, asked)?.cap ?? (OFFER_ID.test(asked) ? undefined : L.coreA.binds(soul).caps.find(c => c.id === asked)) : undefined;
   if (cap) return paramsRefusal(cap, input.params, asked);
   // far offers the page leaves out, and places that refuse for a reason of their own: by id only, never by a name
   const byId = {id: asked, verb: asked.slice(0, Math.max(0, asked.indexOf(':')))};
   if (OFFER_ID.test(asked) && ON_DEMAND_VERB.test(byId.verb) && knownIds(L, []).has(asked.slice(asked.indexOf(':') + 1))) return paramsRefusal(byId, input.params, asked);
+  // #1948: any other id is an offer made on demand (a far room's walk, a named seat) or refused now, with no menu built:
+  // the whole menu and the words menu cost 0.7-0.9 s on the world's thread, and finding another id is the client's, locally.
+  // Words, which a strict client never sends, still read the words menu for their candidates.
+  if (OFFER_ID.test(asked)) {
+    const od = L.resolveOnDemand(soul, asked, [], new Map()).v;
+    if (od.kind !== 'unknown' && od.cap.id === asked) return paramsRefusal(byId, input.params, asked);
+    return {accepted: false, code: 'capability.unknown', capability: asked,
+      reason: `"${asked}" is not an offer on this Soul right now, so nothing was done. Send an offered id, or find one by its words.`};
+  }
   const body = input.capability !== undefined ? {capability: asked, ...(input.params ? {params: input.params} : {})} : input;
   const d = asked || input.verb !== undefined ? L.intents.dryRun(soul, body as Parameters<EdgeLedger['intents']['dryRun']>[1]) : {};
   // an id `resolve` itself reads as this very act is an offer, on or off the menu's page; a candidate is always takeable

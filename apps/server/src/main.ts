@@ -1,9 +1,8 @@
 import {closeContextViews} from './god/context-views.ts';
-import { Attention, unwatchedPace } from './attention.ts';
-import { ClockCatchUp } from './clock-catchup.ts';
+import { WallClock } from './clock-catchup.ts';
 import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
 import { cutOverReminders } from './god/clock-cutover.ts';
-import { bootPhase } from './load/boot-progress.ts';
+import { bootPhase, bootTick } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
 import { createServer } from 'node:http';
@@ -120,6 +119,10 @@ bootAt.engine = performance.now();
 if(edenCore)await installEdenCore(host,{applyCrew:process.env.APPLY_EDEN_CREW_CHECKPOINT==='1',applyCommons:process.env.APPLY_EDEN_COMMONS_CHECKPOINT==='1',retainReader:process.env.EDEN_CORE_RETAIN_READER==='1'});
 const edenCapabilities=edenCore&&host.engine.rulesVersion.includes('+crew-removal/1');
 console.log(`[world] ${host.worldId} booted from ${boot.from}, tick ${host.engine.world.tick}, replayed ${boot.replayed} events, ${host.minds.size} souls, rules ${host.engine.rulesVersion}`);
+// #2235: the wall anchor the last run left (clock-catchup.ts): how many ticks this world missed while it had no process
+const wallClock = new WallClock(host, config.dataDir);
+host.owedTicks = host.paused ? 0 : wallClock.owed();
+if (host.owedTicks > 0) console.log(`[clock] ${host.owedTicks} ticks owed to the wall (${Math.round(host.owedTicks / 20)} s away): they run before the clock starts`);
 
 const auth = new Auth(config, db);
 await auth.init().catch((e) => {if(config.accountAuthRequired)throw e;console.error('[auth] init failed:', e.message);});
@@ -257,29 +260,69 @@ const WRITE_DRAIN_MS = Number(process.env.WRITE_DRAIN_MS ?? 2000);
 // Tests only (write-drain.test.ts): one stdout line as each write is counted in flight and as it closes, so a test can stop
 // the world exactly while one is in flight (#1778: a client-side signal such as 100 Continue did not prove the count).
 const WRITE_DRAIN_TRACE = process.env.WRITE_DRAIN_TRACE === '1';
+// #2235 A8: while a boot catches up the ticks it missed (below), the world answers: reads at once, with how many ticks it
+// still owes (x-sim-catching-up; healthz `catchingUp`), and writes wait in arrival order until it is caught up, so an act
+// lands at the wall-correct tick, after the catch-up, never inside it.
+let catchingUp: Promise<void> | null = null;
+// Held writes are dispatched one at a time, each once the one before it has been answered (or after HELD_STEP_MS, so a
+// streamed reply cannot hold the rest): async body and auth reads must not reorder them. A write that arrives while
+// held ones are still being dispatched joins the end of the line.
+let heldLine: Promise<void> = Promise.resolve(), held = 0;
+const HELD_STEP_MS = 2_000;
+function hold(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, until: Promise<void>) {
+  const before = heldLine; held++;
+  heldLine = new Promise<void>((next) => { void Promise.all([until, before]).then(() => {
+    const step = () => { clearTimeout(timer); next(); }, timer = setTimeout(step, HELD_STEP_MS);
+    // a write whose client has gone (it timed out) is dropped, never applied after the caller gave up; a stop during the
+    // catch-up ends it with the clock never started, so a held write is refused, never applied unticked
+    if (res.destroyed || req.socket.destroyed) return step();
+    res.once('finish', step); res.once('close', step);
+    if (closing) res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); else serve(req, res);
+  }); }).finally(() => { held--; });
+}
 server.on('request', (req, res) => {
   if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
+  const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
+  if (write) {
     const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
     if (WRITE_DRAIN_TRACE) console.log(`[world] write in flight: ${writesInFlight.size}`);
     void done.then(() => { writesInFlight.delete(done); if (WRITE_DRAIN_TRACE) console.log(`[world] write closed: ${writesInFlight.size} in flight`); });
   }
+  if (catchingUp) res.setHeader('x-sim-catching-up', String(host.owedTicks));
+  if (write && (catchingUp || held > 0)) { hold(req, res, catchingUp ?? Promise.resolve()); return; }
+  serve(req, res);
+});
+function serve(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   req.url = stripWorldPath(req.url);
   if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
   void listener(req, res);
-});
+}
 
-// Unwatched worlds run their clock at a slower wall pace (attention.ts; on when SIM_UNWATCHED_PACE is set: the launcher sets it)
-// ...and when somebody comes back, the world's time of day jumps to now (clock-catchup.ts; lane SLEEP): also after the
-// launcher let the world exit while asleep, so this boot may itself be the return. Not in LivingWorld worlds (their
-// dayConfig also restarts the day's events), which the launcher never runs.
-// #1649: a real-time clock re-aligns itself to the wall when the world is watched again (god/world-clock.ts), so no catch-up.
-const catchUp = process.env.SIM_UNWATCHED_PACE && !living && !realTimeEnabled() ? new ClockCatchUp(host, config.dataDir, { log: (m) => console.log(m) }) : null;
-if (process.env.SIM_UNWATCHED_PACE) new Attention((watched) => { host.setPace(watched ? 1 : unwatchedPace()); if (watched) void catchUp?.watched()?.catch(() => {}); else catchUp?.unwatched(); }).watch(server);
 // SIM_BOOT_HASH=1 (measurement only): the engine state this boot restored, to compare with the one its last stop saved
 if (process.env.SIM_BOOT_HASH === '1') console.log(`[boot] state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
-host.start();
-void catchUp?.watched()?.catch(() => {});
+// #2235: world time never stops. The ticks this world missed while it had no process (restart, deploy, eviction) run now,
+// through the ordinary tick with every listener attached, before the clock starts (clock-catchup.ts). host.owedTicks was
+// set right after the boot, so the real-time keeper already reads the caught-up clock. Wall time passes during the boot
+// and the catch-up itself, so it is measured again until nothing whole is owed. A8: the rest of the boot goes on and the
+// port opens meanwhile (writes wait, above); the boot mark moves with every tick (boot-progress.ts), so the launcher's
+// stall guard sees a long catch-up as progress.
+async function catchUpBoot() {
+  const at = performance.now(), first = host.owedTicks; let ran = 0, owed = host.paused ? 0 : wallClock.owed();
+  const turn = () => { bootTick(host.engine.world.tick); return new Promise<void>((r) => setImmediate(r)); };
+  for (let rounds = 0; owed > 0 && rounds < 32; rounds++) {
+    if (rounds === 0) bootPhase('boot:replay', host.engine.world.tick, host.engine.world.tick + owed);
+    const r = await host.catchUp(owed, turn); ran += r;
+    if (r < owed) break;   // paused or halted: a paused clock is owed nothing more, a halted one waits for its fault
+    owed = host.paused ? 0 : wallClock.owed();
+  }
+  host.owedTicks = 0;
+  const ms = performance.now() - at;
+  if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
+  if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
+}
+const startClock = () => { wallClock.start(); host.start(); };
+if (host.owedTicks > 0 && !host.paused) catchingUp = catchUpBoot().catch((e) => console.error('[clock] catch-up failed:', e)).finally(() => { catchingUp = null; if (!closing) startClock(); });
+else startClock();
 if (config.seedNatives && db.liveSouls(host.worldId).length === 0) {
   if (config.worldKey === 'toy') {
     for (const n of NATIVES) await souls.create('system', n, true);
@@ -352,6 +395,9 @@ const shutdown = async (sig: string, exitCode = 0) => {
   if (closing) return; closing = true; bootPhase('stopping', host.engine.world.tick); writeLiveNow(config.dataDir);
   // Lane L5: a durable head first, before any draining that could outlast the launcher's stop grace (then SIGKILL).
   if (host.snapshotAgeMs() > 10_000) { try { host.requestSnapshot(`${sig}: before draining`, { now: true }); } catch (e) { console.error('[world] early snapshot failed', e); } }
+  // #2235 A8: a stop during the boot catch-up ends it first (its clock never started), so the writes it held are
+  // answered 503 now instead of being cut at the exit; the snapshot below keeps the ticks it reached
+  if (catchingUp) { host.stop(); await catchingUp; }
   if (writesInFlight.size) {
     const n = writesInFlight.size, t = performance.now();
     await Promise.race([Promise.all(writesInFlight), new Promise((r) => setTimeout(r, WRITE_DRAIN_MS))]);
@@ -359,7 +405,7 @@ const shutdown = async (sig: string, exitCode = 0) => {
   }
   // Edge worlds have no thought to drain: freeze the clock before the port is released so no successor
   // process can boot while this one still advances the durable clock frontier.
-  if (config.mindDriver === 'edge') { host.stop(); edge?.comms?.close(); }
+  if (config.mindDriver === 'edge') { host.stop(); wallClock.stop(); edge?.comms?.close(); }
   if(edenCore){
     brain.quiesce();takes.stop();clearTimeout(firstBackup);clearInterval(backupTimer);
     void hub.closeClients('server restarting');
@@ -368,13 +414,14 @@ const shutdown = async (sig: string, exitCode = 0) => {
     edenLifeHandles?.close();
   }
   console.log(`[world] ${sig}: saving snapshot at tick ${host.engine.world.tick}`);
-  host.stop(); takes.stop();
+  host.stop(); wallClock.stop(); takes.stop();
   const saveAt = performance.now();
   try { host.saveSnapshot(true); } catch (e) { console.error('[world] snapshot failed', e); }
   if (process.env.SIM_BOOT_HASH === '1') console.log(`[world] ${sig}: state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
   console.log(`[world] ${sig}: snapshot saved in ${Math.round(performance.now() - saveAt)} ms (capture ${Math.round(host.snapshotMs.capture)}, write ${Math.round(host.snapshotMs.persist)})`);
   server.close(); void hub.closeClients('server restarting');
   await closeContextViews();
+  (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
   auth.close();db.close(); process.exit(exitCode);
 };
 // The launcher's wedge path sends SIGUSR2 before SIGTERM (LOAD-CONTRACT §4): a diagnostic report, if this thread can still run.

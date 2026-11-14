@@ -17,7 +17,7 @@ live data.
 | `worldId` | the history's id |
 | `port` | a private port in 4963–4969 |
 | `publicOrigin` | optional loopback HTTP origin, usually the proxy's |
-| `webDir`, `marsWebDir`, `skillFile`, `cliFile` | built web app, Mars assets and the served Soul skill and CLI |
+| `webDir`, `marsWebDir`, `skillFile` | built web app, Mars assets and the served Soul skill (the legacy CLI is not served, #1754) |
 | `authMode` | `local-dev` (default), `public-preview` or `configured` (see below) |
 
 `check` boots an existing disposable copy and reports its clock, head and hash before anything new is installed.
@@ -52,7 +52,6 @@ Save a config outside the repository and start the group:
   "proxyPort": 4966,
   "webDir": "/abs/souls-checkout/apps/web/dist",
   "skillFile": "/abs/souls-checkout/tools/edge-skill/SKILL.md",
-  "cliFile": "/abs/souls-checkout/tools/edge-skill/eden-agent.mjs",
   "marsWebDir": "/abs/mars-web",
   "mars": { "port": 4963, "worldId": "mars-2026-1" },
   "littlemartians": { "port": 4964, "worldId": "littlemartians-1" }

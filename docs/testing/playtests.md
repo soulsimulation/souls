@@ -29,7 +29,7 @@ paying for another run. The baseline arm is `reunion-baseline.json`: the same sc
 
 ```sh
 node tools/playtest/playtest.mjs preflight [--server-root <dir>]
-node tools/playtest/playtest.mjs run <scenario.json> [--seed n] [--out <dir>] [--from <step>] [--server-root <dir>] [--keep-world]
+node tools/playtest/playtest.mjs run <scenario.json> [--seed n] [--out <dir>] [--from <step>] [--server-root <dir>] [--keep-world] [--world <url>]
 node tools/playtest/playtest.mjs review <run-dir> [--from <step>]       # re-run review/develop/report on a run
 node tools/playtest/playtest.mjs replay <run-dir> --mode scripted|live [--out <dir>]
 node tools/playtest/playtest.mjs compare <runA> <runB>
@@ -62,10 +62,10 @@ everything in place, and `--from <step>` resumes.
 | Step | Does | Writes |
 | --- | --- | --- |
 | preflight | server root, web build, CLI, Playwright, model CLIs, machine gate, plan usage | `preflight.json` |
-| provision | starts a local dev world from the scenario's genesis (dev auth, fake native minds) | `world.json` |
+| provision | starts a local dev world from the scenario's genesis (dev auth, fake native minds), with its per-request record on; `--world <url>` uses a world already up elsewhere and skips this | `world.json`, `server/world.log`, `server/requests.jsonl` |
 | seats | one folder per seat; the seat agent onboards from the world's served instructions, as a friend's agent would | `seats/<id>/seat.json` |
 | play | the director runs personas or a script against the seats; the observer samples world truth and screenshots | `personas/`, `evidence/`, `shots/`, transcripts |
-| close | stops seats; stops the world unless `--keep-world` | `close.json` |
+| close | stops seats; collects each seat's session record and prints #1752's measures per instruction; stops the world unless `--keep-world` | `close.json`, `record.json`, `seats/<id>/record/`, `MEASURES.md` |
 | review | oracles, reviewer scores, issues, feature requests, emergence | `oracles.jsonl`, `ledger.tsv`, `issues.*`, `feature-requests.*`, `emergence.json` |
 | develop | a draft spec per issue and feature request | `specs/<id>.md` |
 | report | report, player's-eye journal, metrics, replay record | `REPORT.md`, `journal.md`, `metrics.json`, `replay.json` |
@@ -74,7 +74,7 @@ everything in place, and `--from <step>` resumes.
 
 A seat is a headless coding agent with its own folder and one session for the whole run. Two adapters exist:
 `claude-headless` (`claude -p`, no MCP, a short allowlist of relative-path tools) and `codex-headless`
-(`codex exec`). The harness writes only an identity seed into the folder before onboarding. It never reads the seat's
+(`codex exec`). The harness writes only an identity seed and the record switch into the folder before onboarding. It never reads the seat's
 credentials afterwards. Seats are told to run one command per tool call, from the seat folder, with relative paths
 (`node eden.mjs ...`), and no `cd` or `&&` chains. Between turns a Claude seat keeps `node eden.mjs listen` running,
 and when it exits with messages the harness wakes the seat with that output, as Claude Code does for a finished
@@ -92,10 +92,44 @@ call carries more input context than `PLAYTEST_SEAT_CTX_MAX` (default 20000 toke
 turn ends at once. The seat then takes no further live turn, and `turns.jsonl` records `seatCheck`. `run-specs.sh` stops
 the arm after such a run (exit 8). For #1098's CTRL the first call carried 17.4k.
 
+### The full session record
+
+Every seat runs with the client's full record on (#1773, client 2.29.0 and later): the harness writes an empty
+`.eden-record-on` into the seat folder with the identity seed, before the seat's first command (`.souls/` once a seat
+has moved into a Souls home). Nothing the agent sees changes. `seat.record: false` turns it off for one seat; a
+scenario's `record: false` skips the collecting.
+
+At close, while the world still answers, each seat's record is collected with `tools/soul-trace/collect.mjs` into
+`seats/<id>/record/`: the client's record and `serve` log, the seat's raw Claude Code transcript (its reasoning and tool
+calls, found under the seat's `CLAUDE_CONFIG_DIR`), the end state of every receipt and owner message, and the versions.
+`record.json` in the run folder names, per seat, that bundle, the harness's own turns, transcript and `listen.jsonl`, the
+persona's transcript (`personas/<id>/turns.jsonl`, the stand-in owner's messages and reasons), the observer's evidence
+packs, and the world's log and per-request record. **The bundles are private**: never attach one, or quotes from it, to
+an issue, a pull request or a proof. A proof is an analysing agent's written findings, checked with
+`tools/proof/publication.mjs`.
+
+The world's per-request record (`server/requests.jsonl`, `world-request/1`) is written by a dev world started with
+`SIM_REQUEST_RECORD=<file>` (`apps/server/src/load/request-record.ts`; off by default, and only on a `DEV_AUTH` world):
+one line per `/v1/edge`, `/v1/god` or `/v1/world` request with its arrival, status, world and queue ms (the same numbers
+as `Server-Timing`), the client's idempotency key, and the receipt and message ids in the answer. It joins the client's
+record by key and ids. A run against `--world <url>` has none; production's is #1750's.
+
+**Measures.** The run prints, and writes to `MEASURES.md`, #1752's per-instruction measures and report
+(`tools/playtest/eval/measure.mjs`, `report.mjs`): success, model turns and API calls, world calls by route, first
+motion, client and server ms per call, refusals by code, tokens and cost. They are read from the collected record, so
+there is one recorder. An instruction runs from one owner message to the next. A message is judged when its words are
+an item of the scenario's `battery` (its `file`, or inline `items`), with that item's check against the observer's last
+sample in the window; other messages are listed but not judged. `firstMotion` is at the observer's `sampleSec`. Beside
+them, "Run facts" lists the agent's local lookups (`find`, `query`) that found nothing and how long each stretch of them
+took, and the world's own times from its per-request record.
+
+`scenarios/session-1724-owner.json` is the shown run: #1724's five instructions, sent word for word by the
+`owner-1724` persona, on a fresh Eden 2026 world, one Sonnet seat, passive observer, deterministic review.
+
 ### Personas
 
 `personas/*.md` are character sheets: newcomer, casual, social, spectator, storyteller, boundary, pinkteam, expert,
-and the creators first-timer, tinkerer, storyteller-god and pinkteam-god. A sheet describes who the player is, their
+and the creators first-timer, tinkerer, storyteller-god and pinkteam-god. `owner-1724` is an owner with five fixed errands, sent word for word so a run can judge them. A sheet describes who the player is, their
 patience, attention and channel mix, how they rate, and the JSON they answer with. It never mentions Souls internals.
 A persona keeps one model session per run and sees only what a player sees: a screenshot, the legible page text, the
 chat as a terminal renders it, and the card. It answers with what to say (chat or card), how long to wait, a rating,
@@ -112,7 +146,10 @@ after the cutoff are diagnostic only.
 
 - **Oracles** (`review/oracles.mjs`) are code-only checks that return pass, fail or unknown: ack latency, result sent,
   listening, arrival, posture, duration held, inside-solid, no-progress, oscillation, stuck receipt, truthfulness,
-  vocabulary, duplicate acts, server errors and first body change. A scripted request may carry an `expect` block (a
+  vocabulary, duplicate acts, server errors and first body change. On the current client (look and find locally, then
+  `act <id>`), an unknown wording is an act refused `act.not-an-id` (or `capability.unknown`); it passes when the
+  refusal offers an alternative or a `find`/`query` in the window found rows. A refused act sent again is a retry, not a
+  duplicate, and a `plan` counts as acts. A card request's acts are those of the turns that started in its window. A scripted request may carry an `expect` block (a
   target from the genesis, words the answer must use, a facing) scored by `review/expect-oracles.mjs`.
 - **Reviewer** (`review/reviewer.mjs`) scores each request H (hit), P (partial), M (honest miss) or W (wrong) using
   [`review/RUBRIC.md`](../../tools/playtest/review/RUBRIC.md). It writes issues in player terms only; causes, code
@@ -180,6 +217,32 @@ screenshots or transcripts. Machines without the original run folders can then r
   and fix acceptance bars and budgets before the baseline is measured.
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the
   check is skipped.
+
+## Timed runs
+
+Timed runs without a model (the walk gate, the scripted Soul eval, the eval's load mode, the capacity bench's client
+load, the meetup workload, the slopes tick profile) go to the `souls-timed` self-hosted runners through the manual
+`timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk`, `eval-scripted`, `eval-load`,
+`bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
+own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
+put the world on two of the runner's four physical cores and the load generator on the other two, recorded in
+`timed-run.json`. The runners use a dedicated, unprivileged account: the
+args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
+workstation.
+
+A counted scenario playtest (a T3 change's two repeats per arm) runs on runners in parallel instead of the workstation
+lock. Declare the bar on the issue first, as for a workstation run: the scenario, `base` and candidate branches, the
+items, the pass rule per cell and the load rule. Then dispatch `command=counted`, `ref` = the candidate branch,
+`base` = the base branch (`main` or an `agent/<name>` branch), `repeats` = cells per arm and
+`args=--scenario stair-foot`, with `runner=hosted` (the GitHub-hosted runners) or `souls-timed`:
+`gh workflow run timed-run.yml -f command=counted -f ref=agent/<n>-x -f base=main -f repeats=2 -f args='--scenario stair-foot' -f runner=hosted`.
+Each cell (`base-1`, `cand-1`, `base-2`, …) is its own job on its own runner, all at once. Its artifact
+`timed-run-counted-<run>-<cell>` holds the files the workstation session writes: `counted/<cell>/run.json`, its log,
+`<cell>.scores.json`, `<cell>.class.json` and the replay's `probe.log`. `timed-run.json` records the commit, the kit's
+sha256s, and the 1- and 5-minute load at the start and end of the cell with the runner's CPU count. The kit comes from
+`tools/playtest/counted/<scenario>/` at the workflow's commit, so both arms run the same bytes. The stair kit is #1367's
+declared kit byte for byte. Its starting load is recorded, not gated, since the items pass or fail. Pair `base-k` with
+`cand-k` and score them by the declared rule.
 
 ## Request ceilings on local test worlds
 

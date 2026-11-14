@@ -3,16 +3,17 @@
 //
 // --mode clerk (default; the production path, proven with a synthetic Clerk issuer, no network, no keys):
 //   the launcher runs every world on Clerk with edge minds, no invitations and native Soul arrivals, serving ONE skill
-//   (/SKILL.md: God mode + Soul mode) and the PUBLISHED Soul CLI and skill as is (--soul-cli/--soul-skill);
+//   (/SKILL.md: God mode + Soul mode) and the PUBLISHED Soul client, skill and instructions as is (eden.mjs, --soul-skill);
 //   gaia makes the world (god at birth); her agent installs the god CLI as God mode says, pairs, gaia approves, it builds;
-//   ana's agent follows Soul mode with the published CLI: register → create-soul → an approval link → ana (signed in)
-//   approves it → approval wait → connected; it walks to the plaza, sits on the god's bench, prays; the god answers;
-//   ana's agent reads the answer. Isolation: ben cannot approve ana's request; dev tokens are nobody; no direct births.
+//   ana's agent follows Soul mode to the world's instructions.md with the published eden.mjs: register → create → an
+//   approval link → ana (signed in) approves it → approval wait → connected; it walks to the plaza, sits on the god's
+//   bench, prays; the god answers; ana's agent reads the answer in her events. Isolation: ben cannot approve ana's
+//   request; dev tokens are nobody; no direct births.
 // --mode dev: the same world flow on dev sign-in (the agent makes its own Soul), plus the panel in Chrome
 //   (Chrome lease, real GPU): a stranger's Join section, ben's line for his agent, his agent joins, the god's Souls tab.
 //
 //   node tools/god-skill/e2e/join.mjs [--mode clerk|dev] [--base /worlds] [--port 5225] [--range 5226-5229] [--keep] [--no-shots]
-//        [--soul-cli <eden-agent.mjs>] [--soul-skill <SKILL.md>]   (default: the launcher's pinned 1.9 copies, tools/world-launcher/soul/)
+//        [--soul-skill <skill.md>]   (default: the launcher's pinned copy; the Soul client is its pinned eden.mjs, tools/world-launcher/soul/)
 //
 // Report under .lane/e2e-join/<stamp>-<mode>/ (report.json, REPORT.md, PNGs). $0: edge minds, fake brain.
 import { execFile, spawn } from 'node:child_process';
@@ -29,7 +30,7 @@ const root = resolve(here, '../../..');
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, all) => a.startsWith('--') ? [a.slice(2), all[i + 1]?.startsWith('--') || all[i + 1] === undefined ? true : all[i + 1]] : []).filter(Boolean));
 const MODE = args.mode === 'dev' ? 'dev' : 'clerk';
 const SOUL_DIR = fileURLToPath(new URL('../../world-launcher/soul/', import.meta.url));
-const SOUL_CLI = resolve(typeof args['soul-cli'] === 'string' ? args['soul-cli'] : `${SOUL_DIR}eden-agent.mjs`);
+const SOUL_CLI = resolve(`${SOUL_DIR}eden.mjs`);
 const SOUL_SKILL = resolve(typeof args['soul-skill'] === 'string' ? args['soul-skill'] : `${SOUL_DIR}skill.md`);
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const port = Number(args.port ?? 5225);
@@ -74,7 +75,7 @@ const tokenOf = async (who) => (who ? (sign ? await sign(`user_${who}`) : `dev:$
 
 // ---------- the launcher (own process, own data dir)
 const dataDir = resolve(out, 'data');
-const launcher = spawn(process.execPath, ['tools/world-launcher/launcher.mjs', '--port', String(port), '--range', range, '--data', dataDir, '--eager', '0', '--soul-cli', SOUL_CLI, '--soul-skill', SOUL_SKILL, ...(BASE ? ['--base', BASE] : []), ...launchArgs], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+const launcher = spawn(process.execPath, ['tools/world-launcher/launcher.mjs', '--port', String(port), '--range', range, '--data', dataDir, '--eager', '0', '--soul-skill', SOUL_SKILL, ...(BASE ? ['--base', BASE] : []), ...launchArgs], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
 let launcherLog = ''; launcher.stdout.on('data', (d) => { launcherLog += d; }); launcher.stderr.on('data', (d) => { launcherLog += d; });
 const cleanup = () => { try { launcher.kill('SIGTERM'); } catch { /* gone */ } };
 process.on('exit', () => { if (!args.keep) cleanup(); });
@@ -88,9 +89,11 @@ async function api(path, { who, token, method, body } = {}) {
   return { status: r.status, data };
 }
 const folder = (who) => mkdtempSync(join(tmpdir(), `join-${who}-`));
-const sh = (cwd, line, timeout = 120_000) => exec('bash', ['-c', line], { cwd, timeout, maxBuffer: 8 << 20 }).then((r) => r.stdout.trim(), (e) => { throw new Error(`${line.slice(0, 80)}… → ${String(e.stderr || e.message).trim().slice(0, 400)}`); });
-const node = (cwd, file, ...a) => exec(process.execPath, [file, ...a], { cwd, timeout: 180_000, maxBuffer: 8 << 20 }).then((r) => r.stdout.trim(), (e) => { throw new Error(`${file} ${a.join(' ')} → ${String(e.stdout || '').slice(0, 300)} ${String(e.stderr || e.message).trim().slice(0, 300)}`); });
-const soulCli = (cwd, ...a) => node(cwd, 'eden-agent.mjs', ...a).then((s) => JSON.parse(s));
+// a Soul folder is its own HOME, so eden.mjs never reads or writes the machine's own Souls home
+const soulEnv = (cwd) => ({ ...process.env, HOME: cwd });
+const sh = (cwd, line, timeout = 120_000, env = process.env) => exec('bash', ['-c', line], { cwd, timeout, env, maxBuffer: 8 << 20 }).then((r) => r.stdout.trim(), (e) => { throw new Error(`${line.slice(0, 80)}… → ${String(e.stderr || e.message).trim().slice(0, 400)}`); });
+const node = (cwd, file, ...a) => exec(process.execPath, [file, ...a], { cwd, timeout: 180_000, env: file === 'eden.mjs' ? soulEnv(cwd) : process.env, maxBuffer: 8 << 20 }).then((r) => r.stdout.trim(), (e) => { throw new Error(`${file} ${a.join(' ')} → ${String(e.stdout || '').slice(0, 300)} ${String(e.stderr || e.message).trim().slice(0, 300)}`); });
+const soulCli = (cwd, ...a) => node(cwd, 'eden.mjs', ...a).then((s) => JSON.parse(s));
 const godCli = (cwd, ...a) => node(cwd, 'eden-god.mjs', ...a);
 
 // ---------- the one skill: its sections and the commands they give
@@ -100,16 +103,19 @@ const section = (title) => { const i = skill.indexOf(`\n## ${title}\n`); if (i <
 const lineOf = (text, re) => text.split('\n').find((l) => re.test(l)) ?? null;
 const bare = (l) => l.replace(/\s+#.*$/, '');
 
-/** A person's agent follows Soul mode: install the CLI, register with this world, ask for the Soul; under Clerk the
- *  person approves the link it prints, then `approval wait`. Returns the folder and what each step said. */
+/** The world's instructions.md that Soul mode points at. */
+const instructionsOf = async () => { const url = section('Soul mode').match(/https?:\/\/[^\s*`)]+\/instructions\.md/)?.[0]; return url ? { url, text: await (await fetch(url)).text() } : null; };
+/** A person's agent follows Soul mode to the world's instructions.md: fetch eden.mjs, register with this world, create the
+ *  Soul; under Clerk the person approves the link it prints, then `approval wait`. Returns the folder and what each step said. */
 async function soulAgentJoins(who, name) {
-  const soul = section('Soul mode'), dir = folder(who), said = {};
-  const install = lineOf(soul, /^test -f eden-agent\.mjs \|\| curl /), register = lineOf(soul, /^node eden-agent\.mjs register /), create = lineOf(soul, /^node eden-agent\.mjs create-soul /), wait = lineOf(soul, /^node eden-agent\.mjs approval wait/);
-  if (!install || !register || !create || !wait) throw new Error('Soul mode does not give install/register/create-soul/approval wait');
-  await sh(dir, bare(install));
-  said.version = (await soulCli(dir, 'version')).skillVersion;
-  said.register = JSON.parse(await sh(dir, bare(register)));
-  said.create = JSON.parse(await sh(dir, bare(create).replace('"<name>"', JSON.stringify(name))));
+  const guide = await instructionsOf(), dir = folder(who), said = {}, env = soulEnv(dir);
+  const lines = (guide?.text ?? '').split('\n').map((l) => l.trim()), find = (re) => lines.find((l) => re.test(l)) ?? null;
+  const install = find(/^curl -fsSo eden\.mjs /), register = find(/^node eden\.mjs register /), create = find(/^node eden\.mjs create /), wait = guide?.text.match(/`(node eden\.mjs approval wait)`/)?.[1];
+  if (!install || !register || !create || !wait) throw new Error('Soul mode\'s instructions do not give install/register/create/approval wait');
+  await sh(dir, bare(install), 120_000, env);
+  said.version = (await soulCli(dir, 'version')).version;
+  said.register = JSON.parse(await sh(dir, bare(register), 120_000, env));
+  said.create = JSON.parse(await sh(dir, bare(create).replace('"<Name>"', JSON.stringify(name)), 120_000, env));
   if (said.create.approvalURL) {
     const id = said.create.approvalURL.match(/#approve\/(ap_[a-f0-9]{32})$/)?.[1];
     said.link = said.create.approvalURL;
@@ -118,7 +124,7 @@ async function soulAgentJoins(who, name) {
     // the request is now bound to the approving account: anyone else is refused
     const other = await api(`/v1/account/approvals/${id}/approve`, { who: who === 'ben' ? 'ana' : 'ben', body: {} }), peek = await api(`/v1/account/approvals/${id}`, { who: who === 'ben' ? 'ana' : 'ben' });
     said.isolation = { otherApproves: other.status, otherReads: peek.status };
-    said.wait = JSON.parse(await sh(dir, bare(wait), 300_000));
+    said.wait = JSON.parse(await sh(dir, bare(wait), 300_000, env));
   }
   said.status = await soulCli(dir, 'status');
   return { dir, ...said };
@@ -129,7 +135,7 @@ async function soulDoes(dir, capability, params, { maxS = 240, stop } = {}) {
   if (!a.accepted) return { accepted: false, code: a.code, reason: a.reason };
   const t0 = Date.now(); let rec = a.receipt, me = null;
   while (Date.now() - t0 < maxS * 1000) {
-    me = (await soulCli(dir, 'observe')).me;
+    me = (await soulCli(dir, 'observe')).self;
     if (stop?.(me)) break;
     const r = await soulCli(dir, 'receipt'); rec = r?.phase ? r : rec;
     if (['completed', 'failed', 'replaced'].includes(rec?.phase)) break;
@@ -144,7 +150,7 @@ if (MODE === 'dev' && !args['no-shots']) try { chromium = createRequire(resolve(
 const ids = {};
 let gaiaDir = '', ana = null;
 try {
-  await step('L0 the published Soul CLI and skill are at hand (pinned 1.9 copies)', async () => ({ cli: existsSync(SOUL_CLI), skill: existsSync(SOUL_SKILL), bytes: existsSync(SOUL_CLI) ? readFileSync(SOUL_CLI).length : 0 }), (r) => r.cli && r.skill);
+  await step('L0 the published Soul client (eden.mjs) and skill are at hand (the launcher\'s pinned copies)', async () => ({ cli: existsSync(SOUL_CLI), skill: existsSync(SOUL_SKILL), bytes: existsSync(SOUL_CLI) ? readFileSync(SOUL_CLI).length : 0 }), (r) => r.cli && r.skill);
   await until('the launcher', async () => (await fetch(`${origin}${BASE}/__sim/worlds.json`)).ok, 60_000);
   const worldName = `Join Party ${stamp.slice(11, 16).replace('-', '')}`;
   await step(`L1 gaia makes a new world (Empty plain)${MODE === 'clerk' ? ', signed in with Clerk: the god at birth' : ''}`, async () => {
@@ -155,15 +161,15 @@ try {
   }, (r) => r.slug && r.you === 'owner' && r.base === `${origin}${BASE}/w/${r.slug}`);
   await step('L2 launcher worlds: edge minds, no invitations, native arrivals; the published Soul CLI and skill served as is', async () => {
     const cfg = (await api('/v1/config')).data, edge = await api('/v1/edge/schema');
-    const cli = await (await fetch(`${base}/eden-agent.mjs`)).text(), soulSkill = await (await fetch(`${base}/skill.md`)).text(), instr = await (await fetch(`${base}/instructions.md`)).text();
+    const cli = await (await fetch(`${base}/eden.mjs`)).text(), soulSkill = await (await fetch(`${base}/skill.md`)).text(), instr = await (await fetch(`${base}/instructions.md`)).text();
     return { auth: cfg.authProvider, devAuth: cfg.devAuth, accountApproval: cfg.accountApproval?.contract ?? null, inviteRequired: cfg.inviteRequired, edge: edge.status, cliSame: cli === readFileSync(SOUL_CLI, 'utf8'), skillVersion: soulSkill.match(/version: "([\d.]+)"/)?.[1],
       skillHere: !/\{\{/.test(soulSkill) && (soulSkill.includes(`This world is **${base}**`) || /^\s*version:\s*"2\./m.test(soulSkill)), instructions: instr.startsWith(`# Create a Soul in ${worldName}`) && instr.includes(`World: ${base}`) && !/\{\{/.test(instr) };
   }, (r) => r.inviteRequired === false && r.edge === 200 && r.cliSame && /^(1\.9(\.\d+)?|2\.\d+\.\d+)$/.test(r.skillVersion ?? '') && r.skillHere && r.instructions && (MODE === 'dev' ? r.devAuth === true : r.auth === 'clerk' && r.devAuth === false && r.accountApproval === 'account-soul-approval/1'));
-  await step('K1 ONE skill at /SKILL.md: God mode and Soul mode, each alone; Soul mode points at this world\'s CLI copy and Soul skill', async () => {
+  await step('K1 ONE skill at /SKILL.md: God mode and Soul mode, each alone; Soul mode points at this world\'s instructions (its eden.mjs copy) and Soul skill', async () => {
     skill = await (await fetch(`${base}/SKILL.md`)).text();
-    const god = section('God mode'), soul = section('Soul mode');
-    const links = await Promise.all(['/god/SKILL.md', '/god/eden-god.mjs', '/skill.md', '/eden-agent.mjs'].map(async (p) => [p, (await fetch(base + p)).status]));
-    return { name: skill.includes(`"${worldName}"`), filled: !/\{\{/.test(skill), godInstall: !!lineOf(god, /eden-god\.mjs \|\| curl -fsSO .*\/god\/eden-god\.mjs/), soulInstall: lineOf(soul, /eden-agent\.mjs \|\| curl/)?.includes(`${base}/eden-agent.mjs`), soulSkill: soul.includes(`${base}/skill.md`), godAlone: !/eden-agent/.test(god), soulAlone: !/eden-god/.test(soul), links: Object.fromEntries(links) };
+    const god = section('God mode'), soul = section('Soul mode'), guide = await instructionsOf();
+    const links = await Promise.all(['/god/SKILL.md', '/god/eden-god.mjs', '/skill.md', '/eden.mjs'].map(async (p) => [p, (await fetch(base + p)).status]));
+    return { name: skill.includes(`"${worldName}"`), filled: !/\{\{/.test(skill), godInstall: !!lineOf(god, /eden-god\.mjs \|\| curl -fsSO .*\/god\/eden-god\.mjs/), soulInstall: guide?.url === `${base}/instructions.md` && guide.text.includes(`curl -fsSo eden.mjs ${base}/eden.mjs`), soulSkill: soul.includes(`${base}/skill.md`), godAlone: !/eden\.mjs|eden-agent/.test(god), soulAlone: !/eden-god/.test(soul), links: Object.fromEntries(links) };
   }, (r) => r.name && r.filled && r.godInstall && r.soulInstall && r.soulSkill && r.godAlone && r.soulAlone && Object.values(r.links).every((s) => s === 200));
 
   // ======================== the god
@@ -194,10 +200,10 @@ try {
       return { direct: direct.data.code, dev: dev.status, devAgent: devAgent.status, you: (await api('/v1/god/status', { who: 'ana' })).data.you };
     }, (r) => r.direct === 'approval-required' && r.dev === 401 && r.devAgent === 401 && r.you === 'visitor');
   }
-  await step(`A0 ana's agent: install, register, create-soul "Ana"${MODE === 'clerk' ? ' → an approval link → ana approves on the world page → approval wait → connected' : ' (a local world: no approval)'}`, async () => {
+  await step(`A0 ana's agent: install eden.mjs, register, create "Ana"${MODE === 'clerk' ? ' → an approval link → ana approves on the world page → approval wait → connected' : ' (a local world: no approval)'}`, async () => {
     ana = await soulAgentJoins('ana', 'Ana');
     return ana;
-  }, (r) => r.status.paired === true && /^s_/.test(r.status.soul ?? '') && (MODE === 'dev' || (r.link?.startsWith(`${base}/#approve/ap_`) && r.view?.status === 'pending' && r.view?.mode === 'create' && ['creating', 'ready'].includes(r.approve) && r.wait?.status === 'ready' && r.isolation?.otherApproves === 403 && r.isolation?.otherReads === 403)));
+  }, (r) => r.status.paired === true && /^s_/.test(r.status.soul?.id ?? '') && (MODE === 'dev' || (r.link?.startsWith(`${base}/#approve/ap_`) && r.view?.status === 'pending' && r.view?.mode === 'create' && ['creating', 'ready'].includes(r.approve) && r.wait?.status === 'ready' && r.isolation?.otherApproves === 403 && r.isolation?.otherReads === 403)));
   await step('A1 the Soul is ana\'s: /v1/me lists it for her (and not for ben); her capabilities offer the god\'s things', async () => {
     const mine = (await api('/v1/me', { who: MODE === 'clerk' ? 'ana' : null, token: MODE === 'dev' ? null : undefined })).data;
     const ben = MODE === 'clerk' ? (await api('/v1/me', { who: 'ben' })).data : null;
@@ -214,12 +220,11 @@ try {
     const ans = await godCli(gaiaDir, 'answer', id, 'Yes: look to the plaza tomorrow.');
     return { listed: /Ana/.test(list) && /fountain/.test(list), id, answer: ans.split('\n')[0] };
   }, (r) => r.listed && r.id);
-  await step('A5 her agent reads the answer with Soul mode\'s command (the token is never printed)', async () => {
-    const line = lineOf(section('Soul mode'), /^node -e 'const s=JSON\.parse\(require\("fs"\)\.readFileSync\("\.eden-agent\.json"/);
-    if (!line) throw new Error('Soul mode gives no command to read answers');
-    const said = await sh(ana.dir, line), token = JSON.parse(readFileSync(join(ana.dir, '.eden-agent.json'), 'utf8')).token;
-    return { said: JSON.parse(said), leaked: said.includes(token) };
-  }, (r) => r.said.some((p) => /fountain/.test(p.text) && /plaza tomorrow/.test(p.answer ?? '')) && !r.leaked);
+  await step('A5 her agent reads the answer in her events (`eden.mjs events --raw`; the token is never printed)', async () => {
+    const said = await until('the answer in her events', async () => { const s = await node(ana.dir, 'eden.mjs', 'events', '--raw'); return /plaza tomorrow/.test(s) && s; }, 30_000, 1000);
+    const tokens = JSON.stringify(JSON.parse(readFileSync(join(ana.dir, '.souls/credentials.json'), 'utf8'))).match(/[A-Za-z0-9_-]{24,}/g) ?? [];
+    return { said: (JSON.parse(said).events ?? []).filter((e) => e.kind === 'prayer.answered').map((e) => JSON.stringify(e)), leaked: tokens.some((t) => said.includes(t)) };
+  }, (r) => r.said.some((p) => /fountain/.test(p) && /plaza tomorrow/.test(p)) && !r.leaked);
   await step('W0 who lives here: /v1/world/souls lists Ana, active, at the bench', async () => { const s = (await api('/v1/world/souls')).data.souls; return { n: s.length, ana: s.find((x) => x.name === 'Ana') }; }, (r) => r.ana?.active && r.ana.p && Math.hypot(r.ana.p[0] - 3, r.ana.p[2] - 12) < 3);
 
   // ======================== the panel in Chrome (dev sign-in: a browser cannot hold a synthetic Clerk session)

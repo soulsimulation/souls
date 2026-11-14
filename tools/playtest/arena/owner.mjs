@@ -19,7 +19,7 @@ export function ownerSoulRequest({ base, soulId, identity }) {
 }
 
 async function call({ url, init }) {
-  const r = await fetch(url, { ...init, signal: AbortSignal.timeout(15000) });
+  const r = await fetch(url, { ...init, headers: { ...init.headers, 'x-soul-client': 'arena/1' }, signal: AbortSignal.timeout(15000) });
   let body = null; try { body = await r.json(); } catch { /* not json */ }
   if (!r.ok) { const e = new Error(`${init.method} ${new URL(url).pathname} → ${r.status} ${body?.code ?? body?.error?.code ?? ''}`); e.status = r.status; e.body = body; throw e; }
   return body;

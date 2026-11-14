@@ -69,11 +69,13 @@ export function launcherFlood({ limits = {}, now = Date.now, log = (l) => consol
 // budget is a stop-gap until shedding is load-driven (the world's green/amber/red/black, LOAD-CONTRACT §1).
 export const SOUL_CEILINGS = Object.freeze({
   ipPer10s: 600,            // Soul API requests per address per world per 10 s
-  ipConcurrent: 50,         // API requests in flight + WebSockets per address
-  ipListen: 40,             // listen/wait long-polls per address
+  // #1949: a room of 100 Souls behind one address, or one owner's 100 Souls, each holding one listen and acting every
+  // 10 s (ceilings.test.mjs). The values below are twice what that needs; ipPer10s (it needs ~140) already was.
+  ipConcurrent: 202,        // API requests in flight + WebSockets per address; 2 × (100 listens + 1 act in flight)
+  ipListen: 200,            // listen/wait long-polls per address; 2 × 100 Souls' one listen each
   soulListen: 4,            // listen/wait per Soul token (a Soul needs 1–2; more is a client bug)
-  accountListen: 40,        // listen/wait per account (learned from the world's x-sim-account header, else per Soul)
-  accountHeavyPerMin: 900,  // C1/C2 per account (as above) per minute
+  accountListen: 200,       // listen/wait per account (learned from the world's x-sim-account header, else per Soul); 2 × 100 Souls' one listen each
+  accountHeavyPerMin: 1200, // C1/C2 per account (as above) per minute; 2 × 100 Souls acting 6 times a minute
   worldBudgetRps: 200,      // C1/C2 forwarded to the world's main thread per second, every Soul together (bursts of 2 s); reads its read workers answer are exempt. A safety ceiling only (lane srv-shed): shedding follows the world's level, and the Stage B mix at N=100 is ~30/s
   listenHoldMs: 5000,       // a listen/wait over its listen ceiling is held this long for a slot before it is refused (never at red/black)
   listenHeldMax: 200,       // listens held at once per world (past it, refused at once)
