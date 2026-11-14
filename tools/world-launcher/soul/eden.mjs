@@ -4743,7 +4743,7 @@ async function finishCreate(p, firstWaitMs) {
     first = false;
     if (Date.now() + waitMs * TIME_SCALE > deadline) {
       noteRefusal("/v1/souls", { status: 503, data: { code: "lifecycle-pending" } }, "none", null);
-      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${secs((Date.now() - t0) / TIME_SCALE)}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
+      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${secs(Math.min(LIFECYCLE_WAIT.totalMs, (Date.now() - t0) / TIME_SCALE))}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
     }
     calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${secs(LIFECYCLE_WAIT.totalMs)})`);
     await pause(waitMs);
