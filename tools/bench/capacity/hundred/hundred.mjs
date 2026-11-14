@@ -130,6 +130,14 @@ async function buildFixture() {
       for (let a = 0; !agentOf(dir).token && a < 3; a++) { const c = await cli(dir, ['create', `${w.slug.toUpperCase()} ${k}`]); if (!agentOf(dir).token) { log(`${w.slug} soul ${k} create: ${c.code} ${c.err.trim().split('\n').at(-1)}`); await sleep(2000); } }
       if (!agentOf(dir).token) throw new Error(`${w.slug} soul ${k} did not join`);
       w.dirs.push(relative(FIX, dir));
+      // the first Soul of each template keeps only the walks its world accepts (a catalog place may be scenery or shut)
+      if (k === 1 && ids[w.template] && !ids[w.template].checked) {
+        const tried = (ids[w.template].walk ?? []).filter((id) => id !== 'walk:world').slice(0, 16), ok = [];
+        for (const id of tried) { const r = await cli(dir, ['act', id, '--json'], 120_000); if (r.code === 0 && r.j?.accepted !== false) ok.push(id); }
+        await cli(dir, ['stop', '--json'], 60_000);
+        ids[w.template] = { ...ids[w.template], walk: ok, refusedWalks: tried.length - ok.length, checked: true };
+        log(`fixture ${w.template}: ${ok.length} of ${tried.length} walks accepted`);
+      }
     }
     await stopWorld(w.slug);
     w.builtS = +((Date.now() - tw) / 1000).toFixed(1);
