@@ -2,7 +2,7 @@
 // The control side of .github/workflows/timed-run.yml (#1943): a timed run (the walk gate or the scripted Soul eval) on
 // a `souls-timed` self-hosted runner, each pinned to cores of its own. #1970 adds the eval's load mode, the capacity
 // bench's client load, the meetup workload and the slopes walkers profile; for these four the world under test runs on
-// two of the runner's four physical cores and the load generator on the other two. It runs from the workflow's own commit, never
+// two of the runner's physical cores and the load generator on the rest (2+2 on four cores, 2+1 on three). It runs from the workflow's own commit, never
 // from the ref under measurement. The argument allowlist is not a security boundary (the ref's own scripts run); safety
 // rests on the runner's dedicated, unprivileged account.
 // `counted` runs one cell of a named counted scenario (a kit under tools/playtest/counted/, taken from the workflow's own
@@ -141,13 +141,15 @@ export function frameTiming(pts) {
 }
 
 /** #1970 A2: the runner's own logical CPUs grouped into physical cores (`siblingsOf(cpu)`: that CPU's SMT siblings); the
- *  first two cores for the world under test, the other two for the load generator. Exactly four cores, else refused. */
+ *  first two cores for the world under test, the rest for the load generator: 2+2 on four cores, 2+1 on three (the timed
+ *  runners give each job three). Any other count is refused. */
 export function splitCores(own, siblingsOf) {
   const cores = new Map();
   for (const c of own) { const k = siblingsOf(c).filter((x) => own.includes(x)).sort((a, b) => a - b).join(',') || String(c); cores.set(k, k.split(',').map(Number)); }
   const byFirst = [...cores.values()].sort((a, b) => a[0] - b[0]);
-  if (byFirst.length !== 4) throw new Error(`the runner has ${byFirst.length} physical core(s) of its own; the world/load split needs 4`);
-  return { physicalCores: 4, world: byFirst.slice(0, 2).flat().join(','), load: byFirst.slice(2).flat().join(',') };
+  const n = byFirst.length;
+  if (n !== 3 && n !== 4) throw new Error(`the runner has ${n} physical core(s) of its own; the world/load split needs 3 or 4`);
+  return { physicalCores: n, layout: `2+${n - 2}`, world: byFirst.slice(0, 2).flat().join(','), load: byFirst.slice(2).flat().join(',') };
 }
 /** [[pid, ppid], …] → every descendant pid of root. */
 export function descendants(table, root) {
@@ -420,13 +422,13 @@ async function main(cmd) {
     mkdirSync(out, { recursive: true });
     if (inp.command === 'counted') return runCounted(inp, rec, out, env);
     if (inp.command === 'clip') return runClip(inp, rec, out, env);
-    // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the other
-    // two. HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
+    // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the rest
+    // (one or two). HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
     const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf) : null;
     if (split) {
       execFileSync('taskset', ['-V'], { stdio: 'ignore' });
       env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
-      console.log(`cores: world ${split.world}, load generator ${split.load}`);
+      console.log(`cores: split ${split.layout} of ${split.physicalCores} physical, world ${split.world}, load generator ${split.load}`);
     }
     const n = inp.command === 'walk' ? inp.repeats : 1, runs = [];
     for (let k = 1; k <= n; k++) {
