@@ -11,6 +11,10 @@ import {publishTickWindow, sharedApi, type TickWindow} from './api-times.ts';
 export type Signals = {service: number; loopP99Ms: number; heapFrac: number; gcFrac: number; oldestMs: number};
 const RANK: Record<Level, number> = {green: 0, amber: 1, red: 2, black: 3};
 export const STEP_DOWN_MS = 30_000, BLACK_SERVICE_MS = 30_000;
+/** #2124: at amber, samples that are not calm stop the 30 s calm only once they add up to more than this within it (a
+ *  fifth of the calm). Brief dips (a 5 s tick-service window catching one slow tick, one loop window over the band) no
+ *  longer restart it; a sustained overload still does. Red and black keep the strict calm. */
+export const AMBER_HOLD_MS = 6000;
 
 /** Loop-delay bands are relative to the world's own quiet baseline (LOAD-CONTRACT §1): a large world whose quiet ticks
  *  take 170 ms has a quiet loop p99 near 170 ms, so fixed 200/100 ms amber bands would hold it at amber forever.
@@ -25,6 +29,8 @@ export class LevelState {
   /** The world's quiet loop-delay p99 (ms), from QuietBaseline or a registry pin; 0 = absolute bands only. */
   baselineMs = 0;
   private calmSince: number | null = null;
+  private heldMs = 0;                            // amber: time not calm since calmSince (AMBER_HOLD_MS)
+  private lastAt: number | null = null;
   private starvedSince: number | null = null;   // tick service < 0.2 since
   /** #2124: queue age raises amber on a fresh queue only. After amber steps down, the queue amber's own smaller budget left
    *  behind does not raise it again until it has once been under 2 s: re-entering at once held amber ~94 % of a 24-Soul run. */
@@ -42,25 +48,35 @@ export class LevelState {
     if (s.service < 0.8 || s.loopP99Ms > loopEnter(200, b) || s.heapFrac > 0.70 || (this.queueArmed && s.oldestMs > 2000)) return 'amber';
     return 'green';
   }
+  /** #2124: loop delay holds amber only above its enter band. Below it, with tick service >= 0.9 (amber's own service
+   *  band), loop delay is the queue amber's own smaller budget leaves (24 Souls: tick p99 80-90 ms, loop p99 80-110 ms at
+   *  service 1.0 crossed the old 100 ms leave band every few seconds and held amber the whole run). */
+  amberLoopLeave(): number { return loopEnter(200, this.baselineMs); }
   below(level: Level, s: Signals): boolean {
     const b = this.baselineMs;
     switch (level) {
       case 'black': return s.service >= 0.4 && s.heapFrac < 0.85;
       case 'red': return s.service >= 0.7 && s.loopP99Ms < loopLeave(400, b) && s.heapFrac < 0.75;
-      case 'amber': return s.service >= 0.9 && s.loopP99Ms < loopLeave(100, b) && s.heapFrac < 0.60;
+      case 'amber': return s.service >= 0.9 && s.loopP99Ms < this.amberLoopLeave() && s.heapFrac < 0.60;
       default: return true;
     }
   }
   /** Suspension is neither calm time nor continuous starvation. Keep the level, restart its timers. */
   resumed(now: number) {
-    if (this.calmSince !== null) this.calmSince = now;
+    if (this.calmSince !== null) { this.calmSince = now; this.heldMs = 0; }
+    this.lastAt = now;
     if (this.starvedSince !== null) this.starvedSince = now;
   }
   update(s: Signals, now: number): Level {
-    const enter = this.enterOf(s, now);
+    const enter = this.enterOf(s, now), dt = this.lastAt === null ? 0 : Math.max(0, now - this.lastAt);
+    this.lastAt = now;
     if (RANK[enter] > RANK[this.level]) { this.level = enter; this.calmSince = null; return this.level; }
-    if (this.level === 'green' || !this.below(this.level, s)) { this.calmSince = null; return this.level; }
-    this.calmSince ??= now;
+    if (this.level === 'green') { this.calmSince = null; return this.level; }
+    if (!this.below(this.level, s)) {
+      if (this.level === 'amber' && this.calmSince !== null && (this.heldMs += dt) <= AMBER_HOLD_MS) return this.level;
+      this.calmSince = null; return this.level;
+    }
+    if (this.calmSince === null) { this.calmSince = now; this.heldMs = 0; }
     if (now - this.calmSince >= STEP_DOWN_MS) { this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null; if (this.level === 'green') this.queueArmed = false; }
     return this.level;
   }
