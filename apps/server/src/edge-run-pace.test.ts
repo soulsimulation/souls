@@ -13,6 +13,10 @@ import { installEngineBridge } from './god/engine-bridge.ts';
 import { EdgeLedger } from './edge/ledger/ledger.ts';
 import { paramsProblem, paramsByVerb } from './edge/intents/offer-schema.ts';
 import { WALK_SPEED_CAP } from '../../../mars/viewer/engine/locomotion/walk.ts';
+import { existsSync } from 'node:fs';
+import { bootEden } from '../test/eden-capabilities-timing.ts';
+
+const EDEN = new URL('../../../worlds/templates/eden-2026.json', import.meta.url);
 
 type Act = { accepted?: boolean; code?: string; reason?: string; receipt?: { id: string; capability: string } };
 
@@ -102,4 +106,14 @@ test('#2283 A1/A2 (review): walk:<place> at pace run runs the walk\'s own route 
     assert.equal(phase, 'completed'); assert.ok(seen.has('run'), `seen: ${[...seen]}`);
     assert.deepEqual(w.host.engine.runtime.violations, []);
   } finally { w.brain.quiesce(); w.host.stop(); edge.comms?.close(); w.db.close(); }
+});
+
+test('#2283 (clip finding): a run to a room upstairs runs its indoor and upstairs legs too (mars:walk_to carries the gait)', { timeout: 300_000, skip: existsSync(EDEN) ? false : 'needs worlds/templates/eden-2026.json' }, async (t) => {
+  const w = await bootEden(); t.after(() => w.close());
+  const out = await accept(w.host, Promise.resolve(w.edge.act(w.soul, { capability: 'walk:region-campus-east-hall/classroom-1', params: { pace: 'run' } }))) as Act;
+  assert.equal(out.accepted, true, JSON.stringify(out)); await w.settle(2);
+  const plan = JSON.parse((w.db.db.prepare('SELECT plan FROM edge_receipts_v1 WHERE receipt_id=?').get(out.receipt!.id) as { plan: string }).plan) as { steps: { verb: string; params: { gait?: string; level?: number } }[] };
+  const walks = plan.steps.filter(s => s.verb === 'walk_to' || s.verb === 'mars:walk_to');
+  assert.ok(walks.some(s => s.verb === 'mars:walk_to' && s.params.level), `a leg on the upper floor: ${JSON.stringify(plan.steps)}`);
+  assert.ok(walks.every(s => s.params.gait === 'run'), `every walk leg runs: ${JSON.stringify(plan.steps)}`);
 });
