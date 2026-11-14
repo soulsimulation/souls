@@ -75,7 +75,7 @@ a receipt.
 
 ## 2. The world process
 
-One world is one Node process, built in `apps/server/src/main.ts`: a `Db` on `$DATA_DIR/sim.db` (`main.ts:69`),
+One world is one Node process (`apps/server/src/main.ts`), built by `startWorld(config)` in `world-main.ts` (#2389): a `Db` on `$DATA_DIR/sim.db`,
 a `WorldHost` (`:98`), `Auth`, `Brain`, `Souls`, `Hub`, optional `IntentControlV2`, `EdgeLedger` (edge mode only,
 `:149`), `GodMode` (`:153`), `GroundHost`, `EngineBridge`, and the Hono app from `http.ts`.
 
