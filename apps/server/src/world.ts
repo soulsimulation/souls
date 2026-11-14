@@ -1706,15 +1706,15 @@ export class WorldHost {
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
     return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
-  /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
-   *  takes entities out there, one half at a time), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  /** #1377: an invariant that threw names nobody. What it was reading is found on the engine's own copy of the entity table
+   *  (it takes entities out there, one half at a time; #2168: so a head that won't restore or snapshot is read too), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
   private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
   private thrownSources(error: unknown): string[] {
     if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
     const tick = this.engine.world.tick, fault = String(error);
     if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
       let ids: string[] = [];
-      try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
+      try { ids = this.engine.thrownSourcesV1?.() ?? []; }
       catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
       this.thrownAt = {tick, fault, ids};
     }

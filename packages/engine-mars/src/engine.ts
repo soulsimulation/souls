@@ -742,10 +742,13 @@ export class MarsEngine implements Engine {
   stopBodiesV1(bodies: string[], why: { code: string; message: string }, from: number = this.rt.tick): { stopped: number; deadlines: number } { const ids = new Set(bodies); return this.stopWhereV1(p => ids.has(p.actor), why, from); }
   /** #1377: the entity an invariant that throws (`engine.thrown`, which names nobody) was reading: the one whose absence alone
    *  stops the throw, found by halving the entity table (bodies first, then everything else). Empty when no invariant throws,
-   *  or no single entity explains it. It takes entities out of the table and puts them back while it reads, so the host calls
-   *  it on a scratch restore of the head, never on the live engine; the host logs what it found, and a replay reads that. */
+   *  or no single entity explains it. It reads on a view (#2168): its own shallow copy of the entity table, on a runtime object
+   *  whose per-runtime invariant memory is fresh, so the entities it takes out leave the live table and the live memory as they
+   *  were, and the host may call it on the live head when a scratch restore is refused. The host logs what it found, and a replay
+   *  reads that. */
   thrownSourcesV1(): string[] {
-    const rt: any = this.rt, ents = this.ents, invs: any[] = rt.invariants ?? [];
+    const live: any = this.rt, invs: any[] = live.invariants ?? [], ents: Record<string, any> = { ...live.world.entities };
+    const rt: any = Object.create(live); rt.world = { ...live.world, entities: ents }; rt.violations = []; rt.events = [];
     const threw = (inv: any) => { try { return (inv(rt) ?? []).some((v: { code?: string }) => v?.code === 'engine.thrown'); } catch { return true; } };
     const throwing = invs.filter(threw);
     if (!throwing.length) return [];

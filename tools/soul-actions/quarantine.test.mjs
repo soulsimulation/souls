@@ -187,7 +187,7 @@ const CHAOS = {
 for (const [name, corrupt] of Object.entries(CHAOS))
   test(`chaos: ${name} never stops the tick loop`, {timeout: 300000}, async (t) => {
     quiet(t); const w = await world(t), h = w.f.host, {Ada, Bo, Cy} = w.souls;
-    const bystander = !/inside another|throws/.test(name), far = bystander ? ok(await act(w, Bo, {capability: 'walk:yard'})) : null;
+    const bystander = !/inside another/.test(name), far = bystander ? ok(await act(w, Bo, {capability: 'walk:yard'})) : null;
     ok(await act(w, Ada, {capability: 'walk:shed'})); await w.tick(5);
     w.control.restoreFails = true; corrupt(h, Ada, Bo, w); forgetMotion(h.engine.rt);
     const t0 = h.engine.world.tick; await w.tick(20);
@@ -211,6 +211,8 @@ test('#1377 an invariant that throws reading one body stops that body alone: a b
   const seq0 = h.seq, from = h.engine.world.tick + 1, to = from + 300;   // by tick, so every replay meets the same throws
   w.control.every = (r) => { if (r.tick >= from && r.tick < to && r.world.entities[Ada.entityId]) throw new Error('fixture.invariant-bug on one body'); return []; };
   await w.tick(20);
+  const hash = h.engine.stateHash(), n = Object.keys(h.engine.world.entities).length;   // #2168: the probe reads the live head in place
+  assert.deepEqual(h.engine.thrownSourcesV1(), [Ada.entityId]); assert.equal(h.engine.stateHash(), hash, 'the probe leaves the live head as it was'); assert.equal(Object.keys(h.engine.world.entities).length, n);
   const later = ok(await act(w, Cy, {capability: 'walk:shed'}));
   await w.tick(600);
   const events = w.f.db.events(worldId, seq0), report = JSON.stringify({glitches: h.glitches, bo: read(w, Bo, far), rules: events.filter((e) => e.kind === 'rules').map((e) => [e.author, Object.keys(e.payload ?? {})])});
