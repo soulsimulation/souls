@@ -34,6 +34,7 @@ test('unloaded on the rule; never with a connection open or an act in the quiet 
     await create('One'); await create('Two');
     await until(() => status(L, 'one') === 'running' && status(L, 'two') === 'running', 'both run');
     still('one', { untilWallMs: Date.now() + 20 * 60_000 }); still('two', { untilWallMs: Date.now() + 5 * 60_000 });
+    await wait(1600);   // the quiet time since the launcher started (its start counts as the last use)
     assert.deepEqual(await L.still.sweep(), ['one'], 'one: still, its horizon 20 min away; two: its horizon 5 min away');
     assert.equal(status(L, 'one'), 'stopped');
     assert.equal(L.still.horizons.get('one').still, true);
