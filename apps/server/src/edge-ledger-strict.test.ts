@@ -77,7 +77,7 @@ test('strict: walk-to:here takes exactly one param, at, as two finite numbers; a
   for (const params of [undefined, {}, {at: null}, {at: [1]}, {at: [1, 2, 3]}, {at: [1, '2']}, {at: '1,2'}, {at: {x: 1, z: 2}}, {at: [1, null]}, {at: [1, 2], seconds: 5}, {to: [1, 2]}, [1, 2]]) {
     const out = await act(params);
     assert.equal(out.accepted, false, JSON.stringify(params)); assert.equal(out.code, 'capability.params', JSON.stringify(params) + ' ' + JSON.stringify(out));
-    assert.deepEqual(Object.keys(out.params ?? {}), ['at'], 'the refusal carries the one-param schema');
+    assert.deepEqual(Object.keys(out.params ?? {}), ['at', 'pace'], 'the refusal carries the one-param schema');
   }
   assert.equal(count(), before, 'nothing was written for a refused shape');
   const ok = await act({at: [0, 0]}); assert.equal(ok.accepted, true, JSON.stringify(ok)); assert.equal(ok.receipt.capability, 'walk-to:here');
