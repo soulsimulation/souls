@@ -27,7 +27,7 @@ const pq = (q) => (q ? { p50: q.p50, p99: q.p99 } : null);
 function actPartsOfLive(live) {
   const a = live?.api?.routes?.['edge:act'];
   if (!a?.parts) return null;
-  return { n: a.n, queue: pq(a.queue), handler: pq(a.parts.handler), wait: pq(a.parts.wait), commit: pq(a.parts.commit), waitOver3Ticks: a.parts.waitOver3Ticks };
+  return { n: a.n, queue: a.queue, handler: a.handler, handlerPart: a.parts.handler, wait: pq(a.parts.wait), commit: pq(a.parts.commit), waitOver3Ticks: a.parts.waitOver3Ticks };
 }
 
 async function soulLoop({ folder, until, r, counts }) {
