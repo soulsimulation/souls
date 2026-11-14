@@ -54,8 +54,9 @@ legal-edits/1 the last wall of a ring closed 15 m from a Soul was accepted, and 
   (`god/seal-check.ts`).
   - The pocket rule is nav-connect/1's: free ground cut off from everything else, at most 2,500 m².
   - The check is model-only, on BUILDSAFE's 0.1 m ground raster. It runs only for an edit that adds or moves
-    blocking geometry within 56 m of a Soul on the ground. It floods her region after the edit, and before it only
-    when she is sealed after.
+    blocking geometry within 56 m of a Soul on the ground. It rasters one window round the edit's pieces and floods
+    each region holding a Soul once, after the edit. It rasters the window before the edit only when a Soul is
+    sealed after it. Measured with 12 Souls in reach on a loaded workstation: p50 13 ms, p95 66 ms a commit.
   - Edits logged before the event keep legal-edits/1's verdicts.
 - **Construction-closure walk-outs stay** (`evacuateSites`). They are not edits that break a rule on a body. They
   are ordinary walks off a site the god has closed, each planned with a route and logged (`edge-god-walkout`), so
@@ -63,7 +64,7 @@ legal-edits/1 the last wall of a ring closed 15 m from a Soul was accepted, and 
   as she stands there.
 - **nav-connect/1's step-out stays as the fallback.** It serves worlds without legal-edits/1, and under it whatever
   the check does not see: bodies on upper floors, and a pocket of the rule's size that reaches more than 56 m from
-  the Soul. A frozen Soul is worse than a logged step.
+  the pieces that close it. A frozen Soul is worse than a logged step.
 
 ## 2. One shared legality rule
 
