@@ -35,7 +35,9 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   // #1324: the steer act's landing preview (previewSteerLandingV1), called only from the ride object's steer act on main
   'steerLanding',
   // #2085: it marks the open harvest act's landed pick, called only from the harvest faculty's tick on main
-  'actApplied']);
+  'actApplied',
+  // #2297/#2298: the world's still answer (the stall guard's and the step-out's deadlines), asked only by WorldHost.stillUntil on main
+  'stillParts', 'unstickBodies']);
 
 test('grep: no engine reach in the read code (ledger read methods, perception, together, god-nav, human capabilities, deck)', () => {
   const ledger = [...reaches('edge/ledger/ledger.ts', /host\.engine/g)].filter(([m]) => !LEDGER_MAIN_ONLY.has(m));
