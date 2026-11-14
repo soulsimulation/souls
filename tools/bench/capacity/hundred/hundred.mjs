@@ -219,7 +219,7 @@ async function run(fx) {
   }));
   // the needs and the kept live picture of every world, as the agents fall silent (one read each; the world is loaded now)
   const silentAt = Date.now(), before = {};
-  for (const w of worlds) before[w.slug] = { live: (await getJ(`${ORIGIN}/w/${w.slug}/v1/edge/live`, { headers: { 'x-soul-client': 'bench/1' } })).j?.clock ?? null, needs: a4.includes(w) ? needsOf((await soulApi(soulDir(w), '/v1/edge/here')).j) : undefined };
+  for (const w of worlds) before[w.slug] = { live: (await getJ(`${ORIGIN}/w/${w.slug}/v1/edge/live`, { headers: { 'x-soul-client': 'bench/1' } })).j?.clock ?? null, needs: a4.includes(w) ? needsOf((await soulApi(soulDir(w), '/v1/agent/status')).j) : undefined };
   const win = samples.filter((s) => s.at >= t0 && s.at <= end);
   R.a6 = { ...summarizeActs(acts, win), fractionInMemory: inMemoryFractions(win), timeline: win.map(({ status, ...s }) => ({ ...s, at: Math.round((s.at - t0) / 1000) })) };
   log(`A6: ${acts.length} acts, ${R.a6.failed} failed, ${R.a6.refused} refused, added wait p50 ${R.a6.addedWaitMs.p50} p95 ${R.a6.addedWaitMs.p95} max ${R.a6.addedWaitMs.max} ms; in memory at most ${R.a6.inMemMax}`);
@@ -276,7 +276,7 @@ async function run(fx) {
     const f0 = stopTick(w.slug), wasIn = (await ps())?.worlds?.[w.slug]?.status;
     const walks = fx.ids[w.template]?.walk?.length ? fx.ids[w.template].walk : ['sit-ground:here'], t = Date.now();
     const r = await cli(soulDir(w), ['act', walks[0], '--json'], 120_000);
-    const still = await childStill(w.slug), here = await soulApi(soulDir(w), '/v1/edge/here');
+    const still = await childStill(w.slug), here = await soulApi(soulDir(w), '/v1/agent/status');
     R.a4[w.slug] = { template: w.template, statusBefore: wasIn, gapS: Math.round((t - (unloadedAt[w.slug] ?? t)) / 1000), actMs: r.ms, accepted: r.j?.accepted ?? null, code: r.j?.code ?? null,
       tickAtUnload: f0, still: still.status === 200 ? still.j : `missing (${still.status || 'no answer'}) #2297`,
       ticksMoved: f0 != null && Number.isFinite(still.j?.tick) ? still.j.tick - f0 : null, ticksForGap: Math.round((t - (unloadedAt[w.slug] ?? t)) / 50), needsBefore: before[w.slug]?.needs ?? null, needsAfter: needsOf(here.j) };
