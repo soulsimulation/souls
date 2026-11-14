@@ -634,6 +634,8 @@ export class WorldHost {
   private lag = 0;
   private stillClaim: number | null = null;
   private frontierSeq = -1;
+  /** A world found not still is asked again only from this tick (the answer reads every live action and listener). */
+  private askAfter = 0;
   private snapshotSeq = -1;
   /** #2298 A2: one move of the clock towards `target`: when the world is still, a jump to the earlier of its horizon and
    *  the target (the engine skips to the tick before, then the ordinary tick runs the landing tick, listeners, log and all);
@@ -643,9 +645,10 @@ export class WorldHost {
   advanceStep(target: number, o: { inputsAtTarget?: boolean; cap?: number } = {}): number {
     const tick = this.engine.world.tick;
     if (target <= tick) return 0;
-    if (this.skip && target - tick >= 2 && !this.paused && this.clockAvailable && this.needsJumpable()) {
+    if (this.skip && target - tick >= 2 && tick >= this.askAfter && !this.paused && this.clockAvailable && this.needsJumpable()) {
       const s = this.stillUntil({ advancing: true, inputsAtTarget: o.inputsAtTarget });
-      if (s.still) {
+      if (!s.still) this.askAfter = tick + 10;
+      else {
         let land = target; if (s.untilTick !== null) land = Math.min(land, s.untilTick); if (o.cap) land = Math.min(land, tick + o.cap);
         const skip = land - 1 > tick ? (this.engine as unknown as { skipToV1?(t: number): { ok: boolean } }).skipToV1?.(land - 1) : undefined;
         if (skip?.ok) {
@@ -715,7 +718,7 @@ export class WorldHost {
     }
     if (due > 0 && this.skip) {
       // #2298 A4: a still world only counts what it owes until a second has gone, its horizon nears or an input waits
-      if (this.stillClaim === null && this.needsJumpable()) { const s = this.stillUntil(); if (s.still) this.stillClaim = s.untilTick ?? Infinity; }
+      if (this.stillClaim === null && this.engine.world.tick >= this.askAfter && this.needsJumpable()) { const s = this.stillUntil(); if (s.still) this.stillClaim = s.untilTick ?? Infinity; else this.askAfter = this.engine.world.tick + 10; }
       const t = this.engine.world.tick + this.lag + due;
       if (this.stillClaim !== null && !this.queue.length && t < this.stillClaim && this.lag + due < this.jumpCap) { this.lag += due; return; }
       due += this.lag; this.lag = 0; this.stillClaim = null;

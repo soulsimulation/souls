@@ -113,7 +113,7 @@ test('A5: GET /__sim/still answers the #2241 contract to the launcher only', { t
   assert.ok(up, logs.join(''));
   const r = await fetch(`http://127.0.0.1:${port}/__sim/still`), b = await r.json() as Record<string, unknown>;
   assert.equal(r.status, 200);
-  assert.deepEqual(Object.keys(b).sort(), ['moveTick', 'moveWallMs', 'still', 'tick', 'untilTick', 'untilWallMs', 'wallMs']);
+  assert.deepEqual(Object.keys(b).sort(), ['jumps', 'lastHorizon', 'moveTick', 'moveWallMs', 'still', 'tick', 'ticksComputed', 'ticksJumped', 'untilTick', 'untilWallMs', 'wallMs']);
   assert.equal(b.still, false, 'the toy engine has no stillness: never still');
   assert.ok(Number.isSafeInteger(b.tick) && Math.abs((b.wallMs as number) - Date.now()) < 5000);
   assert.equal((await fetch(`http://127.0.0.1:${port}/__sim/still`, { headers: { 'x-forwarded-for': '203.0.113.9' } })).status, 404, 'a forwarded request is not the launcher');
