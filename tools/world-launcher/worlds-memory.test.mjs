@@ -62,22 +62,22 @@ test('admission counts running worlds\' Pss and each loading world\'s estimate, 
   const big = join(dir, 'eden.json'), small = join(dir, 'hamlet.json');
   writeFileSync(big, 'x'.repeat(1_100_000)); writeFileSync(small, '{}');
   assert.equal(worldClass({ templateFile: big }), 'eden'); assert.equal(worldClass({ templateFile: small }), 'small'); assert.equal(worldClass({ fork: true }), 'eden');
-  const p = pool({ worldsMemMb: 2000, pss: () => 300, maxRunning: 1 });
+  const p = pool({ worldsMemMb: 1400, pss: () => 300, maxRunning: 1 });
   recording(p);
   kid(p, 'one');                                                              // 300 MB measured
-  kid(p, 'eden', { status: 'starting', world: { templateFile: big } });       // 1100 MB estimated while it loads
+  kid(p, 'eden', { status: 'starting', world: { templateFile: big } });       // 650 MB estimated while it loads
   kid(p, 'new', { status: 'starting', world: { templateFile: small } });
   assert.deepEqual(p.memUse('new'), { running: 300, loading: LOAD_MB.eden, waiting: 0 });
-  // 300 + 1100 + 500 = 1900 of 2000: fits, and maxRunning 1 is not the limit with a memory figure
+  // 300 + 650 + 310 = 1260 of 1400: fits, and maxRunning 1 is not the limit with a memory figure
   assert.equal(p.roomFor('new').ok, true);
   kid(p, 'two', { status: 'waiting' });                                       // waiting for a load slot: not counted against 'new'
   assert.equal(p.roomFor('new').ok, true);
-  kid(p, 'three');                                                            // +300: 2200 > 2000
-  const r = p.roomFor('new'); assert.equal(r.ok, false); assert.equal(r.needMb, 2200);
+  kid(p, 'three');                                                            // +300: 1560 > 1400
+  const r = p.roomFor('new'); assert.equal(r.ok, false); assert.equal(r.needMb, 1560);
   // the same without the loading Eden world would fit: the refusal is on its estimate
   p.kids.get('eden').status = 'stopped'; assert.equal(p.roomFor('new').ok, true); p.kids.get('eden').status = 'starting';
   // 'one' and 'three' were used just now and are not still: nothing can be unloaded, so the load is refused
-  await assert.rejects(p.makeRoom('new'), (e) => e.code === 'capacity' && /memory is full \(2200 of 2000 MB/.test(e.message));
+  await assert.rejects(p.makeRoom('new'), (e) => e.code === 'capacity' && /memory is full \(1560 of 1400 MB/.test(e.message));
   assert.ok(p.problems().some((x) => x.code === 'worlds.capacity'), 'a host problem code on the health data');
 });
 

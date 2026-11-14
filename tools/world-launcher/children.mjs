@@ -28,10 +28,10 @@ export const LOAD_REASONS = ['act', 'visitor', 'listener', 'winddown', 'backgrou
 /** #2233: a god's call loads its world as urgently as an act; it is told apart only in the world's last load reason. */
 const rankOf = (reason) => { const i = LOAD_REASONS.indexOf(reason === 'god' ? 'act' : reason); return i < 0 ? LOAD_REASONS.indexOf('visitor') : i; };
 /** #2233 A1: the memory a world is counted for while it loads or waits to load, before its own Pss is read. Two fixed
- *  figures, never learned at run time. From #2240 (L8, 14 Nov): settled Pss about 250 MB for a small world and 575 MB for
- *  Eden; Eden's heap peaks at 843-899 MB while 10 Souls join, more than twice its settled heap, and the heap is only part of
- *  its memory, so a load is counted at about twice the settled figure. #2232 A3's measured load peaks replace these. */
-export const LOAD_MB = Object.freeze({ small: 500, eden: 1100 });
+ *  figures, never learned at run time: #2232 A3 (L8, 14 Nov, issuecomment-6874312959), a cold load from the snapshot peaks at
+ *  628 MB resident (max 647) for an Eden-class world and 289 MB (max 305) for a small one; L8's reservations are 650 and 310.
+ *  (#2240's 843-899 MB heap peak was while 10 Souls joined; a load joins none.) */
+export const LOAD_MB = Object.freeze({ small: 310, eden: 650 });
 /** A world whose template file is at least this big is Eden-class (eden-2026.json is 2.2 MB; the next largest 0.5 MB). */
 export const EDEN_CLASS_TEMPLATE_BYTES = 1_000_000;
 /** 'eden' or 'small', by the size of the world's template (an old-engine fork: Eden-class). */

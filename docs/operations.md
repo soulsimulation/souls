@@ -46,7 +46,7 @@ one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d
 
 **Memory for worlds (#2233).** `--worlds-mem-mb` is the memory all of a stage's worlds may use together. A world loads
 only while the running worlds' measured memory (Pss, read at most every 30 s) plus a fixed estimate for each world
-loading (500 MB for a small world, 1,100 MB for an Eden-class one, chosen by the template's size) stays under it;
+loading (310 MB for a small world, 650 MB for an Eden-class one, chosen by the template's size: the load peaks #2232 measured) stays under it;
 `--min-free-mb` stays a second guard, and `--max-running` no longer limits. To make room the launcher unloads a still
 world whose next event is at least 60 s away, then a world with no act and no visitor for 10 minutes (`--idle-ms`), the
 one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
