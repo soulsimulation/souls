@@ -24,7 +24,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued
  *  together would drop the earlier one's flag from the host's record and log it again at the next boot. After `after` (main's
  *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1, #1369
- *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2 and legal-edits/1 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
+ *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2, legal-edits/1 and board-path/1 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
  *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
  *  already logged in that place. */
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string }): Promise<void> {
@@ -48,7 +48,8 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   await host.enableWaitBoundV2('world').catch((e) => console.error('[world] wait-bound/2 could not be adopted:', String(e).slice(0, 300)));   // #1288
   // legal-edits/1 needs the off-thread preview, which rebuilds the world's factory from its descriptor: a world without one
   // (Eden core reads its history from the database) would refuse every god edit, so it keeps the rules it has
-  if (factoryDescriptorV1(host.factory)) await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b, last
+  if (factoryDescriptorV1(host.factory)) await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b
+  await host.enableCarrierBoardPathV1('world').catch((e) => console.error('[world] board-path/1 could not be adopted:', String(e).slice(0, 300)));   // board-path/1, last
 }
 
 /** Legal by construction 1b (docs/design/legal-by-construction.md part 1): legal-edits/1, one logged rules event (prospective,
