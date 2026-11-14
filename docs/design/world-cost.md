@@ -6,6 +6,25 @@ why do worlds consume so much memory to begin with?" [#2235](https://github.com/
 makes world time never stop, so every world runs at wall pace whether anyone watches or not. Always-on worlds have
 to become cheap.
 
+**Decided, 13–14 Nov 2026, and now the plan of record: [#2241](https://github.com/soulsimulation/souls/issues/2241).**
+The maintainer settled what this note left open, and the tranche in #2241 builds it. Where this note and #2241
+differ, #2241 holds.
+
+- **A Soul moves only on its agent's word.** A walk ends at its goal; an activity in place is held for at most an
+  hour and costs nothing meanwhile. The idle acts this note assumed (an ambient act at least every 20 s, the
+  wall-timed body rule) are removed, which removes D3's weak case: a world with Souls is still whenever none is
+  walking.
+- **Wind-down.** A Soul whose agent has been silent for an hour is walked out of town over about an hour and sleeps
+  until its agent acts. It is timed in world ticks from the log, never from the wall clock or a connection.
+- **Unloading is exact (D4), and needs no wake when no one listens.** A still world leaves memory after 10 minutes.
+  It loads on a request, or at its next event if an agent is listening. Otherwise the missed events are applied in
+  order when it next loads, which gives the same state.
+- **Order.** D2, D3 and D4 come first (tasks 4 to 6 here, re-cut as #2294–#2299). D1 (tasks 2 and 3) moves to the
+  next tranche: it makes worlds that are not still cheaper, and memory, not processor time, is what binds. Task 7
+  widens to a trial of both D7 and D8 (#2300).
+- **Corrections.** The production host has 31 GB; the 8 GB allowance for worlds is a setting. Measured small worlds
+  hold 186–299 MB each (#2241), so section 3's table understates small worlds.
+
 **Why a world costs so much.** Each world is its own Node process that rebuilds the whole template as live
 JavaScript objects: navigation, geometry, about 4,500 entities, caches and a copy of the code. Two worlds made from
 one template hold the same bytes twice. About 99 % of a quiet world's state is its template, and a quiet tick still
