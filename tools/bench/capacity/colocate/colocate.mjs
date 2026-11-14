@@ -213,6 +213,8 @@ async function runForm(form) {
     R.ticks.quiet = await tickWindow(six, SHORT ? 15_000 : 60_000);
     R.memory.quiet = { total: P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])) };
     log(`${form}: quiet Pss ${R.memory.quiet.total?.pssMb ?? '—'} MB; ticks ${JSON.stringify(Object.fromEntries(Object.entries(R.ticks.quiet).map(([k, v]) => [k, v?.p50Ms])))}`);
+    const ended = () => (form !== 'baseline' && P.hostExit ? `the program ended (${P.hostExit.code ?? P.hostExit.sig})` : null);
+    try {
     // one Soul walking in a small world and in an Eden world
     const [ws, we] = [small[0], eden[0]], sS = await joinSouls(ws, 1, 0), sE = await joinSouls(we, 1, 0);
     const stopA = walk(ws, sS), stopB = walk(we, sE); await sleep(WALK_S * 1000);
@@ -222,14 +224,18 @@ async function runForm(form) {
     R.ticks.busy = await tickWindow(six, SHORT ? 15_000 : 60_000);
     R.memory.walking.walks = { [ws.id]: await stopA(), [we.id]: await stopB(), [`${we.id}-busy`]: await stopC() };
     log(`${form}: walking Pss ${R.memory.walking.total?.pssMb ?? '—'} MB; busy ticks ${JSON.stringify(Object.fromEntries(Object.entries(R.ticks.busy).map(([k, v]) => [k, v?.p50Ms])))}`);
+    } catch (e) { R.walkError = scrub(ended() ?? e.message ?? e); log(`${form}: walking/busy: ${R.walkError}`); }
     // one more world: time to load, and what the others saw meanwhile
+    try {
     for (const [j, [id, kind]] of MORE.entries()) {
+      if (ended()) throw new Error(ended());
       const others = [...P.worlds.values()].filter((w) => P.alive(w)), stopWatch = watch(others), m0 = P.mem();
       const w = await P.load(worldSpec(form, id, kind, SIX.length + j)); const seen = await stopWatch(); await sleep(SHORT ? 3000 : 15_000);
       const m1 = P.mem();
       R.oneMore.push({ id, kind, loadS: w.loadS, othersMaxGapMs: Math.max(...Object.values(seen).map((x) => x.maxGapMs)), othersFailedPolls: Object.values(seen).reduce((s, x) => s + x.fail, 0), pssAddedMb: m0 && m1 ? r1(m1.pssMb - m0.pssMb) : null, pssAfterMb: m1?.pssMb ?? null });
       log(`${form}: one more ${id} (${kind}) up in ${w.loadS} s; others' longest /healthz gap ${R.oneMore.at(-1).othersMaxGapMs} ms`);
     }
+    } catch (e) { R.oneMoreError = scrub(e.message ?? e); log(`${form}: one more: ${R.oneMoreError}`); }
     // faults, one world each; a program that ended is started again with two small worlds before the next fault
     let k = 0;
     for (const [fault, target] of [['long', 's2'], ['throw', 's3'], ['alloc', small.length > 3 ? 's4' : 's1']]) {
@@ -286,6 +292,6 @@ export function report({ receipt: rc, results: rs }) {
     const o = Object.entries(x.others).map(([id, v]) => `${id} ${v.maxGapMs}·${v.failedPolls}·${v.answeringAtEnd ? 'yes' : 'no'}`).join(', ');
     L.push(`| ${r.form} | ${x.fault} | ${x.target} | ${x.targetEnded ? `after ${x.targetEnded.afterS} s (${f(x.targetEnded.code ?? x.targetEnded.sig)}${x.targetEnded.error ? `: ${x.targetEnded.error.slice(0, 60)}` : ''})` : 'no'} | ${x.programEnded ? `after ${x.programEnded.afterS} s (${f(x.programEnded.code ?? x.programEnded.sig)})` : 'no'} | ${o} |`);
   }
-  for (const r of rs) if (r.error) L.push('', `${r.form} stopped early: ${r.error}`);
+  for (const r of rs) for (const k of ['error', 'walkError', 'oneMoreError']) if (r[k]) L.push('', `${r.form} ${k === 'error' ? 'stopped early' : k === 'walkError' ? 'walking and busy phase' : 'one more world'}: ${r[k]}`);
   return L.join('\n') + '\n';
 }
