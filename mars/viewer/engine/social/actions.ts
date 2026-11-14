@@ -807,8 +807,11 @@ export function releaseForDirective(rt: Runtime, actor: string, reason?: Diagnos
 /** held-activity/1 (#2294): a seat or slot (sit, take_slot) is held, with no end, once the body is on it: its step writes
  *  the same activity each tick and keeps no progress. Any other phase (approach, turn, sit-down, stand-up) is under way. */
 export const slotHeldV1 = (exec: unknown): null | false => (exec as SlotExec).phase === 'occupied' && !(exec as SlotExec).error ? null : false;
-/** held-activity/1: a gather or campfire circle is held, with no end, while every member still in it is on its place. */
-export const gatherHeldV1 = (exec: unknown): null | false =>
-  (exec as GatherExec).kids.every((k) => k.status === 'completed' || k.status === 'failed' || k.status === 'cancelled' || k.phase === 'occupied') ? null : false;
+/** held-activity/1: a gather or campfire circle is held, with no end, while at least one member is still in it and every
+ *  member still in it is on its place (with none left it completes on its next step, so it is not held). */
+export const gatherHeldV1 = (exec: unknown): null | false => {
+  const live = (exec as GatherExec).kids.filter((k) => k.status !== 'completed' && k.status !== 'failed' && k.status !== 'cancelled');
+  return live.length > 0 && live.every((k) => k.phase === 'occupied') ? null : false;
+};
 
 export const SOCIAL_ACTIONS: ActionDef[] = [sit, takeSlot, stand, face, converse, gather, campfireCircle, ambientWander];

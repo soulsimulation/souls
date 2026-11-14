@@ -2352,8 +2352,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // CN5 (acceptance): a capability that takes no seconds (a swim) ignores them instead of refusing
     if (params.seconds !== undefined && !plan.seconds) delete params.seconds;
     if (params.seconds !== undefined) {
-      // #2294: an hour for every activity in place; a juggle or a body motion keeps its own 600 s engine bound
-      const posed = steps.some(s => s.verb === 'mars:pose_v1'), max = posed || !steps.some(s => s.verb === 'mars:juggle_v1' || s.verb === 'mars:body_motion_v1') ? ACTIVITY_SECONDS_MAX : 600;
+      // #2294: an hour for every activity in place; a juggle or a body motion keeps its own 600 s engine bound, and a
+      // stroll (ambient_wander) moves the body, so it is no activity in place and keeps 600 s
+      const posed = steps.some(s => s.verb === 'mars:pose_v1'), max = posed || !steps.some(s => s.verb === 'mars:juggle_v1' || s.verb === 'mars:body_motion_v1' || s.verb === 'ambient_wander') ? ACTIVITY_SECONDS_MAX : 600;
       if (!plan.seconds || !Number.isInteger(params.seconds) || (params.seconds as number) < 1 || (params.seconds as number) > max) return refuse('capability.params', `seconds must be an integer 1..${max} for this capability.`);
       // an activity's own pose takes the seconds (not the short shelf visits); otherwise the resting/strolling step does
       if (posed) {for (const s of steps) if (s.verb === 'mars:pose_v1' && s.params.activity !== 'browse') s.params.seconds = params.seconds;}

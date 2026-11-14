@@ -267,6 +267,24 @@ function levelGridsFor(spatial:Spatial,centre:(q:[number,number])=>boolean,t:num
   return (x:number,z:number):boolean=>{if(!paged)return centre([x,z]);const k=Math.floor(x/64)+','+Math.floor(z/64);if(!tiles.has(k))tiles.set(k,spatial.clearTester(0,[x,z],t));const r=tiles.get(k);return r?r([x,z]):false;};
 }
 
+/** #2294 held-activity/1: every live action of a runtime and whether it is held: [id, end tick | null (no end) | false (not
+ *  held)], sorted by id. Held only in its steady state, so one more step changes nothing until its end. */
+export function heldActionsV1(rt: any): [string, number | null | false][] {
+  const out: [string, number | null | false][] = [];
+  for (const id of rt.activeIds()) {
+    const rec = rt.records.get(id), ex = rt.execOf(id);
+    if (!rec || ex === undefined || rt.isCancelling(id)) { out.push([id, false]); continue; }
+    const v = rec.verb;
+    // only in its steady state: the record's own phase has caught up (the first step after a start, or a parent that
+    // reads its child, writes on the next tick), so one more step changes nothing
+    const steady = (phase: string) => rec.status === 'executing' && rec.phase === phase;
+    out.push([id, v === 'pose_v1' ? (steady('posing') ? poseHeldUntilV1(ex) : false) : v === 'sit' || v === 'take_slot' ? (steady('occupied') ? slotHeldV1(ex) : false)
+      : v === 'gather' || v === 'campfire_circle' ? (steady('gathered') ? gatherHeldV1(ex) : false)
+      : v === 'sleep_on_mat' ? (steady('sleeping') ? sleepHoldHeldV1(ex) : false) : v === 'sleep' ? (steady('sleeping') || steady('paused') ? sleepPurposeHeldV1(rt, ex) : false) : false]);
+  }
+  return out;
+}
+
 export class MarsEngine implements Engine {
   get nativeArrivalWitnessEnabledV1(){return this.cfg.nativeArrivalWitnessV1===true;}
   readonly dt = 1 / TPS;
@@ -472,17 +490,7 @@ export class MarsEngine implements Engine {
 
   /** #2294 held-activity/1: every live action and whether it is held: [id, end tick | null (no end) | false (not held)],
    *  sorted by id. Its ends enter the state hash, so a world that decides an end differently hashes differently. */
-  private heldV1(): [string, number | null | false][] {
-    const rt = this.rt, out: [string, number | null | false][] = [];
-    for (const id of rt.activeIds()) {
-      const rec = rt.records.get(id), ex = rt.execOf(id);
-      if (!rec || ex === undefined || rt.isCancelling(id)) { out.push([id, false]); continue; }
-      const v = rec.verb;
-      out.push([id, v === 'pose_v1' ? poseHeldUntilV1(ex) : v === 'sit' || v === 'take_slot' ? slotHeldV1(ex) : v === 'gather' || v === 'campfire_circle' ? gatherHeldV1(ex)
-        : v === 'sleep_on_mat' ? sleepHoldHeldV1(ex) : v === 'sleep' ? sleepPurposeHeldV1(rt, ex) : false]);
-    }
-    return out;
-  }
+  private heldV1(): [string, number | null | false][] { return heldActionsV1(this.rt); }
   /** #2294 held-activity/1: the world is still when no body is moving, no programme has a step due and no ride is out:
    *  every live action is held, every programme waits (a `rest` until a tick) or follows a held action, every ride is parked.
    *  A walk, swim, jog or climb under way, advancing or waiting (blocked, queued, leased), is never held. `untilTick` is the
