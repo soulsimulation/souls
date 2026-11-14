@@ -110,7 +110,7 @@ function walk(run, s, walks) {
       try {
         const r = await fetch(`${BASE}/w/${SLUG}/v1/edge/act`, { method: 'POST', headers: clientHeaders(s, { key }), body: JSON.stringify(actBody(id, key)), signal: AbortSignal.any([ac.signal, AbortSignal.timeout(40_000)]) });
         const d = await r.json().catch(() => null), st = serverTiming(r.headers.get('server-timing'));
-        Object.assign(rec, { status: r.status, accepted: d?.accepted, code: d?.error?.code ?? d?.code ?? null, queueMs: st.queue, worldMs: st.world, clientMs: performance.now() - t, load: r.headers.get('x-sim-load') });
+        Object.assign(rec, { status: r.status, accepted: d?.accepted, code: d?.error?.code ?? d?.code ?? null, queueMs: st.queue, worldMs: st.world, handlerMs: st.handler, waitMs: st.wait, clientMs: performance.now() - t, load: r.headers.get('x-sim-load') });
       } catch { rec.status = 0; rec.clientMs = performance.now() - t; }
       finally { run.aborts.delete(ac); }
       if (run.stopped) break;
