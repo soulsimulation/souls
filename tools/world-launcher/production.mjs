@@ -38,6 +38,12 @@ export function memAvailableMb() {
   return Math.round(freemem() / 2 ** 20);
 }
 
+/** #2233 A1: a process's proportional set size in MB (Linux /proc/<pid>/smaps_rollup: its own pages, shared ones split
+ *  between their users), or null where there is none (not Linux, the process gone). */
+export function pssMb(pid, read = (f) => readFileSync(`${process.env.SIM_PROC_ROOT ?? ''}${f}`, 'utf8')) {
+  try { const m = read(`/proc/${pid}/smaps_rollup`).match(/^Pss:\s+(\d+)\s+kB/m); return m ? Math.round(Number(m[1]) / 1024) : null; } catch { return null; }
+}
+
 /** Memory a world's pre-warmed (standby) process needs beside its running one: measured 230-240 MB for a new world and
  *  for the eden/mars forks (Node 22, code loaded, nothing opened), plus margin for the launcher's own overlap. */
 export const PREWARM_MB = 768;
@@ -92,13 +98,14 @@ export function productionSettings(cfg, origin) {
   const maxRunning = cfg.maxRunning ?? ports;
   const maxWorlds = cfg.maxWorlds ?? 200;
   for (const [k, v] of Object.entries({ maxRunning, maxWorlds })) if (!Number.isInteger(v) || v < 1) throw new Error(`launcher: ${k} must be a positive integer`);
+  if (cfg.worldsMemMb !== undefined && !(Number.isInteger(cfg.worldsMemMb) && cfg.worldsMemMb >= 0)) throw new Error('launcher: worldsMemMb must be a whole number of MB');
   if (ports > 0 && maxRunning > ports) throw new Error(`launcher: maxRunning ${maxRunning} exceeds the ${ports} child ports`);
   const base = (cfg.base ?? '').replace(/\/+$/, '');
   if (base && !/^\/[a-z][a-z0-9-]{0,31}$/.test(base)) throw new Error(`launcher: base must be one path segment like /worlds, got ${cfg.base}`);
   if (base && TAKEN_PREFIXES.includes(base)) throw new Error(`launcher: base ${base} belongs to the existing release`);
   return {
     base, devAuth, publicOrigin, authEnvFile: cfg.authEnvFile ?? null, maxWorlds, maxRunning,
-    minFreeMb: cfg.minFreeMb ?? 0, worldHeapMb: cfg.worldHeapMb ?? 0,
+    minFreeMb: cfg.minFreeMb ?? 0, worldHeapMb: cfg.worldHeapMb ?? 0, worldsMemMb: cfg.worldsMemMb ?? 0,   // #2233 A1: 0, no memory figure
     // #1649: the deploy stage (sim-worlds@<stage>.service sets SIM_STAGE=%i); `production` refuses dev-only world options
     stage: cfg.stage ?? (/^[a-z][a-z0-9-]{0,31}$/.test(process.env.SIM_STAGE ?? '') ? process.env.SIM_STAGE : null),   // keeper.mjs stageOf
   };

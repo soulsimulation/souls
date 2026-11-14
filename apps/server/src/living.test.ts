@@ -48,6 +48,17 @@ test('need-anchor/1 A4: needs read from the anchor equal the old per-tick sums t
   const before: Life = structuredClone(anchored); advanceNeedAnchor(anchored, t + 1, needRates('idle', false), 1_728_000);
   assert.notDeepEqual(anchored.anchor, before.anchor, 'a day length change rewrites the anchor');
 });
+// #2296 x #2283: running's cost is part of the anchor's rate; a change into or out of a run rewrites the anchor
+test('need-anchor/1: a Soul that runs for N ticks ends with the energy the old reader gives over the same history', () => {
+  const old = newLife(0), anchored = newLife(0), N = 7_200;
+  assert.equal(needRates('run', false).energy, -210); assert.equal(needRates('jog', false).energy, -210);
+  let t = 0;
+  for (const [act, ticks] of [['idle', 500], ['run', N], ['walk', 500], ['jog', 300], ['idle', 200]] as const) for (let i = 0; i < ticks; i++) {
+    t++; advanceNeeds(old, t, act, false); advanceNeedAnchor(anchored, t, needRates(act, false));
+  }
+  assert.ok(Math.abs(needsAt(anchored, t).energy - old.needs.energy) < 1e-6, `anchor ${needsAt(anchored, t).energy}, old reader ${old.needs.energy}`);
+  assert.ok(old.needs.energy < 80 - 210 * N / 72_000 + 1e-9, 'the run spent energy at the running rate');
+});
 
 test('one hour of world ticks is a day; enacted rest/eating/company change slow needs', () => {
   assert.equal(clockAt(72000, 0).day, 1); assert.equal(clockAt(33000, 0).hour, 17);

@@ -136,3 +136,45 @@ for (const how of ['restart', 'crash'] as const) for (const [ambient, anchors] o
     assert.deepEqual(state(after), state(control));
   });
 }
+
+// #2295 A5: two Souls taken from their agents' last acts to both asleep by the wind-down (short knobs), once ticked
+// straight through and once stopped and cold-booted twice on the way (the second boot without the rule's cache):
+// the same state hash and the same log.
+test('wind-down/1: a world stopped and cold-booted twice between the last agent act and both asleep matches one ticked straight through', { timeout: 900_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'catchup-winddown-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const knobs = { wanderTicks: 400, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 1500 };
+  const boot = (path: string) => {
+    const f = fixture(path, undefined, { durableClockV1: true }); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
+    const ledger = new EdgeLedger(f.host, f.db); return { f, rule: ledger.startBodyRule(knobs)! };
+  };
+  const control = boot(join(dir, 'world.db'));
+  await accept<unknown>(control.f.host, control.f.host.enableHeldActivitiesV1());
+  for (const n of ['ana', 'ben']) { await invite(control.f, n); await accept(control.f.host, control.f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
+  for (const m of control.f.host.minds.values()) await accept(control.f.host, control.f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
+    steps: [{ verb: 'mars:pose_v1', params: { activity: 'read', prop: 'book', seconds: 10 } }], reevalTicks: 1e9, fallback: false, trigger: 'edge-act:r_last' }));
+  const run = async (w: ReturnType<typeof boot>, to: number) => { for (let i = 0; w.f.host.engine.world.tick < to; i++) { w.f.host.tickOnce(); if (i % 200 === 0) await turn(); } };
+  const start = control.f.host.engine.world.tick, end = start + knobs.wanderTicks + knobs.boundTicks + 40;
+  const save = (w: ReturnType<typeof boot>, name: string) => { w.f.host.saveSnapshot(true); const p = join(dir, name); w.f.db.db.exec(`VACUUM INTO '${p}'`); return p; };
+  await run(control, start + knobs.wanderTicks + 250); const first = save(control, 'first.db');
+  await run(control, end);
+  const asleep = () => [...control.f.host.minds.values()].map((m) => control.rule.view(m.soulId)?.state);
+  assert.deepEqual(asleep(), ['asleep', 'asleep'], 'the control put both to sleep');
+  assert.deepEqual([...control.f.host.minds.values()].map((m) => control.f.host.engine.world.entities[m.entityId]?.human?.activity), ['nap', 'nap'], 'lying in the held sleep');
+  const still = () => (control.f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } }).stillnessV1();
+  assert.deepEqual(still(), { still: true, untilTick: null }, 'a held sleep with no end');
+  assert.equal(control.rule.nextMoveTick(), null, 'and the rule has nothing due');
+  // from a still tick, one more step changes no body and no live action
+  const bodies = () => JSON.stringify([...control.f.host.minds.values()].map((m) => control.f.host.engine.world.entities[m.entityId]));
+  const before = bodies(); control.f.host.tickOnce(); control.f.host.tickOnce();
+  assert.equal(bodies(), before, 'one more step changes nothing'); assert.deepEqual(still(), { still: true, untilTick: null });
+  assert.ok(control.f.db.events(control.f.host.worldId).filter((e) => (e.payload as { trigger?: string })?.trigger === 'edge-body').length >= 6, 'the wind-down moved them');
+  const a = boot(first); assert.equal(a.f.host.engine.world.tick, start + knobs.wanderTicks + 250);
+  await a.f.host.catchUp(250, turn);   // partway through Wander: a second stop before the walk out
+  const second = save(a, 'second.db');
+  const b0 = new (await import('node:sqlite')).DatabaseSync(second); b0.exec('DELETE FROM edge_body_v1'); b0.close();   // A3: the cache is lost
+  const b = boot(second);
+  await b.f.host.catchUp(control.f.host.engine.world.tick - b.f.host.engine.world.tick, turn);
+  assert.equal(b.f.host.engine.world.tick, end + 2);
+  assert.equal(b.rule.nextMoveTick(), null, 'nothing more is due');
+  assert.deepEqual(state(b.f), state(control.f));
+});

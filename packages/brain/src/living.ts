@@ -20,7 +20,10 @@ export function needRates(activity: string, companyNear: boolean, nourished=fals
   const asleep = /sleep/.test(activity), resting = /rest|sit/.test(activity), eating = /eat/.test(activity);
   const social = companyNear && (/talk|converse|listen|warm|gather|watch/.test(activity) || (floater && resting));
   const occupied = !/idle|stand|wait|rest|sleep/.test(activity);
-  return { energy: asleep ? 360 : resting ? (floater?360:50) : occupied ? -105 : -65, hunger: eating ? -26000 : nourished ? -4200 : asleep ? 35 : 70,
+  // #2283: running or jogging spends energy at twice the rate of other doing (the body's gait is the activity). Under
+  // need-anchor/1 a change into or out of a run is a rate change, so it rewrites the anchor like any other activity change.
+  const running = activity === 'run' || activity === 'jog';
+  return { energy: asleep ? 360 : resting ? (floater?360:50) : running ? -210 : occupied ? -105 : -65, hunger: eating ? -26000 : nourished ? -4200 : asleep ? 35 : 70,
     company: social ? -2200 : 75, restlessness: occupied ? -220 : asleep ? -50 : 95 };
 }
 /** Slow needs depend on enacted body state and elapsed world days, never wall time. The old reader: one step every tick,
