@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway, bodyPhase, nextBodyRead, WIND_DOWN_MS } from './soul/wake.mjs';
+import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway, actedBody, bodyPhase, nextBodyRead, WIND_DOWN_MS } from './soul/wake.mjs';
 import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState, pendingNotes } from './soul/eden.mjs';
 import { indexCatalog } from './soul/catalog.mjs';
 
@@ -735,8 +735,12 @@ test('#2309 A3: each phase the world reports reads as owned, wandering out or as
   assert.equal(nextBodyRead(BODY.awake, T0), T0 + 10 * MIN, 'forty minutes left: the ten-minute read comes first');
   assert.equal(nextBodyRead({ ...BODY.awake, since: T0 - 58 * MIN }, T0), T0 + 2 * MIN + 5_000, 'the hour ends in two minutes');
   assert.equal(nextBodyRead({ ...BODY.idle, since: T0 - 29 * MIN }, T0), T0 + MIN + 5_000, 'wandering: the next step is half an hour on');
-  assert.equal(nextBodyRead(BODY.asleep, T0), T0 + 10 * MIN);
+  assert.equal(nextBodyRead(BODY.zombie, T0), T0 + 10 * MIN);
+  assert.equal(nextBodyRead(BODY.asleep, T0), Infinity, 'asleep: only an act changes it, and an act asks again');
   assert.equal(nextBodyRead({ ...BODY.awake, since: T0 - 61 * MIN }, T0), T0 + 5_000, 'overdue: soon, not at once');
+  // an accepted act: an owned body's hour starts again with no read; any other phase is read again to see it come back
+  assert.deepEqual(actedBody({ ...BODY.awake, read: T0 - MIN }, T0), { body: { ...BODY.awake, since: T0, read: T0 - MIN }, read: false });
+  for (const b of [BODY.idle, BODY.zombie, BODY.asleep, undefined]) assert.deepEqual(actedBody(b, T0), { body: b, read: true });
 });
 
 test('#2309 A3: serve reads the phase from the world and look shows it, for each phase', async (t) => {

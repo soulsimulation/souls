@@ -352,11 +352,18 @@ export function bodyPhase(body, now) {
     note: end ? "An hour after your last act the world walks your body out of town; an act keeps it, reading and listening do not."
       : body.state === "asleep" ? "Asleep until you act; your next act wakes it." : "Walking out on its own; your next act brings it back." };
 }
-/** Pure: when serve reads the body again: just after the world's next step is due, at the latest `BODY_READ_MS` (× `scale`) on. */
+/** Pure: when serve reads the body again (observe is a heavy read): just after the world's next step is due, at the latest
+ *  `BODY_READ_MS` (× `scale`) on; never while asleep, which only an act ends (and an act asks again). */
 export function nextBodyRead(body, now, scale = 1) {
+  if (body?.state === "asleep") return Infinity;
   const since = Number(body?.since) > 0 ? Number(body.since) : null, late = now + BODY_READ_MS * scale;
   const due = !since ? late : body.state === "awake" ? since + WIND_DOWN_MS : body.state === "idle" ? since + WIND_DOWN_OUT_MS : late;
   return Math.max(now + 5_000 * scale, Math.min(late, due + 5_000));
+}
+/** Pure: the body after an act the agent sent was accepted, as the world's rule takes it: owned again from now. `{body, read}`:
+ *  an owned body only moves its hour on (no read); any other phase is read again soon, to see the world bring it back. */
+export function actedBody(body, now) {
+  return body?.state === "awake" ? { body: { ...body, since: now }, read: false } : { body, read: true };
 }
 /** Pure: the mind is back (an acting command, serve --stop, `wake away off`). `line`: the public line now; `own`: the command sets
  *  its own line. {wake, restore}: restore is the kept line to set again (null clears it), or undefined when nothing is set. The kept
