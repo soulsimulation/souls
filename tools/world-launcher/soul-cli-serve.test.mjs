@@ -1132,7 +1132,7 @@ test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, thro
   assert.ok(await until(() => faces(w).length === 1, 2000), 'one reflex');
   assert.ok(Date.now() - t0 < 1000, `within the second (${Date.now() - t0} ms)`);
   const f = faces(w)[0];
-  assert.deepEqual([f.capability, f.strict, typeof f.clientRef], ['face:s_bo', true, 'string']);
+  assert.deepEqual([f.capability, f.strict, typeof f.clientRef, f.reflex], ['face:s_bo', true, 'string', true], '#2309 A1: the reflex is marked');
   assert.equal(w.acts, acts + 1);
   const p = await w.cli('pending');
   assert.deepEqual(p.json.addressed.map((a) => a.text), ['Ada, over here!'], 'heard as before');
@@ -1141,6 +1141,8 @@ test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, thro
   w.say('Ada, again');
   await sleep(600);
   assert.equal(faces(w).length, 1, 'A3: once per speaker per 30 s');
+  assert.equal((await w.cli('act', 'face:s_cy')).code, 0);
+  assert.equal(w.bodies.at(-1).capability, 'face:s_cy'); assert.equal(w.bodies.at(-1).reflex, undefined, '#2309 A1: an agent\'s act is not');
 });
 
 test('#1345 A2/A3/A5: no reflex over the agent\'s own look, after auto-face:off, or with --no-reflex; a refused one is not retried', async (t) => {
