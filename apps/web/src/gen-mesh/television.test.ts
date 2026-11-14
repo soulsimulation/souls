@@ -20,6 +20,7 @@ test('off: the screen is drawn without glow (dark glass); on: it glows with a pi
   for (const channel of ['garden', 'sea', 'stars', 'test-card']) {
     const on = draw({ on: true, channel });
     assert.ok(glowing(on).length > 0, `${channel}: the screen glows`);
+    assert.ok(glowing(on).every((m) => m.material.userData.kitGlowIntensity > 0), `${channel}: the screen glows in its picture's colours, not cream-white`);
     pictures.add(colours(on));
   }
   assert.equal(pictures.size, 4, 'each channel draws a different picture');
