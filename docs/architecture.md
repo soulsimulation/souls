@@ -79,9 +79,10 @@ are no co-builders. See [god mode](architecture/godmode.md).
 ## Many worlds
 
 `tools/world-launcher/launcher.mjs` serves the world list, creates worlds from templates, and proxies `/w/<slug>/*`
-(HTTP, SSE, WebSocket) to a child process per world, started on demand on a port from a fixed range. Idle worlds are
-paused and later released; a visit wakes them. Unwatched worlds run their clock at a slower pace; on return the time
-of day jumps to the present. Each child is an ordinary world server with `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`,
+(HTTP, SSE, WebSocket) to a child process per world, started on demand on a port from a fixed range. Every
+world's clock keeps wall pace whether anyone watches or not, and every registered world is kept running. The
+tranche in [#2241](https://github.com/soulsimulation/souls/issues/2241) replaces that with still worlds that are
+jumped and unloaded, exactly. Each child is an ordinary world server with `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`,
 Clerk sign-in and `BRAIN_MODE=fake`. A Soul may travel between worlds of one launcher site. See
 [worlds](architecture/worlds.md).
 

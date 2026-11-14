@@ -10,6 +10,20 @@ to become cheap.
 The maintainer settled what this note left open, and the tranche in #2241 builds it. Where this note and #2241
 differ, #2241 holds.
 
+What #2241 changed, so that nobody builds from the older parts of this note:
+
+- **The host and its allowance.** Section 3 assumes 8 GB for worlds. The maintainer allowed 24 GB of the host's 31 GB
+  on 14 Nov. The capacity table to read is "What this gets" in #2241.
+- **Idle acts are gone, not rescheduled.** Sections 1b and 2 keep the idle mark and the body rule's timers as
+  deadlines. In #2241 a Soul moves only when its agent acts. An activity in place is held for at most an hour. A Soul
+  whose agent is silent for an hour is walked out of town by the world and sleeps until its agent acts again.
+- **Memory is a cache of worlds (replaces D4).** A still world stays in memory while there is room, leaves after ten
+  quiet minutes or at once when another world needs the room, and loads again on a request or on its own alarm.
+- **The order (replaces section 4).** Three lanes: still worlds are jumped (engine and world), unloaded and many
+  (launcher), and measurement. A cheaper tick for worlds that are not still (D1) moved to the next tranche.
+
+Sections 1a and 1b, the measurements, stand as written.
+
 - **A Soul moves only on its agent's word.** A walk ends at its goal; an activity in place is held for at most an
   hour and costs nothing meanwhile. The idle acts this note assumed (an ambient act at least every 20 s, the
   wall-timed body rule) are removed, which removes D3's weak case: a world with Souls is still whenever none is

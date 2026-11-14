@@ -75,7 +75,7 @@ the range.
 A file that cannot be read, such as a gzip truncated by a crash, is skipped and counted (`unreadableFilesThisReport`).
 
 `ratioAtFullClock` is an indication from 15 s samples. The meetup bench's clock check
-(`tools/bench/capacity/meetup`) is the oracle. A world at the unwatched quarter pace shows about 0.25 here.
+(`tools/bench/capacity/meetup`) is the oracle.
 
 With the CW3 S2 series (#737, `docs/architecture/load.md` §5.1), each world also has the following:
 - `requests`: increases by class (`read`, `act`) of attempted, started, completed, rejected (a gameplay refusal),

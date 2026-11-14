@@ -1,4 +1,4 @@
 ---
 type: docs
 ---
-A design note proposes how always-on worlds become cheap: a world costs what moves in it, not its scenery.
+The design note on what a world costs is the background for the still-worlds tranche (#2241), and the architecture, operations and roadmap pages no longer describe paused or slowed idle worlds.
