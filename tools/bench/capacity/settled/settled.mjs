@@ -21,6 +21,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statS
 import { cpus, loadavg, totalmem } from 'node:os';
 import { join, resolve, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; }, flag = (k) => argv.includes(`--${k}`);
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
@@ -57,6 +58,18 @@ const psRss = (pid) => { const r = sh('ps', ['-o', 'rss=', '-p', String(pid)]); 
 function du(dir) { let n = 0; for (const e of readdirSync(dir, { withFileTypes: true })) { const p = join(dir, e.name); n += e.isDirectory() ? du(p) : statSync(p).size; } return n; }
 const files = (dir) => readdirSync(dir).map((f) => ({ f, bytes: statSync(join(dir, f)).size })).filter((x) => /\.db(-wal|-shm)?$|\.sqlite/.test(x.f));
 const dbBytes = (dir) => ['sim.db', 'sim.db-wal'].reduce((s, f) => s + (existsSync(join(dir, f)) ? statSync(join(dir, f)).size : 0), 0);
+/** The world database's content, read-only beside the running world: bytes in use (pages not on the free list) and the
+ *  snapshots' share (count and total text). Snapshots are pruned to the newest 5 plus one a day (db.ts), so they plateau;
+ *  everything else is the growth a still world adds per hour. */
+function dbContent(dir) {
+  let db; try {
+    db = new DatabaseSync(join(dir, 'sim.db'), { readOnly: true });
+    const one = (q) => Object.values(db.prepare(q).get())[0];
+    const used = (one('PRAGMA page_count') - one('PRAGMA freelist_count')) * one('PRAGMA page_size');
+    const snap = db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(snapshot)), 0) AS bytes FROM snapshots').get();
+    return { usedBytes: used, snapshots: Number(snap.n), snapshotBytes: Number(snap.bytes), otherBytes: used - Number(snap.bytes) };
+  } catch (e) { return { error: String(e.message ?? e) }; } finally { db?.close(); }
+}
 const liveOf = (dir) => { try { return JSON.parse(readFileSync(join(dir, 'live.json'), 'utf8')); } catch { return null; } };
 
 // ------------------------------------------------------------------ one world
@@ -131,35 +144,38 @@ async function arm(world, souls, limit, heapMb) {
   try {
     if (souls) { const jp = await joinProxy(w); try { for (let i = 0; i < souls; i++) await joinSoul(join(dir, 'souls', `s${i}`), w, jp.url, i); } finally { await jp.close(); } }
     r.joinedS = +((Date.now() - w.t0) / 1000).toFixed(1);
-    const t0 = Date.now(); let heapLimitMb = null, db0 = null, t1 = null;
+    const t0 = Date.now(); let heapLimitMb = null, c0 = null, t1 = null;
     while (Date.now() - t0 < SETTLE_MS) {
       if (w.child.exitCode != null) throw new Error(`world exited (${w.child.exitCode}) while settling: ${w.tail()}`);
       const h = liveOf(w.data)?.heap; if (h) heapLimitMb = h.limitMb ?? heapLimitMb;
-      if (db0 == null && Date.now() - t0 > 90_000) { db0 = dbBytes(w.data); t1 = Date.now(); }   // after the first backup (60 s)
+      if (c0 == null && Date.now() - t0 > 90_000) { c0 = dbContent(w.data); t1 = Date.now(); }   // after the first backup (60 s)
       await sleep(5000);
     }
     const m = smaps(w.child.pid), h = liveOf(w.data)?.heap;
     Object.assign(r, {
       settledMin: +((Date.now() - t0) / 60_000).toFixed(2), rssMb: mb(m?.rss ?? psRss(w.child.pid)), pssMb: mb(m?.pss), privateMb: mb(m?.private), swapMb: mb(m?.swap), processes: m?.processes ?? 1,
       heapUsedMb: h?.usedMb ?? null, heapLimitMb: h?.limitMb ?? heapLimitMb, peakHeapMb: Math.max(w.peakHeapMb, h?.usedMb ?? 0),
-      endDirBytes: du(w.data), dbBytes: dbBytes(w.data), dbGrowthBytesPerHour: db0 == null ? null : Math.round(((dbBytes(w.data) - db0) * 3600_000) / Math.max(1, Date.now() - t1)), files: files(w.data),
+      endDirBytes: du(w.data), dbBytes: dbBytes(w.data), content0: c0, content: dbContent(w.data), contentSpanMin: t1 ? +((Date.now() - t1) / 60_000).toFixed(2) : null, files: files(w.data),
     });
+    r.otherGrowthBytesPerHour = r.content0?.otherBytes != null && r.content?.otherBytes != null && r.contentSpanMin ? Math.round(((r.content.otherBytes - r.content0.otherBytes) * 60) / r.contentSpanMin) : null;
     log(`${id}: rss ${r.rssMb} MB, pss ${r.pssMb} MB, private ${r.privateMb} MB, heap ${r.heapUsedMb}/${r.heapLimitMb} MB (peak ${r.peakHeapMb}), dir ${mb(r.newDirBytes)} -> ${mb(r.endDirBytes)} MB`);
   } catch (e) { r.error = String(e.message ?? e).split(ROOT).join('.'); log(`${id}: ${r.error}`); }
   finally { await stopWorld(w); LIVE.delete(w); }
   return r;
 }
 
-// ------------------------------------------------------------------ disk after 24 h (apps/server/src/main.ts pruneBackups)
-// Hourly backups: the newest 6 files, plus the 00:00 UTC file of each of the last 8 days. After 24 h that is 6 hourly
-// copies plus one or two midnight copies (7 counted here); after 8 days, 6 + 8 = 14. Each copy is the database at its hour.
+// ------------------------------------------------------------------ disk after 24 h (worked out, not waited for)
+// The database at hour h: everything but snapshots grows at the measured rate; snapshots plateau at the newest 5 plus the
+// first of each day (db.ts saveSnapshot: 7 after 24 h, counting two day buckets; 12 after a week), each the mean measured
+// size. Hourly backups (main.ts pruneBackups): the newest 6 plus the 00:00 UTC file of each of the last 8 days, so 7
+// after 24 h and 14 after a week; each is a copy of the database at its hour, counted here at the horizon's size (an upper
+// bound). WAL and the other files are taken as measured at the end.
 function disk24h(r, gb = 100) {
-  if (r.dbGrowthBytesPerHour == null) return null;
-  const elapsedH = r.settledMin / 60, db24 = r.dbBytes + Math.max(0, r.dbGrowthBytesPerHour) * Math.max(0, 24 - elapsedH);
-  const other = r.endDirBytes - r.files.reduce((s, x) => s + x.bytes, 0);   // everything but the databases (logs, live.json, small files)
-  const accounts = r.files.filter((x) => !/^sim\.db|^backup-/.test(x.f)).reduce((s, x) => s + x.bytes, 0);
-  const at24 = other + accounts + db24 * (1 + 7), steady = other + accounts + db24 * (1 + 14);
-  return { db24Mb: mb(db24), dir24hMb: mb(at24), dirSteadyMb: mb(steady), worldsPer100GbAt24h: Math.floor((gb * 1e9) / at24), worldsPer100GbSteady: Math.floor((gb * 1e9) / steady) };
+  const c = r.content; if (r.otherGrowthBytesPerHour == null || !c?.snapshots) return null;
+  const meanSnap = c.snapshotBytes / c.snapshots, rest = r.endDirBytes - r.files.filter((x) => /^sim\.db$|^backup-/.test(x.f)).reduce((s, x) => s + x.bytes, 0);
+  const dbAt = (h, snaps) => c.otherBytes + Math.max(0, r.otherGrowthBytesPerHour) * Math.max(0, h - r.settledMin / 60) + snaps * meanSnap;
+  const db24 = dbAt(24, 7), dbWeek = dbAt(24 * 7, 12), at24 = rest + db24 * (1 + 7), week = rest + dbWeek * (1 + 14);
+  return { meanSnapshotMb: mb(meanSnap), db24Mb: mb(db24), dir24hMb: mb(at24), dirWeekMb: mb(week), worldsPer100GbAt24h: Math.floor((gb * 1e9) / at24), worldsPer100GbWeek: Math.floor((gb * 1e9) / week) };
 }
 
 const commit = sh('git', ['-C', ROOT, 'rev-parse', 'HEAD']);
@@ -176,8 +192,8 @@ receipt.loadAfter = loadavg().map((x) => +x.toFixed(2));
 writeFileSync(join(OUT, 'results.json'), JSON.stringify({ receipt, results }, null, 1) + '\n');
 const f = (x) => (x == null ? '—' : String(x));
 const lines = [`# Settled world memory and disk (#2240)`, '', `commit ${f(commit?.slice(0, 9))} · node ${process.version} · ${receipt.cpus} CPUs · ${receipt.memGb} GB · load ${receipt.loadBefore.join(' ')} → ${receipt.loadAfter.join(' ')} · ${receipt.settleMin} min settle${SHORT ? ' · SHORT (indicative)' : ''}`, '',
-  '| world | Souls | heap limit | RSS MB | Pss MB | Private MB | V8 heap used / peak MB | data dir new → end MB | db growth MB/h | dir at 24 h MB | worlds in 100 GB (24 h · steady) |', '|---|---|---|---|---|---|---|---|---|---|---|',
+  '| world | Souls | heap limit | RSS MB | Pss MB | Private MB | V8 heap used / peak MB | data dir new → end MB | snapshots (n · mean MB) | other content MB · growth MB/h | dir at 24 h · week MB | worlds in 100 GB (24 h · week) |', '|---|---|---|---|---|---|---|---|---|---|---|---|',
   ...results.map((r) => r.error ? `| ${r.template} | ${r.souls} | ${r.limit} ${r.heapMb} | error: ${r.error.slice(0, 120)} |||||||| ` :
-    `| ${r.template} | ${r.souls} | ${r.limit} ${r.heapMb} | ${f(r.rssMb)} | ${f(r.pssMb)} | ${f(r.privateMb)} | ${f(r.heapUsedMb)} / ${f(r.peakHeapMb)} | ${mb(r.newDirBytes)} → ${mb(r.endDirBytes)} | ${f(mb(r.dbGrowthBytesPerHour))} | ${f(r.disk?.dir24hMb)} | ${f(r.disk?.worldsPer100GbAt24h)} · ${f(r.disk?.worldsPer100GbSteady)} |`)];
+    `| ${r.template} | ${r.souls} | ${r.limit} ${r.heapMb} | ${f(r.rssMb)} | ${f(r.pssMb)} | ${f(r.privateMb)} | ${f(r.heapUsedMb)} / ${f(r.peakHeapMb)} | ${mb(r.newDirBytes)} → ${mb(r.endDirBytes)} | ${f(r.content?.snapshots)} · ${f(r.disk?.meanSnapshotMb)} | ${f(mb(r.content?.otherBytes))} · ${f(mb(r.otherGrowthBytesPerHour))} | ${f(r.disk?.dir24hMb)} · ${f(r.disk?.dirWeekMb)} | ${f(r.disk?.worldsPer100GbAt24h)} · ${f(r.disk?.worldsPer100GbWeek)} |`)];
 writeFileSync(join(OUT, 'REPORT.md'), lines.join('\n') + '\n');
 log('done: REPORT.md');
