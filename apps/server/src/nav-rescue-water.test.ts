@@ -2,6 +2,7 @@
 // water is not in a pocket: swimming is its way out. On main the sweep judged it cut off from the walkable ground and moved
 // it about 6 m ashore in one tick, idle (a teleport). A god's pond; a Soul swims out and treads; the engine's rescue read
 // answers nothing for it, and the bridge's sweep after the labelling finishes (as at boot) leaves it where it treads.
+// A body whose water has no shore landing on the main area is still rescued, as the last resort (not covered here).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
@@ -15,7 +16,7 @@ test('nav-connect/1 never steps a Soul treading in deep water ashore', {timeout:
   const w = fixture(':memory:', factory, {durableClockV1: true}); w.brain.quiesce();
   const god = new GodMode(w.db, {worldId: w.host.worldId, ownerId: 'owner', tick: () => w.host.engine.world.tick, emit() {}});
   new GroundHost(w.db, w.host, god); const edge = new EdgeLedger(w.host, w.db);
-  installGroundCapabilities(edge as never, god, w.host); installEngineBridge({host: w.host, god, edge, log() {}, worldClock: false, worldLore: false});
+  installGroundCapabilities(edge as never, god, w.host); const bridge = installEngineBridge({host: w.host, god, edge, log() {}, worldClock: false, worldLore: false});
   t.after(() => {w.brain.quiesce(); w.host.stop(); edge.comms?.close(); w.db.close();});
   const tick = async (n: number) => {for (let i = 0; i < n; i++) {w.host.tickOnce(); if (i % 20 === 0) {await setImmediate(); w.host.drainInputs();}}};
   const engine = w.host.engine as unknown as {navWarmV1(ms: number): boolean; navRescueV1(id: string, budgetMs?: number): unknown};
@@ -30,8 +31,12 @@ test('nav-connect/1 never steps a Soul treading in deep water ashore', {timeout:
   assert.equal(edge.receipt(bo.soulId, b.receipt.id)!.phase, 'completed'); assert.equal(body().human.activity, 'tread');
   const at = [...body().pose.p];
   assert.equal(engine.navRescueV1(bo.entityId, Infinity), null, 'a treading body is not judged cut off');
-  // the labelling finishes now (on main this was the load-dependent boot sweep that stepped Bo ashore); the bridge sweeps
-  engine.navWarmV1(Infinity); await tick(40);
+  // the bridge's sweep, as when the labelling finishes after a boot (on main a load-dependent tick that stepped Bo ashore):
+  // marked pending with the labels ready, the next tick sweeps every Soul; count that it asked about Bo
+  let asked = 0; const read = engine.navRescueV1.bind(engine);
+  engine.navRescueV1 = (id: string, ms?: number) => {if (id === bo.entityId) asked++; return read(id, ms);};
+  engine.navWarmV1(Infinity); (bridge as unknown as {navPending: boolean}).navPending = true; await tick(40);
+  assert.ok(asked > 0, 'the sweep ran and judged Bo');
   const relocates = (w.db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='edge-relocate'").all(w.host.worldId) as {payload: string}[]).filter(r => r.payload.includes('nav-connect'));
   assert.deepEqual(relocates, [], 'no nav-connect relocate was logged');
   const p = body().pose.p; assert.ok(Math.hypot(p[0] - at[0], p[2] - at[2]) < 0.5, `Bo stayed where he treads (${JSON.stringify(at)} -> ${JSON.stringify(p)})`);
