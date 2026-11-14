@@ -20,7 +20,7 @@ import type {Program} from '@souls/engine-contract';
 import {clockAt} from '@souls/brain';
 import {REBUILD_MAX,SoulTimeline,TIMELINE_MAX,timelineView,type TimelineEntry} from './timeline.ts';
 import type {WorldState as NativeWorld} from '../../../../../mars/viewer/engine/world/types.ts';
-import {config} from '../../config.ts';
+import {worldConfig} from '../../config.ts';
 import type {WorldHost, Mind} from '../../world.ts';
 import type {Db} from '../../db.ts';
 import {readHumanCapabilitiesV1, type HumanBindingV1} from '../../human-capabilities.ts';
@@ -110,7 +110,7 @@ const WALK_VERBS = new Set(['walk_to', 'mars:walk_to']);
 const MOTION_M = 0.05;   // #790: a root displacement (m, ground plane) larger than this is first motion
 /** #1327: how long an act waits for the world to record what it handed over before it answers `pending` (HTTP 202). A
  *  slowed clock still drains every tick; only a clock that stopped after the hand-off reaches this. */
-const actCommitWaitMs = () => Number(process.env.SIM_ACT_COMMIT_WAIT_MS) > 0 ? Number(process.env.SIM_ACT_COMMIT_WAIT_MS) : 10_000;
+const actCommitWaitMs = (env: NodeJS.ProcessEnv) => Number(env.SIM_ACT_COMMIT_WAIT_MS) > 0 ? Number(env.SIM_ACT_COMMIT_WAIT_MS) : 10_000;
 const NEAR_RADIUS = 20, GO_NEAR_RADIUS = 60;
 /** srv-act-words (C): the destination words of a focus-shaped walk (vocabulary WORDS_FOCUS_SHAPE's walk arm). */
 const WALK_DEST = /^(?:please )?(?:go|walk|head)(?: over| back)? (?:to|into|inside|towards?) ([a-z0-9' -]+?)[.!]?$/;
@@ -347,10 +347,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private bodyMigrated = false;
   attachPresence(_inbox?: {soulPresence(soulId: string): {listening: boolean; at: number | null}; onSoulListen?(l: (soulId: string) => void): void; onSoulSend?(l: (soulId: string) => void): void}, knobs?: Partial<BodyKnobs>) {return this.startBodyRule(knobs);}
   startBodyRule(knobs?: Partial<BodyKnobs>) {
-    if (process.env.SIM_BODY === '0' || this.bodyRule) return this.bodyRule;
+    const worldEnv = worldConfig(this.host).env;
+    if (worldEnv.SIM_BODY === '0' || this.bodyRule) return this.bodyRule;
     // a dev/test world may shorten the clocks (SIM_BODY_KNOBS JSON, DEV_AUTH worlds only); real worlds never
     let env: Partial<BodyKnobs> = {};
-    if (process.env.SIM_BODY_KNOBS && process.env.DEV_AUTH === '1') try {env = JSON.parse(process.env.SIM_BODY_KNOBS) as Partial<BodyKnobs>;} catch {/* ignored */}
+    if (worldEnv.SIM_BODY_KNOBS && worldEnv.DEV_AUTH === '1') try {env = JSON.parse(worldEnv.SIM_BODY_KNOBS) as Partial<BodyKnobs>;} catch {/* ignored */}
     const live = (m: Mind) => {const row = this.db.soul(m.soulId); return !!row && row.retired_at === null && row.owner === m.owner && row.entity_id === m.entityId && row.world_id === this.host.worldId;};
     const soulOf = (m: Mind): BodySoul => ({soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner});
     const engine = this.host.engine as unknown as {dryGroundAtV1?: (x: number, z: number) => boolean; clearanceUpToV1?: (x: number, z: number, cap?: number, level?: number) => number; lyingRoomAtV1?: (x: number, z: number, level: number, sampleMargin: number) => boolean};
@@ -408,7 +409,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  took (`gone`, not away) come back as sleeping bodies: where they were if that is dry, clear ground in a place, else at
    *  a starting place. SIM_BODY_MIGRATE=dry reports without changing anything. */
   private migrateGone() {
-    const fading = (this.comms as unknown as {fading?: {restoreGone?(dry?: boolean): string[]}} | undefined)?.fading, dry = process.env.SIM_BODY_MIGRATE === 'dry';
+    const fading = (this.comms as unknown as {fading?: {restoreGone?(dry?: boolean): string[]}} | undefined)?.fading, dry = worldConfig(this.host).env.SIM_BODY_MIGRATE === 'dry';
     let ids: string[] = [];
     try {ids = fading?.restoreGone?.(dry) ?? [];} catch (e) {console.error('[body] migration', e instanceof Error ? e.message : e); return;}
     if (!ids.length) return;
@@ -500,7 +501,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   readonly sharedCarry: boolean;
   constructor(host: WorldHost, db: Db, placeData?: unknown, options: {ambient?: boolean; spots?: unknown;now?:()=>number; readOnly?: boolean; sharedCarry?: boolean} = {}) {
     this.host = host; this.db = db; this.ambient = options.ambient === true; this.readOnly = options.readOnly === true;
-    this.sharedCarry = options.sharedCarry ?? process.env.SIM_SHARED_CARRY === '1';
+    this.sharedCarry = options.sharedCarry ?? worldConfig(host).env.SIM_SHARED_CARRY === '1';
     this.controlNow=options.now??Date.now;
     const spots = loadSpots(options.spots); this.baseSpots = spots.data; this.spotsRefused = spots.refused;
     db.db.exec(`CREATE TABLE IF NOT EXISTS edge_receipts_v1 (world_id TEXT NOT NULL, receipt_id TEXT NOT NULL, soul_id TEXT NOT NULL, capability TEXT NOT NULL, phase TEXT NOT NULL,
@@ -1274,7 +1275,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     void done.then(() => {this.handed.delete(id); if (ref && this.handedRefs.get(ref) === id) this.handedRefs.delete(ref);});
     let timer: ReturnType<typeof setTimeout> | undefined;
     // not unref'd: the wait itself is what keeps this request alive (a test process has nothing else to)
-    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs());});
+    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs(worldConfig(this.host).env));});
     const out = await Promise.race([done, late]).finally(() => clearTimeout(timer));
     if (this.rows('receipt_id=?', id)[0]) {
       if (out !== 'late' && out.error) console.error('[edge] act committed, then its hand-off failed; answered with its receipt', id, out.error instanceof Error ? out.error.message : String(out.error));
@@ -1302,7 +1303,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     try {queued = this.host.enqueue('edge-stop', `edge:${soulId}`, payload).then(() => then?.());}
     catch (error) {console.error('[edge] stop after an accepted act could not be queued', soulId, error instanceof Error ? error.message : String(error)); return;}
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs());})]).finally(() => clearTimeout(timer));
+    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs(worldConfig(this.host).env));})]).finally(() => clearTimeout(timer));
   }
 
   // ---------------------------------------------------------------- capabilities
@@ -3494,7 +3495,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   travellerOf(soulId: string): string {
     this.travelTable ||= !!this.db.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='travel_incarnations_v1'").get();
     const row = this.travelTable ? this.db.db.prepare('SELECT traveller FROM travel_incarnations_v1 WHERE world_id=? AND soul_id=?').get(this.host.worldId, soulId) as {traveller: string} | undefined : undefined;
-    return row?.traveller ?? `${config.worldKey}/${soulId}`;
+    return row?.traveller ?? `${worldConfig(this.host).worldKey}/${soulId}`;
   }
   private travelTable = false;
   /** Set by the travel module where a world has one: this Soul's own journeys. */

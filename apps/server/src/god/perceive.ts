@@ -116,7 +116,7 @@ export type PerceiveHost = {
   /** #435 (W072): a thing kept in a lost-and-found (a container with `claim: "owner"`) is only its owner's to handle. */
   claim?: (id: string, soul: EdgeSoul) => { code: string; reason: string } | null;
   /** LAYERS (layers.ts): owner/price/hours in what Souls see; private things refuse other Souls' actuators. */
-  layers?: { active(): boolean; tag(e: Entity): string; refusal(id: string, soul: { soulId: string; name: string }): { code: string; reason: string } | null; ownerWord(id: string, soul?: { soulId: string; name: string }): string | null; hoursOf(s: Entity['schedule']): string };
+  layers?: { readonly economy?: boolean; active(): boolean; tag(e: Entity): string; refusal(id: string, soul: { soulId: string; name: string }): { code: string; reason: string } | null; ownerWord(id: string, soul?: { soulId: string; name: string }): string | null; hoursOf(s: Entity['schedule']): string };
 };
 
 /** Item 6 (F1): god-built buildings, their rooms and named areas (a plaza, a pond, a meadow) join the ledger's places
@@ -488,7 +488,7 @@ export class GodPerceive {
         const placeId = pl.place ?? v.placeId;
         // LAYERS: whose it is, to this viewer ("yours" / "Ana's, private" / "public"), its price and hours now
         const ent = lay ? this.h.model.entities.get(v.id) : undefined, word = ent ? this.h.layers!.ownerWord(v.id, soul) : null;
-        const extra = ent ? { ...(word ? { owner: word } : {}), ...(ent.price && economyOn() ? { price: ent.price } : {}), ...(ent.schedule ? { hours: this.h.layers!.hoursOf(ent.schedule) } : {}) } : {};
+        const extra = ent ? { ...(word ? { owner: word } : {}), ...(ent.price && (this.h.layers!.economy ?? economyOn()) ? { price: ent.price } : {}), ...(ent.schedule ? { hours: this.h.layers!.hoursOf(ent.schedule) } : {}) } : {};
         built.push({ ...v, placeId, here: placeId !== root && inside.has(placeId), dist: Math.round(d * 10) / 10, ...extra });
       }
       built.sort((a, b) => a.dist - b.dist || (a.id < b.id ? -1 : 1));

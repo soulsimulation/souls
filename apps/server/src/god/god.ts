@@ -56,6 +56,8 @@ export type GodEvent = { id: number; event: 'diff' | 'prayer' | 'soul' | 'build'
 
 export type GodOptions = {
   worldId: string;
+  /** Shards (#2389): the world's own environment (LAYERS); unset reads the process's. */
+  env?: Record<string, string | undefined>;
   /** Who may approve god pairing when the world has no owner yet (DEV_AUTH 'dev:admin' in local runs). */
   ownerId: string | null;
   tick: () => number;
@@ -148,7 +150,7 @@ export class GodMode {
   constructor(db: Db, opts: GodOptions | (Omit<GodOptions, 'emit'> & { emit: (m: WorldDiffMessage) => void })) {
     this.db = db; this.opts = opts as GodOptions;
     this.store = new WorldStore(db, opts.worldId);
-    this.assets = new AssetStore({ dir: opts.assetDir ?? defaultAssetDir(), db, worldId: opts.worldId });
+    this.assets = new AssetStore({ dir: opts.assetDir ?? defaultAssetDir(opts.env), db, worldId: opts.worldId });
     // CATRUN (engine fix i): the core kit is one shared, content-addressed library per process, referenced by version
     // (libraryRef), never copied into a world. A world stores only the defs it uses, adopted (pinned by hash) the first
     // time something is placed from them; its own stored hashes always win, so old worlds resolve exactly as before and
@@ -378,7 +380,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const parsed = previewBatchSchema.safeParse(batch); if (!parsed.success) return { accepted: false as const, failures: parsed.error.issues.map(i => ({ op: -1, code: 'schema', field: i.path.join('.'), detail: i.message })) };
     const gate = this.helperGate(this.callerField(parsed.data.build), parsed.data.ops); if (gate) return { accepted: false as const, failures: [gate] };
     const retirement = this.retirementFailure(parsed.data.ops); if (retirement) return { accepted: false as const, failures: [retirement] };
-    const off = deferredOp(parsed.data); if (off) return { accepted: false as const, failures: [off] };
+    const off = deferredOp(parsed.data, this.opts.env); if (off) return { accepted: false as const, failures: [off] };
     const admission = this.builds.admit(this.callerField(parsed.data.build), parsed.data, this.caller.identity); if (admission.failures) return { accepted: false as const, failures: admission.failures };
     // buildsafe/1: a dry run answers as the commit would (the same repair ops, lines and diff; a sealed room repaired or named)
     const safe = this.applySafe({ ...parsed.data, group: admission.group } as Batch, this.opts.tick(), false, this.dryOpts(admission), []);
@@ -452,7 +454,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const journalNote = note ?? normalized.note;
     const payloadHash = hashOf({ batch: normalized, build: field ?? null, expect: input.expect, expectWorldAbout: input.expectWorldAbout, preview: input.preview, note: journalNote ?? null });
     const guard = this.actGuard?.(normalized); if (guard) return guard;
-    const off = deferredOp(normalized); if (off) return { accepted: false, failures: [off] } as Result;
+    const off = deferredOp(normalized, this.opts.env); if (off) return { accepted: false, failures: [off] } as Result;
     const tick = this.opts.tick();
     // Keep public state untouched until SQL succeeds. No SQL write lock is held while planning or baking.
     let next = this.model.fork();
@@ -765,7 +767,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     if (!parsed.success) return { id: null, accepted: false as const, failures: [{ op: -1, code: 'schema', field: parsed.error.issues[0]?.path.join('.'), detail: parsed.error.issues.map(i => i.message).join('; '), fix: 'Use a valid edit batch from GET /v1/god/schema.' }] };
     const gate = this.helperGate(this.callerField(parsed.data.build), parsed.data.ops); if (gate) return { id: null, accepted: false as const, failures: [gate] };
     const retirement = this.retirementFailure(parsed.data.ops); if (retirement) return { id: null, accepted: false as const, failures: [retirement] };
-    const off = deferredOp(parsed.data); if (off) return { id: null, accepted: false as const, failures: [off] };
+    const off = deferredOp(parsed.data, this.opts.env); if (off) return { id: null, accepted: false as const, failures: [off] };
     const build = this.callerField(parsed.data.build), admission = this.builds.admit(build, parsed.data, this.caller.identity);
     if (admission.failures) return { id: null, accepted: false as const, failures: admission.failures };
     // buildsafe/1: the preview shows the batch as the commit will apply it (repairs included); its ops stay as sent
