@@ -195,7 +195,7 @@ async function godWorld(t: test.TestContext, path: string, souls: number | null)
   new LivingWorld(f.host);
   if (souls !== null) {   // a fresh world: a day, held activities, the Souls and each one's last act (a ten-second read)
     await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: JUMP_DAY, customs: [], zone: 'UTC' }, why: 'test: a day' }));
-    await accept<unknown>(f.host, f.host.enableHeldActivitiesV1());
+    for (const p of [f.host.enableContinuousDayV1(), f.host.enableHeldActivitiesV1()]) await accept<unknown>(f.host, p);
     for (const n of ['ana', 'ben'].slice(0, souls)) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
     for (const m of f.host.minds.values()) await accept(f.host, f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
       steps: [{ verb: 'mars:pose_v1', params: { activity: 'read', prop: 'book', seconds: 10 } }], reevalTicks: 1e9, fallback: false, trigger: 'edge-act:r_last' }));
@@ -210,8 +210,9 @@ test('#2298 A1: skipToV1 leaves what ticking leaves; refused while not still or 
   const dir = mkdtempSync(join(tmpdir(), 'jump-a1-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const { f } = await godWorld(t, join(dir, 'world.db'), 2), skip = (g: F) => g.host.engine as unknown as Skip;
   assert.deepEqual(skip(f).skipToV1(f.host.engine.world.tick + 5), { ok: false, reason: 'skip.not-still' }, 'two Souls starting a read');
-  await tickTo(f, f.host.engine.world.tick + 5);   // both are reading, held until the read's end
-  const eng = (f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } }).stillnessV1();
+  const still = () => (f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } }).stillnessV1();
+  for (let i = 0; i < 100 && !still().still; i++) f.host.tickOnce();   // both start reading, held to its end
+  const eng = still();
   assert.equal(eng.still, true); assert.ok(eng.untilTick! > f.host.engine.world.tick + 150, JSON.stringify(eng));
   const copy = copyOf(f, dir, 'a1.db'), from = f.host.engine.world.tick;
   assert.deepEqual(skip(f).skipToV1(eng.untilTick!), { ok: false, reason: 'skip.past-horizon' }, 'the step that ends the read is not skipped');
