@@ -558,6 +558,13 @@
     },
     {
       "step": "V5-server-full",
+      "from": "levels: enter on any condition, at once and straight to the highest that holds",
+      "to": "levels: enter on any condition, straight to the highest that holds (red and black at once, amber once it has held 12 s)",
+      "reason": "Same test, renamed when amber began waiting 12 s before it enters (lone-Soul amber fix); red and black still enter at once, straight to the highest that holds",
+      "pr": "#2334"
+    },
+    {
+      "step": "V5-server-full",
       "from": "rollback through the real CLI: words exit 2 with no act until the flag is on, then they act; off again, they refuse",
       "to": "through the real CLI: words exit 2 with no act; the offered id acts",
       "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
