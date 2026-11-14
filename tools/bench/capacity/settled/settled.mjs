@@ -4,7 +4,7 @@
 //   A1  after --settle-min minutes at the present heap limit (the launcher's own worldHeapMb for that template): RSS, Pss
 //       and Private (Private_Clean + Private_Dirty) of the world process from /proc/<pid>/smaps_rollup (Linux only);
 //   A2  the same world booted again with the heap limit set just above its need (the peak V8 heap the first run's
-//       live.json showed, plus 25 %, rounded up to 64 MB), measured the same way;
+//       live.json showed from boot on, plus 25 %, rounded up to 64 MB), measured the same way;
 //   A3  the data directory's size when new (healthz up) and at the end (the first hourly backup lands at 60 s), and
 //       the database's growth over the run, from which the 24 h size with the hourly backups is worked out.
 // Each world is booted directly with the checkout's launcher command and production decoration in an isolated data dir
@@ -74,7 +74,9 @@ async function bootWorld(dir, { slug, template, heapMb }) {
   const child = spawn(node, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   let tail = ''; const wl = (b) => { tail = (tail + b).slice(-4000); appendFileSync(join(dir, 'world.log'), b); };
   child.stdout.on('data', wl); child.stderr.on('data', wl);
-  const w = { slug, child, data, origin, t0: Date.now() }; LIVE.add(w);
+  const w = { slug, child, data, origin, t0: Date.now(), peakHeapMb: 0 }; LIVE.add(w);
+  // the V8 heap's high mark from boot on (live.json, every 2 s): the world's need includes its load and the joins
+  w.sampler = setInterval(() => { const h = liveOf(data)?.heap; if (h) w.peakHeapMb = Math.max(w.peakHeapMb, h.usedMb ?? 0); }, 2000);
   const t0 = Date.now();
   while (!(await getJ(`${origin}/healthz`, 3000)).j?.ok) {
     if (child.exitCode != null) throw new Error(`${slug} exited at boot (${child.exitCode}): ${tail.trim().split('\n').slice(-4).join(' | ').split(ROOT).join('.')}`);
@@ -84,6 +86,7 @@ async function bootWorld(dir, { slug, template, heapMb }) {
   return Object.assign(w, { bootS: +((Date.now() - t0) / 1000).toFixed(1), tail: () => tail.trim().split('\n').slice(-4).join(' | ').split(ROOT).join('.') });
 }
 async function stopWorld(w) {
+  clearInterval(w?.sampler);
   if (!w?.child || w.child.exitCode != null) return;
   w.child.kill('SIGTERM'); for (let k = 0; k < 60 && w.child.exitCode == null; k++) await sleep(500);
   if (w.child.exitCode == null) { w.child.kill('SIGKILL'); await sleep(500); }
@@ -128,17 +131,17 @@ async function arm(world, souls, limit, heapMb) {
   try {
     if (souls) { const jp = await joinProxy(w); try { for (let i = 0; i < souls; i++) await joinSoul(join(dir, 'souls', `s${i}`), w, jp.url, i); } finally { await jp.close(); } }
     r.joinedS = +((Date.now() - w.t0) / 1000).toFixed(1);
-    const t0 = Date.now(); let peakHeapMb = 0, heapLimitMb = null, db0 = null, t1 = null;
+    const t0 = Date.now(); let heapLimitMb = null, db0 = null, t1 = null;
     while (Date.now() - t0 < SETTLE_MS) {
       if (w.child.exitCode != null) throw new Error(`world exited (${w.child.exitCode}) while settling: ${w.tail()}`);
-      const h = liveOf(w.data)?.heap; if (h) { peakHeapMb = Math.max(peakHeapMb, h.usedMb ?? 0); heapLimitMb = h.limitMb ?? heapLimitMb; }
+      const h = liveOf(w.data)?.heap; if (h) heapLimitMb = h.limitMb ?? heapLimitMb;
       if (db0 == null && Date.now() - t0 > 90_000) { db0 = dbBytes(w.data); t1 = Date.now(); }   // after the first backup (60 s)
       await sleep(5000);
     }
     const m = smaps(w.child.pid), h = liveOf(w.data)?.heap;
     Object.assign(r, {
       settledMin: +((Date.now() - t0) / 60_000).toFixed(2), rssMb: mb(m?.rss ?? psRss(w.child.pid)), pssMb: mb(m?.pss), privateMb: mb(m?.private), swapMb: mb(m?.swap), processes: m?.processes ?? 1,
-      heapUsedMb: h?.usedMb ?? null, heapLimitMb: h?.limitMb ?? heapLimitMb, peakHeapMb: Math.max(peakHeapMb, h?.usedMb ?? 0),
+      heapUsedMb: h?.usedMb ?? null, heapLimitMb: h?.limitMb ?? heapLimitMb, peakHeapMb: Math.max(w.peakHeapMb, h?.usedMb ?? 0),
       endDirBytes: du(w.data), dbBytes: dbBytes(w.data), dbGrowthBytesPerHour: db0 == null ? null : Math.round(((dbBytes(w.data) - db0) * 3600_000) / Math.max(1, Date.now() - t1)), files: files(w.data),
     });
     log(`${id}: rss ${r.rssMb} MB, pss ${r.pssMb} MB, private ${r.privateMb} MB, heap ${r.heapUsedMb}/${r.heapLimitMb} MB (peak ${r.peakHeapMb}), dir ${mb(r.newDirBytes)} -> ${mb(r.endDirBytes)} MB`);
@@ -177,4 +180,4 @@ const lines = [`# Settled world memory and disk (#2240)`, '', `commit ${f(commit
   ...results.map((r) => r.error ? `| ${r.template} | ${r.souls} | ${r.limit} ${r.heapMb} | error: ${r.error.slice(0, 120)} |||||||| ` :
     `| ${r.template} | ${r.souls} | ${r.limit} ${r.heapMb} | ${f(r.rssMb)} | ${f(r.pssMb)} | ${f(r.privateMb)} | ${f(r.heapUsedMb)} / ${f(r.peakHeapMb)} | ${mb(r.newDirBytes)} → ${mb(r.endDirBytes)} | ${f(mb(r.dbGrowthBytesPerHour))} | ${f(r.disk?.dir24hMb)} | ${f(r.disk?.worldsPer100GbAt24h)} · ${f(r.disk?.worldsPer100GbSteady)} |`)];
 writeFileSync(join(OUT, 'REPORT.md'), lines.join('\n') + '\n');
-log(`done: ${join(relative(ROOT, OUT) || '.', 'REPORT.md')}`);
+log('done: REPORT.md');
