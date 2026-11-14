@@ -1889,6 +1889,19 @@ export class Together {
     if (phase === 'failed') this.p.fail(f.receipt, code ?? 'follow.ended', reason ?? 'The walk together ended.'); else this.p.complete(f.receipt);
     if (running && m) this.p.stop(f.soulId, m.entityId, f.receipt);
   }
+  /** #2297: the next tick at which `sweep` changes something, from stored state: an invitation lapses (the first sweep, every
+   *  20 ticks, after its expiresTick), a follow's time is up, a placed item reaches its wall age (at the 600-tick sweep after
+   *  it, the wall converted at 50 ms a tick). A shared proposal still pending is checked on every sweep: busy. */
+  nextDueTick(now = Date.now()): {tick: number | null; busy: boolean} {
+    const tick = this.tick, up = (t: number, n: number) => Math.ceil(Math.max(t, tick + 1) / n) * n;
+    let due: number | null = null; const at = (t: number) => {due = due === null ? t : Math.min(due, t);};
+    const invites = this.pending(); if (invites.some(i => i.kind === 'shared' || i.kind === 'ride')) return {tick: null, busy: true};
+    for (const i of invites) at(up(i.expiresTick + 1, 20));
+    for (const f of this.follows.values()) at(up(f.untilTick, 20));
+    const placed = this.placed();
+    for (const [n, it] of placed.entries()) at(placed.length - n > ITEM_LIMITS.placedWorld ? up(tick + 1, 600) : up(tick + Math.ceil(((it.placedAt ?? now) + (CONSUMABLE.has(it.kind) ? ITEM_LIMITS.consumableMinutes : ITEM_LIMITS.keepHours * 60) * 60_000 - now) / 50) + 1, 600));
+    return {tick: due, busy: false};
+  }
   /** Every second: invitations lapse; follows whose target faded end; placed items are cleared after a while. */
   sweep() {
     this.sharedReconcile();

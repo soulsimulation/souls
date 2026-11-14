@@ -70,6 +70,32 @@ The comparison runs in two places: the CI job `types-web`, on the build it alrea
 PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
 `types-web`.
 
+## Replay corpus
+
+Old history must keep its meaning. `apps/server/test/fixtures/replay-corpus/` holds frozen event logs from fake-mind
+worlds recorded in a temporary database (never production): a toy world, a green-field god world with world-edits that
+adopts the boot runtime-policy chain at its first boot, and a Mars campus world with decisions, a body assignment and a
+retire that adopts the chain mid-history, so it has pins before and after. Each entry is `<name>.log.json` (the world
+row, every event, one snapshot; never rewritten) and `<name>.pins.json` (its reader, the policies its log adopts, and
+the state and kernel hashes at a few ticks and at its head). `apps/server/src/replay-corpus.test.ts` refolds every log
+with the current engine from genesis at each pinned tick, and boots it as a restarting server does, from genesis and from
+its snapshot, to the head. It runs in the server CI shards, which engine, fold, kernel and protocol paths select.
+
+A runtime policy adopted at boot (`adoptBootRuntimePoliciesV1`) is prospective: a log recorded before its adoption has
+no rules event for it and must refold to the same pins. A pin that moves means a change reached history that never
+adopted it: ship it as a logged rules fact or a documented reader instead.
+
+```sh
+node apps/server/test/fixtures/replay-corpus/record.ts <name> --recipe <toy|god-greenfield|mars-campus>   # add a log
+node apps/server/test/fixtures/replay-corpus/record.ts --check            # compare every entry's pins with this tree
+node apps/server/test/fixtures/replay-corpus/record.ts --write <name|all> # re-pin a deliberate change from the frozen logs
+```
+
+When a new boot-adopted policy merges, add an entry recorded after it under a new name (for example
+`mars-campus-2 --recipe mars-campus`); the older entries, recorded before it, and their pins stay as they are. A
+`--write` re-pin is its own reviewed commit with its reason, like the walk and bundle baselines. Logs are never
+re-recorded: the recorder refuses an existing name.
+
 ## Conformance
 
 `packages/conformance` bakes, places and furnishes every core library def revision at its parameter endpoints and
@@ -217,6 +243,35 @@ gh workflow run capacity-qualify.yml -f ref=<branch> -f quiet_host=true \
 - **Long windows (CW8 A2, #955).** `active_min` sets the activity window, from 20 to 240 minutes; blank means 20. It is refused unless `(minutes + 15) × runs ≤ 280`, so the run fits the job's 300 min: for example, `profile=meetup repeats=1 active_min=60`. `telemetry=true` runs the launcher's collector beside the worlds. Each run's `result.json` carries `growth`, the trends after an explicit warm-up; see the bench README's "Long windows" section.
 - **What it qualifies.** The host is the maintainer's machine. Its verdict is labelled with `host_class` and is not
   a production-class result unless that host is the production class.
+
+## A hundred worlds at once (#2301)
+
+`tools/bench/capacity/hundred/hundred.mjs` demonstrates the still-worlds tranche (#2241) end to end through the
+checkout's own launcher, fake minds, every file under its `--out`. It builds the fixture (100 small `hello-hamlet`
+worlds and 4 `eden-2026` worlds, one or two Souls each, booted once from genesis and stopped), then: every world's agent
+acts at seeded gaps of 2 to 10 minutes for an hour with world memory for about 25 small worlds (A6); all agents stop
+together and every listening world has a reminder due at one shared instant, then a crawler fetches every page (A7);
+every world should unload (A3); one world listens with a reminder inside the gap (A5); after an hour, one act each to a
+sleeping Soul in a small and an Eden world (A4); and for three sampled worlds a twin, the fixture's start state ticked
+straight through (`SIM_SKIP=0`) over the world's own log, must reach the state hash the jumped world wrote (A2). A8 is
+worked out by hand from its report.
+
+Run it on a `souls-timed` runner through the timed-run workflow (command `hundred`; the report, `results.json` and the
+log are the artifact; Soul folders and world data stay on the runner):
+
+```bash
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short'                 # A9: under 20 min, 6 + 1 worlds
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--fixture-only'          # A1 alone: build the 104 worlds
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short --small 3 --eden 1 --active-min 4'
+```
+
+`--short` uses short knobs, stated in the report: agents act every 0.5 to 1.5 minutes for 6, the wind-down is shortened
+with `SIM_BODY_KNOBS` (silent 1 minute, walked out within 2; dev worlds only), a still world unloads after 1 quiet
+minute instead of 10, and the gap is 3 minutes. The full run (no `--short`: 60 active minutes, the real one-hour
+wind-down, a one-hour gap) takes about three and a half hours; the timed-run job allows `hundred` 270 minutes (every
+other command keeps 120). A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
+wind-down, the load queue, `--worlds-mem-mb`) is listed under "Missing from this checkout" with its issue, and the
+parts that need it are reported as not shown, never as passed.
 
 ## Playtests and the swarm director
 
