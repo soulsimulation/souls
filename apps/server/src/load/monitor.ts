@@ -10,6 +10,10 @@ import {publishTickWindow, sharedApi, type TickWindow} from './api-times.ts';
 
 export type Signals = {service: number; loopP99Ms: number; heapFrac: number; gcFrac: number; oldestMs: number};
 const RANK: Record<Level, number> = {green: 0, amber: 1, red: 2, black: 3};
+/** #2124: what enters amber (its enter conditions, or the step down from red) and what holds it (the amber lower band a
+ *  signal is not yet under, else `dwell`: every signal is under it and the 30 s calm runs). */
+export type AmberEntry = 'service' | 'loop' | 'heap' | 'queue' | 'red';
+export type AmberHold = 'service' | 'loop' | 'heap' | 'dwell';
 export const STEP_DOWN_MS = 30_000, BLACK_SERVICE_MS = 30_000;
 
 /** Loop-delay bands are relative to the world's own quiet baseline (LOAD-CONTRACT §1): a large world whose quiet ticks
@@ -26,8 +30,31 @@ export class LevelState {
   baselineMs = 0;
   private calmSince: number | null = null;
   private starvedSince: number | null = null;   // tick service < 0.2 since
+  /** #2124: queue age raises amber on a fresh queue only. After amber steps down, the queue amber's own smaller budget left
+   *  behind does not raise it again until it has once been under 2 s: re-entering at once held amber ~94 % of a 24-Soul run. */
+  private queueArmed = true;
+  /** #2124: the signals that caused the last entry into amber (empty until one). */
+  amberEntry: AmberEntry[] = [];
+  /** #2124: the amber enter conditions that hold on this sample (the queue only while armed). */
+  amberEnters(s: Signals): AmberEntry[] {
+    const b = this.baselineMs, out: AmberEntry[] = [];
+    if (s.service < 0.8) out.push('service');
+    if (s.loopP99Ms > loopEnter(200, b)) out.push('loop');
+    if (s.heapFrac > 0.70) out.push('heap');
+    if (this.queueArmed && s.oldestMs > 2000) out.push('queue');
+    return out;
+  }
+  /** #2124: what keeps amber from stepping down on this sample. */
+  amberHolds(s: Signals): AmberHold[] {
+    const b = this.baselineMs, out: AmberHold[] = [];
+    if (s.service < 0.9) out.push('service');
+    if (s.loopP99Ms >= loopLeave(100, b)) out.push('loop');
+    if (s.heapFrac >= 0.60) out.push('heap');
+    return out.length ? out : ['dwell'];
+  }
   enterOf(s: Signals, now: number): Level {
     const b = this.baselineMs;
+    if (s.oldestMs <= 2000) this.queueArmed = true;
     if (s.service < 0.2) this.starvedSince ??= now; else this.starvedSince = null;
     if ((s.heapFrac > 0.92 && s.gcFrac > 0.40) || (this.starvedSince !== null && now - this.starvedSince >= BLACK_SERVICE_MS)) return 'black';
     if (s.service < 0.5 || s.loopP99Ms > loopEnter(1000, b) || s.heapFrac > 0.85) return 'red';
@@ -35,7 +62,7 @@ export class LevelState {
     // 8 ms/frame, so a queue that red itself starves could keep red forever (the eden2 bench, 2026-10-31: red held for
     // whole windows at tick service 1.0 while the launcher shed every read as world.busy). Whether the thread is behind
     // is what service / loop delay / heap say.
-    if (s.service < 0.8 || s.loopP99Ms > loopEnter(200, b) || s.heapFrac > 0.70 || s.oldestMs > 2000) return 'amber';
+    if (this.amberEnters(s).length) return 'amber';
     return 'green';
   }
   below(level: Level, s: Signals): boolean {
@@ -54,10 +81,15 @@ export class LevelState {
   }
   update(s: Signals, now: number): Level {
     const enter = this.enterOf(s, now);
-    if (RANK[enter] > RANK[this.level]) { this.level = enter; this.calmSince = null; return this.level; }
+    if (RANK[enter] > RANK[this.level]) { if (enter === 'amber') this.amberEntry = this.amberEnters(s); this.level = enter; this.calmSince = null; return this.level; }
     if (this.level === 'green' || !this.below(this.level, s)) { this.calmSince = null; return this.level; }
     this.calmSince ??= now;
-    if (now - this.calmSince >= STEP_DOWN_MS) { this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null; }
+    if (now - this.calmSince >= STEP_DOWN_MS) {
+      this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null;
+      if (this.level === 'amber') this.amberEntry = ['red'];
+      // #2124: only a queue still past 2 s on the step-down sample is disarmed; a fresh one between bands keeps its hint
+      if (this.level === 'green' && s.oldestMs > 2000) this.queueArmed = false;
+    }
     return this.level;
   }
 }
@@ -169,11 +201,14 @@ export class LoadMonitor {
   private a: Float64Array;
   private tickHook: {afterTickComplete(): void} | null = null;
   private seenTick = -1;
+  /** #2124: what held amber on the last sample (the tick window counts the time to the next sample against it). */
+  private holds: AmberHold[] = [];
   private now: () => number;
   private o: MonitorOpts;
   /** #1944 A3: the open tick window: its start (wall), each tick's own ms, late ticks, the longest gap, ms at each level
    *  (by RANK) and when that was last counted; the previous tick's start and due time (mono) and whether it was late. */
-  private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0};
+  private tw = {from: 0, ms: [] as number[], late: 0, maxGap: 0, levels: [0, 0, 0, 0], amberMs: {service: 0, loop: 0, heap: 0, dwell: 0} as Record<AmberHold, number>,
+    entries: {service: 0, loop: 0, heap: 0, queue: 0, red: 0} as Record<AmberEntry, number>, levelAt: 0, prevStart: 0, prevDue: 0, prevLate: false, interval: 0};
   /** The last completed tick window (also in live.json and /healthz as `api.ticks`). */
   tickWindow: TickWindow | null = null;
   constructor(o: MonitorOpts) { this.o = o; this.a = o.shared ?? sharedLoad; this.now = o.now ?? Date.now; this.windowMs = o.windowMs ?? 5000; this.baseline = new QuietBaseline(o.baselineMs); this.state.baselineMs = this.baseline.value; }
@@ -260,6 +295,7 @@ export class LoadMonitor {
     const warm = this.startedAt !== null && now - this.startedAt < 2 * this.windowMs, judged = warm ? {...this.signals, loopP99Ms: 0} : this.signals;
     const from = this.level, to = this.o.drill ? (this.state.level = this.o.drill) : this.state.update(judged, now);
     if (to !== from) this.changed(from, to);
+    this.holds = to === 'amber' ? this.state.amberHolds(judged) : [];
     if (to === 'black') {
       this.blackSince ??= now;
       if (now - this.blackSince >= (this.o.blackLimitMs ?? 60_000)) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
@@ -306,20 +342,25 @@ export class LoadMonitor {
     const w = this.tw;
     if (!owing) w.prevStart = 0;   // a paused or stopped clock owes no ticks: the next one is not late
     if (!w.from) { w.from = w.levelAt = now; return; }
-    w.levels[RANK[this.level]] += Math.max(0, now - w.levelAt); w.levelAt = now;
+    const dt = Math.max(0, now - w.levelAt);
+    w.levels[RANK[this.level]] += dt; w.levelAt = now;
+    if (this.level === 'amber') for (const k of this.holds) w.amberMs[k] += dt;
     if (now - w.from < TICK_WINDOW_MS) return;
     const ms = w.ms.sort((x, y) => x - y), q = (p: number) => ms.length ? ms[Math.min(ms.length - 1, Math.floor(p * ms.length))] : 0;
     const span = w.levels.reduce((x, y) => x + y, 0) || 1, share = (i: number) => w.levels[i] / span;
     this.tickWindow = {at: now, windowS: (now - w.from) / 1000, ticks: ms.length, tickMs: {p50: q(0.5), p99: q(0.99)}, lateTicks: w.late, longestGapMs: w.maxGap,
-      levels: {green: share(0), amber: share(1), red: share(2), black: share(3)}};
+      levels: {green: share(0), amber: share(1), red: share(2), black: share(3)},
+      amberS: {service: w.amberMs.service / 1000, loop: w.amberMs.loop / 1000, heap: w.amberMs.heap / 1000, dwell: w.amberMs.dwell / 1000}, amberEntries: {...w.entries}};
     publishTickWindow(this.tickWindow, this.o.api ?? sharedApi);
     w.from = now; w.ms = []; w.late = 0; w.maxGap = 0; w.levels = [0, 0, 0, 0];
+    w.amberMs = {service: 0, loop: 0, heap: 0, dwell: 0}; w.entries = {service: 0, loop: 0, heap: 0, queue: 0, red: 0};
   }
   /** Mark a main-thread turn without a full sample (after a tick). */
   turn() { this.a[S.lastTurnAt] = this.now(); }
   private changed(from: Level, to: Level) {
-    const s = this.signals;
-    console.log(`[load] ${from}→${to}: service ${s.service.toFixed(2)}, loop p99 ${Math.round(s.loopP99Ms)} ms (quiet ${Math.round(this.state.baselineMs)}), heap ${Math.round(100 * s.heapFrac)}%, gc ${Math.round(100 * s.gcFrac)}%, queue ${(s.oldestMs / 1000).toFixed(1)} s`);
+    const s = this.signals, why = to === 'amber' && !this.o.drill ? this.state.amberEntry : [];
+    for (const k of why) this.tw.entries[k]++;
+    console.log(`[load] ${from}→${to}${why.length ? ` (${why.join(', ')})` : ''}: service ${s.service.toFixed(2)}, loop p99 ${Math.round(s.loopP99Ms)} ms (quiet ${Math.round(this.state.baselineMs)}), heap ${Math.round(100 * s.heapFrac)}%, gc ${Math.round(100 * s.gcFrac)}%, queue ${(s.oldestMs / 1000).toFixed(1)} s`);
     this.o.onLevel?.(from, to, s);
     for (const [name, dial] of this.dials) { try { dial(to); } catch (e) { console.error(`[load] dial ${name} failed`, e); } }
   }

@@ -55,6 +55,8 @@ export type HarvestHost = {
   actOpen?(body: string, capability: string): boolean;
   /** End this body's open act now, failed by name. */
   actFail?(body: string, capability: string, why: Refusal): void;
+  /** #2085: record on this body's open act, in its receipt, that the pick landed (a restart then ends it completed). */
+  actApplied?(body: string, capability: string): void;
 };
 
 export function createHarvest(h: HarvestHost) {
@@ -227,7 +229,7 @@ export function createHarvest(h: HarvestHost) {
         if (!fired.has(key) && handActuatorFrame(am, (now - am.startTick) * d).contact) {
           fired.add(key); let failure: Refusal | null;
           try { failure = pick(body, p.vessel, p.planter); } catch (e) { h.log(`harvest: ${(e as Error).message}`); failure = { code: 'harvest.refused', reason: 'The world could not apply the pick; nothing was picked.' }; }
-          if (failure) h.log(`harvest ${p.planter}: ${failure.code}`);
+          if (failure) h.log(`harvest ${p.planter}: ${failure.code}`); else h.actApplied?.(body, `object:${p.vessel}:harvest`);
           touched.set(body, { vessel: p.vessel, failure });
         }
       } else if (now > until) {

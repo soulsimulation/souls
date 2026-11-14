@@ -55,12 +55,12 @@ test('A1: a call whose own deadline passes before the world listens is refused w
     const { first } = await booting();
     const [act, wait] = await Promise.all([call(1, '/v1/edge/act', { method: 'POST' }), call(2, '/v1/edge/wait?timeout=1')]);
     for (const [r, ms] of [[act, 600], [wait, 1000]]) {
-      assert.equal(r.status, 503); assert.equal(r.body.code, 'world.starting'); assert.equal(r.retry, '5'); assert.equal(r.body.limit.scope, 'boot');
-      assert.match(r.body.message, /still booting \(for \d+ s\); this call waited \d+ s for it, its own limit/);
+      assert.equal(r.status, 503); assert.equal(r.body.code, 'world.waking'); assert.equal(r.retry, '5'); assert.equal(r.body.limit.scope, 'boot');
+      assert.match(r.body.message, /still loading \(for \d+ s\); this call waited \d+ s for it, its own limit/);
       assert.ok(r.ms >= ms - 50 && r.ms < ms + 1000, `refused at its deadline (${r.ms.toFixed(0)} ms, deadline ${ms} ms)`);
     }
     assert.equal(L.pool.status('late').status, 'starting', 'refused while it still boots; the boot goes on');
-    assert.equal((await first).status, 200);
+    assert.equal((await first).body.code, 'world.waking', '#2304: the call that started the load is held to the same limit');
     console.log(`# A1: past their deadlines: act refused at ${act.ms.toFixed(0)} ms, wait at ${wait.ms.toFixed(0)} ms: "${act.body.message}"`);
   } finally { await L.close(); }
 });

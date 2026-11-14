@@ -35,12 +35,13 @@ test('#1381 S1 S6: a walk under way stops where it is; the walk ends act.stopped
   assert.ok(offered && offered.available, 'offered while the walk runs'); assert.match(offered!.label, /walk:knoll/);
   const here = async () => ((await req('/v1/edge/here?include=doHere', token)).data.here?.doHere ?? []) as {id: string}[];
   assert.ok((await here()).some(c => c.id === 'stop:current'), 'here offers it while the walk runs');
-  // resolve: the words mean it while it runs
-  assert.notEqual((await req('/v1/edge/resolve', token, {capability: 'wait'})).data.resolve.would?.capability, 'stop:current', 'bare "wait" is not a stop');
+  // the words mean it while it runs (the dry run of act)
+  const dry = (capability: string) => w.edge.intents.dryRun(w.soul, {capability}) as any;
+  assert.notEqual(dry('wait').would?.capability, 'stop:current', 'bare "wait" is not a stop');
   // other words keep their own reading, never a looser match on the stop's label ("stop singing" is the act's own stop)
-  for (const words of ['stop walking', 'stop singing']) assert.notEqual((await req('/v1/edge/resolve', token, {capability: words})).data.resolve.would?.capability, 'stop:current', `${words} is not stop:current`);
+  for (const words of ['stop walking', 'stop singing']) assert.notEqual(dry(words).would?.capability, 'stop:current', `${words} is not stop:current`);
   for (const words of ['stop', 'pause', 'stop what you are doing', 'cancel', 'wait, pause']) {
-    const r = (await req('/v1/edge/resolve', token, {capability: words})).data.resolve;
+    const r = dry(words);
     assert.equal(r.would?.capability, 'stop:current', `${words}: ${JSON.stringify(r).slice(0, 300)}`);
   }
   const posture = body().human?.activity, at = [...body().pose.p];
@@ -58,7 +59,7 @@ test('#1381 S1 S6: a walk under way stops where it is; the walk ends act.stopped
   assert.ok(!(await caps()).some(c => c.id === 'stop:current'), 'not offered once nothing runs');
   assert.ok(!(await here()).some(c => c.id === 'stop:current'), 'nor in here');
   // with nothing open, "stop" means what it meant (stand:here)
-  assert.notEqual((await req('/v1/edge/resolve', token, {capability: 'stop'})).data.resolve.would?.capability, 'stop:current');
+  assert.notEqual(dry('stop').would?.capability, 'stop:current');
 });
 
 test('#1381 S2 S3: nothing running is refused naming the last act, and writes nothing; an ended receipt is refused act.already-ended', {timeout: 300000}, async t => {

@@ -11,7 +11,7 @@ import {AsyncLocalStorage} from 'node:async_hooks';
 
 export const API_ROUTES = [
   'edge:act', 'edge:say', 'edge:converse', 'edge:objects/:id/act', 'edge:plan', 'edge:around',
-  'edge:here', 'edge:observe', 'edge:capabilities', 'edge:view', 'edge:objects', 'edge:resolve',
+  'edge:here', 'edge:observe', 'edge:capabilities', 'edge:view', 'edge:objects',
   'edge:listen', 'edge:wait', 'edge:inbox/:id', 'edge:inbox/:id/ack', 'edge:inbox/:id/result', 'edge:receipts/:id',
   'edge:catalog', 'edge:live', 'edge:public', 'edge:other', 'god:read', 'god:write', 'god:other', 'world:other',
 ] as const;
@@ -53,7 +53,8 @@ const PARTS = ['handler', 'wait', 'commit'] as const;
 const PART0 = HEAD + API_ROUTES.length * KINDS * WINDOWS * SERIES;
 const partAt = (k: number, win: number) => PART0 + (k * WINDOWS + win) * SERIES;
 const OVER0 = PART0 + PARTS.length * WINDOWS * SERIES;
-const TICK_FIELDS = ['at', 'windowMs', 'ticks', 'p50', 'p99', 'late', 'longestGapMs', 'green', 'amber', 'red', 'black'] as const;
+const TICK_FIELDS = ['at', 'windowMs', 'ticks', 'p50', 'p99', 'late', 'longestGapMs', 'green', 'amber', 'red', 'black',
+  'holdService', 'holdLoop', 'holdHeap', 'holdDwell', 'enterService', 'enterLoop', 'enterHeap', 'enterQueue', 'enterRed'] as const;
 const TICK0 = OVER0 + WINDOWS;
 export const API_SLOTS = TICK0 + TICK_FIELDS.length;
 export const newSharedApi = () => new Float64Array(new SharedArrayBuffer(API_SLOTS * Float64Array.BYTES_PER_ELEMENT));
@@ -103,7 +104,9 @@ export type ApiRouteStats = {n: number; queue: Quantiles; handler: Quantiles; nA
 /** #1944 A3: the monitor's last completed tick window: the tick's own ms, ticks that started over 25 ms after they were
  *  due, the longest start-to-start gap, and the share of the window at each load level. `at` = its end (epoch ms). */
 export type TickWindow = {at: number; windowS: number; ticks: number; tickMs: {p50: number; p99: number}; lateTicks: number; longestGapMs: number;
-  levels: {green: number; amber: number; red: number; black: number}};
+  levels: {green: number; amber: number; red: number; black: number};
+  /** #2124: seconds at amber per signal that held it (monitor.ts AmberHold; one sample can count under several), and the entries into amber per cause. */
+  amberS: {service: number; loop: number; heap: number; dwell: number}; amberEntries: {service: number; loop: number; heap: number; queue: number; red: number}};
 export type ApiBlock = {windowS: number; sinceS: number; bucketX: 1.25; routes: Partial<Record<ApiRoute, ApiRouteStats>>; ticks?: TickWindow};
 
 const r1 = (x: number) => Math.round(10 * x) / 10;
@@ -140,7 +143,9 @@ export function apiOf(a: Float64Array = sharedApi, now = Date.now()): ApiBlock {
 
 /** #1944 A3: the monitor publishes each completed tick window (monitor.ts). */
 export function publishTickWindow(w: TickWindow, a: Float64Array = sharedApi) {
-  const v = {at: w.at, windowMs: 1000 * w.windowS, ticks: w.ticks, p50: w.tickMs.p50, p99: w.tickMs.p99, late: w.lateTicks, longestGapMs: w.longestGapMs, ...w.levels};
+  const v = {at: w.at, windowMs: 1000 * w.windowS, ticks: w.ticks, p50: w.tickMs.p50, p99: w.tickMs.p99, late: w.lateTicks, longestGapMs: w.longestGapMs, ...w.levels,
+    holdService: w.amberS.service, holdLoop: w.amberS.loop, holdHeap: w.amberS.heap, holdDwell: w.amberS.dwell,
+    enterService: w.amberEntries.service, enterLoop: w.amberEntries.loop, enterHeap: w.amberEntries.heap, enterQueue: w.amberEntries.queue, enterRed: w.amberEntries.red};
   TICK_FIELDS.forEach((k, i) => { a[TICK0 + i] = v[k]; });
 }
 function tickWindowOf(a: Float64Array): TickWindow | undefined {
@@ -148,7 +153,9 @@ function tickWindowOf(a: Float64Array): TickWindow | undefined {
   if (!f('at')) return undefined;
   const sh = (k: 'green' | 'amber' | 'red' | 'black') => Math.round(100 * f(k)) / 100;
   return {at: f('at'), windowS: r1(f('windowMs') / 1000), ticks: f('ticks'), tickMs: {p50: r1(f('p50')), p99: r1(f('p99'))}, lateTicks: f('late'), longestGapMs: r1(f('longestGapMs')),
-    levels: {green: sh('green'), amber: sh('amber'), red: sh('red'), black: sh('black')}};
+    levels: {green: sh('green'), amber: sh('amber'), red: sh('red'), black: sh('black')},
+    amberS: {service: r1(f('holdService')), loop: r1(f('holdLoop')), heap: r1(f('holdHeap')), dwell: r1(f('holdDwell'))},
+    amberEntries: {service: f('enterService'), loop: f('enterLoop'), heap: f('enterHeap'), queue: f('enterQueue'), red: f('enterRed')}};
 }
 
 /** #1944 A1: marks an act request leaves as it runs (admission.ts starts one per POST /v1/edge/act; the ledger fills it).
