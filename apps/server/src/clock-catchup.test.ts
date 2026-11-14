@@ -159,7 +159,7 @@ test('wind-down/1: a world stopped and cold-booted twice between the last agent 
   assert.equal((control.f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } }).stillnessV1().untilTick, null, 'a held sleep with no end');
   assert.ok(control.f.db.events(control.f.host.worldId).filter((e) => (e.payload as { trigger?: string })?.trigger === 'edge-body').length >= 6, 'the wind-down moved them');
   const a = boot(first); assert.equal(a.f.host.engine.world.tick, start + knobs.wanderTicks + 250);
-  await a.f.host.catchUp(knobs.zombieTicks - 100, turn);   // partway: a second stop before the walk out
+  await a.f.host.catchUp(250, turn);   // partway through Wander: a second stop before the walk out
   const second = save(a, 'second.db');
   const b0 = new (await import('node:sqlite')).DatabaseSync(second); b0.exec('DELETE FROM edge_body_v1'); b0.close();   // A3: the cache is lost
   const b = boot(second);

@@ -39,7 +39,7 @@ export type Posture = 'standing' | 'moving' | 'seated' | 'lying' | 'standby' | '
 export type BodySoul = {soulId: string; entityId: string; name: string; owner: string};
 export type WindDownPhase = 'wander' | 'leg' | 'zombie' | 'asleep';
 /** The rule's state, carried by every decision it logs: enough to rebuild it from the log. */
-export type WindDown = {rule: 'wind-down/1'; phase: WindDownPhase; at: number; last: number; wander: number; zombie: number | null};
+export type WindDown = {rule: 'wind-down/1'; phase: WindDownPhase; at: number; last: number; wander: number; zombie: number | null; spot?: [number, number] | null};
 
 /** What the rule needs from the world (the Ledger implements it; tests may fake it). */
 export type BodyPort = {
@@ -125,7 +125,7 @@ export class BodyRule {
   /** A logged event was applied (live, never during replay): an agent act makes its Soul Owned from this tick. */
   applied(e: {tick: number; kind: string; payload: unknown}) {
     const p = e.payload as {soulId?: string; trigger?: unknown; reflex?: unknown} | null;
-    if (!p?.soulId || !isAgentAct(e.kind, p)) return;
+    if (!p?.soulId || !(isAgentAct(e.kind, p) || e.kind === 'birth')) return;
     const s: St = {last: e.tick, wander: null, zombie: null, slept: false, next: null, spot: null};
     s.next = this.due(p.soulId, s, e.tick); this.st.set(p.soulId, s);
     this.publishIf(p.soulId, s, e.tick);
@@ -141,7 +141,9 @@ export class BodyRule {
     if (!this.booted) {this.booted = true; this.boot(tick);}
     const due = this.nextMoveTick();
     if (tick % 20 !== 0 && (due === null || tick < due) && !this.migrate.size) return;
-    for (const soul of this.port.souls()) {
+    const here = this.port.souls(), ids = new Set(here.map(x => x.soulId));
+    for (const id of [...this.st.keys()]) if (!ids.has(id)) this.st.delete(id);
+    for (const soul of here) {
       const migrate = this.migrate.delete(soul.soulId);
       if (migrate || !this.st.has(soul.soulId)) this.adopt(soul, tick, migrate);
       const s = this.st.get(soul.soulId)!;
@@ -161,7 +163,7 @@ export class BodyRule {
         try {p = JSON.parse(r.payload) as typeof p;} catch {continue;}
         const id = p.soulId; if (!id || !want.has(id) || found.has(id)) continue;
         const w = p.trigger === 'edge-body' ? p.windDown : undefined;
-        if (w?.rule === 'wind-down/1') found.set(id, {last: w.last, wander: w.wander, zombie: w.zombie, slept: w.phase === 'asleep', next: null, spot: null});
+        if (w?.rule === 'wind-down/1') found.set(id, {last: w.last, wander: w.wander, zombie: w.zombie, slept: w.phase === 'asleep', next: null, spot: w.spot ?? null});
         else if (isAgentAct(r.kind, p) || r.kind === 'birth') found.set(id, {last: r.tick, wander: null, zombie: null, slept: false, next: null, spot: null});
         else continue;
         if (found.size === want.size) break;
@@ -169,16 +171,20 @@ export class BodyRule {
     }
     for (const [id, s] of found) {
       // the cache may know more than the log of the same act (a wander start the guard refused is not logged)
-      const r = this.row(id);
-      if (r?.rule === 'wind-down/1' && r.last_act === s.last && s.wander === null && r.wander_at !== null) {s.wander = r.wander_at; s.zombie = r.zombie_at; s.slept = !!r.slept;}
+      const r = this.row(id), kn = this.knobs(id);
+      // a Wander the cache started earlier than the hour after this act: an A7 migration whose first decision the log missed
+      if (r?.rule === 'wind-down/1' && s.wander === null && r.wander_at !== null && r.wander_at >= s.last && r.wander_at < s.last + kn.wanderTicks) Object.assign(s, {last: r.last_act, wander: r.wander_at, zombie: r.zombie_at, slept: !!r.slept});
       else if (r && r.rule === null && r.state !== 'awake') this.enterWander(s, tick);   // A7: the old rule's idle, zombie or asleep body
+      if (s.wander === null && tick > s.last + kn.wanderTicks) s.wander = s.last + kn.wanderTicks;
+      if (!s.spot && r?.rule === 'wind-down/1' && r.last_act === s.last && r.anchor_x !== null && r.anchor_z !== null) s.spot = [r.anchor_x, r.anchor_z];
       s.next = this.due(id, s, tick); this.st.set(id, s);
     }
   }
   /** A Soul the log does not name (a new Soul whose birth is not in this log, or a migration): its state starts now. */
   private adopt(soul: BodySoul, tick: number, migrate: boolean) {
     const r = this.row(soul.soulId), mine = r?.rule === 'wind-down/1';
-    const s: St = this.st.get(soul.soulId) ?? {last: mine ? r.last_act : tick, wander: mine ? r.wander_at : null, zombie: mine ? r.zombie_at : null, slept: mine && !!r.slept, next: null, spot: null};
+    const s: St = this.st.get(soul.soulId) ?? {last: mine ? r.last_act : tick, wander: mine ? r.wander_at : null, zombie: mine ? r.zombie_at : null, slept: mine && !!r.slept, next: null,
+      spot: mine && r.anchor_x !== null && r.anchor_z !== null ? [r.anchor_x, r.anchor_z] : null};
     if (migrate || (r && r.rule === null && r.state !== 'awake')) this.enterWander(s, tick);
     s.next = this.due(soul.soulId, s, tick); this.st.set(soul.soulId, s); this.publishIf(soul.soulId, s, tick);
   }
@@ -239,6 +245,7 @@ export class BodyRule {
   private lieDown(soul: BodySoul, s: St, tick: number) {
     if (s.zombie === null) s.zombie = tick;
     s.slept = true;
+    if (!s.spot) {const at = this.port.pose(soul.entityId); if (at) s.spot = [round(at.x), round(at.z)];}   // where it lies is its spot
     const p = this.port.posture(soul.entityId);
     if (p === 'water' || p === 'basket' || this.port.upright?.(soul.entityId)) {this.save(soul.soulId, s); return;}
     const up: Program['steps'] = p === 'seated' ? [{verb: 'stand', params: {}}] : [];
@@ -260,7 +267,7 @@ export class BodyRule {
     return null;
   }
   private decide(soul: BodySoul, s: St, phase: WindDownPhase, option: string, label: string, steps: Program['steps'], tick: number) {
-    this.port.decide(soul, option, label, steps, {rule: 'wind-down/1', phase, at: tick, last: s.last, wander: s.wander!, zombie: s.zombie});
+    this.port.decide(soul, option, label, steps, {rule: 'wind-down/1', phase, at: tick, last: s.last, wander: s.wander!, zombie: s.zombie, ...(s.spot ? {spot: s.spot} : {})});
   }
   private viewOf(s: St, tick: number, entityId?: string): BodyView {
     const p = entityId ? this.port.posture(entityId) : 'standing';

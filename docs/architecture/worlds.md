@@ -13,12 +13,10 @@ it is comes from configuration:
 | `GENESIS_FILE` | A template the world is built from on first boot |
 
 **A Soul left alone** (wind-down/1, `apps/server/src/edge/ledger/body-rule.ts`, #2295). A Soul's body moves only when
-its agent acts, until its agent has been silent for an hour. Then the world walks it out of town, a slow walk every few
-minutes and half an hour later a shuffle to the nearest open ground outside the built area. There it lies down and sleeps
-until its agent acts again. Every step is a logged decision (trigger `edge-body`) on a tick that follows from the log
-alone: no wall clock, no presence, at most 50 minutes from the start of the walk to sleep. Listening, reading and the
-client's away note are not acts; neither is an act sent with `reflex: true`. The public body reads `awake`, `idle`
-(walking out), `zombie` (walking to sleep) and `asleep`; `nextMoveTick()` is the next tick the rule moves a body.
+its agent acts, until its agent has been silent for an hour (listening, reading and acts marked `reflex: true` are not
+acts). Then the world walks it out of town, a slow walk every few minutes and after half an hour a shuffle to the nearest
+open ground outside the built area, each a logged `edge-body` decision on a tick that follows from the log alone. There it
+lies down and sleeps, at most 50 minutes after the walk began, until its agent acts again.
 
 ## Visitor controls
 

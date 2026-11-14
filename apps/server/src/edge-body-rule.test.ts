@@ -43,7 +43,7 @@ test('A1 A4c: an Owned Soul gets nothing for an hour after its act; then Wander,
   w.advance(w.rule, 100); w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben'); const last = w.at() + 1;
   assert.equal(w.rule.nextMoveTick(), last + K.wanderTicks);
   w.advance(w.rule, last + K.wanderTicks);
-  assert.deepEqual(w.moves, [], 'nothing issued in the Owned hour, connected or not');
+  assert.equal(w.moves.length, 0, 'nothing issued in the Owned hour, connected or not');
   for (let guard = 0; w.rule.nextMoveTick() !== null && guard < 200; guard++) {
     const due = w.rule.nextMoveTick()!, n = w.moves.length; w.advance(w.rule, due + 1);
     assert.ok(w.moves.slice(n).every(m => m.tick === due), 'every move lands on the tick nextMoveTick named');
@@ -111,6 +111,46 @@ test('A3: delete the cache, boot from the log, and the next move lands on the sa
     copy.advance(rebooted, K.wanderTicks + K.boundTicks + 10);
     assert.deepEqual(copy.moves, control.moves, `booted from the log at tick ${cut}`);
   }
+});
+
+test('A3: staggered agents, a restart between the two walk-outs without the cache: the same spots, ticks and goals', () => {
+  const end = 20_000 + K.wanderTicks + K.boundTicks + 10, mid = 20_000 + K.wanderTicks + K.zombieTicks - 50;   // Ana asleep, Ben not yet walking out
+  const run = (cut: number | null) => {
+    const w = world(); w.act(w.rule, 's_ana'); w.advance(w.rule, 20_000); w.act(w.rule, 's_ben');
+    // Ben starts where Ana will sleep: his search must still keep 3 m from her spot after the restart
+    let r = w.rule; if (cut !== null) {w.advance(r, cut); w.db.exec('DELETE FROM edge_body_v1'); r = new BodyRule(w.db as never, 'w', w.port);}
+    w.advance(r, 20_001 + K.wanderTicks + K.zombieTicks - 1);
+    const ana = w.body.get('e_ana')!, ben = w.body.get('e_ben')!; ben.x = ana.x + 0.5; ben.z = ana.z; ben.until = null; ben.posture = 'standing';
+    w.advance(r, end); return {moves: w.moves, at: [...w.body.values()].map(b => [b.x, b.z])};
+  };
+  const control = run(null), copy = run(mid);
+  assert.deepEqual(copy, control);
+  const [a, b] = control.at; assert.ok(Math.hypot(a[0] - b[0], a[1] - b[1]) >= K.spotGapM);
+});
+
+test('A3: a refused wander start (nothing logged) leaves the schedule to the last act: a boot without the cache keeps it', () => {
+  const run = (cut: number | null) => {
+    const w = world(); const decide = w.port.decide; let refused = 0;
+    w.port.decide = (...a) => {if (a[1] === 'body:wander' && !refused++) return; decide(...a);};   // the guard refuses the first stand
+    w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben'); let r = w.rule;
+    if (cut !== null) {w.advance(r, cut); w.db.exec('DELETE FROM edge_body_v1'); r = new BodyRule(w.db as never, 'w', w.port);}
+    w.advance(r, K.wanderTicks + K.boundTicks + 10); return w.moves;
+  };
+  assert.deepEqual(run(K.wanderTicks + 3000), run(null));
+});
+
+test('A4c: a Soul that leaves the world (travel, retirement) is no longer due; nextMoveTick never names a past tick', () => {
+  const w = world(); w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben');
+  const all = w.port.souls(); w.port.souls = () => all.filter(s => s.soulId !== 's_ben');
+  w.advance(w.rule, K.wanderTicks + K.boundTicks + 10);
+  assert.equal(w.rule.nextMoveTick(), null); assert.ok(w.moves.every(m => m.soulId === 's_ana'));
+});
+
+test('a body that cannot lie down (rolling) sleeps where it stands: no nap is issued', () => {
+  const w = world(); w.port.upright = () => true; w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben');
+  w.advance(w.rule, K.wanderTicks + K.boundTicks + 10);
+  assert.deepEqual(['s_ana', 's_ben'].map(id => w.rule.view(id)?.state), ['asleep', 'asleep']);
+  assert.ok(!w.moves.some(m => m.option === 'body:asleep')); assert.equal(w.rule.view('s_ana')?.doing, 'standing');
 });
 
 test('A2: no wall clock: the same moves whatever Date.now says', t => {
