@@ -14,14 +14,13 @@ import type {EdgeSoul} from './edge/contract.ts';
 import type {WorldHost} from './world.ts';
 
 const UNKNOWN = new Set(['action.unknown-verb', 'capability.unknown']);
-// `gate`: also put each id through the strict gate (edge-strict-sweep.test.ts already does that on the larger worlds)
-function unknowns(edge: EdgeLedger, host: WorldHost, soul: EdgeSoul, gate = true) {
-  const {caps, plans} = edge.coreA.binds(soul), known = new Set(host.engine.describeVerbs().map(v => v.verb)), bad: string[] = [];
+// (edge-strict-sweep.test.ts makes the same strict-gate and dry-run checks on hello-hamlet, eden-2026 and mars-two from several places)
+function unknowns(edge: EdgeLedger, host: WorldHost, soul: EdgeSoul) {
+  const {caps, plans} = edge.coreA.binds(soul), bad: string[] = [];
   for (const c of caps) {
-    const no = gate ? edge.offerGate(soul, {capability: c.id, params: {}}) : null;
+    const no = edge.offerGate(soul, {capability: c.id, params: {}});
     if (no && UNKNOWN.has(no.code)) bad.push(`${c.id}: ${no.code}`);
     const p = plans.get(c.id); if (!p) continue;
-    for (const s of p.steps) if (!known.has(s.verb)) bad.push(`${c.id}: step ${s.verb}`);
     const dry = host.engine.canPerform({actor: soul.entityId, label: p.label, steps: p.steps});
     if (dry && UNKNOWN.has(dry.code)) bad.push(`${c.id}: ${dry.code}`);
   }
@@ -45,12 +44,11 @@ test('toy world: no offer the act would refuse as unknown; sit-ground:here is no
   assert.ok(edge.coreA.binds(soul).caps.some(c => c.id === 'rest:here'), 'what the toy engine can do is still offered');
 });
 
-for (const template of ['hello-hamlet', 'eden-2026']) {
-  test(`${template}: no offer the act would refuse as unknown`, {timeout: 300000}, async t => {
-    const w = await bootEden(() => {}, new URL(`../../../worlds/templates/${template}.json`, import.meta.url));
-    t.after(() => w.close());
-    const {n, bad} = unknowns(w.edge, w.host, w.soul, template === 'hello-hamlet');
-    assert.ok(n > 30, `${n} offers`);
-    assert.deepEqual(bad, []);
-  });
-}
+test('hello-hamlet: the mars engine keeps its pose offers', {timeout: 300000}, async t => {
+  const w = await bootEden(() => {}, new URL('../../../worlds/templates/hello-hamlet.json', import.meta.url));
+  t.after(() => w.close());
+  const {n, bad} = unknowns(w.edge, w.host, w.soul);
+  assert.ok(n > 30, `${n} offers`);
+  assert.deepEqual(bad, []);
+  for (const id of ['sit-ground:here', 'wave:here', 'dance:here']) assert.ok(w.edge.coreA.binds(w.soul).caps.some(c => c.id === id), id);
+});

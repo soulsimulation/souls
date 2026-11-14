@@ -44,13 +44,16 @@ async function sweepWorld(t: {after(fn: () => void): void}, template: string) {
   t.after(() => w.close());
   const {edge, soul} = w, misses: Miss[] = [], seen = new Set<string>(), shapes = new Map<string, EdgeCapability>();
   const sweep = (state: string) => {
-    const page = edge.capabilitiesPage(soul).capabilities, all = edge.coreA.binds(soul).caps;
+    const page = edge.capabilitiesPage(soul).capabilities, {caps: all, plans} = edge.coreA.binds(soul);
     assert.ok(page.every(c => all.some(x => x.id === c.id)), 'the page is part of the whole menu');
     for (const c of all) {
       seen.add(c.id);
       const key = OFFER_SHAPE.test(c.id) ? c.verb : `odd:${c.id}`; if (!shapes.has(key) && c.available) shapes.set(key, c);
       const no = edge.offerGate(soul, {capability: c.id, params: exampleParams(offerParams(c))});
       if (no) misses.push({state, id: c.id, code: no.code, reason: no.reason.slice(0, 120)});
+      // and its plan is one the engine knows: never an offer the act refuses as action.unknown-verb
+      const p = plans.get(c.id), dry = p ? w.host.engine.canPerform({actor: soul.entityId, label: p.label, steps: p.steps}) : null;
+      if (dry?.code === 'action.unknown-verb') misses.push({state, id: c.id, code: dry.code, reason: String(dry.message).slice(0, 120)});
     }
   };
   sweep('fresh');
