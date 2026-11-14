@@ -4,6 +4,7 @@
 import type { ClerkSatellite } from '../clerk-satellite.ts';
 import { EdenMark } from '../EdenMark.tsx';
 import { BASE } from '../base-path.ts';
+import { whenVisible } from '../poll-pace.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
@@ -55,9 +56,12 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
     setDialogRaw(open);
   };
   useEffect(() => { if (dialog && needsSignIn && session.ready) setDialogRaw(false); }, [dialog, needsSignIn, session.ready]);
+  // #2305: every 6 s while the page is shown; a hidden page does not poll, and reads once as soon as it is shown again
   useEffect(() => {
-    const t = setInterval(() => { void fetch(`${BASE}/__sim/worlds.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.launcher) setList(d); }).catch(() => {}); }, 6000);
-    return () => clearInterval(t);
+    let t: ReturnType<typeof setTimeout> | undefined, cancel = () => {}, stopped = false;
+    const poll = () => { cancel = whenVisible(() => { void fetch(`${BASE}/__sim/worlds.json`).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d?.launcher && !stopped) setList(d); }).catch(() => {}).finally(() => { if (!stopped) t = setTimeout(poll, 6000); }); }); };
+    t = setTimeout(poll, 6000);
+    return () => { stopped = true; clearTimeout(t); cancel(); };
   }, []);
   // the fullest worlds first; a world whose count is unknown goes last
   const worlds = [...list.worlds].sort((a, b) => (b.entities ?? -1) - (a.entities ?? -1));

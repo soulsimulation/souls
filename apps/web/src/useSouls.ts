@@ -7,7 +7,7 @@ import { takeBootSocket } from './snapshot-prefetch.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { watchSocket } from './client-errors.ts';
 import { useEffect, useRef, useState } from 'react';
-import { Connection } from '@souls/client';
+import { Connection, releaseWhenHidden } from '@souls/client';
 import {createStationConnection,type StationConnection} from './score/station-connection.mjs';
 import * as stationCodec from '@souls/protocol';
 import { PROTO } from '@souls/protocol';
@@ -116,7 +116,9 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
       const monotonicAt=performance.now();if(monotonicAt-lastProbeAt>=1000){lastProbeAt=monotonicAt;st.station?.probe(st.conn!);}
       force((n) => n + 1);
     }, 200);
-    return () => { clearInterval(t); st.conn!.close();st.station?.dispose(); };
+    // #2305: a tab hidden for five minutes lets go of its world, unless a god's edit panel (the God modal) is open
+    const stopRelease = releaseWhenHidden(st.conn!, { keep: () => !!document.querySelector('dialog[data-god-modal][open]') });
+    return () => { clearInterval(t); stopRelease(); st.conn!.close();st.station?.dispose(); };
   }, []);
   // signing in or out: reconnect so the server re-reads who we are
   const first = useRef(true);
