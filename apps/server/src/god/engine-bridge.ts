@@ -167,7 +167,7 @@ export type BridgeOptions = { host: WorldHost; god: GodMode; edge?: EdgeLedger; 
   bootRecord?: { file: string; build: string } };
 /** What the boot record says about one snapshot: written by `build`, the engine's physics derived from the god model at
  *  `editSeq` with nothing pending, and the door facts the derive would have found (the only state a skipped derive keeps). */
-export type BootRecordV1 = { contract: 'boot-reconcile/1'; worldId: string; build: string; tick: number; stateHash: string; editSeq: number; physicsHash: string; doorIds: string[]; gated: string[] };
+export type BootRecordV1 = { contract: 'boot-reconcile/1'; worldId: string; build: string; tick: number; stateHash: string; editSeq: number; physicsHash: string; doorIds: string[]; gated: string[]; /** deriveInputs() */ inputs: string };
 
 /** Load lane L4: per-step ms of the bridge's tick work, the tick-ms distribution and the derived-work counters since the
  *  last line. Only built with SIM_L4_STATS=1. */
@@ -574,21 +574,50 @@ export class EngineBridge {
     try { rec = JSON.parse(readFileSync(r.file, 'utf8')) as BootRecordV1; } catch { return null; }
     return rec?.contract === 'boot-reconcile/1' && rec.worldId === this.host.worldId && rec.build === r.build && rec.tick === b.fromTick &&
       rec.stateHash === b.fromStateHash && rec.editSeq === this.model.editSeq && rec.physicsHash === ep.hash &&
-      Array.isArray(rec.doorIds) && Array.isArray(rec.gated) ? rec : null;
+      Array.isArray(rec.doorIds) && Array.isArray(rec.gated) && rec.inputs === this.deriveInputs() ? rec : null;
   }
   /** At a snapshot's capture: the facts of this head if the bridge is in step with the engine (everything derived is
    *  folded, nothing pending), written once the snapshot is saved; otherwise the record is removed. */
   private recordAtCapture(r: { file: string; build: string }): (at: { tick: number; stateHash: string }) => void {
     const ep = this.engine.world.entityPhysicsV1;
-    const inStep = r.build !== 'dev' && this.reconciled && !this.pending.size && !this.projectionDrafts.size && !!ep && this.physics?.hash === ep.hash;
+    const inStep = r.build !== 'dev' && this.reconciled && !this.pending.size && !this.projectionDrafts.size && !!ep && this.physics?.hash === ep.hash && this.engineAgrees();
     const rec = inStep ? { contract: 'boot-reconcile/1' as const, worldId: this.host.worldId, build: r.build, editSeq: this.model.editSeq, physicsHash: ep!.hash, doorIds: [...this.doorIds].sort(), gated: [...this.gated].sort() } : null;
     return (at) => {
+      const tmp = `${r.file}.${process.pid}.tmp`;
       try {
         if (!rec) { rmSync(r.file, { force: true }); return; }
-        const tmp = `${r.file}.${process.pid}.tmp`;
-        writeFileSync(tmp, JSON.stringify({ ...rec, tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
-      } catch (e) { this.log(`boot record not written: ${(e as Error).message}`); }
+        writeFileSync(tmp, JSON.stringify({ ...rec, inputs: this.deriveInputs(), tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
+      } catch (e) { rmSync(tmp, { force: true }); this.log(`boot record not written: ${(e as Error).message}`); }
     };
+  }
+  /** What a boot's full derive compares, per entity: the engine's own physics part, with its fixture as the engine holds
+   *  it for a god thing (the same key reconcile seeds `sent` with). */
+  private engineKey(id: string): string | null {
+    const part = this.engine.world.entityPhysicsV1?.byEntity[id] as Part | undefined, e = this.engine.world.entities[id];
+    if (e?.tags?.includes('entity-world')) return sentKey(JSON.stringify(normPart({ ...(part ?? {}), fixture: fixtureOfEngine(e) } as Part)));
+    return part ? sentKey(JSON.stringify(normPart(part))) : null;
+  }
+  /** A boot's full derive would send nothing: every god thing's last derived key is what the engine holds (a thing a Soul
+   *  moved natively, or an engine act the model took without sending, differs until it is sent), and the engine holds
+   *  nothing the model no longer has. One key per god thing; no derive. */
+  private engineAgrees(): boolean {
+    const ents = this.engine.world.entities as Record<string, { tags?: string[] }>;
+    for (const id of Object.keys(this.engine.world.entityPhysicsV1?.byEntity ?? {})) if (!this.model.entities.has(id)) return false;
+    for (const [id, e] of Object.entries(ents)) if (e.tags?.includes('entity-world') && !this.model.entities.has(id)) return false;
+    for (const e of this.model.entities.values()) if (!this.engineOwned(e) && (this.sent.get(e.id) ?? null) !== this.engineKey(e.id)) return false;
+    return true;
+  }
+  /** The derive's inputs besides the build and the god model: the shared-carry flag (fixture specs) and, for each mesh
+   *  thing, whether its asset and footprint are on disk (a late asset pull changes what bakes). */
+  private deriveInputs(): string {
+    const meshes = new Set<string>();
+    for (const e of this.model.entities.values()) {
+      const m = this.model.resolvedDef(e.def)?.make as { kind?: string; asset?: string; footprint?: string } | undefined;
+      if (m?.kind !== 'mesh' || !m.asset) continue;
+      const info = this.model.assets(m.asset), fp = m.footprint ? this.model.assets(m.footprint) : undefined;
+      meshes.add(`${m.asset}:${info ? info.tris : '-'}:${m.footprint ?? ''}:${fp?.baked ? createHash('sha256').update(JSON.stringify(fp.baked)).digest('hex').slice(0, 16) : '-'}`);
+    }
+    return createHash('sha256').update(JSON.stringify({ sharedCarry: !!this.edge?.sharedCarry, meshes: [...meshes].sort() })).digest('hex');
   }
 
   /** Commits between two ticks coalesce into one world-edit (one Spatial re-base per tick at most). */
