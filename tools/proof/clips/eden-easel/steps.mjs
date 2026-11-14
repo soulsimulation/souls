@@ -40,8 +40,8 @@ export default async function steps(page, { mark }) {
   mark('follow Pia');
   await page.waitForTimeout(3000);                        // the camera settles on Pia
   mark(`act ${TARGET}`);
-  const r = await eden(['act', TARGET, '--run', '--wait', '75', '--json'], 85_000);
+  const r = await eden(['act', TARGET, '--wait', '75', '--json'], 85_000);
   console.error(`kit: act exit ${r.code}: ${(r.out || r.err).slice(0, 1500)}`);
-  mark(r.code === 0 ? 'at the easel' : 'act ended');
+  mark(r.code === 0 && /"accepted": true/.test(r.out) ? 'at the easel' : 'act refused or ended');
   await page.waitForTimeout(6000);                        // Pia at the easel, painting
 }
