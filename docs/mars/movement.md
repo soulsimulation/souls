@@ -87,6 +87,17 @@ one extra validated planner attempt within existing budgets; unsupported phases 
 every live action certifies its movers exhausted and no future cue or timeout could change that; it does not settle the
 blocked actions, and `execute` refuses to commit the unsettled result.
 
+## Stall releases upstairs
+
+The edge stall guard (`apps/server/src/edge/ledger/stall-guard.ts`) releases a body whose hold stopped making progress
+(engine `stallReleaseV1`, folded from the logged `edge-stop`). Upstairs, body-step-guard/1 stands it on the nearest clear
+spot of its own floor within 2 m. With nothing clear there it used to stand the body where it was, which for a walk stuck
+cancelling mid-flight is off any floor (#447: the next tick faulted `collision.human-static`). Under
+`stallReleaseSupportV1` (stall-release-support/1, prospective, hashed; every world adopts it at boot) it then goes to the
+nearer clear landing of the flight its walk is on, on that landing's level; with neither, nothing is released: the body
+stays in its native hold and the guard tells the owner once (`stall.no-floor-spot`). This is a logged set-down of at most
+a flight's length, the stall guard's sanctioned release, never a respawn. Histories before the policy replay as before.
+
 ## Live stair-link changes
 
 Routes copy planned link geometry, and every link step re-checks the current scene link. A closed, missing or changed
@@ -106,6 +117,19 @@ climber resumes when the landing clears. A body on the destination level can sti
 whose last stretch runs under that floor (the commons deck's front flight): neither walk avoidance nor the invariant
 sees the climber there until it changes level. Carry climbs keep the direction-only check. The policy is prospective. Edge worlds log it at startup (`operator:stair-landing-clearance`)
 after the other stair-traffic rules, except the Little Martians worlds. History before that event replays the old rule.
+
+The `2r − 0.02` ellipsoid weights height by half, so on a steep or turning flight a follower could close to about 0.99 m
+under a climber waiting ahead, at about 0.2 m across. `collision.human-human` flags that pair, and hold-settle/1 then
+settled the follower off the flight. Under the runtime policy `climb-spacing/1` (`climbSpacingV1`, #1530),
+`stairBlocker` also refuses any climbing step that the invariant's own read would flag against a body of the same level
+id: within 1.0 m in height and horizontally closer than the two radii less 0.08 m, with a 2 cm margin. The only
+exception is a step that widens the horizontal gap between two bodies the invariant already flags. A step from just
+outside the height band into it is refused, however the gap moves. The follower waits behind (`climb-wait`), and a way
+that never clears ends its walk by the usual blocked-walk bound. Under the same policy a stopped (cancelled) climb backing
+off to its landing asks an idle body standing on that landing's floor, which holds its last step, to make way, as
+`stair-landing-clearance/1` does for the landing itself. So a climber with a body at the stair foot behind it can still
+step off and walk again. Edge worlds log the policy at startup, last (`operator:climb-spacing`); history before that
+event replays the old rule.
 
 ## Approximations
 

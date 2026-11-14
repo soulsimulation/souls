@@ -5,6 +5,8 @@
 // an act's acknowledgment 150 ms). $0: no model runs.
 // #1944: the world's own side, from its live.json: an act's four parts (queue, handler, wait, commit) at p50 and p99 with
 // the acts whose wait passed three ticks, at the end of the run, and each 10-second tick window that ended during it.
+// #2124: each window also carries the seconds at amber per signal that held it (`amberS`) and the entries into amber per
+// cause (`amberEntries`); LOAD.md sums both over the run.
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -113,6 +115,9 @@ export function renderLoad(result) {
       L.push('', 'Ticks per 10-second window: the tick\'s own ms, ticks that started more than 25 ms after they were due, the longest gap between tick starts, and the share of the window at each load level.', '',
         '| window end | ticks | tick p50 | p99 | late | longest gap | green | amber | red | black |', '|---|---|---|---|---|---|---|---|---|---|');
       for (const w of tw) L.push(`| ${new Date(w.at).toISOString().slice(11, 19)} | ${w.ticks} | ${w.tickMs.p50} | ${w.tickMs.p99} | ${w.lateTicks} | ${w.longestGapMs} | ${w.levels.green} | ${w.levels.amber} | ${w.levels.red} | ${w.levels.black} |`);
+      const sum = (key) => { const t = {}; for (const w of tw) for (const [k, v] of Object.entries(w[key] ?? {})) t[k] = Math.round(10 * ((t[k] ?? 0) + v)) / 10; return t; };
+      const held = sum('amberS'), entered = sum('amberEntries'), list = (t, u = '') => Object.entries(t).map(([k, v]) => `${k} ${v}${u}`).join(', ') || 'none';
+      L.push('', `What held amber, over these windows (a second can count under several signals; \`dwell\` = every signal under the band, the 30 s calm running): ${list(held, ' s')}. Entries into amber by cause (\`red\` = the step down from red): ${list(entered)}.`);
     }
   }
   return L.join('\n') + '\n';

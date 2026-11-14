@@ -74,6 +74,9 @@ parameters, slots and actions.
    so Souls walk around, sit on and use what was built, and replay reproduces it. Under legal-edits/1 (adopted at boot where the engine factory is described: not Eden core) an edit with a resident in its way, or one that
    changes what a resident uses, is refused by name before the commit (its preview runs off the tick thread); before it,
    residents in the way were walked out.
+   A solid of a path or area shape (a wall, fence or hedge) is cut into pieces of at most 1 m that follow the terrain where the ground under it
+   is not flat, and a building's flight entered from the side is climbed along the flight
+   ([#2193](https://github.com/soulsimulation/souls/issues/2193), `god/slope-solids.ts`).
 4. **Viewers.** The commit is broadcast as a `world-diff` message to every viewer and on the god's SSE stream.
 
 ### Joints

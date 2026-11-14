@@ -20,7 +20,7 @@ pnpm typecheck                               # every package (tsc --noEmit)
 pnpm --filter @souls/server test               # one package
 node --test apps/server/src/god/buildsafe.test.ts   # one file
 pnpm test:mars                               # the vendored engine's deterministic suite
-pnpm test:client                             # Soul client and client-eval suites
+pnpm test:client                             # the client-eval suite (the legacy client's tests no longer run, #1754)
 pnpm test                                    # everything (slow; prefer the focused forms)
 ```
 
@@ -123,7 +123,7 @@ therefore **windowed**:
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
   own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads. A merge-group run is path-scoped over everything in the group since `main`, and
+  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
@@ -132,6 +132,13 @@ Steward procedure: give `ci:run` to the PRs entering the window, normally the ne
 the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
+
+**CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
+the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
+work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
+main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
+full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
+The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
@@ -143,11 +150,13 @@ is not a gate step, so the gate's suite tree and cached baseline don't change.
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
 
-**Self-hosted runners.** The heavy `qualify` legs run on the runners named by the repository variable
-`CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners. The browser `smoke` leg
-and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a loaded shared host misses
-(#1162). One runner instance takes one job at a time, so routing is only worth it with several
-instances online. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
+**Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
+whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
+repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
+other leg, and every leg while the variable is unset, runs on GitHub-hosted runners, so one run uses both pools at
+once. The browser `smoke` leg and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a
+loaded shared host misses (#1162). One runner instance takes one job at a time, so routing is only worth it with several
+instances online; a leg moves between pools by its flag, and `ci-scope.test.mjs` pins the split. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
 systemd service under one dedicated unprivileged user, with the label, and Playwright's Chromium system packages when
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
 its header shows the one-line invocation from a workstation. The steward sets and clears `CI_HEAVY_RUNNER`.
@@ -240,3 +249,21 @@ tools) needs lint; T1 (logic) focused tests and typecheck; T2 (visible behaviour
 fake-mind world; T3 (Soul behaviour, navigation, engines) adds a scenario playtest, a reviewer pass and maintainer
 sign-off; T4 is the release head. "Done" means walked on the real URL with real input
 ([agent lifecycle](process/agent-lifecycle.md)).
+
+### Recording a proof clip on a GPU runner
+
+When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
+`tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
+`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
+push it to an `agent/` branch, then dispatch the timed run from that branch:
+
+```bash
+gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'
+gh run download <run-id> -D .e2e/clip-<run-id>
+node tools/proof/upload.mjs --pr <n> .e2e/clip-<run-id>/clip/<kit>-desktop.mp4
+```
+
+The kit and the recorder come from the workflow's branch, the app from `ref`. The recorder runs with
+`SIM_PROOF_GPU=hardware`: it fails (exit 5) rather than fall back to SwiftShader, and the log and the sidecar's `gl`
+name the renderer. The log also prints the clip's frame timing (frames, mean fps, largest gap) beside the take's wall
+clock. The job holds no write token, so the clip comes back as the run's artifact and `upload.mjs` attaches it.

@@ -152,10 +152,11 @@ const pose = (activity: string, seconds: number, extra: Record<string, unknown> 
 const walk = (to: V2, level?: number, from = 0) => level || (level === 0 && from) ? {verb: 'mars:walk_to', params: {x: to[0], z: to[1], level}} : {verb: 'walk_to', params: {to: [to[0], to[1]]}};
 const standFirst = (w: ActivityWorld): Program['steps'] => w.seated ? [{verb: 'stand', params: {}}] : [];
 // the bounds hold the default: a four-second letter is not below its own minimum, so a client can send what the schema says
-const secondsParam = (def: number, max = 1800) => ({seconds: {type: 'integer', min: Math.min(5, def), max, default: def}});
-/** A seat's sit (no pose): the ledger times its rest or sit step, 1..600 s, 60 by default, like every sit:<seat>. */
-const seatSeconds = () => ({seconds: {type: 'integer', min: 1, max: 600, default: 60}});
-export const ACTIVITY_SECONDS_MAX = 1800;
+const secondsParam = (def: number, max = ACTIVITY_SECONDS_MAX) => ({seconds: {type: 'integer', min: Math.min(5, def), max, default: def}});
+/** A seat's sit (no pose): the ledger times its rest or sit step, 1..3600 s (#2294), 60 by default, like every sit:<seat>. */
+const seatSeconds = () => ({seconds: {type: 'integer', min: 1, max: ACTIVITY_SECONDS_MAX, default: 60}});
+/** #2294: the longest an activity in place is held (an hour, the maintainer's bound); the edge accepts up to this. */
+export const ACTIVITY_SECONDS_MAX = 3600;
 
 /** #628: how much nearer to or farther from the thing than its spot a standing point beside it may be (m). */
 export const SIDE_STEP = 0.5;
@@ -302,7 +303,7 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
     const need = lying ? 0.95 : act === 'dance' ? DANCE_CLEARANCE : 0.45;
     // "Dance here" never adds a walk: use the same standing footprint as native admission.
     const spot = act === 'dance' || groundHere >= need ? null : w.open(w.me, need, 30), can = groundHere >= need || !!spot;
-    add({id: `${act}:here`, verb: act, label, available: can, ...(can ? {} : {blocked: {code: 'pose.no-room', reason: act === 'dance' ? 'There is not enough supported standing room here to dance without intersecting an obstacle.' : 'No open ground within 15 m; walk to a lawn or garden first.'}}), params: secondsParam(sec, 600)},
+    add({id: `${act}:here`, verb: act, label, available: can, ...(can ? {} : {blocked: {code: 'pose.no-room', reason: act === 'dance' ? 'There is not enough supported standing room here to dance without intersecting an obstacle.' : 'No open ground within 15 m; walk to a lawn or garden first.'}}), params: secondsParam(sec)},
       {label, steps: [...standFirst(w), ...(spot ? [walk(spot)] : []), pose(act, sec)], seconds: true});
   }
   // ---- reading here: keep the current seat, else a reading spot (with a shelf) nearby, else a free seat, else standing

@@ -9,7 +9,7 @@ import { registerMesh } from '../registry.ts';
 import { bindMotionModel } from '../motion.ts';
 import { apiPath } from '../../world-path.ts';
 import { artOf, brokenLinkLines, coverWhenReady, imageBroken, imageFailed, imageLoaded, videoTexture, whenImageFails } from '../art-media.ts';
-import { CHECKERS_CELL, checkersBoard, checkersSquare, frameMediaKind, gameSquare, gameStatus, notebookLine, NOTEBOOK_LINES_MAX, pinSlot, signupSlot, signupPageStart, pollSlot, pollOptions, posterSlot, posterList, posterPaper, wantedSlot, wantedList, POSTER_W, POSTER_H, type WantedRec } from '@souls/world-compiler';
+import { CHECKERS_CELL, checkersBoard, checkersSquare, frameMediaKind, gameSquare, gameStatus, notebookLine, NOTEBOOK_LINES_MAX, privateThing, pinSlot, signupSlot, signupPageStart, pollSlot, pollOptions, posterSlot, posterList, posterPaper, wantedSlot, wantedList, POSTER_W, POSTER_H, type WantedRec } from '@souls/world-compiler';
 import { posterMesh, posterAgeDays } from '../../../../../mars/viewer/app/engine-view/poster-sheet.ts';
 
 type Face = { at: [number, number, number]; w: number; h: number; yaw?: number; pitch?: number; bg?: string; ink?: string; font?: string; line?: number; media?: boolean; slot?: number; fadeDays?: number };
@@ -41,11 +41,17 @@ function textTexture(lines: string[], f: Face): THREE.Texture {
 }
 /** #428: a notebook's page: a printed heading, ruled lines, and each signed line ("words — Name") handwritten on its own
  *  ruling (notebookLine, the place the hand wrote it), the writer's name after it in a second ink. */
-export function notebookTexture(lines: string[], f: Face): THREE.Texture {
-  const key = JSON.stringify(['notebook', lines, f.w, f.h, f.bg, f.ink]);
+export function notebookTexture(lines: string[], f: Face, closed = false): THREE.Texture {
+  const key = JSON.stringify(['notebook', closed ? [] : lines, f.w, f.h, f.bg, f.ink, closed]);
   const hit = texCache.get(key); if (hit) return hit;
   const cw = 1024, ch = Math.round(cw * f.h / f.w), px = cw / f.w, c = document.createElement('canvas'); c.width = cw; c.height = ch;
   const g = c.getContext('2d')!, rowY = (i: number) => (0.5 - notebookLine(i)[1] / f.h) * ch;
+  // #1223: a private notebook is drawn closed, a plain cover with no lines, for every viewer (its words never reach one)
+  if (closed) {
+    g.fillStyle = '#5e3d27'; g.fillRect(0, 0, cw, ch);
+    g.fillStyle = f.bg ?? '#f4eedc'; g.font = `600 ${Math.round(0.03 * px)}px Georgia, 'Iowan Old Style', serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('Private', cw / 2, ch / 2);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; texCache.set(key, t); return t;
+  }
   g.fillStyle = f.bg ?? '#f4eedc'; g.fillRect(0, 0, cw, ch);
   g.fillStyle = '#6d5a43'; g.font = `600 ${Math.round(0.02 * px)}px Georgia, 'Iowan Old Style', serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText('Notes', cw / 2, rowY(0) - 0.05 * px);
@@ -318,7 +324,7 @@ registerMesh({
       else if (ctx.def.tags.includes('checkers')) map = checkersTexture(typeof st.text === 'string' ? st.text : '', f);
       else if (ctx.def.tags.includes('posters')) map = posterWallTexture(f);
       else if (ctx.def.tags.includes('wanted')) map = wantedTexture(wantedList(st), f);
-      else if (ctx.def.tags.includes('notebook')) map = notebookTexture(typeof st.text === 'string' && st.text ? st.text.split('\n') : [], f);
+      else if (ctx.def.tags.includes('notebook')) map = notebookTexture(typeof st.text === 'string' && st.text ? st.text.split('\n') : [], f, privateThing(ctx.entity, (id) => ctx.model.entities.get(id)));
       else if (ctx.def.tags.includes('pinboard')) map = pinboardTexture(typeof st.text === 'string' ? st.text.split('\n') : [], f);
       else if (ctx.def.tags.includes('signup')) { const names = typeof st.text === 'string' && st.text ? st.text.split('\n') : []; map = signupTexture(String(st.title ?? ''), names.slice(signupPageStart(names.length)), f); }   // #429: a guestbook shows its current page
       else if (ctx.def.tags.includes('poll')) { const opts = pollOptions(st), votes = typeof st.textBy === 'string' && st.textBy ? st.textBy.split(',').map((v) => Number(v.split(':')[1])) : []; map = pollTexture(String(st.title ?? ''), opts, opts.map((_, i) => votes.filter((v) => v === i).length), f); }

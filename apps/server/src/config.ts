@@ -28,9 +28,7 @@ export const config = {
   skillFile: env.EDGE_SKILL_FILE || undefined as string | undefined,
   /** Source-owned onboarding Markdown, served with the selected world's base and display name. */
   instructionsFile: (env.EDGE_INSTRUCTIONS_FILE || resolve(new URL('../../../tools/world-launcher/soul/instructions.md',import.meta.url).pathname)) as string | undefined,
-  /** App's agent CLI served at /eden-agent.mjs (read per request). Unset: 404. */
-  cliFile: env.EDGE_CLI_FILE || undefined as string | undefined,
-  /** Single-controller CLI served at /eden.mjs, separate so existing folders retain their legacy CLI. Unset: the pinned
+  /** Single-controller CLI served at /eden.mjs (the legacy /eden-agent.mjs answers 404, #1754). Unset: the pinned
    *  tools/world-launcher/soul/eden.mjs (SOURCES.json), so a world started without the launcher serves the pinned controller
    *  CLI too (#983). Its directory's runtime/ files are then published at /soul-runtime/* (soul-runtime-publication.ts). */
   controllerCliFile: (env.EDGE_CONTROLLER_CLI_FILE || fileURLToPath(new URL('../../../tools/world-launcher/soul/eden.mjs', import.meta.url))) as string | undefined,

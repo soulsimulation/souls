@@ -28,6 +28,7 @@ import type { GodMode } from './god.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
+import { flightPath, slopePieces } from './slope-solids.ts';
 import { tokenHit } from '../edge/ledger/vocabulary.ts';
 import {outdoorRegionExclusions} from '../edge/ledger/region-arrival.ts';
 import { doorInGap, freeDoorOpening, isDoorDef, isShut } from './doors.ts';
@@ -359,7 +360,7 @@ export class EngineBridge {
     // Entry 43: the tea acts (tea.ts), the same way
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
     // #438: the picking acts (harvest.ts), the same way
-    this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
+    this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why), actApplied: (body, capability) => this.edge?.actApplied(body, capability) });
     this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
@@ -767,7 +768,11 @@ export class EngineBridge {
         // YAW: the rail's middle uses a cell-thick padded solid; original end caps keep conservative corner safety.
         const rails = local.tag === 'rail' && hasStraightLandings(baked.links) && local.y0 > 0.5 ? railRaster(obb) : null;
         const pieces = rails ?? [{ obb, ...(rasterOf({ tag: local.tag, half: o.half }) === 'centre' ? { raster: 'centre' as const } : {}) }];
-        return pieces.map((piece, k) => ({ id: `${e.id}#c${i}${k ? `-end${k}` : ''}`, ...piece, y0: r3(o.y0), y1: r3(o.y1), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)}${local.tag ? ' ' + local.tag : ''}`.slice(0, 100) }));
+        const label = `${this.model.pathOf(e.id)}${local.tag ? ' ' + local.tag : ''}`.slice(0, 100);
+        // #2193: a world-frame solid follows the terrain along its length, so on a slope it is cut into pieces that do too
+        const sloped = worldFrame && !(local as { abs?: boolean }).abs && !rails ? slopePieces(obb, local.y0, local.y1, (x, z) => this.model.terrain.sample(x, z)) : null;
+        if (sloped) return sloped.map((piece, k) => ({ id: `${e.id}#c${i}-s${k}`, ...piece, kind: 'fixture' as const, label }));
+        return pieces.map((piece, k) => ({ id: `${e.id}#c${i}${k ? `-end${k}` : ''}`, ...piece, y0: r3(o.y0), y1: r3(o.y1), kind: 'fixture' as const, label }));
       });
     }
     // closed doors block their gap; a free-standing door (no doorway of its own) blocks its own width (doorblock)
@@ -833,11 +838,14 @@ export class EngineBridge {
       const ya = heightAt(l.y0, a), yb = heightAt(l.y1, b);
       const n = Math.max(2, Math.ceil(Math.abs(yb - ya) / 0.18) + 1), path: [number, number, number][] = [];
       for (let k = 0; k < n; k++) { const t = k / (n - 1); path.push([r3(a[0] + (b[0] - a[0]) * t), r3(ya + (yb - ya) * t), r3(a[1] + (b[1] - a[1]) * t)]); }
+      // #2193: a straight flight entered from the side is climbed along the flight, not across its side
+      const along = !helix && l.kind === 'stairs' && l.path.length === 4 && def.make.kind === 'gen' && def.make.gen === 'building/1' ? flightPath(a, toWorld(...l.path[1]), toWorld(...l.path[2]), b, ya, yb) : null;
+      if (along) path.splice(0, path.length, ...along);
       const kind = l.kind === 'float' ? 'climb' : l.kind;
       const linkLevel = l.id.startsWith('mesh-step:') ? plateLevel : levelOn;
       const la = linkLevel(ya, a), lb = linkLevel(yb, b);
       return { id: `${e.id}#${l.id}`, kind: kind as 'stairs' | 'ramp' | 'ladder' | 'climb', from: { level: la, p: a, y: ya }, to: { level: lb, p: b, y: yb }, width: r3(l.width * wp.s), heading: r3(Math.atan2(b[1] - a[1], b[0] - a[0])), path, usable: true,
-        ...(helix ? { approach: { from: toWorld(...helix.stepFrom), to: toWorld(...helix.stepTo) } } : {}) };
+        ...(helix ? { approach: { from: toWorld(...helix.stepFrom), to: toWorld(...helix.stepTo) } } : {}), ...(along ? { faceAlong: true } : {}) };
     });
     // each flight's ends: its under-stair block stops short of the foot (the first tread is stepped onto, not walked
     // under) and a head tread on the upper level bridges the stairwell edge, so both ends have standing room
@@ -2366,7 +2374,7 @@ export class EngineBridge {
           const block = mine ? { code: 'seat.yours', reason: `You are sitting on ${name(x.id)} already; stand:here to get up.` } : far ? { code: far.code, reason: `${name(x.id)} is out of reach: ${far.message}.` } : full ? { code: 'seat.taken', reason: `${(others.length ? others : [u!.body]).map((b) => this.soulName(b)).join(' and ')} ${others.length > 1 ? 'are' : 'is'} sitting there.` } : inside;
           const label = labelOf(onTop);
           if (block?.code === 'seat.inside' || block?.code === 'seat.out-of-reach') unusable.push(caps.length); else if (!block) usable.push({ id, label, d });
-          caps.push({ id, verb: 'sit', label, target: { id: x.id, kind: 'object' }, available: !block, ...(block ? { blocked: block } : {}), params: { seconds: { type: 'integer', min: 1, max: 600, default: 60 } } });
+          caps.push({ id, verb: 'sit', label, target: { id: x.id, kind: 'object' }, available: !block, ...(block ? { blocked: block } : {}), params: { seconds: { type: 'integer', min: 1, max: 3600, default: 60 } } });   // #2294: an hour on a seat, as every activity in place
           // #1083: seated elsewhere, she stands first (from inside a god-built seat's footprint a bare walk to another seat was refused route.start-blocked)
           plans.set(id, { label, steps: [...stand, { verb: 'sit', params: { on: x.id, seconds: 60 } }], seconds: true });
         }

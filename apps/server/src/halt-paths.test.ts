@@ -1,6 +1,6 @@
 // #1511: no halt leaves a frozen world silently. Each named halt path stops the clock and sets live.json `halted` (load/monitor.ts),
-// which the launcher's guard acts on (#1326, tools/world-launcher/children.mjs): it restarts the world from its log once per
-// breaker window, and a second halt in the window stays halted (503) and is an ALERT. One test per path the issue names.
+// which the launcher's guard acts on (#1326, tools/world-launcher/children.mjs): it restarts the world from its log each time,
+// and a halt that repeats at once ends held by the breaker, an ALERT (#2133). One test per path the issue names.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { marsFactory, MEAL_WORLD } from '@souls/engine-mars';

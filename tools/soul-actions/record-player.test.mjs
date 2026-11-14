@@ -43,17 +43,17 @@ test('record player: pick a record at the tonearm, stop at the knob, refusal, in
  const act=async(cap,accepted=true,params)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap,...(params?{params}:{})})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const finish=async(r,field,want,limit=600)=>{let motion=null,early=false,root=null;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){motion=m;root=[...body().pose.p];if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<(m.reach??0.65)-0.05&&state('player')[field]===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {motion,early,root,phase:edge.receipt(soul.soulId,r.receipt.id)?.phase};};
  // refused: stopping an off player, an unknown record, no record named
- const stopOff=await act('object:player:switch-off',false);
+ const stopOff=await act(`object:${id('player')}:switch-off`,false);
  assert.match(JSON.stringify(stopOff),/object\.state/);assert.match(JSON.stringify(stopOff),/is off/,'stopping an off record player is refused as off');
- const unknown=await act('object:player:put-on-record',false,{record:'Abbey Road'});
+ const unknown=await act(`object:${id('player')}:put-on-record`,false,{record:'Abbey Road'});
  assert.match(JSON.stringify(unknown),/capability\.params/);assert.match(JSON.stringify(unknown),/Morning Waltz, Harbour Lights, Low Tide, Night Train/,'the refusal lists the sleeves');
  await tick(30);assert.equal(state('player').on??false,false,'a refused pick changes nothing');assert.equal(body().human?.handActuator,undefined,'nothing moved');
  // interruption before contact: nothing changes
- const cut=await act('object:player:put-on-record',true,{record:'Low Tide'});for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);assert.ok(body().human?.handActuator,'the reach started');await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);
+ const cut=await act(`object:${id('player')}:put-on-record`,true,{record:'Low Tide'});for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);assert.ok(body().human?.handActuator,'the reach started');await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);
  assert.equal(state('player').on??false,false,'interrupted before contact: the record player stays off');
  assert.ok(['replaced','cancelled'].includes(edge.receipt(soul.soulId,cut.receipt.id)?.phase),'the interrupted act ends replaced');assert.notEqual(state('player').record,'Low Tide','and the picked record was not set');
  // #1051: a tonearm that moves away mid-reach changes nothing; the world refuses it as a changed target
- {const home=god.model.worldPose(god.model.get('player')),r=await act('object:player:put-on-record',true,{record:'Night Train'});
+ {const home=god.model.worldPose(god.model.get('player')),r=await act(`object:${id('player')}:put-on-record`,true,{record:'Night Train'});
   for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);assert.ok(body().human?.handActuator,'the reach started');
   assert.equal(god.act({ops:[{op:'move',id:'player',p:[home.x+4,home.z]}]}).accepted,true);
   for(let n=0;n<600&&!['completed','failed','cancelled','replaced'].includes(edge.receipt(soul.soulId,r.receipt.id)?.phase);n++)await tick(1);
@@ -75,14 +75,14 @@ test('record player: pick a record at the tonearm, stop at the knob, refusal, in
   assert.equal(body().human?.handActuator,undefined);
   results.push({cap,params:params??null,want,part:tint,hold:x.motion.hold??0,handAt:x.motion.at.map(v=>+v.toFixed(3)),root:x.root.map(v=>+v.toFixed(3))});return x;
  };
- await run('object:player:put-on-record','record','Low Tide','tuner',{record:'Low Tide'});
+ await run(`object:${id('player')}:put-on-record`,'record','Low Tide','tuner',{record:'Low Tide'});
  assert.equal(state('player').on,true);
  const onRow=(await here()).objects.find(o=>o.id===id('player'));assert.deepEqual(onRow?.state,{on:true,record:'Low Tide'},'on: the record in a few words');
  // the pick is the Soul's (any sleeve, case and spacing forgiven), not a cycle
- await run('object:player:put-on-record','record','Night Train','tuner',{record:'  night TRAIN '});
- await run('object:player:put-on-record','record','Morning Waltz','tuner',{record:'Morning Waltz'});
+ await run(`object:${id('player')}:put-on-record`,'record','Night Train','tuner',{record:'  night TRAIN '});
+ await run(`object:${id('player')}:put-on-record`,'record','Morning Waltz','tuner',{record:'Morning Waltz'});
  const nearOn=await here();
- await run('object:player:switch-off','on',false,'valve');
+ await run(`object:${id('player')}:switch-off`,'on',false,'valve');
  assert.equal(state('player').record,'Morning Waltz','the record stays on the platter');
  const offRow=(await here()).objects.find(o=>o.id===id('player'));assert.deepEqual(offRow?.state,{on:false});
  // power and the tonearm are worked from one place

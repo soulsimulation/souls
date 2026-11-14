@@ -1,0 +1,26 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-14 #2281 television state. core-television@2 is a new immutable revision of core-television@1 (whose bytes are unchanged): a `channel` enum (garden, sea, stars, test-card), a change-channel action that cycles it while on, components.light (a soft 3 m light on the room while on), a dark-glass screen while off, and each channel drawn as glowing kit shapes shown only while on (state-conditioned `when`). Baked, it is 549 triangles (cabinet) and 360 (flat), under the 600 cap. A narrow K=2 run (`conformance.mjs --k 2 --filter core-television@2`) baked, placed and rendered all 19 samples with exactly the gallery draw findings core-television@1 already carries in known-20261015.json (6 > 4 in the construction view, the shared scaffold; 10 > 4 at one seeded random sample), pinned here to the new hash. No budgets, samples or gap checks were relaxed, and the rendering-gap list is unchanged.",
+  "findings": [
+    {
+      "def": "core-television@2",
+      "hash": "670546aa55c1bdad636a11027cd22a54ec195e182c888bc28d1e6940261163c2",
+      "stage": "gallery-budget",
+      "code": "draws",
+      "detail": "6 > 4",
+      "fields": [
+        "params.condition=construction"
+      ]
+    },
+    {
+      "def": "core-television@2",
+      "hash": "670546aa55c1bdad636a11027cd22a54ec195e182c888bc28d1e6940261163c2",
+      "stage": "gallery-budget",
+      "code": "draws",
+      "detail": "10 > 4",
+      "fields": [
+        "random[1]"
+      ]
+    }
+  ]
+}

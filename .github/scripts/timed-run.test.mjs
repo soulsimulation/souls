@@ -1,16 +1,17 @@
 // timed-run.mjs (#1943, #1970): the per-command allowlist, the argument check, the start-load gate, the scrubbed staging
-// and the world/load core split.
+// and the world/load core split; the counted scenario cells.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE } from './timed-run.mjs';
+import { createHash } from 'node:crypto';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
 test('inputs: ref, command and repeats are checked before anything runs', () => {
-  assert.deepEqual(parseInputs(ENV), { ref: 'main', command: 'walk', repeats: 1, args: [] });
+  assert.deepEqual(parseInputs(ENV), { ref: 'main', command: 'walk', repeats: 1, args: [], runner: 'souls-timed' });
   assert.equal(parseInputs({ ...ENV, INPUT_REF: 'agent/1943-timed-run', INPUT_COMMAND: 'eval-scripted', INPUT_REPEATS: '3' }).repeats, 3);
   for (const [k, v] of [['INPUT_REF', 'feature/x'], ['INPUT_REF', 'agent/../main'], ['INPUT_REF', '$(id)'], ['INPUT_COMMAND', 'gate'], ['INPUT_COMMAND', 'walk;id'],
     ['INPUT_COMMAND', ''], ['INPUT_REPEATS', '0'], ['INPUT_REPEATS', '4'], ['INPUT_REPEATS', '2 x']])
@@ -20,7 +21,9 @@ test('inputs: ref, command and repeats are checked before anything runs', () => 
 test('args: only each command\'s own allowlisted flags, with checked values, once each', () => {
   assert.deepEqual(checkArgs('walk', ' --world fuzz,bench-hamlet '), ['--world', 'fuzz,bench-hamlet']);
   assert.deepEqual(checkArgs('eval-scripted', '--items bench-sit,music --warm-sec 40'), ['--items', 'bench-sit,music', '--warm-sec', '40']);
-  for (const [c, a] of [['walk', '--write'], ['walk', '--from x'], ['walk', '--world nowhere'], ['walk', '--world fuzz,fuzz'], ['walk', '--world fuzz --world fuzz'], ['walk', '--world'],
+  assert.deepEqual(checkArgs('eval-scripted', '--battery hostile-v1 --seat scripted --items act-spam'), ['--battery', 'hostile-v1', '--seat', 'scripted', '--items', 'act-spam']);
+  for (const [c, a] of [['eval-scripted', '--seat claude-sonnet'], ['eval-scripted', '--battery ../x'], ['eval-scripted', '--battery tools/playtest/eval/battery/m4-v1.json'], ['eval-scripted', '--battery'],
+    ['walk', '--write'], ['walk', '--from x'], ['walk', '--world nowhere'], ['walk', '--world fuzz,fuzz'], ['walk', '--world fuzz --world fuzz'], ['walk', '--world'],
     ['walk', '--items a'], ['eval-scripted', '--seat tools/playtest/eval/seats/claude-sonnet.json'], ['eval-scripted', '--max-usd 1'], ['eval-scripted', '--out /x'],
     ['eval-scripted', '--world https://example.org'], ['eval-scripted', '--items A;B'], ['eval-scripted', '--warm-sec 0'], ['eval-scripted', '--warm-sec 900'], ['eval-scripted', 'x --items a']])
     assert.throws(() => checkArgs(c, a), /input args/, `${c} ${a}`);
@@ -151,12 +154,13 @@ test('stage, each capacity command: its own files only, scrubbed; a Soul token a
   }
 });
 
-test('core split: four physical cores of the runner\'s own, two for the world and two for the load generator; else refused', () => {
+test('core split: two physical cores for the world, the rest (two of four, one of three) for the load generator; else refused', () => {
   const smt = (c) => [c % 8, (c % 8) + 8];   // cpu c and c+8 are one physical core
-  assert.deepEqual(splitCores([4, 5, 6, 7, 12, 13, 14, 15], smt), { physicalCores: 4, world: '4,12,5,13', load: '6,14,7,15' });
-  assert.deepEqual(splitCores([0, 1, 2, 3], (c) => [c]), { physicalCores: 4, world: '0,1', load: '2,3' });
-  assert.deepEqual(splitCores([3, 1, 2, 0], () => []), { physicalCores: 4, world: '0,1', load: '2,3' }, 'unreadable topology: one core per CPU');
-  assert.throws(() => splitCores([4, 5, 12, 13], smt), /2 physical core\(s\).*needs 4/);
+  assert.deepEqual(splitCores([4, 5, 6, 7, 12, 13, 14, 15], smt), { physicalCores: 4, layout: '2+2', world: '4,12,5,13', load: '6,14,7,15' });
+  assert.deepEqual(splitCores([0, 1, 2, 3], (c) => [c]), { physicalCores: 4, layout: '2+2', world: '0,1', load: '2,3' });
+  assert.deepEqual(splitCores([3, 1, 2, 0], () => []), { physicalCores: 4, layout: '2+2', world: '0,1', load: '2,3' }, 'unreadable topology: one core per CPU');
+  assert.deepEqual(splitCores([5, 6, 7, 13, 14, 15], smt), { physicalCores: 3, layout: '2+1', world: '5,13,6,14', load: '7,15' }, 'the timed runners: 6 logical CPUs, 3 cores');
+  assert.throws(() => splitCores([4, 5, 12, 13], smt), /2 physical core\(s\).*needs 3 or 4/);
   assert.throws(() => splitCores([0, 1, 2, 3, 4, 5], (c) => [c]), /6 physical core/);
 });
 
@@ -167,4 +171,53 @@ test('world pinning: only world servers under the run\'s own process tree', () =
   assert.ok(isWorld(['node', 'apps/server/src/main.ts'].join('\0')));
   for (const c of ['node\0tools/world-launcher/launcher.mjs', 'node\0tools/bench/capacity/bench.mjs', 'grep\0apps/server/src/main.ts.bak'])
     assert.ok(!isWorld(c), c);
+});
+
+// counted scenario cells
+const CNT = { ...ENV, INPUT_REF: 'agent/1367-x', INPUT_COMMAND: 'counted', INPUT_REPEATS: '2', INPUT_ARGS: '--scenario stair-foot', INPUT_BASE: 'main', INPUT_CELL: 'cand-2', INPUT_RUNNER: 'hosted' };
+
+test('counted: one cell per job, base-k on the base branch and cand-k on the ref; hosted runners for counted only', () => {
+  const c = parseInputs(CNT);
+  assert.deepEqual([c.cell, c.arm, c.base, c.scenario, c.runner, target(c)], ['cand-2', 'cand', 'main', 'stair-foot', 'hosted', 'refs/heads/agent/1367-x']);
+  assert.equal(target(parseInputs({ ...CNT, INPUT_CELL: 'base-1' })), 'refs/heads/main');
+  assert.deepEqual(parseInputs({ ...CNT, INPUT_ARGS: '--scenario stair-foot --loop-sec 300' }).args, ['--scenario', 'stair-foot', '--loop-sec', '300']);
+  for (const [k, v] of [['INPUT_CELL', 'cand-3'], ['INPUT_CELL', 'all'], ['INPUT_CELL', 'ref-1'], ['INPUT_CELL', ''], ['INPUT_BASE', ''], ['INPUT_BASE', 'feature/x'], ['INPUT_BASE', 'agent/../main'],
+    ['INPUT_ARGS', ''], ['INPUT_ARGS', '--scenario nowhere'], ['INPUT_ARGS', '--scenario stair-foot --loop-sec 5'], ['INPUT_ARGS', '--scenario stair-foot --port 1'], ['INPUT_RUNNER', 'ubuntu-latest']])
+    assert.throws(() => parseInputs({ ...CNT, [k]: v }), /^Error: input /, `${k}=${v}`);
+  assert.equal(parseInputs({ ...CNT, INPUT_RUNNER: '' }).runner, 'souls-timed');
+  for (const command of ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile'])
+    assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: command, INPUT_RUNNER: 'hosted' }), /input runner="hosted": .* souls-timed only/, command);
+  assert.equal(target(parseInputs(ENV)), 'refs/heads/main');
+});
+
+test('counted: the kit runs the cell, scores it and classifies it, writing the workstation session\'s files under out', () => {
+  const steps = countedSteps(parseInputs(CNT), { kit: 'k', out: 'o', port: 30000 });
+  assert.deepEqual(steps.map((s) => [s.step, s.argv, s.stdout, s.stderr ?? null]), [
+    ['run', [join('k', 'run.mjs'), 'cand', '.', '30000', join('o', 'counted', 'cand-2')], null, null],
+    ['score', [join('k', 'score-frozen.mjs'), join('o', 'counted', 'cand-2', 'run.json')], join('o', 'counted', 'cand-2.scores.json'), null],
+    ['classify', [join('k', 'classify-frozen.mjs'), join('o', 'counted', 'cand-2'), '.', '30000'], join('o', 'counted', 'cand-2.class.json'), join('o', 'counted', 'cand-2.class.err')],
+  ]);
+  // the stair kit is the one #1367's declaration names, byte for byte
+  const declared = { 'run.mjs': '02f63c203908290b8ca430f5fcc8858b822fb429ea2ba0d5d5af19b0b1dcbd04', 'score-frozen.mjs': 'dc3b317b622f5be062925244b1a35669c38997b1f00b44f98c8f6c4037c1e64d',
+    'classify-frozen.mjs': '408ef102aa3da67cff0a1657e5dd8d5ae4b04c132b12ff1d62da7838e5258889', 'replay.mjs': 'f18536f28efad26dc6848959d52914d74b3bd3c3234747bc91f9b78e49bd0a1b', 'probe.mjs': 'b3a224c15a5051dae473808eeab22be65b1ef2f0059e16b1a7c9f7b709cd12ae' };
+  const kit = COUNTED['stair-foot'];
+  assert.deepEqual(Object.fromEntries(kit.files.map((f) => [f, createHash('sha256').update(readFileSync(join(import.meta.dirname, '../..', kit.dir, f))).digest('hex')])), declared);
+});
+
+test('stage, counted: the record, log, score, class and probe log only; world data and Soul homes stay; a home\'s token refuses the upload', () => {
+  const d = mkdtempSync(join(tmpdir(), 'timed-')), out = join(d, 'out'), dest = join(d, 'art'), put = (f, t) => { mkdirSync(join(out, f, '..'), { recursive: true }); writeFileSync(join(out, f), t); };
+  const sw = { paths: [['/srv/runner-x/_work', '<runner-work>']], names: [['buildbox', '<host>']] };
+  try {
+    const pub = ['counted/cand-2/run.json', 'counted/cand-2.log', 'counted/cand-2.scores.json', 'counted/cand-2.class.json', 'counted/cand-2.class.err', 'counted/cand-2/probe.log'];
+    put('timed-run.json', '{"ran":"/srv/runner-x/_work/souls/src"}');
+    for (const f of pub) put(f, 'on buildbox');
+    for (const f of ['counted/cand-2/data/sim.db', 'counted/cand-2/s-Ana/x.json']) put(f, 'world');
+    put('counted/cand-2/h-Ana/credentials.json', '{"souls":{"s_1":{"w":{"token":"tok-FAKE-fixture-counted"}}}}');
+    assert.deepEqual(stage({ out, dest, command: 'counted', scrubWith: sw }), ['timed-run.json', ...pub]);
+    assert.equal(readFileSync(join(dest, 'counted/cand-2.log'), 'utf8'), 'on <host>');
+    for (const f of ['counted/cand-2/data/sim.db', 'counted/cand-2/h-Ana/credentials.json']) assert.ok(!existsSync(join(dest, f)), f);
+    rmSync(dest, { recursive: true });
+    put('counted/cand-2/run.json', '{"err":"tok-FAKE-fixture-counted"}');
+    assert.throws(() => stage({ out, dest, command: 'counted', scrubWith: sw }), /run\.json holds a Soul token/);
+  } finally { rmSync(d, { recursive: true, force: true }); }
 });

@@ -10,15 +10,19 @@ const seconds = (min: number, max: number, dflt?: number): ParamSpec => ({type: 
 const WITH: ParamSpec = {type: 'array', optional: true, items: 'Soul id or name', maxItems: 6, description: 'invite them; each chooses'};
 const VIA: ParamSpec = {type: 'array', optional: true, items: 'place id', maxItems: 4, description: 'walked first, in order'};
 const WALK: ParamSchema = {via: VIA, with: WITH};
+// #2283: a walk or walk-to at running pace (the engine's run gait: stairs stay slow, a wet route walks)
+const PACE: ParamSpec = {type: 'string', optional: true, enum: ['walk', 'run'], default: 'walk'};
 const SITTING: ParamSchema = {seconds: seconds(1, 600, 60), with: WITH};
 const ACTIVITY: ParamSchema = {seconds: seconds(1, 1800)};
 const AT: ParamSpec = {type: 'any', optional: true, description: 'a Soul, place or thing to face'};
 
 const VERB_PARAMS: Record<string, ParamSchema> = {
-  walk: WALK, jog: WALK, run: WALK, 'go-near': WALK,
+  walk: {...WALK, pace: PACE}, jog: WALK, run: WALK, 'go-near': WALK,
   stroll: {...WALK, pause: {type: 'integer', optional: true, min: 0, max: 60, default: 4}},
   'hang-out': {...WALK, seconds: seconds(1, 1800)}, gather: {...WALK, seconds: seconds(1, 1800)}, 'warm-by-fire': {...WALK, seconds: seconds(5, 600, 120)},
   wander: {seconds: seconds(5, 300, 60)},
+  // #1916: a point on the Soul's own level, [x, z] in metres; nothing else
+  'walk-to': {at: {type: 'point', required: true, description: '[x, z] in metres, on your level'}, pace: PACE},
   sit: SITTING, rest: SITTING, 'sit-ground': SITTING, lie: SITTING, nap: SITTING,
   follow: {seconds: seconds(1, 3600, 600)},
   wave: {to: AT, at: AT, seconds: seconds(1, 60)},
@@ -30,7 +34,7 @@ const VERB_PARAMS: Record<string, ParamSchema> = {
 };
 /** Verbs whose whole parameter list is known: another name is a mistake worth saying. Everywhere else an undeclared name
  *  is left to the plan that reads it, so a gap in this table can't refuse an act that works. */
-const CLOSED = new Set(['walk', 'jog', 'run', 'go-near', 'stroll', 'wander', 'stand', 'face']);
+const CLOSED = new Set(['walk', 'jog', 'run', 'go-near', 'stroll', 'wander', 'stand', 'face', 'walk-to']);
 
 /** The shared parameters of the verbs asked for, for a response's `paramsByVerb`. */
 export function paramsByVerb(verbs: Iterable<string>): Record<string, ParamSchema> {
@@ -56,10 +60,11 @@ const typeOk = (name: string, spec: ParamSpec, v: unknown): boolean => {
     // PC11 (#690): `with` also takes one string of names ("Bo and Cy")
     case 'array': return Array.isArray(v) || (name === 'with' && typeof v === 'string');
     case 'object': return !!v && typeof v === 'object' && !Array.isArray(v);
+    case 'point': return Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && Number.isFinite(n));
     default: return true;
   }
 };
-const shown = (spec: ParamSpec) => [spec.type, spec.enum ? `one of ${spec.enum.join(', ')}` : null, spec.min !== undefined || spec.max !== undefined ? `${spec.min ?? ''}..${spec.max ?? ''}` : null, spec.maxLength ? `at most ${spec.maxLength} characters` : null].filter(Boolean).join(', ');
+const shown = (spec: ParamSpec) => [spec.type === 'point' ? 'two finite numbers [x, z]' : spec.type, spec.enum ? `one of ${spec.enum.join(', ')}` : null, spec.min !== undefined || spec.max !== undefined ? `${spec.min ?? ''}..${spec.max ?? ''}` : null, spec.maxLength ? `at most ${spec.maxLength} characters` : null].filter(Boolean).join(', ');
 
 /** Why these params don't fit this offer, or null. Only what the schema states refuses. */
 export function paramsProblem(cap: Pick<EdgeCapability, 'id' | 'verb' | 'params'>, params: unknown): string | null {
