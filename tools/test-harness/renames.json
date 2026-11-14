@@ -565,6 +565,13 @@
     },
     {
       "step": "V3-launcher-unit",
+      "from": "calendar interest and not-coming call the item's object act, one request each",
+      "to": "calendar interest and not-coming call the item's object act, one request each; an interest taken reads the calendar once for memory",
+      "reason": "Same test, extended by #1981: an interest taken also reads the calendar once so the item goes to memory; both act calls are unchanged",
+      "pr": "#2187"
+    },
+    {
+      "step": "V3-launcher-unit",
       "from": "(d) the proxy: Soul calls to a booting world are answered 503 world.starting at once; red sheds C2; a restart ramps C1/C2 back in",
       "to": "(d) the proxy: Soul calls to a booting world wait for it (#2231); red sheds C2; a restart ramps C1/C2 back in",
       "reason": "Same test, renamed when a Soul call to a booting world began waiting for it instead of answering 503 world.starting (#2231)",

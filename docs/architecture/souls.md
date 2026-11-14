@@ -222,7 +222,9 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from.
+`memory <words>` searches the projections and says where each line came from. `digest [--since <time>]` reads only the
+log, makes no request and no model call, and writes at most 200 words for the owner since the last digest (`lastDigest` in
+the Soul's state); `--refs` ends each line with the records it came from, and `--json` gives the same as data.
 
 The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
 `ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/world-launcher/soul/memory-folder.mjs`). Each keeps its newest
@@ -377,7 +379,9 @@ withholds. Owner messages and credentials are never in it.
   `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
-  its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
+  its anchor. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
+  door of Eden House 3 Kitchen"); a place row's `also` names the places beside it whose names share its own as a prefix
+  (Eden House 3, Eden House 3 Kitchen). `query` takes several questions in one call, each with its own depth, filters and token budget, and says
   what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
   narrow nothing; an act that needs others ranks after one done alone. A fresh folder's first `find` fetches both itself,
   and waits out `world.starting`. A thing worked by hand comes with its `state` (the kind's defaults with the live picture's changes) and

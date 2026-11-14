@@ -69,7 +69,7 @@ function inspectOwnedProcess(pid) {
   if (!validPid(pid)) throw fault("CONTROLLER_PROCESS_INVALID");
   let output;
   try {
-    output = execFileSync("ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,lstart="], { encoding: "utf8", timeout: 500, maxBuffer: 4096, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LC_ALL: "C" } });
+    output = execFileSync("ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,lstart="], { encoding: "utf8", timeout: 500, maxBuffer: 4096, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, LC_ALL: "C", TZ: "UTC" } });
   } catch (e) {
     if (e.status === 1 && !String(e.stdout ?? "").trim()) return null;
     throw fault("CONTROLLER_PROCESS_UNKNOWN");
