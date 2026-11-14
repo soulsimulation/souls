@@ -44,7 +44,7 @@ on:
         description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; counted --scenario --loop-sec; clip --kit --viewport'
+        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; counted --scenario --loop-sec; clip --kit --viewport'
         default: ''
 permissions:
   contents: read

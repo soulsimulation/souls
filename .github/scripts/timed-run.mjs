@@ -52,7 +52,8 @@ const FLAG = true;   // a bare flag, no value
 /** Per command: each flag allowed in `args`, and the check its value must pass (FLAG: a bare flag). Nothing else is accepted. */
 export const ARG_ALLOW = {
   walk: { '--world': (v) => v.split(',').every((w) => WALK_WORLDS.includes(w)) && new Set(v.split(',')).size === v.split(',').length },
-  'eval-scripted': { '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
+  // --battery: a bare battery name (battery/<name>.json in the ref); --seat: the scripted owner only, never a live mind
+  'eval-scripted': { '--battery': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--seat': (v) => v === 'scripted', '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
   'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600) },
   'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
