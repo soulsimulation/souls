@@ -633,7 +633,9 @@ reachable. The step-out happens at most once a minute for each Soul. A Soul cut 
 `route.unreachable`, with a reason that gives the seconds until it can step out again, and `retry_after` on the act,
 the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
 not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
-isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
+isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287). A Soul in deep water is
+not cut off while it can swim to a shore that lands on the main area: it swims out and is never stepped ashore. Only water
+with no such shore leaves the step-out as the last resort.
 
 A Soul a god edit closed in while it walked waits until the walk ends, then is asked again with warm labels. While it
 waits on cold labels the tick loop relabels every tick at 20 ms (#1499), and the Soul is asked in the tick they turn warm.

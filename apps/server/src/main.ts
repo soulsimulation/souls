@@ -280,7 +280,19 @@ function hold(req: import('node:http').IncomingMessage, res: import('node:http')
     if (closing) res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); else serve(req, res);
   }); }).finally(() => { held--; });
 }
+/** #2297 A5: GET /__sim/still, for the launcher only (loopback, not forwarded): the still contract of #2241. Still also
+ *  needs no write in flight or held here; wall times are now plus the ticks to go at the world's rate. */
+function stillAnswer() {
+  const s = host.stillUntil(), wallMs = Date.now(), at = (t: number | null) => (t === null ? null : wallMs + Math.max(0, t - s.tick) * 50 / (host.baseRate || 1));
+  const still = s.still && !catchingUp && held === 0 && writesInFlight.size === 0;
+  return { still, tick: s.tick, wallMs, untilTick: still ? s.untilTick : null, untilWallMs: still ? at(s.untilTick) : null, moveTick: still ? s.moveTick : null, moveWallMs: still ? at(s.moveTick) : null };
+}
+const loopback = (a: string | undefined) => a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
 server.on('request', (req, res) => {
+  if (req.method === 'GET' && req.url === '/__sim/still') {
+    if (!loopback(req.socket.remoteAddress) || req.headers['x-forwarded-for'] !== undefined) { res.writeHead(404).end(); return; }
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(stillAnswer())); return;
+  }
   if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
   const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
   if (write) {

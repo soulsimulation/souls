@@ -34,7 +34,7 @@ import {applyUpperFloorsV1,placeLevelOf,previewUpperFloorsV1,type UpperFloorsFac
 import {registerAssets} from './catalog-adapter.ts';
 import {socialEdenTransitionV1Schema,type SocialEdenTransitionV1} from '@souls/engine-contract';
 import {searchArrival,arrivalPocket,type ArrivalGround,type ArrivalPocket,type ArrivalSpot} from './arrival-search.ts';
-import {attachGround,groundRegistry,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater} from './ground-bridge.ts';
+import {attachGround,groundRegistry,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
 // The Mars engine behind Sim's engine contract.
 //
 // The shell speaks a small BODY LANGUAGE (walk_to, sit, stand, rest, wave,
@@ -511,6 +511,19 @@ export class MarsEngine implements Engine {
     }
     for (const e of listEntities(this.ents) as any[]) if (e.carrier && e.carrier.phase !== 'parked') return no;
     return { still: true, untilTick: until };
+  }
+  /** #2297 (read only): the tick at which a held gaze lapses (updateAttention, every 10 ticks, drops a gaze from its
+   *  `until`; the head turns back), or null. The world changes there although no body moves. */
+  attentionDueV1(): number | null {
+    let t: number | null = null;
+    for (const e of listEntities(this.ents) as any[]) { const u = e.kind === 'human' ? e.human?.gaze?.until : undefined; if (Number.isInteger(u)) { const d = Math.ceil(Math.max(u, this.rt.tick + 1) / 10) * 10; t = t === null ? d : Math.min(t, d); } }
+    return t;
+  }
+  /** #2297 still check (read only, for the host's check mode): the state hash with the clock fields left out (the tick and
+   *  the time of day, which a still world changes on every tick as a pure function of the tick), and the world RNG's state. */
+  stillCheckV1(): { hash: string; rng: string } {
+    const w = this.rt.world;
+    return { hash: hashOf(this.stateHashInputs(hashOf({ ...w, tick: 0, env: { ...w.env, datetime: '' } }))), rng: String(w.rng) };
   }
 
   private guardedV1?: unknown[];
@@ -2872,13 +2885,17 @@ export class MarsEngine implements Engine {
    *  and the caller logs a god walk-out (the body rises and lands at `to`), since a plain relocate refuses a held body.
    *  Any other held body (a berth, mid-action) is never answered: a relocate refuses it. A body sitting or lying with no
    *  hold is judged where it is. Seated or resting, no standing room (under it, or at a tight approach) is not a pocket:
-   *  only a closed-off area moves it.
+   *  only a closed-off area moves it. A body in deep water (treading or swimming) with a shore it can swim to that lands on
+   *  the main area is never answered: water is not a pocket, and a relocate ashore would carry it metres in one tick.
    *  Pure read; the caller logs the move (edge-relocate). */
   navRescueV1(id:string,budgetMs=50,maxPocket=NAV_RESCUE_MAX_POCKET):{to:[number,number];code:string;pocket?:number;level:number;seated?:true}|null{
     const e=this.ents[id],h=e?.human;if(!h||this.byActor.has(id)||h.sleepPose||h.on||h.riding||h.carrier)return null;
     const seat=this.seatStand(id);if(!seat&&this.holders(id).length)return null;
     const anchored=!seat&&(NAV_ANCHORED.has(h.activity)||NAV_ANCHORED.has(h.baseActivity));
     if(!this.navWarmV1(budgetMs))return null;
+    // a body in deep water with a shore to swim to, landing on the main area, is not in a pocket: it swims out. Only a body
+    // whose water has no such shore falls through to the rescue below, the last resort.
+    if(inDeepWater(this.rt,id)){const to=this.navNearestMainV1([e.pose.p[0],e.pose.p[2]],id),land=to&&shoreToward(this.rt,id,to);if(land&&this.conn!.check([{id,p:land,level:0,tol:.6}])[0]?.ok)return null;}
     const p:[number,number]=seat?seat.p:[e.pose.p[0],e.pose.p[2]],level=seat?seat.level:h.level??0,v=this.conn!.check([{id,p,level,tol:.6}])[0];
     if(!v||v.ok||(seat||anchored)&&v.code==='nav.no-standing-room')return null;
     if(level===0&&v.code!=='nav.no-standing-room'&&(v.pocket??0)>maxPocket)return null;

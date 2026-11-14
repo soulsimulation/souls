@@ -9,9 +9,9 @@ import {ActPending, EdgeError, edgeBody, edgeErrorOf} from '../contract.ts';
 import {Conversations} from './converse.ts';
 import {chessKind} from './objects/chess.ts';
 import {Objects} from './objects/framework.ts';
-import {presentationKind} from './objects/presentation.ts';
+import {presentationKind, presentationNextTick, type PresentationState} from './objects/presentation.ts';
 import {markKind, projectKind} from './objects/marks.ts';
-import {calendarKind} from './objects/calendar.ts';
+import {calendarKind, calendarNextTick} from './objects/calendar.ts';
 import {rideKind} from './objects/ride.ts';
 import type {CommsCore, SpectatorEdgeMessage} from './core.ts';
 import {Presence} from './presence.ts';
@@ -67,6 +67,8 @@ export type CommsRuntime = {
    *  recent dialogue (`speech` / `conversation.turn`, marked `replay: true`; see dialogue-replay.ts). */
   spectatorJoin(): SpectatorEdgeMessage[];
   sweep(): void;
+  /** #2297: the next tick at which the comms sweep changes something, or null. */
+  nextDueTick(now?: number): number | null;
   close(): void;
 };
 
@@ -366,6 +368,17 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     onSpectator(l) { spectators.push(l); return () => {const i=spectators.indexOf(l);if(i>=0)spectators.splice(i,1);}; },
     spectatorJoin: () => { let replay: SpectatorEdgeMessage[] = []; try { replay = dialogueReplay(core); } catch { /* history is optional */ } return [...roster(), ...replay]; },
     sweep,
+    /** #2297: the next tick at which the comms sweep changes something: a calendar item or a presentation changes phase, a
+     *  Soul's calendar item is removed a day after it ends, the steward's digest slot opens, a conversation drops a silent member or lapses an invitation, a
+     *  Soul fades (wall times converted at the admin's rate). The sweep runs on a 30 s wall timer: it lands up to 30 s later. */
+    nextDueTick(now = Date.now()): number | null {
+      const tick = core.tick(); let t: number | null = null; const at = (x: number | null) => {if (x !== null) t = t === null ? x : Math.min(t, x);};
+      const wall = (ms: number | null) => ms === null ? null : tick + Math.max(1, Math.ceil((ms - now) / 50 * (deps.host.baseRate > 0 ? deps.host.baseRate : 1)));
+      for (const o of objects.ofKind('calendar-item')) { const s = o.state as CalendarState; at(calendarNextTick(s) ?? (s.proposedById ? s.endsAtTick + CALENDAR_EXPIRE_MINUTES * ticksPerRealMinute() + 1 : null)); }
+      for (const o of objects.ofKind('presentation')) at(presentationNextTick(o.state as PresentationState));
+      at(wall(conversations.nextDueMs())); at(wall(fading.nextDueMs())); at(steward.nextDigestTick());
+      return t === null ? null : Math.max(tick + 1, t);
+    },
     close() { closed = true; if (timer) clearInterval(timer); cancelSweep(); webhooks.close(); streams.wakeAll(); },
   };
 }
