@@ -9,7 +9,9 @@ export type Side = 's' | 'n' | 'e' | 'w';
 export type Rect = [number, number, number, number];
 export type PRoom = { id: string; name: string; floor: number; kind: string; rect?: Rect; poly?: Vec2[] };
 export type PDoor = { floor: number; a: string; b: string; at?: number; width?: number; height?: number };
-export type PExt = { floor: number; room: string; side: Side; at?: number; kind: 'door' | 'window'; width?: number; height?: number; sill?: number; to?: 'outside' | 'balcony' | 'porch' };
+export type PExt = { floor: number; room: string; side: Side; at?: number; kind: 'door' | 'window'; width?: number; height?: number; sill?: number; to?: 'outside' | 'balcony' | 'porch';
+  /** false: a bare doorway; the building draws no leaf, a door thing set in it is the door (#2282). Honoured only by a def
+   *  revision that opts in with make.args.bareDoors (core/hall@2), so a stored building never changes. */ leaf?: false };
 /** A straight flight in a band along a wall: `rect` is the flight's footprint, it rises along `axis` in direction `dir`. */
 export type PStair = { id: string; from: number; to: number; room: string; rect: Rect; axis: 'x' | 'z'; dir: 1 | -1; width: number; risers: number; going: number; /** Sign of the room side across the band (away from its wall). */ away: 1 | -1;
   /** A flight narrowed to keep its corridor (bandWidth): the full-width band it replaces. Doors are placed round this one, so
@@ -279,7 +281,7 @@ export function autoPlan(params: { W: number; D: number; t: number; fh: number; 
 type JPlan = {
   /** Optional authored footprint: room coordinates resize with the building instead of being clipped. */
   size?: number[];
-  floors?: { rooms?: { id?: string; name?: string; rect?: number[]; kind?: string }[]; doors?: { between?: string[]; at?: number; width?: number }[]; exterior?: { room?: string; wall?: string; at?: number; kind?: string; width?: number; sill?: number; height?: number }[] }[];
+  floors?: { rooms?: { id?: string; name?: string; rect?: number[]; kind?: string }[]; doors?: { between?: string[]; at?: number; width?: number }[]; exterior?: { room?: string; wall?: string; at?: number; kind?: string; width?: number; sill?: number; height?: number; leaf?: boolean }[] }[];
   stairs?: { from?: number; to?: number; room?: string; wall?: string; at?: number }[];
   /** One balcony on the front (south) wall of a room above the ground floor, reached by a door at `at` along that wall. */
   balcony?: { floor?: number; room?: string; at?: number; width?: number; depth?: number };
@@ -325,7 +327,7 @@ export function explicitPlan(json: unknown, c0: { W: number; D: number; t: numbe
       if (typeof e.room !== 'string') continue;
       const side = (['s', 'n', 'e', 'w'] as const).find((x) => x === e.wall) ?? 's';
       const kind = e.kind === 'window' ? 'window' : 'door';
-      p.ext.push({ floor: k, room: slug(e.room), side, kind, ...(typeof e.at === 'number' ? { at: e.at } : {}), ...(typeof e.width === 'number' ? { width: e.width } : {}), ...(typeof e.sill === 'number' ? { sill: e.sill } : {}), ...(typeof e.height === 'number' ? { height: e.height } : {}) });
+      p.ext.push({ floor: k, room: slug(e.room), side, kind, ...(typeof e.at === 'number' ? { at: e.at } : {}), ...(typeof e.width === 'number' ? { width: e.width } : {}), ...(typeof e.sill === 'number' ? { sill: e.sill } : {}), ...(typeof e.height === 'number' ? { height: e.height } : {}), ...(kind === 'door' && e.leaf === false ? { leaf: false as const } : {}) });
     }
   });
   if (!p.rooms.length) { p.rooms.push({ id: 'room', name: 'Room', floor: 0, kind: 'room', rect: [X0, Z0, X1, Z1] }); p.warnings.push('plan: no rooms; one room fills the footprint'); }
