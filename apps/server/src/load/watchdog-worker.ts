@@ -25,9 +25,10 @@ function write() {
 }
 write();
 // #2303: while the world is silent (still, nobody watching) live.json is written every 10 s, a third of the launcher's
-// 30 s staleness limit (guard.mjs liveStaleMs). A main thread whose last turn is over 5 s old is reported at the full pace.
+// 30 s staleness limit (guard.mjs liveStaleMs). A main thread whose last turn is over 5 s old, and a paused or halted
+// clock (stallMs 0, halted), are reported at the full pace.
 const SILENT_EVERY_MS = 10_000;
-setInterval(() => { const now = Date.now(); if (a[S.still] === 1 && now - writtenAt < SILENT_EVERY_MS && now - a[S.lastTurnAt] < 5_000) return; write(); }, everyMs ?? 2000);
+setInterval(() => { const now = Date.now(); if (a[S.still] === 1 && a[S.stallMs] > 0 && !a[S.halted] && now - writtenAt < SILENT_EVERY_MS && now - a[S.lastTurnAt] < 5_000) return; write(); }, everyMs ?? 2000);
 if (port !== undefined) {
   const server = createServer((req, res) => {
     if (req.method !== 'GET' || !/^\/(?:[^?]*\/)?healthz(?:\?|$)/.test(req.url ?? '')) { res.writeHead(404).end(); return; }

@@ -675,7 +675,7 @@ export class WorldHost {
     }
     // #2303: the one tick a jump leaves before its target, inside the horizon it claimed and with nothing queued, keeps the
     // still stretch (an ordinary tick otherwise ends it, and the world's timers wake for nothing)
-    if (this.stillStretch && this.stillClaim !== null && tick + 1 < this.stillClaim && !this.queue.length) { this.landing = true; try { this.tickOnce(); } finally { this.landing = false; } return this.engine.world.tick - tick; }
+    if (this.stillStretch && this.stillClaim !== null && tick + 1 < this.stillClaim && !this.queue.length) { this.jumpFrom = tick; this.landing = true; try { this.tickOnce(); } finally { this.landing = false; } return this.engine.world.tick - tick; }
     this.tickOnce();
     return this.engine.world.tick - tick;
   }
