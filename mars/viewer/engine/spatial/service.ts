@@ -745,7 +745,37 @@ export class Spatial {
     if (this.epoch === epoch) { m.map.set(key, structuredClone(r)); if (m.map.size > m.cap) m.map.delete(m.map.keys().next().value!); }
     return r;
   }
+  private passMemo?: { scene: SpatialScene; open: SpatialScene; grids?: GridSet };
+  /** doors-pass/1 (#2365): the synced scene with every closed, unlocked, hand-operated door gap (`door: 'pass'`) left
+   *  out, as a walk through it sees it (it opens the door, passes and closes it); the synced scene itself when it has none.
+   *  Memoised per synced scene. Call after sync(world). */
+  passScene(): SpatialScene {
+    const scene = this.scene, m = this.passMemo;
+    if (m?.scene === scene) return m.open;
+    const obstacles = scene.obstacles.filter((o) => o.door !== 'pass');
+    const open = obstacles.length === scene.obstacles.length ? scene : { ...scene, obstacles };
+    this.passMemo = { scene, open };
+    return open;
+  }
+  /** doors-pass/1: the grids of passScene() (the synced grids when it has no such door). Flat worlds; on ground worlds level
+   *  0 is composed from tiles (GroundNav.compose over passScene().obstacles), so only its other levels come from here. */
+  passGrids(): GridSet {
+    const open = this.passScene(), m = this.passMemo!;
+    if (open === this.scene) return this.grids;
+    return (m.grids ??= this.ground ? this.grids : this.gridsFor(open));
+  }
   private routeNow(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
+    if (opts?.doors === 'pass') {
+      const { doors: _, ...rest } = opts;
+      this.sync(world);
+      const open = this.passScene();
+      if (open !== this.scene) {
+        const o = { ...(this.planner === 'exact' ? {} : { planner: this.planner }), ...rest, ...(this.routeReachV1 ? { routeReachV1: true } : {}) };
+        if (this.ground) return groundRoute(this.ground, open, profile, start, goal, o, (r) => this.groundInclude(world, r), () => this.grids);
+        return findRoute(this.passGrids(), open, profile, start, goal, o);
+      }
+      return this.routeNow(world, profile, start, goal, rest);
+    }
     const o0 = this.planner === 'exact' ? opts : { planner: this.planner, ...opts }, o = this.routeReachV1 ? { ...o0, routeReachV1: true } : o0;
     if (this.ground) {
       this.sync(world);

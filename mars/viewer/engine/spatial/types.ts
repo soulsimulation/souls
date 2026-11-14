@@ -11,7 +11,12 @@ import type { OBB2, Vec2 } from '../core/math.ts';
  * clearance and a 0.9 m interior door less than the 0.34 m a body plans with. Absent: the conservative raster, as before
  * (old world-edit logs carry no field and replay unchanged).
  */
-export type Obstacle = { id: string; obb: OBB2; y0: number; y1: number; label?: string; kind?: 'wall' | 'solid' | 'glass' | 'component' | 'vehicle' | 'fixture'; raster?: 'centre' };
+/**
+ * `door: 'pass'` (doors-pass/1, #2365): the closed gap of an unlocked, hand-operated door. The walk raster blocks it like any
+ * solid (a body never walks through a shut leaf), but reach checks and the connectivity audit treat it as a way through:
+ * a walk that needs it opens it by hand, passes and closes it behind (Soul Actions entry 31). Absent: an ordinary solid.
+ */
+export type Obstacle = { id: string; obb: OBB2; y0: number; y1: number; label?: string; kind?: 'wall' | 'solid' | 'glass' | 'component' | 'vehicle' | 'fixture'; raster?: 'centre'; door?: 'pass' };
 
 /** A horizontal walkable surface (ground patch, deck, landing). */
 export type Surface = { id: string; level: number; y: number; obb: OBB2; label?: string };

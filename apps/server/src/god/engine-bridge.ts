@@ -39,10 +39,10 @@ import { createWatering, type Watering } from './watering.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
-import { createContactActuatorService } from './contact-actuator.ts';
+import { createContactActuatorService, isContactActuator } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { setWorldDaySource } from './poster-boards.ts';
-import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
+import { actionsOf, actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -865,6 +865,8 @@ export class EngineBridge {
     const free = freeDoorOpening(def, baked), openings = free ? [...(baked.openings ?? []), free] : baked.openings ?? [];
     const gates = worldFrame ? openings.filter((o) => o.kind === 'gate') : [];
     if (gates.length) this.gated.add(e.id); else this.gated.delete(e.id);
+    // doors-pass/1 (#2365): a closed gap of an unlocked door a hand opens is a way through for reach and connectivity
+    const pass = () => actionsOf(def).some((a) => a.name === 'open' && isContactActuator(def, a)) && actuatedState(e, def).locked !== true;
     const shut = isShut(e, def);
     for (const o of openings) {
       // a wall's or fence's gate with a door standing in it yields to the door (the door blocks or passes by its state)
@@ -873,7 +875,7 @@ export class EngineBridge {
       if (!closed) continue;
       // a gate of a world-frame wall/fence sits on the ground under it (sill and height are ground-relative)
       const obb = this.gapBox(o, def, e), c = obb.c;
-      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)` });
+      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)`, ...(pass() ? { door: 'pass' as const } : {}) });
     }
     // floors: polygons → oriented rectangles on levels
     const surfaces = [...(baked.surfaces ?? [])];

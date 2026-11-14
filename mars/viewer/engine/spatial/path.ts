@@ -82,6 +82,11 @@ export type RouteOpts = {
    * walk from an upper floor down to the ground a chunk at a time instead of refusing it `ground.too-far`.
    */
   routeReachV1?: boolean;
+  /**
+   * doors-pass/1 (#2365, read by Spatial.route only): plan as if every closed, unlocked, hand-operated door (an obstacle
+   * with `door: 'pass'`) stood open. For reach checks: a walk through such a door opens and closes it (entry 31).
+   */
+  doors?: 'pass';
 };
 
 /** Corridor planner: coarse cell size (m) and fine-search halo around the coarse path (m). */

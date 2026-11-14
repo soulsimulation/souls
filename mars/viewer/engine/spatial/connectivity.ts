@@ -165,7 +165,8 @@ export class NavConnectivity {
     return `${sp.baseId}|${sp.epoch}|${g ? `${g.field.id}|${g.cell}|${g.extentTiles()}` : sp.cell}|${this.t}`;
   }
   get ready(): boolean { return !this.pending && this.publishedKey === this.currentKey() && this.publishedGround === this.spatial.ground; }
-  private get scene(): SpatialScene { return this.buildScene ?? this.spatial.scene; }
+  /** doors-pass/1 (#2365): the audit sees a closed, unlocked, hand-operated door as a way through (a walk opens it). */
+  private get scene(): SpatialScene { return this.buildScene ?? this.spatial.passScene(); }
   stats = { updates: 0, relabelled: 0, reused: 0, uniform: 0, lastMs: 0, lastRelabelled: 0, graphMs: 0, clusterMs: 0, links: 0, edges: 0, clusters: 0, clusterBuilds: 0, linkHits: 0, maxStepMs: 0, maxStepPhase: '' as string };
 
   constructor(spatial: Spatial, opts: { anchors: () => Vec2[]; clear?: number }) {
@@ -182,7 +183,7 @@ export class NavConnectivity {
     if (!this.pending) {
       const anchors = this.anchors().map(p => [...p] as Vec2);
       const work = new NavConnectivity(this.spatial, { anchors: () => anchors, clear: this.t });
-      work.building = true; work.buildScene = this.spatial.scene; work.stats = this.stats;
+      work.building = true; work.buildScene = this.spatial.passScene(); work.stats = this.stats;
       // Cache values are immutable. Union-find path compression, maps and graph sets belong to the builder alone.
       work.tiles = new Map(this.tiles); work.lru = new Map(this.lru); work.mediaMemo = new Map(this.mediaMemo);
       work.clusterMemo = new Map(this.clusterMemo); work.linkMemo = new Map(this.linkMemo);
@@ -257,7 +258,7 @@ export class NavConnectivity {
     const sp = this.spatial, g = sp.ground;
     let relabelled = 0;
     if (!g) {
-      const lv = sp.grids.levels.get(0);
+      const lv = sp.passGrids().levels.get(0);
       const key = `${sp.baseId}|${sp.epoch}|${lv ? `${lv.ox},${lv.oz},${lv.nx},${lv.nz}` : ''}`;
       if (this.flat?.key !== key || this.version !== key) {
         this.tiles.clear(); this.lru.clear();
@@ -473,7 +474,7 @@ export class NavConnectivity {
   private upperAt(level: number, p: Vec2, tol: number): { g: LevelGrid; node: (c: number) => string | null; floor?: string; ck: string } | null {
     const sp = this.spatial;
     if (!sp.ground) {
-      const g = sp.grids.levels.get(level); if (!g) return null;
+      const g = sp.passGrids().levels.get(level); if (!g) return null;
       let labels = this.flatUpper.get(g);
       if (!labels) { labels = labelComponents(g.clearance, g.nx, g.nz, this.t).labels; this.flatUpper.set(g, labels); }
       const L = labels;
