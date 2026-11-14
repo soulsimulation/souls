@@ -20,7 +20,8 @@ async function take(policy:Record<string,boolean>){
 }
 /** Steps the scene. With `hold`, a body (B) holds the approach walk's narrow way for good, as a walker inside it would, and
  *  B shuffles by 2 mm a tick, as a body in a crowd does (and as a walker yielding beside a wall rocks, wait-bound.test.ts):
- *  that restarts the persistent-wait detector, so the hold is never named a deadlock and item-approach/1's limit never reads it. */
+ *  that restarts the persistent-wait detector, so the hold is never named a deadlock. item-approach/1's limit reads a deadlock
+ *  name, or any blocked approach only where walk-block/1 is on (off here); the take's own record reads `running` throughout. */
 function run(e:MarsEngine,id:string,ticks:number,hold:boolean){
   const rt=(e as any).rt,events:ProgramEvent[]=[];let held=false,parent:string|undefined;
   // headway: the last tick the body left a 0.5 m disc round where it last made headway (the watchdog's measure)
