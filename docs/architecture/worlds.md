@@ -132,6 +132,15 @@ switch independent. A previously saved master mute migrates to both switches off
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
     with no picture kept, loads the world. Not yet: memory admission (#2233) and the load queue (#2304).
+    **Measured (#2301, one run, 48-CPU runner, fake minds, `--worlds-mem-mb 6250`):** 100 small and 4 Eden-class worlds,
+    each with an agent acting every 2 to 10 minutes for an hour. At most 27 worlds were in memory, with about 7.5 GB in the
+    launcher's process tree (p50). Each world spent a median of 21 % of the hour in memory (Eden-class worlds 24 to 35 %).
+    Loading added a median of 3.4 s to an act (p95 8.3 s, longest 36 s). The run used 2 processor cores at the median
+    and 6 at most. 33 of 1,006 acts were refused with `world.capacity`: the memory was full and no world was quiet
+    enough to unload. 28 minutes after the agents fell silent, every world was out of memory, and the launcher alone held
+    117 MB. Three worlds jumped and unloaded reached the same state hash as a twin ticked straight through from genesis.
+    In the same run, 18 of the 22 reminders that were set were still undelivered 8 minutes after they fell due while
+    their worlds were unloaded. A world's alarm load was not seen.
   - **A still world's clock is jumped, not stepped (#2298; `SIM_SKIP=0` ticks every world as before).** One function
     moves a world's time, live and after any gap: `WorldHost.advanceStep(target)`. When `stillUntil()` says still, the
     engine skips (`skipToV1`) to the tick before the earlier of the horizon and the target, and the ordinary tick runs the
