@@ -37,7 +37,7 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
-import { advanceNeeds, DAY_TICKS, newLife, type Life } from '@souls/brain';
+import { advanceNeedAnchor, advanceNeeds, DAY_TICKS, needRates, needsAt, newLife, type Life, type Needs } from '@souls/brain';
 import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
 import { frontier, stepIndex, belongsTo } from './deck.ts';
@@ -1564,8 +1564,17 @@ export class WorldHost {
     const journal:AcceptanceJournal=()=>{const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(t.toRulesVersion,this.worldId,t.fromRulesVersion);if(r.changes!==1)throw Error('commons-provisions.header-moved');return true;};
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author:'operator:commons-provisions',payload:{commonsProvisions:t},guard,journal,resolve,reject}));
   }
+  /** A living Soul's needs now (need-anchor/1 reads them from the anchor; before it they are stored every tick). */
+  needsOf(m: Mind): Needs | undefined { return m.life ? needsAt(m.life, this.engine.world.tick) : undefined; }
+  /** A Soul's energy now: a living Soul's is its energy need. */
+  energyOf(m: Mind): number { return m.life ? needsAt(m.life, this.engine.world.tick).energy : m.energy; }
+  enableNeedAnchorsV1(author='operator:need-anchor'){if((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,needAnchorsV1:true},why:'need-anchor/1 (#2296): a need is a value at a tick and a rate, rewritten only when a rate changes; retain historical replay before this event'});}
+  /** need-anchor/1: what nearness last found, and the Soul bodies it was found for. Derived, never state: recomputed
+   *  whenever any of them differ, so a restored world reads the same nearness. */
+  private nearV1: { sig: unknown[]; near: Map<string, boolean> } | null = null;
   private advanceLives() {
     const tick = this.engine.world.tick;
+    if ((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1 === true) return this.advanceNeedAnchorsV1(tick);
     for (const m of this.minds.values()) {
       if (!m.life) continue;
       const e = this.engine.world.entities[m.entityId]; if (!e?.human) continue;
@@ -1577,6 +1586,26 @@ export class WorldHost {
       const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
       advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater, needsDay); m.energy = m.life.needs.energy;
     }
+  }
+  /** need-anchor/1 (#2296): an anchor is rewritten only when a rate's input changes, and nearness is tested only on a tick
+   *  where some Soul's body moved (or a Soul came or went). Nothing else is written. */
+  private advanceNeedAnchorsV1(tick: number) {
+    const w = this.engine.world, needsDay = (this.living as {zone?: string} | undefined)?.zone ? REAL_DAY_TICKS : DAY_TICKS;
+    const floaterOf = (e: unknown) => (e as {body?:{family:string}} | undefined)?.body?.family==='floater';
+    const sig: unknown[] = [];
+    for (const m of this.minds.values()) { const e = w.entities[m.entityId]; sig.push(m.soulId, m.entityId, e?.pose.p[0], e?.pose.p[1], e?.pose.p[2], floaterOf(e)); }
+    sig.push('|'); for (const o of this.mindByEntity.values()) { const b = w.entities[o.entityId]; sig.push(o.entityId, b?.pose.p[0], b?.pose.p[1], b?.pose.p[2]); }
+    const c = this.nearV1, moved = !c || c.sig.length !== sig.length || sig.some((v, i) => v !== c.sig[i]), near = moved ? new Map<string, boolean>() : c.near;
+    const humanRest=(this.extra.runtimePolicy as {humanRestNeedsV1?:boolean}|undefined)?.humanRestNeedsV1===true;
+    for (const m of this.minds.values()) {
+      if (!m.life) continue;
+      const e = w.entities[m.entityId]; if (!e?.human) continue;
+      const floater = floaterOf(e);
+      if (moved) near.set(m.soulId, [...this.mindByEntity.values()].some(other => { const b = w.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; }));
+      const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
+      advanceNeedAnchor(m.life, tick, needRates(resting?'rest':e.human.activity, near.get(m.soulId)!, recharging, floater), needsDay);
+    }
+    if (moved) this.nearV1 = { sig, near };
   }
 
   private captureHostState(): Omit<SnapshotBody, 'runtime'> {
@@ -2107,7 +2136,7 @@ export class WorldHost {
       id: m.soulId, entityId: m.entityId, name: m.name, description: m.description, owner: ownerShort(m.owner), native: m.native,
       ...this.publicNameMetadata(m.soulId),
       ...(this.profilePhoto(m.soulId)?{profilePhoto:this.profilePhoto(m.soulId)!}:{}),
-      intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(m.energy), doing: this.doingOfV1(m),
+      intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(this.energyOf(m)), doing: this.doingOfV1(m),
       ...this.publicNow(m.soulId),
       ...(this.publicBodyOf?.(m.soulId) ? {body: this.publicBodyOf(m.soulId)!} : {}),
       ...(this.publicSlowedOf?.(m.soulId) ? {slowed: this.publicSlowedOf(m.soulId)!} : {}),

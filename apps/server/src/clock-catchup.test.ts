@@ -52,7 +52,7 @@ const turn = () => setImmediate();
 type F = ReturnType<typeof fixture>;
 const state = (f: F) => ({ tick: f.host.engine.world.tick, seq: f.host.seq, engine: f.host.engine.stateHash(), kernel: kernelHash(f.host.kernel),
   lives: hashOf([...f.host.minds.values()].map((m) => [m.soulId, m.life])), events: hashOf(f.db.events(f.host.worldId).map((e) => [e.seq, e.tick, e.kind, e.author, e.payload])) });
-async function world(t: test.TestContext, dir: string, ambient: boolean) {
+async function world(t: test.TestContext, dir: string, ambient: boolean, anchors = false) {
   const f = fixture(join(dir, 'world.db'), await factory(), { durableClockV1: true }); f.souls.enableLifecycle(); f.brain.quiesce();
   t.after(() => { f.host.stop(); f.db.close(); });
   await accept<unknown>(f.host, new LivingWorld(f.host).install(['Owners drive their Souls.'])); for (let i = 0; i < 4; i++) f.host.tickOnce();
@@ -61,7 +61,8 @@ async function world(t: test.TestContext, dir: string, ambient: boolean) {
   await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: 0, dayTicks: 2400, customs: ['Owners drive their Souls.'] }, why: 'test: a 2-minute day, so the gap crosses its moments and a day turn' }));
   for (const n of ['ana', 'ben', 'cy']) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'idle' })); }
   if (ambient) new EdgeLedger(f.host, f.db, undefined, { ambient: true });
-  for (let i = 0; i < 200; i++) { f.host.tickOnce(); await turn(); }
+  // #2296: need-anchor/1 adopted halfway, after a snapshot, so the history before it replays through the old reader
+  for (let i = 0; i < 200; i++) { if (anchors && i === 100) { f.host.saveSnapshot(true); await accept<unknown>(f.host, f.host.enableNeedAnchorsV1()); } f.host.tickOnce(); await turn(); }
   return f;
 }
 /** The process comes back: the world boots from the database it left and gets the same listeners main.ts gives it. */
@@ -107,19 +108,21 @@ test('held-activity/1: a world cold-booted halfway through a 3,600 s read ends i
   assert.equal(after.host.engine.stateHash(), control.host.engine.stateHash(), 'equal hashes at the end tick');
 });
 
-for (const how of ['restart', 'crash'] as const) for (const ambient of [false, true]) {
-  const what = `${how === 'restart' ? 'stopped and cold-booted' : 'that crashed and cold-booted'}, ${ambient ? 'idle Souls with the edge ambient-life reflex' : 'idle Souls, needs and day moving'}`;
+for (const how of ['restart', 'crash'] as const) for (const [ambient, anchors] of [[false, false], [true, false], [false, true]]) {
+  const what = `${how === 'restart' ? 'stopped and cold-booted' : 'that crashed and cold-booted'}, ${ambient ? 'idle Souls with the edge ambient-life reflex' : anchors ? 'idle Souls whose needs are anchors (need-anchor/1, adopted mid-history)' : 'idle Souls, needs and day moving'}`;
   // #2236: the ambient-life reflex keeps its idle clock in memory, so a reboot shifts the idle Souls' next acts: unproved
   test(`equivalence: a world ${what}, caught up by ticking, matches one ticked straight through`, { timeout: 600_000, ...(ambient ? { todo: '#2236: the ambient-life idle clock is lost on reboot' } : {}) }, async (t) => {
     const dir = mkdtempSync(join(tmpdir(), `catchup-${how}-`)); t.after(() => rmSync(dir, { recursive: true, force: true }));
-    const control = await world(t, dir, ambient), gap = 2400, copy = join(dir, 'away.db');
+    const control = await world(t, dir, ambient, anchors), gap = 2400, copy = join(dir, 'away.db');
     if (how === 'restart') control.host.saveSnapshot(true);                    // a clean stop saves its head
     else for (let i = 0; i < 300; i++) { control.host.tickOnce(); await turn(); }   // a crash: the last snapshot is older than the head
     control.db.db.exec(`VACUUM INTO '${copy}'`);                                 // what the stopped process left on disk
-    const away = state(control);
+    const away = state(control), needs = (f: F) => hashOf([...f.host.minds.values()].map((m) => f.host.needsOf(m))), awayNeeds = needs(control);
     for (let i = 0; i < gap; i++) { control.host.tickOnce(); await turn(); }    // the control never stopped
     const after = await reboot(t, copy, ambient);
     assert.equal(after.host.engine.world.tick, away.tick, 'booted to where it stopped');
+    if (anchors && how === 'crash') { const adopted = after.db.events(after.host.worldId).find((e) => (e.payload as {runtimePolicy?: {needAnchorsV1?: boolean}})?.runtimePolicy?.needAnchorsV1)!;
+      assert.ok(after.db.latestSnapshot(after.host.worldId)!.tick < adopted.tick, 'the boot replayed the old reader\'s ticks and the adoption from an older snapshot'); }
     const ran = await after.host.catchUp(control.host.engine.world.tick - after.host.engine.world.tick, turn);
     assert.equal(ran, gap);
     const inGap = control.db.events(control.host.worldId).filter((e) => e.tick > away.tick && e.tick < away.tick + gap);
@@ -127,7 +130,8 @@ for (const how of ['restart', 'crash'] as const) for (const ambient of [false, t
     const day = inGap.filter((e) => e.kind === 'rules' && e.author === 'world').map((e) => Object.keys(e.payload as object).filter((k) => k !== 'why').join('+'));
     t.diagnostic(JSON.stringify({ how, ambient, gap, acts, day }));
     assert.ok(day.length > 0, 'the day turned in the gap (LivingWorld logged its events)');
-    assert.notEqual(state(control).lives, away.lives, 'needs moved in the gap');
+    assert.notEqual(needs(control), awayNeeds, 'needs moved in the gap');
+    if (anchors) assert.ok([...control.host.minds.values()].every((m) => m.life!.anchor), 'every Soul\'s needs are an anchor');
     if (ambient) assert.ok(acts > 0, 'the idle Souls lived in the gap (ambient acts were logged)');
     assert.deepEqual(state(after), state(control));
   });
