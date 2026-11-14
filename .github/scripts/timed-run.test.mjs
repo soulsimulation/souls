@@ -124,7 +124,7 @@ test('command lines: each bench with its repeats, its own output dir under out a
   assert.deepEqual(commandLine(cap('bench-client', '--arms n6 --short'), o), ['tools/bench/capacity/bench.mjs', '--load', 'client', '--via-launcher', '--repeats', '2', '--out', join('o', 'bench'), '--port', '30000', '--child-range', '30001-30002', '--arms', 'n6', '--short']);
   assert.deepEqual(commandLine(cap('meetup', '--profile even'), o), ['tools/bench/capacity/meetup/meetup.mjs', '--repeats', '2', '--out', join('o', 'meetup'), '--port', '30000', '--range', '30001-30030', '--profile', 'even']);
   assert.deepEqual(commandLine(cap('slopes-profile'), o), ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', '--repeats', '2', '--out', join('o', 'slopes'), '--port', '30000']);
-  assert.deepEqual(SPLIT, ['eval-load', 'bench-client', 'meetup', 'slopes-profile']);
+  assert.deepEqual(SPLIT, ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers']);
 });
 
 test('stage, each capacity command: its own files only, scrubbed; a Soul token anywhere under out refuses the upload', () => {
