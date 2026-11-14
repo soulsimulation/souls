@@ -15,6 +15,12 @@ const RANK: Record<Level, number> = {green: 0, amber: 1, red: 2, black: 3};
 export type AmberEntry = 'service' | 'loop' | 'heap' | 'queue' | 'red';
 export type AmberHold = 'service' | 'loop' | 'heap' | 'dwell';
 export const STEP_DOWN_MS = 30_000, BLACK_SERVICE_MS = 30_000;
+/** A blip (one slow act: a tick gap lowers the 5 s tick service for 5 s and raises the loop p99, the max of two 5 s
+ *  windows, for up to 10 s) is shorter than this, with a margin. Amber's own conditions enter amber from green only once
+ *  they have held this long, and at amber a crossing of its lower band this short pauses the 30 s calm instead of
+ *  restarting it. Red and black, and their calms, are unchanged (#2124: with one Soul, single slow acts held amber
+ *  83-85 % of a run). */
+export const AMBER_BLIP_MS = 12_000;
 
 /** Loop-delay bands are relative to the world's own quiet baseline (LOAD-CONTRACT §1): a large world whose quiet ticks
  *  take 170 ms has a quiet loop p99 near 170 ms, so fixed 200/100 ms amber bands would hold it at amber forever.
@@ -23,12 +29,15 @@ export const BASELINE_ENTER_X = 2, BASELINE_LEAVE_X = 1.2, BASELINE_CAP_MS = 400
 const loopEnter = (abs: number, b: number) => Math.max(abs, BASELINE_ENTER_X * b);
 const loopLeave = (abs: number, b: number) => Math.max(abs, BASELINE_LEAVE_X * b);
 
-/** Enter on any condition; step down one level after 30 s with every signal below the current level's lower band. */
+/** Enter on any condition (amber's after AMBER_BLIP_MS of it); step down one level after 30 s with every signal below the
+ *  current level's lower band (at amber, a shorter crossing pauses the 30 s). */
 export class LevelState {
   level: Level = 'green';
   /** The world's quiet loop-delay p99 (ms), from QuietBaseline or a registry pin; 0 = absolute bands only. */
   baselineMs = 0;
   private calmSince: number | null = null;
+  private amberSince: number | null = null;   // amber's conditions hold at green since
+  private breachSince: number | null = null;  // at amber, a signal over the lower band since (the calm paused)
   private starvedSince: number | null = null;   // tick service < 0.2 since
   /** #2124: queue age raises amber on a fresh queue only. After amber steps down, the queue amber's own smaller budget left
    *  behind does not raise it again until it has once been under 2 s: re-entering at once held amber ~94 % of a 24-Soul run. */
@@ -77,15 +86,27 @@ export class LevelState {
   /** Suspension is neither calm time nor continuous starvation. Keep the level, restart its timers. */
   resumed(now: number) {
     if (this.calmSince !== null) this.calmSince = now;
+    if (this.amberSince !== null) this.amberSince = now;
+    if (this.breachSince !== null) this.breachSince = now;
     if (this.starvedSince !== null) this.starvedSince = now;
   }
   update(s: Signals, now: number): Level {
-    const enter = this.enterOf(s, now);
-    if (RANK[enter] > RANK[this.level]) { if (enter === 'amber') this.amberEntry = this.amberEnters(s); this.level = enter; this.calmSince = null; return this.level; }
-    if (this.level === 'green' || !this.below(this.level, s)) { this.calmSince = null; return this.level; }
+    let enter = this.enterOf(s, now);
+    if (enter === 'amber' && this.level === 'green') { this.amberSince ??= now; if (now - this.amberSince < AMBER_BLIP_MS) enter = 'green'; } else this.amberSince = null;
+    if (RANK[enter] > RANK[this.level]) { if (enter === 'amber') this.amberEntry = this.amberEnters(s); this.level = enter; this.calmSince = this.breachSince = this.amberSince = null; return this.level; }
+    if (this.level === 'green') return this.level;
+    if (!this.below(this.level, s)) {
+      // at amber a blip pauses the calm; a crossing that lasts AMBER_BLIP_MS (or any at red and black) restarts it
+      if (this.level !== 'amber' || this.calmSince === null) { this.calmSince = null; return this.level; }
+      this.breachSince ??= now;
+      if (now - this.breachSince >= AMBER_BLIP_MS) this.calmSince = this.breachSince = null;
+      return this.level;
+    }
+    if (this.breachSince !== null && this.calmSince !== null) this.calmSince += now - this.breachSince;
+    this.breachSince = null;
     this.calmSince ??= now;
     if (now - this.calmSince >= STEP_DOWN_MS) {
-      this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = null;
+      this.level = LEVELS[RANK[this.level] - 1]; this.calmSince = this.breachSince = null;
       if (this.level === 'amber') this.amberEntry = ['red'];
       // #2124: only a queue still past 2 s on the step-down sample is disarmed; a fresh one between bands keeps its hint
       if (this.level === 'green' && s.oldestMs > 2000) this.queueArmed = false;
