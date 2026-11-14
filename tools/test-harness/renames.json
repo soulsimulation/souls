@@ -558,6 +558,13 @@
     },
     {
       "step": "V5-server-full",
+      "from": "\\#2133 every world adopts stall-release-support/1 at boot after stand-height/2, then \\#2294 held-activity/1 last, and the engine has both on",
+      "to": "\\#2133 every world adopts stall-release-support/1 at boot after stand-height/2, then climb-spacing/1, \\#2294 held-activity/1 and the wait bounds, and the engine has them on",
+      "reason": "Same test, renamed when the boot adoption chain gained climb-spacing/1 and the wait bounds; it still asserts stall-release-support/1 after stand-height/2 and held-activity/1 adopted at boot with the engine flags on",
+      "pr": "#2333"
+    },
+    {
+      "step": "V5-server-full",
       "from": "rollback through the real CLI: words exit 2 with no act until the flag is on, then they act; off again, they refuse",
       "to": "through the real CLI: words exit 2 with no act; the offered id acts",
       "reason": "Same test, renamed when the free-text flag was removed (#1911): words still exit 2 with no act through the real CLI, and the offered id acts",
