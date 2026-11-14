@@ -197,10 +197,9 @@ async function godWorld(t: test.TestContext, path: string, souls: number | null,
   installEngineBridge({ host: f.host, god, edge: ledger, log: () => {}, worldLore: false, worldClock: false });
   new LivingWorld(f.host);
   if (souls !== null) {   // a fresh world: a day, held activities, the Souls and each one's last act (a ten-second read)
-    // a day gives every Soul needs, which add up every tick until need-anchor/1 (#2296) and so keep the world ticking: the
-    // worlds with Souls here have no day until it lands (the empty world has the day turns and moments)
-    if (!souls) await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: day, customs: [], zone: 'UTC' }, why: 'test: a day' }));
-    for (const p of [f.host.enableContinuousDayV1(), f.host.enableHeldActivitiesV1()]) await accept<unknown>(f.host, p);
+    // a day gives every Soul needs; under need-anchor/1 (#2296) they are an anchor and a rate, so a still world can jump
+    await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: day, customs: [], zone: 'UTC' }, why: 'test: a day' }));
+    for (const p of [f.host.enableContinuousDayV1(), f.host.enableHeldActivitiesV1(), f.host.enableNeedAnchorsV1()]) await accept<unknown>(f.host, p);
     for (const n of ['ana', 'ben'].slice(0, souls)) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
     for (const m of f.host.minds.values()) await accept(f.host, f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
       steps: [{ verb: 'mars:pose_v1', params: { activity: 'read', prop: 'book', seconds: 10 } }], reevalTicks: 1e9, fallback: false, trigger: 'edge-act:r_last' }));
@@ -251,7 +250,9 @@ for (const [name, souls, settle, span] of [
     const jumpedMs = performance.now() - jt;
     t.diagnostic(JSON.stringify({ name, how, span, jumped, computed, tickedMs: Math.round(tickedMs), jumpedMs: Math.round(jumpedMs) }));
     assert.equal(run.f.host.engine.world.tick, end);
-    if (souls) assert.deepEqual(asleep(run), asleep(control));
+    if (souls) { assert.deepEqual(asleep(run), asleep(control)); const { needsAt } = await import('@souls/brain'), read = (g: F, t: number) => [...g.host.minds.values()].map((m) => needsAt(m.life!, t));
+      assert.ok([...run.f.host.minds.values()].every((m) => m.life), 'the Souls have needs'); assert.deepEqual(read(run.f, end), read(control.f, end), 'the needs read at the end are equal');
+      assert.notDeepEqual(read(control.f, end), read(control.f, start), 'and they moved over the span'); }
     assert.deepEqual(state(run.f), state(control.f), 'state hash and full log equal');
     // a short day's moments and day turns fall every few hundred ticks, each an ordinary tick and a re-ask
     assert.ok(jumped > span * 0.5, `most of the span was jumped (${jumped} of ${span})`);
