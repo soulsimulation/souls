@@ -63,9 +63,14 @@ function smaps(pids) {
 }
 
 // ------------------------------------------------------------------ one world's command (the launcher's, decorated)
-function worldSpec(form, id, kind, i) {
+const portFree = (p) => new Promise((r) => { const s = createServer(); s.once('error', () => r(false)); s.listen(p, '127.0.0.1', () => s.close(() => r(true))); });
+const TAKEN = new Set();
+/** A port of the run's span that is free now: an outgoing connection can hold a port of the span (the ephemeral range
+ *  overlaps it), so each world's port is checked just before it loads. */
+async function freePort(i) { for (let p = PORT + i; p < PORT + 40; p++) if (!TAKEN.has(p) && await portFree(p)) { TAKEN.add(p); return p; } throw new Error('no free port in the span'); }
+async function worldSpec(form, id, kind, i) {
   const dir = join(OUT, form, id), data = join(dir, 'data'), library = join(dir, 'library'); mkdirSync(data, { recursive: true }); mkdirSync(library, { recursive: true });
-  const port = PORT + i, origin = `http://127.0.0.1:${port}`, slug = `co-${id}`, heapMb = worldHeapMb({ template: TEMPLATE[kind] }, 0), soul = (f) => join(ROOT, 'tools/world-launcher/soul', f);
+  const port = await freePort(i), origin = `http://127.0.0.1:${port}`, slug = `co-${id}`, heapMb = worldHeapMb({ template: TEMPLATE[kind] }, 0), soul = (f) => join(ROOT, 'tools/world-launcher/soul', f);
   const base = defaultCommand({ slug, dataDir: data, name: `Colocate ${id}`, templateFile: join(ROOT, 'worlds/templates', `${TEMPLATE[kind]}.json`) }, port,
     { publicOrigin: origin, marsWebDir: MARS_WEB, root: ROOT, libraryDir: library, soulControllerCliFile: soul('eden.mjs'), soulCliFile: soul('eden-agent.mjs'), soulSkillFile: soul('skill.md'), soulInstructionsFile: soul('instructions.md') });
   const { cmd, args, env } = decorateCommand(base, { devAuth: true, publicOrigin: origin, base: '', worldHeapMb: heapMb, build: 'dev' });
@@ -84,7 +89,7 @@ function program(form) {
   P.memOf = (w) => (form === 'baseline' && w.child?.exitCode == null ? smaps([w.child.pid]) : null);
   P.alive = (w) => (form === 'baseline' ? w.child?.exitCode == null : P.hostExit == null && !w.ended);
   function startHost() {
-    const sumHeap = SIX.concat(MORE).reduce((s, [, k]) => s + worldHeapMb({ template: TEMPLATE[k] }, 0), 0), any = worldSpec(form, '_host', 'small', 99);
+    const sumHeap = SIX.concat(MORE).reduce((s, [, k]) => s + worldHeapMb({ template: TEMPLATE[k] }, 0), 0), any = { env: { MALLOC_ARENA_MAX: '2', MALLOC_MMAP_THRESHOLD_: '262144', MALLOC_TRIM_THRESHOLD_: '1048576' } };   // production.mjs WORLD_MALLOC_ENV
     const env = { ...process.env, MALLOC_ARENA_MAX: any.env.MALLOC_ARENA_MAX, MALLOC_MMAP_THRESHOLD_: any.env.MALLOC_MMAP_THRESHOLD_, MALLOC_TRIM_THRESHOLD_: any.env.MALLOC_TRIM_THRESHOLD_ };
     delete env.NODE_OPTIONS;
     const execArgv = form === 'one-thread' ? [`--max-old-space-size=${sumHeap}`] : [];
@@ -118,6 +123,7 @@ function program(form) {
     return w;
   };
   P.stop = async () => {
+    for (const w of P.worlds.values()) TAKEN.delete(w.port);
     if (form === 'baseline') { for (const w of P.worlds.values()) if (w.child?.exitCode == null) w.child.kill('SIGKILL'); }
     else if (P.host && P.hostExit == null) P.host.kill('SIGKILL');
     await sleep(1000);
@@ -166,10 +172,10 @@ async function joinProxy(w, port) {
     up.on('error', () => { res.writeHead(502); res.end(); }); req.pipe(up);
   });
   await new Promise((ok) => srv.listen(port, '127.0.0.1', ok));
-  return { url: `http://localhost:${port}${prefix}`, close: () => new Promise((ok) => srv.close(ok)) };
+  return { url: `http://localhost:${srv.address().port}${prefix}`, close: () => new Promise((ok) => srv.close(ok)) };
 }
 async function joinSouls(w, n, from) {
-  const jp = await joinProxy(w, PORT + 40), out = [];
+  const jp = await joinProxy(w, 0), out = [];
   try {
     for (let i = from; i < from + n; i += 3) out.push(...await Promise.all(Array.from({ length: Math.min(3, from + n - i) }, async (_, k) => {
       const j = i + k, dir = join(w.dir, 'souls', `s${j}`); mkdirSync(dir, { recursive: true });
@@ -202,7 +208,7 @@ async function runForm(form) {
   try {
     const W = {};
     for (const [i, [id, kind]] of SIX.entries()) {
-      const w = await P.load(worldSpec(form, id, kind, i)); W[id] = w;
+      const w = await P.load(await worldSpec(form, id, kind, i)); W[id] = w;
       await sleep(SHORT ? 3000 : 15_000);
       const m = P.mem(); R.loads.push({ id, kind, loadS: w.loadS, pssAfterMb: m?.pssMb ?? null, rssAfterMb: m?.rssMb ?? null, own: P.memOf(w) });
       log(`${form}: ${id} (${kind}) up in ${w.loadS} s; program Pss ${m?.pssMb ?? '—'} MB`);
@@ -230,7 +236,7 @@ async function runForm(form) {
     for (const [j, [id, kind]] of MORE.entries()) {
       if (ended()) throw new Error(ended());
       const others = [...P.worlds.values()].filter((w) => P.alive(w)), stopWatch = watch(others), m0 = P.mem();
-      const w = await P.load(worldSpec(form, id, kind, SIX.length + j)); const seen = await stopWatch(); await sleep(SHORT ? 3000 : 15_000);
+      const w = await P.load(await worldSpec(form, id, kind, SIX.length + j)); const seen = await stopWatch(); await sleep(SHORT ? 3000 : 15_000);
       const m1 = P.mem();
       R.oneMore.push({ id, kind, loadS: w.loadS, othersMaxGapMs: Math.max(...Object.values(seen).map((x) => x.maxGapMs)), othersFailedPolls: Object.values(seen).reduce((s, x) => s + x.fail, 0), pssAddedMb: m0 && m1 ? r1(m1.pssMb - m0.pssMb) : null, pssAfterMb: m1?.pssMb ?? null });
       log(`${form}: one more ${id} (${kind}) up in ${w.loadS} s; others' longest /healthz gap ${R.oneMore.at(-1).othersMaxGapMs} ms`);
@@ -242,7 +248,7 @@ async function runForm(form) {
       let tw = P.worlds.get(target);
       if (!tw || !P.alive(tw) || [...P.worlds.values()].filter((w) => P.alive(w)).length < 3) {
         log(`${form}: restarting for the ${fault} fault`); await P.stop(); P.worlds.clear();
-        for (const [j, id] of [`r${k}a`, `r${k}b`, `r${k}c`].entries()) await P.load(worldSpec(form, id, 'small', j));
+        for (const [j, id] of [`r${k}a`, `r${k}b`, `r${k}c`].entries()) await P.load(await worldSpec(form, id, 'small', j));
         tw = P.worlds.get(`r${k}a`); k++;
       }
       const others = [...P.worlds.values()].filter((w) => w !== tw && P.alive(w)), stopWatch = watch(others), t0 = Date.now();
