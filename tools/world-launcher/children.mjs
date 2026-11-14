@@ -21,6 +21,12 @@ const within = (p, ms) => { let t; return Promise.race([p, new Promise((r) => { 
 /** Restart wait after the n-th failure in a row: full jitter, 1 s base, 5 min cap (guard.mjs). */
 /** The exit code of a world that asks to be restarted (apps/server main.ts: black for 60 s, snapshot saved): no backoff. */
 export const PLANNED_EXIT = 75;
+/** #2304: why a world is loaded, most urgent first: a Soul's act or a god call; a visitor's live connection (and a page's
+ *  data request); an alarm for a listening agent; an alarm for a wind-down step; anything else (keep-alive, start-up,
+ *  monitors' reads). The load queue serves them in this order, oldest first within each. */
+export const LOAD_REASONS = ['act', 'visitor', 'listener', 'winddown', 'background'];
+/** #2304: what takeOver() resolves with when a handover left the world unloaded instead of moving it. */
+export const UNLOADED = Symbol('unloaded');
 export const backoffMs = (n, random = Math.random, g = GUARD) => jitterMs(n, g, random);
 
 /** True when nothing listens on 127.0.0.1:port (we can bind it ourselves). */
@@ -49,6 +55,10 @@ export class ChildPool {
    * exitMs (lane SLEEP): releaseIdle() lets a world frozen that long more exit, giving its memory back (see there).
    * guard (lane L1): overrides of guard.mjs GUARD (tests); random: the backoff's jitter source (tests).
    * beforeStop(k) (#2299): awaited by stop() before SIGTERM, while the world still answers (its errors are ignored).
+   * loadParallel (#2304): at most this many worlds load (boot) at once; the rest wait in order of LOAD_REASONS, oldest
+   * first within each (ensure's `reason`). Absent: no limit. A handover's take-over does not wait here.
+   * afterRelease(slug) (#2304): asked by takeOver() once the previous process is gone; false leaves the world unloaded
+   * (takeOver resolves UNLOADED; a caller that joined it then loads it through the queue as any other).
    */
   constructor(o) {
     this.o = o;
@@ -57,6 +67,9 @@ export class ChildPool {
     /** Handed over to a newer launcher (keeper.mjs): no world of this pool may start or restart again. */
     this.fenced = false;
     this.gate = null; this.inflight = new Map();   // boot promise -> its kid
+    /** #2304: the load queue (kids waiting for a slot, each with its rank and the time it joined), the loads running, and
+     *  the wait of the last 100 loads (ms from joining the queue to starting). */
+    this.loadWaiting = []; this.loading = 0; this.loadWaits = [];
     this.g = { ...GUARD, ...(o.guard ?? {}) }; this.random = o.random ?? Math.random; this.guardTimer = null;
     this.log = o.log ?? (() => {});
     mkdirSync(o.logDir, { recursive: true });
@@ -92,6 +105,8 @@ export class ChildPool {
       catch (e) { warm?.child.kill('SIGTERM'); k.status = 'failed'; k.lastError = `handover: ${e.message}`; this.o.onChange?.(slug); throw e; }
       k.adopted = null; this.savePids();
       if (this.closing || this.fenced) { warm?.child.kill('SIGTERM'); k.status = 'stopped'; throw new Error(`world ${slug}: this launcher is closing`); }
+      // #2304: a still world with no visitor is not moved; it loads on this release when next needed
+      if (this.o.afterRelease && (await this.o.afterRelease(slug)) === false) { warm?.child.kill('SIGTERM'); k.status = 'stopped'; this.o.onChange?.(slug); return UNLOADED; }
       if (warm && warm.child.exitCode === null && warm.child.signalCode === null) {
         k.status = 'starting'; k.port = warm.port; k.asleep = false; this.attach(k, warm);
         warm.child.kill('SIGUSR2');   // open the data and the port now
@@ -99,7 +114,7 @@ export class ChildPool {
         this.inflight.set(run, k); run.then(() => this.inflight.delete(run), () => this.inflight.delete(run));
         return run;
       }
-      return this.boot(k, timeoutMs);   // no standby process (old release, or it failed): a cold boot, as before
+      return this.boot(k, timeoutMs, { queued: false });   // no standby process (old release, or it failed): a cold boot, as before
     })().finally(() => { k.ready = null; });
     return k.ready;
   }
@@ -303,7 +318,7 @@ export class ChildPool {
   }
 
   /** Start (or join the start of) a world; resolves with its port once /healthz answers. */
-  ensure(world, { timeoutMs = 90_000, passive = false } = {}) {
+  ensure(world, { timeoutMs = 90_000, passive = false, reason = 'visitor' } = {}) {
     if (this.fenced) { const e = new Error(`world ${world.slug} is served by a newer launcher`); e.code = 'handed-over'; return Promise.reject(e); }
     // closing (closeAll): nothing boots again, e.g. a long-poll's GET retried after its world was stopped under it would
     // otherwise start a world no one stops (lane srv-shed, found with 100 listens open at close)
@@ -311,13 +326,17 @@ export class ChildPool {
     let k = this.kids.get(world.slug);
     if (k?.handedBack) { const e = new Error(`world ${world.slug} is going back to the previous launcher`); e.code = 'handed-back'; return Promise.reject(e); }
     // being stopped (put to sleep, its memory given back): boot it again only once that process is gone (one writer)
-    if (k?.stopping) return k.stopping.then(() => { if (this.closing) { const e = new Error(`world ${world.slug} is stopping`); e.code = 'stopping'; throw e; } return this.ensure(world, { timeoutMs, passive }); });
+    if (k?.stopping) return k.stopping.then(() => { if (this.closing) { const e = new Error(`world ${world.slug} is stopping`); e.code = 'stopping'; throw e; } return this.ensure(world, { timeoutMs, passive, reason }); });
     if (k && !passive) k.lastUsed = Date.now();
     if (k?.frozen) this.thaw(k, { use: !passive });
     if (k && (k.status === 'running')) return Promise.resolve(k.port);
     // held (lane L1 breaker): too many failures in a row; nothing restarts it but an operator's resume()
     if (k?.held) { const e = new Error(`world ${world.slug} is resting after ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${k.held.reason}); an operator resumes it`); e.code = 'held'; return Promise.reject(e); }
-    if (k?.ready) return this.waitFor(k.ready, timeoutMs, world.slug);
+    // #2304: a world waiting for a load slot moves up to the most urgent reason anyone has asked for it
+    const rank = LOAD_REASONS.indexOf(reason) < 0 ? LOAD_REASONS.indexOf('visitor') : LOAD_REASONS.indexOf(reason);
+    if (k?.ready) k.loadRank = Math.min(k.loadRank ?? rank, rank);
+    // (a handover that left the world unloaded: load it here, as any other)
+    if (k?.ready) return this.waitFor(k.ready.then((p) => (p === UNLOADED ? this.ensure(world, { timeoutMs, passive, reason }) : p)), timeoutMs, world.slug);
     // adopted but its handover failed: the previous launcher may still hold its database, so it is never started here
     if (k?.adopted) { const e = new Error(`world ${world.slug} could not be taken over from the previous launcher${k.lastError ? `: ${k.lastError}` : ''}`); e.code = 'handover-failed'; return Promise.reject(e); }
     k = k ?? { slug: world.slug, world, restarts: 0, crashes: 0, status: 'starting', port: null, child: null, upSince: null, lastExit: null, ready: null, stopped: false, lastUsed: Date.now() };
@@ -327,7 +346,7 @@ export class ChildPool {
     // after a single crash someone waiting restarts it now, as before
     if (k.timer && k.crashes > 1) return this.waitFor(k.pending.p, timeoutMs, world.slug);
     if (k.timer) { clearTimeout(k.timer); k.timer = null; }
-    k.ready = this.boot(k, timeoutMs).finally(() => { k.ready = null; });
+    k.loadRank = rank; k.ready = this.boot(k, timeoutMs).finally(() => { k.ready = null; k.loadRank = null; });
     // a boot a visitor started fails: not retried here (the next visit tries again), but it counts toward the breaker,
     // so a world that cannot boot is held instead of booted by every visit
     k.ready.catch((e) => { if (!['capacity', 'handed-over', 'stopping'].includes(e.code) && !k.stopped && !this.closing && !this.fenced) this.noteFailure(k, e.reason ?? 'boot'); });
@@ -370,12 +389,45 @@ export class ChildPool {
     }
   }
 
-  async boot(k, timeoutMs) {
-    while (this.gate) await this.gate.p;
-    if (this.fenced) { k.status = 'stopped'; const e = new Error(`world ${k.slug} is served by a newer launcher`); e.code = 'handed-over'; throw e; }
+  async boot(k, timeoutMs, { queued = true } = {}) {
+    const done = queued ? await this.loadSlot(k) : () => {};
+    try {
+      while (this.gate) await this.gate.p;
+      if (this.fenced) { k.status = 'stopped'; const e = new Error(`world ${k.slug} is served by a newer launcher`); e.code = 'handed-over'; throw e; }
+      if (this.closing || k.stopped) { k.status = 'stopped'; this.o.onChange?.(k.slug); const e = new Error(`world ${k.slug} was stopped`); e.code = 'stopping'; throw e; }
+    } catch (e) { done(); throw e; }
     const run = this.spawnAndWait(k, timeoutMs);
     this.inflight.set(run, k); run.then(() => this.inflight.delete(run), () => this.inflight.delete(run));
+    run.then(done, done);
     return run;
+  }
+  /** #2304: wait for one of the loadParallel slots (status 'waiting' meanwhile); resolves with the slot's release. */
+  async loadSlot(k) {
+    const max = this.o.loadParallel ?? Infinity, joined = Date.now();
+    if (this.loading >= max || this.loadWaiting.length) {
+      k.status = 'waiting'; this.o.onChange?.(k.slug);
+      await new Promise((go) => this.loadWaiting.push({ k, joined, go }));
+    }
+    this.loading++;
+    this.loadWaits.push(Date.now() - joined); if (this.loadWaits.length > 100) this.loadWaits.shift();
+    let freed = false;
+    return () => { if (freed) return; freed = true; this.loading--; this.nextLoad(); };
+  }
+  /** The most urgent waiting load (lowest rank, then the oldest) takes the free slot. */
+  nextLoad() {
+    if (this.loading >= (this.o.loadParallel ?? Infinity) || !this.loadWaiting.length) return;
+    let best = 0;
+    for (let i = 1; i < this.loadWaiting.length; i++) { const a = this.loadWaiting[i], b = this.loadWaiting[best]; if ((a.k.loadRank ?? 1) < (b.k.loadRank ?? 1) || ((a.k.loadRank ?? 1) === (b.k.loadRank ?? 1) && a.joined < b.joined)) best = i; }
+    const [next] = this.loadWaiting.splice(best, 1);
+    next.go();
+  }
+  /** #2304: the queue for the health page: loads waiting by reason, loads running, and the wait of the last 100 loads. */
+  loadStats() {
+    const byReason = Object.fromEntries(LOAD_REASONS.map((r) => [r, 0]));
+    for (const { k } of this.loadWaiting) byReason[LOAD_REASONS[k.loadRank ?? 1] ?? 'visitor']++;
+    const w = [...this.loadWaits].sort((a, b) => a - b), at = (q) => (w.length ? w[Math.min(w.length - 1, Math.ceil(q * w.length) - 1)] : null);
+    return { parallel: Number.isFinite(this.o.loadParallel) ? this.o.loadParallel : null, loading: this.loading, waiting: this.loadWaiting.length, waitingByReason: byReason,
+      lastWaitsMs: { n: w.length, median: at(0.5), p95: at(0.95), max: w.length ? w[w.length - 1] : null } };
   }
   async spawnAndWait(k, timeoutMs) {
     k.status = 'starting'; this.o.onChange?.(k.slug);
