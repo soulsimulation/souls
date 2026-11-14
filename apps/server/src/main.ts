@@ -164,7 +164,7 @@ const intentV2=edenCapabilities?new IntentControlV2(host,brain,souls,{historyV1:
 
 const server = createServer();
 const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, config.worldPath);
-server.on('upgrade', req => { req.url = stripWorldPath(req.url); });
+server.on('upgrade', req => { req.url = stripWorldPath(req.url); host.wake(); });   // #2384: a viewer wakes a sleeping still world
 hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
 host.watched = () => hub.clients.size > 0;   // #2298 A4b
 host.listeners.push({ afterTick: () => { sharedLoad[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often

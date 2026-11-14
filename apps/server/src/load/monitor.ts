@@ -159,13 +159,15 @@ export class QuietTick {
   }
 }
 
-const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100;
+const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100, DROWSY_SAMPLE_MS = 1000;
 /** #1944 A3: the tick window (10 s), and how late past its due time a tick's start counts as late. */
 export const TICK_WINDOW_MS = 10_000, LATE_TICK_MS = 25;
 /** What the monitor reads from the world (WorldHost satisfies it). */
 export type HostLike = {rewinds?: number; engine: {world: {tick: number}}; tickMs: number[]; paused: boolean; pace: number; baseRate: number; readonly running: boolean; readonly clockAvailable: boolean; readonly stepFailing?: string | null;
   /** #1326: the effective rate (lower while dilated), and the host's listeners, where the monitor notes each completed tick. */
-  clockRate?: number; listeners?: {afterTickComplete?(tick: number): void}[]};
+  clockRate?: number; listeners?: {afterTickComplete?(tick: number): void}[];
+  /** #2384: a still world asleep to its horizon owes no tick until it wakes: not stalled, not behind. */
+  readonly sleeping?: boolean};
 /** #1326: a clock owing ticks counts as stalled once its last tick is older than this, or 10 of its expected tick intervals
  *  at the current rate and attention pace when that is longer (a world sleeping at a reduced pace ticks less often). */
 export const STALL_MIN_MS = 2000;
@@ -213,7 +215,7 @@ export class LoadMonitor {
   private histAt = 0;
   private gc: {at: number; ms: number}[] = [];
   private obs: PerformanceObserver | null = null;
-  private ticks: {at: number; tick: number; due: number}[] = [];   // due = ticks owed since the previous sample
+  private ticks: {at: number; tick: number; due: number; asleep?: boolean}[] = [];   // due = ticks owed since the previous sample
   private timer: NodeJS.Timeout | null = null;
   private pendingSample: NodeJS.Immediate | null = null;
   private blackSince: number | null = null;
@@ -221,6 +223,8 @@ export class LoadMonitor {
   private souls = {awake: 0, waiting: 0, connected: 0};
   private a: Float64Array;
   private tickHook: {afterTickComplete(): void} | null = null;
+  /** #2384: the histogram is off because the world sleeps; when the last full sample was taken. */
+  private drowsy = false; private sampledAt = 0;
   private seenTick = -1;
   /** #2124: what held amber on the last sample (the tick window counts the time to the next sample against it). */
   private holds: AmberHold[] = [];
@@ -246,6 +250,11 @@ export class LoadMonitor {
     // On thaw, overdue timers can run before the SIGCONT callback. Sample after the poll phase so the explicit
     // resume notification can discard suspended wall time before it becomes a false red lasting 30 seconds.
     this.timer = setInterval(() => {
+      // #2384: while the world sleeps to its horizon, the event-loop histogram (a 10 ms timer) is off and a full sample is
+      // taken once a second (under the 2 s stall threshold, so the tick age stays fresh); a wake turns both back at once
+      const asleep = !!this.o.host.sleeping;
+      if (asleep !== this.drowsy) { this.drowsy = asleep; if (asleep) this.hist?.disable(); else { this.hist?.reset(); this.hist?.enable(); this.histAt = this.now(); } }
+      if (asleep && this.now() - this.sampledAt < DROWSY_SAMPLE_MS) return;
       if (!this.pendingSample) this.pendingSample = setImmediate(() => { this.pendingSample = null; this.sample(); });
     }, this.o.sampleMs ?? 250); this.timer.unref();
     this.sample();
@@ -268,20 +277,21 @@ export class LoadMonitor {
   /** One sample: read, decide, publish. Public for tests (which pass signals straight to state.update instead). */
   sample(): Level {
     const now = this.now(), h = this.o.host, a = this.a;
-    a[S.lastTurnAt] = now;
+    a[S.lastTurnAt] = now; this.sampledAt = now;
     a[S.halted] = h.clockAvailable === false || h.stepFailing ? 1 : 0;
     a[S.rewinds] = h.rewinds ?? 0;
     // #1326: a tick this sample sees advance dates from now at the latest: a host without listeners, the first sample, and a
     // faulted tick (the world moves on, but afterTickComplete runs only after a clean one)
     if (h.engine.world.tick !== this.seenTick) { this.seenTick = h.engine.world.tick; a[S.tickAt] = Math.max(a[S.tickAt], now); }
     // a clock that starts owing again (unpaused, restarted, its rate raised from 0) counts its age from now
-    const stallMs = stallMsOf(h); if (stallMs > 0 && !(a[S.stallMs] > 0)) a[S.tickAt] = now;
+    const stallMs = stallMsOf(h); if (stallMs > 0 && (!(a[S.stallMs] > 0) || h.sleeping)) a[S.tickAt] = now;   // #2384: asleep, its clock is accounted for
     a[S.stallMs] = stallMs; a[S.clockRate] = h.clockRate ?? h.baseRate; a[S.baseRate] = h.baseRate;
     // tick service over 5 s: ticks run / ticks owed at the admin rate and the attention pace (dilation counts as missed)
-    const prev = this.ticks.at(-1), owing = h.running && !h.paused && h.clockAvailable;
+    // #2384: a sleeping world owes nothing, nor does one just woken until it lands (its frame runs within 50 ms)
+    const prev = this.ticks.at(-1), asleep = !!h.sleeping || (!!prev?.asleep && prev.tick === h.engine.world.tick), owing = h.running && !h.paused && h.clockAvailable && !asleep;
     this.tickWindowSample(now, owing);
     const due = prev && owing ? (Math.min(1000, now - prev.at) * h.baseRate * h.pace) / TICK_MS : 0;
-    this.ticks.push({at: now, tick: h.engine.world.tick, due});
+    this.ticks.push({at: now, tick: h.engine.world.tick, due, asleep});
     while (this.ticks.length > 2 && now - this.ticks[1].at > 5000) this.ticks.shift();
     let owed = 0; for (let i = 1; i < this.ticks.length; i++) owed += this.ticks[i].due;
     const ran = this.ticks.at(-1)!.tick - this.ticks[0].tick;

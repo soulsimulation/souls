@@ -136,10 +136,13 @@ switch independent. A previously saved master mute migrates to both switches off
     moves a world's time, live and after any gap: `WorldHost.advanceStep(target)`. When `stillUntil()` says still, the
     engine skips (`skipToV1`) to the tick before the earlier of the horizon and the target, and the ordinary tick runs the
     landing tick, listeners, log and all; otherwise one ordinary tick runs. Deadlines are asked again after every jump.
-    Live, a still world only counts the ticks it owes on each frame and jumps them every 1.5 s (`jumpCap`, 30 ticks, under
-    the 2 s stall threshold of healthz, live.json and the launcher), every half second on a broadcast boundary while a
-    viewer is connected (so batches and the sky go out as before), at its horizon, or when an input is queued; any request
-    first brings it to now (`settle`), and inputs drain at the landing tick. A landing sends the batch, heartbeat and
+    Live, a still world only counts the ticks it owes on each frame. Once it has jumped and nobody watches, it sleeps
+    (#2384): its frame timer stops and one timer is set for the wall time of its horizon, where it lands exactly. A
+    request (`settle`), a viewer's connection or any queued input wakes it first, and it owes the wall time it slept as
+    ticks. While it sleeps the load monitor counts it as owing nothing and keeps its tick age fresh, so healthz, live.json
+    and the launcher do not read it as stalled; the real-time keeper reads the wall's tick (`wallTick`). Before its first
+    jump it jumps every 1.5 s (`jumpCap`, 30 ticks), and every half second on a broadcast boundary while a viewer is
+    connected (so batches and the sky go out as before); inputs drain at the landing tick. A landing sends the batch, heartbeat and
     kernel view the ticks it covered would have, and the load monitor counts it as due that many intervals on. At a landing with nothing logged since, the durable clock frontier and the periodic snapshot are not written
     again, and the wall anchor is not re-saved while still (the last pair still gives the ticks owed); all are written as
     the stillness ends or the world stops. `GET /__sim/still` also reports `ticksComputed`, `ticksJumped`, `jumps` and
