@@ -121,3 +121,28 @@ test('#1288 wait-bound/2 is a named state-hash input of its own',()=>{
   one.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true} as never);two.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true,waitBoundV2:true} as never);
   assert.notEqual(one.stateHash(),two.stateHash());
 });
+
+test('#2032 item 2: a walk retried after the blocked-walk timeout starts its own wait-bound clock and is not ended early',async()=>{
+  // The walker spreads into a small fixture region beyond the passage and is held there. Its blocked-walk timer (walk-block/1)
+  // is set 50 ticks before its wait-bound clock started (a walk blocked before its last sidestep), so that timeout fires
+  // first and the spread step re-chooses (yieldTimeoutV1): a new walk starts from where the body waits.
+  const f=await marsFactory({scene:'proving-ground',arrival:[-24,-10.5],arrivalPlace:'lawn',reference:[-24,-8],grounds:{id:'grounds',name:'the grounds'},walkBlockV1:true}),w=f.genesis('wait-bound-retry');
+  (w.regions as any).beyond={id:'beyond',label:'Hypothetical beyond the passage',provenance:{origin:'test-fixture',confidence:'hypothetical'},kind:'place',polygon:[[14.3,-10.5],[15.3,-10.5],[15.3,-9.5],[14.3,-9.5]]};
+  const e=f.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,yieldTimeoutV1:true,waitBoundV1:true} as never);
+  e.spawnHuman({id:B,soul:'s_'+B,label:'Blocker',near:{at:[15,-14.8],first:true}});
+  e.spawnHuman({id:W,soul:'s_'+W,label:'Walker',near:{at:[19,-17],first:true}});
+  const r=e.perform({actor:W,label:'through the passage',steps:[{verb:'walk_to',params:{to:'beyond',spread:'region/1'}}]});assert.equal(r.ok,true,JSON.stringify(r));const id=r.id!;
+  const rt=(e as any).rt,events:ProgramEvent[]=[],walks:{id:string;at:number}[]=[];
+  for(let i=0;i<2700&&e.programOf(W)===id;i++){
+    events.push(...e.step().programs);
+    const ex=execOf(e,W);if(ex&&!walks.some(w=>w.id===ex.id))walks.push({id:ex.id,at:e.world.tick});
+    if(ex?.narrows.length&&!rt.services.traffic?.size){const n=ex.narrows[0];(rt.services.traffic??=new Map()).set(n.res,{actors:new Set([B]),entry:n.entry,dir:[-n.dir[0],-n.dir[1]]});}
+    const prog=(e as any).programs.get(id);if(e.world.tick===600){assert.ok(prog.waitBoundV1&&prog.blockedSince!==undefined,'held, both clocks running');prog.blockedSince=prog.waitBoundV1.since-50;}
+  }
+  assert.ok(walks.length>=2,`the timeout retried the walk (${walks.length} walks)`);
+  assert.match(rt.records.get(walks[0].id).diagnostic.message,/^walking has remained blocked for a minute/,'the first walk ended by the blocked-walk timeout');
+  const retry=walks[1],end=rt.records.get(retry.id),endTick=walks[2]?.at??e.world.tick;
+  assert.ok(!/wait-bound\/1/.test(end.diagnostic?.message??'')||endTick>=retry.at+1199,`the retried walk (from tick ${retry.at}) was ended by wait-bound/1 by tick ${endTick}: ${end.diagnostic?.message}`);
+  assert.ok(endTick>=retry.at+1199,`the retried walk lasted its own bound (${retry.at} to ${endTick})`);
+  assert.deepEqual(e.runtime.violations,[]);
+});
