@@ -11,6 +11,8 @@ import {publishTickWindow, sharedApi, type TickWindow} from './api-times.ts';
 export type Signals = {service: number; loopP99Ms: number; heapFrac: number; gcFrac: number; oldestMs: number};
 const RANK: Record<Level, number> = {green: 0, amber: 1, red: 2, black: 3};
 export const STEP_DOWN_MS = 30_000, BLACK_SERVICE_MS = 30_000;
+/** Tick service at which a window counts as served (the quiet tests below; amber's loop leave band, #2124). */
+export const SERVED = 0.95;
 
 /** Loop-delay bands are relative to the world's own quiet baseline (LOAD-CONTRACT §1): a large world whose quiet ticks
  *  take 170 ms has a quiet loop p99 near 170 ms, so fixed 200/100 ms amber bands would hold it at amber forever.
@@ -47,7 +49,10 @@ export class LevelState {
     switch (level) {
       case 'black': return s.service >= 0.4 && s.heapFrac < 0.85;
       case 'red': return s.service >= 0.7 && s.loopP99Ms < loopLeave(400, b) && s.heapFrac < 0.75;
-      case 'amber': return s.service >= 0.9 && s.loopP99Ms < loopLeave(100, b) && s.heapFrac < 0.60;
+      // #2124: while the tick is served (>= 0.95, the same test as a served window below), loop delay holds amber only
+      // above its enter band. Between the bands it is the queue amber's own smaller budget leaves (24 Souls: tick p99
+      // 80-90 ms, loop p99 80-110 ms at service 1.0 crossed 100 ms every few seconds and held amber the whole run).
+      case 'amber': return s.service >= 0.9 && s.loopP99Ms < (s.service >= SERVED ? loopEnter(200, b) : loopLeave(100, b)) && s.heapFrac < 0.60;
       default: return true;
     }
   }

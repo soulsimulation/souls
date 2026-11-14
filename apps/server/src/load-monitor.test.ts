@@ -42,6 +42,31 @@ test('levels: the queue amber left behind does not raise amber again until it ha
   l.update(at({oldestMs: 2500}), t += 250); assert.equal(l.level, 'amber', 'a new queue past 2 s raises the hint again');
 });
 
+test('levels: loop delay between the bands does not hold amber while the tick is served (#2124, run 43568793845)', () => {
+  // 24 Souls: tick p99 80-90 ms, loop p99 80-110 ms (max of two windows), tick service 0.98-1.0, amber from setup
+  const l = new LevelState(); let t = 0;
+  l.update(at({loopP99Ms: 230}), t); assert.equal(l.level, 'amber');
+  const loop = [96, 104, 88, 110, 101, 84, 107, 93, 109, 99, 81, 105], svc = [1, 0.98, 1, 0.99, 1, 1];
+  let i = 0; for (; t < STEP_DOWN_MS + 1000; i++) l.update(at({loopP99Ms: loop[i % loop.length], service: svc[i % svc.length]}), t += 250);
+  assert.equal(l.level, 'green', 'steps down within one calm window (30 s) of the oscillation');
+  for (let k = 0; k < 400; k++, i++) l.update(at({loopP99Ms: loop[i % loop.length], service: svc[i % svc.length]}), t += 250);
+  assert.equal(l.level, 'green', 'and the same load does not raise amber again (enter stays at 200 ms)');
+});
+
+test('levels: a genuine overload still enters and holds amber (service < 0.8, or loop p99 over 2 × the band, sustained)', () => {
+  const slow = new LevelState(); let t = 0;
+  for (; t <= 3 * STEP_DOWN_MS; t += 250) slow.update(at({service: 0.75, loopP99Ms: 90}), t);
+  assert.equal(slow.level, 'amber', 'tick service under 0.8 enters and holds');
+  const loop = new LevelState(); t = 0;
+  for (; t <= 3 * STEP_DOWN_MS; t += 250) loop.update(at({loopP99Ms: 210 + (t % 1000) / 10}), t);
+  assert.equal(loop.level, 'amber', 'loop p99 over 200 ms holds at full tick service');
+  const between = new LevelState(); t = 0;
+  between.update(at({loopP99Ms: 250}), t);
+  for (; t <= 3 * STEP_DOWN_MS; t += 250) between.update(at({loopP99Ms: 150, service: 0.92}), t);
+  assert.equal(between.level, 'amber', 'a tick that is not served keeps the 100 ms leave band');
+  assert.equal(new LevelState().update(at({loopP99Ms: 1100, service: 1}), 0), 'red', 'red is unchanged');
+});
+
 test('levels: black on tick service < 0.2 only after 30 s of it', () => {
   const l = new LevelState();
   assert.equal(l.update(at({service: 0.1}), 0), 'red');
@@ -59,8 +84,8 @@ test('levels: leave one step at a time after 30 s below the lower band; a signal
   l.update(at({loopP99Ms: 150}), t += 1000); assert.equal(l.level, 'red');
   l.update(at({loopP99Ms: 150}), t += STEP_DOWN_MS - 1); assert.equal(l.level, 'red');
   l.update(at({loopP99Ms: 150}), t += 1); assert.equal(l.level, 'amber', 'one step down');
-  l.update(at({loopP99Ms: 150}), t += STEP_DOWN_MS + 5000); assert.equal(l.level, 'amber', '150 ms is not below the amber band (100)');
-  l.update(calm, t += 1000); l.update(at({loopP99Ms: 120}), t += 20_000); l.update(calm, t += 1000);
+  l.update(at({loopP99Ms: 150, service: 0.93}), t += STEP_DOWN_MS + 5000); assert.equal(l.level, 'amber', '150 ms is not below the amber band (100) when the tick is not served');
+  l.update(calm, t += 1000); l.update(at({loopP99Ms: 120, service: 0.93}), t += 20_000); l.update(calm, t += 1000);
   l.update(calm, t += STEP_DOWN_MS - 2000); assert.equal(l.level, 'amber', 'a sample above the band restarts the 30 s');
   l.update(calm, t += 2000); assert.equal(l.level, 'green');
 });
@@ -70,9 +95,9 @@ test('levels: loop bands are relative to the quiet baseline (a 170 ms-quiet worl
   assert.equal(l.update(at({loopP99Ms: 190}), t), 'green', 'its own quiet ticks are not load (amber enters at 2 × 170)');
   assert.equal(l.update(at({loopP99Ms: 330}), t += 250), 'green');
   assert.equal(l.update(at({loopP99Ms: 350}), t += 250), 'amber', 'above 2 × baseline');
-  l.update(at({loopP99Ms: 180}), t += 1000); l.update(at({loopP99Ms: 180}), t += STEP_DOWN_MS);
+  l.update(at({loopP99Ms: 180, service: 0.93}), t += 1000); l.update(at({loopP99Ms: 180, service: 0.93}), t += STEP_DOWN_MS);
   assert.equal(l.level, 'green', 'leaves below 1.2 × baseline (204 ms), where the fixed 100 ms band never would');
-  const fixed = new LevelState(); fixed.update(at({loopP99Ms: 350}), 0); fixed.update(at({loopP99Ms: 180}), 1000); fixed.update(at({loopP99Ms: 180}), 1000 + STEP_DOWN_MS);
+  const fixed = new LevelState(); fixed.update(at({loopP99Ms: 350}), 0); fixed.update(at({loopP99Ms: 180, service: 0.93}), 1000); fixed.update(at({loopP99Ms: 180, service: 0.93}), 1000 + STEP_DOWN_MS);
   assert.equal(fixed.level, 'amber', 'the absolute bands (no baseline) hold it at amber: the defect');
   const small = new LevelState(); small.baselineMs = 20;
   assert.equal(small.update(at({loopP99Ms: 210}), 0), 'amber', 'a small world keeps the absolute floor');
