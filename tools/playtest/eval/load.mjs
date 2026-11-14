@@ -8,7 +8,7 @@
 // #2124: each window also carries the seconds at amber per signal that held it (`amberS`) and the entries into amber per
 // cause (`amberEntries`); LOAD.md sums both over the run.
 // #2124 L4: each act's capability is kept beside the trace's own act calls, so LOAD.md names the slow ones (`slowActs`:
-// server time less the queue, per capability).
+// server time less the queue, per capability) and their queue (`actQueueMs`, p50/p95/max).
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -51,6 +51,13 @@ export function slowActs(pairs) {
     ms.sort((x, y) => x - y);
     return { capability, n: ms.length, p50: ms[Math.floor(0.5 * (ms.length - 1))], max: ms.at(-1), over250: ms.filter((x) => x > 250).length };
   }).sort((x, y) => y.max - x.max);
+}
+
+/** The act calls' queue (Server-Timing `queue`, the client trace's `queuedMs`): p50, p95 and max over the run, ms. */
+export function actQueue(pairs) {
+  const ms = pairs.flatMap(({ http }) => http.filter((r) => r.method === 'POST' && /\/v1\/edge\/act(?:\?|$)/.test(r.route ?? '') && Number.isFinite(r.queuedMs)).map((r) => r.queuedMs)).sort((x, y) => x - y);
+  const q = (p) => ms[Math.min(ms.length - 1, Math.max(0, Math.ceil(p * ms.length) - 1))];
+  return ms.length ? { n: ms.length, p50: q(0.5), p95: q(0.95), max: ms.at(-1) } : null;
 }
 
 async function soulLoop({ folder, until, r, counts, acts = [] }) {
@@ -110,7 +117,7 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       await stopWorld({ pid: w.pid });
@@ -145,6 +152,7 @@ export function renderLoad(result) {
       L.push('', `What held amber, over these windows (a second can count under several signals; \`dwell\` = every signal under the band, the 30 s calm running): ${list(held, ' s')}. Entries into amber by cause (\`red\` = the step down from red): ${list(entered)}.`);
     }
     if (a.slowActs?.length) {
+      if (a.actQueueMs) L.push('', `Act calls' queue (client trace): p50 ${a.actQueueMs.p50}, p95 ${a.actQueueMs.p95}, max ${a.actQueueMs.max} ms over ${a.actQueueMs.n} calls.`);
       L.push('', 'Acts by capability, slowest first: server time less the queue (handler + wait + commit), ms.', '', '| capability | acts | p50 | max | over 250 ms |', '|---|---|---|---|---|');
       for (const x of a.slowActs) L.push(`| ${x.capability} | ${x.n} | ${x.p50} | ${x.max} | ${x.over250} |`);
     }
