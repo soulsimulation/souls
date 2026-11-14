@@ -74,9 +74,13 @@ import {mountSoulNow} from './soul-now-routes.ts';
 import {soulLink} from './soul-link.ts';
 import {mountOperatorSouls} from './op-souls.ts';
 import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
+import {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
+export {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
 /** #1326: the edge writes that wait on the clock (an act's body, a plan's acts): refused with 503 world.stalled while it is
  *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
 const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
+// #894: the world page and its public guides may be indexed; every other answer carries X-Robots-Tag (buildApp)
+const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
 
 /** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
@@ -130,6 +134,15 @@ export function buildApp(d: Deps) {
   if(d.stationV2&&d.stationV2.host!==d.host)throw new Error('V2 station must belong to selected host');
   if(d.intentV2&&(d.intentV2.host!==d.host||d.intentV2.brain!==d.brain||d.intentV2.souls!==d.souls))throw new Error('intent transport must belong to selected host');
   const app = new Hono();
+  // #1006: the shared security headers (security-headers.ts), mounted first so every answer carries them: every route,
+  // an unknown path, the early middleware's refusals and onError. #894: the world page and its public guides may be
+  // indexed (the launcher marks every response of an unlisted world noindex itself); the API, MCP, health, debug and any
+  // query-string variant never are. A route's own CSP keeps its directives and gains frame-ancestors.
+  app.use('*', async (c, next) => {
+    await next();
+    if (!((c.req.method === 'GET' || c.req.method === 'HEAD') && INDEXABLE.has(c.req.path) && !c.req.url.includes('?'))) c.header('X-Robots-Tag', SECURITY_HEADERS['X-Robots-Tag']);
+    c.header('X-Frame-Options', SECURITY_HEADERS['X-Frame-Options']); c.header('Content-Security-Policy', withFrameAncestors(c.res.headers.get('content-security-policy')));
+  });
   // #1774 A4: a dev world's per-request record for playtests (load/request-record.ts); unset, nothing is mounted
   const requestRecord = requestRecordFile(process.env, d.auth.devAuth);
   if (requestRecord) app.use('*', requestRecordMiddleware(requestRecord));
@@ -259,10 +272,6 @@ export function buildApp(d: Deps) {
     console.error('[http]', err);
     return c.json({ ok: false, code: 'internal', message: 'internal error' }, 500);
   });
-  // #894: the world page and its public guides may be indexed (the launcher marks every response of an unlisted world
-  // noindex itself); the API, MCP, health, debug and any query-string variant never are.
-  const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
-  app.use('*', async (c, next) => { await next(); if (!((c.req.method === 'GET' || c.req.method === 'HEAD') && INDEXABLE.has(c.req.path) && !c.req.url.includes('?'))) c.header('X-Robots-Tag', 'noindex, nofollow'); c.header('X-Frame-Options', 'DENY'); c.header('Content-Security-Policy', "frame-ancestors 'none'"); });
   // A halted durable clock cannot serve an unacknowledged body/head or accept
   // more control. Generic unavailable response carries no private row/error.
   app.use('*',async(c,next)=>{
