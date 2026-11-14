@@ -132,6 +132,7 @@ async function buildFixture() {
       w.dirs.push(relative(FIX, dir));
       // the first Soul of each template keeps only the walks its world accepts (a catalog place may be scenery or shut)
       if (k === 1 && ids[w.template] && !ids[w.template].checked) {
+        ids[w.template].checked = 'checking';   // once per template, whichever worker gets there first
         const tried = (ids[w.template].walk ?? []).filter((id) => id !== 'walk:world').slice(0, 16), ok = [];
         for (const id of tried) { const r = await cli(dir, ['act', id, '--json'], 120_000); if (r.code === 0 && r.j?.accepted !== false) ok.push(id); }
         await cli(dir, ['stop', '--json'], 60_000);
