@@ -1,7 +1,7 @@
 // Clip kit (#2383): in Eden 2026, two building types whose outside doorways now hold real doors, both closed: the A-frame
 // cottage (core/cottage@2) and the bakery (core/hall@3). Before the take, admin's Soul Clara runs to the bakery's front.
 // On camera (Ctrl+K, Enter follows Clara) she walks into the bakery's shop, opening its door by hand and closing it
-// behind her, back out to the A-frame cottage's door, then into the cottage the same way (one closed door per walk:
+// behind her, back out to the front of the A-frame cottage, then into the cottage the same way (one closed door per walk:
 // two in a row wait for #2370's multi-door walk).
 import { execFile, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -22,7 +22,7 @@ for (let i = 0; i < 30; i++) {                            // a world just up may
   if (run(EDEN, DIR, ['catalog']).status === 0) break;
   spawnSync('sleep', ['2']);
 }
-run(EDEN, DIR, ['act', 'walk:int-bakery-door-1', '--run', '--wait', '150', '--json'], 170_000);  // off camera: to the bakery's door
+run(EDEN, DIR, ['act', 'walk:int-bakery', '--run', '--wait', '150', '--json'], 170_000);  // off camera: to the bakery's front
 
 const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
   (e, out, err) => { console.error(`kit: ${args.join(' ')} -> ${e ? (e.code ?? 1) : 0}: ${String(out || err).slice(0, 1200)}`); res(!e); }));
@@ -40,8 +40,8 @@ export default async function steps(page, { mark }) {
   await eden(['act', 'walk:int-bakery/shop', '--wait', '60', '--json'], 70_000);
   mark('inside the bakery, door closed behind');
   await page.waitForTimeout(3000);
-  mark('walk out to the A-frame cottage (core/cottage@2) door, closed');
-  await eden(['act', 'walk:eden-a-frame-door-1', '--wait', '90', '--json'], 100_000);
+  mark('walk out to the front of the A-frame cottage (core/cottage@2), its door closed');
+  await eden(['act', 'walk:eden-a-frame', '--wait', '90', '--json'], 100_000);
   mark('walk into the cottage living room');
   await eden(['act', 'walk:eden-a-frame/living', '--wait', '60', '--json'], 70_000);
   mark('inside the cottage, door closed behind');

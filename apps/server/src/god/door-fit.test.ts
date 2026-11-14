@@ -41,7 +41,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   for (const [id, sub] of ids0) { assert.equal(god.model.entities.get(id)!.def.replace('core-', 'core/'), DOOR_FIT_FROM.get(old.find((o) => o.name === god.model.entities.get(id)!.name)!.def)!.ref); assert.deepEqual(god.model.subtree(id), sub, 'contents kept'); }
   assert.equal([...god.model.entities.values()].filter((e) => doorFitted(e.def)).length, 0, 'nothing left on an old revision');
   const doors = [...god.model.entities.values()].filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR).map((e) => ({ name: e.name, p: [e.p![0], e.p![e.p!.length - 1]], r: e.r, sx: e.params?.sx, sy: e.params?.sy, open: e.state?.open }));
-  const want = places(fitted).filter((o) => o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? '')).map((o) => ({ name: o.name, p: o.p, r: o.r, sx: o.params?.sx, sy: o.params?.sy, open: o.state?.open }));
+  const want = places(fitted).filter((o) => o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? '')).map((o) => ({ name: o.name, p: [o.p![0], o.p![o.p!.length - 1]], r: o.r, sx: o.params?.sx, sy: o.params?.sy, open: o.state?.open }));
   assert.equal(doors.length, 3);
   assert.deepEqual(new Set(doors.map((d) => JSON.stringify(d))), new Set(want.map((d) => JSON.stringify(d))), 'the live world and the template agree');
   assert.ok(doors.every((d) => d.open === false), 'enclosed rooms: closed');

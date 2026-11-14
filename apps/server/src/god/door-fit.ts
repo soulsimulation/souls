@@ -31,12 +31,14 @@ const yaw = (r: unknown): number => Array.isArray(r) ? Number(r[1] ?? 0) : typeo
 export function doorFit(def: string, params: Record<string, unknown> | undefined, p: unknown, r: unknown, name: string | undefined,
   bodies: Vec2[] = [], taken: (n: string) => boolean = () => false, indoors: (x: number, z: number) => boolean = () => false): { ref: string; doors: PlaceOp[]; series: string[] } | null {
   const to = DOOR_FIT_FROM.get(opRef(def)); if (!to) return null;
+  // the door stands at the building's own height (its floor), not on the ground outside: on a slope that may be lower
   const fits = buildingDoorFits(params ?? {}, to.args, { p: xz(p), r: yaw(r) }), series: string[] = [];
+  const y = Array.isArray(p) && p.length > 2 ? Math.round(Number(p[1]) * 1000) / 1000 : undefined;
   const doors = fits.flatMap((f, k) => {
     const n = name ? `${name}-door-${k + 1}`.slice(0, 64) : undefined;
     if (indoors(f.p[0] + SERIES_PROBE * Math.sin(f.r), f.p[1] + SERIES_PROBE * Math.cos(f.r))) { series.push(n ?? f.opening); return []; }
     const occupied = bodies.some((b) => Math.hypot(b[0] - f.p[0], b[1] - f.p[1]) < IN_DOORWAY);
-    return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: f.p, r: f.r, params: { sx: f.sx, sy: f.sy },
+    return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: y === undefined ? f.p : [f.p[0], y, f.p[1]], r: f.r, params: { sx: f.sx, sy: f.sy },
       state: { open: !to.enclosed || occupied }, mode: 'strict' } as PlaceOp];
   });
   return { ref: to.ref, doors, series };
