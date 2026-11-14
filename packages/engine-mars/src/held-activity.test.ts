@@ -2,7 +2,11 @@
 // world whose bodies all stand or hold is still until the earliest end.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {marsFactory,GREEN_FIELD_WORLD,MarsEngine} from './engine.ts';
+import {marsFactory,GREEN_FIELD_WORLD,MarsEngine,heldActionsV1} from './engine.ts';
+import {provingGround} from '../../../mars/viewer/engine/scenes/proving-ground.ts';
+import {emptyWorld, human, addAll, FIXTURE} from '../../../mars/viewer/engine/world/factory.ts';
+import {Spatial} from '../../../mars/viewer/engine/spatial/service.ts';
+import {DEFAULT_INVARIANTS} from '../../../mars/viewer/engine/runtime/invariants.ts';
 import {Runtime} from '../../../mars/viewer/engine/runtime/runtime.ts';
 import {createRegistry, servicesFor, ENGINE_INVARIANTS} from '../../../mars/viewer/engine/api/registry.ts';
 import {groundSleepFixture} from '../../../mars/viewer/engine/scenarios/sleep.ts';
@@ -78,9 +82,10 @@ test('a mat sleep is held from the tick it falls asleep to a known end; its elap
     if (held) rt.services.heldActivitiesV1 = true;
     const rec = rt.submit('sleep', {...fixture.p, duration: 20}, {preempt: false}), holds = () => Object.values((rt.services.sleeps as {holds: Record<string, {phase: string}>}).holds);
     for (let n = 0; n < 2000 && !holds().some((h) => h.phase === 'sleeping'); n++) rt.step();
-    const hold = holds().find((h) => h.phase === 'sleeping')!, end = sleepHoldHeldV1(hold), whole = sleepPurposeHeldV1(rt, rt.execOf(rec.id));
-    const before = JSON.stringify(hold), at = rt.tick;
-    for (let n = 0; n < 100; n++) rt.step();
+    const hold = holds().find((h) => h.phase === 'sleeping')!, end = sleepHoldHeldV1(hold), at = rt.tick;
+    assert.equal(sleepPurposeHeldV1(rt, rt.execOf(rec.id)), false, 'the purpose follows its mat sleep a tick later');
+    rt.step(); const whole = sleepPurposeHeldV1(rt, rt.execOf(rec.id)), before = JSON.stringify(hold);
+    for (let n = 0; n < 99; n++) rt.step();
     const elapsed = readSleep(rt, rec.id)!.elapsed;
     if (held) assert.equal(JSON.stringify(hold), before, 'nothing of the sleep is written while it is held');
     for (let n = 0; n < 2000 && hold.phase === 'sleeping'; n++) rt.step();
@@ -92,4 +97,45 @@ test('a mat sleep is held from the tick it falls asleep to a known end; its elap
   assert.equal(held.whole, held.end, 'the sleep purpose is held to the same tick');
   assert.equal(held.woke, held.end); assert.equal(held.woke, legacy.woke, 'it wakes on the tick it always did');
   assert.ok(Math.abs(held.elapsed - legacy.elapsed) < 1e-9 && held.elapsed > 4.9, 'readSleep reports the same elapsed time');
+});
+
+// review of #2315: held only in a steady state. From any tick at which every live action reads as held (the world still,
+// for these actions), one more step changes no body and no record, unless a held end falls on that tick.
+function steadyAfterStill(rt: Runtime, ticks: number, act: (tick: number) => void) {
+  const view = () => JSON.stringify([Object.values(rt.world.entities).filter((e) => e.kind === 'human').map((e) => [e.id, e.pose, e.human]),
+    [...rt.records.values()].map((r) => [r.id, r.status, r.phase])]);
+  let stills = 0;
+  for (let n = 0; n < ticks; n++) {
+    act(rt.tick);
+    const held = heldActionsV1(rt), still = held.length > 0 && held.every(([, end]) => end !== false), ends = held.map(([, end]) => end).filter((e): e is number => typeof e === 'number');
+    const before = view(); rt.step();
+    if (still && !ends.includes(rt.tick)) { stills++; assert.equal(view(), before, `held at tick ${rt.tick - 1}, yet the next step changed something`); }
+  }
+  return stills;
+}
+test('from every tick that reads still, one more step changes nothing: pose, mat sleep, a circle whose members all leave', () => {
+  const base = provingGround(), w = addAll(emptyWorld('proving-ground', base), { id: 'fire', def: 'campfire', kind: 'fixture', pose: { p: [-5, 0, 4], yaw: 0 }, provenance: FIXTURE, phase: 'installed', support: { kind: 'ground' } } as any, human('f0', -9.5, -1), human('f1', -8.5, -1));
+  const rt = new Runtime(w, createRegistry(), { spatial: new Spatial(base), heldActivitiesV1: true }, DEFAULT_INVARIANTS);
+  let circle: string | undefined, stood = false;
+  const stills = steadyAfterStill(rt, 1500, (tick) => {
+    if (tick === 1) circle = rt.submit('campfire_circle', { actors: ['f0', 'f1'], fire: 'fire' }).id;
+    const kids = [...rt.records.values()].filter((r) => r.parent === circle && rt.isActive(r.id));
+    if (!stood && circle && rt.records.get(circle)?.phase === 'gathered' && tick > 400) { stood = true; for (const k of kids) rt.cancel(k.id); }
+  });
+  assert.ok(stood && stills > 100, 'the circle was held a while: ' + stills);
+  assert.equal(rt.records.get(circle!)?.status, 'completed', 'with every member gone it completed, and was never read as held meanwhile');
+  const fx = groundSleepFixture([0, 0], 0), sr = new Runtime(fx.world, createRegistry(), servicesFor({'ground-sleep': fx.scene})(fx.world), ENGINE_INVARIANTS);
+  sr.services.heldActivitiesV1 = true;
+  assert.ok(steadyAfterStill(sr, 1200, (tick) => { if (tick === 0) sr.submit('sleep', {...fx.p, duration: 20}, {preempt: false}); }) > 300, 'the mat sleep was held');
+});
+
+test('a pose reads as held only once it is posing, not on the tick its programme starts it', async () => {
+  const {e} = await world(true);
+  read(e, 10);
+  let first: number | null = null;
+  for (let n = 0; n < 220; n++) {
+    const s = e.stillnessV1(), body = JSON.stringify(e.world.entities.h); e.step();
+    if (s.still && s.untilTick !== e.world.tick && s.untilTick !== null) { first ??= e.world.tick; assert.equal(JSON.stringify(e.world.entities.h), body, 'still, yet the body changed'); }
+  }
+  assert.ok(first !== null);
 });

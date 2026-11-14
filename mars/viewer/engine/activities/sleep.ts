@@ -303,6 +303,7 @@ export function sleepPurposeHeldV1(rt: Runtime, exec: unknown): number | null | 
   const ex = exec as Purpose;
   if (ex.draining || ex.ending) return false;
   if (ex.mode === 'paused' && !ex.error) return null;
+  if (ex.mode !== 'sleeping') return false;   // its mode follows the mat sleep's phase one tick later
   const hold = ex.child && rt.isActive(ex.child) ? store(rt).holds[ex.child] : undefined;
   return hold ? sleepHoldHeldV1(hold) : false;
 }
