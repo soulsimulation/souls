@@ -7786,7 +7786,7 @@ export function spawnDetached(file, args, opts) {
 }
 const FEED_SPAWN_MS = 5 * 60_000;
 function startFeedCheck(cmd, args) {
-  if (!HOME || ["upgrade", "help", "serve", "listen", "dashboard"].includes(cmd) || (cmd === "news" && args.includes("--fetch"))) return;   // as the update check
+  if (!HOME || ["upgrade", "help", "serve", "listen", "dashboard", "digest"].includes(cmd) || (cmd === "news" && args.includes("--fetch"))) return;   // as the update check
   try {
     if (!soulHome.feedDue(HOME.config(), Date.now()).length || Date.now() - (readServeLock()?.beatAt ?? 0) < SERVE_STALE_MS) return;   // a serve here checks
     // the last start is kept beside the config: a child that never claims a site (it found no home) is not started on every command

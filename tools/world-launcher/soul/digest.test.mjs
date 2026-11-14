@@ -117,6 +117,7 @@ test('A1, A3: the command makes no request, records when it last ran in the Soul
   const w = await world(t), dir = tmp(t), run = cliIn(dir), soul = join(dir, '.souls/souls/s_a1');
   await run('register', `${w.base}/a`); await run('create', 'Mira');
   lived(soul, 'a');
+  for (let i = 0; i < 50 && !w.seen.includes('/v1/feed'); i++) await new Promise((r) => setTimeout(r, 100));   // the feed check `create` started on its own (#1941)
   const asked = w.seen.length, first = await run('digest', '--refs');
   assert.equal(first.code, 0, first.err);
   assert.match(first.out, /^I met Ana\. \[a\/s_ana\]$/m);
