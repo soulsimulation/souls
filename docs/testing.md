@@ -249,3 +249,21 @@ tools) needs lint; T1 (logic) focused tests and typecheck; T2 (visible behaviour
 fake-mind world; T3 (Soul behaviour, navigation, engines) adds a scenario playtest, a reviewer pass and maintainer
 sign-off; T4 is the release head. "Done" means walked on the real URL with real input
 ([agent lifecycle](process/agent-lifecycle.md)).
+
+### Recording a proof clip on a GPU runner
+
+When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
+`tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
+`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
+push it to an `agent/` branch, then dispatch the timed run from that branch:
+
+```bash
+gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'
+gh run download <run-id> -D .e2e/clip-<run-id>
+node tools/proof/upload.mjs --pr <n> .e2e/clip-<run-id>/clip/<kit>-desktop.mp4
+```
+
+The kit and the recorder come from the workflow's branch, the app from `ref`. The recorder runs with
+`SIM_PROOF_GPU=hardware`: it fails (exit 5) rather than fall back to SwiftShader, and the log and the sidecar's `gl`
+name the renderer. The log also prints the clip's frame timing (frames, mean fps, largest gap) beside the take's wall
+clock. The job holds no write token, so the clip comes back as the run's artifact and `upload.mjs` attaches it.

@@ -9,6 +9,10 @@
 // commit so both arms run the same bytes): `base-k` checks out the `base` input, `cand-k` the ref. The workflow runs every
 // cell as its own job, all at once. The kit scores pass/fail per item, so its starting load is recorded and not gated, and
 // it may run on the GitHub-hosted runners (`runner=hosted`).
+// `clip` (#2294) records a proof clip of the ref with a hardware GL renderer: a clip kit (tools/proof/clips/<kit>/, from the
+// workflow's own commit, like the counted kits) names a template and steps; the ref boots a fake-mind dev world of it, and
+// the proof recorder, also from the workflow's commit, records the kit's steps (SIM_PROOF_GPU=hardware). The clip, its
+// sidecar and its frame timing are the artifact; nothing is uploaded with a token.
 //
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
@@ -18,8 +22,8 @@
 //   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot (other jobs': a warning)
 //
 // Pure decisions are exported for timed-run.test.mjs. Nothing here prints a path, host or user name.
-import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, copyFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { createHash } from 'node:crypto';
 import { availableParallelism, hostname, loadavg, userInfo } from 'node:os';
@@ -27,7 +31,9 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'counted'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'counted', 'clip'];
+/** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, viewport?, localStorage?}) and steps.mjs. */
+export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
  *  `run.mjs <arm> <tree> <port> <outDir>`, scores it with `score-frozen.mjs <run.json>`, and classifies it with
  *  `classify-frozen.mjs <outDir> <tree> <port>`. The files are the kit as declared on #1367 (sha256s recorded per run). */
@@ -52,6 +58,7 @@ export const ARG_ALLOW = {
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
+  clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
 };
 
 /** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
@@ -83,6 +90,7 @@ export function parseInputs(env) {
   if (!RUNNERS.includes(runner)) bad('runner', runner, RUNNERS.join(' or '));
   if (runner === 'hosted' && command !== 'counted') bad('runner', runner, `${command} is a timing run and runs on souls-timed only`);
   const args = checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
+  if (command === 'clip' && !args.includes('--kit')) bad('args', env.INPUT_ARGS, 'clip needs --kit <name> (a folder of tools/proof/clips)');
   if (command !== 'counted') return { ...inp, runner };
   // counted: a base ref, a scenario, and the one cell this job runs (base-k or cand-k, k up to repeats)
   const base = String(env.INPUT_BASE ?? '');
@@ -96,7 +104,7 @@ export function parseInputs(env) {
 export const target = (inp) => checkoutRef(inp.arm === 'base' ? inp.base : inp.ref);
 
 /** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
-export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, counted: 1 };
+export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, counted: 1, clip: 1 };
 /** The process to run for one repeat (cwd: the ref). Every command but walk does all its repeats in one invocation. The
  *  eval's load mode keeps its Soul folders (--keep-data) in the per-run directory, so the token refusal can read them. */
 export function commandLine(inp, { out, port }) {
@@ -109,6 +117,7 @@ export function commandLine(inp, { out, port }) {
     case 'meetup': return ['tools/bench/capacity/meetup/meetup.mjs', ...r, '--out', join(out, 'meetup'), '--port', p, '--range', `${port + 1}-${port + 30}`, ...inp.args];
     case 'slopes-profile': return ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', ...r, '--out', join(out, 'slopes'), '--port', p, ...inp.args];
     case 'counted': throw new Error('counted runs its kit\'s steps: countedSteps');
+    case 'clip': throw new Error('clip runs its kit: runClip');
   }
   throw new Error(`no command line for ${inp.command}`);
 }
@@ -124,6 +133,12 @@ export function countedSteps(inp, { kit, out, port }) {
 }
 /** The log of repeat k: walk writes one per repeat, the others one in all. */
 export const logName = (command, k) => (command === 'walk' ? `walk-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : command === 'counted' ? `counted/${k}.log` : `${command}.log`);
+/** A clip's frame timing from its frames' presentation times (seconds) → count, span, mean fps, largest gap. */
+export function frameTiming(pts) {
+  const t = pts.filter(Number.isFinite).sort((a, b) => a - b), gaps = t.slice(1).map((x, i) => x - t[i]), r3 = (x) => +x.toFixed(3);
+  const span = t.length > 1 ? t.at(-1) - t[0] : 0;
+  return { frames: t.length, spanSec: r3(span), meanFps: span > 0 ? +((t.length - 1) / span).toFixed(2) : null, maxGapSec: gaps.length ? r3(Math.max(...gaps)) : null, gapsOver100ms: gaps.filter((g) => g > 0.1).length };
+}
 
 /** #1970 A2: the runner's own logical CPUs grouped into physical cores (`siblingsOf(cpu)`: that CPU's SMT siblings); the
  *  first two cores for the world under test, the other two for the load generator. Exactly four cores, else refused. */
@@ -190,7 +205,11 @@ export const PUBLISH = {
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
   // the files the workstation session writes per cell: the kit's record, its log, the score, the class and the probe log
   counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
+  // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
+  clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
 };
+/** Media a timed run publishes byte for byte (never scrubbed as text). */
+export const BINARY = /\.(mp4|webm|png)$/;
 const filesUnder = (d, base = d) => { let es; try { es = readdirSync(d, { withFileTypes: true }); } catch { return []; } return es.flatMap((e) => (e.isDirectory() ? filesUnder(join(d, e.name), base) : e.isFile() ? [join(d, e.name).slice(base.length + 1).split(sep).join('/')] : [])); };
 /** The files a timed run of `command` may publish that exist, relative to out, in PUBLISH order. */
 export function allowlist(out, command) {
@@ -200,10 +219,14 @@ export function allowlist(out, command) {
 
 /** Copy the allowlisted files into dest, scrubbed; refuse if any still holds a Soul token. Returns the copied list. */
 export function stage({ out, dest, command, scrubWith }) {
-  const tokens = soulTokens(out), texts = allowlist(out, command).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
+  const tokens = soulTokens(out), files = allowlist(out, command), media = files.filter((f) => BINARY.test(f));
+  const texts = files.filter((f) => !BINARY.test(f)).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
   for (const [f, t] of texts) if (tokens.some((k) => t.includes(k))) throw new Error(`${f} holds a Soul token; nothing is uploaded`);
+  // a clip whose take showed something private (its sidecar's privacy hits), or that has no sidecar, is never published
+  for (const f of media) if (/\.(mp4|webm)$/.test(f) && (readJ(join(out, `${f}.json`)).privacy?.hits?.length ?? 1) > 0) throw new Error(`${f}: its sidecar records a privacy hit or is missing; nothing is uploaded`);
   for (const [f, t] of texts) { mkdirSync(join(dest, f, '..'), { recursive: true }); writeFileSync(join(dest, f), t); }
-  return texts.map(([f]) => f);
+  for (const f of media) { mkdirSync(join(dest, f, '..'), { recursive: true }); copyFileSync(join(out, f), join(dest, f)); }
+  return [...texts.map(([f]) => f), ...media];
 }
 
 /** A whole-path glob where `*` matches within one path segment → a test. */
@@ -306,6 +329,56 @@ async function runCounted(inp, rec, out, env) {
   const bad = cell.steps.filter((s) => s.exitCode !== 0);
   if (bad.length || cell.steps.length !== steps.length) throw new Error(`${inp.cell}: the kit's ${bad[0]?.step ?? 'steps'} exited non-zero`);
 }
+/** One proof clip of the ref (cwd: its checkout). The recorder and the kit come from this workflow's commit; the ref boots
+ *  a fake-mind dev world of the kit's template; HOME is inside the per-run directory (the kit's Soul and god folders);
+ *  the recorder must find a hardware GL renderer (SIM_PROOF_GPU=hardware, exit 5 otherwise). */
+async function runClip(inp, rec, out, env) {
+  const kitName = inp.args[inp.args.indexOf('--kit') + 1], ctl = resolve(import.meta.dirname, '../..');
+  const src = join(ctl, CLIP_KITS, kitName), kit = join(env.PER_RUN, 'kit', kitName);
+  if (!existsSync(join(src, 'kit.json')) || !existsSync(join(src, 'steps.mjs'))) throw new Error(`clip kit ${kitName}: no kit.json and steps.mjs in ${CLIP_KITS}/${kitName} at this workflow's commit`);
+  cpSync(join(ctl, CLIP_KITS), join(env.PER_RUN, 'kit'), { recursive: true });
+  const k = readJ(join(kit, 'kit.json')), viewport = inp.args.includes('--viewport') ? inp.args[inp.args.indexOf('--viewport') + 1] : (k.viewport ?? 'desktop');
+  if (!/^[a-z0-9-]{1,60}$/.test(k.template ?? '') || !existsSync(join('worlds/templates', `${k.template}.json`))) throw new Error(`clip kit ${kitName}: template ${JSON.stringify(k.template)} is not in the ref's worlds/templates`);
+  // the recorder from this workflow's commit, so a ref without the GPU switch records with it too
+  copyFileSync(join(ctl, '.claude/skills/proof/record.mjs'), '.claude/skills/proof/record.mjs');
+  env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
+  for (const [cmd, a] of [['nvidia-smi', ['--query-gpu=name,driver_version', '--format=csv,noheader']], ['ffmpeg', ['-version']]]) {
+    const r = spawnSync(cmd, a, { encoding: 'utf8' }); console.log(`${cmd}: ${r.status === 0 ? r.stdout.split('\n')[0] : 'not available'}`);
+  }
+  let renderNodes = []; try { renderNodes = readdirSync('/dev/dri').filter((f) => f.startsWith('renderD')); } catch { /* none */ }
+  console.log(`render nodes: ${renderNodes.length}`);
+  const port = await freePorts(1), dir = join(out, 'clip'); mkdirSync(dir, { recursive: true });
+  const { startWorld } = await import(pathToFileURL(resolve('tools/god-skill/dev-world.mjs')).href);
+  const t0 = Date.now(), saved = { BRAIN_MODE: process.env.BRAIN_MODE, HOME: process.env.HOME };
+  let world;
+  Object.assign(process.env, { BRAIN_MODE: 'fake', HOME: env.HOME });
+  try { world = await startWorld({ slug: 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.', env: { INVITE_REQUIRED: '0' } }); }
+  finally { for (const [key, v] of Object.entries(saved)) { if (v === undefined) delete process.env[key]; else process.env[key] = v; } }
+  console.log(`world up in ${((Date.now() - t0) / 1000).toFixed(1)} s (${k.template})`);
+  const clipFile = join(dir, `${kitName}-${viewport}.mp4`), log = createWriteStream(join(out, 'clip.log'));
+  const argv = ['.claude/skills/proof/record.mjs', '--url', `${world.base}?dev=1`, '--steps', join(kit, 'steps.mjs'), '--out', clipFile, '--viewport', viewport,
+    ...(k.timeOfDay ? ['--time-of-day', String(k.timeOfDay)] : []), ...(k.fromLoad ? ['--from-load'] : []),
+    ...Object.entries(k.localStorage ?? {}).flatMap(([key, v]) => ['--local-storage', `${key}=${v}`])];
+  const renv = { ...env, SIM_PROOF_GPU: 'hardware', CLIP_WORLD: world.base, CLIP_CHECKOUT: resolve('.'), CLIP_WORK: join(env.PER_RUN, 'clip-work') };
+  mkdirSync(renv.CLIP_WORK, { recursive: true });
+  console.log(`clip: record.mjs --steps <kit>/${kitName}/steps.mjs --viewport ${viewport}`);
+  const t1 = Date.now(), child = spawn(process.execPath, argv, { env: renv, stdio: ['ignore', 'pipe', 'pipe'] });
+  for (const st of [child.stdout, child.stderr]) st.on('data', (b) => { log.write(b); process.stdout.write(b); });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
+  const code = await new Promise((r) => child.on('close', (c) => r(c ?? 1))); log.end();
+  try { process.kill(-world.child.pid, 'SIGTERM'); } catch { try { world.child.kill('SIGTERM'); } catch { /* gone */ } }
+  const made = readdirSync(dir).find((f) => /\.(mp4|webm)$/.test(f)) ?? null, side = made ? readJ(join(dir, `${made}.json`)) : {};
+  let timing = null;
+  if (made) {
+    const r = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'csv=p=0', join(dir, made)], { encoding: 'utf8', maxBuffer: 64 << 20 });
+    if (r.status === 0) timing = frameTiming(r.stdout.split('\n').map((x) => Number.parseFloat(x)));
+  }
+  const clip = { kit: kitName, template: k.template, viewport, exitCode: code, wallMs: Date.now() - t1, file: made, gl: side.gl ?? null,
+    durationSec: side.durationSec ?? null, videoSec: side.videoSec ?? null, timing, privacyHits: side.privacy?.hits?.length ?? null, recorder: 'workflow commit' };
+  if (timing) console.log(`frame timing: ${timing.frames} frames over ${timing.spanSec} s, mean ${timing.meanFps} fps, largest gap ${timing.maxGapSec} s, ${timing.gapsOver100ms} gaps over 100 ms; take ${clip.durationSec} s wall clock, video ${clip.videoSec} s`);
+  writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, runs: [{ repeat: 1, exitCode: code, wallMs: clip.wallMs, clip }] }, null, 1));
+  if (code !== 0) throw new Error(`the recorder exited ${code}${code === 5 ? ' (no hardware GL renderer)' : code === 4 ? ' (privacy hit: the take is not published)' : ''}`);
+}
 const scrubWith = () => { const env = process.env, u = (() => { try { return userInfo().username; } catch { return env.USER; } })();
   return { paths: [[env.PER_RUN, '<per-run>'], [env.GITHUB_WORKSPACE, '.'], [env.RUNNER_WORKSPACE, '<runner-work>'], [env.RUNNER_TEMP, '<runner-temp>'], [env.HOME, '~']], names: [[hostname(), '<host>'], [u, '<user>']] }; };
 
@@ -346,6 +419,7 @@ async function main(cmd) {
     if (!rec.startLoad || (rec.startLoad.overGate && rec.startLoad.gated !== false)) throw new Error('no passing start-load record; the run does not start');
     mkdirSync(out, { recursive: true });
     if (inp.command === 'counted') return runCounted(inp, rec, out, env);
+    if (inp.command === 'clip') return runClip(inp, rec, out, env);
     // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the other
     // two. HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
     const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf) : null;

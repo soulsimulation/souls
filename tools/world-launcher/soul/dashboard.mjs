@@ -133,7 +133,7 @@ button { font: inherit; margin: 0 6px 6px 0; padding: 2px 8px; border: 1px solid
 button[aria-pressed="true"] { border-color: var(--fg); }
 </style></head>
 <body>
-<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p></header>
+<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p><p id="ago" class="none"></p></header>
 <main>
 <section><h2>Status</h2><div id="status"></div></section>
 <section><h2>Resident</h2><div id="resident"></div></section>
@@ -150,7 +150,9 @@ button[aria-pressed="true"] { border-color: var(--fg); }
 <script>
 // Every value here comes from /data.json and is shown as text, never as markup: worlds and other Souls wrote much of it.
 var el = function (id) { return document.getElementById(id); };
-var day = null, lastDays = "";
+var day = null, lastDays = "", read = 0;
+// #2257: the page reads /data.json again every 5 s in place; this line says how long ago, so a person can see it is live.
+function ago() { if (read) el("ago").textContent = "updated " + Math.round((Date.now() - read) / 1000) + " s ago"; }
 function none(text) { var s = document.createElement("span"); s.className = "none"; s.textContent = text || "not yet"; return s; }
 function show(id, value) {
   var box = el(id); box.replaceChildren();
@@ -172,7 +174,8 @@ function pick(d) {
 function render(d) {
   var s = d.status || {}, r = d.resident;
   el("name").textContent = (s.soul && (s.soul.name || s.soul.id)) || "Soul";
-  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world") + " · updated " + new Date(d.at).toLocaleTimeString();
+  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world");
+  read = Date.now(); ago();
   el("state").className = r && r.up ? "up" : "down";
   show("status", d.status); show("resident", d.resident); show("plan", d.plan); show("wakes", d.wakes);
   var j = d.journal, days = j ? j.days : [];
@@ -191,7 +194,7 @@ function tick() {
   fetch("/data.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(render)
     .catch(function () { el("state").textContent = "The dashboard has stopped; start it again with: node eden.mjs dashboard"; el("state").className = "down"; });
 }
-tick(); setInterval(tick, 5000);
+tick(); setInterval(tick, 5000); setInterval(ago, 1000);
 </script>
 </body></html>
 `;
