@@ -1,181 +1,138 @@
-// LINK BODY (2026-10-24): the body never leaves. Presence drives it: awake -> zombie (no listen for SLEEP_GRACE) -> asleep
-// (after ZOMBIE_WANDER); a listen or an accepted action wakes it; a connected Soul left without actions gets the idle reflex.
+// wind-down/1 (#2295): silent for an hour, walks out, sleeps until its agent acts. The rule on a small synthetic world
+// (a fake port, the real log table): its ticks, its goals, its rebuild from the log and its bounds.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Hono} from 'hono';
-import {retainedCommonsShoreFactory,nativeSleepSnapshotFactoryV1} from '@souls/engine-mars';
-import type {WorldState as NativeWorld} from '../../../mars/viewer/engine/world/types.ts';
-import {fixture,invite,accept} from '../test/native-owner-fixture.ts';
-import {LivingWorld} from './living.ts';
-import {EdgeLedger} from './edge/ledger/ledger.ts';
-import {WorldHost} from './world.ts';
-import {registerEdgeComms} from './edge/comms/index.ts';
-import {edgeSoulResolver} from './edge/routes.ts';
-import type {BodyKnobs} from './edge/ledger/body-rule.ts';
+import {DatabaseSync} from 'node:sqlite';
+import {BodyRule, BODY_KNOBS, type BodyPort, type BodySoul, type BodyKnobs, type Posture} from './edge/ledger/body-rule.ts';
 
-const SEC=1000,MIN=60*SEC;
-async function world(names:string[],knobs:Partial<BodyKnobs>={},fixedSoulId?:string){
- const factory=nativeSleepSnapshotFactoryV1(await retainedCommonsShoreFactory()),f=fixture(':memory:',factory,{durableClockV1:true});f.souls.enableLifecycle();f.brain.quiesce();
- await accept<unknown>(f.host,new LivingWorld(f.host).install(['Owners drive their Souls.']));for(let i=0;i<4;i++)f.host.tickOnce();
- await accept(f.host,f.host.installCommonsProvisionsV1());await accept(f.host,f.host.installRetainedCommonsShoreV1());
- await accept<unknown>(f.host,f.host.enableQuietStallReleaseV1());await accept<unknown>(f.host,f.host.enableYieldTimeoutV1());await accept<unknown>(f.host,f.host.enableShoreDepartV1());
- // A pinned identity freezes body-rule jitter; the native journaled birth remains unchanged.
- const rows:any[]=[];for(const n of names){await invite(f,n);if(fixedSoulId){
-  const entityId='h_'+fixedSoulId.slice(2),owner='dev:'+n;f.db.createSoul({id:fixedSoulId,worldId:f.host.worldId,owner,entityId,name:n,description:'body',native:false});
-  await accept(f.host,f.host.enqueue('birth','soul:'+fixedSoulId,{soulId:fixedSoulId,entityId,name:n,description:'body',owner}));rows.push(f.db.soul(fixedSoulId));
- }else rows.push(await accept(f.host,f.souls.create('dev:'+n,{name:n,description:'body'})));}
- const clock={now:Date.now()};const now=()=>clock.now;
- const ledger=new EdgeLedger(f.host,f.db,undefined,{now}),app=new Hono();
- const comms=registerEdgeComms(app,{host:f.host,db:f.db,souls:f.souls,soul:edgeSoulResolver(f.host,f.souls,()=>undefined),ledger},{fading:true,now,sweepMs:0});ledger.attachComms(comms as any);
- const pres=new Map<string,{listening:boolean;at:number|null}>(),listens:((id:string)=>void)[]=[],sends:((id:string)=>void)[]=[];
- const rule=ledger.attachPresence({soulPresence:id=>pres.get(id)??{listening:false,at:null},onSoulListen:l=>listens.push(l),onSoulSend:l=>sends.push(l)},knobs)!;
- const spectated:any[]=[];(comms as any).onSpectator((m:any)=>{if(m.kind==='body')spectated.push(m);});
- const souls=rows.map((r,i)=>({soulId:r.id,entityId:r.entity_id,name:names[i],owner:r.owner}));
- const listen=(i:number,open:boolean)=>{pres.set(souls[i].soulId,{listening:open,at:clock.now});if(open)for(const l of listens)l(souls[i].soulId);};
- const send=(i:number)=>{for(const l of sends)l(souls[i].soulId);};
- /** Advance `ms` of rule time in steps of `step` ms per world tick; `each` runs after every tick. */
- const run=(ms:number,step=50,each?:()=>void)=>{for(let t=0;t<ms;t+=step){clock.now+=step;f.host.tickOnce();f.host.drainInputs();each?.();}};
- const ents=()=>(f.host.engine.world as NativeWorld).entities;
- const close=()=>{comms.close();f.host.stop();f.db.close();};
- return {f,factory,ledger,comms,rule,souls,listen,send,run,clock,ents,spectated,close};
+type Move = {tick: number; soulId: string; option: string; steps: {verb: string; params: Record<string, unknown>}[]};
+/** A 10 m house at the town's centre; shuffling at 0.6 m/s; a walk that is `stuck` never ends by itself. */
+function world(db = new DatabaseSync(':memory:'), opts: {knobs?: Partial<BodyKnobs>; stuck?: boolean} = {}) {
+  db.exec('CREATE TABLE IF NOT EXISTS events (world_id TEXT NOT NULL, seq INTEGER NOT NULL, tick INTEGER NOT NULL, kind TEXT NOT NULL, author TEXT NOT NULL, payload TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (world_id, seq))');
+  const souls: BodySoul[] = [{soulId: 's_ana', entityId: 'e_ana', name: 'Ana', owner: 'o1'}, {soulId: 's_ben', entityId: 'e_ben', name: 'Ben', owner: 'o2'}];
+  const body = new Map<string, {x: number; z: number; posture: Posture; until: number | null; to: [number, number] | null}>([
+    ['e_ana', {x: 2, z: 1, posture: 'standing', until: null, to: null}], ['e_ben', {x: -1, z: -2, posture: 'standing', until: null, to: null}]]);
+  const moves: Move[] = []; let now = 0;
+  const seq = () => ((db.prepare('SELECT MAX(seq) n FROM events').get() as {n: number | null}).n ?? 0) + 1;
+  const log = (kind: string, payload: object) => {const e = {tick: now + 1, kind, payload}; db.prepare("INSERT INTO events VALUES ('w',?,?,?,?,?,0)").run(seq(), e.tick, kind, 'x', JSON.stringify(payload)); return e;};
+  const port: BodyPort = {
+    souls: () => souls, pose: id => {const b = body.get(id)!; return {x: b.x, z: b.z, level: 0};}, posture: id => body.get(id)!.posture,
+    busy: () => false, running: id => body.get(id)!.until !== null, dry: x => x > -60, clear: () => true,
+    places: (x, z) => Math.abs(x) < 5 && Math.abs(z) < 5 ? 'house' : '', centre: () => [0, 0],
+    decide: (s, option, _l, steps, windDown) => {
+      moves.push({tick: now, soulId: s.soulId, option, steps: steps as Move['steps']}); log('decision', {soulId: s.soulId, trigger: 'edge-body', windDown});
+      const b = body.get(s.entityId)!, walk = steps.find(x => x.verb === 'walk_to'), nap = steps.find(x => x.verb === 'mars:pose_v1');
+      if (walk) {const to = walk.params.to as [number, number]; b.to = to; b.posture = 'moving'; b.until = opts.stuck ? Infinity : now + Math.ceil(Math.hypot(to[0] - b.x, to[1] - b.z) / 0.6 * 20);}
+      else if (nap) {b.posture = 'lying'; b.until = null;} else {b.posture = 'standing'; b.until = null;}
+    },
+    stop: s => {const b = body.get(s.entityId)!; b.until = null; b.posture = 'standing';},
+    publish: () => {}, wallMs: t => t * 50,
+  };
+  const rule = new BodyRule(db as never, 'w', port, {knobs: opts.knobs});
+  const advance = (r: BodyRule, to: number) => {for (; now < to; now++) {
+    for (const b of body.values()) if (b.until !== null && now >= b.until) {[b.x, b.z] = b.to!; b.until = null; b.posture = 'standing';}
+    r.tick(now);
+  }};
+  const act = (r: BodyRule, soulId: string, reflex = false) => r.applied(log('decision', {soulId, trigger: 'edge-act:r_' + now, ...(reflex ? {reflex: true} : {})}));
+  return {db, rule, port, body, moves, advance, act, at: () => now, set: (t: number) => {now = t;}};
 }
+const K = BODY_KNOBS;
 
-const stateOf=(w:any,i=0)=>w.rule.view(w.souls[i].soulId);
-const shuffles=(w:any,id:string)=>w.f.db.events(w.f.host.worldId).filter((e:any)=>e.kind==='decision'&&e.payload?.soulId===id&&String(e.payload?.option).startsWith('body:')).map((e:any)=>e.payload.option);
-
-test('stop listening: zombie within SLEEP_GRACE + one sweep, asleep (lying) after ZOMBIE_WANDER, a listen wakes it at once',{timeout:900000},async t=>{
- // This captured failing identity previously shuffled onto a 0.35m-clear patch, then refused pose.no-room.
- const w=await world(['ana'],{},'s_0add0b2900');t.after(w.close);const id=w.souls[0].soulId,e=w.ents()[w.souls[0].entityId];
- w.listen(0,true);w.run(5*SEC);assert.equal(stateOf(w).state,'awake');
- w.listen(0,false);const closed=w.clock.now;let zombieAt=0;
- w.run(130*SEC,50,()=>{if(!zombieAt&&stateOf(w).state==='zombie')zombieAt=w.clock.now;});
- t.diagnostic(`zombie after ${(zombieAt-closed)/1000} s (SLEEP_GRACE 120 s)`);
- assert.ok(zombieAt>0&&zombieAt-closed>=120*SEC&&zombieAt-closed<=121*SEC,'zombie within SLEEP_GRACE + 1 s');
- assert.equal(stateOf(w).doing,'drifting');
- // half an hour of zombie at one rule-second per tick, the last seconds at real tick rate
- w.run(zombieAt+30*MIN-15*SEC-w.clock.now,1000);let asleepAt=0;w.run(30*SEC,50,()=>{if(!asleepAt&&stateOf(w).state==='asleep')asleepAt=w.clock.now;});
- t.diagnostic(`asleep ${(asleepAt-zombieAt)/1000} s after turning zombie (ZOMBIE_WANDER 1800 s); shuffles ${shuffles(w,id).length}`);
- assert.ok(asleepAt>0&&asleepAt-zombieAt>=30*MIN&&asleepAt-zombieAt<=30*MIN+1*SEC,'asleep after ZOMBIE_WANDER (+1 s)');
- assert.ok(shuffles(w,id).filter((o:string)=>o==='body:zombie-shuffle').length>=3,'the zombie shuffled');
- w.run(20*SEC,50);assert.equal(String((e.human as any).activity),'nap','lies down where it stands');assert.equal(stateOf(w).doing,'dozing');
- const at=e.pose.p.slice();w.run(10*MIN,1000);assert.deepEqual(e.pose.p,at,'asleep is still');assert.equal(stateOf(w).state,'asleep');
- w.listen(0,true);assert.equal(stateOf(w).state,'awake','a listen wakes it at once');
- w.run(3*SEC,50);assert.notEqual(String((e.human as any).activity),'nap','stood up');
- const ev=w.spectated.filter(m=>m.soulId===id).map(m=>`${m.state}/${m.doing}`);t.diagnostic('spectator body events '+JSON.stringify(ev));
- assert.deepEqual(ev,['awake/null','zombie/drifting','asleep/standing','asleep/dozing','awake/null']);
- for(const m of w.spectated)for(const k of ['kind','soulId','state','doing','since'])assert.ok(k in m,'contract field '+k);
- assert.deepEqual((w.ledger.publicSoul(id) as any).body,stateOf(w),'public record carries body');
- assert.equal((w.ledger.publicSoul(id) as any).fade.colour,'green','fade stays readable and green');
- assert.deepEqual(w.f.host.engine.runtime.violations,[]);
+test('A1 A4c: an Owned Soul gets nothing for an hour after its act; then Wander, the walk out and sleep, each on the tick nextMoveTick named', () => {
+  const w = world();
+  w.advance(w.rule, 100); w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben'); const last = w.at() + 1;
+  assert.equal(w.rule.nextMoveTick(), last + K.wanderTicks);
+  w.advance(w.rule, last + K.wanderTicks);
+  assert.deepEqual(w.moves, [], 'nothing issued in the Owned hour, connected or not');
+  for (let guard = 0; w.rule.nextMoveTick() !== null && guard < 200; guard++) {
+    const due = w.rule.nextMoveTick()!, n = w.moves.length; w.advance(w.rule, due + 1);
+    assert.ok(w.moves.slice(n).every(m => m.tick === due), 'every move lands on the tick nextMoveTick named');
+  }
+  assert.equal(w.rule.nextMoveTick(), null, 'both asleep: nothing due');
+  for (const id of ['s_ana', 's_ben']) {
+    const mine = w.moves.filter(m => m.soulId === id), start = mine[0].tick, asleep = mine.at(-1)!;
+    assert.equal(start, last + K.wanderTicks, 'Wander starts an hour after the last act');
+    assert.equal(mine[0].steps[0].verb, 'stand');
+    const legs = mine.filter(m => m.option === 'body:wander-walk');
+    assert.ok(legs.length >= 5, `${legs.length} wander legs`);
+    for (let i = 1; i < legs.length; i++) {const gap = legs[i].tick - legs[i - 1].tick; assert.ok(gap >= K.legMinTicks && gap <= K.legMaxTicks, `gap ${gap}`);}
+    // the walk out starts 30 min into Wander (none when the body already stands on its sleeping spot)
+    const zombie = mine.find(m => m.option === 'body:zombie-walk' || m.option === 'body:asleep');
+    assert.equal(zombie?.tick, start + K.zombieTicks, 'the walk out starts 30 min into Wander');
+    assert.equal(asleep.option, 'body:asleep'); assert.deepEqual(asleep.steps.at(-1)!.params, {activity: 'nap', seconds: 3600, endless: true});
+    assert.ok(asleep.tick - start <= K.boundTicks, `A4b: Wander to asleep in ${asleep.tick - start} ticks`);
+    assert.equal(w.rule.view(id)?.state, 'asleep');
+  }
+  const [a, b] = ['e_ana', 'e_ben'].map(e => w.body.get(e)!);
+  assert.ok(Math.hypot(a.x - b.x, a.z - b.z) >= K.spotGapM, 'the sleeping spots are 3 m apart');
+  for (const s of [a, b]) {assert.equal(w.port.places(s.x, s.z, 0), '', 'outside the built area'); assert.equal(s.posture, 'lying');}
 });
 
-test('asleep posture remains standing when the native nap refuses a narrow starting point',async t=>{
- const w=await world(['ana'],{zombieWanderMs:MIN},'s_sleepnarrow');t.after(w.close);
- const s=w.souls[0],e=w.ents()[s.entityId],eng=w.f.host.engine as any,results:any[]=[];
- w.f.host.listeners.push({onDecision:(ev,r)=>{if((ev.payload as any).option==='body:asleep')results.push(r);}});
- await accept(w.f.host,w.f.host.enqueue('edge-relocate','edge:'+s.soulId,{soulId:s.soulId,entityId:s.entityId,to:[10.25,-0.45]}));
- w.run(SEC);const start=e.pose.p.slice();
- assert.equal(eng.canPerform({actor:s.entityId,label:'narrow nap',steps:[{verb:'mars:pose_v1',params:{activity:'nap',seconds:3600}}]}).code,'pose.no-room');
- w.listen(0,true);w.run(5*SEC);w.listen(0,false);w.run(4*MIN,50);
- assert.deepEqual([stateOf(w).state,stateOf(w).doing],['asleep','standing']);assert.equal(e.human!.activity,'idle');
- assert.deepEqual(e.pose.p,start,'a narrow starting point is not silently relocated');
- assert.ok(results.length>=1&&results.length<=2,'refusal retries retain the one-minute bound');
- assert.ok(results.every(r=>r.programOk===false&&r.programCode==='pose.no-room'),'the native refusal is preserved');
- w.listen(0,true);assert.equal(stateOf(w).state,'awake');assert.deepEqual(eng.runtime.violations,[]);
+test('wander legs end farther from the town centre than they start', () => {
+  const w = world(); w.act(w.rule, 's_ana'); w.advance(w.rule, K.wanderTicks + K.zombieTicks);
+  let checked = 0;
+  for (const m of w.moves.filter(m => m.option === 'body:wander-walk')) {
+    const to = m.steps[0].params.to as [number, number], from = w.moves.filter(x => x.soulId === m.soulId && x.tick < m.tick && x.steps[0].verb === 'walk_to').at(-1)?.steps[0].params.to as [number, number] | undefined;
+    if (from) {assert.ok(Math.hypot(...to) > Math.hypot(...from)); checked++;}
+    assert.equal(m.steps[0].params.pace, 'shuffle');
+  }
+  assert.ok(checked >= 4);
 });
 
-test('sleep interrupts a native shuffle beside furniture with lying room at the actual stop',async t=>{
- const w=await world(['ana'],{},'s_0add0b2900');t.after(w.close);const s=w.souls[0],e=w.ents()[s.entityId],eng=w.f.host.engine as any;
- await accept(w.f.host,w.f.host.enqueue('edge-relocate','edge:'+s.soulId,{soulId:s.soulId,entityId:s.entityId,to:[11.3,0.3]}));w.run(SEC);
- const start=e.pose.p.slice();assert.ok(eng.clearanceUpToV1(start[0],start[2],2)<1.6,'start beside the actual obstacle');
- assert.ok(eng.lyingRoomAtV1(start[0],start[2],0,0.125),'start has conservative lying clearance');
- w.listen(0,true);w.run(5*SEC);w.listen(0,false);
- let interrupted=false,at:number[]=[];
- for(let n=0;n<6000&&!interrupted;n++){w.run(50);if(stateOf(w).state==='zombie'&&(w.ledger as any).posture(s.entityId)==='moving'&&Math.hypot(e.pose.p[0]-start[0],e.pose.p[2]-start[2])>0.02){
-  at=e.pose.p.slice();assert.ok(eng.clearanceUpToV1(at[0],at[2],2)<1.6,'interrupt while still beside furniture');
-  w.rule.setKnobs(s.soulId,{zombieWanderMs:w.clock.now-stateOf(w).since});interrupted=true;
- }}
- assert.ok(interrupted,'the native zombie actually moved before sleep');w.run(20*SEC,50);
- assert.equal(e.human!.activity,'nap');assert.deepEqual([stateOf(w).state,stateOf(w).doing],['asleep','dozing']);
- assert.ok(eng.clearanceUpToV1(e.pose.p[0],e.pose.p[2],1)>=0.9,'the actual interrupted stop admits lying');
- const settled=e.pose.p.slice();w.run(MIN,50);assert.deepEqual(e.pose.p,settled);assert.deepEqual(eng.runtime.violations,[]);
- t.diagnostic(JSON.stringify({start,interruptedAt:at,settled}));
+test('A6: after the last Soul is asleep, 24 h of ticks log no decision and move no body', () => {
+  const w = world(); w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben');
+  w.advance(w.rule, K.wanderTicks + K.boundTicks + 10); assert.equal(w.rule.nextMoveTick(), null);
+  const n = w.moves.length, at = [...w.body.values()].map(b => [b.x, b.z]);
+  w.advance(w.rule, w.at() + 24 * 72_000);
+  assert.equal(w.moves.length, n); assert.deepEqual([...w.body.values()].map(b => [b.x, b.z]), at);
 });
 
-test('an accepted action wakes a sleeper; an agent acting without listening is awake, then a zombie again after the grace',{timeout:900000},async t=>{
- const w=await world(['ana'],{zombieWanderMs:60*SEC});t.after(w.close);const s=w.souls[0];
- w.run(4*MIN,1000);assert.equal(stateOf(w).state,'asleep','never listened: asleep after grace + wander');
- const r=await accept(w.f.host,w.ledger.act(s,{capability:'wave:here'}));assert.equal(r.accepted,true,JSON.stringify(r));
- assert.equal(stateOf(w).state,'awake','the accepted action woke it');
- w.run(119*SEC,1000);assert.equal(stateOf(w).state,'awake');w.run(3*SEC,50);assert.equal(stateOf(w).state,'zombie');
+test('A4b: a walk out that never arrives is stopped and the body sleeps where it stands, within the bound', () => {
+  const w = world(undefined, {stuck: true}); w.act(w.rule, 's_ana'); const start = K.wanderTicks + 1;
+  w.advance(w.rule, start + K.boundTicks + 1);
+  const asleep = w.moves.filter(m => m.soulId === 's_ana').at(-1)!;
+  assert.equal(asleep.option, 'body:asleep'); assert.ok(asleep.tick - start <= K.boundTicks, `${asleep.tick - start}`);
 });
 
-test('2 h of zombie by the shore: never in water, never off its place, never beyond REFLEX_RADIUS',{timeout:1800000},async t=>{
- const w=await world(['ana'],{zombieWanderMs:3*3600*SEC});t.after(w.close);const s=w.souls[0],e=w.ents()[s.entityId],eng=w.f.host.engine as any;
- await accept(w.f.host,w.f.host.enqueue('edge-relocate',`edge:${s.soulId}`,{soulId:s.soulId,entityId:s.entityId,to:[-24,2]}));w.run(2*SEC,50);
- t.diagnostic('start '+JSON.stringify(e.pose.p));
- w.run(150*SEC,1000);assert.equal(stateOf(w).state,"zombie");
- const anchor=[e.pose.p[0],e.pose.p[2]];let far=0,wet=0,moved=0,last=anchor.slice(),minX=Infinity;
- w.run(2*3600*SEC,1000,()=>{const x=e.pose.p[0],z=e.pose.p[2];far=Math.max(far,Math.hypot(x-anchor[0],z-anchor[1]));if(!eng.dryGroundAtV1(x,z))wet++;minX=Math.min(minX,x);if(Math.hypot(x-last[0],z-last[1])>0.01)moved++;last=[x,z];
-  assert.ok(!(e.human as any).shore,'never on the shore');});
- const n=shuffles(w,s.soulId).filter((o:string)=>o==='body:zombie-shuffle').length;
- t.diagnostic(`shuffles ${n}, ticks moving ${moved}, farthest ${far.toFixed(2)} m from where it was left, westmost x ${minX.toFixed(2)} (shore water x < -29.5), wet ticks ${wet}`);
- assert.equal(wet,0,'never in water');assert.ok(far<=20.5,'within REFLEX_RADIUS');assert.ok(n>=20,'shuffled');assert.equal(stateOf(w).state,'zombie');
- assert.deepEqual(eng.runtime.violations,[]);
+test('an agent act wakes a sleeper at once; a reflex act does not restart the hour', () => {
+  const w = world(); w.act(w.rule, 's_ana'); w.act(w.rule, 's_ben'); w.advance(w.rule, K.wanderTicks - 10);
+  w.act(w.rule, 's_ana', true); w.act(w.rule, 's_ben', true); assert.equal(w.rule.nextMoveTick(), K.wanderTicks + 1, 'reflex: the hour runs on');
+  w.advance(w.rule, K.wanderTicks + K.boundTicks + 10); assert.equal(w.rule.view('s_ana')?.state, 'asleep');
+  w.act(w.rule, 's_ana'); assert.equal(w.rule.view('s_ana')?.state, 'awake'); assert.equal(w.rule.nextMoveTick(), w.at() + 1 + K.wanderTicks);
 });
 
-test('a Soul left in water floats at the surface: zombie floating (no shuffles), then asleep floating, still',{timeout:900000},async t=>{
- const w=await world(['ana'],{zombieWanderMs:2*MIN});t.after(w.close);const s=w.souls[0],e=w.ents()[s.entityId];
- w.listen(0,true);const r=await accept(w.f.host,w.ledger.act(s,{capability:'swim:shore-water'}));assert.equal(r.accepted,true);
- for(let i=0;i<300&&w.ledger.receipt(s.soulId,(r as any).receipt.id)!.phase!=='completed';i++)w.run(1*SEC,50);
- w.listen(0,false);w.run(2*MIN+25*SEC,1000);assert.deepEqual([stateOf(w).state,stateOf(w).doing],['zombie','floating']);
- w.run(2*MIN+30*SEC,1000);assert.deepEqual([stateOf(w).state,stateOf(w).doing],['asleep','floating']);
- const at=e.pose.p.slice();w.run(10*MIN,1000);
- t.diagnostic('floating at '+JSON.stringify(at)+' activity '+(e.human as any).activity+'; body shuffles '+shuffles(w,s.soulId).length);
- assert.deepEqual(e.pose.p,at,'still');assert.ok(at[1]<-1,'in the water');assert.ok(['tread','swim'].includes(String((e.human as any).activity)));
- assert.equal(shuffles(w,s.soulId).filter((o:string)=>o.includes('shuffle')).length,0,'never shuffles in water');
+test('A3: delete the cache, boot from the log, and the next move lands on the same tick with the same goal', () => {
+  for (const cut of [K.wanderTicks + 5000, K.wanderTicks + K.zombieTicks + 30]) {
+    const control = world(); control.act(control.rule, 's_ana'); control.act(control.rule, 's_ben');
+    control.advance(control.rule, K.wanderTicks + K.boundTicks + 10);
+    const copy = world(); copy.act(copy.rule, 's_ana'); copy.act(copy.rule, 's_ben'); copy.advance(copy.rule, cut);
+    copy.db.exec('DELETE FROM edge_body_v1');
+    const rebooted = new BodyRule(copy.db as never, 'w', copy.port);
+    copy.advance(rebooted, K.wanderTicks + K.boundTicks + 10);
+    assert.deepEqual(copy.moves, control.moves, `booted from the log at tick ${cut}`);
+  }
 });
 
-test('idle reflex: a silent connected Soul sits and dozes within 2 h; an owner message ends it at once',{timeout:1800000},async t=>{
- // Test actual idle postures on open ground. Seat approaches and random drifts can otherwise leave the Soul
- // beside furniture where native nap correctly refuses pose.no-room; the separate wander tests cover movement.
- // #1431: a fixed Soul id. The idle reflex picks each move by mix(soulId+':idle', n), so a random id made this test a draw
- // (one CI run never sat). This id sits and dozes plainly within the 2 h; the assertions are unchanged.
- const w=await world(['ana'],{seatRadiusM:0,reflexRadiusM:0},'s_5ea7ed0001');t.after(w.close);const s=w.souls[0],e=w.ents()[s.entityId],eng=w.f.host.engine as any;
- const at=e.pose.p.slice();assert.ok(eng.dryGroundAtV1(at[0],at[2]),'the posture fixture is dry');
- assert.ok(eng.clearanceUpToV1(at[0],at[2],1)>=0.9,'the posture fixture has native nap clearance');
- assert.equal(eng.canPerform({actor:s.entityId,label:'fixture nap',steps:[{verb:'mars:pose_v1',params:{activity:'nap',seconds:5}}]}),null,'native nap is initially admissible');
- w.listen(0,true);w.run(9*MIN,1000);assert.equal(stateOf(w).state,'awake');
- const seen=new Map<string,number>(),body=new Map<string,number>();w.run(2*3600*SEC,1000,()=>{const v=stateOf(w),h=e.human as any;if(v.state==='idle'){seen.set(v.doing,(seen.get(v.doing)??0)+1);
-  const k=v.doing==='sitting'&&(String(h.activity).startsWith('sit')||h.baseActivity==='sit')?'seated':v.doing==='dozing'&&h.activity==='nap'?'napping':null;if(k)body.set(k,(body.get(k)??0)+1);}w.listen(0,true);});
- assert.deepEqual(e.pose.p,at,'posture choices stay on the verified open patch');
- t.diagnostic('engine postures while idle '+JSON.stringify(Object.fromEntries(body)));assert.ok((body.get('seated')??0)>0&&(body.get('napping')??0)>0,'the body really sat and napped');
- const moves=shuffles(w,s.soulId);t.diagnostic('idle seconds by posture '+JSON.stringify(Object.fromEntries(seen))+'; moves '+JSON.stringify(moves.reduce((a:any,o:string)=>(a[o]=(a[o]??0)+1,a),{})));
- assert.ok((seen.get('sitting')??0)>0&&(seen.get('dozing')??0)>0,'>= 1 sit and >= 1 doze');
- assert.equal(stateOf(w).state,'idle');
- // dozing at the end of a 2 h idle is the dominant case; force one more doze to test the stand-up
- for(let n=0;n<120&&stateOf(w).doing!=='dozing';n++)w.run(60*SEC,1000,()=>w.listen(0,true));
- assert.equal(stateOf(w).doing,'dozing','the bounded late-idle window reaches a doze');
- w.run(5*SEC,50);w.send(0);assert.equal(stateOf(w).state,'awake','owner message ends the reflex at once');
- w.run(2*SEC,50);assert.notEqual(String((e.human as any).activity),'nap','a doze stands up');
- assert.deepEqual(w.f.host.engine.runtime.violations,[]);
+test('A2: no wall clock: the same moves whatever Date.now says', t => {
+  const run = () => {const w = world(); w.act(w.rule, 's_ana'); w.advance(w.rule, K.wanderTicks + K.boundTicks); return w.moves;};
+  const a = run(); t.mock.method(Date, 'now', () => Math.random() * 1e13); assert.deepEqual(run(), a);
 });
 
-test('#1981 A4.1: a seat sit the idle reflex logged before the same-place check replays to the same state; replay never re-runs the rule',{timeout:300000},async t=>{
- const w=await world(['ana']);t.after(w.close);const s=w.souls[0];
- w.listen(0,true);w.run(5*SEC);
- // Exactly what the reflex logged before the check: body:sit (trigger edge-body) on the first seat offer, wherever it is.
- const {caps,plans}=w.ledger.ambientPlans(s),c=caps.find(c=>c.verb==='sit'&&c.id!=='sit:here'&&c.available&&c.target);
- assert.ok(c&&plans.get(c.id),'the fixture offers a seat');
- const steps=structuredClone(plans.get(c!.id)!.steps);for(const x of steps)if(x.params&&'seconds' in x.params)x.params.seconds=600;
- await accept(w.f.host,w.f.host.enqueue('decision','edge:'+s.soulId,{soulId:s.soulId,entityId:s.entityId,option:'body:sit',label:'Sitting for a while',steps,reevalTicks:1e9,fallback:false,trigger:'edge-body'}));
- const e=w.ents()[s.entityId],from=[e.pose.p[0],e.pose.p[2]];
- w.run(60*SEC);
- assert.ok(Math.hypot(e.pose.p[0]-from[0],e.pose.p[2]-from[1])>0.5,'the logged sit moved the body (it walked to the seat)');
- const hash=w.f.host.engine.stateHash();w.f.host.saveSnapshot(true);
- for(const mode of ['snapshot','genesis']){
-  if(mode==='genesis')w.f.db.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(w.f.host.worldId);
-  const replay=new WorldHost(w.f.db,w.factory,w.f.host.seed,1e9,w.f.host.worldId,{durableClockV1:true});
-  assert.equal(replay.boot().from,mode);assert.equal(replay.engine.stateHash(),hash,`${mode} replay is exact`);replay.stop();
- }
+test('A7: a Soul the old rule held idle, zombie or asleep enters Wander at its first tick under the new rule', () => {
+  for (const state of ['idle', 'zombie', 'asleep']) {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE edge_body_v1 (world_id TEXT NOT NULL, soul_id TEXT NOT NULL, state TEXT NOT NULL, doing TEXT, since INTEGER NOT NULL,
+      anchor_x REAL, anchor_z REAL, last_act INTEGER NOT NULL, poke_at INTEGER NOT NULL, woke_at INTEGER NOT NULL, busy_at INTEGER NOT NULL,
+      idle_from INTEGER NOT NULL, next_at INTEGER NOT NULL, n INTEGER NOT NULL, knobs TEXT, PRIMARY KEY (world_id, soul_id)) WITHOUT ROWID`);
+    db.prepare("INSERT INTO edge_body_v1 VALUES ('w','s_ana',?,NULL,1,NULL,NULL,1,0,1,0,1,1,0,NULL)").run(state);
+    const w = world(db); w.set(500); w.advance(w.rule, 501);
+    assert.deepEqual(w.moves.map(m => [m.tick, m.soulId, m.option]), [[500, 's_ana', 'body:wander']], state);
+  }
+});
+
+test('the knobs are injectable: a short wind-down for tests and clips', () => {
+  const w = world(undefined, {knobs: {wanderTicks: 200, zombieTicks: 400, legMinTicks: 100, legMaxTicks: 150, boundTicks: 1500}});
+  w.act(w.rule, 's_ana'); w.advance(w.rule, 2000);
+  assert.equal(w.rule.view('s_ana')?.state, 'asleep');
+  assert.equal(w.moves.find(m => m.soulId === 's_ana')?.tick, 201);
 });
