@@ -57,7 +57,7 @@ export async function prepareFolder(seat, { name }) {
   let lookFailed = null;
   for (const until = Date.now() + 300_000; !catalogHasActs(f, soulId) && Date.now() < until; await sleep(500)) {
     const l = await cli(f, ['look']);
-    if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503/.test(lookFailed)) break; }
+    if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503|no answer/.test(lookFailed)) break; }   // #2364: a loaded host's world may not answer yet
   }
   return { soulId, createdAt, lookFailed, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
