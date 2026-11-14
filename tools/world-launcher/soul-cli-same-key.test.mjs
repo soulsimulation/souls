@@ -106,7 +106,8 @@ test('concurrent runs of the same act send their own keys; a live run\'s pending
   });
   const first = f.run('act', 'wave:here');
   while (!acts(f.seen).length) await new Promise(r => setTimeout(r, 20));   // the first is out, its key kept in the folder
-  await Promise.all([first, f.run('act', 'wave:here')]);   // (exit codes not read: the legacy state file's save races, a separate defect)
+  const done = await Promise.all([first, f.run('act', 'wave:here')]);
+  for (const r of done) assert.equal(r.code, 0, `both runs exit 0 once their acts are answered (#2092): ${r.stderr}`);
   const [x, y] = acts(f.seen);
   assert.notEqual(x.key, y.key); assert.notEqual(x.body.clientRef, y.body.clientRef);
   assert.equal(f.receipts.size, 2, 'two acts, two receipts');
