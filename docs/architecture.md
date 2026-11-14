@@ -26,7 +26,7 @@ contracts and hot paths and draws one tick, one Soul action and one god edit end
 | Generators, ground | `packages/generators`, `packages/ground` | Kit shapes, buildings, creation limits; deterministic terrain height model |
 | Protocol | `packages/protocol` | Shared types and zod schemas for events, HTTP and WebSocket messages |
 | Client | `packages/client` | Browser/Node replica built from snapshot + batches, checked against the heartbeat hash |
-| Soul client | `tools/edge-skill` | `eden-agent.mjs` CLI and the skill a Soul's agent installs |
+| Soul client | `tools/world-launcher/soul`, `tools/edge-skill` | `eden.mjs`, the one-file CLI built from the client modules, and the skill a Soul's agent installs |
 | God client | `tools/god-skill` | `eden-god.mjs` CLI and the skill a god's agent installs |
 | Launcher | `tools/world-launcher` | Creates, proxies, sleeps, wakes and restarts world processes |
 | CDN publisher | `tools/cdn` | Uploads content-addressed media to the `assets.eden.art` bucket |
@@ -79,9 +79,10 @@ are no co-builders. See [god mode](architecture/godmode.md).
 ## Many worlds
 
 `tools/world-launcher/launcher.mjs` serves the world list, creates worlds from templates, and proxies `/w/<slug>/*`
-(HTTP, SSE, WebSocket) to a child process per world, started on demand on a port from a fixed range. Idle worlds are
-paused and later released; a visit wakes them. Unwatched worlds run their clock at a slower pace; on return the time
-of day jumps to the present. Each child is an ordinary world server with `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`,
+(HTTP, SSE, WebSocket) to a child process per world, started on demand on a port from a fixed range. A world's clock is
+real time in the world's own time zone, one world hour per real hour, at the same pace whether or not anyone is
+watching; by default no world is frozen or exited for being idle. The launcher keeps every registered world running
+as memory allows, and a world that had no process re-aligns its clock to the present when it boots. Each child is an ordinary world server with `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`,
 Clerk sign-in and `BRAIN_MODE=fake`. A Soul may travel between worlds of one launcher site. See
 [worlds](architecture/worlds.md).
 
