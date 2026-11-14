@@ -117,7 +117,7 @@ server.on('listening', () => {
   L[1] = 1;
   // #2367: FAKE_DUE_FILE ({ dueAt, out }): a reminder the running world delivers at dueAt (at once if it loads later),
   // appending the delivery time to `out`, as the reminders' pump does
-  if (process.env.FAKE_DUE_FILE) { let d = null; try { d = JSON.parse(readFileSync(process.env.FAKE_DUE_FILE, 'utf8')); } catch { /* none */ } if (d) setTimeout(() => appendFileSync(d.out, `${Date.now()}\n`), Math.max(0, d.dueAt - Date.now())).unref(); }
+  if (process.env.FAKE_DUE_FILE) { let d = null; try { d = JSON.parse(readFileSync(process.env.FAKE_DUE_FILE, 'utf8')); } catch { /* none */ } if (d) { const fire = () => { if (Date.now() < d.dueAt) return void setTimeout(fire, d.dueAt - Date.now()).unref(); appendFileSync(d.out, `${Date.now()}\n`); }; fire(); } }   // (a timer may fire a ms early; the pump never does)
   if (process.env.FAKE_LIVE === '1') process.on('SIGUSR2', () => console.log('[report] (a process report, as lane L2 writes one)'));
   if (process.env.FAKE_FLAP_MS) setTimeout(() => process.exit(3), Number(process.env.FAKE_FLAP_MS));
   if (process.env.FAKE_PLANNED_MS) setTimeout(() => process.exit(75), Number(process.env.FAKE_PLANNED_MS));

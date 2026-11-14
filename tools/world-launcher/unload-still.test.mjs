@@ -166,7 +166,7 @@ test('#2367 A2: a load with no room waits, then answers world.waking with a retr
   const L = await open({ dataDir: join(dir, 'room'), roomWaitMs: 1500 });
   try {
     await create('Aaa'); await create('Bbb'); await until(() => status(L, 'aaa') === 'running' && status(L, 'bbb') === 'running', 'both run');
-    L.pool.o.worldsMemMb = 400; await L.pool.stop('bbb'); await wait(400);
+    L.pool.o.pss = () => 300; L.pool.state('aaa').pssAt = 0; L.pool.o.worldsMemMb = 400; await L.pool.stop('bbb'); await wait(400);   // (a fake's Pss on Linux is tiny: a fixed 300 MB)
     assert.equal(status(L, 'bbb'), 'stopped', 'no room: the keep-alive does not load it');
     assert.equal((await act('aaa')).status, 200);   // aaa: just used and not still, so it cannot go
     const t0 = Date.now(), r = await act('bbb'), body = await r.json();
