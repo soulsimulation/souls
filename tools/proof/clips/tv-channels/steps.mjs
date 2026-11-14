@@ -35,20 +35,10 @@ export default async function steps(page, { mark }) {
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
   mark('follow Tess');
-  await page.waitForTimeout(2500);
-  await page.mouse.move(640, 400);
-  for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, -240); await page.waitForTimeout(150); }   // closer, the screen in view
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(3500);
   for (const [act, label] of [['switch-on', 'on'], ['change-channel', 'channel 2'], ['change-channel', 'channel 3'], ['change-channel', 'channel 4'], ['switch-off', 'off']]) {
     await eden(['act', `object:${TV}:${act}`, '--wait', '40', '--json'], 50_000);
     mark(label);
-    if (act === 'switch-on') {                            // probe: orbit the camera in eighths to find the screen's face
-      for (let i = 0; i < 8; i++) {
-        await page.mouse.move(400, 360); await page.mouse.down();
-        await page.mouse.move(550, 360, { steps: 10 }); await page.mouse.up();
-        mark(`orbit ${i + 1}`); await page.waitForTimeout(900);
-      }
-    }
     await page.waitForTimeout(3000);                      // the picture (or the dark glass) on screen
   }
 }
