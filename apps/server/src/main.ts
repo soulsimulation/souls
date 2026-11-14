@@ -120,7 +120,7 @@ if(edenCore)await installEdenCore(host,{applyCrew:process.env.APPLY_EDEN_CREW_CH
 const edenCapabilities=edenCore&&host.engine.rulesVersion.includes('+crew-removal/1');
 console.log(`[world] ${host.worldId} booted from ${boot.from}, tick ${host.engine.world.tick}, replayed ${boot.replayed} events, ${host.minds.size} souls, rules ${host.engine.rulesVersion}`);
 // #2235: the wall anchor the last run left (clock-catchup.ts): how many ticks this world missed while it had no process
-const wallClock = new WallClock(host, config.dataDir);
+const wallClock = new WallClock(host, config.dataDir, { quiet: () => host.stillStretch });   // #2298 A4: not rewritten while still
 host.owedTicks = host.paused ? 0 : wallClock.owed();
 if (host.owedTicks > 0) console.log(`[clock] ${host.owedTicks} ticks owed to the wall (${Math.round(host.owedTicks / 20)} s away): they run before the clock starts`);
 
@@ -165,6 +165,7 @@ const server = createServer();
 const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, config.worldPath);
 server.on('upgrade', req => { req.url = stripWorldPath(req.url); });
 hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
+host.watched = () => hub.clients.size > 0;   // #2298 A4b
 hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPersist;
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
@@ -285,10 +286,13 @@ function hold(req: import('node:http').IncomingMessage, res: import('node:http')
 function stillAnswer() {
   const s = host.stillUntil(), wallMs = Date.now(), at = (t: number | null) => (t === null ? null : wallMs + Math.max(0, t - s.tick) * 50 / (host.baseRate || 1));
   const still = s.still && !catchingUp && held === 0 && writesInFlight.size === 0;
-  return { still, tick: s.tick, wallMs, untilTick: still ? s.untilTick : null, untilWallMs: still ? at(s.untilTick) : null, moveTick: still ? s.moveTick : null, moveWallMs: still ? at(s.moveTick) : null };
+  const k = host.skipStats;   // #2298 A5
+  return { still, tick: s.tick, wallMs, untilTick: still ? s.untilTick : null, untilWallMs: still ? at(s.untilTick) : null, moveTick: still ? s.moveTick : null, moveWallMs: still ? at(s.moveTick) : null,
+    ticksComputed: k.ticksComputed, ticksJumped: k.ticksJumped, jumps: k.jumps, lastHorizon: k.lastHorizon };
 }
 const loopback = (a: string | undefined) => a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
 server.on('request', (req, res) => {
+  if (!catchingUp) { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); } }   // #2298 A4: a request first brings a still world to now
   if (req.method === 'GET' && req.url === '/__sim/still') {
     if (!loopback(req.socket.remoteAddress) || req.headers['x-forwarded-for'] !== undefined) { res.writeHead(404).end(); return; }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(stillAnswer())); return;

@@ -83,6 +83,21 @@ export class StallGuard {
     for (const id of this.kept.keys()) if (!live.has(id)) this.kept.delete(id);
   }
 
+  /** #2298: the next tick at which afterTick would act (a first sighting or a release), on its own 1 s grid, or null; `busy`
+   *  while an owner's request waits on a held body (it is released within seconds, so the world is not still). */
+  nextDue(tick: number): {tick: number | null; busy: boolean} {
+    if (this.off) return {tick: null, busy: false};
+    const grid = (t: number) => Math.ceil(Math.max(t, tick + 1) / TPS) * TPS;
+    let due: number | null = null;
+    for (const soul of this.h.souls()) {
+      const p = this.h.probe(soul.entityId);
+      if (!p || !p.held || !p.candidate || p.exempt || this.kept.get(soul.soulId) === p.signature) continue;
+      if (p.pending) return {tick: null, busy: true};
+      const s = this.seen.get(soul.soulId), t = grid(!s || s.sig !== p.signature ? tick + 1 : s.since + this.limitTicks(p) - 2 * TPS);
+      due = due === null ? t : Math.min(due, t);
+    }
+    return {tick: due, busy: false};
+  }
   /** stand:here from the owner's agent: a stalled hold (of a kind that should end by itself) is released at once. */
   async ownerStand(soul: EdgeSoul): Promise<boolean | 'held'> {
     const p = this.off ? null : this.h.probe(soul.entityId);

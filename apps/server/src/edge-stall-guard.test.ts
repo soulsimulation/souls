@@ -81,3 +81,16 @@ test('a held body restored from a snapshot is released within 30 s of boot',{tim
  r.tick(1200,()=>r.free());const seconds=(r.f.host.engine.world.tick-boot)/20;t.diagnostic(`restored body released ${seconds} s after boot`);
  assert.ok(r.free(),'released after the restore');assert.ok(seconds<=30,`${seconds} s`);await flush();assert.equal(r.stalls().length,1);
 });
+// #2298: a still world is jumped, not stepped; the guard's release is one of its deadlines, so a world that jumps releases the
+// stalled body on the tick a world ticked straight through does (two identical worlds, one ticked, one caught up by jumps)
+test('jumped: a seat claim left by a gone action is released on the same tick as when ticked',{timeout:300000},async t=>{
+ const world=async()=>{const q=await setup(t);for(const p of [q.f.host.enableHeldActivitiesV1(),q.f.host.enableNeedAnchorsV1()])await accept<unknown>(q.f.host,p);q.tick(40);
+  const rt=(q.f.host.engine as any).rt,a=q.actor;rt.owners.set('actor:'+a,[{action:'a-gone-seat',mode:'exclusive'}]);Object.assign(q.ent()[a].human,{activity:'sit',baseActivity:'sit',task:'a-gone-seat'});return q;};
+ const a=await world(),b=await world(),from=a.f.host.engine.world.tick;assert.equal(b.f.host.engine.world.tick,from);
+ a.tick(1200,()=>a.free());assert.ok(a.free(),'the ticked world released it');const end=a.f.host.engine.world.tick+40;a.tick(end-a.f.host.engine.world.tick);
+ const jumped=b.f.host.skipStats.ticksJumped;await b.f.host.catchUp(end-b.f.host.engine.world.tick);
+ const stops=(q:Q)=>q.f.db.events(q.f.host.worldId).filter(e=>e.tick>from).map(e=>[e.tick,e.kind]);   // (Soul ids differ between the two worlds)
+ t.diagnostic(JSON.stringify({ticked:stops(a),jumped:stops(b),ticksJumped:b.f.host.skipStats.ticksJumped-jumped}));
+ assert.ok(b.free(),'the jumped world released it');assert.deepEqual(stops(b),stops(a),'the release was logged on the same tick');
+ assert.ok(b.f.host.skipStats.ticksJumped>jumped,'and the world did jump');
+});

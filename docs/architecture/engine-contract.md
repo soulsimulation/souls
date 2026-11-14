@@ -64,7 +64,11 @@ and every walk, swim, jog or climb under way (advancing or waiting) are never he
 `{still, untilTick}`: still when every live action is held, every programme waits or follows a held action, every
 ride is parked and nothing is queued; `untilTick` is the earliest held end or programme wait (`null` when none).
 Without the policy no world is still. With it, the held ends enter `stateHash()` (`held`), and history before the
-event replays as recorded.
+event replays as recorded. `MarsEngine.skipToV1(to)` (#2298) moves the clock to `to` without
+stepping while the world is still and `to` is before the earliest held end, programme wait or gaze lapse, and leaves what
+stepping would: the time of day, attention, the record prune, keyframes and the take cut, each as its last scheduled step
+would have written it. It is refused with a reason (`skip.not-still`, `skip.past-horizon`, `skip.not-ahead`,
+`skip.waiting`, `skip.standing-holds`, `skip.render-context`) and then changes nothing.
 
 - **Program** `{ actor, label, steps: {verb, params}[] }`: the verb steps one body runs. A `decision` event starts one.
   One actor runs one program.

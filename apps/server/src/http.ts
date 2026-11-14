@@ -300,6 +300,7 @@ export function buildApp(d: Deps) {
     const clock = mon?.clock();
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
       tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
+      skip: d.host.skipStats,   // #2298 A5: ticks computed and jumped, jumps, the last horizon
       ...(mon ? {load: mon.health()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.

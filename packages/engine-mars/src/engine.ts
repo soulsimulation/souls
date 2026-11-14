@@ -492,10 +492,7 @@ export class MarsEngine implements Engine {
     // Bound memory. Mars keeps every event and record for ever, which suits a bounded rehearsal and not a world that never stops.
     if (this.rt.events.length > 20000) this.rt.events.splice(0, this.rt.events.length - 1000);
     this.cursor = this.rt.events.length;
-    if (tick % 600 === 0) {
-      const parents = new Set<string>(); for (const r of this.rt.records.values()) if (r.parent && this.rt.isActive(r.id)) parents.add(r.parent);
-      for (const [id, r] of this.rt.records) if (r.endedTick !== undefined && r.endedTick < tick - KEEP_RECORDS && !parents.has(id)) this.rt.records.delete(id);
-    }
+    if (tick % 600 === 0) this.pruneRecords(tick);
     // L4 (c): the body loop changed no entry; the next step reuses this listing unless engine code runs in between
     this.tableCacheV1 = listing; this.tableCacheAt = this.tableWritesV1;
     return out;
@@ -522,6 +519,42 @@ export class MarsEngine implements Engine {
     }
     for (const e of listEntities(this.ents) as any[]) if (e.carrier && e.carrier.phase !== 'parked') return no;
     return { still: true, untilTick: until };
+  }
+  private pruneRecords(tick: number) {
+    const parents = new Set<string>(); for (const r of this.rt.records.values()) if (r.parent && this.rt.isActive(r.id)) parents.add(r.parent);
+    for (const [id, r] of this.rt.records) if (r.endedTick !== undefined && r.endedTick < tick - KEEP_RECORDS && !parents.has(id)) this.rt.records.delete(id);
+  }
+  /** #2298 A1: move the clock to `to` without stepping, leaving exactly what stepping there would leave. Only while the world
+   *  is still (stillnessV1) and `to` is before its horizon (the earliest held end, programme wait or gaze lapse), so every
+   *  step skipped changes nothing but the clock; otherwise it is refused with a reason and nothing changes. What a quiet step
+   *  writes on a schedule is written as the last such step would have: the time of day, attention (every 10 ticks; it reads
+   *  only bodies that do not move), the record prune (every 600, at its own tick; nothing ends while still), the broadcast
+   *  keyframes (every KEY_EVERY) and the take cut (every 20). The stair and stalled-reflex sweeps act only on a walk waiting
+   *  on others, which is never held, so they are refused here, never skipped. The invariants run at the next ordinary step. */
+  skipToV1(to: number): { ok: true; from: number; to: number } | { ok: false; reason: string } {
+    const rt = this.rt, from: number = rt.tick;
+    if (!Number.isSafeInteger(to) || to <= from) return { ok: false, reason: 'skip.not-ahead' };
+    const s = this.stillnessV1();
+    if (!s.still) return { ok: false, reason: 'skip.not-still' };
+    const gaze = this.attentionDueV1(), horizon = [s.untilTick, gaze].filter((t): t is number => t !== null);
+    if (horizon.length && to >= Math.min(...horizon)) return { ok: false, reason: 'skip.past-horizon' };
+    if (this.world.standingHoldsV1) return { ok: false, reason: 'skip.standing-holds' };
+    const waits = rt.services.moverWaits as { samples: Map<string, unknown>; episodes: Map<string, unknown> } | undefined;
+    if (rt.waiting.size || waits?.samples.size || waits?.episodes.size) return { ok: false, reason: 'skip.waiting' };
+    for (const l of rt.live.values() as Iterable<any>) if (l.rec.diagnostic || l.cancelling) return { ok: false, reason: 'skip.waiting' };
+    if (!this.readerRecordingDepth && this.renderBaseKey !== this.renderContextKeyV1()) return { ok: false, reason: 'skip.render-context' };
+    const at = (t: number) => { rt.world.tick = t; const c = this.cfg.clock; if (c) rt.world.env.datetime = new Date(Date.UTC(2026, 9, 3, 6) + Math.max(0, t - c.origin) / c.dayTicks * 86400_000).toISOString(); };
+    const last = (every: number, offset = 0) => { const t = to - ((((to - offset) % every) + every) % every); return t > from ? t : null; };
+    const cut = this.recorder.startTick + 20 * Math.floor((to - this.recorder.startTick) / 20);
+    if (to - this.recorder.startTick >= 20) { at(cut); if (this.cfg.soulsRepairV1 === true) this.recutV1(); else this.startRecorder(this.finishRecorder()); }
+    const k = last(KEY_EVERY);
+    if (k !== null) { at(k); for (const e of listEntities(this.ents) as any[]) if (e.kind === 'human') this.keys.set(e.id, this.poseSampleOf(e.id)); }
+    const prune = last(600);
+    if (prune !== null) this.pruneRecords(prune);
+    rt.world.tick = to; this.updateClock();
+    if (last(10) !== null) this.updateAttention();
+    this.tableCacheV1 = null;
+    return { ok: true, from, to };
   }
   /** #2297 (read only): the tick at which a held gaze lapses (updateAttention, every 10 ticks, drops a gaze from its
    *  `until`; the head turns back), or null. The world changes there although no body moves. */

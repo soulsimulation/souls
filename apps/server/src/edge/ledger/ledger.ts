@@ -388,7 +388,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const rule = this.bodyRule;
     this.host.listeners.push({onApplied: e => {try {rule.applied(e);} catch {/* best effort */}},
       // #2297: the rule's waits live outside the engine: its next step (from the logged wind-down) is a deadline that moves a body
-      stillness: () => {const t = rule.nextMoveTick(); return t === null ? [] : [{name: 'body.wind-down', tick: t, move: true}];}});
+      stillness: () => {if (rule.pending()) return [{name: 'body.pending', busy: true}]; const t = rule.nextMoveTick(); return t === null ? [] : [{name: 'body.wind-down', tick: t, move: true}];}});
     this.host.publicBodyOf = id => this.bodyRule?.view(id) ?? null;
     return this.bodyRule;
   }
@@ -951,14 +951,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** #2297: the ledger keeps the world busy while a receipt waits to start (WAIT_LIMIT, NAV_WARM: it may start on any tick),
    *  a bound contact or a motion is watched, or ambient life (off in served worlds) may act on an idle Soul. */
-  private stillParts(): {name: string; busy?: boolean; tick?: number}[] {
+  private stillParts(): {name: string; busy?: boolean; tick?: number; move?: boolean}[] {
     if (this.pending.size) return [{name: 'edge.receipt-waiting', busy: true}];
     if (this.contactPending.size || this.motionWatch.size) return [{name: 'edge.contact', busy: true}];
     if (this.ambient && this.host.minds.size) return [{name: 'edge.ambient', busy: true}];
     const tg = this.together.nextDueTick(); if (tg.busy) return [{name: 'edge.together', busy: true}];
     const pj = (this.projects as {nextDueTick?(): number | null} | undefined)?.nextDueTick?.() ?? null;
     const cm = (this.comms as {nextDueTick?(): number | null} | undefined)?.nextDueTick?.() ?? null;
-    return [...(tg.tick !== null ? [{name: 'edge.invite-follow-item', tick: tg.tick}] : []), ...(pj !== null ? [{name: 'god.project-consent', tick: pj}] : []), ...(cm !== null ? [{name: 'edge.comms', tick: cm}] : [])];
+    // #2298: the stall guard's release (stall-guard/1) and the step out of a solid footprint (CN5) are deadlines too
+    const now = this.host.engine.world.tick, sg = this.stallGuard.nextDue(now); if (sg.busy) return [{name: 'edge.stall-guard', busy: true}];
+    const us = this.unstickDue(now);
+    return [...(sg.tick !== null ? [{name: 'edge.stall-guard', tick: sg.tick}] : []), ...(us !== null ? [{name: 'edge.step-out', tick: us, move: true}] : []), ...(tg.tick !== null ? [{name: 'edge.invite-follow-item', tick: tg.tick}] : []), ...(pj !== null ? [{name: 'god.project-consent', tick: pj}] : []), ...(cm !== null ? [{name: 'edge.comms', tick: cm}] : [])];
   }
   private afterTick(tick: number) {
     if(this.contactPending.size)this.contactTicks(tick);
@@ -1056,6 +1059,23 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private navRescuedAt = new Map<string, number>();
   /** nav/1: an idle body standing inside a solid (e.g. it was mid-walk through a house when the footprints were admitted)
    *  steps out to the nearest clear spot, as a logged edge-relocate (deterministic in replay). At most once a minute each. */
+  /** #2298: the next sweep (every 100 ticks) at which `unstick` would step an idle body out of a solid footprint, or null.
+   *  Never busy: a body with no clear spot near it would otherwise keep the world from ever being still. */
+  private unstickDue(tick: number): number | null {
+    let due: number | null = null;
+    this.unstickBodies(tick, (m, after) => { const t = Math.ceil(Math.max(after, tick + 1) / 100) * 100; due = due === null ? t : Math.min(due, t); });
+    return due;
+  }
+  private unstickBodies(tick: number, each: (m: {soulId: string}, after: number) => void) {
+    const engine = this.host.engine as unknown as {clearanceAtV1?: (x: number, z: number) => number; clearanceUpToV1?: (x: number, z: number, cap?: number) => number; nearestStandableV1?: unknown};
+    if (!engine.clearanceAtV1 || !engine.nearestStandableV1 || !(this.host.engine.world as {navV1?: unknown}).navV1) return;
+    const clear = (x: number, z: number) => engine.clearanceUpToV1 ? engine.clearanceUpToV1(x, z, 1) : engine.clearanceAtV1!(x, z);
+    for (const m of this.host.minds.values()) {
+      const b = this.body(m.entityId), h = b?.human; if (!b || !h || (h.level ?? 0) !== 0 || h.shore || h.carrier || h.sleepPose || h.activity === 'sit' || h.baseActivity === 'sit' || this.host.engine.programOf(m.entityId)) continue;
+      if (clear(b.pose.p[0], b.pose.p[2]) >= 0.27) continue;
+      each(m, (this.unstuckAt.get(m.soulId) ?? -1e9) + 1200);
+    }
+  }
   private unstick(tick: number) {
     const engine = this.host.engine as unknown as {clearanceAtV1?: (x: number, z: number) => number; clearanceUpToV1?: (x: number, z: number, cap?: number) => number; nearestStandableV1?: (at: [number, number], except?: string) => [number, number] | null};
     if (!engine.clearanceAtV1 || !engine.nearestStandableV1 || !(this.host.engine.world as {navV1?: unknown}).navV1) return;

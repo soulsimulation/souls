@@ -132,8 +132,20 @@ switch independent. A previously saved master mute migrates to both switches off
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
     with no picture kept, loads the world. Not yet: memory admission (#2233) and the load queue (#2304).
-  - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
-    them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
+  - **A still world's clock is jumped, not stepped (#2298; `SIM_SKIP=0` ticks every world as before).** One function
+    moves a world's time, live and after any gap: `WorldHost.advanceStep(target)`. When `stillUntil()` says still, the
+    engine skips (`skipToV1`) to the tick before the earlier of the horizon and the target, and the ordinary tick runs the
+    landing tick, listeners, log and all; otherwise one ordinary tick runs. Deadlines are asked again after every jump.
+    Live, a still world only counts the ticks it owes on each frame and jumps them every 1.5 s (`jumpCap`, 30 ticks, under
+    the 2 s stall threshold of healthz, live.json and the launcher), every half second on a broadcast boundary while a
+    viewer is connected (so batches and the sky go out as before), at its horizon, or when an input is queued; any request
+    first brings it to now (`settle`), and inputs drain at the landing tick. A landing sends the batch, heartbeat and
+    kernel view the ticks it covered would have, and the load monitor counts it as due that many intervals on. At a landing with nothing logged since, the durable clock frontier and the periodic snapshot are not written
+    again, and the wall anchor is not re-saved while still (the last pair still gives the ticks owed); all are written as
+    the stillness ends or the world stops. `GET /__sim/still` also reports `ticksComputed`, `ticksJumped`, `jumps` and
+    `lastHorizon`. A Soul whose needs still add up every tick (before need-anchor/1, #2296) keeps its world ticking.
+  - **Gaps are caught up exactly.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
+    them, the world advances every tick it missed (jumping where it is still, above), from the wall anchor in
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
     ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
     ambient-life idle clock and the body rule's timers (#2236).
@@ -145,8 +157,7 @@ switch independent. A previously saved master mute migrates to both switches off
     gaze, the body rule's next wind-down step, the day turn and moments, light changes, garden drying, invitations,
     follows and placed items, standing agreements, calendar items and presentations, conversation timeouts, the steward's
     digest slot, reminders, plan steps and the zone's next daylight-saving change (wall times at the admin's rate).
-    `moveTick` is the earliest at which the world itself moves a body (a held end or the body rule). Nothing is skipped
-    yet. The still check (`SIM_STILL_CHECK=1`, off in production; `still-until.test.ts`) asserts on every tick inside a
+    `moveTick` is the earliest at which the world itself moves a body (a held end or the body rule). The still check (`SIM_STILL_CHECK=1`, off in production; `still-until.test.ts`) asserts on every tick inside a
     claimed horizon that the log did not grow, the world RNG did not draw and the engine state hash changed only in its
     clock fields.
   - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
