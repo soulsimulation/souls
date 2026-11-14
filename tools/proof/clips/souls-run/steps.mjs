@@ -11,6 +11,11 @@ const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
 /** The nearest offered walk to an upstairs room (`caps --search`, the local catalog, with each row's metres). */
 function target() {
+  for (let i = 0; i < 30; i++) {                          // a world just up may not give its catalog yet (503)
+    const r = spawnSync(process.execPath, [EDEN, 'catalog'], { cwd: DIR, encoding: 'utf8', timeout: 60_000 });
+    if (r.status === 0) break;
+    spawnSync('sleep', ['2']);
+  }
   for (const words of ['upstairs', 'roof']) {
     const r = spawnSync(process.execPath, [EDEN, 'caps', '--search', words, '--verb', 'walk', '--all', '--json'], { cwd: DIR, encoding: 'utf8', timeout: 60_000 });
     const offers = (parse(r.stdout)?.offers ?? []).filter((o) => /^walk:/.test(o.id ?? '')).sort((a, b) => (a.metres ?? 1e9) - (b.metres ?? 1e9));
