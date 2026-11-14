@@ -54,6 +54,18 @@ version. The Mars engine keeps them in one registry, `RUNTIME_POLICY_KEYS` in `p
 (`physicalBindingCfgV1`), so adopting a policy on a bound world never makes its snapshots unrestorable (#1363). A new
 flag goes in `RUNTIME_POLICY_FLAGS`; `runtime-policy-registry.test.ts` fails until it does.
 
+**Held activities and stillness** (`held-activity/1`, #2294, cfg `heldActivitiesV1`, adopted at boot last). An activity
+in place is *held*: it has a start tick and either an end tick or no end, and nothing of it is written between them.
+A pose done alone (read, dance, play, eat, lie, nap, sit on the ground…) keeps `heldFrom`/`heldEnd` instead of adding
+up its seconds; a mat sleep keeps `from`/`until` once asleep (its elapsed time is read from them). A seat or slot
+(`sit`, `take_slot`) once occupied, and a `gather` or `campfire_circle` whose members are all on their places, are
+held with no end. A programme `rest` is a programme wait to its `until` tick. Grouped poses, games, singing along
+and every walk, swim, jog or climb under way (advancing or waiting) are never held. `MarsEngine.stillnessV1()` is
+`{still, untilTick}`: still when every live action is held, every programme waits or follows a held action, every
+ride is parked and nothing is queued; `untilTick` is the earliest held end or programme wait (`null` when none).
+Without the policy no world is still. With it, the held ends enter `stateHash()` (`held`), and history before the
+event replays as recorded.
+
 - **Program** `{ actor, label, steps: {verb, params}[] }`: the verb steps one body runs. A `decision` event starts one.
   One actor runs one program.
 - **ProgramEvent** `{ tick, id, actor, kind: 'step'|'completed'|'failed'|'cancelled', step, code?, message? }`: how the

@@ -3,7 +3,8 @@ import {CodecError} from '../runtime/codec.ts';
 // child owns the person and mat through continuous lie/wake. No rig targets.
 import { z } from 'zod';
 import type { ActionDef, ActionStatus, Diagnostic, StepResult } from '../actions/types.ts';
-import type { Runtime } from '../runtime/runtime.ts';
+import { DT, type Runtime } from '../runtime/runtime.ts';
+import { heldTicksV1 } from '../social/pose.ts';
 import type { Entity, HumanState } from '../world/types.ts';
 import type { Spatial } from '../spatial/service.ts';
 import { add2, sub2, scale2, dist2, rot2, heading, angleDelta, obbCorners, obbOverlap, pointInObb, hypot, type OBB2, type Vec2 } from '../core/math.ts';
@@ -15,7 +16,9 @@ export type SleepPose = NonNullable<HumanState['sleepPose']>;
 export interface SleepParams { actor: string; mat: string; duration: number; returnTo?: Vec2 }
 export type SleepMode = 'approaching' | 'lying-down' | 'sleeping' | 'waking' | 'returning' | 'draining' | 'paused' | 'waiting' | 'completed';
 type Mat = { anchor: Vec2; yaw: number; area: OBB2 };
-type Hold = { id: string; p: SleepParams; mat: Mat; standingFraction: number; slept: number; phase: 'approaching' | 'lying-down' | 'sleeping' | 'waking'; child?: string; error?: Diagnostic; stop: boolean };
+type Hold = { id: string; p: SleepParams; mat: Mat; standingFraction: number; slept: number; phase: 'approaching' | 'lying-down' | 'sleeping' | 'waking'; child?: string; error?: Diagnostic; stop: boolean;
+  /** held-activity/1 (#2294, runtime policy): asleep from tick `from` to tick `until`; `slept` is not added up meanwhile. */
+  from?: number; until?: number };
 type Purpose = { id: string; p: SleepParams; mode: SleepMode; child?: string; owned: string[]; elapsed: number; error?: Diagnostic; ending: boolean; draining: boolean };
 type Store = { purposes: Record<string, Purpose>; holds: Record<string, Hold> };
 const store = (rt: Runtime): Store => (rt.services.sleeps ??= { purposes: {}, holds: {} }) as Store;
@@ -163,7 +166,9 @@ function clearPose(rt: Runtime, ex: Hold) {
   const h = humanState(rt.world.entities[ex.p.actor]);
   if (h.task === ex.id) { delete h.sleepPose; delete h.task; delete h.speed; h.activity = 'idle'; }
 }
-function wake(ex: Hold) { ex.stop = true; if (ex.phase !== 'approaching') ex.phase = 'waking'; }
+/** held-activity/1: the seconds a hold has slept, read from its start tick while it is held. */
+const sleptOf = (rt: Runtime, h: Hold) => h.from !== undefined && h.until !== undefined ? Math.min(h.p.duration, h.slept + (rt.tick - h.from) * DT) : h.slept;
+function wake(rt: Runtime, ex: Hold) { ex.slept = sleptOf(rt, ex); delete ex.from; delete ex.until; ex.stop = true; if (ex.phase !== 'approaching') ex.phase = 'waking'; }
 export const sleepHold: ActionDef<SleepParams, Mat, Hold> = {
   verb: 'sleep_on_mat', description: 'Physically approach an authored clear ground mat, lie prone, sleep, then rise before releasing it.',
   schema, drivesReservedHands: false,
@@ -197,7 +202,8 @@ export const sleepHold: ActionDef<SleepParams, Mat, Hold> = {
         : clearance(rt, ex.p, live);
     if (bad) { ex.error = bad; return { status: 'blocked', diagnostic: bad }; }
     ex.error = undefined;
-    if (ex.phase === 'lying-down') { ex.standingFraction = Math.max(0, ex.standingFraction - dt / SLEEP_TRANSITION_SECONDS); if (ex.standingFraction < 1e-8) { ex.standingFraction = 0; ex.phase = 'sleeping'; } }
+    if (ex.phase === 'lying-down') { ex.standingFraction = Math.max(0, ex.standingFraction - dt / SLEEP_TRANSITION_SECONDS); if (ex.standingFraction < 1e-8) { ex.standingFraction = 0; ex.phase = 'sleeping'; if (rt.services.heldActivitiesV1 === true) { ex.from = rt.tick; ex.until = rt.tick + heldTicksV1(ex.p.duration - ex.slept); } } }
+    else if (ex.phase === 'sleeping' && ex.until !== undefined) { if (rt.tick >= ex.until) { ex.slept = ex.p.duration; ex.phase = 'waking'; delete ex.from; delete ex.until; } }
     else if (ex.phase === 'sleeping') { ex.slept = Math.min(ex.p.duration, ex.slept + dt); if (ex.slept >= ex.p.duration - 1e-8) { ex.slept = ex.p.duration; ex.phase = 'waking'; } }
     else if (ex.phase === 'waking') {
       ex.standingFraction = Math.min(1, ex.standingFraction + dt / SLEEP_TRANSITION_SECONDS);
@@ -206,7 +212,7 @@ export const sleepHold: ActionDef<SleepParams, Mat, Hold> = {
     publish(rt, ex); return { status: 'running', phase: ex.phase };
   },
   cancel(rt, ex) {
-    wake(ex);
+    wake(rt, ex);
     if (ex.phase === 'approaching') { if (ex.child && rt.isActive(ex.child)) rt.cancel(ex.child); clearPose(rt, ex); return { ok: true, deferred: !!ex.child && rt.isActive(ex.child) }; }
     return { ok: true, deferred: true };
   },
@@ -218,7 +224,7 @@ export const sleepHold: ActionDef<SleepParams, Mat, Hold> = {
 function absorb(rt: Runtime, ex: Purpose) {
   if (!ex.child) return;
   const h = store(rt).holds[ex.child];
-  if (h) ex.elapsed = Math.min(ex.p.duration, ex.elapsed + h.slept);
+  if (h) ex.elapsed = Math.min(ex.p.duration, ex.elapsed + sleptOf(rt, h));
   ex.child = undefined;
 }
 function drain(rt: Runtime, ex: Purpose): StepResult {
@@ -287,7 +293,17 @@ export const sleepControl: ActionDef<{ sleep: string; intent: 'pause' | 'resume'
 };
 export function readSleep(rt: Runtime, id: string): { action: string; status: ActionStatus; mode: SleepMode; bindings: SleepParams; elapsed: number; remaining: number; ownedActions: string[]; diagnostic?: Diagnostic } | undefined {
   const ex = store(rt).purposes[id], rec = rt.records.get(id); if (!ex || !rec) return;
-  const hold = ex.child ? store(rt).holds[ex.child] : undefined, current = hold?.slept ?? 0, elapsed = Math.min(ex.p.duration, ex.elapsed + current), diagnostic = ex.error ?? hold?.error;
+  const hold = ex.child ? store(rt).holds[ex.child] : undefined, current = hold ? sleptOf(rt, hold) : 0, elapsed = Math.min(ex.p.duration, ex.elapsed + current), diagnostic = ex.error ?? hold?.error;
   return { action: id, status: rec.status, mode: ex.mode, bindings: structuredClone(ex.p), elapsed, remaining: Math.max(0, ex.p.duration - elapsed), ownedActions: [...ex.owned], ...(diagnostic ? { diagnostic: structuredClone(diagnostic) } : {}) };
+}
+/** held-activity/1 (#2294): the tick a mat sleep ends while it is held (asleep, nothing in the way), else false. */
+export function sleepHoldHeldV1(exec: unknown): number | false { const ex = exec as Hold; return ex.phase === 'sleeping' && ex.until !== undefined && !ex.error && !ex.stop ? ex.until : false; }
+/** held-activity/1: a sleep purpose is held while its mat sleep is (to the same tick), or with no end while it is paused. */
+export function sleepPurposeHeldV1(rt: Runtime, exec: unknown): number | null | false {
+  const ex = exec as Purpose;
+  if (ex.draining || ex.ending) return false;
+  if (ex.mode === 'paused' && !ex.error) return null;
+  const hold = ex.child && rt.isActive(ex.child) ? store(rt).holds[ex.child] : undefined;
+  return hold ? sleepHoldHeldV1(hold) : false;
 }
 export const SLEEP_ACTIONS: ActionDef[] = [sleep, sleepHold, sleepControl];
