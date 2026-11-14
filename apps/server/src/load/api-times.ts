@@ -97,7 +97,7 @@ export function recordApi(route: ApiRoute, queueMs: number, handlerMs: number, n
   } catch { /* never fails a request */ }
 }
 
-export type Quantiles = {p50: number; p99: number; p999: number; max: number};
+export type Quantiles = {p50: number; p95?: number; p99: number; p999: number; max: number};
 /** edge:act only (#1944): its parts over the same windows, and how many acts waited past three ticks (window, since start). */
 export type ActPartStats = {handler: Quantiles; wait: Quantiles; commit: Quantiles; waitOver3Ticks: number; waitOver3TicksAll: number};
 export type ApiRouteStats = {n: number; queue: Quantiles; handler: Quantiles; nAll: number; handlerAll: Quantiles; parts?: ActPartStats};
@@ -119,7 +119,7 @@ function quantiles(a: Float64Array, bases: number[]): {n: number; q: Quantiles} 
     for (let i = 0; i < API_BUCKETS; i++) { c += counts[i]; if (c >= want) return r1(Math.min(max, i < API_BUCKETS - 1 ? BOUNDS_MS[i] : max)); }
     return r1(max);
   };
-  return {n, q: {p50: q(0.5), p99: q(0.99), p999: q(0.999), max: r1(max)}};
+  return {n, q: {p50: q(0.5), p95: q(0.95), p99: q(0.99), p999: q(0.999), max: r1(max)}};
 }
 
 /** The `api` block of /healthz and live.json (pure: the watchdog thread calls it too). Routes with no answers are left out. */
