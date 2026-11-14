@@ -110,9 +110,10 @@ of being placed in a wall. God edits never walk out a rider whose ride is in the
 Under `board-path/1` (cfg `carrierBoardPathV1`, adopted at boot last) a boarder's step is checked along its whole way to the next
 point, not only at it: a step that would bring it within the `collision.human-human` separation of another body is not taken.
 Outside the basket it goes round the other way (either side, round the far end if need be) when that way is clear of bodies,
-the basket and static geometry; otherwise it waits (`boarding-wait`, a `carrier.board-path-blocked` mark naming the body) and
-after 15 s gives the seat up with the refusal `carrier.board-path-blocked`. It never brushes past. Before the rule a boarder
-could brush someone beside the basket, and the world answered with a recovery.
+the basket and static geometry; otherwise it waits (`boarding-wait`, a `carrier.board-path-blocked` mark naming the body).
+After 15 s of waiting or rerouting, a boarder still before the boarding step (or a punt's plank) gives the seat up with the
+refusal `carrier.board-path-blocked`; one already past the step steps out as a timed-out boarder always has. Before the rule
+a boarder could brush someone beside the basket, and the world answered with a recovery.
 
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another
 venue. A seated Soul still stands first; active movement and occupied support keep their native admission rules.

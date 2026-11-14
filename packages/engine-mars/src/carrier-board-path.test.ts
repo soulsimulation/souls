@@ -52,8 +52,24 @@ test('board-path/1 A1: a wait is bounded; the seat is given up with carrier.boar
   const {e,E,put}=await world(true);put('ana',[.6,1.7]);put('cy',[-.4,1.45]);put('bo',[-.4,-1.45]);
   const r=board(e);assert.ok(r.ok);
   for(let i=0;i<BOARD_TIMEOUT+20;i++)e.step();
-  assert.equal(E().ana.human.carrier,undefined,'out of the ride');assert.equal(E().balloon.carrier.seats['rider-b']??E().balloon.carrier.seats['rider-a'],null);
+  assert.equal(E().ana.human.carrier,undefined,'out of the ride');assert.deepEqual(Object.values(E().balloon.carrier.seats),[null,null],'both seats free');
   const fail=(e as any).rt.events.find((ev:any)=>ev.type==='failed'&&ev.diagnostic?.code==='carrier.board-path-blocked')??[...(e as any).rt.records.values()].find((rec:any)=>rec.verb==='carrier_ride');
   assert.equal(fail?.diagnostic?.code??fail?.error?.code??fail?.status,'carrier.board-path-blocked',JSON.stringify(fail));
   assert.deepEqual(e.runtime.violations,[]);
+});
+
+test('board-path/1: on a punt a boarder past a seated rider never brushes it (regression guard: main gives this seat up too)',{timeout:300000},async()=>{
+  const {connectedCommonsShoreFactory}=await import('./connected-shore-engine.ts');
+  const factory=await connectedCommonsShoreFactory(),e=factory.create(factory.genesis('punt-path')) as MarsEngine,spec=e.puntCandidatesV1()[0];
+  e.configureRuntimePolicy({sleepBlockTicks:1200,carrierBoardPathV1:true});
+  const E=()=>e.world.entities as Record<string,any>;assert.equal(e.installCarrierV1(spec),true);
+  const ride=(id:string,slot?:string)=>{e.spawnHuman({id,label:id,soul:id});assert.ok(e.perform({actor:id,label:'Row',steps:[{verb:'walk_to',params:{to:spec.bank!.door.filter((_,i)=>i!==1),standoff:0}},{verb:'mars:carrier_ride',params:{carrier:spec.id,throughReturn:true,...(slot?{slot}:{})}}]}).ok);};
+  ride('a','rider-b');E()[spec.id].carrier.departAtTick=e.world.tick+6000;
+  for(let i=0;i<2500&&E().a.human.carrier?.phase!=='seated';i++)e.step();
+  assert.equal(E().a.human.carrier?.phase,'seated');
+  ride('b');
+  let boarded=false;for(let i=0;i<3000&&e.programOf('b');i++){e.step();boarded||=E().b.human.carrier?.phase==='seated';}
+  assert.deepEqual(e.runtime.violations.filter(v=>v.code==='collision.human-human'),[],'never brushed');
+  assert.ok(boarded||E().b.human.carrier===undefined,'b either boarded clear of a or gave the seat up from the bank');
+  console.info(`punt: b ${boarded?'boarded':'gave the seat up'}`);
 });

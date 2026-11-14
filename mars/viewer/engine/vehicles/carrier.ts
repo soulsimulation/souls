@@ -251,7 +251,7 @@ function turnToward(e: Entity, yaw: number, dt: number) { const t = angleDelta(e
 /** Take the boarding step if it is free (or already mine). */
 const takeDoor = (c: CarrierState, actor: string) => { if (c.doorBy && c.doorBy !== actor) return false; c.doorBy = actor; return true; };
 const freeDoor = (c: CarrierState, actor: string) => { if (c.doorBy === actor) c.doorBy = null; };
-type RideExec = { actor: string; carrier: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; leg: number; stopping: boolean; waited: number; id: string; path: Vec3[]; throughReturn?: boolean; blockedBy?: string };
+type RideExec = { actor: string; carrier: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; leg: number; stopping: boolean; waited: number; id: string; path: Vec3[]; throughReturn?: boolean; blockedBy?: string; pathWaited?: number };
 /** The doorway's points in world space, inside first. */
 const inside = (e: Entity, d: CarrierDef) => (d.doorway ?? []).map(q => at(e, q, d.floorY));
 /** From where the boarder stands, round the basket (never through it) to the boarding step, through the door, then to its seat. */
@@ -264,7 +264,9 @@ export function boardingPath(e: Entity, from: Vec3, seat: Vec3, d: CarrierDef): 
 }
 /** board-path/1 (logged runtime policy `carrierBoardPathV1`): a boarder's step never brings it within the human-human
  *  invariant's separation of another body. Outside the basket it goes round the other way when that way is clear; otherwise it
- *  waits (`boarding-wait`, the blocker named on the ride and by a `carrier.board-path-blocked` mark), within BOARD_TIMEOUT. */
+ *  waits (`boarding-wait`, the blocker named on the ride and by a `carrier.board-path-blocked` mark). Waits and reroutes are
+ *  bounded by BOARD_TIMEOUT: before the boarding step (or a bank's plank) the seat is then given up with that refusal; past it
+ *  (inside the basket) the boarder steps out as a timed-out boarder always has. */
 function boardPathRule(rt: Runtime): boolean { return rt.services.carrierBoardPathV1 === true; }
 const bodyRadius = (e: Entity) => isFloater(e) ? floaterBody(e.body).radius : humanRadius(e);
 /** board-path/1: the body a straight step from a to b would bring within the separation collision.human-human reads (the two
@@ -367,19 +369,25 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
       if (blocker && hypot(a.pose.p[0] - to[0], a.pose.p[2] - to[2]) > 1e-9)
         return ++ex.waited > BOARD_TIMEOUT ? (leave(), { status: 'running', phase: 'leaving' }) : { status: 'running', phase: 'boarding-wait' };
       if (boardPathRule(rt)) {
-        const by = pathBlocker(rt, a, a.pose.p, last ? seat.p : to);
+        // before the boarding step the legs past it (step to doorway to seat) are read too, so a body that would block them
+        // (a seated rider in the way on a punt) is waited for where the seat can still be given up
+        const doorAt = ex.path.length - 2 - (c.bank ? 0 : (d.doorway ?? []).length);
+        let by = pathBlocker(rt, a, a.pose.p, last ? seat.p : to);
+        for (let i = doorAt; !by && ex.leg <= doorAt && i < ex.path.length - 1; i++) by = pathBlocker(rt, a, ex.path[i], i + 1 === ex.path.length - 1 ? seat.p : ex.path[i + 1]);
         if (by) {
-          // still outside the basket: go round the other way when that is clear; else wait, then give the seat up
-          const doorIdx = ex.path.length - 2 - (c.bank ? 0 : (d.doorway ?? []).length), outside = !c.bank && ex.leg <= doorIdx;
-          const round = outside ? boardDetour(rt, e, a, d) : null;
-          if (round) { ex.path = [...round, ...ex.path.slice(doorIdx)]; ex.leg = 0; ++ex.waited; }
-          if (!round || pathBlocker(rt, a, a.pose.p, ex.path[0])) {
-            if (ex.blockedBy !== by) { ex.blockedBy = by; rt.mark('carrier.board-path-blocked', { carrier: e.id, actor: ex.actor, by }); }
-            if (++ex.waited <= BOARD_TIMEOUT) return { status: 'running', phase: 'boarding-wait' };
-            if (outside) return abandon(diag('board-path-blocked', `${rt.world.entities[by]?.label ?? by} stayed in the way to the boarding step of ${e.label ?? e.id}`, [by, e.id]));
+          // before the boarding step (or a bank's plank) the seat can be given up where the body stands: outside a basket go
+          // round the other way when that is clear, else wait. Past the step the body waits, then steps out as before.
+          // board-path/1 waits and reroutes have their own bound (pathWaited), apart from the door wait.
+          const doorIdx = doorAt, before = ex.leg <= doorIdx;
+          const bound = () => (ex.pathWaited = (ex.pathWaited ?? 0) + 1) > BOARD_TIMEOUT;
+          if (ex.blockedBy !== by) { ex.blockedBy = by; rt.mark('carrier.board-path-blocked', { carrier: e.id, actor: ex.actor, by }); }
+          const round = before && !c.bank ? boardDetour(rt, e, a, d) : null;
+          if (bound()) {
+            if (before) return abandon(diag('board-path-blocked', `${rt.world.entities[by]?.label ?? by} stayed in the way to the boarding step of ${e.label ?? e.id}`, [by, e.id]));
             leave(); return { status: 'running', phase: 'leaving' };
           }
-          return { status: 'running', phase: 'boarding' };
+          if (round) { ex.path = [...round, ...ex.path.slice(doorIdx)]; ex.leg = 0; return { status: 'running', phase: 'boarding' }; }
+          return { status: 'running', phase: 'boarding-wait' };
         }
         delete ex.blockedBy;
       }
