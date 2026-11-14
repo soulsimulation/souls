@@ -7,7 +7,22 @@ import { fileURLToPath } from "node:url";
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const mark = (file) => file.split("/").pop();
 /** module file -> the name eden.mjs knows it by. A module comes after anything it imports. */
-export const MODULES = [["home.mjs", "soulHome"], ["../../edge-skill/memory-folder.mjs", "soulRecords"], ["brief.mjs", "soulBrief"], ["people.mjs", "soulPeople"], ["consolidate.mjs", "soulConsolidate"], ["memory.mjs", "soulMemory"], ["../../edge-skill/client-body-kit.mjs", "soulBodyKit"]];
+export const MODULES = [
+  ["home.mjs", "soulHome"],
+  ["memory-folder.mjs", "soulRecords"],
+  ["brief.mjs", "soulBrief"],
+  ["people.mjs", "soulPeople"],
+  ["consolidate.mjs", "soulConsolidate"],
+  ["memory.mjs", "soulMemory"],
+  ["digest.mjs", "soulDigest"],
+  ["client-body-kit.mjs", "soulBodyKit"],
+  ["catalog.mjs", "soulCatalog"],
+  ["live.mjs", "soulLive"],
+  ["wake.mjs", "soulWake"],
+  ["net.mjs", "soulNet"],
+  ["dashboard.mjs", "soulDashboard"],
+  ["render.mjs", "soulRender"],
+];
 
 /** A module as a generated block: node imports hoisted under private names, another inlined module read from its closure,
  *  its exports returned from one closure. */

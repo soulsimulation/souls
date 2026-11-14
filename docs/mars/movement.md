@@ -87,6 +87,17 @@ one extra validated planner attempt within existing budgets; unsupported phases 
 every live action certifies its movers exhausted and no future cue or timeout could change that; it does not settle the
 blocked actions, and `execute` refuses to commit the unsettled result.
 
+## Stall releases upstairs
+
+The edge stall guard (`apps/server/src/edge/ledger/stall-guard.ts`) releases a body whose hold stopped making progress
+(engine `stallReleaseV1`, folded from the logged `edge-stop`). Upstairs, body-step-guard/1 stands it on the nearest clear
+spot of its own floor within 2 m. With nothing clear there it used to stand the body where it was, which for a walk stuck
+cancelling mid-flight is off any floor (#447: the next tick faulted `collision.human-static`). Under
+`stallReleaseSupportV1` (stall-release-support/1, prospective, hashed; every world adopts it at boot) it then goes to the
+nearer clear landing of the flight its walk is on, on that landing's level; with neither, nothing is released: the body
+stays in its native hold and the guard tells the owner once (`stall.no-floor-spot`). This is a logged set-down of at most
+a flight's length, the stall guard's sanctioned release, never a respawn. Histories before the policy replay as before.
+
 ## Live stair-link changes
 
 Routes copy planned link geometry, and every link step re-checks the current scene link. A closed, missing or changed

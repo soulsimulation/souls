@@ -341,6 +341,8 @@ const SEATED = new Set(['sit', 'sit-down', 'stand-up']);
 const OVERLAYS = new Set(['eat', 'serve', 'drink', ...ACTIVITY_OVERLAYS]);
 /** Soul Actions 44: the lips from the rig's head bone, in the body frame of a 1.75 m body (scaled by height). */
 const CUP_LIPS = { fwd: 0.1, up: 0.02 } as const;
+/** #2197: where the eating palm stops, from the head bone: in front of the chin, with the food above it at the lips. */
+const EAT_PALM = { fwd: 0.11, up: -0.06, side: 0.02 } as const;
 const RUN_SPEED = 2.3; // m/s: faster than any walk
 const INTERACT = new Set(['browse', 'post-letter', 'give', 'take', 'hand-over']);
 const PELVIS = 0.09; // m from the hip joints down to the sitting surface (thigh/buttock thickness)
@@ -999,9 +1001,11 @@ export class HumanViews {
     // entry 36: a singer sings along with the nearest player (her head and breath follow the sung notes); just after her
     // singing ends, the singing frame eases out (the hand lets go of the mic) instead of snapping to the base posture
     const letGo = v.activity !== 'sing' && v.prevAct === 'sing' && (v.since ?? 9) < SING_LET_GO && !GAIT_ACTS.has(v.activity);
+    const fluteRelease=v.activity==='idle'&&v.prevAct==='play-music'&&v.prevInstrument==='flute'&&v.since!==undefined&&v.since<.8;
     const pianoRelease=v.activity!=='play-piano'&&(v.prevAct==='play-piano'||v.prevAct==='play-music'&&(v.prevInstrument==='piano'||v.prevInstrument==='keyboard'))&&v.since!==undefined&&v.since<PIANO_FADE;
     const act: ActivityFrame | null = freeBody && !engineHands && w < 0.5 && !waveClip && !interactClip && !clipBody && !lib.sleep
       ? letGo ? activityFrame('sing', 'idle', tSec, pairPhase, { since: 9, released: v.since, accompanist: null })
+      : fluteRelease ? activityFrame('play-music','idle',tSec-v.since!,pairPhase,{instrument:'flute',actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : pianoRelease ? activityFrame('play-piano',v.prevBase??'sit',tSec-v.since!,pairPhase,{actorId:h.name,released:v.since,priorAge:v.prevDuration})
       : activityFrame(waveReturn?'wave':v.activity, v.base, waveActive?waveTime:tSec, pairPhase, { groundSeat: v.groundSeat, since: v.since, gap: v.partnerP ? Math.hypot(v.partnerP.x - h.position.x, v.partnerP.z - h.position.z) : undefined,instrument:v.instrument,game:v.game,gameTick:v.gameTick,gameDt:v.gameDt,actorId:h.name, ...(v.activity === 'sing' ? { accompanist: accompanistOf(v.cur.p, this.players) } : {}) }) : null;
     if(act && waveActive && !extra.wave)act.handW=[0,waveBlend];
@@ -1174,7 +1178,7 @@ export class HumanViews {
     const waterOrigins=!lib.water&&!hasHands&&!gripping&&!v.grip&&!v.on&&!gait&&!fp&&proneW===0&&sitW===0&&warmW===0&&!posed&&v.waterTransition&&v.waterTransition.weight<1?v.waterTransition.origins:[];
     const waterFrom=waterOrigins.some(x=>x.pose!==null);
     // a carried item (engine human.prop) shows in the hand whenever it is set; an activity's own prop while it runs
-    const wantProp = !hasHands && !gripping && proneW === 0 ? propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
+    const wantProp = !hasHands && !gripping && proneW === 0 ? act?.flute ? 'flute' : propFor(act || clipBody || lib.cur ? v.activity : '', v.propWanted,v.instrument) : null;
     if (v.prop && v.prop.kind !== wantProp) v.prop.obj.visible = false;
     const footFit = !water && !waterFrom && !lib.water && sitW <= 0 && !gait && !fp?.feet && !posed && !runFallback && !gripping && !hasHands && ['idle', 'walk', 'run', 'jog'].includes(v.activity);
     const handGame = handGameActive(v) && freeBody && sitW === 0 && !hasHands && !gripping;
@@ -1412,6 +1416,12 @@ export class HumanViews {
         // entry 36: a goal on a fixed thing (the mic's grip) is placed from the body root at its own height above the floor
         const t = r ? V().copy(h.position).addScaledVector(_fwd, r[0]).addScaledVector(_right, (left ? -1 : 1) * r[1]).addScaledVector(UP, r[2])
           : V().copy(_s).addScaledVector(_fwd, q![0]).addScaledVector(_right, (left ? -1 : 1) * q![1]).addScaledVector(UP, q![2]);
+        if(act.flute){
+          const head=v.spine?.head?.getWorldPosition(V())??V().copy(h.position).addScaledVector(UP,1.525);
+          t.copy(head).addScaledVector(_fwd,.125).addScaledVector(UP,.005).addScaledVector(_right,left?.14:.36);
+        }
+        // #2197: the eating hand ends just below and in front of this rig's lips, so the food held up in its fingers meets the mouth
+        if(act.mouth&&!left&&v.spine?.head){const head=v.spine.head.getWorldPosition(V());t.lerp(head.addScaledVector(_fwd,EAT_PALM.fwd).addScaledVector(UP,EAT_PALM.up).addScaledVector(_right,EAT_PALM.side),act.mouth);}
         if (t.y < floor) t.y = floor;
         if (wgt <= 0) return;
         targets[i] = t;
@@ -1467,14 +1477,20 @@ export class HumanViews {
       if (!v.prop || v.prop.kind !== wantProp) { if (v.prop) h.remove(v.prop.obj); v.prop = { kind: wantProp, obj: makeProp(wantProp) }; h.add(v.prop.obj); }
       const hand = (side: 'left' | 'right') => { const i = v.arms.findIndex((_, k) => armSide(v, k) === side); return i >= 0 ? palm(v.arms[i], V()) : null; };
       let L = hand('left'), R = hand('right');
-      // a library eat / drink clip lifts one hand to the mouth: the item goes in that hand (the higher one over the clip)
-      if (lib.cur && (v.activity === 'eat' || v.activity === 'drink') && wantProp !== 'plate') {
+      // a library eat / drink clip lifts one hand to the mouth: the item goes in that hand (the higher one over the clip).
+      // Only when that clip owns the arms: seated, the sitting clip plays under the procedural frame, whose right hand rises.
+      if (clipBody && lib.cur && (v.activity === 'eat' || v.activity === 'drink') && wantProp !== 'plate') {
         const d = lib.cur.act.getClip().duration;
         let up = 0;
         for (const k of [0.2, 0.4, 0.6, 0.8]) { const p = clipProbe(v.rig.template, lib.cur.clip, Math.round(d * k * 10) / 10); if (p) up += p.wristL.y - p.wristR.y; }
         if (up > 0) [L, R] = [R, L];
       }
-      placeProp(v.prop.obj, wantProp, L, R, V().copy(_fwd));
+      if(wantProp==='flute'&&act?.flute){
+        const head=v.spine?.head?.getWorldPosition(V())??V().copy(h.position).addScaledVector(UP,1.525);
+        const centre=head.addScaledVector(_fwd,.1).addScaledVector(UP,.02).addScaledVector(_right,.24);
+        if(L&&R)centre.lerp(V().copy(L).add(R).multiplyScalar(.5),1-act.flute.weight);
+        _m.makeBasis(_right,UP,V().copy(_fwd).negate()).setPosition(centre);v.prop.obj.matrixAutoUpdate=false;v.prop.obj.matrix.copy(_m);v.prop.obj.matrixWorldNeedsUpdate=true;v.prop.obj.visible=true;
+      }else placeProp(v.prop.obj, wantProp, L, R, V().copy(_fwd));
       // placeProp wrote a world matrix: express it in the holder's frame (the prop is the holder's child)
       v.prop.obj.matrix.premultiply(_inv.copy(h.matrixWorld).invert());
     }

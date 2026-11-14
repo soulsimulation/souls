@@ -53,7 +53,8 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `{ok, service, build, auth, worlds, running, maxWorlds, maxRunning, hostOk, hostCodes?, clientErrorsNew}`. `hostOk`
   and short `hostCodes` are public; the numbers behind them are for loopback requests only.
 - `GET /__sim/health`: a health page for site owners (accounts listed in `SIM_SITE_OWNERS`) or loopback; build,
-  host, every world, backups, arrivals, new client errors and alerts (`tools/world-launcher/health-dash.mjs`).
+  host, every world, backups, arrivals, new client errors and alerts (`tools/world-launcher/health-dash.mjs`). A signed-in
+  site owner can set any world's list picture with the Picture button on its row; the audit log records it as `site-admin`.
 - `GET /w/<slug>/healthz` carries `halted` and `glitches`: `{total, byRule: {rule: {rung: n}}}`, every refusal, recovery and halt
   the world has had. It is public, so rule names and counts only. Each glitch also writes one `[world] glitch` line to
   the world's log and one row to its store, with the bodies, the tick and the evidence: `op.mjs glitches --port <port>
@@ -63,8 +64,8 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
   count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
-  The launcher restarts a halted world once per breaker window (30 min), since a restart boots from the log; a second halt
-  in the same window stays halted for an operator ([#1326](https://github.com/soulsimulation/souls/issues/1326)).
+  The launcher restarts a halted world every time, since a restart boots from its last snapshot and the log; each restart
+  counts toward the breaker ([#1326](https://github.com/soulsimulation/souls/issues/1326), [#2133](https://github.com/soulsimulation/souls/issues/2133)).
 - **What each halt becomes** ([#1511](https://github.com/soulsimulation/souls/issues/1511); each path is tested in
   `apps/server/src/halt-paths.test.ts`). Every one stops the clock (or, for step-failing, refuses acts) and sets
   `live.json` `halted`, which the launcher's guard acts on. None is silent.
@@ -72,13 +73,13 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   | Halt (glitch rule) | Where | In the process | Then |
   |---|---|---|---|
   | `durability.clock-frontier`, `engine.unhashable` | `persistClockFrontier` on the tick | the tick throws: the process exits | the launcher restarts it from the log (backoff; 5 failures in 30 min: `held`) |
-  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s), once per 30 min |
+  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s); each restart counts toward the breaker |
   | `durability.repair`, `durability.checkpoint` | `failCheckpoint` | clock stopped, process up, `halted` | as above |
   | `engine.halted` | `haltOnFault` (edge worlds) | clock stopped, process up, `halted` | as above |
   | `engine.step-failing` | steps faulting | clock runs, acts refused, `halted` | as above |
 
-  **Still a frozen world:** a second halt inside the same 30-minute window is not restarted. The world stays halted
-  (visitors get 503) until an operator acts or a fix ships. The alert is the only exit, so it has to be loud:
+  **A halt that repeats at once:** after 5 restarts in 30 min the breaker holds the world (`held`, last reason `halted`),
+  down until an operator resumes it, never a silent loop. The alert is then the only exit, so it has to be loud:
   - the world's `halted` problem code makes `hostOk` false;
   - `host-health.log` gets an ALERT line, and the health page shows the world as `halted`;
   - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).
@@ -93,21 +94,34 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   gets its ALERT line, then RECOVERED once it ticks again. It isn't restarted for it. Edge reads say `world.stalled`
   meanwhile and acts are refused with `503 world.stalled` (`docs/architecture/load.md` §3).
 - The repair rules are on by default ([#1323](https://github.com/soulsimulation/souls/issues/1323)): a world whose history
-  began without them adopts them at its first boot on 4.16.1 or later, logged as one `rules` event, with the line
-  `[world] adopted the repair rules at tick <n> (one way)`. **That is one way: once adopted, a world can't boot on 4.16 or
-  earlier**, so a rollback past 4.16.1 needs that world's pre-release backup. Leave `SIM_SOULS_REPAIR` unset.
+  began without them adopts them at its first boot on 0.120.1 or later, logged as one `rules` event, with the line
+  `[world] adopted the repair rules at tick <n> (one way)`. **That is one way: once adopted, a world can't boot on 0.120 or
+  earlier**, so a rollback past 0.120.1 needs that world's pre-release backup. Leave `SIM_SOULS_REPAIR` unset.
   `SIM_SOULS_REPAIR=0` stops adoption for worlds that haven't adopted, and is ignored, with a warning, for one that has.
   `SIM_SOULS_REPAIR=1` (or `SIM_SHARED_CARRY=1`, which brings repair) bypasses adoption: an old world then refuses to boot, as
-  in 4.16, so don't set it on a server with existing worlds.
+  in 0.120, so don't set it on a server with existing worlds.
   Before a release that changes what a first boot adopts, rehearse each world on the host:
   `node tools/world-launcher/deploy/boot-rehearsal.mjs --db <world data>/sim.db --scratch <new empty dir outside it>
   --from-pid <the world's process>` (or `--env-file`/`--env` with the world's settings) boots an online-backup copy with
   this tree's code, adopts, runs `--ticks` (default 1200) and prints one JSON line: adopted or refused and why, running or
   halted, the hashes before and after. The original is opened read-only and the copy is deleted afterwards.
+- `GET /w/<slug>/healthz` also carries `api`: per-route server time (queue and handler p50/p99/p99.9, the last 5–10 min and
+  since start) for the Soul and god API, by a closed list of route ids. `live.json` carries the same. Each API answer's
+  `Server-Timing` adds `launcher;dur` and `upstream;dur` at the launcher. A main-thread stall over 1 s is a timestamped
+  `[stall]` line in the world's log. To place a slow answer, see `docs/architecture/load.md` §4 (#1750).
 - `sim-worlds-health@<stage>.timer` runs `deploy/host-health.mjs` every 10 minutes: disk, memory, the unit's working
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
   can alert on `hostOk`.
+
+## Soul API ceilings
+
+The launcher refuses Soul API traffic past these defaults (`SOUL_CEILINGS` in `tools/world-launcher/flood.mjs`), sized
+so 100 Souls behind one address, or under one account, each holding a listen and acting every 10 s, are never refused
+(#1949): 600 requests per address in 10 s, 202 requests in flight per address, 200 listens per address, 4 per Soul,
+200 per account, and 1,200 heavy (C1/C2) requests per account a minute. The world budget is 200 heavy requests a second.
+`node tools/world-launcher/op.mjs set-limits --port <launcher port> --slug <slug> --limits '{...}'` overrides any of
+them for one world, at once (`null` restores a default).
 
 ## Backups
 
@@ -129,6 +143,13 @@ qualified separately.
 - Visitors' page errors: pages post to `/__sim/client-errors`; `node tools/world-launcher/op.mjs client-errors --port
   <port> --base /` summarises them on the current root-only host. Use the actual configured base for other deployments.
 - Operator actions: `<data>/audit.jsonl` (`op.mjs audit`).
+
+## Platform feed
+
+Every client pulls site news from `<base>/v1/feed?after=<id>&limit=N` (public, cached 60 s, no credentials). Post from
+the host: `op.mjs feed-post --port <port> --base / --kind announcement|release|world|event --title "…" [--body …]
+[--url https://…] [--starts-at …] [--replaces <id>]`. `<data>/feed.jsonl` is append-only: correct an item by posting one
+that replaces it. `op.mjs feed-stats` prints reads per UTC day by client version (`x-soul-client`); no ids are kept.
 
 ## CDN
 

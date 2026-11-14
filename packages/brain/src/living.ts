@@ -3,14 +3,17 @@ import type { MidContext, MidDecision } from './mid.ts';
 
 export type Needs = { energy: number; hunger: number; company: number; restlessness: number };
 export type Life = { needs: Needs; journal: string; acts: string[]; lastTick: number; reflectedDay: number };
+/** The accelerated world day (one per real hour at 20 ticks/s): every world's day before #1649, now the dev-only
+ *  accelerated clock and the fallback where no clock runs. A real-time world's day is 1,728,000 ticks (server real-clock.ts). */
 export const DAY_TICKS = 72000;
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 export function newLife(tick: number): Life {
   return { needs: { energy: 80, hunger: 20, company: 35, restlessness: 20 }, journal: 'I am new here. I want to learn the place and find what suits me.', acts: [], lastTick: tick, reflectedDay: -1 };
 }
-/** Slow needs depend on enacted body state and elapsed world ticks, never wall time. */
-export function advanceNeeds(life: Life, tick: number, activity: string, companyNear: boolean, nourished=false, floater=false): void {
-  const d = (tick - life.lastTick) / DAY_TICKS; life.lastTick = tick;
+/** Slow needs depend on enacted body state and elapsed world days, never wall time. `dayTicks` is the world clock's day
+ *  (#1649: a real-time world's needs move over a real day); DAY_TICKS where no clock runs. */
+export function advanceNeeds(life: Life, tick: number, activity: string, companyNear: boolean, nourished=false, floater=false, dayTicks=DAY_TICKS): void {
+  const d = (tick - life.lastTick) / dayTicks; life.lastTick = tick;
   const n = life.needs;
   const asleep = /sleep/.test(activity), resting = /rest|sit/.test(activity), eating = /eat/.test(activity);
   const social = companyNear && (/talk|converse|listen|warm|gather|watch/.test(activity) || (floater && resting));

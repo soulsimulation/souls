@@ -5,8 +5,8 @@
   "provenance": {
     "pinnedSource": "main df69a3ca",
     "researchBaselines": [
-      {"ref": "5eebdc33", "what": "release 4.09, the November 1 research baseline", "reachable": true},
-      {"ref": "fa695018", "what": "release 4.12, planning intake", "reachable": true},
+      {"ref": "5eebdc33", "what": "release 0.113, the November 1 research baseline", "reachable": true},
+      {"ref": "fa695018", "what": "release 0.116, planning intake", "reachable": true},
       {"ref": "ecb63f57", "what": "main at planning intake", "reachable": true}
     ],
     "inTreeResearch": [

@@ -12,12 +12,19 @@ import { quota, quotaAllows } from './lib/quota.mjs';
 import { sha256, rng } from './lib/hash.mjs';
 import { tickValidity } from './tick-validity.mjs';
 import { freeMemGb, resolvePlaywright } from './lib/platform.mjs';
-import { REPO_ROOT, scratchDir } from '../lib/paths.mjs';
+import { REPO_ROOT } from '../lib/paths.mjs';
+import { outsideCheckout } from './arena/seat-home.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SERVER_ROOT = process.env.PLAYTEST_SERVER_ROOT ?? REPO_ROOT;
-const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? scratchDir('playtest/runs');
+const RUNS_ROOT = process.env.PLAYTEST_RUNS_ROOT ?? outsideCheckout('souls-playtest-runs');   // #1098 arm B2: live seats never inside a checkout
 const FROZEN_BUNDLE = join(here, 'frozen/frozen.json');
+
+/** The world files a dev run boots from: a genesis, a frozen snapshot, or both. A snapshot needs no genesis (#883). */
+export const worldFiles = (world, serverRoot) => ({
+  genesis: world.genesis ? resolve(serverRoot, world.genesis) : undefined,
+  snapshot: world.snapshot ? resolve(serverRoot, world.snapshot) : undefined,
+});
 const STEPS = ['preflight', 'provision', 'seats', 'play', 'close', 'review', 'develop', 'report'];
 
 function args(argv) { const out = { _: [] }; for (let i = 0; i < argv.length; i++) { const a = argv[i]; if (a.startsWith('--')) { const k = a.slice(2); const v = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true; out[k] = v; } else out._.push(a); } return out; }
@@ -105,12 +112,21 @@ export async function cmdRun(a, hooks = null) {
   // 0 preflight
   if (from <= 0) { const pf = hooks?.preflight ?? await preflight({ serverRoot, scenario }); writeJson(join(runDir, 'preflight.json'), pf); receipt(runDir, 0, 'preflight', { ok: pf.ok, allow: pf.allow }); if (!pf.ok) { log('preflight failed', JSON.stringify(pf.checks)); return 2; } }
   // 1 provision
-  if (from <= 1) {
+  // #1774 A6: --world <url> runs against a world already up elsewhere (a dev or staging world) and skips provision
+  if (from <= 1 && a.world) {
+    checkAbort('provision');
+    const base = String(a.world).replace(/\/+$/, '');
+    if (!/^https?:\/\/[^/]+\/w\/[a-z0-9-]+$/.test(base)) throw new Error('--world is a world URL: <origin>/w/<slug>');
+    ctx.world = { base, remote: true, slug: base.split('/').at(-1) };
+    writeJson(join(runDir, 'world.json'), ctx.world);
+    try { if (m.provision) writeJson(join(runDir, 'server', 'healthz-before.json'), { ...(await m.provision.healthz(base)), at: Date.now() }); } catch { /* recorded as missing */ }
+    receipt(runDir, 1, 'provision', { ok: true, remote: true });
+  } else if (from <= 1) {
     if (!m.provision) throw new Error('arena/provision.mjs missing');
     checkAbort('provision');
     if (scenario.world.kind !== 'dev') throw new Error(`world kind ${scenario.world.kind} is not available in this stage`);
     const slug = scenario.world.slug ?? `pt-${scenario.name}`.slice(0, 31);
-    ctx.world = await m.provision.startWorld({ serverRoot, slug, port: scenario.world.port, genesis: resolve(serverRoot, scenario.world.genesis), snapshot:scenario.world.snapshot?resolve(serverRoot,scenario.world.snapshot):undefined, dataDir: join(runDir, 'server', 'data'), log: join(runDir, 'server', 'world.log'), fresh: true, natives: scenario.world.natives === true, onSpawn: (child) => own('world', slug, () => m.provision.stopWorld({ pid: child.pid }), { pid: child.pid, port: scenario.world.port, dataDir: join(runDir, 'server', 'data') }) });
+    ctx.world = await m.provision.startWorld({ serverRoot, slug, port: scenario.world.port, ...worldFiles(scenario.world, serverRoot), dataDir: join(runDir, 'server', 'data'), log: join(runDir, 'server', 'world.log'), requestRecord: join(runDir, 'server', 'requests.jsonl'), fresh: true, natives: scenario.world.natives === true, onSpawn: (child) => own('world', slug, () => m.provision.stopWorld({ pid: child.pid }), { pid: child.pid, port: scenario.world.port, dataDir: join(runDir, 'server', 'data') }) });
     try { ctx.world = { ...ctx.world, ...(await m.provision.describeWorld({ base: ctx.world.base, slug, port: scenario.world.port, pid: ctx.world.pid, build: ctx.world.build, startedAt: new Date().toISOString() })) }; } catch (e) { log('describeWorld failed', e.message); }
     writeJson(join(runDir, 'world.json'), { ...ctx.world, child: undefined, healthz: undefined });
     try { writeJson(join(runDir, 'server', 'healthz-before.json'), { ...(await m.provision.healthz(ctx.world.base)), at: Date.now() }); } catch { /* recorded as missing */ }
@@ -197,6 +213,17 @@ export async function cmdRun(a, hooks = null) {
       if (ctx.god) { try { await ctx.god.stop(); closed.god = infoOf(ctx.god); } catch (e) { closed.god = { error: e.message }; } }
       if (ctx.sampler) { try { await ctx.sampler.stop?.(); } catch { /* ignore */ } }
       if (ctx.browser) { try { await ctx.browser.close(); } catch { /* ignore */ } }
+      // #1774: per seat, the collected session record beside the persona's transcript, the evidence and the world's logs;
+      // then #1752's measures per instruction, read from that record (record/record.mjs). Before the world stops: collect
+      // reads the receipts' and messages' end states from it.
+      if (scenario.record !== false) {
+        try {
+          const { finishRunRecord } = await import('./record/record.mjs');
+          const rr = await finishRunRecord({ runDir, scenario, world: ctx.world ?? {}, seats: ctx.seats.map((s) => ({ id: infoOf(s).id, folder: s.folder, dir: s.dir, soulId: infoOf(s).soulId })), log });
+          closed.record = { ok: true, seats: rr.index.seats.map((x) => ({ id: x.id, bundle: !!x.bundle, records: x.records })), episodes: rr.index.episodes.length };
+          process.stdout.write(rr.md);
+        } catch (e) { closed.record = { ok: false, error: String(e.message).slice(0, 300) }; log('run record failed', e.message); }
+      }
       try { if (m.provision && ctx.world?.base) writeJson(join(runDir, 'server', 'healthz-after.json'), await m.provision.healthz(ctx.world.base)); } catch { /* recorded as missing */ }
       // H-a: verdicts count only if the world ticked at its nominal rate while the Souls played
       try { const before = existsSync(join(runDir, 'server', 'healthz-before.json')) ? readJson(join(runDir, 'server', 'healthz-before.json')) : null, after = existsSync(join(runDir, 'server', 'healthz-after.json')) ? { ...readJson(join(runDir, 'server', 'healthz-after.json')), at: Date.now() } : null;
@@ -371,7 +398,7 @@ async function main() {
     const tmp = join(src, `replay-${mode}.scenario.json`); writeJson(tmp, scen);
     process.exit(await cmdRun({ _: ['run', tmp], seed: rp.seed, 'server-root': a['server-root'], out: a.out }));
   }
-  console.log('usage: playtest.mjs run <scenario.json> [--seed n] [--out dir] [--from step] [--server-root dir] [--keep-world] | review <run> | replay <run> --mode scripted|live | compare <a> <b> | preflight | replay-set [--server-root dir] [--repeats 2] [--out dir] [--baseline dir] [--dry-run] [--score-only] [--only labels] [--frozen bundle.json] [--force-machine] | freeze-bundle [--runs-root dir] [--out file] | direct <cast.json> [--server-root dir] [--world <url>] [--headless] [--script file] [--only a,b] [--out dir] [--no-planner] [--force-machine] [--keep-world]');
+  console.log('usage: playtest.mjs run <scenario.json> [--seed n] [--out dir] [--from step] [--server-root dir] [--keep-world] [--world <url>] | review <run> | replay <run> --mode scripted|live | compare <a> <b> | preflight | replay-set [--server-root dir] [--repeats 2] [--out dir] [--baseline dir] [--dry-run] [--score-only] [--only labels] [--frozen bundle.json] [--force-machine] | freeze-bundle [--runs-root dir] [--out file] | direct <cast.json> [--server-root dir] [--world <url>] [--headless] [--script file] [--only a,b] [--out dir] [--no-planner] [--force-machine] [--keep-world]');
   process.exit(1);
 }
 if (import.meta.url === `file://${process.argv[1]}`) main();

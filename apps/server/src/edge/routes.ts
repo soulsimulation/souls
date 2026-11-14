@@ -1,7 +1,7 @@
 // Mounts the EDGE-CONTRACT-v1 surface under /v1/edge. Ledger verbs here; Comms registers its own.
 import {createHash} from 'node:crypto';
 import {inspectFrame} from './perception/inspect.ts';
-import {freeTextAct, resolveCandidates} from './intents/strict.ts';
+import {resolveCandidates} from './intents/strict.ts';
 import type {Context, Hono} from 'hono';
 import {ActPending, actCommitScope, EDGE_CONTRACT, EdgeError, edgeBody, type EdgeDeps, type EdgeReceipt, type EdgeSoul, edgeErrorOf} from './contract.ts';
 import type {EdgeLedger} from './ledger/ledger.ts';
@@ -15,6 +15,8 @@ import {mountIdempotency} from './events/idempotency.ts';
 import {mountOperationLookup} from './events/operations.ts';
 import {mountSchema,EDGE_ACT_VERBS} from './events/schema.ts';
 import {mountBootRoutes} from './boot/routes.ts';
+import {mountCatalogRoute} from './catalog/routes.ts';
+import {mountLiveRoute} from './catalog/live.ts';
 import {INTENT_VERBS} from './intents/intents.ts';
 import {mountOutcomeRoutes} from './outcomes/routes.ts';
 import {mountPersonalReminders} from './reminders/routes.ts';
@@ -53,6 +55,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // shortens the hold limit (15 minutes) for tests and proof worlds.
   if (loop) L.onTick(tick => loop.sweep(tick));
   mountBootRoutes(app,deps,[...EDGE_ACT_VERBS,...INTENT_VERBS]);
+  // #1737: the world's structure as one public file a Soul's client keeps on disk
+  const catalog = mountCatalogRoute(app,deps);
   mountOutcomeRoutes(app,deps);
   mountBodyRoutes(app,deps);
   mountOwnerDay(app,{ledger:L,db:deps.db,ownerSoul:deps.ownerSoul});
@@ -74,16 +78,17 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
       return c.json({contract: EDGE_CONTRACT, error: {code: 'unavailable', message: 'the ledger could not answer; retry'}}, 503);
     }
   };
-  const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
+  // #2083: an act over its limit is refused naming the limit, so a flooding agent sees which act was not taken
+  const limit = (s: EdgeSoul, key: string, n: number) => {const r = deps.souls.limits.allow(`edge-${key}:${s.soulId}`, n, 60_000); if (!r.ok) throw key === 'act' ? new EdgeError(429, 'rate-limited', `more than ${n} acts a minute: this act was not taken`, {limit: n, window_s: 60}) : new EdgeError(429, 'rate-limited', 'too many requests; slow down');};
   app.get('/v1/edge/observe', wrap(c => {const s = deps.soul(c); limit(s, 'observe', 240); return L.observe(s, new Set((c.req.query('include') ?? '').split(',').filter(Boolean)));}));
   // #1329 part 4 follow-up: a search builds the whole menu and up to 12 walks on main (up to ~0.5 s), so it has its own
   // budget, as around does; a plain listing keeps the capabilities budget
   app.get('/v1/edge/capabilities', wrap(c => {const s = deps.soul(c), search = c.req.query('search')?.trim(); if (search) limit(s, 'capabilities-search', 30); else limit(s, 'capabilities', 240); return {tick: deps.host.engine.world.tick, ...L.capabilitiesPage(s, {all: c.req.query('all') === '1', ...(search ? {search: search.slice(0, 200)} : {})})};}));
-  app.post('/v1/edge/act', wrap(async c => {const s = deps.soul(c); limit(s, 'act', 60); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {capability, params?, clientRef?} or {verb, target, …}'); }); const {for: forMessage, forDefault, strict, ...input} = (body ?? {}) as Record<string, unknown>;
+  app.post('/v1/edge/act', wrap(async c => {const s = deps.soul(c); limit(s, 'act', 60); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {capability, params?, clientRef?} or {verb, target, …}'); }); const {for: forMessage, forDefault, strict: _strict, ...input} = (body ?? {}) as Record<string, unknown>;
     // #1327: a key without a clientRef names the act too, so a retry of an act handed over and not yet recorded is that act
     {const key = c.req.header('idempotency-key'); if (input.clientRef === undefined && key && key.length <= 100) input.clientRef = key;}
-    // CTRL-1 (#1093): a strict client (eden 2.9+) acts on offered ids only; words go through /v1/edge/resolve
-    if (strict === true && !freeTextAct()) {const no = L.offerGate(s, input); if (no) return no;}
+    // CTRL-1 (#1093), #1911: an act is an offered id, whatever client sends it; words are refused by the strict gate
+    {const no = L.offerGate(s, input); if (no) return no;}
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
     // #1327: once this request commits a receipt, that receipt is its answer: a fault after the commit point answers
     // accepted with it, never a 503 (or a refusal) that reads as "not done". Faults before it keep their own answer.
@@ -110,7 +115,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   app.get('/v1/edge/inspect/:id', wrap(c => {const s = deps.soul(c); limit(s, 'inspect', 120); return {tick: deps.host.engine.world.tick, inspect: inspectFrame(L, s, c.req.param('id') ?? '', {all: c.req.query('all') === '1'})};}));
   // knowledge/1: look around / explore — more of what is near, places close by, and secret places found (remembered).
   app.get('/v1/edge/around', wrap(c => {const s = deps.soul(c); limit(s, 'around', 30); const to = c.req.query('to'); return {tick: deps.host.engine.world.tick, around: aroundFrame(L, s), ...(to !== undefined ? {route: routeFrame(L, s, to)} : {})};}));
-  app.post('/v1/edge/resolve', wrap(async c => {const s = deps.soul(c); limit(s, 'resolve', 120); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); }); if (!body || typeof body !== 'object' || (body.verb === undefined && body.capability === undefined)) throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); const resolve = L.intents.dryRun(s, body); return {tick: deps.host.engine.world.tick, resolve: {...resolve, candidates: resolveCandidates(L, s, resolve), ...(freeTextAct() ? {freeTextAct: true} : {})}};}));
+  app.post('/v1/edge/resolve', wrap(async c => {const s = deps.soul(c); limit(s, 'resolve', 120); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); }); if (!body || typeof body !== 'object' || (body.verb === undefined && body.capability === undefined)) throw new EdgeError(400, 'invalid', 'body must be JSON {verb, target} or {capability}'); const resolve = L.intents.dryRun(s, body); return {tick: deps.host.engine.world.tick, resolve: {...resolve, candidates: resolveCandidates(L, s, resolve)}};}));
   app.get('/v1/edge/receipts/:id', wrap(c => {const s = deps.soul(c); const id = c.req.param('id') ?? '', r = L.receipt(s.soulId, id) ?? L.pendingReceipt(s.soulId, id); if (!r) throw new EdgeError(404, 'not-found', 'no such receipt for this Soul'); return {receipt: r};}));
   // Public and read often: it revalidates. The answer's own bytes are the tag, so a Soul that changed never reads as unchanged.
   const publicSoul = wrap(c => L.publicSoul(c.req.param('soulId') ?? ''));
@@ -133,12 +138,14 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   const eyes = mountEdgeEyes(app, deps);
   const comms = registerEdgeComms(app, deps, {stewardToken: process.env.EDGE_STEWARD_TOKEN || undefined, fading: process.env.EDGE_FADING === '1'});
   L.attachComms(comms);
+  // #1737: who is where and what was said, world-wide, for a Soul's client to follow
+  const live = mountLiveRoute(app, deps, comms as never, catalog.version);
   // LINK BODY: the body follows the agent's listen presence (edge/ledger/body-rule.ts)
   const presence = deps.ownerInbox;
   if (presence?.soulPresence) L.attachPresence({soulPresence: id => presence.soulPresence!(id), onSoulListen: l => presence.onSoulListen?.(l), onSoulSend: l => presence.onSoulSend(l)});
   // EVENTS-v1 (tranche agent-minds M1/M2/M4): push stream (SSE + WS), digest, world.notice, server-side plans, schema.
   let plans: Plans | null = null;
-  const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null,
+  const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null, live,
     bootNotice: process.env.EDGE_BOOT_NOTICE === '1' ? `The world server restarted${deps.build ? ` (${deps.build})` : ''}. Plans and open acts carried on; read the digest if you missed anything.` : null});
   plans = registerEdgePlans(app, deps, comms, events, L);
   // #1313: the owner's card reads the act under way for its newest message from the world's records
@@ -148,7 +155,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   mountSchema(app);
   const capture=options.evidenceCapture?captureNativeEvidence({gate:options.evidenceCapture,db:deps.db,worldId:deps.host.worldId,comms}):null;
   const close = comms.close;
-  return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); eyes.close(); close(); }});
+  return Object.assign(comms, {events, plans, eyes, close() { capture?.close(); reminders.close(); plans?.close(); events.close(); live.close(); eyes.close(); close(); }});
 }
 
 /** #1295: the duration an act asked for (`params.seconds`), when it is a number. */

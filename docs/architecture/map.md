@@ -131,8 +131,8 @@ sequenceDiagram
 ```
 
 Constants: `TICK_MS = 50`, `BATCH_TICKS = 10`, `HEARTBEAT_TICKS = 100`, `RING_BATCHES = 600` (`world.ts:120-123`);
-`SNAPSHOT_EVERY_TICKS` default 6,000 (`config.ts:61`); `pace` is 1 while watched, `SIM_UNWATCHED_PACE` (default 0.25)
-otherwise (`attention.ts:16-19`), and pace is not logged. Overrun handling halves `clockRate` to no lower than
+`SNAPSHOT_EVERY_TICKS` default 6,000 (`config.ts:61`); `pace` is 1 (#2235: no unwatched slowdown) and is not logged.
+A boot first runs the ticks the world missed while it had no process (`WorldHost.catchUp`, `clock-catchup.ts`). Overrun handling halves `clockRate` to no lower than
 `baseRate/4` and logs a `rules` event `{clockRate, why:'dilation'}`; 200 calm frames double it back (`world.ts:449-452`).
 A listener's `enqueue` during `afterTick` lands in the next tick, except under `durableClockV1` (Eden core worlds) where
 `drainInputs()` runs a second time before the frontier is persisted (`world.ts:497`).
@@ -404,12 +404,13 @@ The CLI does not run the compiler locally (it imports only `obbOverlap`), contra
 (5 worlds per account; new accounts 2 and one per hour), then `pool.ensure` and `POST /w/<slug>/v1/god/claim` with the
 creator's own token. `children.mjs defaultCommand` (`:405-454`) starts `node apps/server/src/main.ts` with
 `BRAIN_MODE=fake`, empty provider keys, `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`, `WORLD_KEY=<slug>`, `DATA_DIR`,
-`PUBLIC_URL`, `WORLD_PATH`, `SIM_UNWATCHED_PACE=0.25`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, and either
+`PUBLIC_URL`, `WORLD_PATH`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, and either
 `AUTH_PROVIDER=clerk` + `ACCOUNT_REGISTRY_PATH` (with `--auth-env`) or `DEV_AUTH=1`. The launcher↔child contract is
 HTTP only: `GET healthz` (boot poll), `/v1/config`, `/v1/god/status`, `/v1/world/souls`, `/v1/god/claim`,
 `/v1/op/souls/*`, `/v1/op/god/*`, `/v1/site/*` with a per-run `x-sim-site-key`, plus read-only opens of the child's
-`sim.db` (`worldOwner`). Idle: `SIGSTOP` after 10 min without non-passive requests or sockets, `SIGTERM` after another
-60 min; LRU eviction against `maxRunning`/`minFreeMb`; restart backoff `min(30 s, 500·2ⁿ)`. Release handover is
+`sim.db` (`worldOwner`). Idle: no freeze and no exit by default (#2235: world time never stops); with `--sleep-ms` set, `SIGSTOP` after that long
+without non-passive requests or sockets, and `SIGTERM` after `SIM_WORLD_IDLE_EXIT_MIN` more. A resident client's live poll and held listen, wait and event stream are not use: while the world sleeps the
+launcher answers the poll from the last live picture and holds the long-polls until an act wakes it (#1997); LRU eviction against `maxRunning`/`minFreeMb`; restart backoff `min(30 s, 500·2ⁿ)`. Release handover is
 `keeper.mjs` holding the port and `SIGHUP` handing worlds to a new launcher generation with a `/v1/config` canary.
 
 **Auth.** `Auth` (`auth.ts`) verifies Clerk RS256 JWTs against the issuer JWKS when `ACCOUNT_AUTH_REQUIRED=1`;
@@ -454,7 +455,7 @@ synchronous handler that delays the next frame.
 | H3 | `hereFrame` / `Perception` | request | rebuilt per `here`, `around`, `boot`; `things()` scans all `w.entities`, `solids()` maps all `navV1.solids` | `edge/perception/here.ts:27,211` |
 | H4 | `buildLedgerBoot` | request | static boot pack rebuilt per request (ETag, no stored cache) | `edge/boot/routes.ts`, `boot-pack.ts` |
 | H5 | `EdgeLedger.afterTick` | tick, every 20 | `ambientLife` (a `db.soul()` read per mind + all open conversations), `BodyRule.sweep`, `together.sweep`; `unstick` every 100 | `ledger.ts:501-520` |
-| H6 | `EngineBridge.afterTick` | tick | `flush`, `writeBack` slices every 10 ticks, `perceiveStep`, `spotsStep`, `layersStep`, `navStep` until the first nav build is done, then `navRewarmStep` (a poll every 10 ticks; 10 ms relabel slices while a ride or other static change left the labels cold, #901) | `god/engine-bridge.ts:217` |
+| H6 | `EngineBridge.afterTick` | tick | `flush`, `writeBack` slices every 10 ticks, `perceiveStep`, `spotsStep`, `layersStep`, `navStep` until the first nav build is done, then `navRewarmStep` (a poll every 10 ticks; 10 ms relabel slices while a ride or other static change left the labels cold, #901; while a rescued Soul waits on them, 20 ms every tick until warm, #1499; one whole relabel of at most 250 ms when a rescued Soul has waited 200 ticks under a changing static world, #1548) | `god/engine-bridge.ts:217` |
 | H7 | `viewHash()` + `kernelView()` | tick, every 100 / 40 | hashes every human's pose; clones the whole kernel for broadcast | `world.ts:1594-1631` |
 | H8 | Hub join / resync | request | `snapshotView()` clones all entities + `JSON.stringify`; `holdClock` parks the frame while a join set goes out | `hub.ts:206-242`, `world.ts:429` |
 | H9 | Periodic snapshot | tick + slices | synchronous capture, then encode/serialize/write in 4 ms `setImmediate` slices; a failed checkpoint stops the clock | `world.ts:1700-1760` |

@@ -9,6 +9,7 @@
 //   view: 'any' | 'out' | 'alt',  toleranceDeg: 45,  source: 'worlds/templates/… (op name)' } }
 // kind → oracles: go/find → target-arrival · near → answer-names · which-way → answer-direction · face → facing ·
 // look → view-used + named-in-description. Positions are world x/z (x east, z south; north is −z, as perception speaks).
+// A near expect's targets[] are the place asked about; its answer words are measured from them against the genesis (H4).
 import { validateJourney } from './journey-oracles.mjs';
 import { xz } from './run.mjs';
 
@@ -43,6 +44,22 @@ export function namesIn(text, names) {
   return (names ?? []).filter((n) => { const A = words(n).trim(); return A && new RegExp(` ${A.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(s|es)? `).test(T); });
 }
 
+// "can't tell" about the direction: a bare "can't tell" or one about which way / where, never "can't tell you how …".
+const CANT_TELL = /\b(?:can['’]?t|cannot|could ?n['’]?t) (?:tell|say)(?:(?: you)?(?: for sure| exactly)?)? *(?:[.!,;]|$|which way|where|what direction|the direction|from here)|\bnot sure (?:which way|where)\b|\b(?:don['’]?t|do not) know (?:which way|where)\b|\bno idea\b|\bunable to (?:tell|say)\b/im;
+const ABBREV = /\b(?:e\.g|i\.e|etc|approx|vs|dr|st|mt)\.$/i;
+const FOLLOW_UP = /^(?:it|it['’]s|its|that|that['’]s|this|there)\b/i;
+/** The sentences of an answer that name any of these names, each with a directly following "It…/That…" sentence; the
+ *  whole answer when none does (H1). Abbreviations (e.g., i.e., approx.) and decimals do not end a sentence. */
+export function sentencesNaming(text, names) {
+  const all = [];
+  for (const part of String(text ?? '').split(/(?<=[.!?\n])\s+/).map((x) => x.trim()).filter(Boolean)) {
+    if (all.length && ABBREV.test(all.at(-1))) all[all.length - 1] += ` ${part}`; else all.push(part);
+  }
+  const keep = all.map((x) => namesIn(x, names).length > 0);
+  const out = all.filter((x, i) => keep[i] || (i > 0 && keep[i - 1] && FOLLOW_UP.test(x)));
+  return keep.some(Boolean) ? out : all;
+}
+
 /** The script entry (and its expect) that produced this evidence pack: same seat and text, k-th occurrence by sentAt. */
 export function expectFor(run, ev) {
   const script = run?.scenario?.director?.script ?? [];
@@ -72,6 +89,33 @@ export function validateExpect(x) {
 
 const targetsOf = (x) => (x.targets ?? []).map((t) => ({ ...t, radiusM: t.radiusM ?? 5 }));
 const label = (t) => t.ref ?? t.names[0];
+const defWords = (d) => String(d ?? '').replace(/^.*\//, '').replace(/@.*$/, '');
+
+/** Placed things (templateNames values: {name, def, pos}) that a word names: whole words of the name or the def, singular
+ *  or plural ("shower" names `showers`, "benches" names `street-bench-1`). */
+export function placedNamed(things, word) {
+  const w = words(word).trim();
+  if (!w) return [];
+  const forms = [...new Set([w, w.replace(/(?<=[a-z]{3})s$/, ''), w.replace(/(?<=[a-z]{3})es$/, '')])]; // tables → table, benches → bench
+  const re = new RegExp(` (?:${forms.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?:s|es)? `);
+  return [...(things?.values?.() ?? [])].filter((n) => n.pos && (re.test(words(n.name)) || re.test(words(defWords(n.def)))));
+}
+
+/** H4: an answer word measured from the targets, not the Soul. → {word, placed: false} for a word that names nothing placed
+ *  (an alias); {word, placed: true, near: false, self: true} for a word that names only the place asked about; else
+ *  {word, placed: true, near, thing, target, d}: the placed thing nearest a target (the targets themselves excluded), its
+ *  distance and whether it lies within that target's radiusM. */
+export function wordFromTargets(things, targets, word) {
+  const own = new Set(targets.flatMap((t) => [t.ref, ...(t.names ?? [])]).filter(Boolean));
+  const placed = placedNamed(things, word);
+  let best = null;
+  for (const n of placed) {
+    if (own.has(n.name)) continue;
+    for (const t of targets) { const d = dist(n.pos, t.pos), over = d - (t.radiusM ?? 5); if (!best || over < best.over) best = { thing: n.name, target: t, d, over }; }
+  }
+  if (best) return { word, placed: true, near: best.over <= 0, thing: best.thing, target: best.target, d: best.d };
+  return placed.length ? { word, placed: true, near: false, self: true, thing: placed[0].name, target: targets[0], d: 0 } : { word, placed: false };
+}
 const NEAR_AT = /^(here|at|close)$/i;
 const sampleNames = (s) => [s.place, ...(s.placePath ?? []), ...(s.near ?? []).filter((n) => NEAR_AT.test(String(n.distance ?? ''))).flatMap((n) => [n.who, n.id])].filter(Boolean);
 /** Is a body sample at one of the targets? → {target, by} | null (by: 'name' | 'position'). */
@@ -94,24 +138,47 @@ function lastHeading(receipts, samples, inWindow) {
   return r ? { heading: r.endedAt.heading, pos: xz(r.endedAt.pos), receipt: r.id ?? null, capability: r.capability ?? null } : null;
 }
 
-/** expectOracles({ev, expect, timely, replies, receipts, acts, inWindow, P}) → rows for the expect's kind. */
-export function expectOracles({ ev, expect: x, timely = [], replies = [], receipts = [], acts = [], inWindow = () => true, P = `evidence/${ev.requestId}.json` }) {
+/** expectOracles({ev, expect, timely, replies, receipts, acts, inWindow, P, things}) → rows for the expect's kind.
+ *  things: templateNames(genesis) of the run's world, for near answers (null when the genesis could not be read). */
+export function expectOracles({ ev, expect: x, timely = [], replies = [], receipts = [], acts = [], inWindow = () => true, P = `evidence/${ev.requestId}.json`, things = null }) {
   const errs = validateExpect(x);
   const ids = EXPECT_KINDS[x?.kind] ?? [];
   if (errs.length) return ids.map((id) => o(id, 'unknown', `expect invalid: ${errs.join('; ')}`));
   const T = targetsOf(x), out = [];
   const sp = (s) => `${P}#samples[${s.i}]`;
   const last = timely.at(-1);
-  const reply = replies.map((r) => r.text).join('\n');
-  const rptr = replies.map((r) => r.ptr).slice(0, 3);
   const cutoff = ms(ev.cutoffAt) ?? Infinity;
-  const late = replies.length && replies.every((r) => r.ms > cutoff) ? ' (the answer came after the cutoff)' : '';
+  // H2: only answers written by the cutoff are read; an answer that came only after it is a fail.
+  const inTime = replies.filter((r) => !(r.ms > cutoff));
+  const lateOnly = replies.length > 0 && !inTime.length;
+  const reply = inTime.map((r) => r.text).join('\n');
+  const rptr = (lateOnly ? replies : inTime).map((r) => r.ptr).slice(0, 3);
+  const answeredAt = Math.max(-Infinity, ...inTime.map((r) => (Number.isFinite(r.ms) ? r.ms : Infinity)));
+  const noAnswer = (id, extra = []) => (!replies.length ? o(id, 'fail', 'no answer to the owner', [`${P}#resultAt`, ...extra]) : lateOnly ? o(id, 'fail', 'answer came after the cutoff', [...rptr, ...extra]) : null);
   const nameCheck = (id) => {
     const a = x.answer ?? {}; const min = a.minHits ?? 1;
-    if (!replies.length) return o(id, 'fail', 'no answer to the owner', [`${P}#resultAt`]);
-    const hit = namesIn(reply, a.anyOf), bad = namesIn(reply, a.noneOf ?? []);
-    if (bad.length) return o(id, 'fail', `names ${bad.join(', ')}, which the world does not have there${late}`, rptr);
-    return hit.length >= min ? o(id, 'pass', `names ${hit.join(', ')} (${hit.length}/${min} needed)${late}`, rptr) : o(id, 'fail', `names none of ${a.anyOf.slice(0, 8).join(', ')}${a.anyOf.length > 8 ? '…' : ''}${late}`, rptr);
+    const none = noAnswer(id); if (none) return none;
+    let hit = namesIn(reply, a.anyOf), note = '', farOnly = false;
+    const bad = namesIn(reply, a.noneOf ?? []);
+    if (bad.length) return o(id, 'fail', `names ${bad.join(', ')}, which the world does not have there`, rptr);
+    if (id === 'answer-names') { // H4: a word counts only when the genesis has it within radiusM of the place asked about
+      if (!T.length || !things) note = `; names not measured from the target (${T.length ? 'genesis not loaded' : 'no targets'})`;
+      else {
+        const judged = hit.map((w) => wordFromTargets(things, T, w)), far = judged.filter((j) => j.placed && !j.near);
+        const soul = (timely.filter((s) => s.p && !(s.ms > answeredAt)).at(-1) ?? timely.find((s) => s.p))?.p ?? null; // where the Soul answered
+        const fromSoul = (w) => { if (!soul) return ''; const d = Math.min(...placedNamed(things, w).map((n) => dist(n.pos, soul))); return Number.isFinite(d) ? `, ${d.toFixed(1)} m from the Soul` : ''; };
+        hit = judged.filter((j) => !j.placed || j.near).map((j) => j.word); farOnly = far.length > 0;
+        if (far.length) note = `; not near ${label(T[0])}: ${far.map((j) => (j.self ? `${j.word} (names the place asked about)` : `${j.word} (nearest ${j.d.toFixed(1)} m from ${label(j.target)}, radius ${j.target.radiusM} m${fromSoul(j.word)})`)).join(', ')}`;
+      }
+    }
+    if (hit.length < min) return o(id, 'fail', `${farOnly ? `names ${hit.length} thing(s) near ${label(T[0])} (${min} needed)` : `names none of ${a.anyOf.slice(0, 8).join(', ')}${a.anyOf.length > 8 ? '…' : ''}`}${note}`, rptr);
+    if (id === 'named-in-description') { // H3: a description counts only after the seat looked
+      const views = acts.filter((v) => /\beden(-agent)?\.mjs view\b/.test(v.cmd ?? ''));
+      const timed = views.filter((v) => Number.isFinite(v.startedAtMs ?? v.completedAtMs));
+      const looked = timed.length ? timed.some((v) => (v.startedAtMs ?? v.completedAtMs) <= answeredAt) : views.length > 0;
+      if (!looked) return o(id, 'fail', `names ${hit.join(', ')}, but named without looking (no view before the answer)`, rptr);
+    }
+    return o(id, 'pass', `names ${hit.join(', ')} (${hit.length}/${min} needed)${note}`, rptr);
   };
   for (const id of ids) {
     if (id === 'target-arrival') {
@@ -126,10 +193,14 @@ export function expectOracles({ ev, expect: x, timely = [], replies = [], receip
       const d = dist(first.p, t.pos), want = bearing(first.p, t.pos), tol = x.toleranceDeg ?? 50;
       if (d < 8) { out.push(o(id, 'unknown', `${label(t)} is ${d.toFixed(1)} m away: no direction to judge`, [sp(first)])); continue; }
       if (!replies.length) { out.push(o(id, 'fail', `no answer (truth: ${compassName(want)}, ${Math.round(d)} m)`, [sp(first)])); continue; }
-      const said = compassWords(reply);
-      if (!said.length) { out.push(o(id, 'unknown', `answered without a compass direction (truth: ${compassName(want)}, ${Math.round(d)} m)${late}`, [...rptr, sp(first)])); continue; }
+      if (lateOnly) { out.push(o(id, 'fail', `answer came after the cutoff (truth: ${compassName(want)}, ${Math.round(d)} m)`, [...rptr, sp(first)])); continue; }
+      const read = sentencesNaming(reply, T.flatMap((k) => k.names)).join(' '); // H1: the sentences naming the target
+      const said = compassWords(read);
+      // "can't tell" in the sentences read, or anywhere in an answer that gives no direction there, is a fail
+      if (CANT_TELL.test(read) || (!said.length && CANT_TELL.test(reply))) { out.push(o(id, 'fail', `said it can't tell (truth: ${compassName(want)}, ${Math.round(d)} m)`, [...rptr, sp(first)])); continue; }
+      if (!said.length) { out.push(o(id, 'unknown', `answered without a compass direction (truth: ${compassName(want)}, ${Math.round(d)} m)`, [...rptr, sp(first)])); continue; }
       const ok = said.find((w) => angleDiff(w.deg, want) <= tol);
-      out.push(o(id, ok ? 'pass' : 'fail', `said ${said.map((w) => w.word).join(', ')}; truth ${compassName(want)} (${Math.round(want)}°, ${Math.round(d)} m to ${label(t)}; tolerance ${tol}°)${late}`, [...rptr, sp(first)]));
+      out.push(o(id, ok ? 'pass' : 'fail', `said ${said.map((w) => w.word).join(', ')}; truth ${compassName(want)} (${Math.round(want)}°, ${Math.round(d)} m to ${label(t)}; tolerance ${tol}°)`, [...rptr, sp(first)]));
     } else if (id === 'facing') {
       const gaze = acts.map((a) => /\bview\b.*--gaze\s+("?)([^"\s]+)\1/.exec(a.cmd ?? '')?.[2]).filter(Boolean).find((g) => T.some((t) => t.names.some((n) => norm(g).includes(norm(n)) || norm(n).includes(norm(g)))));
       const h = lastHeading(receipts, timely, inWindow);
@@ -139,7 +210,13 @@ export function expectOracles({ ev, expect: x, timely = [], replies = [], receip
         if (d < 1.5) { out.push(o(id, 'pass', `at ${label(t)} (${d.toFixed(1)} m): facing is moot`, [`${P}#receipts`])); continue; }
         if (diff <= tol || gaze) { out.push(o(id, 'pass', diff <= tol ? `body faces ${Math.round(h.heading)}°; ${label(t)} lies at ${Math.round(want)}° (${Math.round(diff)}° off, tolerance ${tol}°; ${h.capability ?? h.receipt})` : `eyes turned with view --gaze ${gaze} (body ${Math.round(diff)}° off)`, [`${P}#receipts`])); continue; }
         out.push(o(id, 'fail', `body faces ${Math.round(h.heading)}° (${compassName(h.heading)}); ${label(t)} lies at ${Math.round(want)}° (${compassName(want)}), ${Math.round(diff)}° off (tolerance ${tol}°)`, [`${P}#receipts`]));
-      } else out.push(gaze ? o(id, 'pass', `eyes turned with view --gaze ${gaze} (no body heading in the window)`) : o(id, 'unknown', 'no completed act with a heading in the request window'));
+      } else {
+        // a refused act to turn or face is a fail, not an unknown
+        const refused = acts.filter((a) => a.output?.accepted === false && /\beden(-agent)?\.mjs act\s+["']?(?:turn|face|facing)\b/i.test(a.cmd ?? '')).at(-1); // the act's own words start with turn/face
+        out.push(gaze ? o(id, 'pass', `eyes turned with view --gaze ${gaze} (no body heading in the window)`)
+          : refused ? o(id, 'fail', `facing refused (${refused.output.code ?? 'no code'}${refused.output.reason ? `: ${String(refused.output.reason).slice(0, 80)}` : ''})`, refused.turn != null ? [`seats/${ev.seat}/transcript.jsonl#turn${refused.turn}`] : [])
+          : o(id, 'unknown', 'no completed act with a heading in the request window'));
+      }
     } else if (id === 'view-used') {
       const views = acts.filter((a) => /\beden(-agent)?\.mjs view\b/.test(a.cmd ?? ''));
       const want = x.view ?? 'any';

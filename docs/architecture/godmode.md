@@ -51,7 +51,7 @@ modules they mount):
 | Status and pairing | `GET /v1/god/status` (public; says whether the caller is god, owner or visitor), `/welcome`, `/pairings`, `pair/*`, `claim`, `mint` |
 | Edits | `POST /v1/god/act`, `/dryrun`, `/preview`; `POST /v1/god/undo[?group=]`, `/redo`; `GET /v1/god/edits`, `/requests/:clientRef`, `/snapshot`, `/stream` (SSE), `POST /v1/god/query` |
 | Builds and districts | `/v1/god/builds…`, `/v1/god/districts…` |
-| Environment | `POST /v1/god/env` (time, sky, weather), `/strike` (lightning), `/land` (terrain and water); public `GET /v1/world/env` |
+| Environment | `POST /v1/god/env` (time, sky, weather; on real time the hour is a viewer preview and the accelerated clock dev-only, [worlds](worlds.md)), `/strike` (lightning), `/land` (terrain and water); public `GET /v1/world/env` |
 | Objects | `POST`/`GET /v1/god/assets` (uploads, moderated), `GET /v1/god/defs`, `/catalog`, `/catalog/taxonomy`, `/recommend`, `/layers`; public `GET /assets/<sha256>.<ext>`, `/thumbs/<hash>.png` |
 | Seeing | `POST /v1/god/look` (PNG) |
 | People | `GET /v1/god/prayers`, `POST /v1/god/answer`; Souls pray with `POST /v1/god/pray`; `POST /v1/god/visitors {open}` |
@@ -72,6 +72,9 @@ parameters, slots and actions.
    journal budget, write the row to `world_edits_v1` with its inverse, update `world_entities_v1` / `world_defs_v1`.
 3. **Physics.** The engine bridge (`god/engine-bridge.ts`) turns the changed entities into a logged `world-edit` event,
    so Souls walk around, sit on and use what was built, and replay reproduces it. Residents in the way are walked out.
+   A solid of a path or area shape (a wall, fence or hedge) is cut into pieces of at most 1 m that follow the terrain where the ground under it
+   is not flat, and a building's flight entered from the side is climbed along the flight
+   ([#2193](https://github.com/soulsimulation/souls/issues/2193), `god/slope-solids.ts`).
 4. **Viewers.** The commit is broadcast as a `world-diff` message to every viewer and on the god's SSE stream.
 
 ### Joints

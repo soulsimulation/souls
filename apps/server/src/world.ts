@@ -1,9 +1,10 @@
+import {appendFileSync} from 'node:fs';
 import {tx} from './edge/comms/store.ts';
 import { SoulNow, type SoulNowLine } from './soul-now.ts';
 import type {CarrierInstallSpec} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 import {soulProfileFactV1Schema,type SoulProfileFactV1} from '@souls/protocol';
 import {authoredBoundariesDeclarationV1Schema,type AuthoredBoundariesDeclarationV1} from '@souls/engine-contract';
-import {ACTION_THREW,FRAME_LET_GO,QUARANTINED,REWOUND,STOP_GAVE_UP,type EngineRefusalV1} from '@souls/engine-contract';
+import {ACTION_THREW,FRAME_LET_GO,NONFINITE_HELD,QUARANTINED,REWOUND,STOP_GAVE_UP,type EngineRefusalV1,type NonFinitePatchV1} from '@souls/engine-contract';
 import {edenLectureV1} from '@souls/engine-mars';
 import {renderPlatformRowsV1Schema,type RenderPlatformV1} from '@souls/engine-contract';
 import {officeStairGuardsDeclarationV1Schema,type OfficeStairGuardsDeclarationV1} from '@souls/engine-contract';
@@ -36,7 +37,8 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
-import { advanceNeeds, newLife, type Life } from '@souls/brain';
+import { advanceNeeds, DAY_TICKS, newLife, type Life } from '@souls/brain';
+import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
 import { frontier, stepIndex, belongsTo } from './deck.ts';
 import {mandateOf,MANDATE_STATE} from './mandate.ts';
@@ -45,7 +47,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
-import { countGlitch, faultFacts, faultKeys, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
+import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
 
@@ -85,6 +87,8 @@ const REWIND_COOLDOWN_TICKS = 1200;
 /** #1440: holds of one body within a cooldown before quarantine-mark/1 holds it by a standing mark. */
 const MARK_AFTER = 3;
 /** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
+/** #1496: the hash's own fault for a number that is no number. */
+const nonFiniteError = (error: unknown) => error instanceof Error && /non-finite number/.test(error.message);
 const glitchy = (r: EngineRefusalV1) => r.rule !== STOP_GAVE_UP.code && r.rule !== FRAME_LET_GO.code;
 /** #1150: half the ticks of ten seconds of world time faulted. The step itself is broken, and the world says so. */
 const STEP_FAILING_WINDOW_TICKS = 200, STEP_FAILING_FAULTS = 100;
@@ -177,6 +181,11 @@ export class WorldHost {
   lastSnapshotCostMs = 0;
   extra: Record<string, unknown> = {};       // module state persisted with snapshots (narrator schedule etc.)
   tickMs: number[] = [];
+  /** #1961: span timers of each live tick, off unless SOULS_TICK_SPANS names a file. One JSON line per tick, appended
+   *  every 100 ticks after the tick ends: [tick, total, drain, step, clock, listeners, broadcast, snapshot 0|1], ms.
+   *  drain = queued inputs (both drains), step = the engine's step, clock = the durable clock write, listeners = runtime
+   *  events, afterTick and afterTickComplete, broadcast = flush and heartbeat; everything else is total minus those. */
+  tickSpans: { file: string; rows: string[] } | null = process.env.SOULS_TICK_SPANS ? { file: process.env.SOULS_TICK_SPANS, rows: [] } : null;
   /** The last boot's phases (lane L5): restore = snapshot read + decode + engine restore; replay = stepping logged history to its head. */
   bootStats: BootStats | null = null;
   private queue: Pending[] = [];
@@ -231,7 +240,7 @@ export class WorldHost {
   private bootV1(): { from: 'genesis' | 'snapshot'; replayed: number } {
     this.bootSkippedV1 = null;
     const tBoot = performance.now(); bootPhase('boot:restore');
-    this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null;
+    this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null;
     let w = this.db.world(this.worldId);
     if (!w) {
       this.db.createWorld({ id: this.worldId, schema: 'pending', rules_version: this.factory.rulesVersion, dt: 1 / 20, seed: this.seed });
@@ -535,10 +544,9 @@ export class WorldHost {
   /** The world's own clock loop is running (start(); a served world). False while stepped by hand (tests, tools): lane P5
    *  defers some boot-time derived work only in a served world, so a stepped one sees it at the same tick as before. */
   get running(): boolean { return this.timer !== null; }
-  /** Wall pace of the clock (attention.ts): 1 while anyone watches or acts here, lower while nobody does (an unwatched
-   *  world advances fewer ticks per wall second, and wakes its loop less often). The same ticks run in the same order with
-   *  the same inputs, so schedules (in world time) and takes (cut every 20 ticks) are unchanged; only how fast world time
-   *  passes against the wall clock changes, as while asleep. Not logged, not persisted, not part of `clockRate`. */
+  /** Wall pace of the clock: 1. #2235: a served world never runs slower than the wall, watched or not (the unwatched
+   *  quarter pace is gone); lower values remain only for measurement harnesses. Not logged, not persisted, not part of
+   *  `clockRate`. */
   pace = 1;
   setPace(pace: number) {
     if (!(pace > 0 && pace <= 1) || pace === this.pace) return;
@@ -546,6 +554,20 @@ export class WorldHost {
     if (this.timer && !this.paused) this.carry += (Math.min(1000, now - this.last) * this.clockRate * this.pace) / TICK_MS;  // the time so far, at the old pace
     this.last = now; this.pace = pace;
     if (this.timer) { clearInterval(this.timer); this.startFrameTimer(); }
+  }
+  /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
+  owedTicks = 0;
+  /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
+   *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
+   *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
+   *  a world that never stopped; outside writes wait at the HTTP edge until the catch-up is done (main.ts). */
+  async catchUp(ticks: number, turn: () => Promise<unknown> = () => new Promise((r) => setImmediate(r))): Promise<number> {
+    if (this.timer) throw new Error('catch-up.clock-running');
+    let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
+    this.owedTicks = Math.max(0, Math.floor(ticks));
+    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
+    finally { this.owedTicks = 0; }
+    return done;
   }
 
   // ------------------------------------------------------------ the loop
@@ -602,14 +624,17 @@ export class WorldHost {
     const t0 = performance.now();
     const tick = this.engine.world.tick;
     if (this.recoveryForEdge) this.validPoses = { tick, poses: this.soulPoses() };
+    const sp = this.tickSpans, span = sp ? [0, 0, 0, 0, 0, 0] : null;   // #1961: drain, step, clock, listeners, broadcast, snapshot
+    let ts = sp ? performance.now() : 0;
     // 1. apply queued inputs at this tick, logging them
     this.drainInputs();
+    if (span) span[0] += performance.now() - ts;
     if (this.repairRules && !this.clockAvailable) return;   // a repair in that drain couldn't be written: a named halt, not a throw
     // 2. step the engine
     let out: ReturnType<Engine['step']>;
     const previousViolations = this.engine.runtime.violations.length;
     const tStep = performance.now();
-    try { out = this.stepEngine(); if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
+    try { out = this.stepEngine(); if (span) span[1] = performance.now() - tStep; if (this.engine.runtime.violations.length > previousViolations) throw new Error(JSON.stringify(this.engine.runtime.violations.slice(previousViolations))); }
     catch (error) { for (const r of out!?.refusals ?? []) if (glitchy(r)) this.countRefusal(r); if (this.repairRules) { this.kernel.tick = this.engine.world.tick; sweep(this.kernel); this.faultedPrograms = out!?.programs ?? null; } this.noteFaultedTick(error); const head = this.engine; this.recoverFault(error); this.faultedPrograms = null; if (this.repairRules) this.afterFaultedTick(head, out!?.refusals); if (this.stepFailing && this.clockAvailable && this.snapshotDue()) this.snapshotFaultedHead(); return; }
     this.noteCleanTick();
     this.advanceLives();
@@ -628,22 +653,35 @@ export class WorldHost {
     if(this.durableClockV1){
       // Derived effects become durable before this elapsed body tick is sent.
       // Listener-generated next inputs retain their ordinary queue semantics.
+      if (span) ts = performance.now();
       this.drainInputs();
+      if (span) span[0] += performance.now() - ts;
       if(this.repairRules&&!this.clockAvailable)return;
+      if (span) ts = performance.now();
       this.persistClockFrontier();
+      if (span) span[2] = performance.now() - ts;
     }
+    if (span) ts = performance.now();
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
     const tickContext = Object.freeze({ startedAtMs: t0 });
     for (const l of this.listeners) l.afterTick?.(now, tickContext);
+    if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
     if (now % BATCH_TICKS === 0) this.flush();
     if (now % HEARTBEAT_TICKS === 0) this.heartbeat();
-    if (this.snapshotDue(now)) this.schedulePeriodicSnapshot();
+    if (span) span[4] = performance.now() - ts;
+    if (this.snapshotDue(now)) { if (span) span[5] = 1; this.schedulePeriodicSnapshot(); }
     this.tickMs.push(performance.now() - t0);
     if (this.tickMs.length > 400) this.tickMs.splice(0, 200);
     if (this.splitTap) this.splitTap(now, out); // never throws (DeltaTap.onTick); reads only
+    if (span) ts = performance.now();
     for (const l of this.listeners) { try { l.afterTickComplete?.(now); } catch { /* observers cannot undo a completed tick */ } }
+    if (sp && span) {
+      const end = performance.now(); span[3] += end - ts;
+      sp.rows.push(JSON.stringify([now, end - t0, ...span].map((x) => Math.round(x * 1000) / 1000)));
+      if (sp.rows.length >= 100) { try { appendFileSync(sp.file, sp.rows.join('\n') + '\n'); } catch { /* a measurement never stops the clock */ } sp.rows.length = 0; }
+    }
   }
 
   /** Accept queued inputs without advancing the engine or starting new mind work. */
@@ -986,6 +1024,7 @@ export class WorldHost {
     const tick = e.tick;
     if(e.kind==='rules'&&e.payload?.lastRungInPlace)for(const m of this.minds.values())m.pending=null;
     if(e.kind==='rules'&&e.payload?.quarantineV1)for(const id of e.payload.quarantineV1.bodies??[]){const m=this.mindByEntity.get(id);if(m)m.pending=null;}
+    if(e.kind==='rules'&&e.payload?.nonFiniteHoldV1)for(const id of e.payload.nonFiniteHoldV1.bodies??[]){const m=this.mindByEntity.get(id);if(m)m.pending=null;}
     if(e.kind==='rules'&&e.payload?.reflection?.episodeMemory){
       const p=e.payload,record=p.reflection.episodeMemory,m=this.minds.get(p.soulId);
       if(!this.extra.intentEpisodeMemoryV1||!m||record.contract!=='private-purpose-episodes/1'||record.proseKind!=='interpretation'||!Number.isSafeInteger(record.throughSeq)||record.throughSeq<0||record.throughSeq>=e.seq||Object.keys(record).sort().join(',')!=='contract,episodes,proseKind,throughSeq'||JSON.stringify(record.episodes)!==JSON.stringify(episodesFromHistoryV1(this.intentHistoryOf(p.soulId),m.owner,record.throughSeq)))throw Error('purpose-episodes.invalid-source');
@@ -1242,7 +1281,9 @@ export class WorldHost {
           m.nextEvalTick=Math.min(m.nextEvalTick,tick+1+hash32(m.soulId)%20);
           m.evalTrigger='world-event';m.lastFingerprint='';
         }
-        if (p?.dayConfig) { this.extra.living = { ...p.dayConfig, lastDay: -1, event: 'a new place', quiet: false }; for (const m of this.minds.values()) m.life ??= newLife(tick); }
+        // #1649: a real-time re-alignment (`realign`) moves the origin only and keeps the day's state
+        if (p?.dayConfig && p.realign === true && this.extra.living) { const was = this.extra.living as Record<string, unknown>; this.extra.living = { ...p.dayConfig, lastDay: was.lastDay, event: was.event, quiet: was.quiet, ...(was.quietDay !== undefined ? { quietDay: was.quietDay } : {}) }; }
+        else if (p?.dayConfig) { this.extra.living = { ...p.dayConfig, lastDay: -1, event: 'a new place', quiet: false }; for (const m of this.minds.values()) m.life ??= newLife(tick); }
         if(p?.runtimePolicy)this.extra.runtimePolicy=structuredClone(p.runtimePolicy);
         const day = this.living;
         if (p?.quiet && day) { day.quiet = true; day.quietDay = p.day; }
@@ -1331,9 +1372,30 @@ export class WorldHost {
    *  flag it against another body on its level (|dy| <= 1 m, closer than both radii), so a follower waits behind on the stair and
    *  is never settled off it. History before the event replays as it was. Main adopts it at boot. */
   enableClimbSpacingV1(author='operator:climb-spacing'){if((this.extra.runtimePolicy as {climbSpacingV1?:boolean}|undefined)?.climbSpacingV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,climbSpacingV1:true},why:'climb-spacing/1 (#1530): a climber waits behind a body ahead on the stair rather than stepping where the separation invariant flags them; retain historical replay before this event'});}
+  /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
+   *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
+  enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
+  /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
+   *  Its adoption also stands, once, any free body already left more than a step above its floor (the plan is read when the event
+   *  is accepted and logged in it, with each body's Soul, so a replay stands the same bodies in the same places). */
+  /** #2133 stall-release-support/1 (prospective): a stall release upstairs stands a body only on a floor (its own, else its flight's
+   *  nearer clear landing), else leaves it held; never where it stands mid-flight. */
+  enableStallReleaseSupportV1(author='operator:stall-release-support'){if((this.extra.runtimePolicy as {stallReleaseSupportV1?:boolean}|undefined)?.stallReleaseSupportV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stallReleaseSupportV1:true},why:'stall-release-support/1 (#2133): a stall release upstairs stands a body on its own floor near it, else on the nearer clear landing of the flight it is on, else leaves it held and says so; never where it stands mid-flight (#447: the next tick faulted collision.human-static); retain historical replay before this event'});}
+  enableStandHeightV2(author='operator:stand-height'){
+    if((this.extra.runtimePolicy as {standHeightV2?:boolean}|undefined)?.standHeightV2)return Promise.resolve();
+    const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV2:true},why:'stand-height/2 (#1521): a body the engine sets down on the ground floor of a world without a ground field stands at its floor height, never in the air at the height it had; any body already left in the air is stood on its floor once; retain historical replay before this event'};
+    const guard:AcceptanceGuard=()=>{const bodies=this.engine.planAboveFloorV2?.()??[];if(bodies.length)payload.standHeightRepairV2={bodies:bodies.map(b=>({...b,...(this.mindByEntity.get(b.id)?{soul:this.mindByEntity.get(b.id)!.soulId}:{})}))};return true;};
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
+  }
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
+  /** #2196 park-away/1, one logged rules event (prospective): an empty ride that landed away from its home parks where it landed and
+   *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event
+   *  replays as it was. Main adopts it at boot. */
+  enableCarrierParkAwayV1(author='operator:park-away'){if((this.extra.runtimePolicy as {carrierParkAwayV1?:boolean}|undefined)?.carrierParkAwayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,carrierParkAwayV1:true},why:'park-away/1 (#2196): a ride never moves with nobody aboard; one that landed away parks there and the next rider flies it home; retain historical replay before this event'});}
+  /** #1496 nonfinite-hold/1 (prospective, needs quarantine/1): a non-finite number the frontier hash meets that quarantine/1 doesn't hold is put back to its last good value by a logged event, never a halt. */
+  enableNonFiniteHoldV1(author='operator:nonfinite-hold'){if((this.extra.runtimePolicy as {nonFiniteHoldV1?:boolean}|undefined)?.nonFiniteHoldV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteHoldV1:true},why:'nonfinite-hold/1 (#1496): a number in the hashed head that is no number is put back to its value in the last good snapshot by a logged patch, and what it touched stops; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
    *  fault comes back on the head, the bodies the fault names are stopped where they stand and contained, and the clock and
    *  everyone else go on; never a halt. A host-only key: the engine never reads it, so no snapshot binding changes. Main adopts
@@ -1503,11 +1565,13 @@ export class WorldHost {
     for (const m of this.minds.values()) {
       if (!m.life) continue;
       const e = this.engine.world.entities[m.entityId]; if (!e?.human) continue;
+      // #1649: needs move over a real day on a real-time clock (its dayConfig names a zone); other clocks keep the accelerated day
+      const needsDay = (this.living as {zone?: string} | undefined)?.zone ? REAL_DAY_TICKS : DAY_TICKS;   // also while a real-time clock is paused
       const floater=(e as unknown as {body?:{family:string}}).body?.family==='floater';
       const nearby = [...this.mindByEntity.values()].some(other => { const b = this.engine.world.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; });
       const humanRest=(this.extra.runtimePolicy as {humanRestNeedsV1?:boolean}|undefined)?.humanRestNeedsV1===true;
       const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
-      advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater); m.energy = m.life.needs.energy;
+      advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater, needsDay); m.energy = m.life.needs.energy;
     }
   }
 
@@ -1578,10 +1642,12 @@ export class WorldHost {
     try { baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; }
     catch (failure) {
       // #1369: a baseline that won't materialize is no failed write: nothing to go back to, so the head stays
-      if (this.quarantineRule) { this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; return this.quarantine(error, failure); }
+      if (this.quarantineRule) { this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null; return this.quarantine(error, failure); }
       this.failCheckpoint(failure); return;
     }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
+    // #1377: an invariant that throws reading one entity: only that entity is quarantined (a rewind would stop everyone and read it again)
+    if (this.quarantineRule && this.thrownOnly(error)) return this.quarantine(error);
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
     if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
@@ -1627,13 +1693,31 @@ export class WorldHost {
   /** #1440 quarantine-mark/1 (host-only, prospective): a body held again past MARK_AFTER times in a cooldown is held by one standing mark. */
   private get quarantineMarkRule(): boolean { return this.quarantineRule && (this.extra.runtimePolicy as {quarantineMarkV1?: boolean} | undefined)?.quarantineMarkV1 === true; }
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
+  /** #1496: nonfinite-hold/1 is adopted, on top of quarantine/1. */
+  private get nonFiniteHoldRule(): boolean { return this.quarantineRule && (this.extra.runtimePolicy as {nonFiniteHoldV1?: boolean} | undefined)?.nonFiniteHoldV1 === true; }
   /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
    *  rule names it, but it can make every step or the state hash throw). */
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
     let corrupt: string[] = [];
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
-    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt])].sort(), corrupt };
+    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
+  /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
+   *  takes entities out there, one half at a time), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
+  private thrownSources(error: unknown): string[] {
+    if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
+    const tick = this.engine.world.tick, fault = String(error);
+    if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
+      let ids: string[] = [];
+      try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
+      catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
+      this.thrownAt = {tick, fault, ids};
+    }
+    return this.thrownAt.ids;
+  }
+  /** #1377: a fault that is only invariants that threw, and what they were reading was found: going back would read it again. */
+  private thrownOnly(error: unknown): boolean { const keys = faultKeys(error); return keys.length > 0 && keys.every(k => k.code === THROWN_RULE && !k.subjects.length) && this.thrownSources(error).length > 0; }
   /** #1369: each Soul's body's last whole pose (finite numbers), so a body whose pose breaks is held where it last stood. */
   private wholePoses = new Map<string, RecoveryPose>();
   private noteWholePoses() {
@@ -1768,7 +1852,7 @@ export class WorldHost {
     }
     // #1369: the baseline won't restore. That is no failed write (#1368 was a wait the reader rejected), so under quarantine/1 the
     // world goes on from the head it had, with what the fault named stopped and contained, and never goes back to that baseline
-    if (this.quarantineRule) { head(); this.recoveryBaseline = null; return this.quarantine(error, failed); }
+    if (this.quarantineRule) { head(); this.recoveryBaseline = null; this.nonFiniteBase = null; return this.quarantine(error, failed); }
     this.failCheckpoint(new Error(`recovery.baseline-unusable: ${String(error).slice(0, 300)}`));
   }
   /** #1369 quarantine/1, the ladder's end: the bodies the fault names stop where they stand (their programmes alone), the fault's
@@ -1806,7 +1890,7 @@ export class WorldHost {
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, ...(this.thrownAt?.tick === tick && this.thrownAt.fault === String(error) && this.thrownAt.ids.length ? {thrownReading: this.thrownAt.ids} : {}), stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });
@@ -2276,6 +2360,8 @@ export class WorldHost {
       if (!code) throw error;
       this.lastSnapshotTick = engine.world.tick; this.snapshotTaken();
       this.recordGlitch('contained', error, {rule: 'durability.snapshot-skipped', tick: engine.world.tick, evidence: {code, ...this.nonFiniteAt(code)}});
+      // #1496: under nonfinite-hold/1 what the capture met is put back now, so the next capture is not skipped for it again
+      if (code === 'snapshot.non-finite' && this.nonFiniteHoldRule && this.holdNonFinite(error)) this.snapshotSoon ??= 'a non-finite number was put back';
       return;
     }
     const { checkpoint, legacy, fields, steps } = parts;
@@ -2313,7 +2399,7 @@ export class WorldHost {
       if (!result.done) { later(finish); return; }
       const body: SnapshotBody = { runtime: result.value.snapshot, ...fields };
       const meta = { ...frontier, stateHash: result.value.snapshot.stateHash, physicalHash: result.value.physicalHash };
-      if (this.recoveryCapture === materialize) { this.recoveryBaseline = body; this.recoveryCapture = null; }
+      if (this.recoveryCapture === materialize) { this.recoveryBaseline = body; this.recoveryCapture = null; this.nonFiniteBase = null; }
       // JSON and SQLite each take tens of milliseconds on a large world. Give
       // queued HTTP/ticks a turn between them without changing stored bytes.
       later(() => {
@@ -2350,15 +2436,53 @@ export class WorldHost {
     this.replayDebtMs += job.previousDebt.ms; this.lastSnapshotWall = job.previousDebt.wall; this.snapshotSoon ??= job.previousDebt.soon;
   }
   /** #1369: a state that won't hash because a body in it is broken (a pose that is no number) is no failed write. Under
-   *  quarantine/1 that body is held where it last stood whole and the hash is taken again; anything else fails as before. */
+   *  quarantine/1 that body is held where it last stood whole and the hash is taken again. #1496: under nonfinite-hold/1 any
+   *  other non-finite number is then put back (`holdNonFinite`) and the hash taken again; anything else fails as before. */
   private hashOrQuarantine():string{
-    try{return this.engine.stateHash();}
-    catch(error){
-      if(!this.quarantineRule||!this.quarantineTargets(error).corrupt.length)throw error;
+    let error:unknown;
+    try{return this.engine.stateHash();}catch(failure){error=failure;}
+    if(this.quarantineRule&&this.quarantineTargets(error).corrupt.length){
       this.quarantine(error,undefined,false);
-      try{return this.engine.stateHash();}
-      catch(again){throw Object.assign(new Error(`engine.unhashable: ${String(again).slice(0,300)}`,{cause:again}),{unhashable:true});}   // named for what it is: no write failed
+      try{return this.engine.stateHash();}catch(again){error=again;}
+    }else if(!this.nonFiniteHoldRule)throw error;
+    if(this.nonFiniteHoldRule&&nonFiniteError(error)&&this.holdNonFinite(error)){try{return this.engine.stateHash();}catch(again){error=again;}}
+    throw Object.assign(new Error(`engine.unhashable: ${String(error).slice(0,300)}`,{cause:error}),{unhashable:true});   // named for what it is: no write failed
+  }
+  /** #1496 nonfinite-hold/1: every non-finite number the engine can put right goes back to its value in the last good snapshot
+   *  (the recovery baseline; with none there, the named fallback), and what it touched stops. One logged event carries the
+   *  exact patches, so a replay writes the same ones and reads nothing. False when there was nothing to patch or the write failed. */
+  /** #1496: the engine restored from the recovery baseline for the last hold, kept while that baseline is the same object. */
+  private nonFiniteBase: {body: SnapshotBody; engine: Engine | null} | null = null;
+  /** #1496: each set of fields' holds within the current cooldown, for the glitch row's rate. */
+  private nonFiniteRepeats = new Map<string, {since: number; n: number}>();
+  private holdNonFinite(error: unknown): boolean {
+    const engine = this.engine; if (!engine.planNonFiniteV1 || !engine.applyNonFiniteV1) return false;
+    let base: Engine | null = null;   // only read, so one restore serves every hold until the baseline changes
+    if (this.nonFiniteBase && this.nonFiniteBase.body !== this.recoveryBaseline) this.nonFiniteBase = null;
+    if (this.recoveryBaseline && this.nonFiniteBase?.body === this.recoveryBaseline) base = this.nonFiniteBase.engine;
+    else if (this.recoveryBaseline) {
+      try { base = this.factory.restore(structuredClone(this.recoveryBaseline.runtime)); }
+      catch (failure) { console.error('[world] the last good snapshot would not restore for a non-finite hold:', String(failure).slice(0, 200)); }
+      this.nonFiniteBase = {body: this.recoveryBaseline, engine: base};
     }
+    let patches: NonFinitePatchV1[];
+    try { patches = engine.planNonFiniteV1(base); } catch (failure) { console.error('[world] could not look for non-finite numbers:', String(failure).slice(0, 200)); return false; }
+    if (!patches.length) return false;
+    const tick = engine.world.tick, done = engine.applyNonFiniteV1(patches, NONFINITE_HELD);
+    const souls = done.bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
+    const q = {patches, bodies: done.bodies, souls, programmes: done.programmes, stopped: done.stopped, ...(done.deadlines ? {deadlines: done.deadlines} : {}), reason: String(error).slice(0, 300)};
+    const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:nonfinite-hold', payload: {nonFiniteHoldV1: q}, at: Date.now()};
+    if (!this.writeRepair(e)) return false;
+    this.seq = e.seq; this.acc.log.push(e);
+    const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
+    // as quarantine/1 (#1377): the event every time (a replay needs it), the row at most twice a cooldown for the same fields
+    const key = fields.map(f => f.field).join('|'), r = this.nonFiniteRepeats.get(key), loud = !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2;
+    this.nonFiniteRepeats.set(key, r && tick - r.since < REWIND_COOLDOWN_TICKS ? {since: r.since, n: r.n + 1} : {since: tick, n: 1});
+    if (this.nonFiniteRepeats.size > 256) for (const [k, v] of this.nonFiniteRepeats) if (tick - v.since >= REWIND_COOLDOWN_TICKS) this.nonFiniteRepeats.delete(k);
+    if (loud) this.recordGlitch('contained', error, {rule: NONFINITE_HELD.code, tick, bodies: done.bodies, evidence: {seq: e.seq, fields, stopped: done.stopped, programmes: done.programmes, ...(patches.some(p => p.from === 'arrival') ? {arrival: patches.filter(p => p.from === 'arrival').map(p => p.path[1])} : {})}});
+    for (const id of done.bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
+    for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a non-finite hold:', String(failure).slice(0, 200)); }
+    return true;
   }
   private persistClockFrontier():void {
     try{

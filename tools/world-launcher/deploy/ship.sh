@@ -4,7 +4,7 @@
 #
 #   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--no-eyes] [--from <step>] [--out <dir>]
 #                                       [--accept-host-codes <code,...>]
-#     --label    the release, such as 4.16. Backups are pre-r416-production-*, the outputs <out>
+#     --label    the release, such as 0.123. Backups are pre-r0123-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
 #     --no-switch  every step for real except the backup and the activation: stage (without install.sh), rehearse, the probe
@@ -129,6 +129,8 @@ git -C "$ROOT" merge-base --is-ancestor "$SHA" origin/main 2>/dev/null || pf "$S
 # --no-switch makes nothing live, so the receipts are reported, never required
 rf() { if [ "$NOSWITCH" = 1 ]; then say "   receipts (not required with --no-switch): $*"; else pf "$*"; fi; }
 if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with release-receipt.json (or receipt.json and ship-receipt.json)"
+# a gate blocked only by blockers the maintainer accepted, for this receipt and cut (docs/release.md#accepted-exceptions)
+elif [ -n "${SHIP_EXCEPTIONS:-}" ]; then node "$VERDICT" accepted "$RECEIPTS" "$SHIP_EXCEPTIONS" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the receipts are blocked beyond the accepted exceptions"
 elif [ -f "$RECEIPTS/release-receipt.json" ]; then node "$VERDICT" receipt "$RECEIPTS/release-receipt.json" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the release receipt is not clean for this commit"
 elif ! node "$VERDICT" receipts "$RECEIPTS/receipt.json" "$RECEIPTS/ship-receipt.json" "$SHA" | sed 's/^/   /'; then rf "the gate and ship receipts are not clean for this commit"; fi
 [ "$NOEYES" = 1 ] || { [ -n "$PROBE_CLI" ] && [ -d "$PROBE_CLI" ]; } || pf "SHIP_PROBE_CLI is not the release-probe god folder"

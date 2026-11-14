@@ -153,6 +153,10 @@ test('A6: a failing bar fails eyes, which posts failure naming it; a probe miss 
   assert.equal(r.status, 1);
   assert.equal(posted(f)[1], 'failure release/eyes run=77.1 fail: probe(noBuild=2,reconnectMaxMs=9000)');
   assert.ok(existsSync(join(f.t, 'out/probe-bar.json')));
+  // #1583: a probe that failed elsewhere names the reconnect only past the bar the probe itself applied
+  f = fakeGh([WAITING], RUN, st(CONTEXT.ship, 'success', 'run=77.1 released')); d = fakeDeploy(f.t);
+  r = f.run(['--sha', SHA], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR, FAKE_PROBE_RC: '1', FAKE_PROBE_BAR: JSON.stringify({ pass: false, lost: 1, reconnectMaxMs: 5194, reconnectBarMs: 6500 }) });
+  assert.equal(posted(f)[1], 'failure release/eyes run=77.1 fail: probe(lost=1)');
 });
 
 test('A4: a ship that stops before the release fails eyes without walks, and the probe is told to stop', () => {

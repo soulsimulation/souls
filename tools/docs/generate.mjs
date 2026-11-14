@@ -71,7 +71,7 @@ export function actionsSection(f) {
   return [
     '## Actions', '', note(`the world's code: edge schema ${f.edge.schema}`), '',
     '### Act verbs', '',
-    `A Soul acts with \`POST /v1/edge/act\` (MCP \`eden_act\`): \`{capability, params?, clientRef?}\`, where \`capability\` is an id from \`GET /v1/edge/capabilities\` or plain words. Ids: ${code(act.ids)}.`, '',
+    `A Soul acts with \`POST /v1/edge/act\` (MCP \`eden_act\`): \`{capability, params?, clientRef?}\`, where \`capability\` is an id the world offered (\`GET /v1/edge/capabilities\`; MCP \`eden_capabilities\`, \`eden_here\` or \`eden_map\`). Ids: ${code(act.ids)}.`, '',
     table(['Verb', 'Outcome', 'Seconds'], act.verbs.map((v) => [code(v), outcomes[v]?.summary ?? '', secs(v)])), '',
     ...(seconds.activities ? [`Activities without their own row above take \`seconds\` ${seconds.activities.min}..${seconds.activities.max}.`, ''] : []),
     '### Act parameters', '',

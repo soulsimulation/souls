@@ -2,10 +2,10 @@
 // transcripts with every CLI call), scored offline. No world, controller, network or model.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { evaluateRun, compareRunSet, cliArgs, joinRequests, loadSoulRun, answerQuestion, questionSteps, renderIndex, indexSources, directionsMeasure } from './evaluate.mjs';
+import { evaluateRun, compareRunSet, cliArgs, cliCalls, jsonDocs, seatSteps, actOutcome, joinRequests, loadSoulRun, answerQuestion, questionSteps, renderIndex, indexSources, directionsMeasure } from './evaluate.mjs';
 import { validateSpec } from './spec.mjs';
 
 const Q = (f) => new URL(`./questions/${f}`, import.meta.url).pathname;
@@ -36,11 +36,18 @@ function makeRun(opts = {}) {
   for (const [n, s] of ['0-preflight', '1-provision', '2-seats', '3-play', '4-close', '5-review', '7-report'].entries()) w(join(p, 'receipts', `${s}.json`), { step: s.slice(2), ok: true, ...(n === 5 ? { requests: 0 } : {}) });
   w(join(p, 'world.json'), { startedAt: iso(-10) });
   const m1 = 'msg_1', m2 = 'msg_2';
-  w(join(p, 'personas/bo/decisions.jsonl'), jl([
+  // A directed cast (#783) writes its cards to director/directions.jsonl (here after another seat's card) instead.
+  if (opts.directed) w(join(p, 'director/directions.jsonl'), jl([
+    { t: iso(-1), seat: 'ada', kind: 'gather', by: 'director', channel: 'card', text: 'Go to the hall', messageId: 'msg_a', requestId: 'ada-001' },
+    { t: iso(0), seat: 'bo', kind: 'gather', by: 'director', channel: 'card', text: script[0].text, messageId: m1, requestId: 'bo-001' },
+    { t: iso(5), seat: 'bo', kind: 'note', by: 'console', channel: 'card', text: 'not delivered' },
+    { t: iso(9), seat: 'bo', kind: 'redirect', by: 'console', channel: 'card', text: script[1].text, messageId: m2, requestId: 'bo-002' },
+  ]));
+  else if (!opts.noDirector) w(join(p, 'personas/bo/decisions.jsonl'), jl([
     { t: iso(0), seat: 'bo', mode: 'scripted', scripted: script[0], delivered: { requestId: 'bo-001', channel: 'card', messageId: m1 } },
     { t: iso(9), seat: 'bo', mode: 'scripted', scripted: script[1], delivered: { requestId: 'bo-002', channel: 'card', messageId: m2 } },
   ]));
-  w(join(p, 'personas/bo/requests.jsonl'), jl([
+  if (!opts.noDirector) w(join(p, 'personas/bo/requests.jsonl'), jl([
     { t: iso(40), requestId: 'bo-002', cutoffReason: 'result', openSec: 31, resultText: 'At the hall' },
     { t: iso(100), requestId: 'bo-001', cutoffReason: opts.director001 ?? 'budget', openSec: 100 },
   ]));
@@ -76,6 +83,26 @@ const M = (e, id) => e.measures.find((m) => m.id === id);
 test('cliArgs reads the served CLI calls the transcript records', () => {
   assert.deepEqual(cliArgs('node eden.mjs result msg_1 failed "My owner \\"changed\\" it"'), ['result', 'msg_1', 'failed', 'My owner "changed" it']);
   assert.deepEqual(cliArgs('curl -fsSo eden.mjs http://x'), []);
+});
+
+test('#1736: a chained shell call is one step per eden.mjs command, its output split per JSON document', (t) => {
+  const cmd = 'node eden.mjs ack msg_8 "Got it: walk to walk:cottage and stay there."; node eden.mjs act walk:cottage --wait 90';
+  assert.deepEqual(cliCalls(cmd), [['ack', 'msg_8', 'Got it: walk to walk:cottage and stay there.'], ['act', 'walk:cottage', '--wait', '90']]);
+  assert.deepEqual(cliCalls('node eden.mjs say "a; b && c" --to Ada && node eden.mjs wait 30 --json | head -40; cat x'), [['say', 'a; b && c', '--to', 'Ada'], ['wait', '30', '--json']]);
+  assert.deepEqual(cliCalls('node eden.mjs ack m "ok"; node eden.mjs --help 2>&1 | head -30'), [['ack', 'm', 'ok'], ['--help']]);
+  assert.deepEqual(jsonDocs('{\n "acked": "m"\n}\n{ "a": "}{", "b": [1] }\n'), [{ acked: 'm' }, { a: '}{', b: [1] }]);
+  assert.equal(jsonDocs('{ "a": 1 }\nhelp text'), null);
+  const dir = mkdtempSync(join(tmpdir(), 'chain-1736-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const out = JSON.stringify({ acked: 'msg_8', reply: 'Got it' }, null, 1) + '\n' + JSON.stringify({ accepted: true, receipt: { id: 'r_1', capability: 'walk:cottage', phase: 'completed' } }, null, 1);
+  const line = (content) => JSON.stringify({ type: content[0].type === 'tool_use' ? 'assistant' : 'user', _rx: 5, message: { content } });
+  writeFileSync(join(dir, 't.jsonl'), [line([{ type: 'tool_use', id: 'u1', input: { command: cmd } }]), line([{ type: 'tool_result', tool_use_id: 'u1', content: out }]),
+    line([{ type: 'tool_use', id: 'u2', input: { command: 'node eden.mjs ack m2 "ok"; node eden.mjs act walk:knoll --wait 60; echo done' } }]), line([{ type: 'tool_result', tool_use_id: 'u2', content: '{"acked":"m2"}\n{"accepted":true}\ndone' }])].join('\n'));
+  const steps = seatSteps(join(dir, 't.jsonl'), 'bo');
+  assert.deepEqual(steps.map((s) => s.verb), ['ack', 'act', 'ack', 'act'], 'never dropped');
+  assert.equal(steps[1].out.receipt.phase, 'completed'); assert.equal(actOutcome(steps[1]).outcome, 'completed', 'the walk is seen');
+  assert.equal(steps[0].out.acked, 'msg_8');
+  assert.ok(steps[2].unplaced && steps[3].unplaced && steps[3].out === null, 'output that can\'t be told apart: unplaced');
+  assert.equal(actOutcome(steps[3]).outcome, 'started', 'not a failure');
 });
 
 test('a question reads a close without `result` as the result it replaced, just after the command that made it (#1269)', () => {
@@ -282,4 +309,74 @@ test('directions: the direction journal is counted by command and outcome; each 
   writeFileSync(join(pt, 'director', 'commands.jsonl'), readFileSync(join(pt, 'director', 'commands.jsonl'), 'utf8') + '{"t":"2026-01-01T00:01:40Z","cmd":"redir');
   const torn = directionsMeasure(sr);
   assert.deepEqual({ value: torn.value, skipped: torn.skipped, keys: Object.keys(torn.byCommand) }, { value: 5, skipped: 1, keys: ['broadcast', 'error', 'redirect', 'end'] });
+});
+
+test('#822 walk measures read world truth: arrival from the receipt\'s last phase, speed from receipt ticks', async () => {
+  const S = (sec, tick, x, extra = {}) => ({ t: iso(sec), tick, pos: { x, z: 0 }, posture: 'walking', place: 'field', ...extra });
+  const R = (extra = {}) => ({ id: 'r-walk', capability: 'walk:g-hall', phase: 'started', acceptedTick: 20, startedTick: 20, endedTick: null, chosen: { place: 'g-hall' }, ...extra });
+  // The walk is cut off by the next request (as a directed run's next direction does) and ends in the later pack.
+  const packs = (end, start = {}) => [
+    // A loaded server: the samples are 10 s of wall apart per 100 ticks (10 Hz on the wall clock), but a tick is still
+    // 50 ms of world time, so speed is over ticks × 0.05 s, not over the wall-derived rate.
+    { requestId: 'bo-001', seat: 'bo', channel: 'card', text: 'Walk to the hall', sentAt: iso(0), cutoffAt: iso(20), samples: [S(2, 40, 0), S(12, 140, 5)], receipts: [R(start)] },
+    { requestId: 'bo-002', seat: 'bo', channel: 'card', text: 'Say hello', sentAt: iso(20), cutoffAt: iso(40), samples: [S(22, 240, 10, { posture: 'standing', place: 'g-hall.room' })], receipts: end ? [R({ ...start, ...end })] : [] },
+  ];
+  const ev = async (pk) => (await evaluateRun(makeRun({ observerOk: true, packs: pk }), { write: false })).evaluation;
+  const done = { phase: 'completed', endedTick: 200, endedAt: { place: 'g-hall.room', pos: [10, 0] } };
+
+  const ok = await ev(packs(done));
+  assert.equal(M(ok, 'walkArrivalRate').value, 1, 'completed after the cutoff is still an arrival (world truth)');
+  assert.equal(M(ok, 'walkArrivalRate').n, 1);
+  assert.match(M(ok, 'walkArrivalRate').basis, /arrival oracle saw 0\/1/, 'the at-cutoff oracle count is kept beside it');
+  assert.equal(M(ok, 'walkArrivalRate').walks[0].receiptId, 'r-walk');
+  assert.equal(M(ok, 'walkMps').status, 'measured');
+  assert.ok(Math.abs(M(ok, 'walkMps').value - 1.25) < 1e-9, `10 m over ticks 40..200 at 50 ms a tick (8 world s), whatever the wall rate: ${M(ok, 'walkMps').value}`);
+  assert.equal(M(ok, 'walkMps').n, 1, 'one receipt seen in two packs is one speed');
+  assert.match(M(ok, 'walkMps').basis, /startedTick 1, startedAt 0/);
+
+  const failed = await ev(packs({ phase: 'failed', endedTick: 200, code: 'no-route' }));
+  assert.equal(M(failed, 'walkArrivalRate').value, 0);
+  assert.match(M(failed, 'walkArrivalRate').walks[0].why, /failed \(no-route\)/);
+
+  const elsewhere = await ev(packs({ ...done, endedAt: { place: 'g-yard', pos: [10, 0] } }));
+  assert.equal(M(elsewhere, 'walkArrivalRate').value, 0, 'completed outside the chosen place is not an arrival');
+
+  const open = await ev(packs(null));
+  assert.equal(M(open, 'walkArrivalRate').status, 'unavailable', 'a walk never seen terminal is unknown, not a miss');
+  assert.match(M(open, 'walkArrivalRate').reason, /never terminal/);
+
+  const noTicks = await ev(packs(done, { acceptedTick: undefined, startedTick: undefined }).map((p) => ({ ...p, receipts: p.receipts.map((r) => ({ ...r, acceptedAt: iso(1) })) })));
+  assert.equal(M(noTicks, 'walkMps').status, 'unavailable');
+  assert.equal(M(noTicks, 'walkMps').value, null, 'never 0');
+  assert.match(M(noTicks, 'walkMps').reason, /no startedTick or firstMotionTick/);
+
+  const motion = await ev(packs(done, { firstMotionTick: 140 }));
+  assert.ok(Math.abs(M(motion, 'walkMps').value - 5 / 3) < 1e-9, `from first motion: 5 m over ticks 140..200: ${M(motion, 'walkMps').value}`);
+  assert.match(M(motion, 'walkMps').basis, /firstMotionTick 1, startedTick 0, startedAt 0/);
+});
+
+test('directed casts: requests come from the direction stream, joined with the seat transcripts; absent stays unavailable', async () => {
+  const persona = (await evaluateRun(makeRun(), { write: false })).evaluation;
+  const e = (await evaluateRun(makeRun({ name: 'direct-1', directed: true }), { write: false })).evaluation;
+  for (const id of ['ackSec', 'seatResultSec', 'unacked', 'directorOpenSec', 'requestsPhysicallyCompleted', 'requestsPhysicallyUnknown', 'seatReportedDone']) {
+    assert.equal(M(e, id).status, 'measured', id);
+    assert.equal(M(e, id).value, M(persona, id).value, `${id} matches the persona-director run of the same calls`);
+  }
+  assert.equal(M(e, 'requestsPhysicallyCompleted').denominator, 2);
+  assert.match(M(e, 'ackSec').basis, /director\/directions\.jsonl/);
+  assert.ok(M(e, 'ackSec').sources.includes('playtest/director/directions.jsonl'));
+  const bo2 = e.requests.find((r) => r.requestId === 'bo-002');
+  assert.deepEqual(bo2.refs[0], { path: 'playtest/director/directions.jsonl', line: 4, sha256: bo2.refs[0].sha256 }, 'the card keeps its line in the stream');
+  assert.equal(bo2.text, 'Change of plan: the pond hall instead');
+  // ada has a delivered card but no transcript: her request is left out of seat timing and said so.
+  assert.match(M(e, 'ackSec').basis, /no transcript for ada/);
+  // Seats without a transcript: latency unavailable with the reason, never 0.
+  const deaf = (await evaluateRun(makeRun({ name: 'direct-2', directed: true, noTranscript: true }), { write: false })).evaluation;
+  for (const id of ['ackSec', 'seatResultSec', 'unacked', 'requestsPhysicallyCompleted']) assert.equal(M(deaf, id).status, 'unavailable', id);
+  assert.equal(M(deaf, 'ackSec').reason, 'no seat transcripts were retained');
+  // No director records at all: no requests, so physical completion is unavailable rather than 0 over nothing.
+  const none = (await evaluateRun(makeRun({ name: 'direct-3', noDirector: true }), { write: false })).evaluation;
+  assert.equal(M(none, 'ackSec').reason, 'no director records');
+  assert.equal(M(none, 'requestsPhysicallyCompleted').status, 'unavailable');
+  assert.equal(M(none, 'requestsPhysicallyCompleted').reason, 'no director records to join the seat\'s acts to');
 });

@@ -115,7 +115,9 @@ test('#1141: the read cache keeps whole answers and answers a matching tag itsel
   const A = '/w/genes-valley/v1/edge/public/souls/s_tagged', asked = (tag) => api(A, { headers: { 'if-none-match': tag } });
   const cold = await asked('"t1"');   // the first caller's tag must not be what the shared entry is filled with
   assert.equal(cold.status, 304); assert.equal(cold.headers.get('etag'), '"t1"'); assert.equal(cold.headers.get('x-sim-cache'), 'miss'); assert.equal(await cold.text(), '');
+  assert.match(cold.headers.get('server-timing') ?? '', /world;dur=3\.0/, 'the answer the world made says what it cost');
   const plain = await api(A); assert.equal(plain.status, 200); assert.equal(await plain.text(), '{"soul":"s_tagged"}', 'the next caller reads the whole answer');
+  assert.equal(plain.headers.get('x-sim-cache'), 'hit'); assert.match(plain.headers.get('server-timing') ?? '', /^launcher;dur=[\d.]+;desc=cache$/, '#1737/#1750: a kept answer does not repeat the world\'s time; it says the launcher gave it');
   const hit = await asked('W/"t1"'); assert.equal(hit.status, 304, 'a weak form matches'); assert.equal(hit.headers.get('etag'), '"t1"'); assert.ok(hit.headers.get('x-sim-cache'));
   const stale = await asked('"old"'); assert.equal(stale.status, 200); assert.equal(await stale.text(), '{"soul":"s_tagged"}', 'a tag that does not match reads it all');
   // callers sharing one flight, the first of them with a tag: the others still read the whole answer
@@ -210,6 +212,87 @@ test('an idle world falls asleep (frozen in place) and wakes at once on its next
     const exited = new Promise((r) => L4.pool.state('held').child.once('exit', (code, signal) => r(signal ?? code)));
     await L4.pool.stop('held'); assert.ok(['SIGTERM', 0].includes(await exited));
   } finally { await L4.close(); }
+});
+test('#1997: a resident client (live poll, listen, wait, stream) lets its world sleep; an act wakes it and the long-polls go on', async () => {
+  // reuses the sleep launcher's ports (base+2..4): that test closed its launcher before this one opens
+  const P = at(4), base = `http://127.0.0.1:${P}`, SLEEP = 600, hits = join(dir, 'resident-hits.log');
+  writeFileSync(hits, '');
+  const cmd = (w, port) => { const c = command(w, port); c.env.FAKE_HITS = hits; return c; };
+  const L7 = await openLauncher({ port: P, range: [at(2), at(3)], dataDir: join(dir, 'data-resident'), webDir, templatesDir, command: cmd, sleepMs: SLEEP, eager: 0, log: () => {} });
+  const sleepy = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (f, ms = 5000) => { const t = Date.now(); while (!f() && Date.now() - t < ms) await sleepy(25); return f(); };
+  const w = (s, p, o = {}) => { const f = fetch(`${base}/w/${s}${p}`, { ...o, headers: { authorization: 'Bearer sim_s_rest_x', ...o.headers } }); f.catch(() => {}); return f; };   // (held ones outlive a failure)
+  const stream = async (s) => { const r = await w(s, '/v1/edge/events?kinds=speech.to-me', { headers: { accept: 'text/event-stream' } }); let text = '', ended = false; const read = (async () => { for await (const c of r.body) text += Buffer.from(c).toString(); ended = true; })(); return { r, read, text: () => text, ended: () => ended }; };
+  let polling = true;
+  try {
+    for (const name of ['Rest', 'Quiet']) assert.equal((await fetch(`${base}/__sim/worlds`, { method: 'POST', body: JSON.stringify({ name }) })).status, 201);
+    assert.equal((await w('rest', '/slow?ms=1')).status, 200);   // both up and used once
+    assert.equal((await w('quiet', '/slow?ms=1')).status, 200);
+    const k = L7.pool.state('rest'), q = L7.pool.state('quiet'), pid = k.child.pid, used = k.lastUsed;
+    // AC1: the resident's traffic: the 2 s live poll (here every 50 ms) and its listen, wait and stream held open
+    let asleepLives = 0, liveFails = 0;
+    const poll = (async () => { while (polling) { const r = await w('rest', '/v1/edge/live').catch(() => null); if (r?.status === 200) { const b = await r.json(); assert.equal(b.pid, pid); if (r.headers.get('x-sim-cache') === 'asleep') asleepLives++; } else liveFails++; await sleepy(50); } })();
+    const listen = w('rest', '/v1/edge/inbox/listen?timeoutMs=50000');
+    const wait = w('rest', '/v1/edge/wait?timeout=55&after=c_0');
+    const s1 = await stream('rest'); assert.equal(s1.r.status, 200);
+    assert.ok(await until(() => k.frozen && q.frozen), 'both worlds fall asleep');
+    assert.equal(k.lastUsed, used, 'resident traffic is not a use');
+    const idleRest = k.frozenAt - used, idleQuiet = q.frozenAt - q.lastUsed;
+    assert.ok(idleRest >= SLEEP && idleRest < SLEEP + 600, `rest froze ${idleRest} ms after its last use`);
+    assert.ok(Math.abs(idleRest - idleQuiet) < 600, `same idle window: ${idleRest} vs ${idleQuiet} ms`);
+    // AC3: what was open at the freeze ends cleanly: a retry for the listen and the wait, a normal end for the stream
+    for (const r of [await listen, await wait]) { assert.equal(r.status, 503); const b = await r.json(); assert.equal(b.code, 'world.busy'); assert.equal(r.headers.get('retry-after'), '1'); }
+    await s1.read; assert.ok(s1.ended() && s1.text().includes('event: hello'), 'the stream ended normally');
+    // asked again while it sleeps: parked here, the world stays asleep and is not asked; the poll is answered from the last picture
+    const mark = readFileSync(hits, 'utf8').length;
+    const listen2 = w('rest', '/v1/edge/inbox/listen?timeoutMs=50000'), s2 = stream('rest'); s2.catch(() => {});
+    await sleepy(800);
+    assert.equal(k.frozen, true, 'the resident did not wake it'); assert.equal(k.lastUsed, used);
+    assert.ok(asleepLives > 0, 'the live poll was answered while it slept'); assert.equal(liveFails, 0);
+    assert.doesNotMatch(readFileSync(hits, 'utf8').slice(mark), /\/v1\/edge\/(inbox\/listen|events)/);
+    // AC2: an act wakes it at once and is answered; the parked listen and stream then reach the world (AC3: picked up again)
+    const t0 = Date.now(), act = await w('rest', '/echo', { method: 'POST', body: 'act' }), actMs = Date.now() - t0;
+    assert.equal(act.status, 200); assert.equal(await act.text(), 'act'); assert.ok(actMs < 1000, `answered ${actMs} ms after the thaw`);
+    assert.equal(k.frozen, false); assert.equal(k.child.pid, pid, 'the same process, thawed');
+    const s2r = await s2; assert.equal(s2r.r.status, 200);
+    await until(() => s2r.text().includes('event: hello'));
+    assert.ok(s2r.text().includes('event: hello'), 'the stream is picked up again');
+    await until(() => /\/v1\/edge\/inbox\/listen\?timeoutMs=\d+/.test(readFileSync(hits, 'utf8').slice(mark)));
+    const left = Number(/\/v1\/edge\/inbox\/listen\?timeoutMs=(\d+)/.exec(readFileSync(hits, 'utf8').slice(mark))?.[1]);
+    assert.ok(left > 40_000 && left < 50_000, `the listen went on with what was left of its deadline (${left} ms)`);
+    // and it sleeps again once the act is old, the forwarded listen and stream ended cleanly again
+    assert.ok(await until(() => k.frozen), 'asleep again');
+    assert.equal((await listen2).status, 503); await s2r.read; assert.ok(s2r.ended());
+    console.log(`#1997 measure (fake world): last use -> asleep ${idleRest} ms (no traffic: ${idleQuiet} ms); first act after the thaw answered in ${actMs} ms`);
+  } finally { polling = false; await sleepy(100); await L7.close(); }
+});
+test('#1997: a world that gives its memory back is stopped once; its resident client does not boot it again, an act does', async () => {
+  // reuses the sleep launcher's ports (base+2..4), after the tests above closed theirs. A slow stop (1 s), as a real world saving its snapshot
+  const P = at(4), base = `http://127.0.0.1:${P}`, lines = [];
+  const cmd = (w, port) => { const c = command(w, port); c.env.FAKE_STOP_MS = '1000'; return c; };
+  const L8 = await openLauncher({ port: P, range: [at(2), at(3)], dataDir: join(dir, 'data-resident-exit'), webDir, templatesDir, command: cmd, sleepMs: 400, exitMs: 800, eager: 0, log: (l) => lines.push(l) });
+  const sleepy = (ms) => new Promise((r) => setTimeout(r, ms));
+  const w = (p, o = {}) => { const f = fetch(`${base}/w/gone${p}`, { ...o, headers: { authorization: 'Bearer sim_s_gone_x', ...o.headers } }); f.catch(() => {}); return f; };
+  let on = true;
+  try {
+    assert.equal((await fetch(`${base}/__sim/worlds`, { method: 'POST', body: JSON.stringify({ name: 'Gone' }) })).status, 201);
+    assert.equal((await w('/slow?ms=1')).status, 200);
+    const pids = new Set(); const watch = setInterval(() => { const pid = L8.pool.state('gone')?.child?.pid; if (pid) pids.add(pid); }, 20);
+    // the resident: a live poll every 100 ms and a listen asked again 200 ms after each answer
+    const poll = (async () => { while (on) { await w('/v1/edge/live').catch(() => null); await sleepy(100); } })();
+    const listen = (async () => { while (on) { await w('/v1/edge/inbox/listen?timeoutMs=50000').catch(() => null); await sleepy(200); } })();
+    for (let i = 0; i < 100 && L8.pool.status('gone').status !== 'asleep' || !lines.some((l) => /gave its memory back/.test(l)); i++) await sleepy(100);
+    await sleepy(3000);   // the stop is long over: anything that would boot it again has had time to
+    clearInterval(watch);
+    assert.equal(lines.filter((l) => /gone gave its memory back/.test(l)).length, 1, 'stopped exactly once');
+    assert.equal(pids.size, 1, 'never booted again by its resident client');
+    assert.equal(L8.pool.state('gone').child, null); assert.equal(L8.pool.status('gone').status, 'asleep');
+    // an act boots it (a new process) and is answered
+    const act = await w('/echo', { method: 'POST', body: 'act' });
+    assert.equal(act.status, 200); assert.equal(await act.text(), 'act');
+    assert.ok(L8.pool.state('gone').child?.pid && !pids.has(L8.pool.state('gone').child.pid), 'a new process for the act');
+    on = false; await Promise.race([Promise.all([poll, listen]), sleepy(100)]);
+  } finally { on = false; await sleepy(100); await L8.close(); }
 });
 test('the Eyes render worker (user agent EdenEyes/1) is not a watcher: its page and socket let the world sleep', async () => {
   // the Eyes launcher: base+22..24

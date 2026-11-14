@@ -7,7 +7,8 @@ _LIB_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIM_CHECKOUT="${SIM_CHECKOUT:-$(cd "$_LIB_HERE/../../../.." && pwd)}"   # repo root: where tools/playtest lives
 STATE_DIR="${SIM_DIRECTOR_STATE:-$SIM_CHECKOUT/.e2e/playtest/live}"
 STATE="$STATE_DIR/current.env"
-RUNS_ROOT="${SIM_RUNS_ROOT:-$SIM_CHECKOUT/.e2e/playtest/runs}"
+# #1098 arm B2: live seats never run inside a checkout (their Claude Code session would load it), so runs go beside it
+RUNS_ROOT="${SIM_RUNS_ROOT:-$(node -e 'import(process.argv[1]).then((m)=>console.log(m.outsideCheckout("souls-playtest-runs")))' "$SIM_CHECKOUT/tools/playtest/arena/seat-home.mjs")}"
 LOAD_MAX="${SIM_LOAD_MAX:-10}"
 
 die() { echo "souls-director: $*" >&2; exit 1; }

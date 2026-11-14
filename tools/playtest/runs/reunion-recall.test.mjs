@@ -95,6 +95,11 @@ test('a walk with no observed end is unknown; its end, read later, settles it', 
 test('no shared plan on day one is unknown, not a failure of memory', () => {
   assert.equal(verdict([say('See you.', T - 5000), parted(), say('Bo!'), walk('flag-orchard')]), 'unknown');
   assert.equal(verdict([plan('flag-knoll'), parted(), say('Bo!'), walk('flag-orchard')]), 'unknown');
+  // #1606: a first day that didn't happen says so, so an arm can stop before paying for another
+  const why = (a) => question.score(ctxOf(a, good('Ada'))).uncertainty;
+  assert.match(why([say('See you.', T - 5000), parted(), say('Bo!'), walk('flag-orchard')]), /^invalid-day-1: the two Souls stated no shared plan/);
+  assert.match(why([plan(), say('Bo!'), walk('flag-orchard')]), /^invalid-day-1: a Soul never walked away/);
+  assert.doesNotMatch(why([here({ day: 1, atMs: T - 8000 }), here({ day: 2, atMs: T - 6000 }), ...good('Bo')]) ?? '', /invalid-day-1/, 'a clock fault is not a day one that didn\'t happen');
 });
 test('a plan the world repeats is not recall; the Soul\'s own memory and brief are', () => {
   const told = { verb: 'pending', args: [], atMs: T + 500, out: { events: [{ text: 'Tomorrow at walk:flag-orchard.' }] } };
@@ -117,4 +122,13 @@ test('a seat that never had a second card, or no transcript, is unknown, never a
   const one = ctxOf(good('Bo'), good('Ada'));
   assert.equal(question.score({ ...one, requests: one.requests.filter((r) => !(r.seat === 'bo' && r.sentAt === new Date(T).toISOString())) }).verdict, 'unknown');
   assert.equal(question.score({ ...one, hasTranscript: () => false }).verdict, 'unknown');
+});
+test('#1736: a walk in a chained call whose output could not be told apart is a move this question can\'t place', () => {
+  const lost = { verb: 'act', args: ['walk:flag-orchard', '--wait', '60'], atMs: T + 2000, out: null, unplaced: true };
+  assert.equal(verdict([plan(), parted(), say('Bo!'), lost]), 'unknown');
+});
+test('#1736: a second day with no words still cites what the Soul did, so a fail is not dropped for want of evidence', () => {
+  const quiet = [plan(), parted(), { verb: 'result', args: ['msg_3', 'done', 'Carrying on'], atMs: T + 1000, line: 7, out: { closed: true } }];
+  const r = question.score(ctxOf(quiet, quiet));
+  assert.equal(r.verdict, 'fail'); assert.ok(r.evidence.length > 0);
 });

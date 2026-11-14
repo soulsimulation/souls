@@ -4,11 +4,12 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateExpect } from '../../review/expect-oracles.mjs';
+import { validateExpect, wordFromTargets } from '../../review/expect-oracles.mjs';
 import { normalizeCast } from '../../director/swarm/cast.mjs';
 import { providerPolicy } from '../../lib/provider-policy.mjs';
 import { templateNames, dist } from './world-names.mjs';
 import { validateScript } from '../../arena/adapters/scripted-owner.mjs';
+import { validateBattery } from '../../eval/measure.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCENARIOS = resolve(HERE, '..');
@@ -29,12 +30,30 @@ export function checkTargets(genesis, targets, where) {
   return errs;
 }
 
+/** Near-expect truth against the template (H4): targets[] with radiusM, and every answer.anyOf word that names placed
+ *  things names one within radiusM of a target (a word that names nothing placed is an alias and passes). → [string] */
+export function checkNear(genesis, x, where) {
+  if (!Array.isArray(x?.targets) || !x.targets.length) return [`${where} expect.targets[] required for near (the place asked about, from the template)`];
+  const errs = x.targets.flatMap((t, i) => (t.radiusM > 0 ? [] : [`${where} targets[${i}].radiusM required for near`]));
+  if (errs.length) return errs;
+  const N = namesOf(genesis);
+  for (const w of x.answer?.anyOf ?? []) {
+    const j = wordFromTargets(N, x.targets, w);
+    if (j.self) errs.push(`${where} answer.anyOf "${w}" names only the place asked about (${j.thing})`);
+    else if (j.placed && !j.near) errs.push(`${where} answer.anyOf "${w}": the nearest placed ${j.thing} is ${j.d.toFixed(1)} m from ${j.target.ref ?? j.target.names[0]} (radiusM ${j.target.radiusM})`);
+  }
+  return errs;
+}
+
 /** validateScenario(obj) → [string] (empty when it would run). */
 export function validateScenario(s) {
   const errs = [];
   if (!s?.name || !/^[a-z0-9-]+$/.test(s.name)) errs.push('name: lowercase letters, digits and -');
   if (s?.world?.kind !== 'dev') errs.push('world.kind must be "dev" (the only kind run provisions)');
-  if (!s?.world?.genesis || !existsSync(join(REPO, s.world.genesis))) errs.push(`world.genesis ${s?.world?.genesis} not found in the repo`);
+  // A frozen snapshot alone names the world (#883); a genesis given beside it must still exist.
+  if (s?.world?.snapshot) { if (!existsSync(resolve(REPO, s.world.snapshot))) errs.push(`world.snapshot ${s.world.snapshot} not found`); }
+  else if (!s?.world?.genesis) errs.push(`world.genesis ${s?.world?.genesis} not found in the repo`);
+  if (s?.world?.genesis && !existsSync(join(REPO, s.world.genesis))) errs.push(`world.genesis ${s.world.genesis} not found in the repo`);
   if (!Number.isInteger(s?.world?.port)) errs.push('world.port required');
   if (!(s?.durationSec > 0)) errs.push('durationSec > 0');
   const ids = new Set();
@@ -43,6 +62,7 @@ export function validateScenario(s) {
     if (!ADAPTERS.includes(x.adapter)) errs.push(`seats[${i}].adapter ${x.adapter}`);
     if (x.adapter === 'claude-headless' && !x.model) errs.push(`seats[${i}].model required for a Claude seat`);
     if (!x.soulName) errs.push(`seats[${i}].soulName required`);
+    if (x.briefBytes != null && !(Number.isSafeInteger(x.briefBytes) && x.briefBytes >= 0)) errs.push(`seats[${i}].briefBytes must be a whole number of bytes, 0 for no brief`);
     if (x.adapter === 'scripted-owner') for (const e of validateScript(x.script)) errs.push(`seats[${i}].${e}`);
     if (x.persona && !existsSync(join(PERSONAS, `${x.persona}.md`))) errs.push(`seats[${i}].persona ${x.persona}: no personas/${x.persona}.md`);
   }
@@ -61,7 +81,10 @@ export function validateScenario(s) {
       if (e.after != null && e.after !== 'result') errs.push(`script[${i}].after must be "result" (send once this seat's open requests have closed)`);
       if (e.atSec + (e.budgetSec ?? 0) > s.durationSec) errs.push(`script[${i}] ends after durationSec`);
       for (const id of e.seat === '*' ? ids : [e.seat]) (bySeat[id] ??= []).push(e);
-      if (e.expect) { for (const m of validateExpect(e.expect)) errs.push(`script[${i}] ${m}`); if (s.world?.genesis) errs.push(...checkTargets(s.world.genesis, e.expect.targets, `script[${i}]`)); }
+      if (e.expect) {
+        for (const m of validateExpect(e.expect)) errs.push(`script[${i}] ${m}`);
+        if (s.world?.genesis && existsSync(join(REPO, s.world.genesis))) { errs.push(...checkTargets(s.world.genesis, e.expect.targets, `script[${i}]`)); if (e.expect.kind === 'near') errs.push(...checkNear(s.world.genesis, e.expect, `script[${i}]`)); }
+      }
     }
     // Sequential direction waits for each request; non-sequential direction may overlap them (a mid-activity redirection).
     if (d.sequential !== false) for (const [seat, es] of Object.entries(bySeat)) { const o = [...es].sort((a, b) => a.atSec - b.atSec); for (let k = 1; k < o.length; k++) if (o[k].atSec < o[k - 1].atSec + (o[k - 1].budgetSec ?? 0)) errs.push(`seat ${seat}: "${o[k].text}" starts before "${o[k - 1].text}" has used its budget`); }
@@ -71,6 +94,11 @@ export function validateScenario(s) {
   if (s?.review?.mode !== 'deterministic' && !s?.review?.reviewerModel) errs.push('review.reviewerModel required');
   try { providerPolicy(s); } catch (e) { errs.push(e.message); }
   if (!s?.rails) errs.push('rails required');
+  // #1774: a run judges the owner messages that are battery items with #1752's checks (tools/playtest/eval/)
+  if (s?.battery) {
+    const b = s.battery.file ? (existsSync(resolve(REPO, s.battery.file)) ? JSON.parse(readFileSync(resolve(REPO, s.battery.file), 'utf8')) : null) : s.battery;
+    if (!b) errs.push(`battery.file ${s.battery.file} not found`); else for (const e of validateBattery(b)) errs.push(`battery: ${e}`);
+  }
   return errs;
 }
 

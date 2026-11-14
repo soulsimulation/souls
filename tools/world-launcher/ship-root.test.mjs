@@ -75,7 +75,7 @@ process.exit(halted ? 2 : 0);`);
     SHIP_HOST_ROOT: root, SHIP_HOST_DATA: data, SHIP_HOST_CONF: conf, SHIP_HOST_TMP: join(t, 'host'), SHIP_HOST_MEMINFO: join(t, 'host/meminfo'), SHIP_SSH: join(t, 'stubs/ssh'), SHIP_SCP: join(t, 'stubs/scp'), SHIP_NODE: join(t, 'stubs/node'),
     SHIP_PYTHON: join(t, 'stubs/python'), SHIP_RELEASE_SH: join(t, 'stubs/release'), SHIP_CURL: join(fakebin, 'curl'), SHIP_WALK_SLUGS: 'eden mars' };
   const run = (args, more = {}) => spawnSync('bash', [SHIP, ...args], { env: { ...env, ...more }, encoding: 'utf8', timeout: 60_000 });
-  return { t, repo, sha, build, env, run, writeReceipts, root, out: join(t, 'out/4.16'), calls: () => readFileSync(log, 'utf8'), base: ['--label', '4.16', '--sha', sha] };
+  return { t, repo, sha, build, env, run, writeReceipts, root, out: join(t, 'out/0.123'), calls: () => readFileSync(log, 'utf8'), base: ['--label', '0.123', '--sha', sha] };
 }
 
 test('--dry-run prints every step, touches nothing remote, writes nothing and never prints the host', () => {
@@ -122,7 +122,7 @@ test('every guard refuses before anything remote', () => {
 test('a commit that is not on origin/main is refused', () => {
   const s = setup(); writeFileSync(join(s.repo, 'b'), '1'); git(s.repo, 'add', 'b'); git(s.repo, 'commit', '-qm', 'local only');
   const sha = git(s.repo, 'rev-parse', 'HEAD'); s.writeReceipts({ refs: { candidate: { sha } } }, { candidate: sha });
-  const r = s.run(['--label', '4.16', '--sha', sha]);
+  const r = s.run(['--label', '0.123', '--sha', sha]);
   assert.equal(r.status, 1);
   assert.match(r.stdout, /not an ancestor of origin\/main/);
   assert.equal(s.calls(), '');
@@ -131,7 +131,7 @@ test('a commit that is not on origin/main is refused', () => {
 test('there is no host option, and --sha must be the full commit', () => {
   const s = setup();
   assert.equal(s.run([...s.base, '--host', 'x']).status, 2);
-  assert.equal(s.run(['--label', '4.16', '--sha', s.sha.slice(0, 12)]).status, 2);
+  assert.equal(s.run(['--label', '0.123', '--sha', s.sha.slice(0, 12)]).status, 2);
   assert.equal(s.calls(), '');
 });
 
@@ -144,7 +144,7 @@ test('a full run on the fake host: every step in order, the host block under an 
   const calls = s.calls();
   assert.match(calls, /release\tproduction --no-activate base=\//);
   assert.equal(calls.match(/^activate\t/gm).length, 1);
-  assert.ok(calls.indexOf('compact-backup.sh pre-r416 production') < calls.indexOf('activate\t'));
+  assert.ok(calls.indexOf('compact-backup.sh pre-r0123 production') < calls.indexOf('activate\t'));
   assert.ok(calls.indexOf('release-probe.mjs') < calls.indexOf('activate\t'));
   const snapshot = JSON.parse(readFileSync(join(s.out, 'snapshot.json'), 'utf8'));
   assert.ok(snapshot.remote.databasePaths.includes('body-collections.sqlite'));
@@ -305,12 +305,12 @@ test('a second run into the same output folder is refused', () => {
 test('verdicts: receipts, a backup that dropped rows or missed a database, stale activation inputs', () => {
   assert.deepEqual(receiptProblems(null, null, 'a', 'b').length > 0, true);
   const snapshot = { candidate: 'a', at: new Date().toISOString(), remote: { databases: 2, databasePaths: ['accounts.sqlite', 'body-collections.sqlite'] } };
-  const log = rows => [...rows, '/b/pre-r416-production-x'].join('\n');
-  const ok = '{"dropped":{}}', quick = 'ok /b/pre-r416-production-x/accounts.sqlite\nok /b/pre-r416-production-x/body-collections.sqlite\n';
-  assert.equal(backupReceipt(log([ok, ok]), quick, snapshot, 's', '416').databases, 2);
-  assert.throws(() => backupReceipt(log([ok, '{"dropped":{"events":1}}']), quick, snapshot, 's', '416'), /dropped rows/);
-  assert.throws(() => backupReceipt(log([ok, ok]), 'ok /b/pre-r416-production-x/accounts.sqlite\nok /b/pre-r416-production-x/other.db\n', snapshot, 's', '416'), /filenames differ/);
-  assert.throws(() => backupReceipt('nothing', quick, snapshot, 's', '416'), /did not name its folder/);
+  const log = rows => [...rows, '/b/pre-r0123-production-x'].join('\n');
+  const ok = '{"dropped":{}}', quick = 'ok /b/pre-r0123-production-x/accounts.sqlite\nok /b/pre-r0123-production-x/body-collections.sqlite\n';
+  assert.equal(backupReceipt(log([ok, ok]), quick, snapshot, 's', '0123').databases, 2);
+  assert.throws(() => backupReceipt(log([ok, '{"dropped":{"events":1}}']), quick, snapshot, 's', '0123'), /dropped rows/);
+  assert.throws(() => backupReceipt(log([ok, ok]), 'ok /b/pre-r0123-production-x/accounts.sqlite\nok /b/pre-r0123-production-x/other.db\n', snapshot, 's', '0123'), /filenames differ/);
+  assert.throws(() => backupReceipt('nothing', quick, snapshot, 's', '0123'), /did not name its folder/);
   const backup = { at: snapshot.at, status: 'pass', snapshotSha256: 's', databases: 2, quickChecks: 2 }, upload = { sha: 'a', manifestSha256: 'm' };
   assert.deepEqual(activationProblems(snapshot, 's', backup, upload, 'm'), []);
   assert.ok(activationProblems(snapshot, 's', backup, upload, 'm', Date.now() + 2 * 3_600_000).length >= 2);
@@ -409,6 +409,51 @@ test('#1402 the publishable release receipt: ship.sh accepts a clean one for thi
   }
 });
 
+// #2262: release.yml holds only the release receipt (and the exceptions), so the same cases run on that folder too
+for (const releaseOnly of [false, true]) test(`accepted exceptions${releaseOnly ? ', from the release receipt alone' : ''}: a gate blocked only by blockers the maintainer accepted for this receipt and cut passes; nothing else does`, async () => {
+  const { publicReceipt } = await import('../test-harness/ship-receipt.mjs');
+  const s = setup(), dir = join(s.t, 'blocked'), exceptions = join(s.t, 'accepted-exceptions.json'); mkdirSync(dir);
+  let last;
+  const removed = [{ step: 'V6-party', id: 'S1 CLI: act "walk to the fountain"' }, { step: 'V6-party', id: 'S3 CLI: act look fountain' }];
+  const skip = { step: 'V3-launcher-unit', id: 'a read-only folder', status: 'skip' };
+  const v7 = { schemaVersion: 1, step: 'V7', source: s.sha, dirty: false, status: 'pass', checks: [{ id: 'x', ok: true }], failed: [], at: '2026-11-12T10:30:00.000Z' };
+  const write = (more = {}) => {
+    const g = { schemaVersion: 1, status: 'blocked', blockers: ['2 baseline assertions removed', '1 unexpected test skip(s)/TODO(s)'], exclusions: ['V7', 'V8'], scope: { resolved: 'full' },
+      refs: { candidate: { sha: s.sha }, baseline: { sha: 'b'.repeat(40) } }, newFailures: [], removed, unexpectedSkips: [skip], quarantined: [], startedAt: '2026-11-12T10:00:00.000Z', ...more };
+    const bytes = JSON.stringify(g); last = g; if (!releaseOnly) writeFileSync(join(dir, 'receipt.json'), bytes);
+    writeFileSync(join(dir, 'release-receipt.json'), JSON.stringify(publicReceipt(g, sha256(bytes), v7, 'c'.repeat(64))));
+    return sha256(bytes);
+  };
+  const accept = (hash, more = []) => writeFileSync(exceptions, JSON.stringify({ schema: 'accepted-exceptions/1', gate_sha256: hash, cut: s.sha, accepted_by: 'maintainer', date: '2026-11-12', exceptions: [
+    { kind: 'removed', tests: removed, reason: 'reworded to offered ids', ref: '#2149' }, { kind: 'unexpectedSkips', tests: [skip], reason: 'skips only on Modal', ref: '#2212' }, ...more] }));
+  const ship = () => s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir, SHIP_EXCEPTIONS: exceptions });
+  let hash = write(); accept(hash);
+  let r = ship();
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /ACCEPTED removed \(#2149\)[\s\S]*V6-party: S3 CLI[\s\S]*apart from the exceptions the maintainer accepted/);
+  // without the file the same receipts refuse, as before
+  assert.match(s.run([...s.base, '--dry-run'], { SHIP_RECEIPTS: dir }).stdout, /release receipt is not clean/);
+  const refused = (want, name) => { r = ship(); assert.equal(r.status, 1, name); assert.match(r.stdout, want, name); assert.match(r.stdout, /blocked beyond the accepted exceptions/, name); };
+  accept(hash, []); writeFileSync(exceptions, readFileSync(exceptions, 'utf8').replace('"accepted_by":"maintainer"', '"accepted_by":"PENDING-GENE"'));
+  refused(/accepted_by is PENDING-GENE/, 'not yet accepted');
+  hash = write({ removed: [...removed, { step: 'V6-party', id: 'S5 read' }], blockers: ['3 baseline assertions removed', '1 unexpected test skip(s)/TODO(s)'] }); accept(hash);
+  refused(/not accepted: removed V6-party: S5 read/, 'one blocker uncovered');
+  write(); accept(hash);
+  refused(/different gate receipt/, 'hash mismatch');
+  const failure = { step: 'V5-server-full', id: 'a new failure' };
+  hash = write({ newFailures: [failure], blockers: ['1 new test failure(s)', '2 baseline assertions removed', '1 unexpected test skip(s)/TODO(s)'] }); accept(hash, [{ kind: 'newFailures', tests: [failure], reason: 'listed anyway', ref: '#1' }]);
+  refused(/new failures: never accepted[\s\S]*kind newFailures is never accepted[\s\S]*gate blocker is never accepted: 1 new test failure/, 'a new failure listed');
+  hash = write(); accept(hash); writeFileSync(join(dir, 'release-receipt.json'), JSON.stringify(publicReceipt(last, hash, { ...v7, status: 'fail', failed: ['x'] }, 'c'.repeat(64))));
+  refused(/the release receipt blocks beyond the accepted gate blockers/, 'a failing V7');
+  // a gate blocker other than the count lines is never accepted; a release receipt without the lists refuses
+  hash = write({ blockers: ['2 baseline assertions removed', '1 unexpected test skip(s)/TODO(s)', 'V5-server-full: candidate test file did not load: x'] }); accept(hash);
+  refused(/gate blocker is never accepted: (other|V5-server-full)/, 'another gate blocker');
+  if (releaseOnly) {
+    hash = write(); accept(hash); const rr = JSON.parse(readFileSync(join(dir, 'release-receipt.json'), 'utf8')); delete rr.gate.removedTests;
+    writeFileSync(join(dir, 'release-receipt.json'), JSON.stringify(rr));
+    refused(/does not list the gate's blockers and tests/, 'a release receipt from before #2262');
+  }
+});
+
 test('#1402 rehearse: a world slug that is not a plain slug is a stop, and nothing is written for it', () => {
   const s = setup(), data = join(s.t, 'host/data');
   writeFileSync(join(data, 'worlds.json'), JSON.stringify({ worlds: [{ slug: 'eden' }, { slug: '../escape' }] }));
@@ -429,7 +474,7 @@ test('#1438 --no-eyes: the browser steps are skipped and recorded, SHIP_RELEASED
   for (const tool of ['release-probe.mjs', 'ship/walk.mjs', 'poster.mjs', 'stall.mjs']) assert.doesNotMatch(calls, new RegExp(tool.replace('.', '\\.')), tool);
   assert.match(calls, /cdn-walk\.mjs/);
   assert.equal(calls.match(/^activate\t/gm).length, 1);
-  assert.ok(calls.indexOf('compact-backup.sh pre-r416 production') < calls.indexOf('activate\t'));
+  assert.ok(calls.indexOf('compact-backup.sh pre-r0123 production') < calls.indexOf('activate\t'));
   const lines = readFileSync(join(s.out, 'STEPS.txt'), 'utf8').split('\n').filter(Boolean);
   assert.match(lines[0], / mode ship-no-eyes /);
   assert.deepEqual(lines.slice(1).map(l => l.split(' ').slice(0, 2).join(' ')), ['snapshot ok', 'stage ok', 'rehearse ok', 'backup ok', 'probe-start skipped-no-eyes', 'activate ok',

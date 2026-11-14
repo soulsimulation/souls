@@ -4,13 +4,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
 import {execFile} from 'node:child_process';
-import {mkdtempSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {takeNowFlag, cleanNowText} from './soul/eden.mjs';
 
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
+const VERSION = /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(CLI, 'utf8'))[1];
 
 async function mounted(t) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'now2-'));
@@ -68,5 +69,5 @@ test('now sets the line alone, --clear clears it; a too-long line refuses before
   const before = m.seen.length; const r = await m.run(['act', 'wander:here', '--now', 'y'.repeat(141)], 1);
   assert.match(r.err, /at most 140/); assert.equal(m.seen.length, before, 'no call made');
   const {d} = await m.run(['status']);
-  assert.deepEqual(d.link, {state: 'connected', reason: 'listening', since: 3}); assert.deepEqual(d.now, {text: 'Rowing', at: 7}); assert.equal(d.client, '2.24.9'); assert.equal(d.pairedAs, 'the laptop', 'who the world knows holds it');
+  assert.deepEqual(d.link, {state: 'connected', reason: 'listening', since: 3}); assert.deepEqual(d.now, {text: 'Rowing', at: 7}); assert.equal(d.client, VERSION); assert.equal(d.pairedAs, 'the laptop', 'who the world knows holds it');
 });

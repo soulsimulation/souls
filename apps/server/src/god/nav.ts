@@ -102,6 +102,8 @@ export type Thing = {
   /** Buildings: just inside the front door, and whether that door is open now. */
   inside?: Vec2;
   doorOpen?: boolean;
+  /** #2261 Buildings: their ground-floor doors to the outside, each the middle of its gap and its outward direction. */
+  doors?: { at: Vec2; out: Vec2 }[];
   /** Has a seat (sit:<id> is offered near it). */
   seat?: boolean;
   /** Piers, decks, bridges: standing points ON the deck, preferred in order (F1). */
@@ -307,6 +309,11 @@ export class GodNav {
         const st = ((e.state?.doors ?? {}) as Record<string, unknown>)[front.id];
         doorOpen = st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def));
       }
+      // #2261: every door to the outside (only the front one when the openings do not say which are), in world terms
+      const exits = (outer.length ? outer : front ? [front] : []).map((o) => {
+        const at = toWorld(o.at[0], o.at[1]), ahead = toWorld(o.at[0] + Math.sin(o.yaw), o.at[1] + Math.cos(o.yaw));
+        return { at, out: [ahead[0] - at[0], ahead[1] - at[1]] as Vec2 };
+      });
       if (frontSlot) stands.push(toWorld(frontSlot.p[0], frontSlot.p[2]));
       // XP5 hook: the footprint's clear lane can be off-centre, or on an open side without a radial front door.
       if (def.make.kind === 'gen' && def.make.gen === 'kit/2' && def.make.args?.footprint && frontSlot) {
@@ -332,7 +339,7 @@ export class GodNav {
       }
       // the room the front door opens into goes first (the entrance)
       if (front) { const fa = toWorld(front.at[0], front.at[1]); roomRefs.sort((a, b) => { const A = out.find((t) => t.ref === a)!, B = out.find((t) => t.ref === b)!; return (A.level - B.level) || (polyDist(A.poly!, fa) - polyDist(B.poly!, fa)); }); }
-      out.unshift({ ...base, ref, kind: 'building', what: article(kind0), at: [wp.x, wp.z], level, stands, ...(inside ? { inside, doorOpen } : {}), rooms: roomRefs, words: [...base.words, 'building', 'house'] });
+      out.unshift({ ...base, ref, kind: 'building', what: article(kind0), at: [wp.x, wp.z], level, stands, ...(inside ? { inside, doorOpen } : {}), ...(exits.length ? { doors: exits } : {}), rooms: roomRefs, words: [...base.words, 'building', 'house'] });
       return out;
     }
     // seats: approach in front of each seat; stand slots (a fountain's rim): those points
@@ -384,7 +391,7 @@ export class GodNav {
     // nearest open spot of the main ground within r of it, else of `alt`; only once the engine's labels are ready (a
     // listing never waits for them)
     const toMain = (g: { p: Vec2; level: number } | null, r: number, ...alts: Vec2[]) => {
-      if (!g || g.level || !E.navCheckV1 || !E.navNearestMainV1 || !warmNow() || E.navCheckV1([{ id: t.ref, p: g.p, level: 0 }])[0]?.ok) return g;
+      if (!g || g.level || !E.navCheckV1 || !E.navNearestMainV1 || !warmNow() || this.connOk(t.ref, { p: g.p, level: 0 })) return g;
       // an area's spot must stay inside it: main ground outside a walled yard is not the yard (route truth)
       const ok = (v: Vec2 | null) => (v && (!t.area || inPoly(v[0], v[1], t.area)) ? v : null);
       let q = ok(E.navNearestMainV1(g.p, except, r));
@@ -468,17 +475,17 @@ export class GodNav {
       if (!t.stands?.length) goal = toMain(goal, t.big ? 80 : 3);
       // RESOLVE2: a thing up on a roof whose own patch is cut off (eden-house-3: its planters stand on a strip a ridge
       // parts from the terrace its roof stair lands on): the nearest connected standing room on that roof within 4 m
-      if (goal && goal.level > 0 && E.navCheckV1 && warmNow() && !E.navCheckV1([{ id: t.ref, ...goal }])[0]?.ok) goal = this.roofReach(goal) ?? goal;
+      if (goal && goal.level > 0 && E.navCheckV1 && warmNow() && !this.connOk(t.ref, goal)) goal = this.roofReach(goal) ?? goal;
       // #875: a seat whose stand point is in a pocket furniture closes off (a dining chair pushed in between the table and
       // the wall) while the room's main floor is beside it: another stand point of it that is connected, else the nearest
       // connected standing spot within 2.5 m of that stand point, both in its own room; with none the goal stays, refused
       // honestly. The floor through the wall is no way to it, and a search by distance doesn't know a wall, so a seat in no
       // room keeps its goal: a bench in a walled yard behind a closed door reads as cut off too, and the door opens on the way.
       // The ground floor only in practice: RESOLVE2 above has already moved an upper floor's goal, and no room limits that
-      if (goal && t.seat && E.navCheckV1 && warmNow() && !E.navCheckV1([{ id: t.ref, ...goal }])[0]?.ok) {
+      if (goal && t.seat && E.navCheckV1 && warmNow() && !this.connOk(t.ref, goal)) {
         const poly = this.things().find((r) => r.kind === 'room' && r.level === t.level && r.poly && inPoly(t.at[0], t.at[1], r.poly))?.poly;
         if (poly) {
-          const fits = (g: { p: Vec2; level: number } | null) => !!g && inPoly(g.p[0], g.p[1], poly) && !!E.navCheckV1!([{ id: t.ref, ...g }])[0]?.ok;
+          const fits = (g: { p: Vec2; level: number } | null) => !!g && inPoly(g.p[0], g.p[1], poly) && !!this.connOk(t.ref, g);
           let other: { p: Vec2; level: number } | null = null;
           for (const s of stands) { const g = near(s, t.level, 6); if (fits(g)) { other = g; break; } }
           // roofReach knows nothing of bodies: step off anyone on its spot, as any goal does, if that stays in the room
@@ -533,11 +540,22 @@ export class GodNav {
     return best ? { p: best, level: g.level } : null;
   }
 
+  /** #1515: the service points standing in a room on a level, kept per service-point list (a new list is a new object:
+   *  refreshServicePoints) and room description (a re-described world is new Thing objects): every room walk goal
+   *  filtered the whole list by point-in-polygon (12% of a walk listing at 12 Souls). */
+  private servicesIn(room: Thing, level: number): readonly ActivityServicePoint[] {
+    if (this.serviceMemo?.of !== this.servicePoints) this.serviceMemo = { of: this.servicePoints, m: new WeakMap() };
+    let byLevel = this.serviceMemo.m.get(room); if (!byLevel) this.serviceMemo.m.set(room, byLevel = new Map());
+    let out = byLevel.get(level);
+    if (!out) byLevel.set(level, out = this.servicePoints.filter(s => s.level === level && inPoly(s.at[0], s.at[1], room.poly!)));
+    return out;
+  }
+  private serviceMemo: { of: readonly ActivityServicePoint[]; m: WeakMap<Thing, Map<number, readonly ActivityServicePoint[]>> } | null = null;
   /** Prefer an equally reachable visitor point outside an activity's work
    * position. Retain the original goal if this bounded search has no alternative. */
   private visitorGoal(room: Thing, original: {p: Vec2; level: number}, near: (at: Vec2, level: number, ring?: number) => {p: Vec2; level: number} | null) {
     if (!room.poly) return original;
-    const services = this.servicePoints.filter(s => s.level === original.level && inPoly(s.at[0], s.at[1], room.poly!));
+    const services = this.servicesIn(room, original.level);
     const free = (p: Vec2) => services.every(s => Math.hypot(p[0] - s.at[0], p[1] - s.at[1]) >= SERVICE_STAND_DISTANCE);
     if (!services.length || free(original.p)) return original;
     const frame = room.roomFrame;
@@ -870,7 +888,7 @@ export class GodNav {
     const g0 = this.goal(t, here, soul.entityId);
     // RESOLVE2: a goal up on a roof (or a raised floor) the main ground has no way up to is never offered as available
     // (a roof bench with no stair: the walk 'completed' in the lobby below)
-    const E = this.E, cut = !!g0 && (g0.level > 0 || !!t.semanticPart) && !!E.navCheckV1 && !!E.navWarmV1?.(0) && E.navCheckV1([{ id, ...g0 }])[0]?.ok === false;
+    const E = this.E, cut = !!g0 && (g0.level > 0 || !!t.semanticPart) && !!E.navCheckV1 && !!E.navWarmV1?.(0) && this.connOk(id, g0) === false;
     const goal = cut ? null : g0;
     const cap: EdgeCapability = { id, verb: 'walk', label: where, ...(t.aliases?.length?{aliases:t.aliases}:{}), target, available: !!goal,
       ...(goal ? {} : { blocked: cut ? { code: 'route.unreachable', reason: this.unfinishedTo(g0!.level, t.ref) ?? `${t.ref} is up where no stair or ramp from the ground reaches.` } : this.blocked.has(t.ref) ? { code: 'route.unreachable', reason: this.blocked.get(t.ref)! } : { code: 'place.no-standing-room', reason: `There is no clear standing room at ${t.ref} right now.` } }) };
@@ -915,6 +933,27 @@ export class GodNav {
   private strolls = new Map<string, { key: string; spots: Vec2[] }>();
   /** The engine's navigation epoch, read once per tick and world version (each read syncs the planner, ~0.5 ms). */
   private epochMemo: { at: string; ep: number | undefined } | null = null;
+  /** #1515: navCheckV1's verdict for one standing point (joined to the main area both ways), kept per static epoch. The
+   *  verdict reads only the published connectivity labels, which the engine derives from the static world alone (no
+   *  bodies), and that world's staticEpochV1 moves exactly when that changes (a god commit, a layer or def change, a construction
+   *  phase, a ride's platform moving, a replaced spatial service); a check also drains any pending relabel first, so a
+   *  point's verdict at one static epoch is always the same. The epoch is read on every call (after the caller's own
+   *  warm poll has synced the planner, an integer compare): never a per-tick memo, so an edit within a tick is seen.
+   *  Undefined when the engine has no connectivity check. At 12 Souls the menu's main-ground checks of walk goals
+   *  re-labelled evicted 64 m tiles on every read (about a third of the walk listing, #1515 profile). */
+  private connOk(id: string, g: { p: Vec2; level: number }): boolean | undefined {
+    const E = this.E; if (!E.navCheckV1) return undefined;
+    const ep = E.staticEpochV1?.(); if (ep === undefined) return E.navCheckV1([{ id, p: g.p, level: g.level }])[0]?.ok;
+    // (the world read as well as its epoch: each engine counts its epochs from 1, and a rollback, a recovery rewind or a
+    // held head swaps the engine under this GodNav; one MenuWorld per engine, menuWorldOf)
+    if (this.connMemo?.ep !== ep || this.connMemo.of !== E) this.connMemo = { of: E, ep, m: new Map() };
+    const k = `${g.level}|${g.p[0]},${g.p[1]}`, m = this.connMemo.m;
+    if (m.has(k)) return m.get(k);
+    const ok = E.navCheckV1([{ id, p: g.p, level: g.level }])[0]?.ok;
+    if (m.size >= 50_000) m.clear();
+    m.set(k, ok); return ok;
+  }
+  private connMemo: { of: MenuWorld; ep: number; m: Map<string, boolean | undefined> } | null = null;
   private navEpoch(): number | undefined {
     const at = `${this.E.world.tick}|${this.h.version?.() ?? this.h.model.editSeq}`;
     if (this.epochMemo?.at !== at) this.epochMemo = { at, ep: this.E.navEpochV1?.() };

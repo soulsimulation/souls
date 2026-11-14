@@ -20,7 +20,7 @@ pnpm typecheck                               # every package (tsc --noEmit)
 pnpm --filter @souls/server test               # one package
 node --test apps/server/src/god/buildsafe.test.ts   # one file
 pnpm test:mars                               # the vendored engine's deterministic suite
-pnpm test:client                             # Soul client and client-eval suites
+pnpm test:client                             # the client-eval suite (the legacy client's tests no longer run, #1754)
 pnpm test                                    # everything (slow; prefer the focused forms)
 ```
 
@@ -117,13 +117,13 @@ therefore **windowed**:
   doesn't clear a deferred `ci-ok`. The run queues behind a CI run already going for the same PR and cancels nothing, and it
   does no heavy work if that run passes at the same head, or if the head's newest run already passed. Once a PR is in
   the window, its later pushes run in full as usual. A PR with conflicts gets no `pull_request` run until they are fixed.
-- **Any other label does nothing.** Its run sits in a concurrency group of its own, so it can't cancel a running CI, and
-  every job skips without taking a runner. A skipped required check reads as a pass, so in that run the `ci-ok` job carries
-  another name and can't replace a real result. The merge train ignores a run with every job skipped.
+- **Any other label starts the same run** (#2018). The merge queue reads only the newest `ci` run at a head, so a run
+  without `ci-ok` would hide the real one. Like a window label's run, it queues behind the PR's running CI, cancels
+  nothing, and does no heavy work when the head's newest run passed, so its `ci-ok` repeats that result.
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
   own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads. A merge-group run is path-scoped over everything in the group since `main`, and
+  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
@@ -132,6 +132,13 @@ Steward procedure: give `ci:run` to the PRs entering the window, normally the ne
 the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
+
+**CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
+the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
+work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
+main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
+full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
+The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
@@ -143,11 +150,13 @@ is not a gate step, so the gate's suite tree and cached baseline don't change.
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
 
-**Self-hosted runners.** The heavy `qualify` legs run on the runners named by the repository variable
-`CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners. The browser `smoke` leg
-and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a loaded shared host misses
-(#1162). One runner instance takes one job at a time, so routing is only worth it with several
-instances online. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
+**Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
+whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
+repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
+other leg, and every leg while the variable is unset, runs on GitHub-hosted runners, so one run uses both pools at
+once. The browser `smoke` leg and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a
+loaded shared host misses (#1162). One runner instance takes one job at a time, so routing is only worth it with several
+instances online; a leg moves between pools by its flag, and `ci-scope.test.mjs` pins the split. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
 systemd service under one dedicated unprivileged user, with the label, and Playwright's Chromium system packages when
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
 its header shows the one-line invocation from a workstation. The steward sets and clears `CI_HEAVY_RUNNER`.

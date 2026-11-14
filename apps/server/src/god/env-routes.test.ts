@@ -54,3 +54,16 @@ test('only a token leading an open build receives the shared-clock warning, with
   const done = await (await f.request('/v1/god/env', f.a, { weather: { kind: 'clear' } })).json() as { warnings: string[] };
   assert.equal(done.warnings.some(w => w.startsWith('env.shared-clock:')), false);
 });
+
+test('#1649 the owner changes the world time zone through POST /v1/god/env; a bad zone and a missing token are refused by name', async t => {
+  const f = fixture(t);
+  assert.equal((await f.request('/v1/god/env', undefined, { timeZone: 'Asia/Tokyo' })).status, 401);
+  const bad = await f.request('/v1/god/env', f.a, { timeZone: 'Mars/Olympus' });
+  assert.equal(bad.status, 400); assert.equal((await bad.json() as { code: string }).code, 'time.zone-invalid');
+  assert.equal(f.god.model.editSeq, 0, 'refused work never enters the journal');
+  const ok = await (await f.request('/v1/god/env', f.a, { timeZone: 'Asia/Tokyo' })).json() as { accepted: boolean; env: { time: { timeZone: string } } };
+  assert.equal(ok.accepted, true); assert.equal(ok.env.time.timeZone, 'Asia/Tokyo');
+  assert.equal(f.god.model.editSeq, 1, 'one recorded edit');
+  f.god.undo();
+  assert.equal((f.god.model.state.time as { timeZone?: string | null }).timeZone ?? null, null, 'undoable');
+});

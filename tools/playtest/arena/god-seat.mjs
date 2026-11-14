@@ -24,7 +24,7 @@ export const GOD_CLI = { file: 'eden-god.mjs', fallbackFile: null, status: ['sta
  *  the world does not serve /god/eden-god.mjs). */
 export function createGodSeat({ runDir, god, worldBase, serverRoot, rails, preinstall = false }) {
   const dir = join(runDir, 'god');
-  const s = new Seat({ dir, seat: { id: 'god', soulName: null, ...god }, worldBase, rails, cli: GOD_CLI, allowedTools: GOD_ALLOWED, kind: 'god' });
+  const s = new Seat({ dir, seat: { id: 'god', soulName: null, ...god }, worldBase, rails, cli: GOD_CLI, allowedTools: GOD_ALLOWED, kind: 'god', infraFile: join(runDir, 'infrastructure-invalid.jsonl') });
   mkdirSync(s.folder, { recursive: true });
   if (preinstall) {
     const src = [join(serverRoot, 'tools/god-skill/build/eden-god.mjs'), join(serverRoot, 'tools/god-skill/eden-god.mjs')].find(existsSync);
@@ -46,7 +46,7 @@ export function sendGodCardRequest({ base, text }) {
 }
 export const godCardViewRequest = ({ base }) => ({ url: `${base}/v1/god/inbox`, init: { method: 'GET', headers: godAuth } });
 async function call({ url, init }) {
-  const r = await fetch(url, { ...init, signal: AbortSignal.timeout(15000) });
+  const r = await fetch(url, { ...init, headers: { ...init.headers, 'x-soul-client': 'arena/1' }, signal: AbortSignal.timeout(15000) });
   let body = null; try { body = await r.json(); } catch { /* not json */ }
   if (!r.ok) { const e = new Error(`${init.method} ${new URL(url).pathname} → ${r.status} ${body?.code ?? ''}`); e.status = r.status; e.body = body; throw e; }
   return body;

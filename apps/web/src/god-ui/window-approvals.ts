@@ -8,9 +8,12 @@ import * as J from './join-api.ts';
 export const WINDOW_POLL_MS = 2000; // PAIR: worst case 2 s + one request, under the 3 s bar (was 4500: the modal took 0-4.5 s, walked 4.3 s)
 const KEY = `sim.approvalsClosed:${worldKey}`;
 
-/** The request to show: the newest waiting one this tab has not closed (the server lists newest first). */
-export function pickWindowApproval(waiting: readonly Pick<J.Approval, 'id' | 'status'>[], closed: ReadonlySet<string>): string | null {
-  return waiting.find((a) => a.status === 'pending' && !closed.has(a.id))?.id ?? null;
+/** The request to show: the newest waiting one this tab has not closed. Soul approvals and account requests (#2245) come
+ *  together, newest first by `createdAt`; the server lists each newest first, and that order stands where times tie. */
+export type WindowItem = { id: string; status: string; createdAt?: number };
+export function pickWindowApproval(waiting: readonly WindowItem[], closed: ReadonlySet<string>): string | null {
+  const newest = [...waiting].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  return newest.find((a) => a.status === 'pending' && !closed.has(a.id))?.id ?? null;
 }
 export function closedApprovals(storage: Pick<Storage, 'getItem'> | null = safeSession()): Set<string> {
   try { const v = JSON.parse(storage?.getItem(KEY) ?? '[]'); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []); } catch { return new Set(); }
@@ -43,10 +46,26 @@ export function approvalLine(a: J.Approval | null, refusedHere: boolean): string
   }
 }
 
+/** #2258: an account request stays open until it is answered. What its card says once it has ended elsewhere (a card that
+ *  approved or refused it closes instead). */
+export function requestLine(q: Pick<J.AccountRequest, 'status' | 'ended'> | null): string | null {
+  if (!q) return null;
+  if (q.status === 'expired') return 'Timed out';   // only an older world's request
+  if (q.status !== 'cancelled') return null;
+  return q.ended === 'refused' ? 'Refused' : q.ended === 'replaced' ? 'Replaced by a newer request from the same agent' : 'Withdrawn by the agent';
+}
+export const STALE_REQUEST_MS = 24 * 60 * 60_000;
+/** A request open for more than a day says so above its buttons: the matching code is what guards a late approve. */
+export function staleRequestNote(q: Pick<J.AccountRequest, 'status' | 'createdAt' | 'confirm'>, now = Date.now()): string | null {
+  if (q.status !== 'pending' || !(now - q.createdAt > STALE_REQUEST_MS)) return null;
+  return `This request is more than a day old. Answer it only if your agent is still asking and shows ${q.confirm}.`;
+}
+
 /** Requests waiting for the signed-in account; polls only while `enabled` and the tab is visible; stops for good when the
- *  world has no such list (an older server). */
-export function useWindowApprovals(enabled: boolean): J.Approval[] {
-  const [waiting, setWaiting] = useState<J.Approval[]>([]);
+ *  world has no such list (an older server). With `requests` (#2245, the new worlds' god panel) the account requests
+ *  (login, retire) come too. */
+export function useWindowApprovals(enabled: boolean, requests = false): (J.Approval | J.AccountRequest)[] {
+  const [waiting, setWaiting] = useState<(J.Approval | J.AccountRequest)[]>([]);
   useEffect(() => {
     if (!enabled) { setWaiting([]); return; }
     let live = true, timer: ReturnType<typeof setTimeout> | undefined, stopped = false, asking = false;
@@ -55,9 +74,10 @@ export function useWindowApprovals(enabled: boolean): J.Approval[] {
       if (!live || stopped || asking) return;
       if (typeof document !== 'undefined' && document.hidden) return;   // resumes on visibilitychange
       asking = true;
-      const list = await J.waitingApprovals().finally(() => { asking = false; });
+      const answer = await J.waitingApprovals().finally(() => { asking = false; });
       if (!live) return;
-      if (list === null) { stopped = true; setWaiting([]); return; }
+      if (answer === null) { stopped = true; setWaiting([]); return; }
+      const list = requests ? [...answer.approvals, ...answer.requests] : answer.approvals;
       setWaiting((prev) => (prev.length === list.length && prev.every((a, i) => a.id === list[i]!.id && a.status === list[i]!.status) ? prev : list));
       timer = setTimeout(() => void tick(), WINDOW_POLL_MS);
     };
@@ -65,6 +85,6 @@ export function useWindowApprovals(enabled: boolean): J.Approval[] {
     document.addEventListener('visibilitychange', onVisible);
     void tick();
     return () => { live = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [enabled]);
+  }, [enabled, requests]);
   return waiting;
 }

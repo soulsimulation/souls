@@ -47,7 +47,7 @@ import { keySeen, shapeWedgeDistance, viewFirst, viewWedge, type ViewWedge } fro
 import { WorldBuildSites, SITE_REFINEMENT, type PublicSite } from './WorldBuildSites.ts';
 import { GroundCover, coverSetting } from './gen-mesh/ground-cover.ts';
 import { isRideBalloonDef, rideMotionDef } from './gen-mesh/kits/ride-balloon.ts';
-import { isRideCarrierDef, carrierIdOf } from './ride-carriers.ts';
+import { isRideCarrierDef, carrierIdOf, hasOwnCars } from './ride-carriers.ts';
 import { holdRainbow, isRainbowDef } from './atmosphere/rainbow-things.ts';
 import {WorldEntityStairs,pendingStairDiff} from './WorldEntityStairs.ts';
 import { ScatterPools } from './ScatterPools.ts';
@@ -545,6 +545,7 @@ export class WorldEntityLayer {
     this.seq = delta.seq;
     this.sites.reset((delta.builds ?? []) as PublicSite[], delta.buildsRev ?? 0, delta.now);
     // entities: a record that differs from ours is replaced and drawn again (eased only when it is new to the picture)
+    const existingParents = new Set(delta.upserts.map(e => e.in.parent).filter(id => m.entities.has(id)));
     const queue: { id: string; ease: boolean }[] = [], upserted = new Set<string>();
     for (const e of delta.upserts as unknown as Entity[]) {
       const cur = m.entities.get(e.id);
@@ -565,7 +566,7 @@ export class WorldEntityLayer {
     const seen = new Set<string>();
     for (let i = 0; i < queue.length;) {
       const until = performance.now() + RESYNC_SLICE_MS;
-      m.readPass(() => { while (i < queue.length) { const { id, ease } = queue[i++]; if (seen.has(id)) continue; seen.add(id); const e = m.entities.get(id); if (e) { this.draw(e, ease); last.drawn++; } if (performance.now() >= until) break; } });
+      m.readPass(() => { while (i < queue.length) { const { id, ease } = queue[i++]; if (seen.has(id)) continue; seen.add(id); const e = m.entities.get(id); if (e) { this.draw(e, ease, false, existingParents.has(e.in.parent)); last.drawn++; } if (performance.now() >= until) break; } });
       if (i < queue.length) { await nextTask('user-visible'); if (signal.aborted || this.model !== m) return; }
     }
     this.stats.resyncs++;
@@ -732,6 +733,7 @@ export class WorldEntityLayer {
       if(contextChanged&&(d as DiffMsg&{by?:string}).by!=='engine')this.onContextChanged?.();
       for (const def of [...(d.defs ?? []), ...d.diff.defs]) { this.model.defs.set('sha:' + def.hash, def); this.model.defs.set(def.ref, def); if (def.ref.startsWith('core-')) this.model.defs.set('core/' + def.ref.slice(5), def); }
       for (const id of d.diff.removes) { this.touched.add(id); this.model.delete(id); this.undraw(id, held.has(id) ? SITE_REFINEMENT.removalDelaySeconds : 0); }
+      const existingParents = new Set(d.diff.upserts.map(e => e.in.parent).filter(id => this.model!.entities.has(id)));
       for (const e of d.diff.upserts) this.touched.add(e.id);
       if (d.ground || d.diff.world) this.groundTouched = true;
       for (const e of d.diff.upserts) { if (this.model.entities.has(e.id)) this.model.delete(e.id); this.model.insert(e); }
@@ -743,7 +745,7 @@ export class WorldEntityLayer {
       if (d.ground) { const grew = JSON.stringify(d.ground.extent) !== JSON.stringify(this.model.ground().extent); this.model.terrain = sameBase(this.model.ground(), d.ground) ? this.model.terrain.retile(d.ground, d.diff.tiles) : new Terrain(d.ground); this.rebuildTerrain(new Set(d.diff.tiles)); this.rebuildWater(); if (grew) this.buildHorizon(); }
       if (d.diff.world) { const before = JSON.stringify((this.model.state as { ground?: unknown }).ground ?? null); this.model.state = { ...this.model.state, ...d.diff.world } as WorldModel['state']; if (JSON.stringify((this.model.state as { ground?: unknown }).ground ?? null) !== before) this.rebuildTerrain(); }
       if (d.ground) this.sites.refreshAll(true); else this.sites.refitDiff(d);
-      for (const e of d.diff.upserts) this.draw(e, true);
+      for (const e of d.diff.upserts) this.draw(e, true, false, existingParents.has(e.in.parent));
       // children ride with a moved parent: refresh their targets without easing
       const upserted = new Set(d.diff.upserts.map(e => e.id));
       for (const e of d.diff.upserts) for (const cid of this.model.subtree(e.id).slice(1)) { const c = this.model.entities.get(cid); if (c && !upserted.has(cid)) this.draw(c, false); }
@@ -806,9 +808,18 @@ export class WorldEntityLayer {
   rideCars(): string[] {
     if (!this.model) return [];
     const out: string[] = [], m = this.model;
-    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def)) out.push(carrierIdOf(e, id => m.entities.has(id))); }
+    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def) && !hasOwnCars(def)) out.push(carrierIdOf(e, id => m.entities.has(id))); }
     return out;
   }
+  /** #2198: world-level god rides ridden in their own cars (a big wheel's gondolas): native carrier id → the thing's id. */
+  rideWheels(): Map<string, string> {
+    const out = new Map<string, string>(), m = this.model; if (!m) return out;
+    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && hasOwnCars(def)) out.set(carrierIdOf(e, id => m.entities.has(id)), e.id); }
+    return out;
+  }
+  /** #2198: where the ride on this wheel is now (its floor point, world metres) and whether it is going round; null when
+   *  nobody rides. The wheel turns its gondola to it (gen-mesh/motion.ts rideTurn). */
+  wheelRide(id: string, ride: { p: readonly number[]; aloft: boolean } | null) { const d = this.drawn.get(id); if (d) d.obj.userData.wheelRide = ride ?? undefined; }
   /** PERF-STREAM: top-level things by name, rebuilt when the world's records change (poseOverride ran a find over every
    *  record for every ride on every frame: 4 s of a 50,000-thing world's first half minute). */
   private names: { key: object; size: number; map: Map<string, Entity> } | null = null;
@@ -1593,7 +1604,7 @@ export class WorldEntityLayer {
 
   // ---------- things ----------
 
-  private draw(e: Entity, ease: boolean, force = false) {
+  private draw(e: Entity, ease: boolean, force = false, existingParent = false) {
     const m = this.model!; const def = m.resolvedDef(e.def);
     if (!def) return;
     // PERF-STREAM: a thing beyond the ring is not built (its record is kept; it is drawn when the camera comes); one that
@@ -1617,6 +1628,11 @@ export class WorldEntityLayer {
     const inPlace = !!existing && !existing.removing && existing.to.p.distanceTo(target) < 1e-6 && existing.to.s === wp.s && def.tags.includes('hand-operated') && (def.tags.includes('neon') || hasFlames(def));
     if (inPlace) ease = false;
     const refinement = ease && !isWorld ? this.sites.refinement(e, m) : null;
+    // #1664: a newly admitted surface child is already supported, not an airborne God creation.
+    // Preserve construction refinement and all births without a parent that existed before this update.
+    if (!existing && existingParent && !refinement && parent && pdef?.slots.some(slot => slot.id === e.in.slot && slot.kind === 'surface')) ease = false;
+    // Completed native work already committed this ordinary ground output at full size. God edits retain their creation ease.
+    if (!existing && !isWorld && !refinement && e.by === 'engine' && e.in.parent === 'world' && wp.y === 0 && !def.components.body) ease = false;
     if (existing && existing.defHash === defHash && !existing.removing && !force) {
       if (isWorld) return;
       // The parent or slot can change without changing the world pose. Resolve its host again even when no easing is needed.

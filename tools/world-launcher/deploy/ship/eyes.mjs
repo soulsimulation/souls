@@ -146,7 +146,7 @@ const rc = await probeExit; post.push(`probe ${rc}`);
 let bar = null; try { bar = JSON.parse(readFileSync(join(PDIR, 'report.json'), 'utf8')).bar; writeFileSync(join(OUT, 'probe-bar.json'), JSON.stringify(bar, null, 1) + '\n'); } catch {}
 const missed = !bar ? ['no-report'] : [['errorPages', bar.errorPages], ['notLoaded', bar.notLoaded?.length], ['noBuild', bar.noBuild?.length], ['arrivalsNotLoaded', bar.arrivalsNotLoaded?.length],
   ['lost', bar.lost], ['unclean', bar.unclean], ['notResumed', bar.notResumed], ['reloaded', bar.reloaded?.length], ['rolledBack', bar.rolledBack?.length]].filter(([, n]) => n > 0).map(([k, n]) => `${k}=${n}`)
-  .concat(bar.reconnectMaxMs > 5000 ? [`reconnectMaxMs=${bar.reconnectMaxMs}`] : []);
+  .concat(bar.reconnectMaxMs > (bar.reconnectBarMs ?? 5000) ? [`reconnectMaxMs=${bar.reconnectMaxMs}`] : []);
 if (rc !== 0) failed.push(`probe(${missed.join(',') || `exit=${rc}`})`);
 const live = async (name, log, cmd, args, more = {}) => { const c = await tool(join(OUT, log), cmd, args, { ...env, ...more }); post.push(`${name} ${c}`); if (c) failed.push(name); say(`${name}: ${c ? `FAILED (exit ${c})` : 'ok'}`); };
 const N = process.execPath, SHIPD = join(DEPLOY, 'ship'), URLS = SLUGS.map((s) => `${origin}/w/${s}/`);
