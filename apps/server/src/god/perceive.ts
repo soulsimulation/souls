@@ -263,7 +263,12 @@ export class GodPerceive {
   private wantOne(e: Entity, layersOn: boolean): { w: Want; sign?: SignRow } | null {
     const m = this.h.model, def = m.resolvedDef(e.def); if (!def) return null;
     const c = def.components as Record<string, unknown>;
-    if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) return null;
+    // #1900: held action-bearing carryables still publish their acts while the native body owns their pose.
+    // On restart the projection is rebuilt from scratch; excluding the held object marks its saved facade gone.
+    const native = this.h.engine.world.entities[e.id], support = native?.support;
+    const heldActionTool = !!c.carryable && actionsOf(def).length > 0 && support?.kind === 'in-hand'
+      && e.in.parent === support.by && !!this.h.engine.world.entities[support.by]?.human;
+    if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || (this.h.engineOwned(e) && !heldActionTool)) return null;
     if (keptShut(m, e)) return null;   // entry 42: kept in a shut drawer or locker: not a thing anyone sees until it is opened
     const text = signText(e, def), acts = this.h.commit ? actionsOf(def).some((a) => a.name !== 'repair' || !this.h.mending?.whole(e.id)) : false;
     // LAYERS: an owned, priced or scheduled thing is seen as such (a loaf for sale, Ana's door, the café's hours)
