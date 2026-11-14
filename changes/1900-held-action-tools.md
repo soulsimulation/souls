@@ -1,4 +1,5 @@
 ---
 type: fix
+pr: 1901
 ---
-Held portable tools keep their declared action offers after a world restart.
+Held cups, baskets and other portable tools keep their actions after a world restart instead of reporting they are gone.
