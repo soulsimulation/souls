@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway } from './soul/wake.mjs';
+import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway, actedBody, bodyPhase, nextBodyRead, WIND_DOWN_MS } from './soul/wake.mjs';
 import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState, pendingNotes } from './soul/eden.mjs';
 import { indexCatalog } from './soul/catalog.mjs';
 
@@ -152,6 +152,9 @@ async function world(t) {
     const url = new URL(req.url, 'http://w'), p = url.pathname;
     let body = ''; for await (const c of req) body += c;
     const json = (status, v) => { if (!res.destroyed) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); } };
+    if (w.copy && p === '/v1/edge/catalog') return json(200, { contract: 'soul-catalog/1', worldId: 'w1', scope: 'public', placeVerbs: [], anywhere: [], places: [{ id: 'g-hall', name: 'Hall', kind: 'building', parent: null, at: [0, 0] }], things: [], acts: [], counts: { places: 1, things: 0, acts: 0, kinds: 0 } });
+    if (w.copy && p === '/v1/edge/live') return json(200, { contract: 'soul-live/1', tick: 1, souls: [{ id: 's_me', name: 'Me', at: [0, 0], place: 'g-hall', doing: null }], speech: [] });
+    if (p === '/v1/edge/observe') { w.observed = (w.observed ?? 0) + 1; return w.body ? json(200, { self: { body: w.body } }) : json(404, { error: { code: 'not-found', message: p } }); }   // #2309
     if (p === '/v1/edge/self/link') return json(200, { link: { state: 'connected' }, now: w.line });   // #1933: the public line
     if (p === '/v1/edge/self/now') { w.line = JSON.parse(body).text; return json(200, { now: w.line }); }
     if (/^\/v1\/edge\/inbox\/[^/]+\/ack$/.test(p)) { const b = JSON.parse(body || '{}'); if ('now' in b) w.line = b.now; return json(200, { acked: true }); }
@@ -465,6 +468,8 @@ test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps th
   let r = await w.cli('wake', 'heartbeat');
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json.heartbeat.every, HEARTBEAT_EVERY_MIN);
+  assert.equal(HEARTBEAT_EVERY_MIN, 45, '#2309 A2: under the world\'s hour');
+  assert.equal(r.json.silence, undefined, '#2309 A2: no warning under the hour');
   r = await w.cli('wake', 'heartbeat', '--every', '15');
   const { every, prompt, command } = r.json.heartbeat;
   assert.equal(every, 15);
@@ -544,7 +549,15 @@ test('#1981 A2: help living names the 1,800 s cap and says to chain or repeat ac
   const long = (await w.cli('wake', 'heartbeat', '--every', '45')).json;
   assert.equal(long.gap, '45 minutes is longer than one activity (at most 1800 s): help living has the Soul chain activities, or repeat one, to cover the gap.');
   for (const every of ['30', '15']) assert.equal((await w.cli('wake', 'heartbeat', '--every', every)).json.gap, undefined, `${every} minutes fits one activity`);
-  assert.match((await w.cli('wake', 'heartbeat')).json.gap, /^60 minutes/, 'the default heartbeat is longer than one activity');
+  assert.match((await w.cli('wake', 'heartbeat')).json.gap, /^45 minutes/, 'the default heartbeat is longer than one activity');
+  // #2309 A2: an owner's own cadence is kept; 60 or more says once what the world does after an hour of silence
+  for (const every of ['60', '90']) {
+    const hb = (await w.cli('wake', 'heartbeat', '--every', every)).json;
+    assert.equal(hb.heartbeat.every, Number(every));
+    assert.match(hb.silence, /^The world takes the body after an hour of silence/);
+  }
+  assert.equal((await w.cli('wake', 'heartbeat', '--every', '59')).json.silence, undefined);
+  assert.match(living, /\(45 minutes unless your owner set `wake heartbeat --every`\)/, '#2309 A2: the wake prompt follows the default');
 });
 
 // #1933: the mind is away. A fake clock: T0 is 2027-01-15 08:00 UTC.
@@ -699,4 +712,50 @@ test('#1931 A3, A4: thing-state fires when that field of that thing changes, rea
   r = step(r.rules, st, T0 + 6_000);
   assert.deepEqual(r.fired.map((f) => [f.id, f.why]), [['w1', 'e_ch open is now false'], ['w2', 'e_ch open is now false']]);
   assert.deepEqual(step(r.rules, { ...st, catalog: null }, T0 + 8_000).fired, [], 'no catalog copy: nothing is read');
+});
+
+// #2309: the world's wind-down phase (#2295) as serve keeps it and look shows it. A fake clock: T0 as above.
+const BODY = {
+  awake: { state: 'awake', doing: null, since: T0 - 20 * MIN },
+  idle: { state: 'idle', doing: 'drifting', since: T0 - 5 * MIN },
+  zombie: { state: 'zombie', doing: 'drifting', since: T0 - 40 * MIN },
+  asleep: { state: 'asleep', doing: 'dozing', since: T0 - 90 * MIN },
+};
+test('#2309 A3: each phase the world reports reads as owned, wandering out or asleep; owned says when the hour ends', () => {
+  const at = (b) => bodyPhase({ ...b, read: T0 - 30_000 }, T0);
+  assert.deepEqual(at(BODY.awake), { phase: 'owned', since: iso(T0 - 20 * MIN), hourEndsAt: iso(T0 + 40 * MIN), minutesLeft: 40, readSecondsAgo: 30,
+    note: 'An hour after your last act the world walks your body out of town; an act keeps it, reading and listening do not.' });
+  assert.equal(WIND_DOWN_MS, 60 * MIN);
+  assert.deepEqual([at(BODY.idle).phase, at(BODY.idle).doing, at(BODY.idle).hourEndsAt], ['wandering out', 'drifting', undefined]);
+  assert.deepEqual([at(BODY.zombie).phase, at(BODY.asleep).phase, at(BODY.asleep).note], ['wandering out', 'asleep', 'Asleep until you act; your next act wakes it.']);
+  assert.equal(bodyPhase(null, T0), null, 'nothing read: nothing shown');
+  assert.equal(bodyPhase({ state: 'faded' }, T0), null, 'a state this client does not know is left out');
+  assert.equal(at({ state: 'awake', doing: null, since: 0 }).hourEndsAt, undefined, 'a row with no last act names no end');
+  // the next read: just after the world's next step, at most ten minutes on, never sooner than five seconds
+  assert.equal(nextBodyRead(BODY.awake, T0), T0 + 10 * MIN, 'forty minutes left: the ten-minute read comes first');
+  assert.equal(nextBodyRead({ ...BODY.awake, since: T0 - 58 * MIN }, T0), T0 + 2 * MIN + 5_000, 'the hour ends in two minutes');
+  assert.equal(nextBodyRead({ ...BODY.idle, since: T0 - 29 * MIN }, T0), T0 + MIN + 5_000, 'wandering: the next step is half an hour on');
+  assert.equal(nextBodyRead(BODY.zombie, T0), T0 + 10 * MIN);
+  assert.equal(nextBodyRead(BODY.asleep, T0), Infinity, 'asleep: only an act changes it, and an act asks again');
+  assert.equal(nextBodyRead({ ...BODY.awake, since: T0 - 61 * MIN }, T0), T0 + 5_000, 'overdue: soon, not at once');
+  // an accepted act: an owned body's hour starts again with no read; any other phase is read again to see it come back
+  assert.deepEqual(actedBody({ ...BODY.awake, read: T0 - MIN }, T0), { body: { ...BODY.awake, since: T0, read: T0 - MIN }, read: false });
+  for (const b of [BODY.idle, BODY.zombie, BODY.asleep, undefined]) assert.deepEqual(actedBody(b, T0), { body: b, read: true });
+});
+
+test('#2309 A3: serve reads the phase from the world and look shows it, for each phase', async (t) => {
+  const w = await world(t);
+  w.env = { EDEN_TIME_SCALE: '0.01' };   // serve's own timers: the body is read again every 6 s at the latest
+  w.body = { state: 'awake', doing: null, since: Date.now() - 20 * MIN }; w.copy = true;   // look reads the local copy too
+  assert.equal((await w.cli('serve')).code, 0);
+  assert.ok(await until(() => w.state().body?.state === 'awake', 15_000), 'serve kept what the world said');
+  const l0 = await w.cli('look'); let look = l0.json;
+  assert.ok(look, l0.err + l0.out);
+  assert.equal(look.body.phase, 'owned'); assert.ok(look.body.minutesLeft >= 39 && look.body.minutesLeft <= 40, JSON.stringify(look.body));
+  for (const [state, phase] of [['idle', 'wandering out'], ['zombie', 'wandering out'], ['asleep', 'asleep']]) {
+    w.body = { state, doing: 'drifting', since: Date.now() - MIN };
+    assert.ok(await until(() => w.state().body?.state === state, 15_000), `serve read ${state}`);
+    look = (await w.cli('look')).json;
+    assert.deepEqual([look.body.phase, look.body.hourEndsAt], [phase, undefined], state);
+  }
 });
