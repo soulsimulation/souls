@@ -218,6 +218,35 @@ gh workflow run capacity-qualify.yml -f ref=<branch> -f quiet_host=true \
 - **What it qualifies.** The host is the maintainer's machine. Its verdict is labelled with `host_class` and is not
   a production-class result unless that host is the production class.
 
+## A hundred worlds at once (#2301)
+
+`tools/bench/capacity/hundred/hundred.mjs` demonstrates the still-worlds tranche (#2241) end to end through the
+checkout's own launcher, fake minds, every file under its `--out`. It builds the fixture (100 small `hello-hamlet`
+worlds and 4 `eden-2026` worlds, one or two Souls each, booted once from genesis and stopped), then: every world's agent
+acts at seeded gaps of 2 to 10 minutes for an hour with world memory for about 25 small worlds (A6); all agents stop
+together and every listening world has a reminder due at one shared instant, then a crawler fetches every page (A7);
+every world should unload (A3); one world listens with a reminder inside the gap (A5); after an hour, one act each to a
+sleeping Soul in a small and an Eden world (A4); and for three sampled worlds a twin, the fixture's start state ticked
+straight through (`SIM_SKIP=0`) over the world's own log, must reach the state hash the jumped world wrote (A2). A8 is
+worked out by hand from its report.
+
+Run it on a `souls-timed` runner through the timed-run workflow (command `hundred`; the report, `results.json` and the
+log are the artifact; Soul folders and world data stay on the runner):
+
+```bash
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short'                 # A9: under 20 min, 6 + 1 worlds
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--fixture-only'          # A1 alone: build the 104 worlds
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short --small 3 --eden 1 --active-min 4'
+```
+
+`--short` uses short knobs, stated in the report: agents act every 0.5 to 1.5 minutes for 6, the wind-down is shortened
+with `SIM_BODY_KNOBS` (silent 1 minute, walked out within 2; dev worlds only), a still world unloads after 1 quiet
+minute instead of 10, and the gap is 3 minutes. The full run (no `--short`: 60 active minutes, the real one-hour
+wind-down, a one-hour gap) takes about three and a half hours and does not fit the job's 120 minutes; run it on the
+host the tranche names. A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
+wind-down, the load queue, `--worlds-mem-mb`) is listed under "Missing from this checkout" with its issue, and the
+parts that need it are reported as not shown, never as passed.
+
 ## Playtests and the swarm director
 
 - [testing/playtests.md](testing/playtests.md): batteries, personas and casts play Souls and gods as coding-agent
