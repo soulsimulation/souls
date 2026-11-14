@@ -9,7 +9,7 @@ import {WorldHost} from './world.ts';
 import {marsFactory,GREEN_FIELD_WORLD,LITTLE_MARTIANS_WORLD} from '@souls/engine-mars';
 import {enableEdgeRuntimeRules,adoptBootRuntimePoliciesV1,LITTLE_MARTIANS_WORLD_KEYS} from './edge-runtime-rules.ts';
 
-type Policy = {quietStallReleaseV1?:boolean;yieldTimeoutV1?:boolean;spreadV2?:boolean;routeReachV1?:boolean;occupiedLinkRoutingV1?:boolean;concurrentLinkEgressV1?:boolean;stairLandingClearanceV1?:boolean};
+type Policy = {quietStallReleaseV1?:boolean;yieldTimeoutV1?:boolean;spreadV2?:boolean;routeReachV1?:boolean;occupiedLinkRoutingV1?:boolean;concurrentLinkEgressV1?:boolean;stairLandingClearanceV1?:boolean;linkLeaseV1?:boolean};
 async function startup(worldKey:string,config:typeof GREEN_FIELD_WORLD){
  const db=new Db(':memory:'),host=new WorldHost(db,await marsFactory(config),'edge-rules',1e9,`${worldKey}-1`);
  try{
@@ -27,7 +27,7 @@ test('Little Martians startup does not queue occupied-link routing, concurrent l
   const {policy,authors,services}=await startup(key,config);
   assert.equal(policy.quietStallReleaseV1,true,key);assert.equal(policy.yieldTimeoutV1,true,key);assert.equal(policy.spreadV2,true,key);
   assert.equal(policy.routeReachV1,true,key+': route-reach/1 (#872) is on every edge world');
-  assert.equal(policy.occupiedLinkRoutingV1,undefined,key);assert.equal(policy.concurrentLinkEgressV1,undefined,key);assert.equal(policy.stairLandingClearanceV1,undefined,key);
+  assert.equal(policy.occupiedLinkRoutingV1,undefined,key);assert.equal(policy.concurrentLinkEgressV1,undefined,key);assert.equal(policy.stairLandingClearanceV1,undefined,key);assert.equal(policy.linkLeaseV1,undefined,key);
   assert.ok(!authors.includes('operator:occupied-link-routing')&&!authors.includes('operator:concurrent-link-egress')&&!authors.includes('operator:stair-landing-clearance'),key+': '+authors.join(','));
   assert.notEqual(services.occupiedLinkRoutingV1,true,key);assert.notEqual(services.concurrentLinkEgressV1,true,key);assert.notEqual(services.stairLandingClearanceV1,true,key);
  }
@@ -37,7 +37,8 @@ test('a qualifying non-Little-Martians edge world activates the three stair-traf
  for(const key of ['eden-2026','my-mars-college-2026-3','godmode-lab']){
   const {policy,authors,services}=await startup(key,GREEN_FIELD_WORLD);
   assert.equal(policy.occupiedLinkRoutingV1,true,key);assert.equal(policy.concurrentLinkEgressV1,true,key);assert.equal(policy.stairLandingClearanceV1,true,key);
-  assert.deepEqual(authors.filter(a=>a.startsWith('operator:')).slice(-3),['operator:occupied-link-routing','operator:concurrent-link-egress','operator:stair-landing-clearance'],key);
+  assert.deepEqual(authors.filter(a=>a.startsWith('operator:')).slice(-4),['operator:occupied-link-routing','operator:concurrent-link-egress','operator:stair-landing-clearance','operator:link-lease'],key);
+  assert.equal(policy.linkLeaseV1,true,key);assert.equal(services.linkLeaseV1,true,key);   // #2264
   assert.equal(services.occupiedLinkRoutingV1,true,key);assert.equal(services.concurrentLinkEgressV1,true,key);assert.equal(services.stairLandingClearanceV1,true,key);
   assert.equal(policy.routeReachV1,true,key);
  }

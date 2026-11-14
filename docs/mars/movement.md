@@ -118,6 +118,22 @@ whose last stretch runs under that floor (the commons deck's front flight): neit
 sees the climber there until it changes level. Carry climbs keep the direction-only check. The policy is prospective. Edge worlds log it at startup (`operator:stair-landing-clearance`)
 after the other stair-traffic rules, except the Little Martians worlds. History before that event replays the old rule.
 
+## Leased flights
+
+Under the runtime policy `link-lease/1` (`linkLeaseV1`, #2264; design: [stair traffic](../design/stair-traffic.md)) a
+single-file flight (a stair, ladder or ramp a body fits but two cannot pass on) is used in one direction at a time
+(`runtime/lease.ts`). Its lease, in the state hash, holds the direction (up, down or free), the holders (walkers admitted
+to it, on their way to its entry or on the flight) and a queue at each end. A walker whose next leg is the flight asks
+3 m before its entry. Admitted, it walks on and climbs; otherwise it walks to a free holding spot off that end
+(`Spatial.holdingSpots`) and waits there, blocked `traffic.lease-wait` naming the flight and its holder, so nobody waits
+in the doorway. Requests are served by tick, then entity id. When the flight empties and the other end has a request,
+the lease turns once the current direction has admitted three walkers, or run 10 s, since that request. A holder that
+makes no progress (0.1 m) for 60 s backs down to its entry through the stair cancel and steps off to a holding spot;
+it and every walk then waiting end `route.blocked`, the message naming `traffic.lease-timeout` and the holder. Flights
+joined by a roomless landing are leased separately (task 3 of the design). Edge worlds log it at startup
+(`operator:link-lease`), last of the stair-traffic rules, except the Little Martians worlds; history before that event
+replays as recorded.
+
 ## Approximations
 
 - The look-ahead predicts the sidestep offset at 0.9 m/s lateral; the hard layer catches the rest (counted in
