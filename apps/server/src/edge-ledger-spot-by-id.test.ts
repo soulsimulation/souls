@@ -42,3 +42,12 @@ test('an asked spot that cannot be used is not offered, and says why', () => {
   assert.equal(out.why.get('eat.e_wall')!.code, 'spot.no-room');
   assert.match(out.why.get('eat.e_busy')!.reason, /busy table is taken right now/);
 });
+
+test('#2189: a spot a Soul is using names that Soul in its refusal; the code is unchanged', () => {
+  const named = (by: string | null) => activityCapabilities(data, {...world(), takenBy: (_at: [number, number], id?: string) => (id === 'eat.e_busy' ? by : null)} as never, new Set(['eat.e_busy'])).why.get('eat.e_busy')!;
+  const ana = named('Ana');
+  assert.equal(ana.code, 'spot.taken');
+  assert.match(ana.reason, /^busy table is taken right now: Ana is using it, so nothing was done\. Ask again when Ana has finished/);
+  // taken by a body that is not a Soul (or nobody to name): the reason names no one, as before
+  assert.equal(named(null).reason, 'busy table is taken right now, so nothing was done. Another one of the same kind may be free.');
+});

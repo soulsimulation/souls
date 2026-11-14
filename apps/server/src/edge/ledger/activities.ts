@@ -124,6 +124,8 @@ export type ActivityWorld = {
   open(at: V2, min: number, rings: number): V2 | null;
   /** Someone else stands within 0.7 m of the point, or another Soul's open act targets this spot id. */
   taken(at: V2, spotId?: string): boolean;
+  /** #2189: the name of the Soul that makes `taken` true (its body there, or its open act on the spot), or null when none does. */
+  takenBy?(at: V2, spotId?: string): string | null;
   /** Admitted interiors (spots in a closed building are not offered). */
   enterable(place: string | undefined): boolean;
   /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
@@ -218,7 +220,11 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
     const name = s.label ?? 'that spot';
     if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
-    else if (w.taken(s.at, s.id) || besideTaken(s)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
+    else if (w.taken(s.at, s.id) || besideTaken(s)) {
+      // #2189: name the Soul using it, as the words path did ("Ana is already singing at the nearest microphone")
+      const at = clearAt(s), by = w.takenBy?.(s.at, s.id) ?? (at && at !== s.at ? w.takenBy?.(at) : null) ?? null;
+      why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now${by ? `: ${by} is using it` : ''}, so nothing was done. ${by ? `Ask again when ${by} has finished, or another` : 'Another'} one of the same kind may be free.`});
+    }
     else if (!ok(s)) {
       // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead
       const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.taken(o.at, o.id))
