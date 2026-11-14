@@ -3,7 +3,8 @@
 //
 //   awake   connected (a listen open, or one within SLEEP_GRACE; an accepted action counts too) and directed
 //   idle    connected but no accepted action, owner message or addressed turn for IDLE_START: every IDLE_STEP the body
-//           sits (a free seat within 15 m, else the ground), stands, dozes or drifts; dozing dominates after IDLE_DOZE
+//           sits (a free seat within 15 m in the same enclosed places as the body, else the ground), stands, dozes or
+//           drifts; dozing dominates after IDLE_DOZE
 //   zombie  disconnected (no listen for SLEEP_GRACE): a body without a soul. Every 20-60 s a short slow shuffle (2-6 m,
 //           half walking speed) to a random point within REFLEX_RADIUS of where it was left, on dry ground, in the same
 //           place (never through a door), along a clear straight line
@@ -58,8 +59,9 @@ export type BodyPort = {
   /** The enclosed places (rooms, buildings) containing this point, as one key. Equal keys = the same room, or both outdoors:
    *  a way between two points with the same key at every step never passes a door. */
   places(x: number, z: number, level: number): string;
-  /** A free seat within `radius` m: the plan steps to sit there (seconds filled), or null. */
-  seat(soul: BodySoul, radius: number, seconds: number): Program['steps'] | null;
+  /** A free seat within `radius` m whose position (the seat's own origin) passes `within` (x, z): the plan steps to sit
+   *  there (seconds filled), or null. */
+  seat(soul: BodySoul, radius: number, seconds: number, within: (x: number, z: number) => boolean): Program['steps'] | null;
   /** An upright rest adapter for bodies that cannot sit or lie. */
   standby?(soul:BodySoul,seconds:number):Program['steps']|null;
   /** Milliseconds left in the upright rest this body is running now, or null when none runs. */
@@ -248,7 +250,11 @@ export class BodyRule {
     if(standby&&(pick==='sitting'||pick==='dozing')){this.port.decide(s,'body:doze','Standby (upright)',[...up,...standby]);this.set(s,r,'idle','dozing',now);return;}
     if (pick === 'sitting') {
       if (posture === 'seated') return this.set(s, r, 'idle', 'sitting', now);
-      const seat = this.port.seat(s, k.seatRadiusM, seconds);
+      // #1981 A4.1: only a seat in the same enclosed places as the body, so the reflex never ends a body in another room
+      // (it carried bodies from the stage into the games room beside it). The seat's end point is checked, not each step
+      // of the walk there, as the drift's lineOk does.
+      const at = this.port.pose(s.entityId), room = at ? this.port.places(at.x, at.z, at.level) : null;
+      const seat = at && room !== null ? this.port.seat(s, k.seatRadiusM, seconds, (x, z) => this.port.places(x, z, at.level) === room) : null;
       this.port.decide(s, 'body:sit', seat ? 'Sitting for a while' : 'Sitting on the ground', seat ?? [...up, {verb: 'mars:pose_v1', params: {activity: 'sit-ground', seconds}}]);
     } else if (pick === 'dozing') this.port.decide(s, 'body:doze', 'Dozing', [...up, {verb: 'mars:pose_v1', params: {activity: 'nap', seconds}}]);
     else if (pick === 'standing') {if (up.length || this.port.running(s.entityId)) this.port.decide(s, 'body:stand', 'Standing, looking around', [...up, {verb: 'rest', params: {seconds}}]);}

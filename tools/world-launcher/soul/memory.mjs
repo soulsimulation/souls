@@ -320,9 +320,12 @@ export function openSoulMemory(soulDir, { world, url = null, soul = null, role =
           return { remembered: "self", lines: value.self.length, ...(lines.length > 20 ? { dropped: lines.length - 20 } : {}) };
         }
         if (selector === "goal") {
-          Object.assign(value, { goal: safeId(target) ? target : `goal:${sha(String(target)).slice(0, 32)}`, note: clip(note, 300), horizon: goal.horizon ?? "today", metric: clip(goal.metric ?? "Owner-defined progress", 160), next: clip(goal.next ?? "Choose a next step", 160) });
+          // #2122: one goal, one id. The same note under a new id updates the open goal it repeats; fields not given keep its values.
+          const asked = safeId(target) ? target : `goal:${sha(String(target)).slice(0, 32)}`, same = (n) => String(n).trim().toLowerCase().replace(/\s+/g, " ").replace(/[\s.!]+$/, "");
+          const had = known.goals.find((g) => g.id === asked) ?? known.goals.find((g) => same(g.note) === same(note));
+          Object.assign(value, { goal: had?.id ?? asked, note: clip(note, 300), horizon: goal.horizon ?? had?.horizon ?? "today", metric: clip(goal.metric ?? had?.metric ?? "Owner-defined progress", 160), next: clip(goal.next ?? had?.next ?? "Choose a next step", 160) });
           r.remember(value);
-          return { remembered: "goal", id: value.goal };
+          return { remembered: "goal", id: value.goal, ...(value.goal !== asked ? { merged: `"${asked}" repeats the open goal "${value.goal}", so it updated that one. Use "${value.goal}".` } : {}) };
         }
         const lower = String(target).toLowerCase();
         if (selector === "person") {

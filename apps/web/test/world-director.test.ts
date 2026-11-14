@@ -127,3 +127,49 @@ test('DIRECTOR2: a paired gesture that starts just after a cut still gets its pa
     assert.ok(cuts.every((t,i)=>!i||t-cuts[i-1]>=MIN_CUT),'no cut pair under MIN_CUT: '+cuts.join(','));
   }
 });
+
+// #2202: the cut order is a seeded weighted shuffle by eventfulness and novelty.
+const busy=(t:number):DirectorInput=>({bodies:[body('a',0,0,'read'),body('b',40,0,'paint'),body('c',80,0,'dance'),body('d',0,40,'eat'),body('e',40,40,'garden')],speaking:new Map(),now:t,landmarks:L});
+const order=(seed:number,input:(t:number)=>DirectorInput,to=300)=>{const d=new WorldDirector(seed);const seen:[number,string][]=[];for(let t=0;t<to;t+=.25){const k=d.choose(input(t))?.key??'none';if(seen.at(-1)?.[1]!==k)seen.push([t,k]);}return seen;};
+
+test('#2202 shuffle: the same world state gives different cut orders across page loads (seeds), the same order for one seed', () => {
+  const subjects=(s:number)=>order(s,busy).map(([,k])=>k).filter(k=>!k.startsWith('landmark:')).join();
+  assert.equal(subjects(7),subjects(7),'one seed is reproducible');
+  const orders=new Set([1,2,3,4,5,6,7,8].map(subjects));
+  assert.ok(orders.size>=5,`${orders.size} distinct orders of 8: ${[...orders].join(' | ')}`);
+  const firsts=new Set([1,2,3,4,5,6,7,8].map(s=>subjects(s).split(',')[0]));
+  assert.ok(firsts.size>=3,'the first subject varies too: '+[...firsts].join());
+});
+
+test('#2202 weights: a conversation and a fresh event still come first, whatever the seed', () => {
+  const scene=(t:number):DirectorInput=>({...busy(t),bodies:[...busy(t).bodies,body('p',-40,0),body('q',-39,0)],speaking:new Map([['p',{thread:'t',at:t-1}],['q',{thread:'t',at:t-3}]])});
+  for(let s=1;s<=20;s++){const first=order(s,scene,30).map(([,k])=>k).find(k=>!k.startsWith('landmark:'));assert.equal(first,'conversation:t',`seed ${s}`);}
+  const d=new WorldDirector(3),c=candidates(busy(0)).find(x=>x.key==='soul:a')!;
+  const speaking={...busy(0),speaking:new Map([['a',{thread:'x',at:-2}]])};
+  assert.equal(d.eventfulness(c,speaking,6)-d.eventfulness(c,busy(0),6),2,'speech in the last 10 s adds 2');
+  const crowd=(n:number):DirectorInput=>({bodies:Array.from({length:n},(_,i)=>body('g'+i,i,0,'sit')),speaking:new Map(),now:0,landmarks:[]});
+  const g=(n:number)=>{const x=crowd(n),c=candidates(x).find(k=>k.label==='group')!;return d.eventfulness(c,x,c.score)-c.score;};
+  assert.equal(g(5)-g(4),.5,'each active member beyond two adds 0.5');
+});
+
+test('#2202 recency: a subject, place and type just shown weigh less; no subject twice within 90 s while others are on', () => {
+  const d=new WorldDirector(1),x=busy(0),c=candidates(x).find(k=>k.key==='soul:a')!;
+  const fresh=d.priority(c,x,6);
+  for(let t=0;t<30;t+=.25)d.choose(busy(t));
+  const shown=d.current?.kind==='subjects'?d.current:null;assert.ok(shown,'a subject is on');
+  const again=candidates(busy(30)).find(k=>k.key===shown!.key)!;
+  assert.ok(d.priority(again,busy(30),6)<.45*fresh,'just shown: subject, place and type penalties');
+  for(let s=1;s<=10;s++){
+    const last=new Map<string,number>();
+    for(const [t,k] of order(s,busy,400)){if(k.startsWith('landmark:'))continue;const p=last.get(k);assert.ok(p===undefined||t-p>=90,`seed ${s}: ${k} again after ${p===undefined?0:t-p} s`);last.set(k,t);}
+  }
+});
+
+test('#2202 fallback: with nothing eventful on, the town views are a plain shuffle, never one of the last half again', () => {
+  const many:Landmark[]=['a','b','c','d','e','f','g','h'].map((id,i)=>({id,label:id,p:[i*50,20,30],target:[i*50,1,0]}));
+  const walkers=(t:number):DirectorInput=>({bodies:[body('w',500+t,500,'walk')],speaking:new Map(),now:t,landmarks:many});
+  const views=(s:number)=>order(s,walkers,400).map(([,k])=>k);
+  const all=[1,2,3,4,5,6].map(views);
+  for(const v of all){assert.ok(v.every(k=>k.startsWith('landmark:')),v.join());for(let i=1;i<v.length;i++)assert.ok(!v.slice(Math.max(0,i-4),i).includes(v[i]),'none of the last half again: '+v.join());}
+  assert.ok(new Set(all.map(v=>v.join())).size>=5,'different orders per page load');
+});

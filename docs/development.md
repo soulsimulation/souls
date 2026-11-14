@@ -90,7 +90,6 @@ Read in `apps/server/src/config.ts` (and `thinking-budget.ts`, `auth.ts`). `.env
 | `TYPESAFE_API_KEY`, `ANTHROPIC_API_KEY` | none | Model providers; without a key that tier is fake or off |
 | `NARRATOR_MODEL`, `COMPILER_MODEL`, `TALK_MODEL` | `claude-haiku-4-5-20251001` | Models per role; the latter two default to the narrator |
 | `EDGE_SKILL_FILE`, `EDGE_INSTRUCTIONS_FILE` | built-in | Override the Soul skill and instructions the world serves |
-| `EDGE_CLI_FILE` | none (`/eden-agent.mjs` answers 404) | The legacy CLI served at `/eden-agent.mjs` |
 | `EDGE_CONTROLLER_CLI_FILE` | `tools/world-launcher/soul/eden.mjs` | The controller CLI served at `/eden.mjs`; the default is the file `SOURCES.json` pins. Its directory's `runtime/` files are served at `/soul-runtime/*` |
 | `EDGE_EYES` | unset (off) | `world` renders Soul views in a headless browser ([Souls](architecture/souls.md#eyes)) |
 | `EDGE_EYES_CHROME` | unset | An explicit Chromium executable for Eyes, instead of the release's Playwright Chromium ([Souls](architecture/souls.md#eyes)) |

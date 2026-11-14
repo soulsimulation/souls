@@ -1,5 +1,7 @@
 // #2049: a Soul's wake rules go with it when it travels or is paired again. In another world the rules naming a place or a
 // Soul of the old one are dropped, each with a reason in serve's log. The real CLI and serve against a stand-in world.
+// #2082: thing-state rules name the old world's things, so they are dropped too; serve reads a catalog copy another process
+// replaced.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -8,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { carryWake, wakeCatalog } from './soul/eden.mjs';
 
 /** A stand-in world: a quiet inbox and stream, travel to `/w/other` as another Soul id, and pairing that mints a new token. */
 async function world(t) {
@@ -42,12 +45,12 @@ const ids = (r) => r.json.rules.map((x) => x.id);
 test('#2049: wake rules survive pairing again whole, and travel without the ones naming the old world\'s places or Souls', async (t) => {
   const w = await world(t);
   assert.equal((await w.cli('serve')).code, 0);
-  for (const args of [['act-ended'], ['soul-arrives', '{"who":"s_mira"}'], ['soul-arrives', '{"where":"g-hall"}'], ['soul-arrives'], ['place-busy', '{"place":"g-yard","atLeast":2}']]) {
+  for (const args of [['act-ended'], ['soul-arrives', '{"who":"s_mira"}'], ['soul-arrives', '{"where":"g-hall"}'], ['soul-arrives'], ['place-busy', '{"place":"g-yard","atLeast":2}'], ['thing-state', '{"thing":"e_ch","field":"open"}']]) {
     const r = await w.cli('wake', 'add', ...args);
     assert.equal(r.code, 0, r.err);
   }
   let r = await w.cli('wake');
-  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w1', 'w2', 'w3', 'w4', 'w5']);
+  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6']);
 
   // Paired again: the old token stopped working, so pairing mints a new one for the same Soul in the same world. The serve
   // restarts for it and every rule is kept.
@@ -56,18 +59,46 @@ test('#2049: wake rules survive pairing again whole, and travel without the ones
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json.serve?.restarted, true, JSON.stringify(r.json));
   r = await w.cli('wake');
-  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w1', 'w2', 'w3', 'w4', 'w5'], 'kept across pairing again');
+  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w1', 'w2', 'w3', 'w4', 'w5', 'w6'], 'kept across pairing again');
 
-  // Travel: the rules go along, except w2 (a Soul of the old world), w3 and w5 (its places); each drop is logged with why.
+  // Travel: the rules go along, except w2 (a Soul of the old world), w3 and w5 (its places), w6 (its thing); each drop is logged.
   r = await w.cli('travel', 'other');
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json.serve?.restarted, true, JSON.stringify(r.json));
   r = await w.cli('wake');
-  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'w1', 'w4'], 'kept across travel');
+  assert.deepEqual(ids(r), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w1', 'w4'], 'kept across travel');
   assert.deepEqual(r.json.rules.find((x) => x.id === 'w4').params, { who: 'any', where: 'here' });
-  const log = await until(() => (/dropped w5/.test(w.log()) ? w.log() : null));
+  const log = await until(() => (/dropped w6/.test(w.log()) ? w.log() : null));
   assert.match(log, /wake: dropped w2: it names Soul s_mira of the world this Soul left/);
   assert.match(log, /wake: dropped w3: it names place g-hall of the world this Soul left/);
   assert.match(log, /wake: dropped w5: it names place g-yard of the world this Soul left/);
-  assert.equal((await w.cli('wake', 'add', 'act-ended')).json.added, 'w6', 'new ids do not reuse the dropped ones');
+  assert.match(log, /wake: dropped w6: it names thing e_ch of the world this Soul left/);
+  assert.equal((await w.cli('wake', 'add', 'act-ended')).json.added, 'w7', 'new ids do not reuse the dropped ones');
+});
+
+const chest = (open) => ({ places: [{ id: 'g-v', name: 'Village', kind: 'area', at: [0, 0] }], acts: [], things: [{ id: 'e_ch', name: 'porch-chest', kind: 'core-chest', place: 'g-v', at: [1, 0] }],
+  kinds: { 'core-chest': { acts: [{ verb: 'open', label: 'Open' }], state: { open, locked: false } } } });
+
+test('#2082: a thing-state rule stays in the same world, and the catalog lookups follow the copy\'s version', () => {
+  const rule = { id: 'w1', kind: 'thing-state', params: { thing: 'e_ch', field: 'open' }, every: 0, was: 'false' };
+  assert.deepEqual(carryWake({ rules: [rule], next: 2 }, true).wake.rules, [rule], 'same world: kept with its state');
+  assert.deepEqual(carryWake({ rules: [rule], next: 2 }, false).dropped, [{ id: 'w1', why: 'it names thing e_ch of the world this Soul left' }]);
+  const v1 = wakeCatalog(null, { world: 'W', etag: '"1"', catalog: chest(false) }, 'W');
+  assert.equal(wakeCatalog(v1, { world: 'W', etag: '"1"', catalog: chest(false) }, 'W'), v1, 'same version: not built again');
+  const v2 = wakeCatalog(v1, { world: 'W', etag: '"2"', catalog: chest(true) }, 'W');
+  assert.deepEqual([v2.etag, v2.ix.cat.kinds['core-chest'].state.open], ['"2"', true], 'a new version: built from it');
+  assert.equal(wakeCatalog(v2, { world: 'X', etag: '"2"', catalog: chest(true) }, 'W'), null, 'a copy of another world is not read');
+});
+
+test('#2082: serve reads a catalog copy another process replaced, and thing-state wakes on it', async (t) => {
+  const w = await world(t), at = JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).world;
+  const copy = (etag, open) => writeFileSync(join(w.dir, 'world-catalog.json'), JSON.stringify({ world: at, etag, fetchedAt: new Date().toISOString(), catalog: chest(open) }));
+  copy('"1"', false);
+  writeFileSync(join(w.dir, 'world-live.json'), JSON.stringify({ world: at, receivedAt: Date.now(), live: { souls: [], things: {} } }));
+  assert.equal((await w.cli('serve')).code, 0);
+  assert.equal((await w.cli('wake', 'add', 'thing-state', '{"thing":"e_ch","field":"open"}', '--every', '0')).code, 0);
+  const was = () => { try { return JSON.parse(readFileSync(join(w.dir, '.eden-serve.json'), 'utf8')).wake.rules.find((x) => x.id === 'w1')?.was; } catch { return undefined; } };
+  assert.equal(await until(was), 'false', 'the first look took the default in');
+  copy('"2"', true);   // as a command would: the kind's default changed, the live row is still empty
+  assert.ok(await until(() => /wake: w1 \(e_ch open is now true\)/.test(w.log())), w.log());
 });

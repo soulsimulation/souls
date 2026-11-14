@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {ANYWHERE, buildCatalog, kindOf, type CatalogInput} from './catalog.ts';
 import {EDGE_ACT_VERBS} from '../events/schema.ts';
 
@@ -73,6 +74,11 @@ test('what can be done on the spot is published as <verb>:here, and every such v
   for (const [verb] of ANYWHERE) assert.ok((EDGE_ACT_VERBS as readonly string[]).includes(verb), verb);
 });
 
+test('walk-to:here is published with the acts done on the spot (#1916)', () => {
+  const {payload} = buildCatalog(input());
+  assert.deepEqual(payload.anywhere.find(a => a.id === 'walk-to:here'), {id: 'walk-to:here', verb: 'walk-to', label: 'Walk to a point on your level'});
+});
+
 // #1751: what a kind of thing takes by hand, from the def's own action list (the engine bridge's thingActs)
 const switchable = {acts: [{verb: 'switch-on', label: 'Switch on', when: [{field: 'on', is: false}]}, {verb: 'switch-off', label: 'Switch off', when: [{field: 'on', is: true}]}], state: {on: true}};
 test('a kind worked by hand is published once with its acts and the state they read; a revision without them says so', () => {
@@ -101,4 +107,21 @@ test('a ref two places share is published for neither: walk:<id> names its place
   const jetty = {id: 'g-jetty', ref: 'jetty', name: 'Jetty', kind: 'pier', parent: 'world', level: 0, polygon: square(0, 0)};
   const {payload} = buildCatalog({worldId: 'w', places: [lake, bank, jetty], spots: [], things: []});
   assert.deepEqual(payload.places.map(p => [p.id, p.ref ?? null]), [['g-jetty', 'jetty'], ['g-lake', null], ['g-lake.bank', null]]);
+});
+
+test('native Eden: a building with an interior gives its doors, with position, level and facing, from its door gaps (#2261)', () => {
+  const read = (f: string) => JSON.parse(readFileSync(new URL(`../../../../../worlds/eden/${f}`, import.meta.url), 'utf8'));
+  const {places} = read('places.v1.json') as {places: CatalogInput['places']}, {interiors} = read('activity-spots.v1.json') as {interiors: NonNullable<CatalogInput['interiors']>};
+  const {payload} = buildCatalog({worldId: 'eden', places, spots: [], things: [], interiors});
+  const place = (id: string) => payload.places.find(p => p.id === id)!;
+  // the Library: one door, the middle of its south wall (z -2.8), where #2224 read it from a walk in
+  assert.deepEqual(place('eden-library-1').doors, [{at: [74, -2.8], level: 0, facing: 'south', approach: [74, -1.8]}]);
+  // the Yurt: its south wall runs x 64.5..70.5 (middle 67.5); its door is 1.7 m west of the middle
+  const yurt = place('eden-yurt');
+  assert.deepEqual(yurt.doors, [{at: [65.8, -15.5], level: 0, facing: 'south', approach: [65.8, -14.5]}]);
+  assert.ok(Math.abs(yurt.doors![0]!.at[0] - yurt.at[0]) > 1.5);
+  // a door on a side wall faces that way (the Greenhouse's west wall); a place with no interior has none
+  assert.deepEqual(place('eden-greenhouse').doors, [{at: [64, 35], level: 0, facing: 'west', approach: [63, 35]}]);
+  assert.equal(payload.places.filter(p => p.doors).length, interiors.length);
+  assert.equal(place('region-campus.library-annex').doors, undefined);
 });
