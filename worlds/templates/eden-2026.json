@@ -4125,7 +4125,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@2",
           "name": "eden-classroom-1",
           "p": [
             42,
@@ -4161,20 +4161,56 @@
                       "wall": "s",
                       "kind": "door",
                       "at": 0.5,
-                      "width": 1.5
+                      "width": 1.5,
+                      "leaf": false
                     },
                     {
                       "room": "classroom",
                       "wall": "n",
                       "kind": "door",
                       "at": 0.5,
-                      "width": 1.5
+                      "width": 1.5,
+                      "leaf": false
                     }
                   ]
                 }
               ],
               "stairs": []
             }
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-classroom-1-door-s",
+          "p": [
+            42,
+            0.89
+          ],
+          "r": 0,
+          "params": {
+            "frame": "#dfd6bf",
+            "leaf": "#6a7770",
+            "trim": "#56625c",
+            "sx": 1.27,
+            "sy": 0.94
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-classroom-1-door-n",
+          "p": [
+            42,
+            -17.89
+          ],
+          "r": 3.1416,
+          "params": {
+            "frame": "#dfd6bf",
+            "leaf": "#6a7770",
+            "trim": "#56625c",
+            "sx": 1.27,
+            "sy": 0.94
           }
         },
         {

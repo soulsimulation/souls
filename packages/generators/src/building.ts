@@ -71,6 +71,8 @@ export function buildingLayout(params: Record<string, unknown>, args: Record<str
   const common = { W, D, t, fh, floors, balcony: b(params.balcony, false), porch: n(params.porch, 0), density: n(params.windows, 0.6) };
   const usePlan = !!params.plan && typeof params.plan === 'object' && Array.isArray((params.plan as { floors?: unknown }).floors);
   const plan = usePlan ? explicitPlan(params.plan, { ...common, W: w, D: d }) : autoPlan({ ...common, style }, args);
+  // a bare doorway (leaf: false) only where the def revision opts in (core/hall@2, #2282); older revisions draw every leaf
+  if (!args.bareDoors) for (const e of plan.ext) delete e.leaf;
   const L = realize(plan);
   const roof = s(params.roof, 'gable');
   const out: BuildingLayout = { ...L, yaw: usePlan ? 0 : FRONT_YAW[front] ?? 0, front: usePlan ? 's' : front, style: usePlan ? 'plan' : style, roof, roofPitch: n(params.roofPitch, 32), roofRise: roofRise(roof, n(params.roofPitch, 32), L.W, L.D, !!L.round), material: s(params.material, 'plaster'), checks: architectureChecks(L), params, args };

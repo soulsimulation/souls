@@ -221,9 +221,12 @@ function dressOpening(b: Builder, L: BuildingLayout, w: Wall, op: Opening, o: Wa
   const jc = w.exterior ? o.trim : '#d8cbb1';
   for (const sd of [-1, 1]) b.box(cx + sd * (hw + 0.035), o.base, 0, 0.07, op.height + 0.07, T + 0.04, jc);
   b.box(cx, o.base + op.height, 0, op.width + 0.14, 0.08, T + 0.04, jc);
-  // the leaf, standing open into the room (hinged on the left jamb)
-  const leafW = op.width - 0.04, swing = sOut * 1.25;
-  b.at(cx - hw + 0.02, o.base, 0, 0, () => b.at(0, 0, 0, swing, () => b.box(leafW / 2, 0, -sOut * 0.03, leafW, op.height - 0.02, 0.05, w.exterior ? mix(o.trim, '#5e412b', 0.4) : '#a77c52')));
+  // the leaf, standing open into the room (hinged on the left jamb); a bare doorway (op.leaf false) has none: a door
+  // thing set in it is the door (#2282)
+  if (op.leaf !== false) {
+    const leafW = op.width - 0.04, swing = sOut * 1.25;
+    b.at(cx - hw + 0.02, o.base, 0, 0, () => b.at(0, 0, 0, swing, () => b.box(leafW / 2, 0, -sOut * 0.03, leafW, op.height - 0.02, 0.05, w.exterior ? mix(o.trim, '#5e412b', 0.4) : '#a77c52')));
+  }
   if (!w.exterior || op.to === 'balcony') return;
   if (o.glassWalls) { b.box(cx, 0, sOut * (T / 2 + 0.25), op.width + 0.5, FLOOR0 + 0.02, 0.5, o.F.base); return; }
   // hood on brackets and a step (eden-facades), a lamp beside the door
