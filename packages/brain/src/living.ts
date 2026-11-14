@@ -83,7 +83,7 @@ export function livingChoice(c: MidContext, seed: string): MidDecision {
   return { option, how: 'fallback', pool: scored.map(x => x.o.id), probabilities: Object.fromEntries(scored.map(x => [x.o.id, x.score / total])), topP: 0, keepGoing: null, mood: n.energy < 20 ? 'weary' : n.company > 65 ? 'lonely' : 'content', reevalSeconds: 120, sociable: n.company / 100, seed };
 }
 /** Bounded first-person notes when the reflection call cannot run. No program or timetable. */
-export function reflectInCode(name: string, life: Life, unfinished: string[], tick = life.lastTick): string {
+export function reflectInCode(name: string, life: Life, unfinished: string[], tick: number): string {
   const needs = needsAt(life, tick);
   const counts = new Map<string, number>(); for (const a of life.acts) counts.set(a, (counts.get(a) ?? 0) + 1);
   const often = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([a]) => a);

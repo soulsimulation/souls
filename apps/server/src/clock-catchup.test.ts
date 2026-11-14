@@ -61,8 +61,8 @@ async function world(t: test.TestContext, dir: string, ambient: boolean, anchors
   await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: 0, dayTicks: 2400, customs: ['Owners drive their Souls.'] }, why: 'test: a 2-minute day, so the gap crosses its moments and a day turn' }));
   for (const n of ['ana', 'ben', 'cy']) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'idle' })); }
   if (ambient) new EdgeLedger(f.host, f.db, undefined, { ambient: true });
-  // #2296: need-anchor/1 adopted halfway, after a snapshot, so the history before it replays through the old reader
-  for (let i = 0; i < 200; i++) { if (anchors && i === 100) { f.host.saveSnapshot(true); await accept<unknown>(f.host, f.host.enableNeedAnchorsV1()); } f.host.tickOnce(); await turn(); }
+  // #2296: need-anchor/1 adopted halfway, 50 ticks after a snapshot, so a boot from it replays the old reader, then the adoption
+  for (let i = 0; i < 200; i++) { if (anchors && i === 50) f.host.saveSnapshot(true); if (anchors && i === 100) await accept<unknown>(f.host, f.host.enableNeedAnchorsV1()); f.host.tickOnce(); await turn(); }
   return f;
 }
 /** The process comes back: the world boots from the database it left and gets the same listeners main.ts gives it. */

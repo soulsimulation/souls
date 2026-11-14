@@ -1570,7 +1570,8 @@ export class WorldHost {
   energyOf(m: Mind): number { return m.life ? needsAt(m.life, this.engine.world.tick).energy : m.energy; }
   enableNeedAnchorsV1(author='operator:need-anchor'){if((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,needAnchorsV1:true},why:'need-anchor/1 (#2296): a need is a value at a tick and a rate, rewritten only when a rate changes; retain historical replay before this event'});}
   /** need-anchor/1: what nearness last found, and the Soul bodies it was found for. Derived, never state: recomputed
-   *  whenever any of them differ, so a restored world reads the same nearness. */
+   *  whenever any of them differ, and for a Soul it holds no answer for (one that just got a life or a body), so a
+   *  restored world reads the same nearness. */
   private nearV1: { sig: unknown[]; near: Map<string, boolean> } | null = null;
   private advanceLives() {
     const tick = this.engine.world.tick;
@@ -1601,7 +1602,7 @@ export class WorldHost {
       if (!m.life) continue;
       const e = w.entities[m.entityId]; if (!e?.human) continue;
       const floater = floaterOf(e);
-      if (moved) near.set(m.soulId, [...this.mindByEntity.values()].some(other => { const b = w.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; }));
+      if (moved || !near.has(m.soulId)) near.set(m.soulId, [...this.mindByEntity.values()].some(other => { const b = w.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; }));
       const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
       advanceNeedAnchor(m.life, tick, needRates(resting?'rest':e.human.activity, near.get(m.soulId)!, recharging, floater), needsDay);
     }
