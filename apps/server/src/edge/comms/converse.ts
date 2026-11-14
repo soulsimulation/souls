@@ -1,5 +1,6 @@
-// `converse` — private, membership-based conversations (EDGE-CONTRACT-v1 §6, vision §6).
-// Only members receive turns. A member silent for the inactivity timeout drops; pending
+// `converse` — membership-based conversations (EDGE-CONTRACT-v1 §6, vision §6).
+// Only members receive turns on their streams. Held out loud (the default), turns also reach the world's
+// viewers; `private: true` at start keeps them to members, and viewers get only a talking cue (#2269). A member silent for the inactivity timeout drops; pending
 // invitations and join requests expire after the (shorter) invite timeout, and the members
 // hear `invite-expired`. Faded (absent) Souls cannot be invited; a pending invitation to a
 // Soul that fades expires at the next sweep. A conversation closes
@@ -19,6 +20,8 @@ type Member = Ref & {joinedAt: number; lastAt: number; fromTurn: number};
 type Pending = Ref & {at: number; by?: string};
 type Body = {id: string; state: 'open' | 'closed'; createdBy: string; createdTick: number; createdAt: number;
   members: Member[]; invited: Pending[]; asks: Pending[]; turns: number; closedAt?: number; closedReason?: string;
+  /** #2269: viewers see who is talking, never the turns. */
+  private?: true;
   /** #1139: who has left and the turns they were there for, so memory's pointers into a conversation still read. */
   past?: {soulId: string; fromTurn: number; toTurn: number}[]};
 
@@ -55,7 +58,7 @@ export class Conversations {
     return {id: b.id, state: b.state, members: this.refs(b.members,b.state==='open'), invited: this.refs(b.invited,b.state==='open'),
       ...(member ? {asks: this.refs(b.asks)} : {}), turns: member ? b.turns : undefined,
       role: member ? 'member' : b.invited.some(m => m.soulId === viewer) ? 'invited' : b.asks.some(m => m.soulId === viewer) ? 'asked' : 'none',
-      ...(b.closedReason ? {closedReason: b.closedReason} : {}), untrusted: true};
+      ...(b.closedReason ? {closedReason: b.closedReason} : {}), ...(b.private ? {private: true} : {}), untrusted: true};
   }
 
   private emit(to: string[], kind: string, body: Record<string, unknown>) {
@@ -82,7 +85,10 @@ export class Conversations {
     this.sweep();
     const op = input.op;
     if (typeof op !== 'string' || !['start', 'accept', 'decline', 'say', 'leave', 'ask'].includes(op)) throw new EdgeError(400, 'invalid', 'op must be start, accept, decline, say, leave or ask');
-    if (op === 'start') return this.start(soul, input.with, input.text);
+    if (op === 'start') {
+      if (input.private !== undefined && typeof input.private !== 'boolean') throw new EdgeError(400, 'invalid', 'private must be true or false');
+      return this.start(soul, input.with, input.text, input.private === true);
+    }
     if (typeof input.conversation !== 'string' || !/^cv_[A-Za-z0-9_-]{1,40}$/.test(input.conversation)) throw new EdgeError(400, 'invalid', 'conversation must be a conversation id');
     const id = input.conversation;
     const target = input.soul === undefined ? undefined : typeof input.soul === 'string' ? input.soul : (() => { throw new EdgeError(400, 'invalid', 'soul must be a Soul id'); })();
@@ -105,7 +111,7 @@ export class Conversations {
     });
   }
 
-  private start(soul: EdgeSoul, withRaw: unknown, textRaw: unknown): ConverseResult {
+  private start(soul: EdgeSoul, withRaw: unknown, textRaw: unknown, isPrivate = false): ConverseResult {
     if (!Array.isArray(withRaw) || withRaw.length < 1 || withRaw.length > MAX_INVITEES || withRaw.some(s => typeof s !== 'string'))
       throw new EdgeError(400, 'invalid', `with must list 1..${MAX_INVITEES} Soul ids`);
     const text = textRaw === undefined ? undefined : textParam(textRaw, 500);
@@ -121,12 +127,12 @@ export class Conversations {
     const now = this.core.now(), tick = this.core.tick();
     const b: Body = {id: newId('cv'), state: 'open', createdBy: soul.soulId, createdTick: tick, createdAt: now,
       members: [{...soulRef(soul), joinedAt: now, lastAt: now, fromTurn: 0}],
-      invited: invitees.map(id => ({soulId: id, name: this.core.nameOf(id), at: now, by: soul.soulId})), asks: [], turns: 0};
+      invited: invitees.map(id => ({soulId: id, name: this.core.nameOf(id), at: now, by: soul.soulId})), asks: [], turns: 0, ...(isPrivate ? {private: true as const} : {})};
     return tx(this.core.db, () => {
       if (text) this.addTurn(b, soul, text, false);
       this.save(b);
-      this.emit(invitees, 'conversation.invite', {conversation: b.id, from: this.currentRef(soul), members: this.refs(b.members), ...(text ? {text} : {}), untrusted: true});
-      this.core.spectate({kind: 'conversation.start', tick, conversation: b.id, from: this.currentRef(soul), invited: this.refs(b.invited), untrusted: true});
+      this.emit(invitees, 'conversation.invite', {conversation: b.id, from: this.currentRef(soul), members: this.refs(b.members), ...(text ? {text} : {}), ...(isPrivate ? {private: true} : {}), untrusted: true});
+      this.core.spectate({kind: 'conversation.start', tick, conversation: b.id, from: this.currentRef(soul), invited: this.refs(b.invited), ...(isPrivate ? {private: true} : {}), untrusted: true});
       return {accepted: true, conversation: this.view(b, soul.soulId)};
     });
   }
@@ -184,7 +190,9 @@ export class Conversations {
     this.core.db.prepare('INSERT INTO edge_comms_turn_names_v1(world_id,conversation_id,seq,name) VALUES(?,?,?,?)').run(this.core.worldId,b.id,seq,name);
     const turn = {seq, tick, at, from: {...this.currentRef(soul),name}, text};
     if (deliver) this.emit(this.ids(b.members).filter(id => id !== soul.soulId), 'conversation.turn', {conversation: b.id, turn, untrusted: true});
-    this.core.spectate({kind: 'conversation.turn', tick, conversation: b.id, turn, untrusted: true});
+    // #2269: out loud, viewers get the turn; private, only a cue that this member is talking.
+    if (b.private) this.core.spectate({kind: 'conversation.talking', tick, conversation: b.id, from: this.currentRef(soul), private: true, untrusted: true});
+    else this.core.spectate({kind: 'conversation.turn', tick, conversation: b.id, turn, untrusted: true});
     return {seq, tick, at};
   }
   private retain(b: Body, soulId: string) {

@@ -98,13 +98,20 @@ world appears as `local:<template>`.
 
 - #1724's five instructions;
 - from the #1097 scorecard: a seat (a bench), a thing activity (music), a plain walk, a place that can't be walked into (the
-  West Lake), a ride that isn't offered ("fly"), and a two-step errand.
+  West Lake), a ride that isn't offered ("fly"), and a two-step errand;
+- #1924: what is on in the next hour, saying it will come to the first thing (another Soul announces it first, `calendar`).
 
 Every item starts where a new Soul arrives. Its check is one of `place`, `placeKind`, `posture`, `receipt`
-(`{verb, thingKind?}`) or `card`, composed with `all` and `any` (`tools/playtest/eval/measure.mjs`). No item needs `resolve`.
+(`{verb, thingKind?}`), `card` or `calendarInterest` (`"first"`), composed with `all` and `any`
+(`tools/playtest/eval/measure.mjs`). No item needs `resolve`.
 
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.
+
+`tools/playtest/eval/battery/positions-v1.json` (#1975) holds ten places a person might point to (a side, a corner, beside
+or between things, a door, a middle, near a spot, beside another Soul, halfway, farthest from everyone). Its `check` only
+ends the episode when the Soul reports; each item's `position` (a target and `within` metres) is judged by hand from the
+Soul's final position in `GET /v1/edge/live`, which the runner does not read.
 
 ## Hostile cases
 

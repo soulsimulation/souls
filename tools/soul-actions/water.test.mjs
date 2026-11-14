@@ -33,11 +33,11 @@ test('hand-operated water: valve contact, refusal, interruption, persistence, bo
  const tapRow=near.objects.find(o=>o.id===id('tap'));assert.deepEqual(tapRow?.state,{on:false},'a nearby tap shows only its on fact');
  const act=async(cap,accepted=true)=>{const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:cap})}));const b=await r.json();assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const finish=async(r,name,want,limit=500)=>{let contact=false,early=false;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){contact=true;if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.6&&state(name).on===want)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {contact,early,phase:edge.receipt(soul.soulId,r.receipt.id).phase};};
- await act('object:tap:switch-off',false);
+ await act(`object:${id('tap')}:switch-off`,false);
  // interruption before contact: nothing changes
- const cut=await act('object:tap:switch-on');for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('tap').on,false,'interrupted before contact: tap stays off');
+ const cut=await act(`object:${id('tap')}:switch-on`);for(let n=0;n<300&&!body().human?.handActuator;n++)await tick(1);await tick(4);await accept(f.host,edge.act(soul,{capability:'stand:here'}));await tick(60);assert.equal(state('tap').on,false,'interrupted before contact: tap stays off');
  const results={};
- for(const [name,cap] of [['tap','object:tap:switch-on'],['outdoor-shower','object:outdoor-shower:switch-on'],['tap','object:tap:switch-off']]){
+ for(const [name,cap] of [['tap',`object:${id('tap')}:switch-on`],['outdoor-shower',`object:${id('outdoor-shower')}:switch-on`],['tap',`object:${id('tap')}:switch-off`]]){
   const r=await act(cap);assert.notEqual(state(name).on,cap.endsWith('on'),'admission changes nothing remotely');const x=await finish(r,name,cap.endsWith('on'));
   assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.ok(x.contact,'actual hand contact ran');assert.equal(x.early,false,'no water before contact');assert.equal(state(name).on,cap.endsWith('on'));results[cap]=x;
   const m=body().human;assert.equal(m?.handActuator,undefined);

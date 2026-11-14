@@ -47,7 +47,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
-import { countGlitch, faultFacts, faultKeys, glitchLine, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
+import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
 
@@ -544,10 +544,9 @@ export class WorldHost {
   /** The world's own clock loop is running (start(); a served world). False while stepped by hand (tests, tools): lane P5
    *  defers some boot-time derived work only in a served world, so a stepped one sees it at the same tick as before. */
   get running(): boolean { return this.timer !== null; }
-  /** Wall pace of the clock (attention.ts): 1 while anyone watches or acts here, lower while nobody does (an unwatched
-   *  world advances fewer ticks per wall second, and wakes its loop less often). The same ticks run in the same order with
-   *  the same inputs, so schedules (in world time) and takes (cut every 20 ticks) are unchanged; only how fast world time
-   *  passes against the wall clock changes, as while asleep. Not logged, not persisted, not part of `clockRate`. */
+  /** Wall pace of the clock: 1. #2235: a served world never runs slower than the wall, watched or not (the unwatched
+   *  quarter pace is gone); lower values remain only for measurement harnesses. Not logged, not persisted, not part of
+   *  `clockRate`. */
   pace = 1;
   setPace(pace: number) {
     if (!(pace > 0 && pace <= 1) || pace === this.pace) return;
@@ -555,6 +554,20 @@ export class WorldHost {
     if (this.timer && !this.paused) this.carry += (Math.min(1000, now - this.last) * this.clockRate * this.pace) / TICK_MS;  // the time so far, at the old pace
     this.last = now; this.pace = pace;
     if (this.timer) { clearInterval(this.timer); this.startFrameTimer(); }
+  }
+  /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
+  owedTicks = 0;
+  /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
+   *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
+   *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
+   *  a world that never stopped; outside writes wait at the HTTP edge until the catch-up is done (main.ts). */
+  async catchUp(ticks: number, turn: () => Promise<unknown> = () => new Promise((r) => setImmediate(r))): Promise<number> {
+    if (this.timer) throw new Error('catch-up.clock-running');
+    let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
+    this.owedTicks = Math.max(0, Math.floor(ticks));
+    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
+    finally { this.owedTicks = 0; }
+    return done;
   }
 
   // ------------------------------------------------------------ the loop
@@ -1355,11 +1368,17 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
+   *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
+  enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
    *  Its adoption also stands, once, any free body already left more than a step above its floor (the plan is read when the event
    *  is accepted and logged in it, with each body's Soul, so a replay stands the same bodies in the same places). */
+  /** #2133 stall-release-support/1 (prospective): a stall release upstairs stands a body only on a floor (its own, else its flight's
+   *  nearer clear landing), else leaves it held; never where it stands mid-flight. */
+  enableStallReleaseSupportV1(author='operator:stall-release-support'){if((this.extra.runtimePolicy as {stallReleaseSupportV1?:boolean}|undefined)?.stallReleaseSupportV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stallReleaseSupportV1:true},why:'stall-release-support/1 (#2133): a stall release upstairs stands a body on its own floor near it, else on the nearer clear landing of the flight it is on, else leaves it held and says so; never where it stands mid-flight (#447: the next tick faulted collision.human-static); retain historical replay before this event'});}
   enableStandHeightV2(author='operator:stand-height'){
     if((this.extra.runtimePolicy as {standHeightV2?:boolean}|undefined)?.standHeightV2)return Promise.resolve();
     const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV2:true},why:'stand-height/2 (#1521): a body the engine sets down on the ground floor of a world without a ground field stands at its floor height, never in the air at the height it had; any body already left in the air is stood on its floor once; retain historical replay before this event'};
@@ -1367,6 +1386,10 @@ export class WorldHost {
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
   }
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
+  /** #2196 park-away/1, one logged rules event (prospective): an empty ride that landed away from its home parks where it landed and
+   *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event
+   *  replays as it was. Main adopts it at boot. */
+  enableCarrierParkAwayV1(author='operator:park-away'){if((this.extra.runtimePolicy as {carrierParkAwayV1?:boolean}|undefined)?.carrierParkAwayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,carrierParkAwayV1:true},why:'park-away/1 (#2196): a ride never moves with nobody aboard; one that landed away parks there and the next rider flies it home; retain historical replay before this event'});}
   /** #1496 nonfinite-hold/1 (prospective, needs quarantine/1): a non-finite number the frontier hash meets that quarantine/1 doesn't hold is put back to its last good value by a logged event, never a halt. */
   enableNonFiniteHoldV1(author='operator:nonfinite-hold'){if((this.extra.runtimePolicy as {nonFiniteHoldV1?:boolean}|undefined)?.nonFiniteHoldV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteHoldV1:true},why:'nonfinite-hold/1 (#1496): a number in the hashed head that is no number is put back to its value in the last good snapshot by a logged patch, and what it touched stops; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
@@ -1619,6 +1642,8 @@ export class WorldHost {
       this.failCheckpoint(failure); return;
     }
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = baseline;
+    // #1377: an invariant that throws reading one entity: only that entity is quarantined (a rewind would stop everyone and read it again)
+    if (this.quarantineRule && this.thrownOnly(error)) return this.quarantine(error);
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
     if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
@@ -1671,8 +1696,24 @@ export class WorldHost {
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
     let corrupt: string[] = [];
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
-    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt])].sort(), corrupt };
+    return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
+  /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
+   *  takes entities out there, one half at a time), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
+  private thrownSources(error: unknown): string[] {
+    if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
+    const tick = this.engine.world.tick, fault = String(error);
+    if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
+      let ids: string[] = [];
+      try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
+      catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
+      this.thrownAt = {tick, fault, ids};
+    }
+    return this.thrownAt.ids;
+  }
+  /** #1377: a fault that is only invariants that threw, and what they were reading was found: going back would read it again. */
+  private thrownOnly(error: unknown): boolean { const keys = faultKeys(error); return keys.length > 0 && keys.every(k => k.code === THROWN_RULE && !k.subjects.length) && this.thrownSources(error).length > 0; }
   /** #1369: each Soul's body's last whole pose (finite numbers), so a body whose pose breaks is held where it last stood. */
   private wholePoses = new Map<string, RecoveryPose>();
   private noteWholePoses() {
@@ -1845,7 +1886,7 @@ export class WorldHost {
     if (!this.writeRepair(e)) return;
     this.seq = e.seq; this.acc.log.push(e);
     for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);   // going back didn't answer it: a return stays on the head
-    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
+    if (loud) this.recordGlitch('contained', error, {rule: faultKeys(error).length ? undefined : corrupt.length ? 'entity.corrupt' : undefined, tick, bodies, evidence: {seq: e.seq, quarantine: true, ...(this.thrownAt?.tick === tick && this.thrownAt.fault === String(error) && this.thrownAt.ids.length ? {thrownReading: this.thrownAt.ids} : {}), stopped, contained: q.contained, relocated: q.relocated, ...(held.length ? {held} : {}), ...(q.restore ? {restore: q.restore} : {})}});
     for (const id of bodies) { const m = this.mindByEntity.get(id); if (m) { m.pending = null; this.acc.dirty.add(m.soulId); } }
     for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a quarantine:', String(failure).slice(0, 200)); }
     if (tell) this.tellQuietly(() => { this.flush(); this.heartbeat(); });

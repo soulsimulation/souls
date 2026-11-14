@@ -26,6 +26,8 @@ export class Auth {
    * Old worlds (eden/mars/littlemartians) keep main's legacy agent-local projection unchanged. */
   get production(){return this.cfg.authProvider==='clerk'&&this.cfg.worldEngine===true;}
   legacyOwnerAllowed?:(ownerId:string)=>boolean;
+  /** #2243: the shared account registry's database (account grants live there), or null in a world without one. */
+  get registryDb(){return this.registry?.db??null;}
   devAuth: boolean;
   cfg: Config; db: Db;
   constructor(cfg: Config, db: Db) {

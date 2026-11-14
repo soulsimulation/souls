@@ -47,25 +47,25 @@ test('guestbook: sign by hand with a few words, several Souls, a fresh page when
  const read=async(s,name)=>{const r=await act(s,`read:${id(name)}`);await finish(s,r);return edge.receipt(s.soulId,r.receipt.id);};
  const results={};
  // G7: an act interrupted before the contact changes nothing
- {watch='guestbook';const cut=await act(cy,'sign the guestbook');await tick(4);soul=cy;await accept(f.host,edge.act(cy,{capability:'stand:here'}));await tick(60);
+ {watch='guestbook';const cut=await act(cy,`object:${id('guestbook')}:sign`);await tick(4);soul=cy;await accept(f.host,edge.act(cy,{capability:'stand:here'}));await tick(60);
   assert.equal(state('guestbook').text,'','interrupted before contact: the book stays empty');assert.ok(['replaced','cancelled','failed'].includes(edge.receipt(cy.soulId,cut.receipt.id).phase),'the sign act was interrupted');results.interrupted=edge.receipt(cy.soulId,cut.receipt.id).phase;}
  // G1: plain words; the name at the end of the stroke; a few words with the name
- const a1=await on('guestbook',ana,'sign the guestbook');assert.equal(a1.early,false,'no name before the stroke ends');assert.equal(a1.stroke.kind,'write');assert.equal(state('guestbook').text,'Ana');results.ana=a1;
- const b1=await on('guestbook',ben,'sign the guestbook',{text:'Lovely  garden,  thank you '});assert.equal(b1.early,false);results.ben=b1;
+ const a1=await on('guestbook',ana,`object:${id('guestbook')}:sign`);assert.equal(a1.early,false,'no name before the stroke ends');assert.equal(a1.stroke.kind,'write');assert.equal(state('guestbook').text,'Ana');results.ana=a1;
+ const b1=await on('guestbook',ben,`object:${id('guestbook')}:sign`,{text:'Lovely  garden,  thank you '});assert.equal(b1.early,false);results.ben=b1;
  assert.equal(state('guestbook').text,'Ana\nBen — Lovely garden, thank you');assert.ok(b1.stroke.seconds>a1.stroke.seconds&&b1.stroke.width>a1.stroke.width,'a longer line takes a longer stroke');
  assert.ok(a1.at&&b1.at&&b1.at[1]<a1.at[1],'the second entry is written on the next line down');
  // G5: once each; words bounded; nothing crossed off
- const again=await act(ana,'sign the guestbook',undefined,false);assert.match(again.reason??'',/already signed the guestbook/);results.again=again.code;
- const long=await act(cy,'sign the guestbook',{text:'x'.repeat(41)},false);assert.equal(long.code,'capability.params',JSON.stringify(long));assert.match(long.reason??'',/at most 40 characters \(yours is 41\)/);results.long=long.reason;
- const blank=await act(cy,'sign the guestbook',{text:'   '},true);assert.ok(blank.accepted,'blank words are no words');soul=cy;await accept(f.host,edge.act(cy,{capability:'stand:here'}));await tick(60);assert.ok(['replaced','cancelled'].includes(edge.receipt(cy.soulId,blank.receipt.id).phase),'the blank-words act was interrupted');assert.ok(!/Cy/.test(state('guestbook').text),'the blank-words act was cut before contact');
- const ctl=await act(cy,'sign the guestbook',{text:'a\u0007b'},false);assert.match(ctl.reason??'',/control characters/);
- const off=await act(ben,'cross my name off the guestbook',undefined,false);assert.ok(!off.accepted,JSON.stringify(off));results.unsign=off.code;
+ const again=await act(ana,`object:${id('guestbook')}:sign`,undefined,false);assert.match(again.reason??'',/already signed the guestbook/);results.again=again.code;
+ const long=await act(cy,`object:${id('guestbook')}:sign`,{text:'x'.repeat(41)},false);assert.equal(long.code,'capability.params',JSON.stringify(long));assert.match(long.reason??'',/at most 40 characters/);results.long=long.reason;
+ const blank=await act(cy,`object:${id('guestbook')}:sign`,{text:'   '},true);assert.ok(blank.accepted,'blank words are no words');soul=cy;await accept(f.host,edge.act(cy,{capability:'stand:here'}));await tick(60);assert.ok(['replaced','cancelled'].includes(edge.receipt(cy.soulId,blank.receipt.id).phase),'the blank-words act was interrupted');assert.ok(!/Cy/.test(state('guestbook').text),'the blank-words act was cut before contact');
+ const ctl=await act(cy,`object:${id('guestbook')}:sign`,{text:'a\u0007b'},false);assert.match(ctl.reason??'',/control characters/);
+ const off=await act(ben,`object:${id('guestbook')}:unsign`,undefined,false);assert.ok(!off.accepted,JSON.stringify(off));results.unsign=off.code;
  assert.ok(!edge.capabilities(ben).some(c=>c.object===id('guestbook')&&/unsign|cross/i.test(c.id+c.label)),'no unsign on a guestbook');
  // G2: a third Soul; order kept
- await on('guestbook',cy,'sign the guestbook',{text:'Back next spring'});assert.equal(state('guestbook').text,'Ana\nBen — Lovely garden, thank you\nCy — Back next spring');
+ await on('guestbook',cy,`object:${id('guestbook')}:sign`,{text:'Back next spring'});assert.equal(state('guestbook').text,'Ana\nBen — Lovely garden, thank you\nCy — Back next spring');
  assert.equal(state('guestbook').textBy,`${ana.soulId},${ben.soulId},${cy.soulId}`);
  // G3: the sheet beside it keeps its own words and capacity
- await on('sheet',ana,'sign the sign-up sheet');const sheetAgain=await act(ana,'sign the sign-up sheet',undefined,false);assert.match(sheetAgain.reason??'',/^Your name is already on this sheet\.$/);
+ await on('sheet',ana,`object:${id('sheet')}:sign`);const sheetAgain=await act(ana,`object:${id('sheet')}:sign`,undefined,false);assert.match(sheetAgain.reason??'',/^Your name is already on this sheet\.$/);
  // G4: counts in the offer, words only with the read
  const caps=edge.capabilities(ben),label=n=>caps.find(c=>c.id===`read:${id(n)}`)?.label??'';
  assert.match(label('guestbook'),/a guestbook, 3 names/);assert.match(label('sheet'),/a sign-up sheet, 1 name/);assert.ok(!/Ana|Lovely|spring|mill/.test(label('guestbook')),'offers carry counts, not words');
@@ -78,13 +78,13 @@ test('guestbook: sign by hand with a few words, several Souls, a fresh page when
  const filler=Array.from({length:13},(_,i)=>({t:`Guest ${i+1}`,by:`s_g${i+1}`}));
  const st=state('guestbook');assert.equal(god.act({ops:[{op:'set',id:'guestbook',state:{text:[st.text,...filler.map(x=>x.t)].join('\n'),textBy:[st.textBy,...filler.map(x=>x.by)].join(',')}}]}).accepted,true);await tick(5);
  assert.equal(state('guestbook').text.split('\n').length,16);
- const ana2=await act(ana,'sign the guestbook',undefined,false);assert.match(ana2.reason??'',/already signed/,'still once each while her entry is kept');
+ const ana2=await act(ana,`object:${id('guestbook')}:sign`,undefined,false);assert.match(ana2.reason??'',/already signed/,'still once each while her entry is kept');
  const extra=await join('dee','Dee');
- const d1=await on('guestbook',extra,'sign the guestbook',{text:'Fresh page'});assert.equal(d1.early,false);
+ const d1=await on('guestbook',extra,`object:${id('guestbook')}:sign`,{text:'Fresh page'});assert.equal(d1.early,false);
  const kept=state('guestbook').text.split('\n');assert.equal(kept.length,9,'the oldest page of 8 gave way');assert.equal(kept[0],'Guest 6');assert.equal(kept[8],'Dee — Fresh page');assert.ok(!kept.some(l=>/^Ana$|Ben —|Cy —/.test(l)),'the first page is gone');
  assert.ok(d1.at&&Math.abs(d1.at[1]-a1.at[1])<1e-6,'a fresh page: the hand writes on its first line, at the top');results.dee=d1;
- const ana3=await on('guestbook',ana,'sign the guestbook',{text:'Came back'});assert.equal(state('guestbook').text.split('\n').at(-1),'Ana — Came back','once her entry has gone she signs again');
- const eve=await join('eve','Eve');await on('guestbook',eve,'sign the guestbook',{text:' \n '});assert.equal(state('guestbook').text.split('\n').at(-1),'Eve','blank words are no words: the name alone');
+ const ana3=await on('guestbook',ana,`object:${id('guestbook')}:sign`,{text:'Came back'});assert.equal(state('guestbook').text.split('\n').at(-1),'Ana — Came back','once her entry has gone she signs again');
+ const eve=await join('eve','Eve');await on('guestbook',eve,`object:${id('guestbook')}:sign`,{text:' \n '});assert.equal(state('guestbook').text.split('\n').at(-1),'Eve','blank words are no words: the name alone');
  const rFull=await read(ben,'guestbook');assert.ok(JSON.stringify(rFull).length<4000,'the read stays bounded');results.ana3=ana3;
  // G8: persistence
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);assert.equal(restored.get('guestbook').state.text,state('guestbook').text);assert.equal(restored.get('guestbook').state.textBy,state('guestbook').textBy);
