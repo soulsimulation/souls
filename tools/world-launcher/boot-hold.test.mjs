@@ -49,7 +49,7 @@ test('A1/A2: an act and a wait sent while the world cold-boots are held and answ
   } finally { await L.close(); }
 });
 
-test('A1: a call whose own deadline passes before the world listens is refused world.waking (#2304), naming the boot', async () => {
+test('A1: a call whose own deadline passes before the world listens is refused world.starting, naming the boot', async () => {
   const { L, call, booting } = await launcherWithStoppedWorld(1, 'late', { bootHoldMs: 600 });
   try {
     const { first } = await booting();
