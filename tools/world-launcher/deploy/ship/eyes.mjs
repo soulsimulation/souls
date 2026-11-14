@@ -79,6 +79,9 @@ let mode = checksOnly ? 'checks-only' : null; const skipped = new Set(), findEnd
 if (!checksOnly) say(`looking for a release run of ${sha.slice(0, 12)}${wantRun ? ` (run ${wantRun})` : ''}; up to ${findMin} min`);
 while (!checksOnly) {
   let statuses = []; try { statuses = await listStatuses(repo, sha); } catch (e) { say(`status read failed; retrying`); }
+  // a late or queued eyes job for a run whose ship already stopped: leave at once, so the release group frees up
+  const shipNow = wantRun != null ? latestFor(statuses, CONTEXT.ship, wantRun) : null;
+  if (shipNow?.state === 'failure' || shipNow?.state === 'error') { say(`STOPPED: run ${wantRun} already stopped (${shipNow.detail || shipNow.description}); nothing to watch`); process.exit(1); }
   const waiting = statuses.filter((x) => x.context === CONTEXT.ship && x.state === 'pending').map((x) => latestFor([x], CONTEXT.ship, wantRun)).filter((x) => x?.word === 'waiting-for-eyes' && !skipped.has(x.run));
   const cand = waiting[0];
   if (cand && latestFor(statuses, CONTEXT.ship, cand.run)?.word === 'waiting-for-eyes') {

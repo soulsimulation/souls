@@ -178,8 +178,8 @@ logs `gl renderer: <vendor> / <renderer> (hardware, <flags>)`, and gives every c
 (`SHIP_GPU`), with `--disable-software-rasterizer`. No hardware renderer fails eyes; SwiftShader is never used. The
 probe's god folder comes from the `SIM_PROBE_GOD_JSON` secret of the `production` environment, so the job runs in that
 environment (environment secrets reach no job outside it; it is limited to `main`). It reads only that secret, writes it
-in its per-run directory, which it removes at the end, and holds `statuses: write` for `release/eyes`. If its setup fails
-before eyes answers, it posts `release/eyes` failure, so the ship job stops instead of waiting. Its artifact
+in its per-run directory, which it removes at the end, and holds `statuses: write` for `release/eyes` and `actions: read` for the run. If its setup fails
+before eyes answers, it posts `release/eyes` failure, so the ship job stops instead of waiting; an eyes job that starts after its run's ship already stopped exits at once. When the ship job stops for "no eyes", cancel that run (`gh run cancel <id>`) before dispatching again: a queued eyes job holds the `release` concurrency group. Its artifact
 `eyes-<label>` holds `gl.json`, `eyes-result.json` and the verdicts that pass the publication check. `eyes_only=true`
 runs `eyes.mjs --checks-only --gpu hardware`: the walks, poster and stall against the live build, with no run, probe or
 secret.

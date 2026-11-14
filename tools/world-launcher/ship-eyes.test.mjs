@@ -178,6 +178,10 @@ test('A10: a waiting status of an earlier attempt, or of a finished run, is skip
   f = fakeGh([st(CONTEXT.ship, 'failure', 'run=77.1 stopped: no eyes'), WAITING], RUN); d = fakeDeploy(f.t);
   r = f.run(['--sha', SHA, '--find-min', '0.01'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
   assert.equal(r.status, 1); assert.equal(f.posts(), '');
+  // with --run, a ship that already stopped ends eyes at once (a late eyes job frees the release group)
+  f = fakeGh([st(CONTEXT.ship, 'failure', 'run=77.1 stopped: no eyes'), WAITING], RUN); d = fakeDeploy(f.t);
+  r = f.run(['--sha', SHA, '--run', '77.1'], { EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR });
+  assert.equal(r.status, 1); assert.match(r.stdout, /run 77\.1 already stopped \(no eyes\)/); assert.equal(f.posts(), ''); assert.equal(d.tools(), '');
 });
 
 test('B1: a probe that dies after ready fails eyes at once, before any release, and runs no walk', () => {

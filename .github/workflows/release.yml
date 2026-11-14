@@ -373,7 +373,7 @@ jobs:
           else echo "Eyes: the eyes job, on a souls-timed GPU runner" >> "$GITHUB_STEP_SUMMARY"; fi
           if ! node $H wait "$SHA" release/eyes --run "$RUN" --want ready --timeout-min 20 --every-s 20; then
             node $H post "$SHA" release/ship failure "run=$RUN stopped: no eyes" --url "$URL" || true
-            echo "::error::No eyes ($EYES) for run $RUN within 20 min: nothing was staged. $([ "$EYES" = laptop ] && echo 'Start ship/eyes.mjs' || echo 'Read the eyes job (a busy or missing souls-timed runner, or its setup)'), then dispatch again."
+            echo "::error::No eyes ($EYES) for run $RUN within 20 min: nothing was staged. $([ "$EYES" = laptop ] && echo 'Start ship/eyes.mjs' || echo 'Read the eyes job (a busy or missing souls-timed runner, or its setup)'). Cancel this run (gh run cancel $GITHUB_RUN_ID) so a queued eyes job frees the release group, then dispatch again."
             exit 1
           fi
       - name: ship.sh
@@ -447,7 +447,7 @@ jobs:
           set +e
           node tools/world-launcher/deploy/ship/release-client.mjs feed --version "$VERSION" --origin "$SIM_ORIGIN" --ssh "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" 2>&1 | sed -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g'
           rc=${PIPESTATUS[0]}
-          [ "$rc" = 0 ] || echo "::warning::the release item was not posted to the feed. Once v$VERSION is tagged, retry: gh workflow run release.yml --ref main -f version=$VERSION -f feed_only=true"
+          [ "$rc" = 0 ] || echo "::warning::the release item was not posted to the feed. Retry from a checkout of this head: node tools/world-launcher/deploy/ship/release-client.mjs feed --version $VERSION --origin $SIM_ORIGIN --ssh <deploy target>. Once v$VERSION is tagged: gh workflow run release.yml --ref main -f version=$VERSION -f feed_only=true"
           exit "$rc"
       - name: The eyes' verdict
         if: ${{ inputs.eyes != 'runner' && !cancelled() }}
@@ -525,6 +525,7 @@ jobs:
     permissions:
       contents: read
       statuses: write   # release/eyes
+      actions: read     # eyes.mjs reads this run (the Actions runs API) before it answers
     env:
       SHA: ${{ needs.preflight.outputs.sha }}
       RUN: ${{ github.run_id }}.${{ github.run_attempt }}
@@ -570,7 +571,10 @@ jobs:
           python3 -c 'import PIL; print("Pillow", PIL.__version__)'
           # eyes.mjs and handover.mjs speak to the GitHub API through gh
           if ! command -v gh >/dev/null; then
-            curl -fsSL https://github.com/cli/cli/releases/download/v2.63.0/gh_2.63.0_linux_amd64.tar.gz | tar -xz -C "$PER_RUN" && cp "$PER_RUN/gh_2.63.0_linux_amd64/bin/gh" "$PER_RUN/bin/"
+            # pinned: gh 2.63.0's own checksums file lists this sha256 for the tarball
+            curl -fsSL -o "$PER_RUN/gh.tgz" https://github.com/cli/cli/releases/download/v2.63.0/gh_2.63.0_linux_amd64.tar.gz
+            echo "a3a8df5164693e81acf9000b63a2da1a8aca25e4d2c640c466bcedf22c83d5fb  $PER_RUN/gh.tgz" | sha256sum -c --quiet
+            tar -xzf "$PER_RUN/gh.tgz" -C "$PER_RUN" && cp "$PER_RUN/gh_2.63.0_linux_amd64/bin/gh" "$PER_RUN/bin/"
           fi
           gh --version | head -1
           nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || echo "nvidia-smi: not available"
