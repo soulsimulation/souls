@@ -763,7 +763,7 @@ export class MarsEngine implements Engine {
   thrownSourcesV1(): string[] {
     const sp = this.rt.services.spatial as Spatial | undefined, epoch = sp?.epoch, pending = sp?.restoredEpoch;
     try { return this.thrownSourcesOnView(); }
-    finally { if (sp && epoch !== undefined) { sp.restoredEpoch = epoch; sp.sync(this.rt.world); sp.adoptRestoredEpoch(); sp.restoredEpoch = pending; } }
+    finally { if (sp && epoch !== undefined) try { sp.restoredEpoch = epoch; sp.sync(this.rt.world); sp.adoptRestoredEpoch(); } finally { sp.restoredEpoch = pending; } }
   }
   private thrownSourcesOnView(): string[] {
     const live: any = this.rt, invs: any[] = live.invariants ?? [], ents: Record<string, any> = { ...live.world.entities };
