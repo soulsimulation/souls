@@ -558,6 +558,13 @@
     },
     {
       "step": "V5-server-full",
+      "from": "\\#2133 every world adopts stall-release-support/1 at boot after stand-height/2, then \\#2294 held-activity/1 last, and the engine has both on",
+      "to": "\\#2133 every world adopts stall-release-support/1 at boot after stand-height/2, then climb-spacing/1, \\#2294 held-activity/1 and the wait bounds, and the engine has them on",
+      "reason": "Same test, renamed when the boot adoption chain gained climb-spacing/1 and the wait bounds; it still asserts stall-release-support/1 after stand-height/2 and held-activity/1 adopted at boot with the engine flags on",
+      "pr": "#2333"
+    },
+    {
+      "step": "V5-server-full",
       "from": "levels: enter on any condition, at once and straight to the highest that holds",
       "to": "levels: enter on any condition, straight to the highest that holds (red and black at once, amber once it has held 12 s)",
       "reason": "Same test, renamed when amber began waiting 12 s before it enters (lone-Soul amber fix); red and black still enter at once, straight to the highest that holds",

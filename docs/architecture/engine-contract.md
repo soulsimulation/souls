@@ -140,6 +140,10 @@ stall release with nothing clear near leaves the body where it stands; upstairs 
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
 
+Under `wait-bound/1` (#1952), adopted at boot, a walk going nowhere off a stair flight ends `route.blocked` within a
+minute ([movement](../mars/movement.md)), and an action ended without its def (a stall release's `forceCancel`) leaves no
+walk exec behind. `wait-bound/2` (#1288), adopted after it, applies the same bound to swims and journeys through water.
+
 ## Refusal
 
 With the `souls-repair/1` rules (`soulsRepairV1`), a move that would break a rule is not applied
@@ -286,13 +290,14 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
 - The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies,
   while steps are failing too (#1378). A fault that names none still stops everything in place, as above, unless it is an
   invariant that threw and what it was reading is found (#1377, below).
-- An invariant that throws names nobody (`engine.thrown`). Under quarantine/1 the host restores the head to a scratch engine,
-  and there the engine takes entities out of the table half at a time, bodies first (`thrownSourcesV1`), to find the one
-  entity whose absence alone stops the throw (#1377). That entity is quarantined alone, at once, with no rewind, since going
+- An invariant that throws names nobody (`engine.thrown`). Under quarantine/1 the engine takes entities out of its own
+  shallow copy of the entity table half at a time, bodies first (`thrownSourcesV1`), to find the one entity whose absence
+  alone stops the throw (#1377). It reads on a view of the live runtime with fresh per-runtime invariant memory, so a head
+  that won't snapshot or restore is read too (#2168). The live entity table and invariant memory are untouched. The
+  navigation scene is shared, so it is synced back to the live world afterwards with its epoch kept, as a restore keeps it. That entity is quarantined alone, at once, with no rewind, since going
   back would read it again. Everyone else's programmes go on. The glitch row names it (`thrownReading`), and the
   `quarantineV1` event carries it, so a replay reads the log and never probes. While steps fail, only that body is refused.
-  A throw that no single entity explains, a step that throws outside any action, or a head that won't snapshot or restore
-  keeps the stop-all, counted as before.
+  A throw that no single entity explains, or a step that throws outside any action, keeps the stop-all, counted as before.
 - A body quarantined again within the cooldown is held whole (#1378): the event also contains every rule on it (key
   `{code: '*', subjects: [body]}`), so a fault that comes back under a new rule each tick is absorbed instead of faulting
   the step. Only a violation whose every subject is held whole is covered; one that names a free body still faults.

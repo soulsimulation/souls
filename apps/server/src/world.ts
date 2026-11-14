@@ -1446,6 +1446,12 @@ export class WorldHost {
   /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
    *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
   enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
+  /** #1952 wait-bound/1, one logged rules event (prospective): off a stair flight, a walk whose body has not left a 0.5 m disc
+   *  or changed level for a minute ends route.blocked, named waits included; a forced release leaves no walk exec. Main adopts it at boot. */
+  enableWaitBoundV1(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV1?:boolean}|undefined)?.waitBoundV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV1:true},why:'wait-bound/1 (#1952): a walk that makes no headway for a minute ends route.blocked and names what it waited for, and a released walk leaves nothing behind; retain historical replay before this event'});}
+  /** #1288 wait-bound/2, one logged rules event (prospective): wait-bound/1's bound for a swim or a journey through water too
+   *  (swim_to, ground_travel, swim_in), so a swim held behind a body in the water ends route.blocked. Main adopts it at boot, after wait-bound/1. */
+  enableWaitBoundV2(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV2?:boolean}|undefined)?.waitBoundV2)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV2:true},why:'wait-bound/2 (#1288): a swim or a journey through water that makes no headway for a minute ends route.blocked and names what it waited for; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
@@ -1811,15 +1817,15 @@ export class WorldHost {
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
     return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
-  /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
-   *  takes entities out there, one half at a time), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  /** #1377: an invariant that threw names nobody. What it was reading is found on the engine's own copy of the entity table
+   *  (it takes entities out there, one half at a time; #2168: so a head that won't restore or snapshot is read too), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
   private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
   private thrownSources(error: unknown): string[] {
     if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
     const tick = this.engine.world.tick, fault = String(error);
     if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
       let ids: string[] = [];
-      try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
+      try { ids = this.engine.thrownSourcesV1?.() ?? []; }
       catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
       this.thrownAt = {tick, fault, ids};
     }
