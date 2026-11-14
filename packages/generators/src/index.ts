@@ -10,7 +10,7 @@ export { correctKitArgs, isKitProgram, type KitCorrection } from './kit-lenient.
 export { expandKitProgram, kitNumber, KitProgramError, type KitProgramArgs, type KitProgramShape } from './kit-program.ts';
 export { assertFootprint, footprintToBaked, kitFootprintIssues, mergeKitSlots, type LmFootprint } from './kit-footprint.ts';
 export { BUILDING_STYLES, buildingParams, buildingPhysics, fittedDoorway } from './building.ts';
-export { buildingDoorFits, type DoorFit } from './building-doors.ts';
+export { buildingDoorFits, buildingGroundRooms, type DoorFit } from './building-doors.ts';
 export { FACE_FONTS, FACE_IMAGE, FACE_LIMITS, FACE_NORMALS, FACE_PATTERNS, FACE_SIDES, boxSideSize, decalSchema, faceContentIssues, faceLines, faceLocalSide, shapeFaceSchema, type Decal, type FaceContent, type FaceSide, type ShapeFace } from './faces.ts'; // XP8
 export { ANIMAL_SPECIES, BEHAVIORS, creatureAbilities } from './animals.ts';
 export { GENERATORS, registerGenerator, generator, describeGenerators } from './registry.ts';

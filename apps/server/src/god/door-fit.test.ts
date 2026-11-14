@@ -32,7 +32,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   const seq0 = god.model.editSeq;
 
   const fact = await accept<unknown>(host, enableDoorFitV1(host, god) as Promise<never>) as { payload: { doorFitV1: unknown; runtimePolicy: { doorFitV1: boolean } } };
-  assert.deepEqual(fact.payload.doorFitV1, { buildings: 3, doors: 3 }, 'logged with what it fitted');
+  assert.deepEqual(fact.payload.doorFitV1, { buildings: 3, doors: 3, series: 0, kept: [] }, 'logged with what it fitted');
   assert.equal(fact.payload.runtimePolicy.doorFitV1, true);
   assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
   await w.settle(10);

@@ -6730,7 +6730,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@2",
+          "def": "core/tower@1",
           "name": "region-vineyard-villa-tower",
           "p": [
             82.6,
@@ -6747,23 +6747,6 @@
             "roof": "hip",
             "material": "stone",
             "windows": 0.6
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-vineyard-villa-tower-door-1",
-          "p": [
-            82.6,
-            -147.61
-          ],
-          "r": 0,
-          "params": {
-            "sx": 0.84,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -7240,11 +7223,11 @@
           "name": "region-abbey-church-door-1",
           "p": [
             -147.61,
-            98.022
+            99.997
           ],
           "r": 1.571,
           "params": {
-            "sx": 0.84,
+            "sx": 1.53,
             "sy": 0.9
           },
           "state": {
@@ -8500,7 +8483,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@2",
+          "def": "core/cottage@1",
           "name": "campus-residence-2",
           "p": [
             12,
@@ -8516,23 +8499,6 @@
             "floors": 3,
             "roof": "flat",
             "balcony": true
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "campus-residence-2-door-1",
-          "p": [
-            15.39,
-            -120.293
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 0.84,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -11769,8 +11735,8 @@
           "def": "core/door@2",
           "name": "suburb-house-1-door-1",
           "p": [
-            178.824,
-            43.11
+            179.292,
+            42.11
           ],
           "r": -3.141,
           "params": {
@@ -11801,8 +11767,8 @@
           "def": "core/door@2",
           "name": "suburb-house-2-door-1",
           "p": [
-            191.824,
-            43.11
+            192.292,
+            42.11
           ],
           "r": -3.141,
           "params": {
@@ -11833,8 +11799,8 @@
           "def": "core/door@2",
           "name": "suburb-house-3-door-1",
           "p": [
-            217.824,
-            43.11
+            218.292,
+            42.11
           ],
           "r": -3.141,
           "params": {
@@ -11865,8 +11831,8 @@
           "def": "core/door@2",
           "name": "suburb-house-4-door-1",
           "p": [
-            230.824,
-            43.11
+            231.292,
+            42.11
           ],
           "r": -3.141,
           "params": {
@@ -11897,8 +11863,8 @@
           "def": "core/door@2",
           "name": "suburb-house-5-door-1",
           "p": [
-            178.824,
-            83.11
+            179.292,
+            82.11
           ],
           "r": -3.141,
           "params": {
@@ -11928,8 +11894,8 @@
           "def": "core/door@2",
           "name": "suburb-house-6-door-1",
           "p": [
-            181.175,
-            64.89
+            180.706,
+            65.89
           ],
           "r": 0,
           "params": {
@@ -11966,8 +11932,8 @@
           "def": "core/door@2",
           "name": "suburb-house-7-door-1",
           "p": [
-            191.824,
-            83.11
+            192.292,
+            82.11
           ],
           "r": -3.141,
           "params": {
@@ -11997,8 +11963,8 @@
           "def": "core/door@2",
           "name": "suburb-house-8-door-1",
           "p": [
-            194.175,
-            64.89
+            193.706,
+            65.89
           ],
           "r": 0,
           "params": {
@@ -12029,8 +11995,8 @@
           "def": "core/door@2",
           "name": "suburb-house-9-door-1",
           "p": [
-            217.824,
-            83.11
+            218.292,
+            82.11
           ],
           "r": -3.141,
           "params": {
@@ -12060,8 +12026,8 @@
           "def": "core/door@2",
           "name": "suburb-house-10-door-1",
           "p": [
-            220.175,
-            64.89
+            219.706,
+            65.89
           ],
           "r": 0,
           "params": {
@@ -12092,8 +12058,8 @@
           "def": "core/door@2",
           "name": "suburb-house-11-door-1",
           "p": [
-            230.824,
-            83.11
+            231.292,
+            82.11
           ],
           "r": -3.141,
           "params": {
@@ -12123,8 +12089,8 @@
           "def": "core/door@2",
           "name": "suburb-house-12-door-1",
           "p": [
-            233.175,
-            64.89
+            232.706,
+            65.89
           ],
           "r": 0,
           "params": {
@@ -12154,8 +12120,8 @@
           "def": "core/door@2",
           "name": "suburb-house-13-door-1",
           "p": [
-            181.175,
-            102.89
+            180.706,
+            103.89
           ],
           "r": 0,
           "params": {
@@ -12185,8 +12151,8 @@
           "def": "core/door@2",
           "name": "suburb-house-14-door-1",
           "p": [
-            194.175,
-            102.89
+            193.706,
+            103.89
           ],
           "r": 0,
           "params": {
@@ -12222,8 +12188,8 @@
           "def": "core/door@2",
           "name": "suburb-house-15-door-1",
           "p": [
-            220.175,
-            102.89
+            219.706,
+            103.89
           ],
           "r": 0,
           "params": {
@@ -12253,8 +12219,8 @@
           "def": "core/door@2",
           "name": "suburb-house-16-door-1",
           "p": [
-            233.175,
-            102.89
+            232.706,
+            103.89
           ],
           "r": 0,
           "params": {
@@ -12284,8 +12250,8 @@
           "def": "core/door@2",
           "name": "lake-cabin-1-door-1",
           "p": [
-            -120.159,
-            -54.884
+            -121.012,
+            -55.835
           ],
           "r": -0.437,
           "params": {
@@ -12315,8 +12281,8 @@
           "def": "core/door@2",
           "name": "lake-cabin-2-door-1",
           "p": [
-            -154.452,
-            -55.291
+            -155.683,
+            -55.631
           ],
           "r": 0.133,
           "params": {
@@ -12346,8 +12312,8 @@
           "def": "core/door@2",
           "name": "lake-cabin-3-door-1",
           "p": [
-            -165.935,
-            -52.661
+            -167.21,
+            -52.744
           ],
           "r": 0.337,
           "params": {
@@ -12377,8 +12343,8 @@
           "def": "core/door@2",
           "name": "lake-cabin-4-door-1",
           "p": [
-            -177.484,
-            -48.155
+            -178.747,
+            -47.965
           ],
           "r": 0.552,
           "params": {
@@ -12408,8 +12374,8 @@
           "def": "core/door@2",
           "name": "lake-cabin-5-door-1",
           "p": [
-            -189.098,
-            -38.855
+            -190.271,
+            -38.35
           ],
           "r": 0.809,
           "params": {
@@ -12439,8 +12405,8 @@
           "def": "core/door@2",
           "name": "lake-cabin-6-door-1",
           "p": [
-            -194.904,
-            -25.612
+            -195.915,
+            -24.832
           ],
           "r": 1.06,
           "params": {
@@ -13093,7 +13059,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@2",
+          "def": "core/cottage@1",
           "name": "cliff-house-4",
           "p": [
             255.782,
@@ -13110,23 +13076,6 @@
             "material": "plaster",
             "roof": "flat",
             "windows": 0.5
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "cliff-house-4-door-1",
-          "p": [
-            255.782,
-            129.622
-          ],
-          "r": 0,
-          "params": {
-            "sx": 0.84,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -13877,7 +13826,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@2",
+          "def": "core/cottage@1",
           "name": "hillside-home-1",
           "p": [
             181.517,
@@ -13893,23 +13842,6 @@
             "floors": 2,
             "material": "plaster",
             "roof": "gable"
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "hillside-home-1-door-1",
-          "p": [
-            184.471,
-            -69.445
-          ],
-          "r": 0.778,
-          "params": {
-            "sx": 0.84,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {

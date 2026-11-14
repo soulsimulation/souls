@@ -630,6 +630,12 @@ checks, room goals and the connectivity audit treat its gap as open, so a room b
 Soul inside is never stepped out. The walk graph still treats the shut leaf as solid: one plain walk act goes to the
 door, opens it by hand, passes and closes it behind (entry 31). A locked door stays a wall.
 
+Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
+revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
+enclosed room. Templates carry them; a live world gets them once at boot (`door-fit/1`, the last boot rule). Inside doors,
+upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room stays an open
+doorway, with no door in it, until a walk can pass several closed doors in a row (#2370).
+
 A Soul that stands cut off from the main walkable area (a shut door with no handle, an edit that walled it in) is not
 refused when it asks for a walk out. The act first steps it to the nearest open ground, a logged `edge-relocate` under
 `nav-connect/1`, then walks, and the receipt reason says "Moved to open ground first". Every walk form does this: an

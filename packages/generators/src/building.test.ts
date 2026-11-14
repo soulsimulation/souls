@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildingLayout, buildingPhysics } from './building.ts';
+import { buildingDoorFits } from './building-doors.ts';
 import { LANDING_W, MIN_STAIR_W } from './building-plan.ts';
 import { pointInPoly } from './geom.ts';
 import type { Baked, LocalOBB } from './types.ts';
@@ -237,4 +238,16 @@ test('a bare doorway (#2282): leaf: false is honoured only where the def opts in
   assert.deepEqual(bare.openings.map((o) => [o.kind, o.leaf]), [['door', false], ['window', undefined]], 'a door has no leaf; a window takes no flag');
   assert.equal(buildingLayout(params(false), { style: 'hall' }).openings.some((o) => 'leaf' in o), false, 'core/hall@1 draws every leaf as before');
   assert.deepEqual(buildingPhysics(params(false), { style: 'hall', bareDoors: true }), buildingPhysics(params(), { style: 'hall' }), 'same walls, same opening');
+});
+
+test('a door-fitted revision (#2383): only its outside ground-floor doors are bare, each takes a door, and the walls are the same', () => {
+  for (const [style, params] of [['cottage', {}], ['townhouse', { floors: 3 }], ['hall', { front: 'e' }]] as const) {
+    const L = buildingLayout(params, { style, doorThings: true });
+    const bare = L.openings.filter((o) => o.leaf === false);
+    assert.ok(bare.length >= 1 && bare.every((o) => o.kind === 'door' && o.exterior && o.floor === 0 && o.to !== 'balcony'), style);
+    assert.equal(L.openings.some((o) => o.kind === 'door' && !o.exterior && o.leaf === false), false, `${style}: inside doors keep their leaf`);
+    assert.deepEqual(buildingPhysics(params, { style, doorThings: true }), buildingPhysics(params, { style }), `${style}: same walls and openings`);
+    assert.equal(buildingDoorFits(params, { style, doorThings: true }, { p: [10, 5], r: Math.PI / 2 }).length, bare.length);
+    assert.equal(buildingDoorFits(params, { style }, { p: [0, 0] }).length, 0, 'the old revision takes no doors');
+  }
 });

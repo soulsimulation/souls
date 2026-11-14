@@ -1,5 +1,5 @@
 // #2383 doors everywhere: the real door things a door-fitted building revision (make.args.doorThings) takes, one per bare
-// doorway (fittedDoorway: every ground-floor door), placed in the doorway's centre on the wall line, its front facing the
+// doorway (fittedDoorway: every outside door on the ground floor), placed in the doorway's centre on the wall line, its front facing the
 // way the wall's outward normal does (core/door@2 swings out), stretched to the opening. Pure: the same params, args and
 // pose give the same doors, so a template rewrite and a live-world migration place the same things.
 import { buildingLayout, buildingPhysics } from './building.ts';
@@ -23,4 +23,11 @@ export function buildingDoorFits(params: Record<string, unknown>, args: Record<s
     out.push({ opening: b.id, exterior: o.exterior, p: [r3(pose.p[0] + x * c + z * s), r3(pose.p[1] - x * s + z * c)], r, sx: r2(clamp((b.width - 0.03) / FRAME_W, SX)), sy: r2(clamp(b.height / FRAME_H, SY)) });
   });
   return out;
+}
+
+/** The building's ground-floor rooms as world polygons (x, z), for these params and def args at `pose`. */
+export function buildingGroundRooms(params: Record<string, unknown>, args: Record<string, unknown>, pose: { p: [number, number]; r?: number }): [number, number][][] {
+  const yaw = pose.r ?? 0, c = Math.cos(yaw), s = Math.sin(yaw);
+  return (buildingPhysics(params, args).rooms ?? []).filter((r) => r.floor === 0)
+    .map((r) => r.polygon.map(([x, z]): [number, number] => [pose.p[0] + x * c + z * s, pose.p[1] - x * s + z * c]));
 }

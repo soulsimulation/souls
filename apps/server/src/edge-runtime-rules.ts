@@ -67,7 +67,7 @@ export async function enableDoorFitV1(host: WorldHost, god: GodMode | undefined,
     .flatMap((e): [number, number][] => e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
   const r = fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`));
   if (r.left.length) return;
-  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors },
+  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors, series: r.series.length, kept: r.kept },
     why: 'door-fit/1 (#2383): every building doorway holds a real door a Soul opens by hand; the buildings and doors were fitted by a recorded engine edit just before this event' });
 }
 
