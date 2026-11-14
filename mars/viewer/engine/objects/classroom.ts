@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import type { ActionDef, Diagnostic, StepResult } from '../actions/types.ts';
 import type { Runtime } from '../runtime/runtime.ts';
+import { hypot } from '../core/math.ts';
 import { CATALOG } from '../world/catalog.ts';
 import type { Entity } from '../world/types.ts';
 
@@ -155,7 +156,7 @@ export const classroomTv: ActionDef<Tv, null, { id: string; p: Tv }> = {
     if (held.length) return { ok: false, diagnostic: { code: 'display.in-class', message: `${p.display} is showing a class's lesson (held by ${held.join(', ')})`, subjects: [p.display, ...held] } };
     const a = rt.world.entities[p.actor];
     if (!a?.human) return { ok: false, diagnostic: { code: 'object.unknown', message: `no body "${p.actor}"`, subjects: [p.actor] } };
-    const d = Math.hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]);
+    const d = hypot(a.pose.p[0] - e.pose.p[0], a.pose.p[2] - e.pose.p[2]);
     if (d > TV_REACH || (a.human.level ?? 0) !== 0) return { ok: false, diagnostic: { code: 'display.out-of-reach', message: `${p.actor} is ${d.toFixed(1)} m from ${p.display}; come within ${TV_REACH} m`, subjects: [p.actor, p.display], details: { distance: d } } };
     if (p.op === 'next' && c.mode !== 'on') return { ok: false, diagnostic: { code: 'display.off', message: `${p.display} is off; switch it on first`, subjects: [p.display] } };
     return { ok: true, program: null };
