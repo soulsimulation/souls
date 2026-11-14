@@ -2240,7 +2240,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // W8: "attend the lecture", "go to class": an audience seat in the classroom (the existing seat-in-room intent)
     if (!caps.some(c => c.id === asked)) {const cls = classWords(asked, this.places.byId.values()); if (cls) return this.intents.act(soul, {...cls, ...(clientRef ? {clientRef} : {})});}
     if (asked.startsWith('face:') && caps.some(c => c.id === asked && c.target?.kind === 'soul')) return this.intents.act(soul, {verb: 'turn', face: caps.find(c => c.id === asked)!.target!.id, ...(clientRef ? {clientRef} : {})});
-    if (asked === 'walk-to:here' && caps.some(c => c.id === asked)) return this.intents.act(soul, {verb: 'walk-to', target: {at: params.at}, ...(clientRef ? {clientRef} : {})});
+    if (asked === 'walk-to:here' && caps.some(c => c.id === asked)) return this.intents.act(soul, {verb: 'walk-to', target: {at: params.at, ...(params.pace !== undefined ? {pace: params.pace} : {})}, ...(clientRef ? {clientRef} : {})});
     // strict/1: an id-shaped target that names nothing in this world is refused, never swapped for something else
     // (SOULSIM-E: unless it is a far place's walk the listing leaves out, which resolveOnDemand below offers: the agent
     // resolved "go to the horse" to walk:land-park-lawns-west and acting on that id was refused, on Eden 2026 / 3.60)
@@ -2394,6 +2394,14 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const standing = steps[0]?.verb === 'stand' ? [steps.shift()!] : [];
       steps = [...standing, ...legs, ...steps];
     }
+    // #2283: a walk at running pace is the same route at the engine's run gait (stairs stay slow, water is waded at
+    // walking pace, a wet route falls back to walking at launch): only the walk steps change, both the ground walk_to and
+    // the mars:walk_to a room on another floor is reached by (its legs indoors and after the stair)
+    let label = plan.label;
+    if (params.pace !== undefined) {
+      if ((params.pace !== 'walk' && params.pace !== 'run') || cap.verb !== 'walk') return {...refuse('capability.params', 'pace is walk or run, on a walk.'), ...resolved};
+      if (params.pace === 'run') {steps = steps.map(s => WALK_VERBS.has(s.verb) ? {...s, params: {...s.params, gait: 'run'}} : s); label = label.replace(/^Walk\b/i, 'Run');}
+    }
     const make = (plan as {make?: 'mark' | 'project'}).make;
     if (make && this.aboard(soul.entityId)) return refuse('ride.aboard', 'You are in a ride; make marks on the ground.');
     if (make && this.comms) {
@@ -2457,7 +2465,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (cap.blocked.code === 'route.unreachable' && navWasCold && plan.steps.some(s => WALK_VERBS.has(s.verb)) && !isVerificationProbe(soul.soulId) && this.navWarmFor(NAV_ACT_WARM_MS)) return this.actOnce(soul, input, null, true);
       return {...refuse(cap.blocked.code, cap.blocked.reason), ...resolved};
     }
-    return this.launch(soul, capability, plan.label, this.standIfSeated(soul, steps), clientRef, resolved, refuse, prep.commit,params,cap.target?{capability:cap.id,target:cap.target.id,kind:cap.target.kind,...(cap.target.kind==='place'?{place:cap.target.id}:{})}:undefined,false,navWasCold);
+    return this.launch(soul, capability, label, this.standIfSeated(soul, steps), clientRef, resolved, refuse, prep.commit,params,cap.target?{capability:cap.id,target:cap.target.id,kind:cap.target.kind,...(cap.target.kind==='place'?{place:cap.target.id}:{})}:undefined,false,navWasCold);
   }
   /** #485: on the seat already, not on the way to one (a walking sit holds its claim before she sits). */
   private sittingNow(entityId: string): boolean {const h = (this.mw.world as NativeWorld).entities[entityId]?.human; return !!this.seatOf(entityId) && (h?.activity === 'sit' || h?.baseActivity === 'sit');}
@@ -2581,8 +2589,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     // BS3 (a): a jog or run the water refuses (the way runs through the shallows, or the body stands in them) walks instead
     let note: string | undefined = passage?.note, approach: Record<string, unknown> | undefined;
-    if (issue?.code === 'gait.dry-ground-required' && steps.some(s => s.verb === 'walk_to' && s.params?.gait && s.params.gait !== 'walk')) {
-      const walked = steps.map(s => s.verb === 'walk_to' && s.params?.gait ? {...s, params: Object.fromEntries(Object.entries(s.params).filter(([k]) => k !== 'gait'))} : s);
+    if (issue?.code === 'gait.dry-ground-required' && steps.some(s => WALK_VERBS.has(s.verb) && s.params?.gait && s.params.gait !== 'walk')) {
+      const walked = steps.map(s => WALK_VERBS.has(s.verb) && s.params?.gait ? {...s, params: Object.fromEntries(Object.entries(s.params).filter(([k]) => k !== 'gait'))} : s);
       const again = this.host.engine.canPerform({actor: soul.entityId, label, steps: walked});
       if (!again || WAIT_CODES.has(again.code) || APPROACH_CODES.has(again.code)) {steps = walked; issue = again; note = 'Walking, not running: the way goes through shallow water (or starts in it), where only walking is possible.';}
     }
