@@ -58,7 +58,7 @@ test('#2133 every world adopts stall-release-support/1 at boot, last, after stan
   while(!done){host.drainInputs();await setImmediate();}await p;
   const rules=(db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='rules' ORDER BY seq").all(host.worldId) as {payload:string}[]).map(r=>JSON.parse(r.payload).runtimePolicy??{});
   const first=rules.findIndex(r=>r.stallReleaseSupportV1===true);
-  assert.equal(first,rules.length-1,'adopted by the last rules event');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
+  assert.equal(first,rules.length-2,'adopted by the rules event before the last');assert.equal(rules.at(-1)?.climbSpacingV1,true,'climb-spacing/1 adopted last');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
   assert.equal((host.engine.snapshot() as unknown as {cfg:{stallReleaseSupportV1?:boolean}}).cfg.stallReleaseSupportV1,true);
  }finally{host.stop();db.close();}
 });

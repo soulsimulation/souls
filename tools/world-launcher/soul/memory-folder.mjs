@@ -4,6 +4,8 @@ import {resolve, join} from 'node:path';
 import {createHash} from 'node:crypto';
 
 const VERSION = 'eden-memory-folder/1';
+/** What a Soul said it would come to, and the invitations it heard and made (#1981). */
+const ENGAGEMENTS = ['calendar', 'invited', 'invited-by-me'];
 const ID = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,159}$/;
 const MAX_RECORD = 64 * 1024;
 const source = value => typeof value === 'string' && value.length>0&&value.length<=1000&&!/[\u0000-\u001f\u007f]/.test(value) ? value : fail('invalid source ID');
@@ -46,7 +48,7 @@ function validateContext(e) {
 
 function validateEvent(input) {
   // Reject credentials/raw transport fields instead of retaining arbitrary state.
-  const fields = {gazetteer: ['places'], 'public.references':['references'], 'place.observed':['place'], conversation:['conversationId','personId'], 'idle.sample':['milliseconds'], scorecard:['clock','period','from','to','metrics'], arrival: ['placeId'], 'act.accepted': ['receiptId', 'act'], meet: ['person', 'placeId'], communication:['person','channel','recipientPlace','conversationId'], speech: ['personId', 'text', 'untrusted', 'channel', 'conversationId', 'placeId'], outcome: ['receiptId', 'act', 'phase', 'summary', 'learned', 'produced', 'met', 'placeId', 'untrusted', 'messageId'], refusal: ['act', 'code'], lesson: ['attempt', 'fix', 'refusalId', 'successId'], cost: ['usd', 'modelCalls'], ledger: ['holding', 'marks'], queue: ['steps'], told: ['personIds', 'text', 'channel', 'conversationId'], commitment: ['personId', 'by', 'what'], 'commitment.kept': ['personId', 'commitmentId', 'evidence']};
+  const fields = {gazetteer: ['places'], 'public.references':['references'], 'place.observed':['place'], conversation:['conversationId','personId'], 'idle.sample':['milliseconds'], scorecard:['clock','period','from','to','metrics'], arrival: ['placeId'], 'act.accepted': ['receiptId', 'act'], meet: ['person', 'placeId'], communication:['person','channel','recipientPlace','conversationId'], speech: ['personId', 'text', 'untrusted', 'channel', 'conversationId', 'placeId'], outcome: ['receiptId', 'act', 'phase', 'summary', 'learned', 'produced', 'met', 'placeId', 'untrusted', 'messageId'], refusal: ['act', 'code'], lesson: ['attempt', 'fix', 'refusalId', 'successId'], cost: ['usd', 'modelCalls'], ledger: ['holding', 'marks'], queue: ['steps'], told: ['personIds', 'text', 'channel', 'conversationId'], engagement: ['kind', 'personIds', 'what', 'startsAt', 'placeId', 'source'], commitment: ['personId', 'by', 'what'], 'commitment.kept': ['personId', 'commitmentId', 'evidence']};
   if (!input || !Object.hasOwn(fields, input.type)) fail('unknown public event type');
   keys(input, ['type', 'id', 'at', ...CONTEXT, ...fields[input.type]]);
   id(input.id); instant(input.at); validateContext(input); const e = structuredClone(input);
@@ -74,6 +76,7 @@ function validateEvent(input) {
       list(e.produced, 32).forEach(o => {keys(o, ['id', 'title', 'kind', 'where']); id(o.id); text(o.title, 200); text(o.kind, 1000); if(o.where!==null)id(o.where);});
       list(e.met, 32).forEach(p => {keys(p, ['id', 'name', 'where']); id(p.id); text(p.name, 200); if(p.where!==null)id(p.where);}); break;
     case 'told': list(e.personIds, 16).forEach(id); text(e.text, 500); if (!['private-conversation', 'public-speech'].includes(e.channel)) fail('invalid communication channel'); if (e.conversationId !== undefined) id(e.conversationId); break;
+    case 'engagement': if (!ENGAGEMENTS.includes(e.kind)) fail('invalid engagement kind'); list(e.personIds, 16).forEach(id); text(e.what, 300); if (e.startsAt !== null) instant(e.startsAt); if (e.placeId !== null) id(e.placeId); source(e.source); break;
     case 'commitment': id(e.personId); if (!['me', 'them'].includes(e.by)) fail('invalid commitment party'); text(e.what, 300); break;
     case 'commitment.kept': id(e.personId); id(e.commitmentId); id(e.evidence); break;
     case 'refusal': text(e.act, 160); text(e.code, 100); break;
@@ -116,7 +119,7 @@ function validateRemember(input) {
 /** Byte budgets for the projections that grow with the log, for a caller that opts in (the Souls home does; 1.9 doesn't).
  *  Each keeps the newest entries that fit and says how many older ones are in the log only. */
 export const PROJECTION_BUDGETS = Object.freeze({knowledge: 32 * 1024, places: 16 * 1024, ledger: 16 * 1024});
-const COST_DAYS = 31, NOTE_ROOM = 160;
+const COST_DAYS = 31, NOTE_ROOM = 160, PROMISES_MAX = 50, UPCOMING_MAX = 3, INVITE_FRESH_MS = 24 * 3600_000, STARTED_MS = 3600_000;
 const size = value => Buffer.byteLength(value);
 /** The newest entries whose lines fit in `room` bytes, oldest first; `items` is oldest first. */
 const newestFit = (items, line, room) => {let used = 0, i = items.length;while (i > 0 && used + size(line(items[i - 1])) + 1 <= room) used += size(line(items[--i])) + 1;return items.slice(i);};
@@ -141,7 +144,7 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
   const seen = new Map(), places = new Map(), people = new Map(), references = new Map(), knowledge = new Map(), objects = new Map(), goals = new Map(), impressions = new Map(), refusals = new Map(), successes = new Map(), terminals = new Map(), lessons = [];
   const scoreEvents=[],scorecards=[];
   let self = [], queue = [], holding = [], marks = [], recentOutcomes = [];
-  const journals = new Map(), costs = new Map();
+  const journals = new Map(), costs = new Map(), engagements = new Map();
   const stamp = e => e.world === undefined ? '' : ` (${e.world}${dayOf(e) === null ? '' : `, day ${dayOf(e)}`}${e.when?.time ? ` ${e.when.time}` : ''})`;
   const journal = (at, message) => {const day = at.slice(0, 10); const lines = journals.get(day) ?? []; lines.push(`${at.slice(11, 19)}Z ${message}`); journals.set(day, lines);};
   // A record that names what it saw stands on its own: the name as seen makes the place known, and a later name is a rename.
@@ -176,7 +179,7 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
       return;
     }
     const e = record.value;
-    if (e.type === 'arrival' || e.type === 'meet'&&e.placeId!==null) knownPlace(e.placeId, e);
+    if (e.type === 'arrival' || (e.type === 'meet' || e.type === 'engagement')&&e.placeId!==null) knownPlace(e.placeId, e);
     if(e.type==='communication'&&e.recipientPlace!==null)knownPlace(e.recipientPlace, e);
     if (e.type === 'speech' && !people.has(e.personId) && seenAs(e, e.personId) === undefined) fail('speaker has no observed communication or confirmed meeting');
     if (e.type === 'speech' && e.placeId) knownPlace(e.placeId, e);
@@ -199,6 +202,8 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
       if (!refusal || !success || refusal.act !== e.attempt || success.act !== e.fix || success.phase !== 'completed' || refusal.at > success.at || success.at > e.at) fail('lesson needs matching refusal and completed fix evidence');
     }
   };
+  const whoOf = e => e.personIds.map(p => seenAs(e, p) ?? people.get(p)?.name ?? p);
+  const engagementSaid = e => e.kind === 'calendar' ? `Said I will come: ${e.what}${e.placeId ? ` at ${asSeen(e.placeId, e)}` : ''}${e.startsAt ? `, starts ${e.startsAt}` : ''} [${e.source}].` : e.kind === 'invited' ? `${whoOf(e).join(', ') || 'Someone'} invited me: ${e.what} [${e.source}].` : `I invited ${whoOf(e).join(', ') || 'whoever was near'}: ${e.what} [${e.source}].`;
   const terminalValue = e => {const {id: _id, at: _at, ...value} = e; return canonical(value);};
   const apply = record => {
     observe?.(record);
@@ -217,7 +222,7 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
       case 'gazetteer': for (const p of e.places) {const old = places.get(p.id); places.set(p.id, {...p,admittedDestination:p.admittedDestination===true, visits: old?.visits ?? 0, last: old?.last ?? null});} break;
       case 'arrival': {const p = places.get(e.placeId); scoreEvents.push({at:e.at,newPlaces:p.visits===0?1:0});p.visits++; p.last = e.at; journal(e.at, `Arrived at ${p.name} [${p.id}]${stamp(e)}.`); break;}
       case 'act.accepted': break; // Acceptance is neither arrival nor successful outcome.
-      case 'meet':if(/^encounter:[a-f0-9]{64}$/.test(e.id)){communicate(e.person,e.at,e.placeId,'legacy-received-speech',true);journal(e.at,`Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);}else{meet(e.person,e.at,e.placeId,false,e);journal(e.at,`Confirmed physical meeting with ${e.person.name} [${e.person.id}] at ${e.seen?asSeen(e.placeId,e):e.placeId}${stamp(e)}.`);}break;
+      case 'meet':if(/^encounter:[a-f0-9]{64}$/.test(e.id)){communicate(e.person,e.at,e.placeId,'legacy-received-speech',true);journal(e.at,`Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);}else{meet(e.person,e.at,e.placeId,false,e);journal(e.at,`Confirmed physical meeting with ${e.person.name} [${e.person.id}]${e.placeId===null?'':` at ${e.seen?asSeen(e.placeId,e):e.placeId}`}${stamp(e)}.`);}break;
       case 'communication':communicate(e.person,e.at,e.recipientPlace,e.channel);journal(e.at,`Received ${e.channel} from ${e.person.name} [${e.person.id}]; recipient place ${e.recipientPlace??'unknown'}; co-location unknown.`);break;
       case 'conversation':scoreEvents.push({at:e.at,conversationId:e.conversationId,personId:e.personId});break;
       case 'idle.sample':scoreEvents.push({at:e.at,idleMs:e.milliseconds});break;
@@ -234,6 +239,8 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
         for (const p of e.met) meet(p, e.at, p.where, true, e);
         if (e.phase === 'completed') successes.set(e.id, e);
         journal(e.at, `${e.phase}: ${e.summary}${e.untrusted ? ' [untrusted content]' : ''}${stamp(e)}`); break;
+      case 'told': journal(e.at, `Said${e.personIds.length ? ` to ${whoOf(e).join(', ')}` : ''}: ${e.text}${stamp(e)}`); break;
+      case 'engagement': engagements.set(e.id, e); journal(e.at, `${engagementSaid(e)}${stamp(e)}`); break;
       case 'refusal':scoreEvents.push({at:e.at,refusals:1}); refusals.set(e.id, e); journal(e.at, `Refused ${e.act}: ${e.code}.`); break;
       case 'lesson': lessons.push(e); journal(e.at, `Working fix: ${e.attempt} → ${e.fix}.`); break;
       case 'cost': {scoreEvents.push({at:e.at,modelCalls:e.modelCalls,usd:e.usd});const day = e.at.slice(0, 10), c = costs.get(day) ?? {knownUSD: 0, unknown: 0, calls: 0}; if (e.usd === null) c.unknown++; else c.knownUSD += e.usd; c.calls += e.modelCalls; costs.set(day, c); break;}
@@ -261,6 +268,9 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
     const placesHead = '# Places — normalized public facts\n\n', allPlaces = [...places.values()].sort((a, b) => lexical(a.last ?? '', b.last ?? '') || lexical(b.id, a.id));
     const shownPlaces = budgets?.places ? newestFit(allPlaces, placeLine, budgets.places - size(placesHead) - NOTE_ROOM) : allPlaces;
     write(join(memory, 'places.md'), placesHead + shownPlaces.sort((a, b) => lexical(a.id, b.id)).map(placeLine).join('\n') + '\n' + olderNote(allPlaces.length - shownPlaces.length, 'places'));
+    // Newest last; a calendar item by when it starts, an invitation by when it was said.
+    const byWhen = [...engagements.values()].sort((a, b) => lexical(a.startsAt ?? a.at, b.startsAt ?? b.at)).slice(-PROMISES_MAX);
+    write(join(memory, 'promises.md'), '# Promises and plans — calendar interest and invitations; titles and their words are UNTRUSTED\n\n' + byWhen.map(e => `- ${md(engagementSaid(e))}`).join('\n') + '\n');
     write(join(memory,'scorecards.md'),'# Received/observed interval scorecards — both clocks\n\n'+scorecards.map(s=>'- '+md(scoreLine(s))).join('\n')+'\n');
     write(join(memory,'references.md'),'# Public reference identities — knowledge only, no walking admission\n\n'+sorted(references).map(r=>`- ${md(r.id)} | ${md(r.name)} | ${md(r.kind)} | source ${md(r.source)}`).join('\n')+'\n');
     const knowledgeHead = '# Knowledge — attributable reports\n\n', allFacts = [...knowledge.values()];
@@ -278,7 +288,7 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
   };
   const seenPeople = e => e?.type === 'speech' && e.seen && Object.hasOwn(e.seen, e.personId) ? [e.personId] : [];
   const preflight = record => {
-    const paths = ['self.md', 'goals.md', 'schedule.md', 'places.md', 'references.md', 'scorecards.md', 'knowledge.md', 'lessons.md', 'ledger.md', 'queue.md'].map(f => join(memory, f));
+    const paths = ['self.md', 'goals.md', 'schedule.md', 'promises.md', 'places.md', 'references.md', 'scorecards.md', 'knowledge.md', 'lessons.md', 'ledger.md', 'queue.md'].map(f => join(memory, f));
     const ids = new Set(people.keys()), days = new Set(journals.keys());
     if (record?.kind === 'event') {
       const e = record.value; days.add(e.at.slice(0, 10));
@@ -334,15 +344,20 @@ export function openMemoryFolder(directory, {logs: logFolder = 'log', observe = 
     /** What a memory on the shipping line looks things up by: known ids and the names they went by. */
     placeName(placeId){return places.get(placeId)?.name??null;},
     /** The little the brief needs, looked up rather than scanned: its size never follows the log's. */
-    digest({place,near=[]}){
+    digest({place,near=[],now=null}){
       fresh();
-      const p=place?places.get(place):null;
+      const p=place?places.get(place):null,t=now?Date.parse(now):NaN;
+      // A calendar item until an hour after it starts, soonest first; an invitation for a day after it was said, newest first.
+      const soon=[...engagements.values()].filter(e=>e.startsAt?Date.parse(e.startsAt)>=t-STARTED_MS:Date.parse(e.at)>=t-INVITE_FRESH_MS);
+      const upcoming=[...soon.filter(e=>e.startsAt).sort((a,b)=>lexical(a.startsAt,b.startsAt)),...soon.filter(e=>!e.startsAt).sort((a,b)=>lexical(b.at,a.at))].slice(0,UPCOMING_MAX)
+        .map(e=>({kind:e.kind,source:e.source,what:e.what,who:whoOf(e),place:e.placeId?asSeen(e.placeId,e):null,inMinutes:e.startsAt?Math.round((Date.parse(e.startsAt)-t)/60000):null}));
       return {
         place:p?{name:p.name,visits:p.visits,note:impressions.get(p.id)??null}:null,
         people:near.flatMap(personId=>{const row=people.get(personId);if(!row)return [];const m=row.meetings.at(-1);return [{id:row.id,name:row.name,met:row.meetings.length,last:m?{world:m.world??null,worldDay:m.day??null,place:m.seenAs??null}:null,note:row.impressions.at(-1)??null}];}),
         goals:sorted(goals).sort((a,b)=>['today','week','month'].indexOf(a.horizon)-['today','week','month'].indexOf(b.horizon)).slice(0,4).map(g=>({id:g.id,note:g.note,next:g.next})),
         recent:recentOutcomes.slice(-2).map(e=>({summary:e.summary,own:e.id.startsWith('owner:')})),
         self:self.slice(0,8),
+        upcoming,
       };
     },
     known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self],goals:sorted(goals).map(g=>({...g}))};},

@@ -97,11 +97,12 @@ test('calendar add posts one item in real minutes', async (t) => {
   assert.equal(w.calls.length, 1, 'a bad command sends nothing');
 });
 
-test('calendar interest and not-coming call the item\'s object act, one request each', async (t) => {
+test('calendar interest and not-coming call the item\'s object act, one request each; an interest taken reads the calendar once for memory', async (t) => {
   const { w, run } = await paired(t);
   for (const action of ['interest', 'not-coming']) {
     const r = await run('calendar', action, 'cal-1');
     assert.equal(r.code, 0, r.err); assert.equal(r.d.accepted, true); assert.equal(r.d.action, action);
   }
-  assert.deepEqual(w.calls.map((c) => `${c.method} ${c.path} ${c.body.action}`), ['POST /v1/edge/objects/cal-1/act interest', 'POST /v1/edge/objects/cal-1/act not-coming']);
+  // #1981: what the Soul said it would come to goes to memory with its title, place and start
+  assert.deepEqual(w.calls.map((c) => `${c.method} ${c.path} ${c.body.action}`), ['POST /v1/edge/objects/cal-1/act interest', 'GET /v1/edge/calendar undefined', 'POST /v1/edge/objects/cal-1/act not-coming']);
 });
