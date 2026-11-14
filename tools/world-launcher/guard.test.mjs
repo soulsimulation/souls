@@ -198,6 +198,16 @@ test('(c) a flapping world is held after 5 failures, refused while held, and res
   await p.closeAll();
 });
 
+test('#2378 (c2) a hold is a rest: it ends by itself and the world boots again, the rest doubling for each hold in a row', async () => {
+  const p = pool(R, { FAKE_FLAP_MS: '150' }, { guard: { ...FAST, holdRestMs: 400 } });
+  await p.ensure(world('fr')).catch(() => {});   // (a boot that fails counts toward the hold as well)
+  await until(() => p.status('fr').status === 'held', 8000, 'held');
+  await until(() => p.lines.some((l) => /fr rested 0 s after its hold: resuming it/.test(l)), 3000, 'resumed by itself');
+  await until(() => p.lines.filter((l) => /fr held: 5 failures/.test(l)).length === 2, 8000, 'held again (it still flaps)');
+  assert.ok(p.lines.some((l) => /fr held: .* it rests 1 s, then boots again/.test(l)), 'the second rest is twice the first');
+  await p.closeAll();
+});
+
 test('exit 75 (the world asks for a planned restart): restarted at once, reason planned, never a breaker failure', async () => {
   const p = pool(R, { FAKE_PLANNED_MS: '150' });
   await p.ensure(world('pl'));

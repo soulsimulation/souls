@@ -150,7 +150,9 @@ hang or a memory runaway.
   restarts the world as `wedged`, and the stall stack (#457, after 2 s) names the frame it was stuck in. A SIGKILL
   loses nothing accepted: acts are logged before they are answered, and the boot replays the log and catches the
   clock up (#2235).
-- `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak`.
+- `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak`,
+  and (#2378) `hang-at&tick=N` (a step stuck at tick N on every boot), `corrupt` (a Soul's body broken in memory) and
+  `disk&mb=N` (the headroom check reads N MB free; no `mb`: the disk again).
 
 **Measured** (`tools/world-launcher/crash-proof.test.mjs`): a real fake-mind Eden core world with its durable clock,
 under the launcher's `ChildPool`, a 5 s hang limit and a 768 MB heap cap. The workstation was loaded (load average 28 on
@@ -177,3 +179,27 @@ and exact by the same checks. On that runner's heap the heap rule is a backstop,
 
 For the shards (B5), every limit here ends the whole program, as the table above (A4) says: one world's hang, heap or
 fault storm ends its shard, and the launcher reloads all of its worlds.
+
+## A world that never stays stuck (#2378)
+
+Every freeze cause known, its recovery, and the test that injects it. A world comes back by itself in each one: no one
+is paged. Times are from the fault to the world serving again, measured on the loaded workstation (load average about
+20 on 16 cores; a cold boot there takes 9 to 20 s, a runner's 3 to 13 s, #2300).
+
+| Cause | Recovery | Measured | Exact | Test |
+|---|---|---|---|---|
+| A thrown error in a tick, timer, promise or request handler | Logged by name; the same process runs on; 50 in a minute is a planned restart (#2366) | never down | same process | `tools/world-launcher/crash-proof.test.mjs` |
+| A hang, a runaway heap | The watchdog's kill (hang 10 s, heap 95 % for 5 s), the launcher's restart, the catch-up (#2366) | 7.5 to 27 s | frontier tick and hash, log prefix, accepted Soul | `crash-proof.test.mjs` |
+| 1. Invariant corruption: a Soul's body broken in memory (its pose no number) | quarantine/1 (#1369) holds that body where it last stood whole, by a logged event; everyone else runs on. Edge worlds adopt it at boot; the fault adopts it first on a central-mind world | quarantined 0.14 to 0.18 s after the fault; never down | same process, the hold is in the log | `tools/world-launcher/no-stuck-world.test.mjs` |
+| 2. A restart loop: a step that hangs at the same tick on every boot | The watchdog's kill names the step the tick was in (`live.json` `killed.step`; a boot-stall kill is named by the last `live.json`). Two deaths in a row at the same step of the same tick: the next boot skips that step at that tick (`[world] step quarantined: afterTick[i] (frame) skipped at tick T`, glitch `world.step-quarantined`) | 35 s: two kills at a 3 s hang limit, three boots | log prefix kept; the skipped step is a listener's, which changes no engine state | `no-stuck-world.test.mjs` (A2) |
+| 3. A database wait: another process holds the write lock | Each statement waits at most 5 s (`busy_timeout`); a tick's writes waiting past the hang limit (10 s) end in the watchdog's kill, and the launcher restarts the world once the lock is gone | 12 s lock: down at 10.8 s, serving again at 31 s (19 s after the lock was let go) | frontier tick and hash, log prefix, accepted Soul | `no-stuck-world.test.mjs` |
+| 4. The disk filling | Every minute the world reads its free space; under `SIM_DISK_MIN_FREE_MB` (1024) it logs `[load] disk.low`, prunes by the existing retention rules (the hourly backups' rule, brain calls, talk, local takes) and holds its hourly backup. Nothing beyond retention is deleted. A write that still fails is a named halt, restarted by the guard (#2133) | alert and prune at once; never down | same process | `no-stuck-world.test.mjs`, `apps/server/src/load/restart-loop.test.ts` |
+| 5. A launcher terminal state | The breaker's `held` is a rest, not an end: it boots again after 10 min, doubling for each hold in a row up to 1 h; an operator's resume ends it sooner. A capacity refusal never ends `failed` (#2367) | the rest | as its restart | `tools/world-launcher/guard.test.mjs` (c2) |
+
+What is left, named so it is not mistaken for covered:
+
+- A step that is the engine's own (the step, the drain of logged inputs) and hangs at the same tick on every boot is
+  not skipped: skipping it would change world state. It cycles through kills, the breaker's rest and a retry; the
+  stall stack names the frame.
+- A process that aborts (SIGABRT at V8's heap limit) before its watchdog names a step leaves no step to quarantine; a
+  heap that aborts at the same tick on every boot cycles the same way.

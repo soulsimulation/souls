@@ -394,7 +394,7 @@ export class ChildPool {
     if (k?.frozen) this.thaw(k, { use: !passive });
     if (k && (k.status === 'running')) return Promise.resolve(k.port);
     // held (lane L1 breaker): too many failures in a row; nothing restarts it but an operator's resume()
-    if (k?.held) { const e = new Error(`world ${world.slug} is resting after ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${k.held.reason}); an operator resumes it`); e.code = 'held'; return Promise.reject(e); }
+    if (k?.held) { const e = new Error(`world ${world.slug} is resting after ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${k.held.reason}); it boots again by itself${k.held.until ? ` in ${Math.max(0, Math.round((k.held.until - Date.now()) / 1000))} s` : ''}`); e.code = 'held'; return Promise.reject(e); }
     // #2304: a world waiting for a load slot moves up to the most urgent reason anyone has asked for it
     const rank = rankOf(reason);
     if (k?.ready) k.loadRank = Math.min(k.loadRank ?? rank, rank);
@@ -588,7 +588,7 @@ export class ChildPool {
    *  A refusal for capacity (no memory or slot) is retried the same way but is not the world's failure. */
   scheduleRestart(k, reason = 'exit') {
     const g = this.g, now = Date.now();
-    if (k.upSince && now - k.upSince > g.resetAfterMs) k.crashes = 0;
+    if (k.upSince && now - k.upSince > g.resetAfterMs) { k.crashes = 0; k.holds = 0; }
     k.upSince = null;
     if (reason === 'wedged') k.lastWedge = { at: now, reason: k.lastExit?.reason ?? 'wedged' };
     if (reason !== 'capacity' && reason !== 'planned' && this.noteFailure(k, reason)) return;
@@ -620,7 +620,18 @@ export class ChildPool {
     k.status = 'held'; k.nextTryAt = null; this.o.onChange?.(k.slug);
     const e = new Error(`world ${k.slug} is resting after ${k.held.failures} failures (last: ${reason})`); e.code = 'held';
     this.settlePending(k, e);
-    this.log(`world ${k.slug} held: ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${reason}); no more restarts until an operator resumes it`);
+    // #2378: a hold is a rest, never a terminal state: it ends by itself after holdRestMs (10 min), doubling for each hold
+    // in a row up to holdRestMaxMs (1 h), and the world boots again (no one is paged for it). resume() still ends it early.
+    const rest = Math.min(this.g.holdRestMaxMs ?? 3_600_000, (this.g.holdRestMs ?? 600_000) * 2 ** Math.min(6, k.holds ?? 0));
+    k.holds = (k.holds ?? 0) + 1; k.held.until = Date.now() + rest;
+    k.timer = setTimeout(() => {
+      k.timer = null;
+      if (!k.held || this.closing || k.stopped || this.fenced || !k.world) return;
+      this.log(`world ${k.slug} rested ${Math.round(rest / 1000)} s after its hold: resuming it`);
+      this.resume(k.slug); this.ensure(k.world).catch((e) => this.log(`world ${k.slug} did not come back after its rest: ${e.message}`));
+    }, rest);
+    k.timer.unref?.();
+    this.log(`world ${k.slug} held: ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${reason}); it rests ${Math.round(rest / 1000)} s, then boots again`);
   }
   /** End a hold: the failure count starts again; the next request (or the caller's ensure) boots it. */
   resume(slug) {

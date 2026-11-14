@@ -35,7 +35,10 @@ export const S = {
   stallMs: 32,     // the tick age past which the clock counts as stalled; 0 = it owes no ticks (paused, stopped, halted, rate 0)
   clockRate: 33, baseRate: 34,   // the effective clock rate (lower while dilated) and the rate an admin set
   still: 35,       // #2303: 1 while the world is silent (still and unwatched): the watchdog writes live.json less often
-  size: 36,
+  // #2378 A2: the step a tick is in (written by the main thread, WorldHost.tickOnceInner): the listener's index + 1 (0 = none)
+  // and its tick. The watchdog's kill names it (live.json `killed.step`), so a restart loop is seen and that step quarantined.
+  stepTick: 36, step: 37,
+  size: 38,
 } as const;
 
 export type LiveJson = {
@@ -54,6 +57,8 @@ export type LiveJson = {
   /** Stage B: the first read worker's port (the launcher routes C2 reads here); present only with read workers. */
   readPort?: number;
   read?: {ports: number[]; workers: number; lagGens: number; subset: boolean; routes: string[]};
+  /** #2378 A2: the step the main thread is in (a listener's afterTick at that tick); present only while it is in one. */
+  step?: {tick: number; index: number};
   /** The world's clock has stopped; present only then (#1150). */
   halted?: true;
   /** #1326: the clock owes ticks and none has completed for longer than its threshold; present only then. */
@@ -112,6 +117,7 @@ export function liveOf(a: Float64Array, pid: number, now: number): LiveJson {
     out.read = {ports, workers: a[S.readWorkers], lagGens: a[S.readLagGens], subset: mode === 1, routes: READ_ROUTES[mode] ?? []};
   }
   if (a[S.halted]) out.halted = true;
+  if (a[S.step] > 0) out.step = {tick: a[S.stepTick], index: a[S.step] - 1};   // #2378 A2
   if (a[S.rewinds]) out.rewinds = a[S.rewinds];
   return out;
 }
