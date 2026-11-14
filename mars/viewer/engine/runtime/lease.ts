@@ -81,6 +81,8 @@ export function leaseRequest(rt: Runtime, link: string, dir: LeaseDir, id: strin
   const first = l.holders[0]?.id;
   if (l.timeout) return { admitted: false, holder: l.timeout.holder, request };
   if (head.id !== id) return { admitted: false, holder: first ?? head.id, request };
+  // a request is served from the tick after it is made, so every request of one tick is queued, by tick then id, before any is served
+  if (request.tick === rt.tick) return { admitted: false, holder: first ?? oh?.id ?? id, request };
   let may: boolean;
   if (l.holders.length) may = cur === dir && !turnDue(rt, l, dir);
   else if (!oh) may = true;

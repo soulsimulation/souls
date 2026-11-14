@@ -65,7 +65,8 @@ const DOWN: Walker[] = [['h_dn_a', [X - 1, 2.5, 1], [X, -8, 0]], ['h_dn_b', [X +
 function crossing(policy: boolean, name = 'link-lease'): Run {
   const run: Run = {e: world(name), ended: [], log: []};
   start(run.e, [...UP, ...DOWN]);
-  if (policy) run.e.configureRuntimePolicy({sleepBlockTicks: 1200, linkLeaseV1: true});
+  // stair-way/1, as every world adopts at boot (#1428): without it a make-way clear-of test throws reading a climber's way
+  run.e.configureRuntimePolicy({sleepBlockTicks: 1200, stairWayV1: true, ...(policy ? {linkLeaseV1: true} : {})});
   send(run, [...UP, ...DOWN]);
   return run;
 }
@@ -107,7 +108,7 @@ test('#2264 the a-1 cycle completes: an ascender at the foot, a descender at the
   const e = world('link-lease-a1'), run: Run = {e, ended: [], log: []};
   const cast: Walker[] = [['h_eli', [X, -5.2, 0], [X, 3, 1]], ['h_fin', [X, 0.2, 1], [X + 1, -8, 0]], ['h_gus', [X - 1, 1.5, 1], [X - 1, -8, 0]]];
   start(e, cast);
-  e.configureRuntimePolicy({sleepBlockTicks: 1200, linkLeaseV1: true});
+  e.configureRuntimePolicy({sleepBlockTicks: 1200, stairWayV1: true, linkLeaseV1: true});
   send(run, [cast[2]]);
   for (let i = 0; i < 400 && !(e.world.entities.h_gus.pose.p[1] < RISE - .2 && e.world.entities.h_gus.pose.p[1] > .2); i++) step(run);
   assert.ok(e.world.entities.h_gus.pose.p[1] > .2, 'Gus is on the flight');
@@ -124,7 +125,7 @@ test('#2264 a holder with no progress for 60 s backs down its flight; walks wait
   const e = world('link-lease-stall'), run: Run = {e, ended: [], log: []};
   const idle: Walker = ['h_idle', [X, HEAD[1], 1], [X, HEAD[1], 1]], down: Walker = ['h_dn_a', [X - 2, 3, 1], [X, -8, 0]];
   start(e, [down, UP[0], UP[1], idle]);
-  e.configureRuntimePolicy({sleepBlockTicks: 1200, linkLeaseV1: true});
+  e.configureRuntimePolicy({sleepBlockTicks: 1200, stairWayV1: true, linkLeaseV1: true});
   send(run, [UP[0], UP[1], down]);
   const cast = [UP[0][0], UP[1][0], down[0]], busy = (id: string) => !!e.programOf(id) || !!e.world.entities[id].human!.task;
   for (let i = 0; i < 160 * 20 && cast.some(busy); i++) step(run);
@@ -160,4 +161,22 @@ test('#2264 replay from the log and from a snapshot keep the same state hash; a 
   assert.equal(on.stateHash(), off.stateHash());
   on.configureRuntimePolicy({sleepBlockTicks: 1200, linkLeaseV1: true}); off.configureRuntimePolicy({sleepBlockTicks: 1200});
   assert.notEqual(on.stateHash(), off.stateHash());
+});
+
+test('#2264 a holder whose walk is force-ended (stall release, repair) no longer holds the flight; the other end is admitted', () => {
+  // one up, one down; the climber's walk is force-ended mid-flight, as quiet stall release and repair abandon do (no cancel)
+  const e = world('link-lease-force'), run: Run = {e, ended: [], log: []};
+  start(e, [UP[0], DOWN[0]]);
+  e.configureRuntimePolicy({sleepBlockTicks: 1200, stairWayV1: true, linkLeaseV1: true});
+  send(run, [UP[0], DOWN[0]]);
+  const rt = internals(e).rt as unknown as {services: {walkExecs: Map<string, {id: string; actor: string; climbT: number; phase: string}>}; forceCancel(id: string, d: {code: string; message: string}): boolean};
+  let ex: {id: string; actor: string} | undefined;
+  for (let i = 0; i < 1200 && !ex; i++) { step(run); ex = [...rt.services.walkExecs.values()].find(x => x.actor === UP[0][0] && x.phase === 'climb' && x.climbT > .5); }
+  assert.ok(ex, 'the climber is on the flight');
+  assert.equal(leases(e)?.get('flight')?.holders[0]?.id, UP[0][0]);
+  assert.equal(rt.forceCancel(ex.id, {code: 'test.force', message: 'force-ended as a stall release does'}), true);
+  let down = false;
+  for (let i = 0; i < 5 * 20 && !down; i++) { step(run); down = !!leases(e)?.get('flight')?.holders.some(h => h.id === DOWN[0][0]); }
+  assert.ok(!leases(e)?.get('flight')?.holders.some(h => h.id === UP[0][0]), 'the force-ended walk no longer holds the flight');
+  assert.ok(down, 'the walker at the other end is admitted');
 });

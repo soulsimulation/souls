@@ -168,7 +168,7 @@ type Exec = {
   watch?: { at: Vec2; level: number; n: number; replanned: boolean };
   /** link-lease/1 (#2264): the single-file link this walk asked for, its direction, whether it is admitted, the tick it last
    *  looked for a holding spot, whether it is backing down after a stall, and stepping off the entry to a holding spot after. */
-  lease?: { link: string; dir: LeaseDir; admitted?: true; tried?: number; timedOut?: true; stepOff?: true };
+  lease?: { link: string; dir: LeaseDir; admitted?: true; tried?: number; timedOut?: true; stepOff?: true; cancelled?: true };
 };
 
 const walkSchemaWithin = (reach: number) => z.strictObject({
@@ -358,6 +358,7 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
     // the flight. Defer: walk on to whichever landing is nearer along the path, then finish as cancelled.
     const leg = ex.route.legs[ex.leg];
     if (leg?.kind === 'link' && ex.phase === 'climb' && ex.climbT > 1e-9) {
+      if (ex.lease?.timedOut) ex.lease.cancelled = true;   // link-lease/1: backing down already; it ends at the entry, no step-off
       ex.cancelTo ??= rt.world.entities[ex.actor].body?.family==='floater'?'exit':ex.climbT >= linkGeometry(leg).total / 2 ? 'exit' : 'entry';
       return { ok: true, deferred: true };
     }
@@ -665,7 +666,7 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
   if (ex.cancelTo) {
     const r = stepLinkCancel(rt, ex, a, ex.route.legs[ex.leg] as LinkLeg, dt);
     // link-lease/1: a stalled holder that backed down to its entry ends its walk, it did not arrive
-    return r.status === 'completed' && ex.lease?.timedOut ? leaseStepOff(rt, ex, a) : r;
+    return r.status === 'completed' && ex.lease?.timedOut && !ex.lease.cancelled ? leaseStepOff(rt, ex, a) : r;
   }
   if (rt.services.linkLeaseV1 === true && !ex.lease?.stepOff) { const r = leaseStep(rt, ex, a); if (r) return r; }
   if (activeLeg?.kind === 'link' && ex.phase === 'climb') {
@@ -1689,9 +1690,9 @@ function routeLink(ex: Exec): LinkLeg | undefined {
   return cur?.kind === 'link' ? cur : cur?.kind === 'walk' && next?.kind === 'link' ? next : undefined;
 }
 
-/** That walker still leases `link` (a live walk of its own names it). */
+/** That walker still leases `link` (an active walk of its own names it; a force-ended walk can leave its exec behind). */
 const leaseAlive = (rt: Runtime, link: string) => (id: string) => {
-  for (const e of walkExecs(rt).values()) if (e.actor === id && e.lease?.link === link) return true;
+  for (const e of walkExecs(rt).values()) if (e.actor === id && e.lease?.link === link && rt.isActive(e.id)) return true;
   return false;
 };
 
@@ -1738,7 +1739,7 @@ function leaseStepOff(rt: Runtime, ex: Exec, a: Entity): StepResult {
 
 /** A walker on the flight itself (climbing, or backing down), not on its way to it. */
 const onFlight = (rt: Runtime) => (id: string) => {
-  for (const e of walkExecs(rt).values()) if (e.actor === id) return e.route.legs[e.leg]?.kind === 'link' && (e.phase === 'climb' || !!e.cancelTo) && e.climbT > 1e-9;
+  for (const e of walkExecs(rt).values()) if (e.actor === id && rt.isActive(e.id)) return e.route.legs[e.leg]?.kind === 'link' && (e.phase === 'climb' || !!e.cancelTo) && e.climbT > 1e-9;
   return false;
 };
 
@@ -1786,6 +1787,8 @@ function leaseStep(rt: Runtime, ex: Exec, a: Entity): StepResult | null {
   ex.lease ??= { link, dir };
   const ans = held ? undefined : leaseRequest(rt, link, dir, ex.actor, at, leaseAlive(rt, link));
   if (ans?.admitted) { ex.lease.admitted = true; return null; }
+  // asked this tick: served from the next, walking on meanwhile (at the entry itself it stays off the flight)
+  if (ans && ans.request.tick === rt.tick) return onIt ? leaseWait(rt, ex, a, link, ans.holder) : null;
   const holder = held ?? (ans as { holder: string }).holder;
   // queued: walk to a free holding spot off this end (looked for at most every DECIDE_TICKS, under the replan budget);
   // after a timeout, the walk ends once it stands clear of the flight's ends, or where it is when no spot is free
