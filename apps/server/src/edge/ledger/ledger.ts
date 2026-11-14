@@ -1656,7 +1656,22 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if(me?.body?.motion?.dance||hasDeclaredProfile(me?.body))for(const c of caps){if(!['dance:here','rest:here','nap:here','lie:here'].includes(c.id))continue;const p=plans.get(c.id);if(p){const issue=this.mw.feasibility.canPerform({actor:soul.entityId,label:p.label,steps:p.steps});if(issue){c.available=false;c.blocked={code:issue.code,reason:issue.message};}}}
     // knowledge/1: an offer that leads to (or names) a secret place this Soul has not been to or found is not offered
     if (this.knowledge.marked().size) for (let i = caps.length - 1; i >= 0; i--) {if (this.secretOffer(soul,caps[i]!)) {plans.delete(caps[i]!.id); caps.splice(i, 1);}}
+    // strict offers: an offer whose plan needs another engine's verbs (a mars:pose_v1 sit or wave on the toy engine, which
+    // has no mars: verbs at all) could only be refused as action.unknown-verb, so it is not offered
+    const spaces = this.engineSpaces();
+    if (spaces) for (let i = caps.length - 1; i >= 0; i--) {const p = plans.get(caps[i]!.id); if (p?.steps.some(s => {const k = s.verb.indexOf(':'); return k > 0 && !spaces.has(s.verb.slice(0, k));})) {plans.delete(caps[i]!.id); caps.splice(i, 1);}}
     return {caps, plans};
+  }
+  private verbSpaces: {of: unknown; spaces: ReadonlySet<string>} | null = null;
+  /** The verb namespaces (`mars` of `mars:pose_v1`) this world's engine has. Not the verbs themselves: an engine may leave
+   *  a verb it accepts undescribed, and a live ground install adds verbs, but never a namespace. Read through the menu
+   *  world, which a read worker serves from its replica. */
+  private engineSpaces(): ReadonlySet<string> | null {
+    const e = this.mw;
+    if (this.verbSpaces?.of === e) return this.verbSpaces.spaces;
+    const verbs = e.describeVerbs(), spaces = new Set(verbs.flatMap(v => {const k = v.verb.indexOf(':'); return k > 0 ? [v.verb.slice(0, k)] : [];}));
+    if (!verbs.length) return null;   // a read worker's replica before its first statics lists none: nothing to judge by, kept unfiltered
+    this.verbSpaces = {of: e, spaces}; return spaces;
   }
   /** The menu before the tail (see binds): cached. */
   private bindsCore(soul: EdgeSoul, focus?: MenuFocus, every = false): {caps: EdgeCapability[]; plans: Plans} {
