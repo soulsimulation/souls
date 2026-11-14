@@ -3823,8 +3823,9 @@ function save(patch) {
   const s = { ...load(), ...patch };
   for (const k of Object.keys(s)) if (s[k] === undefined) delete s[k];
   if (HOME) return HOME.save(SEAT, s);
-  writeFileSync(STATE + ".tmp", JSON.stringify(s, null, 1) + "\n", { mode: 0o600 });
-  renameSync(STATE + ".tmp", STATE);
+  const tmp = `${STATE}.${process.pid}.tmp`;   // per process: concurrent runs in one folder never rename each other's file (#2092)
+  writeFileSync(tmp, JSON.stringify(s, null, 1) + "\n", { mode: 0o600 });
+  renameSync(tmp, STATE);
   return s;
 }
 const need = (s, k, hint) => {
