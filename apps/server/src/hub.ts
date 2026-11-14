@@ -147,10 +147,10 @@ export class Hub {
         // still poses for a replay, and writes no other until it moves or is watched
         const silent = !!host.silent?.(), keep = !silent || !this.silentTakeKept; this.silentTakeKept = silent && (this.silentTakeKept || chunks.length > 0);
         if (!chunks.length) return;
-        if (keep) for (const chunk of chunks) {
+        for (const chunk of chunks) {
           const ref=(chunk.take as {renderSceneRef?:{hash:string}}).renderSceneRef;
           const scene=ref&&!db.hasRenderSceneCapture(host.worldId,ref.hash)?host.engine.takeScene?.(ref.hash):undefined;
-          if(this.persistTakes)db.saveTake(host.worldId,chunk,scene);
+          if(this.persistTakes&&keep)db.saveTake(host.worldId,chunk,scene);
           else if(scene)db.saveRenderSceneCapture(host.worldId,scene);
         }
         this.lastTakeTick = chunks.at(-1)!.toTick;
@@ -161,7 +161,7 @@ export class Hub {
       onKernel: (view) => this.broadcast({ t: 'kernel', view }),
       onPlay: (p) => this.broadcast({ t: 'plays', plays: [p] }),
     });
-    setInterval(() => { if (!host.silent?.()) this.sweep(); }, SWEEP_MS).unref();   // #2303: silent means no viewer to ping
+    setInterval(() => { if (!host.silent?.()) this.sweep(); else this.sweepAt = Date.now(); }, SWEEP_MS).unref();   // #2303: silent means no viewer to ping
     // load dial: viewer stats every 2 s at green, 4 s at amber, 8 s at red/black
     let statsN = 0;
     setInterval(() => { if (host.silent?.()) return; if (++statsN % ({green: 1, amber: 2, red: 4, black: 4} as const)[this.loadLevel] !== 0) return; const full = this.stats(); this.broadcast({ t: 'stats', stats: full }, (c) => c.me?.role === 'admin'); this.broadcast({ t: 'stats', stats: publicStats(full) }, (c) => c.me?.role !== 'admin'); }, 2_000).unref();

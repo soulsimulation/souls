@@ -640,7 +640,7 @@ export class WorldHost {
   /** #2298: while true the world has been still since its last jump (no ordinary tick outside a jump's landing). */
   stillStretch = false;
   /** #2303: still since its last jump and nobody watching. A wall timer with nothing due then returns at once. */
-  silent(): boolean { return this.skip && this.stillStretch && !this.watched?.(); }
+  silent(): boolean { return this.skip && this.stillStretch && !this.paused && this.clockAvailable && !this.watched?.(); }
   private landing = false;
   /** #2298 A4: the live clock's ticks owed while still (counted per frame, run as one jump), and until which tick the
    *  last answer said the world stays still (Infinity: no deadline). */
@@ -673,6 +673,9 @@ export class WorldHost {
         }
       }
     }
+    // #2303: the one tick a jump leaves before its target, inside the horizon it claimed and with nothing queued, keeps the
+    // still stretch (an ordinary tick otherwise ends it, and the world's timers wake for nothing)
+    if (this.stillStretch && this.stillClaim !== null && tick + 1 < this.stillClaim && !this.queue.length) { this.landing = true; try { this.tickOnce(); } finally { this.landing = false; } return this.engine.world.tick - tick; }
     this.tickOnce();
     return this.engine.world.tick - tick;
   }

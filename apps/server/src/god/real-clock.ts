@@ -198,7 +198,7 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
   };
   const schedule = () => { void sync().catch((e: Error) => o.log?.(`world clock: ${e.message}`)); };
   // #2297: the zone's next daylight-saving change is a deadline: the keeper logs a re-alignment there (cached until it passes)
-  let dst: { zone: string; from: number; at: number | null } | undefined, dstFell = false;
+  let dst: { zone: string; from: number; at: number | null } | undefined, dstFell = false, checkedAt = now();
   host.listeners?.push({ stillness: (tick) => {
     if (o.paused?.()) return [];
     const zone = o.zone(), t = now();
@@ -207,11 +207,12 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
     return dst.at === null ? [] : [{ name: 'clock.daylight-saving', tick: tick + Math.max(1, Math.ceil((dst.at - t) / TICK_MS)) }];
   } });
   schedule();
-  // #2303: a silent world (still, unwatched) keeps wall pace by jumping, so it does not drift; it is checked only once a
-  // daylight-saving deadline has fallen (the world lands there and the next check re-aligns it)
+  // #2303: a silent world (still, unwatched) keeps wall pace by jumping and seldom drifts; it is checked only once a
+  // daylight-saving deadline has fallen (the world lands there and the next check re-aligns it), and once an hour for a
+  // stall or host suspend longer than the frame's 1 s cap
   const timer = setInterval(() => {
-    if (host.silent?.() && !(dstFell || (dst?.at != null && now() >= dst.at))) return;
-    dstFell = false;
+    if (host.silent?.() && !(dstFell || (dst?.at != null && now() >= dst.at) || now() - checkedAt >= 3_600_000)) return;
+    dstFell = false; checkedAt = now();
     if ((host.pace ?? 1) >= 1 && !host.paused && host.running !== false) schedule();
   }, o.checkMs ?? 15_000);
   timer.unref?.();
