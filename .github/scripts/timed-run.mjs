@@ -352,7 +352,7 @@ async function runClip(inp, rec, out, env) {
   const t0 = Date.now(), saved = { BRAIN_MODE: process.env.BRAIN_MODE, HOME: process.env.HOME };
   let world;
   Object.assign(process.env, { BRAIN_MODE: 'fake', HOME: env.HOME });
-  try { world = await startWorld({ slug: 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.' }); }
+  try { world = await startWorld({ slug: 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.', env: { INVITE_REQUIRED: '0' } }); }
   finally { for (const [key, v] of Object.entries(saved)) { if (v === undefined) delete process.env[key]; else process.env[key] = v; } }
   console.log(`world up in ${((Date.now() - t0) / 1000).toFixed(1)} s (${k.template})`);
   const clipFile = join(dir, `${kitName}-${viewport}.mp4`), log = createWriteStream(join(out, 'clip.log'));
