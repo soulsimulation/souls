@@ -15,6 +15,10 @@
 # and `ref`, `repeats` cells per arm, each cell its own job on its own runner, all at once (one artifact per cell). It
 # scores pass/fail per item, so its starting load is recorded and not gated, and `runner=hosted` may run it on the
 # GitHub-hosted runners. No media and no web build: the workstation's trees ran without them.
+# `clip` records a proof clip of `ref` with the runner's GPU: a clip kit (tools/proof/clips/<kit>/, from this workflow's
+# commit) on a fake-mind dev world, recorded by the proof recorder from this workflow's commit with a hardware GL
+# renderer (it fails rather than fall back to SwiftShader). The clip and its sidecar are the artifact; the dispatcher
+# attaches them to the PR with tools/proof/upload.mjs (this job holds no write token). See docs/testing.md.
 name: timed-run
 on:
   workflow_dispatch:
@@ -24,9 +28,9 @@ on:
         required: true
         default: main
       command:
-        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile or counted (no model in any)
+        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, counted or clip (no model in any)
         type: choice
-        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, counted]
+        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, counted, clip]
         default: walk
       base:
         description: 'counted only: the base arm, main or an agent/<name> branch (the candidate arm is ref)'
@@ -40,7 +44,7 @@ on:
         description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; counted --scenario --loop-sec'
+        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; counted --scenario --loop-sec; clip --kit --viewport'
         default: ''
 permissions:
   contents: read
@@ -104,6 +108,8 @@ jobs:
           sparse-checkout: |
             .github/scripts
             tools/playtest/counted
+            tools/proof/clips
+            .claude/skills/proof
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 22 }
       - name: Snapshot the shared home and /tmp
@@ -140,6 +146,13 @@ jobs:
         if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile'
         working-directory: src
         run: pnpm build:viewer
+      # clip: the ref's Playwright version of Chromium, installed in the per-run directory (the shared home stays untouched)
+      - name: Browsers
+        if: env.INPUT_COMMAND == 'clip'
+        working-directory: src
+        run: |
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PER_RUN/pw-browsers" >> "$GITHUB_ENV"
+          PLAYWRIGHT_BROWSERS_PATH="$PER_RUN/pw-browsers" pnpm --filter mars-campus-viewer exec playwright install chromium > /dev/null
       - name: Start load
         working-directory: src
         run: node "$CTL" load --record "$RECORD"
