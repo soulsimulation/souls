@@ -14,7 +14,10 @@ const eden = (name, args, ms) => new Promise((res) => execFile(process.execPath,
   (e, out, err) => res({ code: e ? (e.code ?? 1) : 0, out: String(out), err: String(err) })));
 const said = (n, r) => console.error(`kit: ${n} exit ${r.code}: ${(r.out || r.err).slice(0, 1200)}`);
 
-// before the page opens: Bo swims out and treads (not filmed)
+// before the page opens: both walk to the shore, then Bo swims out and treads (not filmed)
+const SHORE = 'walk:land-west-lake/shore-bank';
+said('Bo to the shore', await eden('Bo', ['act', SHORE, '--wait', '170', '--json'], 180_000));
+said('Ann to the shore', await eden('Ann', ['act', SHORE, '--wait', '170', '--json'], 180_000));
 said('Bo swims out', await eden('Bo', ['act', SWIM, '--wait', '170', '--json'], 180_000));
 
 export default async function steps(page, { mark }) {
@@ -29,7 +32,7 @@ export default async function steps(page, { mark }) {
   mark('Ann takes the same swim as Bo');
   const ann = await eden('Ann', ['act', SWIM, '--wait', '170', '--json'], 180_000);
   said('Ann', ann);
-  const end = /"phase":\s*"(\w+)"/.exec(ann.out)?.[1] ?? 'unknown', code = /"code":\s*"([\w.]+)"/.exec(ann.out)?.[1] ?? '';
+  const end = /"phase":\s*"(\w+)"/.exec(ann.out)?.[1] ?? 'not accepted', code = /"code":\s*"([\w.-]+)"/.exec(ann.out)?.[1] ?? '';
   mark(`Ann's swim ${end} ${code}`.trim());
   await page.waitForTimeout(4000);
 }
