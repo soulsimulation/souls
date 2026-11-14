@@ -240,13 +240,14 @@ test('a bare doorway (#2282): leaf: false is honoured only where the def opts in
   assert.deepEqual(buildingPhysics(params(false), { style: 'hall', bareDoors: true }), buildingPhysics(params(), { style: 'hall' }), 'same walls, same opening');
 });
 
-test('a door-fitted revision (#2383): only its outside ground-floor doors are bare, each takes a door, and the walls are the same', () => {
+test('a door-fitted revision (#2383): only its outside ground-floor doors are bare (at least 1.2 m), each takes a door, rooms and openings in place', () => {
   for (const [style, params] of [['cottage', {}], ['townhouse', { floors: 3 }], ['hall', { front: 'e' }]] as const) {
     const L = buildingLayout(params, { style, doorThings: true });
     const bare = L.openings.filter((o) => o.leaf === false);
     assert.ok(bare.length >= 1 && bare.every((o) => o.kind === 'door' && o.exterior && o.floor === 0 && o.to !== 'balcony'), style);
     assert.equal(L.openings.some((o) => o.kind === 'door' && !o.exterior && o.leaf === false), false, `${style}: inside doors keep their leaf`);
-    assert.deepEqual(buildingPhysics(params, { style, doorThings: true }), buildingPhysics(params, { style }), `${style}: same walls and openings`);
+    const [a, b] = [buildingPhysics(params, { style, doorThings: true }), buildingPhysics(params, { style })];
+    assert.deepEqual([a.rooms, a.openings?.map((o) => [o.id, o.at, o.width >= 1.2])], [b.rooms, b.openings?.map((o) => [o.id, o.at, o.width >= 1.2 || bare.some((x) => x.id === o.id)])], `${style}: same rooms and openings; bare doorways at least 1.2 m`);
     assert.equal(buildingDoorFits(params, { style, doorThings: true }, { p: [10, 5], r: Math.PI / 2 }).length, bare.length);
     assert.equal(buildingDoorFits(params, { style }, { p: [0, 0] }).length, 0, 'the old revision takes no doors');
   }

@@ -61,8 +61,10 @@ function roofRise(roof: string, pitchDeg: number, W: number, D: number, round: b
  *  until a walk passes several closed doors in a row and climbs to doors upstairs (#2370). */
 export function fittedDoorway(o: { kind: string; floor: number; to?: string; exterior: boolean }): boolean { return o.kind === 'door' && o.exterior && o.floor === 0 && o.to !== 'balcony'; }
 
-/** The narrowest bare doorway a door-fitted revision leaves (core/door@2 at its least stretch is 0.93 m across the frame). */
-export const FITTED_MIN_W = 1.0;
+/** The narrowest bare doorway a door-fitted revision leaves. The door's frame posts stand just inside the jambs, so a
+ *  1.0 m doorway kept only about 0.9 m clear, and the walk grid closed it in a wall turned 20 to 70 degrees off the axes
+ *  (the Eden walk gate, #2383); 1.2 m keeps more clear than the bare 1.0 m doorway had. */
+export const FITTED_MIN_W = 1.2;
 
 const layoutCache = new Map<string, BuildingLayout>();
 /** The full layout (canonical frame + yaw) for params and def args; cached by value. */
