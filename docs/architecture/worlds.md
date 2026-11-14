@@ -144,6 +144,16 @@ switch independent. A previously saved master mute migrates to both switches off
     again, and the wall anchor is not re-saved while still (the last pair still gives the ticks owed); all are written as
     the stillness ends or the world stops. `GET /__sim/still` also reports `ticksComputed`, `ticksJumped`, `jumps` and
     `lastHorizon`. A Soul whose needs still add up every tick (before need-anchor/1, #2296) keeps its world ticking.
+  - **A silent world's timers do nothing (#2303).** A world is silent while it has been still since its last jump and no
+    viewer is connected (`WorldHost.silent()`). Then the wall timers around it return at once: the plan runner, the
+    reminders pump and the comms sweep until the world reaches the deadline they reported in the horizon (so it lands
+    there and they run), the real-time keeper until its daylight-saving deadline falls, and brain maintenance, pairing
+    expiry, auto-portraits, the take archive and the hub's sweeps and viewer stats altogether. The watchdog writes
+    `live.json` every 10 s instead of every 2 s (the launcher calls it stale after 30 s; a main thread stuck for over
+    5 s is reported at the full pace). The take recorder keeps the first chunk of a still stretch (the still poses, for
+    a replay) and writes no other until the world moves or is watched. The hourly backup is skipped when nothing has
+    written to the database since the last one (`total_changes()`, or, before this process's first backup, the newest
+    backup file is newer than the database and its log); retention is unchanged.
   - **Gaps are caught up exactly.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
     them, the world advances every tick it missed (jumping where it is still, above), from the wall anchor in
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world

@@ -94,8 +94,10 @@ export class Plans {
   private busy = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private closed = false;
+  /** #2303: the wall time of the earliest keep-up retry waiting out REISSUE_GAP_MS (the silent runner wakes for it). */
+  private retryWakeMs = Infinity;
   private core: PlanCore; private actor: PlanActor; private envelope: (soulId: string, e: StreamEvent) => Envelope;
-  constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number} = {}) {
+  constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number; silent?: () => boolean} = {}) {
     this.core = core; this.actor = actor; this.envelope = envelope;
     core.db.exec(`CREATE TABLE IF NOT EXISTS edge_plans_v1 (world_id TEXT NOT NULL, plan_id TEXT NOT NULL, soul_id TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (world_id, plan_id)) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);
@@ -109,7 +111,9 @@ export class Plans {
     actor.onReceipt(r => { if (this.closed) return; const p = this.planOf(r.soulId); if (p && p.state === 'running' && p.steps[p.current]?.state.receipt === r.id) void this.evaluate(p); });
     core.streams.onEvent((soulId, e) => { if (!this.closed) this.onEvent(soulId, e); });
     const ms = options.tickMs ?? PLAN_TICK_MS;
-    if (ms > 0) { this.timer = setInterval(() => this.tick(), ms); this.timer.unref?.(); }
+    // #2303: while the world is silent the runner returns at once until a running plan's step is due (nextDueMs, a deadline
+    // of the world, so the world lands there); receipts and events wake a plan without the timer
+    if (ms > 0) { this.timer = setInterval(() => { if (options.silent?.()) { const due = this.nextDueMs(), now = this.core.now(); if ((due === null || due > now) && this.retryWakeMs > now) return; } this.retryWakeMs = Infinity; this.tick(); }, ms); this.timer.unref?.(); }
   }
   close() { this.closed = true; if (this.timer) clearInterval(this.timer); this.timer = null; }
 
@@ -311,14 +315,14 @@ export class Plans {
       const verb = (s.state.capability ?? '').split(':')[0]!;
       if (s.state.deadline && REHOLD.has(verb) && !s.state.noReissue && s.state.deadline - now > REISSUE_MIN_LEFT_MS && s.state.reissues < REISSUE_MAX && now - (s.state.lastIssueAt ?? s.state.startedAt ?? 0) > REISSUE_GAP_MS && !this.actor.posture?.(p.soulId)) {
         s.state.attempt++; this.save(p); await this.issue(p, true);
-      }
+      } else if (s.state.deadline && REHOLD.has(verb) && !s.state.noReissue) this.retryWakeMs = Math.min(this.retryWakeMs, (s.state.lastIssueAt ?? s.state.startedAt ?? 0) + REISSUE_GAP_MS + 1);
       return;
     }
     if (r.phase === 'failed') {
       if (r.code === 'receipt.lost-on-restart') { s.state.attempt++; this.save(p); return this.issue(p, s.state.completedOnce === true); }
       // a timed step keeps its activity up through world interruptions (bumped while lying, interrupted mid-pose)
       if (s.state.deadline && RESUMABLE.test(r.code ?? '') && s.state.deadline - now > REISSUE_MIN_LEFT_MS && s.state.reissues < REISSUE_MAX) {
-        if (now - (s.state.lastIssueAt ?? s.state.startedAt ?? 0) <= REISSUE_GAP_MS) return;     // the next tick retries
+        if (now - (s.state.lastIssueAt ?? s.state.startedAt ?? 0) <= REISSUE_GAP_MS) { this.retryWakeMs = Math.min(this.retryWakeMs, (s.state.lastIssueAt ?? s.state.startedAt ?? 0) + REISSUE_GAP_MS + 1); return; }     // the next tick retries
         s.state.attempt++; s.state.completedOnce = true; this.save(p); return this.issue(p, true);
       }
       if (s.state.completedOnce) { s.state.noReissue = true; this.save(p); return; }   // the step's own act happened; a later keep-up failed
