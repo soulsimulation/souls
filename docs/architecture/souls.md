@@ -399,7 +399,7 @@ withholds. Owner messages and credentials are never in it.
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
 - **Running.** A walk or `walk-to:here` takes `pace`, `walk` (the default) or `run` (#2283): the same plan, its `walk_to`
-  steps at the engine's run gait (4 m/s), so support, admission, walls and crowds hold as for a walk, stairs stay at
+  steps (the ground `walk_to` and the `mars:walk_to` legs inside and upstairs) at the engine's run gait (4 m/s), so support, admission, walls and crowds hold as for a walk, stairs stay at
   climbing pace and a wet route walks. `act <id> --run` sends it; a plan step sends it in its params. A pace on any other
   offer, or any other value, is refused (`capability.params`). Running spends energy at twice the rate of other doing.
 - **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, and an optional `pace`) walks the Soul to that point on
