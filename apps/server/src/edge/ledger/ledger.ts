@@ -386,7 +386,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       wallMs: t => Date.now() - (this.host.engine.world.tick - t) * DT * 1000,
     }, {knobs: {...env, ...(knobs ?? {})}});
     const rule = this.bodyRule;
-    this.host.listeners.push({onApplied: e => {try {rule.applied(e);} catch {/* best effort */}}});
+    this.host.listeners.push({onApplied: e => {try {rule.applied(e);} catch {/* best effort */}},
+      // #2297: the rule's waits live outside the engine: its next step (from the logged wind-down) is a deadline that moves a body
+      stillness: () => {const t = rule.nextMoveTick(); return t === null ? [] : [{name: 'body.wind-down', tick: t, move: true}];}});
     this.host.publicBodyOf = id => this.bodyRule?.view(id) ?? null;
     return this.bodyRule;
   }
@@ -576,6 +578,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       onDecision: (e, r) => this.onDecision(e, r),
       onProgram: ev => this.onProgram(ev),
       afterTick: tick => {this.bootEnded = undefined;this.afterTick(tick);this.stallGuard.afterTick(tick);for(const l of this.tickListeners)try{l(tick);}catch{/* a listener fault never stops the clock */}},
+      stillness: () => this.stillParts(),
     });
   }
   /** Read worker (readOnly): after each applied delta, what main's afterTick keeps for the read code: the faded set (from
@@ -945,6 +948,17 @@ export class EdgeLedger implements EdgeLedgerHooks {
         if(!passage)this.contactPending.delete(id);else{this.passageApplied.add(id+'|'+motion.actionId);if(this.passageApplied.size>256)this.passageApplied.delete(this.passageApplied.values().next().value!);}if(!result.ok){this.update(id,{phase:'failed',code:result.code,reason:result.reason});if(r.program_id)this.host.engine.stop(r.program_id);}
       }catch{this.contactPending.delete(id);this.update(id,{phase:'failed',code:'contact.failed',reason:'The world could not apply the bound contact.'});}
     }
+  }
+  /** #2297: the ledger keeps the world busy while a receipt waits to start (WAIT_LIMIT, NAV_WARM: it may start on any tick),
+   *  a bound contact or a motion is watched, or ambient life (off in served worlds) may act on an idle Soul. */
+  private stillParts(): {name: string; busy?: boolean; tick?: number}[] {
+    if (this.pending.size) return [{name: 'edge.receipt-waiting', busy: true}];
+    if (this.contactPending.size || this.motionWatch.size) return [{name: 'edge.contact', busy: true}];
+    if (this.ambient && this.host.minds.size) return [{name: 'edge.ambient', busy: true}];
+    const tg = this.together.nextDueTick(); if (tg.busy) return [{name: 'edge.together', busy: true}];
+    const pj = (this.projects as {nextDueTick?(): number | null} | undefined)?.nextDueTick?.() ?? null;
+    const cm = (this.comms as {nextDueTick?(): number | null} | undefined)?.nextDueTick?.() ?? null;
+    return [...(tg.tick !== null ? [{name: 'edge.invite-follow-item', tick: tg.tick}] : []), ...(pj !== null ? [{name: 'god.project-consent', tick: pj}] : []), ...(cm !== null ? [{name: 'edge.comms', tick: cm}] : [])];
   }
   private afterTick(tick: number) {
     if(this.contactPending.size)this.contactTicks(tick);
@@ -3090,7 +3104,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // One synchronous, read-only activity listing: entity membership is fixed, but group state is read on every call.
     // Reuse the human references here; never retain a group count or this subset across listings/ticks.
     const humans = Object.values(w.entities).filter(e => e.kind === 'human');
-    const others = humans.filter(e => e.id !== soul.entityId).map(e => [e.pose.p[0], e.pose.p[2]] as [number, number]);
+    const otherBodies = humans.filter(e => e.id !== soul.entityId), others = otherBodies.map(e => [e.pose.p[0], e.pose.p[2]] as [number, number]);
     const claimed = new Set<string>();
     for (const m of this.host.minds.values()) if (m.soulId !== soul.soulId) for (const r of this.openReceipts(m.soulId)) claimed.add(r.capability.slice(r.capability.indexOf(':') + 1));
     const navIds = new Set(((w as {navV1?: {solids: {id: string}[]}}).navV1?.solids ?? []).map(x => x.id));
@@ -3103,6 +3117,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
       open: (at: [number, number], min: number, rings: number) => level === 0 && engine.nearestStandableV1 ? engine.nearestStandableV1(at, soul.entityId, min, rings) : null,
       // (claims are covered by the menu key's cell versions; the bodies part is recorded for the kept-menu check)
       taken: (at: [number, number], spotId?: string) => {const v = others.some(o => Math.hypot(o[0] - at[0], o[1] - at[1]) < 0.7); this.menuReads?.taken.push({at: [at[0], at[1]], v}); return v || (!!spotId && claimed.has(spotId));},
+      // #2189: who is using a taken spot, for its refusal: only a Soul whose body stands there, as anyone at the spot sees
+      // it; never a Soul still on its way (an open act), nor one inside a secret place this Soul does not know
+      takenBy: (at: [number, number]) => {
+        if (this.knowledge.hidesPoint(soul.soulId, at)) return null;
+        for (const o of otherBodies) if (Math.hypot(o.pose.p[0] - at[0], o.pose.p[2] - at[1]) < 0.7) {const n = this.host.mindByEntity?.get(o.id)?.name; if (n) return n;}
+        return null;
+      },
       // a spot inside a building is offered only when that building's interior was admitted (its walls are a shell, nav/1)
       enterable: (place: string | undefined) => {const b = enclosingBuilding(place); return !b || !!w.regions[b] || !!this.placeWalkable?.(b) || [...navIds].some(id => id.startsWith('nav-solid:' + b + '#w'));},
       seat: (radius: number, near?: boolean) => {

@@ -37,7 +37,7 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
-import { advanceNeeds, DAY_TICKS, newLife, type Life } from '@souls/brain';
+import { advanceNeedAnchor, advanceNeeds, DAY_TICKS, needRates, needsAt, newLife, type Life, type Needs } from '@souls/brain';
 import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
 import { frontier, stepIndex, belongsTo } from './deck.ts';
@@ -118,7 +118,7 @@ export class PersistedIntentAdmissionFault extends Error {
   constructor(decisionSeq:number) { super('decision and admission persisted; physical application requires reconciliation'); this.decisionSeq=decisionSeq; }
 }
 type Pending = { kind: EventKind; author: string; payload: any; resolve?: (e: LogEvent) => void; guard?: AcceptanceGuard; journal?: AcceptanceJournal; reject?: (error: unknown) => void; purpose?: PurposeRef; stationEra?:boolean; atomicObjectDecision?:boolean };
-export type BootStats = { from: 'genesis' | 'snapshot'; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
+export type BootStats = { from: 'genesis' | 'snapshot'; /** the restored snapshot's state hash */ fromStateHash?: string; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
 export type SnapshotBody = { runtime: EngineSnapshot; minds: Mind[]; seq: number; extra: Record<string, unknown>; kernel?: KState; counts?: Record<string, number>; faultedHeadV1?: true };
 export type HostListener = {
   onBatch?(b: Batch): void;
@@ -138,7 +138,17 @@ export type HostListener = {
   /** Notification only: the clock was stopped; no queued work is drained. */
   onStop?(): void;
   onClockUnavailable?():void;
+  /** #2297: what this listener keeps outside the engine that can change the world, from stored state only: `busy` (it has
+   *  work under way, so the world is not still) and its deadlines, each the next tick at which it changes something (`move`
+   *  when that change moves a body). A periodic check that would find nothing is not a deadline. */
+  stillness?(tick: number): StillPart[];
 };
+/** #2297: one deadline (or a busy flag) a part of the world reports to `WorldHost.stillUntil`. */
+export type StillPart = { name: string; tick?: number | null; move?: boolean; busy?: boolean };
+/** #2297 the still contract (#2241) as the host answers it: `untilTick` the earliest deadline, `moveTick` the earliest at
+ *  which the world itself moves a body; the step that reaches either tick may change the world, every step before it
+ *  changes only the clock. `parts` names what set them (and what keeps the world busy), for the check and reports. */
+export type StillAnswer = { still: boolean; tick: number; untilTick: number | null; moveTick: number | null; why?: string; due: StillPart[] };
 
 const TICK_MS = 50;
 const BATCH_TICKS = 10;      // 500 ms at rate 1
@@ -188,6 +198,9 @@ export class WorldHost {
   tickSpans: { file: string; rows: string[] } | null = process.env.SOULS_TICK_SPANS ? { file: process.env.SOULS_TICK_SPANS, rows: [] } : null;
   /** The last boot's phases (lane L5): restore = snapshot read + decode + engine restore; replay = stepping logged history to its head. */
   bootStats: BootStats | null = null;
+  /** Asked at each snapshot's capture (same tick); what it returns runs once that snapshot is saved (the god bridge's boot
+   *  record beside it: engine-bridge.ts bootRecord). */
+  snapshotSidecar: (() => (at: { tick: number; stateHash: string }) => void) | null = null;
   private queue: Pending[] = [];
   private intentControllerFaults = new Set<string>();
   private intentObservations: IntentObservations;
@@ -370,7 +383,7 @@ export class WorldHost {
     if (!this.db.hasVocabulary(this.worldId)) void this.enqueue('rules', 'system', { vocabulary: structuredClone(baseVocabulary(this.kernel)), why: 'the vocabulary this world began with' });
     if (this.pendingBootstrap) { void this.enqueue('rules', 'system', { kernelBootstrap: this.pendingBootstrap, why: 'the kernel begins here for a world that predates it' }); this.pendingBootstrap = null; }
     const end = performance.now();
-    const stats: BootStats = { from, restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
+    const stats: BootStats = { from, ...(snap ? { fromStateHash: snap.stateHash } : {}), restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
       replayTicks, replayEvents: later.length, fromTick, toTick: this.engine.world.tick, minds: this.minds.size };
     this.bootStats = stats;
     console.log(`[boot] restore ${stats.restoreMs} ms from ${from} tick ${fromTick} (snapshot read+decode ${stats.readMs} ms, ${stats.minds} minds)`);
@@ -557,6 +570,59 @@ export class WorldHost {
   }
   /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
   owedTicks = 0;
+  /** #2297 A1: am I still, and until which tick? Still only when the engine is still (#2294), no input is queued, no
+   *  catch-up runs, the clock is not paused or halted and no listener is busy. `untilTick` is the earliest deadline of the
+   *  engine and of every listener (`HostListener.stillness`), or null; `moveTick` the earliest at which the world itself
+   *  moves a body (the engine's held ends and programme waits, the body rule's next step), or null. Reads only; skips nothing. */
+  stillUntil(): StillAnswer {
+    const tick = this.engine.world.tick, due: StillPart[] = [];
+    const not = (why: string): StillAnswer => ({ still: false, tick, untilTick: null, moveTick: null, why, due });
+    const eng = (this.engine as unknown as { stillnessV1?(): { still: boolean; untilTick: number | null } }).stillnessV1?.();
+    if (!eng?.still) return not('engine');
+    if (this.queue.length) return not('queued');
+    if (this.owedTicks > 0) return not('catching-up');
+    if (this.paused || !this.clockAvailable) return not('paused');
+    if (eng.untilTick !== null) due.push({ name: 'engine.held', tick: eng.untilTick, move: true });
+    const gaze = (this.engine as unknown as { attentionDueV1?(): number | null }).attentionDueV1?.() ?? null;
+    if (gaze !== null) due.push({ name: 'engine.gaze', tick: gaze });
+    for (const l of this.listeners) for (const p of l.stillness?.(tick) ?? []) { if (p.busy) return not(p.name); if (p.tick != null) due.push(p); }
+    let untilTick: number | null = null, moveTick: number | null = null;
+    for (const p of due) p.tick = Math.max(tick + 1, p.tick!);   // a deadline already passed is due at the next step
+    for (const p of due) { untilTick = untilTick === null ? p.tick! : Math.min(untilTick, p.tick!); if (p.move) moveTick = moveTick === null ? p.tick! : Math.min(moveTick, p.tick!); }
+    return { still: true, tick, untilTick, moveTick, due: due.filter((p) => p.tick === untilTick) };
+  }
+  /** #2297 A6: the still check, off unless SIM_STILL_CHECK=1 (or set by a test). Once the world claims still until a tick,
+   *  every step before that tick is checked: it grew no log, drew no world RNG and changed the engine state hash only in its
+   *  clock fields, and left nothing queued (a listener's enqueue is logged only at the next tick's drain). The claim is asked
+   *  again when it ends, when an input is queued or after a breach. `closed`: no input comes from outside (a test), so an
+   *  input queued between two ticks inside a claim (a listener's deferred work) is a breach too. `fell` counts the deadlines that fell due, by name. */
+  stillCheck: { claimed: number; failures: { tick: number; what: string; why: string }[]; fell: Map<string, number>; every: number; closed?: boolean; claim?: { until: number | null; due: string[]; at?: { hash: string; rng: string } } | null } | null =
+    process.env.SIM_STILL_CHECK === '1' ? { claimed: 0, failures: [], fell: new Map(), every: 1 } : null;
+  private stillCheckBefore() {
+    const chk = this.stillCheck!, tick = this.engine.world.tick;
+    let c = chk.claim;
+    if (c && this.queue.length && chk.closed && (c.until === null || tick + 1 < c.until)) { chk.failures.push({ tick, what: 'an input was queued between ticks', why: c.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${tick}: an input was queued between ticks inside a claimed horizon`); }
+    if (!c || this.queue.length || (c.until !== null && tick + 1 >= c.until)) {
+      if (c && c.until !== null && tick + 1 >= c.until) for (const n of c.due) chk.fell.set(n, (chk.fell.get(n) ?? 0) + 1);
+      const s = this.stillUntil();
+      c = chk.claim = s.still && (s.untilTick === null || tick + 1 < s.untilTick) ? { until: s.untilTick, due: s.due.map((p) => p.name) } : null;
+      if (!c) return null;
+    }
+    const hash = chk.every <= 1 || tick % chk.every === 0;
+    c.at ??= (this.engine as unknown as { stillCheckV1(): { hash: string; rng: string } }).stillCheckV1();
+    return { tick, seq: this.seq, hash, at: c.at };
+  }
+  private stillCheckAfter(b: NonNullable<ReturnType<WorldHost['stillCheckBefore']>>) {
+    const chk = this.stillCheck!; chk.claimed++;
+    const now = (this.engine as unknown as { stillCheckV1(): { hash: string; rng: string } }).stillCheckV1();
+    let failed = false;
+    const fail = (what: string) => { failed = true; chk.failures.push({ tick: b.tick, what, why: chk.claim?.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${b.tick}: ${what} inside a claimed horizon (until ${chk.claim?.until ?? 'none'})`); };
+    if (this.seq !== b.seq) fail('the log grew');
+    if (now.rng !== b.at.rng) fail('the world RNG drew');
+    if (b.hash && now.hash !== b.at.hash) fail('the state hash changed beyond the clock');
+    if (this.queue.length) fail('an input was queued');
+    if (failed) chk.claim = null; else if (chk.claim) chk.claim.at = now;
+  }
   /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
    *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
    *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
@@ -621,6 +687,11 @@ export class WorldHost {
 
   tickOnce() {
     this.assertClockReady();
+    const still = this.stillCheck ? this.stillCheckBefore() : null;   // #2297 A6 (off: one null test)
+    if (still) { try { this.tickOnceInner(); } finally { this.stillCheckAfter(still); } return; }
+    this.tickOnceInner();
+  }
+  private tickOnceInner() {
     const t0 = performance.now();
     const tick = this.engine.world.tick;
     if (this.recoveryForEdge) this.validPoses = { tick, poses: this.soulPoses() };
@@ -1564,8 +1635,18 @@ export class WorldHost {
     const journal:AcceptanceJournal=()=>{const r=this.db.db.prepare('UPDATE worlds SET rules_version=? WHERE id=? AND rules_version=?').run(t.toRulesVersion,this.worldId,t.fromRulesVersion);if(r.changes!==1)throw Error('commons-provisions.header-moved');return true;};
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author:'operator:commons-provisions',payload:{commonsProvisions:t},guard,journal,resolve,reject}));
   }
+  /** A living Soul's needs now (need-anchor/1 reads them from the anchor; before it they are stored every tick). */
+  needsOf(m: Mind): Needs | undefined { return m.life ? needsAt(m.life, this.engine.world.tick) : undefined; }
+  /** A Soul's energy now: a living Soul's is its energy need. */
+  energyOf(m: Mind): number { return m.life ? needsAt(m.life, this.engine.world.tick).energy : m.energy; }
+  enableNeedAnchorsV1(author='operator:need-anchor'){if((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,needAnchorsV1:true},why:'need-anchor/1 (#2296): a need is a value at a tick and a rate, rewritten only when a rate changes; retain historical replay before this event'});}
+  /** need-anchor/1: what nearness last found, and the Soul bodies it was found for. Derived, never state: recomputed
+   *  whenever any of them differ, and for a Soul it holds no answer for (one that just got a life or a body), so a
+   *  restored world reads the same nearness. */
+  private nearV1: { sig: unknown[]; near: Map<string, boolean> } | null = null;
   private advanceLives() {
     const tick = this.engine.world.tick;
+    if ((this.extra.runtimePolicy as {needAnchorsV1?:boolean}|undefined)?.needAnchorsV1 === true) return this.advanceNeedAnchorsV1(tick);
     for (const m of this.minds.values()) {
       if (!m.life) continue;
       const e = this.engine.world.entities[m.entityId]; if (!e?.human) continue;
@@ -1577,6 +1658,26 @@ export class WorldHost {
       const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
       advanceNeeds(m.life, tick, resting?'rest':e.human.activity, nearby, recharging, floater, needsDay); m.energy = m.life.needs.energy;
     }
+  }
+  /** need-anchor/1 (#2296): an anchor is rewritten only when a rate's input changes, and nearness is tested only on a tick
+   *  where some Soul's body moved (or a Soul came or went). Nothing else is written. */
+  private advanceNeedAnchorsV1(tick: number) {
+    const w = this.engine.world, needsDay = (this.living as {zone?: string} | undefined)?.zone ? REAL_DAY_TICKS : DAY_TICKS;
+    const floaterOf = (e: unknown) => (e as {body?:{family:string}} | undefined)?.body?.family==='floater';
+    const sig: unknown[] = [];
+    for (const m of this.minds.values()) { const e = w.entities[m.entityId]; sig.push(m.soulId, m.entityId, e?.pose.p[0], e?.pose.p[1], e?.pose.p[2], floaterOf(e)); }
+    sig.push('|'); for (const o of this.mindByEntity.values()) { const b = w.entities[o.entityId]; sig.push(o.entityId, b?.pose.p[0], b?.pose.p[1], b?.pose.p[2]); }
+    const c = this.nearV1, moved = !c || c.sig.length !== sig.length || sig.some((v, i) => v !== c.sig[i]), near = moved ? new Map<string, boolean>() : c.near;
+    const humanRest=(this.extra.runtimePolicy as {humanRestNeedsV1?:boolean}|undefined)?.humanRestNeedsV1===true;
+    for (const m of this.minds.values()) {
+      if (!m.life) continue;
+      const e = w.entities[m.entityId]; if (!e?.human) continue;
+      const floater = floaterOf(e);
+      if (moved || !near.has(m.soulId)) near.set(m.soulId, [...this.mindByEntity.values()].some(other => { const b = w.entities[other.entityId]; return other !== m && b && (!floater || Math.abs(e.pose.p[1]-b.pose.p[1])<2) && Math.hypot(e.pose.p[0] - b.pose.p[0], e.pose.p[2] - b.pose.p[2]) < 4; }));
+      const resting=(floater||humanRest)&&!!this.engine.bodyResting?.(m.entityId),recharging=floater&&resting&&/bask|recharge/.test(m.doing);
+      advanceNeedAnchor(m.life, tick, needRates(resting?'rest':e.human.activity, near.get(m.soulId)!, recharging, floater), needsDay);
+    }
+    if (moved) this.nearV1 = { sig, near };
   }
 
   private captureHostState(): Omit<SnapshotBody, 'runtime'> {
@@ -2107,7 +2208,7 @@ export class WorldHost {
       id: m.soulId, entityId: m.entityId, name: m.name, description: m.description, owner: ownerShort(m.owner), native: m.native,
       ...this.publicNameMetadata(m.soulId),
       ...(this.profilePhoto(m.soulId)?{profilePhoto:this.profilePhoto(m.soulId)!}:{}),
-      intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(m.energy), doing: this.doingOfV1(m),
+      intent: publicIntent(m.intent), intentText: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(this.energyOf(m)), doing: this.doingOfV1(m),
       ...this.publicNow(m.soulId),
       ...(this.publicBodyOf?.(m.soulId) ? {body: this.publicBodyOf(m.soulId)!} : {}),
       ...(this.publicSlowedOf?.(m.soulId) ? {slowed: this.publicSlowedOf(m.soulId)!} : {}),
@@ -2308,9 +2409,9 @@ export class WorldHost {
   private captureHead() {
     const t0 = performance.now();
     const runtime = this.engine.snapshot();
-    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash() };
+    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash(), sidecar: this.snapshotSidecar?.() };
   }
-  private commitHead({ t0, runtime, body, physicalHash }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
+  private commitHead({ t0, runtime, body, physicalHash, sidecar }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
     // captureBody owns every field; persistence only reads it, and restoration/
     // recovery recipes clone before mutation. Keep one immutable captured body.
     // #1150: a head captured here during a failing stretch is marked and serves a boot, never a rewind. A sliced capture
@@ -2321,7 +2422,7 @@ export class WorldHost {
     this.snapshotMs.capture = performance.now() - t0;
     this.lastSnapshotTick = runtime.tick; this.snapshotTaken();
     const generation = this.snapshotGeneration;
-    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1;
+    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1; sidecar?.(meta);
       this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.persist; };
     if (sync) persist(); else setImmediate(persist);
     return { tick: runtime.tick, stateHash: runtime.stateHash };
@@ -2347,11 +2448,12 @@ export class WorldHost {
       const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
       const fields = this.captureHostState();
       const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const sidecar = this.snapshotSidecar?.();
       const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
       const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
         return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
       })();
-      return { checkpoint, legacy, fields, steps };
+      return { checkpoint, legacy, fields, steps, sidecar };
     };
     // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
     // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
@@ -2368,7 +2470,7 @@ export class WorldHost {
       if (code === 'snapshot.non-finite' && this.nonFiniteHoldRule && this.holdNonFinite(error)) this.snapshotSoon ??= 'a non-finite number was put back';
       return;
     }
-    const { checkpoint, legacy, fields, steps } = parts;
+    const { checkpoint, legacy, fields, steps, sidecar } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
@@ -2410,7 +2512,7 @@ export class WorldHost {
         const at = performance.now(), json = JSON.stringify(body);
         this.snapshotMs.serialize = performance.now() - at;
         later(() => {
-          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json);
+          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json); sidecar?.(meta);
           this.snapshotMs.persist = performance.now() - at;
           this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.finish + this.snapshotMs.serialize + this.snapshotMs.persist;
           this.periodicSnapshot = null;
