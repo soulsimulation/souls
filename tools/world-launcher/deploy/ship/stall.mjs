@@ -1,10 +1,10 @@
 // stall.mjs <url> [runs=2] [shotDir=/tmp] : phone 390x844 dpr3; after the card lifts, 40 s of rAF: per-run max frame gap, gaps >1 s, fps; plus a screenshot every 5 s (timed).
-import { chromium as playwrightChromium, lease } from './browser.mjs';
+import { chromium as playwrightChromium, launchOptions, lease } from './browser.mjs';
 const chromium = playwrightChromium();
 const [url, runs = '2', shotDir = '/tmp'] = process.argv.slice(2);
 const release = await lease('ship-stall'); let b;
 try {
-  b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  b = await chromium.launch(launchOptions(['--ignore-gpu-blocklist']));
   for (let k = 1; k <= Number(runs); k++) {
     const ctx = await b.newContext(process.env.DESK ? { viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 } : { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
     const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.push(String(e).slice(0, 150)));

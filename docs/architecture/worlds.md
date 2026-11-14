@@ -117,6 +117,21 @@ switch independent. A previously saved master mute migrates to both switches off
     recently used order stays the visitors'). A world whose takeover from the previous launcher failed is passed over. A visitor's boot still evicts the
     least recently used idle world when the registry does not fit, and that world waits, owing its time, until a round
     finds room. Crashed worlds restart with backoff, and a world held by the breaker stays held.
+  - **A still world leaves memory (#2299; `--unload-still 1`, off by default and in production until the tranche's
+    proof task has passed; `--unload-still 0` is the behaviour above).** Every 15 s the launcher reads each running
+    world's `GET /__sim/still` (the contract in #2241) and unloads, by its ordinary clean stop, a world that is still,
+    whose horizon (`untilWallMs`) is at least 10 minutes away or `null`, that no request other than a resident read or a
+    passive one (an act, a god call, a page) reached for 10 minutes, with no visitor or god connection open, nothing but
+    resident reads in flight, and up for at least 30 s. Before every stop the launcher reads `/__sim/still` again and
+    records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, is recorded as due at once
+    and the keep-alive boots it as before). An unloaded world is never booted by the keep-alive, and loads on an act, a
+    god call, a visitor's connection or a page; at `moveWallMs`, always; at `untilWallMs`, only when a resident read for
+    it was seen in the last 10 minutes. Otherwise it is not loaded by time at all, and catches up its missed events in
+    order when it next loads. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
+    long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
+    answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
+    with no picture kept, loads the world. Not yet: memory admission (#2233) and the load queue (#2304).
   - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
     them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
