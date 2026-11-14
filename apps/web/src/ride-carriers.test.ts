@@ -2,7 +2,7 @@
 // D1: any native carrier is a ride (balloon, ferris wheel, carousel, punt), not only balloon-tagged things.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {isRideCarrierDef, carrierIdOf, recordedCarriers, carrierPoses} from './ride-carriers.ts';
+import {isRideCarrierDef, carrierIdOf, recordedCarriers, carrierPoses, hasOwnCars} from './ride-carriers.ts';
 import {isRideBalloonDef} from './gen-mesh/kits/ride-balloon.ts';
 import {ridingCarrier} from './WorldBroadcast.ts';
 
@@ -31,6 +31,13 @@ test('recorded carriers (a punt, a wheel car) are framed where the frame has the
   assert.deepEqual(poses.map(c => c.id), ['pond-punt', 'resort-ferris-wheel']);
   // a rider 9 m up at the wheel's car is riding it (the camera frames it with its car), one on the grass below is not
   assert.ok(ridingCarrier([-20, 9.3, -9], poses)); assert.equal(ridingCarrier([-20, 0, -9], poses), null);
+});
+
+test('#2198: a big wheel with hanging gondolas is ridden in its own cars; the core wheel (round pods) still gets a drawn car', () => {
+  assert.equal(hasOwnCars({make: {kind: 'gen', args: {shapes: [{kind: 'box', role: 'wheel'}, {kind: 'box', role: 'gondola', pivot: [0, 2, 0]}]}}}), true);
+  assert.equal(hasOwnCars({make: {kind: 'gen', args: {shapes: [{kind: 'sphere', role: 'wheel'}]}}}), false);
+  assert.equal(hasOwnCars({make: {kind: 'mesh'}}), false);
+  assert.equal(hasOwnCars(undefined), false);
 });
 
 test('the card names a ride pose, never the idle doing; the server\'s body line reads as written', async () => {

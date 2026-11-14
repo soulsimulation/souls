@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, planStepProblem, reconcileMessages, sseFrames, stepParamsProblem, takeAddressed, takePending } from './soul/eden.mjs';
+import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, reconcileMessages, sseFrames, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  *  acknowledged after its cursor, and with no cursor every message not acknowledged. */
 async function world(t) {
   const dir = mkdtempSync(join(tmpdir(), 'souls-serve-'));
-  const w = { dir, inbox: [], events: [], calls: [], acts: 0, keys: [], busyNext: 0, heavyNow: 0, heavyMax: 0, listens: 0, parked: [], bodies: [], refuse: {}, results: [], byRef: new Map(), cut: new Set(), offers: { 'sit:bench': { seconds: { type: 'integer', optional: true, min: 1, max: 600 } } } };
+  const w = { dir, inbox: [], events: [], calls: [], resolverCalls: 0, acts: 0, keys: [], busyNext: 0, heavyNow: 0, heavyMax: 0, listens: 0, parked: [], bodies: [], refuse: {}, results: [], byRef: new Map(), cut: new Set(), offers: { 'sit:bench': { seconds: { type: 'integer', optional: true, min: 1, max: 600 } } } };
   w.said = []; w.listeners = new Set(); w.streams = 0; w.streamAfter = [];
   w.say = (text, kind = 'speech.to-me') => { const e = { id: `c_${w.said.length + 1}`, kind, about: { soulId: 's_bo', name: 'Bo' }, text: `Bo: "${text}"`, untrusted: true, data: { text } }; w.said.push(e); for (const f of w.listeners) f(e); };
   const flush = () => { const p = w.parked; w.parked = []; for (const f of p) f(); };
@@ -30,6 +30,8 @@ async function world(t) {
     const p = url.pathname.slice('/w/test'.length);
     let body = ''; for await (const c of req) body += c;
     w.calls.push([req.method, p]);
+    // #1921: the client never asks the world's resolver or its search; every test's world counts them, and ends at zero
+    if (p === '/v1/edge/resolve' || (p === '/v1/edge/capabilities' && url.searchParams.has('search'))) w.resolverCalls++;
     if (w.deny) return void (res.writeHead(w.deny, { 'content-type': 'application/json' }), res.end(JSON.stringify(w.denyCode === 'unauthorized' ? { error: { code: 'unauthorized', message: 'This Soul is not admitted and ready right now; its pairing is kept. Retry shortly.' } } : { code: 'control.revoked', reason: 'revoked', error: { code: 'control.revoked', message: 'refused' } })));
     if (w.denyOnce === p) { w.denyOnce = null; res.writeHead(403, { 'content-type': 'application/json' }); return void res.end(JSON.stringify({ error: { code: 'forbidden', message: 'once' } })); }
     if (w.cut.delete(p)) { res.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' }); res.write('{"accepted":tr'); setTimeout(() => res.destroy(), 10); return undefined; }
@@ -65,6 +67,7 @@ async function world(t) {
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
     await sleep(p === '/v1/edge/act' && w.actMs ? w.actMs : 10); w.heavyNow--;
     if (w.busyNext > 0) { w.busyNext--; return json(429, { error: { code: 'soul.busy', message: 'one at a time' } }, { 'retry-after': '0' }); }
+    if (p === '/v1/edge/act' && w.overLimit) return json(429, { error: { code: 'rate-limited', message: 'more than 60 acts a minute: this act was not taken', limit: 60, window_s: 60 } });   // as edge/routes.ts answers
     if (p === '/v1/edge/act') {
       const b = body ? JSON.parse(body) : {}, cap = b.capability ?? 'walk:x';
       w.bodies.push(b);
@@ -83,12 +86,6 @@ async function world(t) {
       if (w.holdsBeforeAnswer) { w.holdsBeforeAnswer = false; w.event({ id: 'held', kind: 'activity.observed', receipt: { id: out.receipt.id, capability: cap, phase: 'started' }, action: { status: 'executing', phase: 'occupied' }, body: { posture: 'seated' } }); await sleep(250); }
       if (w.endsBeforeAnswer) { w.endsBeforeAnswer = false; w.event({ kind: 'receipt', receipt: { id: out.receipt.id, capability: cap, phase: 'completed' } }); await sleep(250); }
       return json(200, out);
-    }
-    if (p === '/v1/edge/resolve') {
-      const b = JSON.parse(body), id = b.capability;
-      if (id.includes('nowhere')) return json(200, { resolve: { ok: false, code: 'capability.unknown', reason: 'no such offer', did_you_mean: [{ id: 'walk:mill', label: 'Walk to the mill' }], candidates: [{ id: 'walk:mill' }] } });
-      if (id.includes('taken')) return json(200, { resolve: { ok: false, code: 'seat.taken', reason: 'someone is there' } });
-      return json(200, { resolve: { ok: true, would: { capability: id, available: true }, candidates: [{ id, params: w.offers[id] }] } });
     }
     if (p === '/v1/edge/say') return json(200, { said: { id: 'sp_1', heardBy: 0 } });
     if (/^\/v1\/edge\/inbox\/msg_[^/]+$/.test(p) && req.method === 'GET') return json(200, { message: { id: decodeURIComponent(p.split('/').at(-1)), ...(w.results.some((r) => r.id === decodeURIComponent(p.split('/').at(-1))) ? { result: 'x', outcome: 'done' } : {}) } });
@@ -109,7 +106,7 @@ async function world(t) {
     child.on('exit', (code) => { let json = null; try { json = JSON.parse(out); } catch { /* text */ } done({ code, out, err, json }); });
   });
   w.cli = (...args) => w.cliEnv(null, ...args);
-  t.after(async () => { await w.cli('serve', '--stop'); await sleep(50); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
+  t.after(async () => { await w.cli('serve', '--stop'); await sleep(50); server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); assert.equal(w.resolverCalls, 0, 'no call on the resolver'); });
   return w;
 }
 const flushWorld = (w) => { const p = w.parked; w.parked = []; for (const f of p) f(); };
@@ -545,6 +542,17 @@ test('a keyed write repeated for soul.busy keeps its one key, so the world acts 
   assert.ok(w.keys[0]);
 });
 
+test('#2107 A1: an act refused rate-limited is told to the agent at once, with its code and limit, and never resent', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.overLimit = true;
+  const r = await w.cli('act', 'walk:mill');
+  assert.equal(r.code, 75, r.err);
+  assert.equal(r.json.accepted, false); assert.equal(r.json.code, 'rate-limited'); assert.equal(r.json.limit, 60); assert.equal(r.json.window_s, 60);
+  assert.equal(w.calls.filter(([m, p]) => m === 'POST' && p === '/v1/edge/act').length, 1, 'neither serve nor the CLI sent it again');
+  assert.equal(w.acts, 0);
+});
+
 test('pure state: an event is read once across a cut, a long tail hands over in pieces, messages fold once', () => {
   const st = { cursor: null, inboxAfter: null, readCursor: null, messages: [], receipts: {}, events: [], omitted: 0, gap: false };
   foldEvents(st, Array.from({ length: 150 }, (_, i) => ({ id: `c_${i + 1}`, kind: 'x' })), 'c_150');
@@ -566,21 +574,24 @@ const ended = (w, id, phase = 'completed') => w.event({ kind: 'receipt', receipt
 const planNow = async (w, want) => until(async () => { const p = (await w.cli('plan', '--status')).json; return want(p) ? p : null; });
 const steps3 = JSON.stringify(['walk:mill', { id: 'sit:bench', params: { seconds: 30 } }, 'walk:pond']);
 
-test('plan A1: nothing runs until every step is an offer whose params fit', async (t) => {
+test('plan #1921: no step is asked of the world first; one the catalog cannot vouch for runs, and its refusal mid-plan stops the plan and wakes listen', async (t) => {
   const w = await world(t);
   assert.match((await w.cli('plan', steps3)).err, /none is up in this folder/);
-  await w.cli('serve');
-  const unknown = await w.cli('plan', JSON.stringify(['walk:mill', 'walk:nowhere']));
-  assert.equal(unknown.code, 2);
-  assert.equal(unknown.json.accepted, false);
-  assert.equal(unknown.json.code, 'capability.unknown');
-  assert.equal(unknown.json.problems[0].did_you_mean[0].id, 'walk:mill');
-  const params = await w.cli('plan', JSON.stringify(['walk:mill', { id: 'sit:bench', params: { seconds: 9000 } }]));
-  assert.equal(params.json.code, 'capability.params');
   assert.match((await w.cli('plan', '["walk to the mill"]')).err, /not an offered id/);
-  await sleep(100);
-  assert.equal(w.acts, 0, 'no step ran');
-  assert.equal((await w.cli('plan', JSON.stringify(['sit:taken']))).json.accepted, true, 'a state refusal now may be open by its turn: the step finds out');
+  await w.cli('serve');
+  const held = w.cli('listen');
+  await sleep(150);
+  w.refuse['walk:nowhere'] = 'capability.unknown';
+  const r = await w.cli('plan', JSON.stringify(['walk:mill', 'walk:nowhere']), '--for', 'none');
+  assert.equal(r.json.accepted, true, r.err);
+  assert.deepEqual(r.json.unchecked, ['walk:mill', 'walk:nowhere'], 'this world publishes no catalog, so no step is vouched for');
+  assert.ok(await until(() => w.acts === 1), 'the first step runs');
+  ended(w, 'r_1');
+  const woke = await held;
+  assert.equal(woke.json.plan.state, 'stopped', woke.out);
+  assert.equal(woke.json.plan.steps[1].code, 'capability.unknown', 'the act refused the second step');
+  assert.match(woke.json.next, /fixes":2/);
+  assert.equal(w.acts, 1, 'nothing ran after it');
 });
 
 test('plan A1: serve runs the steps in order with no CLI call between them, links each to the message, and closes it', async (t) => {
@@ -942,15 +953,6 @@ test('plan: pure: parsing, params and transitions', () => {
   assert.deepEqual(parsePlanSteps('["walk:a",{"id":"sit:b","params":{"seconds":3}}]').steps, [{ id: 'walk:a' }, { id: 'sit:b', params: { seconds: 3 } }]);
   assert.equal(parsePlanSteps('[{"id":"walk:a","fixes":2}]').fixes, 2);
   for (const bad of ['', 'x', '[]', '{}', '[1]', '["two words"]', '[{"id":"walk:a","params":[]}]', '[{"id":"a:b","fixes":1},"c:d"]', JSON.stringify(Array(25).fill('walk:a'))]) assert.throws(() => parsePlanSteps(bad), undefined, bad);
-  assert.equal(stepParamsProblem({ n: { type: 'integer', min: 1, max: 5 } }, { n: 3 }), null);
-  assert.match(stepParamsProblem({ n: { type: 'integer' } }, { n: 1.5 }), /integer/);
-  assert.match(stepParamsProblem({ n: { type: 'integer', max: 5 } }, { n: 6 }), /\.\.5/);
-  assert.match(stepParamsProblem({ k: { type: 'string', enum: ['a'] } }, { k: 'b' }), /one of a/);
-  assert.match(stepParamsProblem({ k: { type: 'string', required: true } }, {}), /needs k/);
-  assert.equal(stepParamsProblem(undefined, { any: 1 }), null);
-  assert.equal(planStepProblem({ id: 'sit:b' }, { ok: false, code: 'seat.taken' }), null, 'state is for the step to find out');
-  assert.equal(planStepProblem({ id: 'sit:b' }, { ok: false, code: 'capability.unavailable' }), null, 'so is an offer that is unavailable right now');
-  assert.equal(planStepProblem({ id: 'walk:a' }, { ok: true, would: { capability: 'walk:b' } }).code, 'capability.unknown', 'an id read as something else is not that offer');
   const p = newPlan([{ id: 'walk:a' }, { id: 'walk:b' }], 'msg', 0);
   const a = p.steps[0].clientRef; assert.ok(a); assert.notEqual(a, p.steps[1].clientRef);
   planAnswer(p, { accepted: true, receipt: { id: 'r1', phase: 'started' } }, 1);
@@ -1198,4 +1200,61 @@ test('#1345 A5: the flags are checked before anything is saved', async (t) => {
   const st = await w.cli('serve', '--status', '--no-reflex');
   assert.equal(st.code, 0, st.err);
   assert.equal(JSON.parse(readFileSync(join(w.dir, '.eden-agent.json'), 'utf8')).reflex, false);
+});
+
+// #1940: serve follows the home's installed client (config.client and its copy in bin/), after an upgrade or a rollback.
+/** The serve world as a home: its Soul imported, commands run as an owner's would (HOME there, beats every second). */
+async function homeWorld(t) {
+  const w = await world(t), legacy = join(w.dir, '.eden-agent.json');
+  writeFileSync(legacy, JSON.stringify({ ...JSON.parse(readFileSync(legacy, 'utf8')), soul: 's_me' }), { mode: 0o600 });
+  w.home = (...args) => w.cliEnv({ HOME: w.dir, SOULS_HOME: '', SOULS_PRINCIPAL: '', EDEN_TIME_SCALE: '0.05' }, ...args);
+  assert.equal((await w.home('import')).code, 0);
+  /** Install a client in bin/ and name it in config.json, as upgrade and upgrade --rollback do. */
+  w.install = (version, bytes) => {
+    writeFileSync(join(w.dir, '.souls/bin/eden.mjs'), bytes, { mode: 0o755 });
+    const cfg = join(w.dir, '.souls/config.json');
+    writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), client: version }));
+  };
+  return w;
+}
+const ours = /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(cli, 'utf8'))[1];
+
+test('#1940 A1-A3: after an upgrade serve hands over to the installed client; its plan and wake rules carry on', async (t) => {
+  const w = await homeWorld(t);
+  const a = await w.home('serve');
+  assert.equal(a.json.serving, true, a.err);
+  assert.equal((await w.home('serve', '--status')).json.version, ours, 'status names the running client');
+  assert.equal((await w.home('wake', 'add', 'act-ended')).json.added, 'w1');
+  w.owner('msg_1', 'Mill then pond');
+  assert.equal((await w.home('plan', JSON.stringify(['walk:mill', 'walk:pond']), '--for', 'msg_1')).json.accepted, true);
+  assert.ok(await until(() => w.acts === 1), 'step 1 is under way in the world, none in flight here');
+  w.install('9.9.9', readFileSync(cli, 'utf8').replace(/^const VERSION = "[0-9.]+";$/m, 'const VERSION = "9.9.9";'));
+  const b = await until(async () => { const s = (await w.home('serve', '--status')).json; return s?.version === '9.9.9' ? s : null; }, 10_000);
+  assert.ok(b, 'the new client is serving within a few beats');
+  assert.notEqual(b.pid, a.json.pid);
+  assert.ok(await until(() => !alive(a.json.pid)), 'the old one exits once the new one answers');
+  assert.ok((await w.home('wake')).json.rules.some((r) => r.id === 'w1'), 'the wake rule survives');
+  const p = (await w.home('pending')).json;
+  assert.equal(p.plan?.state, 'running', JSON.stringify(p.plan)); assert.equal(p.plan.step, 1, 'the pending plan survives at its step');
+  ended(w, 'r_1');
+  assert.ok(await until(() => w.acts === 2), 'the new client runs the plan\'s next step');
+  ended(w, 'r_2');
+  assert.ok(await until(() => w.results.length === 1));
+  assert.equal(w.acts, 2, 'each step acted once across the handover');
+});
+
+test('#1940 A2/A3: a client that fails to start leaves the old serve running, and status says why', async (t) => {
+  const w = await homeWorld(t);
+  const a = await w.home('serve');
+  assert.equal(a.json.serving, true, a.err);
+  assert.equal((await w.home('wake', 'add', 'act-ended')).json.added, 'w1');
+  w.install('2.0.0', 'const VERSION = "2.0.0";\nprocess.exit(3);\n');   // a rollback to a client that cannot start
+  const s = await until(async () => { const x = (await w.home('serve', '--status')).json; return x?.handoverFailed ? x : null; }, 10_000);
+  assert.ok(s, 'the failure is reported in status');
+  assert.equal(s.pid, a.json.pid); assert.equal(s.version, ours);
+  assert.equal(s.handoverFailed.to, '2.0.0'); assert.match(s.handoverFailed.why, /exited \(code 3\) before it answered/);
+  assert.ok(alive(a.json.pid));
+  assert.ok((await w.home('wake')).json.rules.some((r) => r.id === 'w1'), 'and it still answers');
+  await sleep(1500);
+  assert.equal((await w.home('serve', '--status')).json.pid, a.json.pid, 'that version is not tried again');
 });

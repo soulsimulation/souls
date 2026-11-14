@@ -8,7 +8,8 @@ import type { Entity, WorldState } from '../world/types.ts';
 import { CATALOG, def } from '../world/catalog.ts';
 import { passRelevant } from '../world/relevant.ts';
 import { buildStaticGrids, buildGrids, clearanceAt, gridsWithObstacles, StaticRaster, updateGrids, type GridSet, type LevelGrid } from './grid.ts';
-import { findRoute, prepareCorridor, type Place, type RouteOpts, type RouteResult } from './path.ts';
+import { findRoute, linkApproach, prepareCorridor, type Place, type RouteOpts, type RouteResult } from './path.ts';
+import { holdingSpots, singleFile } from './holding.ts';
 import type { AgentProfile, Link, Obstacle, SpatialScene, Surface } from './types.ts';
 import type { Profiler } from '../runtime/profile.ts';
 import { sleepEnvelope, SLEEP_BODY_MARGIN } from '../activities/sleep.ts';
@@ -168,7 +169,7 @@ export class Spatial {
     this.restoredEpoch = undefined;
     if (e === undefined || e === this.epoch) return;
     this.epoch = e;
-    this.aroundCache.clear(); this.outside.clear(); this.narrowCache.clear(); this.routeMemo?.map.clear();   // an epoch may come back
+    this.aroundCache.clear(); this.outside.clear(); this.narrowCache.clear(); this.routeMemo?.map.clear(); this.holding.clear();   // an epoch may come back
   }
   /** Set by `rt.profile = true`: wall ms per method (spatial.route includes its spatial.sync). */
   prof?: Profiler;
@@ -289,7 +290,7 @@ export class Spatial {
     this.outside.clear();
     this.sync(world);
     this.epoch = s.navEpoch;
-    this.routeMemo?.map.clear();   // #1770: the epoch is set from outside and may repeat one seen before
+    this.routeMemo?.map.clear(); this.holding.clear();   // #1770: the epoch is set from outside and may repeat one seen before
     return true;
   }
 
@@ -587,6 +588,23 @@ export class Spatial {
     const read = this.clearanceCapped(level, at, t);
     return read ? (q) => read(q) >= t : null;
   }
+
+  /**
+   * Stair lease (#2263): the holding spots at one end of a single-file link (holding.ts), on that end's grid (levelAt, so
+   * a paged world faces that end's window), clear of every single-file flight with an end on that floor. Kept per
+   * navigation epoch. [] for a link that is not single-file or an end with no grid. Nothing in the engine reads it yet.
+   */
+  holdingSpots(link: Link, ascending: boolean): Vec2[] {
+    const key = `${this.epoch}|${link.id}|${ascending}`, hit = this.holding.get(key);
+    if (hit) return hit;
+    if (this.holding.size && ![...this.holding.keys()][0].startsWith(`${this.epoch}|`)) this.holding.clear();
+    const { entry, approach } = linkApproach(link, ascending), g = singleFile(link) ? this.levelAt(entry.level, approach) : undefined;
+    const flights = (this.pages?.all ?? this.scene).links.filter((f) => f.id === link.id || (singleFile(f) && (f.from.level === entry.level || f.to.level === entry.level)));
+    const spots = g ? holdingSpots(link, ascending, g, { flights }) : [];
+    this.holding.set(key, spots);
+    return spots;
+  }
+  private holding = new Map<string, Vec2[]>();
 
   /**
    * The grid of `id` over the tile holding `p`, which no paged window holds. Building an upper level costs ~0.1 s (raster

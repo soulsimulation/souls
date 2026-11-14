@@ -58,6 +58,13 @@ export const layersStateSchema = z.object({
 });
 export type LayersState = z.infer<typeof layersStateSchema>;
 
+/** #1223: is this thing private? Its own `access`, else its nearest owned ancestor's (the ownership rule above).
+ *  `get` looks a parent up by id. A private notebook's written words stay out of everything a viewer receives. */
+export function privateThing(e: { owner?: string; access?: string; in: { parent: string } } | undefined, get: (id: string) => { owner?: string; access?: string; in: { parent: string } } | undefined): boolean {
+  for (let n = 0; e && n < 64; e = e.in.parent === 'world' ? undefined : get(e.in.parent), n++) if (e.owner || e.access) return e.access === 'private';
+  return false;
+}
+
 // ---------- the clock ----------
 
 export const minutesOf = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return (h * 60 + m) % 1440 || (h === 24 ? 1440 : 0); };

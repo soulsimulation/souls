@@ -41,21 +41,21 @@ test('public boards II: chalkboard, sign-up sheet, poll', {timeout:300000}, asyn
  const on=(name,s,words,params)=>{watch=name;return done(s,words,params);};
  const read=async(s,name)=>{const r=await act(s,`read:${id(name)}`);await finish(s,r);return edge.receipt(s.soulId,r.receipt.id);};
  // chalkboard menu: the whiteboard contract in chalk
- const w=await on('menu',ana,'write on the chalkboard',{text:'Soup 3\nBread 2\nTea 1'});assert.equal(w.early,false);assert.equal(state('menu').text,'Soup 3\nBread 2\nTea 1');
+ const w=await on('menu',ana,`object:${id('menu')}:write`,{text:'Soup 3\nBread 2\nTea 1'});assert.equal(w.early,false);assert.equal(state('menu').text,'Soup 3\nBread 2\nTea 1');
  // sign-up: own name, one each, only the signer crosses off
- for(const [s,words] of [[ana,'sign the sign-up sheet'],[ben,'sign up on the sign-up sheet']]){const fr=await on('sheet',s,words);assert.equal(fr.early,false,'no name before the stroke ends');}
+ for(const [s,words] of [[ana,`object:${id('sheet')}:sign`],[ben,`object:${id('sheet')}:sign`]]){const fr=await on('sheet',s,words);assert.equal(fr.early,false,'no name before the stroke ends');}
  assert.equal(state('sheet').text,'Ana\nBen');
- const again=await act(ana,'sign the sign-up sheet',undefined,false);assert.match(again.reason??'',/already on this sheet/);
- const notMine=await act(cy,'cross off my name on the sign-up sheet',undefined,false);assert.ok(/not on this sheet|not-yours|No .*capability|offered/i.test((again.reason??'')+(notMine.reason??'')+notMine.code),JSON.stringify(notMine));
- const off=await on('sheet',ben,'cross off my name on the sign-up sheet');assert.equal(off.stroke.kind,'wipe');assert.equal(state('sheet').text,'Ana');
- await on('sheet',cy,'sign the sign-up sheet');assert.equal(state('sheet').text,'Ana\nCy');assert.deepEqual(state('sheet').textBy,`${ana.soulId},${cy.soulId}`);
+ const again=await act(ana,`object:${id('sheet')}:sign`,undefined,false);assert.match(again.reason??'',/already on this sheet/);
+ const notMine=await act(cy,`object:${id('sheet')}:unsign`,undefined,false);assert.ok(/not on this sheet|not-yours|No .*capability|offered/i.test((again.reason??'')+(notMine.reason??'')+notMine.code),JSON.stringify(notMine));
+ const off=await on('sheet',ben,`object:${id('sheet')}:unsign`);assert.equal(off.stroke.kind,'wipe');assert.equal(state('sheet').text,'Ana');
+ await on('sheet',cy,`object:${id('sheet')}:sign`);assert.equal(state('sheet').text,'Ana\nCy');assert.deepEqual(state('sheet').textBy,`${ana.soulId},${cy.soulId}`);
  // poll: one vote each, a new vote moves it, unknown choices refused with the options
- await on('poll',ana,'vote on the poll',{choice:'soup'});await on('poll',ben,'vote on the poll',{choice:'Salad'});
- const bad=await act(cy,'vote on the poll',{choice:'tea'},false);assert.match(bad.reason??'',/Soup, Salad, Sandwich/);
- await on('poll',cy,'vote on the poll',{choice:'sand'});
- const moved=await on('poll',ana,'vote on the poll',{choice:'salad'});assert.equal(moved.early,false);
+ await on('poll',ana,`object:${id('poll')}:vote`,{choice:'soup'});await on('poll',ben,`object:${id('poll')}:vote`,{choice:'Salad'});
+ const bad=await act(cy,`object:${id('poll')}:vote`,{choice:'tea'},false);assert.match(bad.reason??'',/Soup, Salad, Sandwich/);
+ await on('poll',cy,`object:${id('poll')}:vote`,{choice:'sand'});
+ const moved=await on('poll',ana,`object:${id('poll')}:vote`,{choice:'salad'});assert.equal(moved.early,false);
  assert.equal(state('poll').text,'Soup — 0 votes\nSalad — 2 votes\nSandwich — 1 vote');
- const same=await act(ana,'vote on the poll',{choice:'salad'},false);assert.match(same.reason??'',/already voted for Salad/);
+ const same=await act(ana,`object:${id('poll')}:vote`,{choice:'salad'},false);assert.match(same.reason??'',/already voted for Salad/);
  // reads: counts in the offers, the words only with the read
  const caps=edge.capabilities(ben);const label=n=>caps.find(c=>c.id===`read:${id(n)}`)?.label??'';
  assert.match(label('poll'),/a poll, 3 votes/);assert.match(label('sheet'),/a sign-up sheet, 2 names/);assert.ok(!/Ana|Salad|Lunch/.test(label('poll')+label('sheet')),'offers carry counts, not words');

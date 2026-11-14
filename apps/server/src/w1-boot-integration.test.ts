@@ -41,7 +41,7 @@ test('W1 mounted boot: canonical cached complete catalogue/pages, fresh authenti
  assert.equal(after.status,200);assert.ok(session2.tick>session1.tick);assert.equal(session2.staticEtag,session1.staticEtag);assert.equal(session2.here.tick,session2.tick);assert.ok(session2.here.me.placePath);assert.ok(Array.isArray(session2.here.exits));const lean=await (await request('/v1/edge/here?include=doHere')).json() as any;assert.ok(Array.isArray(lean.here.doHere));assert.equal(lean.apiContract,'eden-edge/1.1');assert.ok(Buffer.byteLength(JSON.stringify(lean.here))<=2600);assert.equal((await (await request('/v1/edge/here')).json() as any).here.doHere,undefined);
  assert.ok(Array.isArray(session2.here.doHere));assert.ok(Buffer.byteLength(JSON.stringify(session2.here.doHere))<=1800);for(const c of session2.here.doHere){const offered=w.ledger.capabilities(soul).find(o=>o.id===c.id)!;assert.ok(offered?.available);assert.deepEqual(c.params,offered.params);assert.ok(!['walk','stroll'].includes(c.verb));}
  const counts=()=>({events:w.f.db.events(w.f.host.worldId).length,receipts:Number((w.f.db.db.prepare('SELECT COUNT(*) AS n FROM edge_receipts_v1').get() as any).n)}),baseline=counts();
- const resolve=async(body:object)=>{const res=await w.app.request('/v1/edge/resolve',{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify(body)});return (await res.json() as any).resolve;};
+ const resolve=async(body:object)=>w.ledger.intents.dryRun(soul,body as never) as any;
  const cap=w.ledger.capabilities(soul).find(c=>c.verb==='walk'&&c.available&&c.target?.kind==='place'&&w.ledger.places.byId.get(c.target.id)?.parent!==null)!;assert.ok(cap);
  const place=w.ledger.places.byId.get(cap.target!.id)!;
  const dryName=await resolve({verb:'go',target:{place:place.name}});
@@ -52,9 +52,10 @@ test('W1 mounted boot: canonical cached complete catalogue/pages, fresh authenti
   const out=await resolve({capability:'walk:'+bad});assert.equal(out.ok,false);assert.equal(out.code,'capability.unknown');assert.ok(out.did_you_mean.length>0);
  }
  assert.deepEqual(counts(),baseline,'boot and resolve append no event or receipt');
- const accepted=(await w.http(soul,'POST','/v1/edge/act',{capability:'walk:'+place.name,clientRef:'w1-name-once'})).body;
- assert.ok(accepted.accepted,JSON.stringify(accepted));assert.equal(accepted.receipt.chosen.place,place.id);assert.equal(accepted.receipt.chosen.matchedBy,'name');
- const retry=(await w.http(soul,'POST','/v1/edge/act',{capability:'walk:'+place.name,clientRef:'w1-name-once'})).body;assert.equal(retry.receipt.id,accepted.receipt.id);
+ // #1911: an act is an offered id; a place's name is read by resolve (above), never by act
+ const accepted=(await w.http(soul,'POST','/v1/edge/act',{capability:cap.id,clientRef:'w1-name-once'})).body;
+ assert.ok(accepted.accepted,JSON.stringify(accepted));assert.equal(accepted.receipt.capability,'walk:'+dryName.would.chosen.place);
+ const retry=(await w.http(soul,'POST','/v1/edge/act',{capability:cap.id,clientRef:'w1-name-once'})).body;assert.equal(retry.receipt.id,accepted.receipt.id);
  // Exercise overflowing pagination independently of currently admitted counts.
  const small=paginatedBoot(source);const all=small.pages.length?small.pages.flatMap(p=>JSON.parse(p.serialized).places):small.payload.places;
  assert.deepEqual(all,source.payload.places);

@@ -20,7 +20,7 @@ pnpm typecheck                               # every package (tsc --noEmit)
 pnpm --filter @souls/server test               # one package
 node --test apps/server/src/god/buildsafe.test.ts   # one file
 pnpm test:mars                               # the vendored engine's deterministic suite
-pnpm test:client                             # Soul client and client-eval suites
+pnpm test:client                             # the client-eval suite (the legacy client's tests no longer run, #1754)
 pnpm test                                    # everything (slow; prefer the focused forms)
 ```
 
@@ -69,6 +69,32 @@ The gate never writes the baseline; only a reviewed commit does.
 The comparison runs in two places: the CI job `types-web`, on the build it already makes, so growth fails `ci-ok` on the
 PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
 `types-web`.
+
+## Replay corpus
+
+Old history must keep its meaning. `apps/server/test/fixtures/replay-corpus/` holds frozen event logs from fake-mind
+worlds recorded in a temporary database (never production): a toy world, a green-field god world with world-edits that
+adopts the boot runtime-policy chain at its first boot, and a Mars campus world with decisions, a body assignment and a
+retire that adopts the chain mid-history, so it has pins before and after. Each entry is `<name>.log.json` (the world
+row, every event, one snapshot; never rewritten) and `<name>.pins.json` (its reader, the policies its log adopts, and
+the state and kernel hashes at a few ticks and at its head). `apps/server/src/replay-corpus.test.ts` refolds every log
+with the current engine from genesis at each pinned tick, and boots it as a restarting server does, from genesis and from
+its snapshot, to the head. It runs in the server CI shards, which engine, fold, kernel and protocol paths select.
+
+A runtime policy adopted at boot (`adoptBootRuntimePoliciesV1`) is prospective: a log recorded before its adoption has
+no rules event for it and must refold to the same pins. A pin that moves means a change reached history that never
+adopted it: ship it as a logged rules fact or a documented reader instead.
+
+```sh
+node apps/server/test/fixtures/replay-corpus/record.ts <name> --recipe <toy|god-greenfield|mars-campus>   # add a log
+node apps/server/test/fixtures/replay-corpus/record.ts --check            # compare every entry's pins with this tree
+node apps/server/test/fixtures/replay-corpus/record.ts --write <name|all> # re-pin a deliberate change from the frozen logs
+```
+
+When a new boot-adopted policy merges, add an entry recorded after it under a new name (for example
+`mars-campus-2 --recipe mars-campus`); the older entries, recorded before it, and their pins stay as they are. A
+`--write` re-pin is its own reviewed commit with its reason, like the walk and bundle baselines. Logs are never
+re-recorded: the recorder refuses an existing name.
 
 ## Conformance
 
@@ -123,7 +149,7 @@ therefore **windowed**:
 - **By hand**, `gh workflow run ci.yml --ref <branch> -f pr=<n>` runs a PR's path-scoped CI on its branch, on the branch's
   own `ci.yml`. It tells you the result, but it doesn't count for the queue.
 - Pushes to main, manual runs without `pr`, and merge-group runs are never windowed. Main keeps its full-scope runs,
-  which the merge train reads. A merge-group run is path-scoped over everything in the group since `main`, and
+  which the merge train reads (see CI on main below). A merge-group run is path-scoped over everything in the group since `main`, and
   `proof-ok` reports there without checking anything, because a PR passes it at its head to enter the queue.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
@@ -132,6 +158,13 @@ Steward procedure: give `ci:run` to the PRs entering the window, normally the ne
 the replaced failure as stale (#909). But the train's 15-minute head wait is shorter than a server run, so a PR that
 is behind main can still leave with `needs:rebase`. The decision is `windowFor` and `windowed` in
 `.github/scripts/ci-scope.mjs`.
+
+**CI on main.** The merge queue fast-forwards `main` to the commit its merge-group run tested, so the push carries
+the same sha. When a successful merge-group `ci` run at that sha passed every `qualify` job, the push run does no heavy
+work: it runs `scope`, `repo` and the marker job `merge-group-covered`, and `ci-ok` passes on those. Any other push to
+main (a direct push, a revert, a merge group whose paths selected only some jobs) runs everything. The marker counts as
+full scope for the merge train's `fullScope`, and the release gate's CI evidence then reads the merge-group run's jobs.
+The decision is `queueCovered` in `.github/scripts/ci-main.mjs`.
 
 **Soul Action tests.** `tools/soul-actions/*.test.mjs` runs as the CI job `soul-actions`, about 76 s measured on a
 loaded laptop. It is picked by its own paths (`tools/soul-actions`, `apps/server`, `packages/world-compiler`,
@@ -143,11 +176,13 @@ is not a gate step, so the gate's suite tree and cached baseline don't change.
 `tools/soul-trace`, `tools/world-launcher/soul`, `apps/server`) and by every full-scope run, and a failure blocks through
 `ci-ok`. Like `soul-actions`, it is not a gate step.
 
-**Self-hosted runners.** The heavy `qualify` legs run on the runners named by the repository variable
-`CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`), else on GitHub-hosted runners. The browser `smoke` leg
-and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a loaded shared host misses
-(#1162). One runner instance takes one job at a time, so routing is only worth it with several
-instances online. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
+**Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs
+whose hosted median is over about 8 minutes: `packages`, `launcher`, `soul-actions`) run on the runners named by the
+repository variable `CI_HEAVY_RUNNER` when it is set (one label, such as `souls-ci`, or a JSON array of labels). Every
+other leg, and every leg while the variable is unset, runs on GitHub-hosted runners, so one run uses both pools at
+once. The browser `smoke` leg and the `native` leg always stay GitHub-hosted: `native` has a wall-clock budget that a
+loaded shared host misses (#1162). One runner instance takes one job at a time, so routing is only worth it with several
+instances online; a leg moves between pools by its flag, and `ci-scope.test.mjs` pins the split. `tools/ci/setup-runners.sh` sets them up on one Linux host, run there as root: N instances, each a
 systemd service under one dedicated unprivileged user, with the label, and Playwright's Chromium system packages when
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
 its header shows the one-line invocation from a workstation. The steward sets and clears `CI_HEAVY_RUNNER`.
@@ -209,6 +244,35 @@ gh workflow run capacity-qualify.yml -f ref=<branch> -f quiet_host=true \
 - **What it qualifies.** The host is the maintainer's machine. Its verdict is labelled with `host_class` and is not
   a production-class result unless that host is the production class.
 
+## A hundred worlds at once (#2301)
+
+`tools/bench/capacity/hundred/hundred.mjs` demonstrates the still-worlds tranche (#2241) end to end through the
+checkout's own launcher, fake minds, every file under its `--out`. It builds the fixture (100 small `hello-hamlet`
+worlds and 4 `eden-2026` worlds, one or two Souls each, booted once from genesis and stopped), then: every world's agent
+acts at seeded gaps of 2 to 10 minutes for an hour with world memory for about 25 small worlds (A6); all agents stop
+together and every listening world has a reminder due at one shared instant, then a crawler fetches every page (A7);
+every world should unload (A3); one world listens with a reminder inside the gap (A5); after an hour, one act each to a
+sleeping Soul in a small and an Eden world (A4); and for three sampled worlds a twin, the fixture's start state ticked
+straight through (`SIM_SKIP=0`) over the world's own log, must reach the state hash the jumped world wrote (A2). A8 is
+worked out by hand from its report.
+
+Run it on a `souls-timed` runner through the timed-run workflow (command `hundred`; the report, `results.json` and the
+log are the artifact; Soul folders and world data stay on the runner):
+
+```bash
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short'                 # A9: under 20 min, 6 + 1 worlds
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--fixture-only'          # A1 alone: build the 104 worlds
+gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--short --small 3 --eden 1 --active-min 4'
+```
+
+`--short` uses short knobs, stated in the report: agents act every 0.5 to 1.5 minutes for 6, the wind-down is shortened
+with `SIM_BODY_KNOBS` (silent 1 minute, walked out within 2; dev worlds only), a still world unloads after 1 quiet
+minute instead of 10, and the gap is 3 minutes. The full run (no `--short`: 60 active minutes, the real one-hour
+wind-down, a one-hour gap) takes about three and a half hours; the timed-run job allows `hundred` 270 minutes (every
+other command keeps 120). A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
+wind-down, the load queue, `--worlds-mem-mb`) is listed under "Missing from this checkout" with its issue, and the
+parts that need it are reported as not shown, never as passed.
+
 ## Playtests and the swarm director
 
 - [testing/playtests.md](testing/playtests.md): batteries, personas and casts play Souls and gods as coding-agent
@@ -240,3 +304,21 @@ tools) needs lint; T1 (logic) focused tests and typecheck; T2 (visible behaviour
 fake-mind world; T3 (Soul behaviour, navigation, engines) adds a scenario playtest, a reviewer pass and maintainer
 sign-off; T4 is the release head. "Done" means walked on the real URL with real input
 ([agent lifecycle](process/agent-lifecycle.md)).
+
+### Recording a proof clip on a GPU runner
+
+When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
+`tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
+`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
+push it to an `agent/` branch, then dispatch the timed run from that branch:
+
+```bash
+gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'
+gh run download <run-id> -D .e2e/clip-<run-id>
+node tools/proof/upload.mjs --pr <n> .e2e/clip-<run-id>/clip/<kit>-desktop.mp4
+```
+
+The kit and the recorder come from the workflow's branch, the app from `ref`. The recorder runs with
+`SIM_PROOF_GPU=hardware`: it fails (exit 5) rather than fall back to SwiftShader, and the log and the sidecar's `gl`
+name the renderer. The log also prints the clip's frame timing (frames, mean fps, largest gap) beside the take's wall
+clock. The job holds no write token, so the clip comes back as the run's artifact and `upload.mjs` attaches it.

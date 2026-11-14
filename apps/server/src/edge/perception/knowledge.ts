@@ -7,10 +7,9 @@
 //              knows how far, and which places in it it has visited (memory of visits, durable per Soul);
 //  - explore: `GET /v1/edge/around` (look around) lists more of what is near (descriptions, the people and things a
 //              little farther off) and finds secret places close by;
-//  - secret : the world's creator can mark a place secret (PLACE-DATA `secret: true`, or the god's
-//              POST /v1/god/places/secret). A secret place and everything inside it is left out of the public map, the
-//              boot catalogue, exits, walks and `far` until this Soul has been inside it or found it by looking around.
-//              Its geometry stays public (the renderer draws the world); only its name and listings are withheld.
+//  - secret : none (#1262, decided 10 November 2026). `marked()` is empty whatever PLACE-DATA `secret` or a stored
+//              `edge_place_secrets_v1` row says, so every read below sees every place; the god route is unmounted.
+//              The rest of the secrecy code is inert and is deleted in a later batch.
 //
 // Read-mostly and deterministic for a given world state; writes are small upserts on place change or discovery.
 import {secretMatcher, type Secrets} from './public-scrub.ts';
@@ -24,13 +23,13 @@ export type Known = {visits: number; firstTick: number; lastTick: number; how: '
 /** Secret places within this many metres (edge of the place) are found by looking around. */
 export const FIND_RADIUS = 25;
 const FAR_LISTED = 6;
+const NO_SECRETS: Set<string> = new Set();
 const parentOf = (p: Place) => p.semanticParent === undefined ? p.parent : p.semanticParent;
 const area = (p: V2[]) => Math.abs(p.reduce((s, [x, z], i) => {const [x2, z2] = p[(i + 1) % p.length]; return s + x * z2 - x2 * z;}, 0)) / 2;
 
 export class PlaceKnowledge {
   private readonly L: EdgeLedger;
   private readonly memo = new Map<string, Map<string, Known>>();
-  private secretsCache: {size: number; set: Set<string>} | null = null;
   /** Bumped whenever the set of secret places changes (callers that cache place listings compare it). */
   version = 0;
   constructor(L: EdgeLedger) {
@@ -43,19 +42,8 @@ export class PlaceKnowledge {
   private get w() {return this.L.host.worldId;}
 
   // ------------------------------------------------------------ secrets
-  /** The god's settings: place id → secret (true) or explicitly public (false, overrides PLACE-DATA). */
-  private overrides(): Map<string, boolean> {
-    return new Map((this.L.db.db.prepare('SELECT place_id, secret FROM edge_place_secrets_v1 WHERE world_id=?').all(this.w) as {place_id: string; secret: number}[]).map(r => [r.place_id, r.secret === 1]));
-  }
-  /** Places marked secret themselves (not counting their insides). */
-  marked(): Set<string> {
-    // keyed on the place count: a god edit that adds or removes places re-derives (a re-added place keeps its id)
-    if (this.secretsCache && this.secretsCache.size === this.L.places.version) return this.secretsCache.set;
-    const o = this.overrides(), out = new Set<string>();
-    for (const p of this.L.places.byId.values()) if (o.get(p.id) ?? (p as Place & {secret?: boolean}).secret === true) out.add(p.id);
-    for (const [id, on] of o) if (on && this.L.places.byId.has(id)) out.add(id);
-    this.secretsCache = {size: this.L.places.version, set: out}; return out;   // keyed on the index version: a replaced place (same count) re-derives
-  }
+  /** Places marked secret themselves: none (#1262). Stored marks and PLACE-DATA `secret` are ignored, so nothing below hides anything. */
+  marked(): Set<string> {return NO_SECRETS;}
   /** The outermost secret place holding (or being) this place, by the parent chain; null when nothing about it is secret. */
   secretRoot(placeId: string): string | null {
     const marked = this.marked(); if (!marked.size) return null;
@@ -84,9 +72,9 @@ export class PlaceKnowledge {
     this.changed(); return true;
   }
   /** Places change (a god edit re-derives them): drop caches. */
-  changed() {this.secretsCache = null; this.matcher = null; this.version++; this.L.invalidateBodies();}
+  changed() {this.matcher = null; this.version++; this.L.invalidateBodies();}
   /** Read worker: main writes visits and secrets; forget what was read so the next read sees the database (WAL). */
-  reload() {this.memo.clear(); this.secretsCache = null; this.matcher = null;}
+  reload() {this.memo.clear(); this.matcher = null;}
   /** Everything a secret place, or anything inside one, goes by, for answers anyone can read. */
   publicMatcher(): Secrets | null {
     if (this.matcher?.version === this.version && this.matcher.places === this.L.places.version) return this.matcher.re;

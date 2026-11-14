@@ -23,6 +23,9 @@ async function pond(t: {after(f: () => void): void}) {
   await tick(4);
   await accept<unknown>(w.host, adoptBootRuntimePoliciesV1(w.host, {edge: true, worldKey: 'eden'})); await tick(4);
   assert.equal((god.act({ops: [{op: 'place', def: 'core/pond@1', name: 'progress-pond', params: {depth: 3}, shape: {area: [[-22, -36], [-10, -36], [-10, -24], [-22, -24]]}}]} as never) as {accepted: boolean}).accepted, true); await tick(4);
+  // nav-connect/1's first labelling runs in wall-clock slices after boot, then steps out every Soul it finds off the main
+  // walkable area, a Soul treading in the pond included: finish it now, before anyone swims, so its sweep lands at a fixed tick
+  (w.host.engine as unknown as {navWarmV1(ms: number): boolean}).navWarmV1(Infinity); await tick(2);
   const soul = async (n: string, to: [number, number] = [-4, -30]) => {
     await invite(w, n); const row = await accept(w.host, w.souls.create('dev:' + n, {name: n, description: 'swims'})) as any; await tick(4);
     await accept(w.host, w.host.enqueue('edge-relocate', 'test:bank', {soulId: row.id, entityId: row.entity_id, to, why: 'bank'})); await tick(4);

@@ -9,7 +9,7 @@ import { getHeapStatistics } from 'node:v8';
 import { Worker } from 'node:worker_threads';
 const slug = process.env.WORLD_KEY, port = Number(process.env.PORT);
 const base = process.env.WORLD_PATH ?? `/w/${slug}`;
-let conditional = 0;
+let conditional = 0, busyMs = 0;
 const server = createServer((req, res) => {
   const path = req.url.startsWith(base) ? req.url.slice(base.length) || '/' : req.url;
   res.setHeader('x-sim-load', LEVELS[L[3]] ?? 'green');   // LOAD-CONTRACT §3 (set with /level?l=red)
@@ -22,16 +22,24 @@ const server = createServer((req, res) => {
   if (path === '/stall') { L[10] = Date.now(); return res.end('stalled'); }
   if (path === '/unstall') { L[10] = 0; return res.end('running'); }
   if (path === '/rewind') { L[9]++; return res.end('rewound'); }   // #1150: a rung 3, which the launcher alerts on
+  // #2164: /busy?ms= stands in for a world too busy to answer /healthz in time while its main thread still turns
+  if (path.startsWith('/busy')) { busyMs = Number(new URL(req.url, 'http://x').searchParams.get('ms') ?? 1000); return res.end('busy'); }
+  if (path === '/healthz' && busyMs > 0 && !req.busyDone) { req.busyDone = true; setTimeout(() => server.emit('request', req, res), busyMs); return; }
   if (path === '/healthz' && L[8] === 1) return res.writeHead(503, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: false, code: 'world-unavailable', message: 'World temporarily unavailable.', halted: true, glitches: { total: 2, byRule: { 'collision.human-load': { recovery: 1, halt: 1 } } } }));
   if (path === '/healthz') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, worldId: `${slug}-1`, genesis: process.env.GENESIS_FILE ?? null, pid: process.pid, ...(process.env.FAKE_TICK_MS ? { tickMs: { avg: Number(process.env.FAKE_TICK_MS), max: 2 * Number(process.env.FAKE_TICK_MS), n: 400 }, clockRate: 1 } : {}) }));
   if (path === '/argv') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ execArgv: process.execArgv, heapMb: process.env.SIM_WORLD_HEAP_MB ?? null, nodeOptions: process.env.NODE_OPTIONS ?? null, limitMb: Math.round(getHeapStatistics().heap_size_limit / 2 ** 20) }));
   if (path === '/v1/world/snapshot') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ tick: Date.now(), slug }));
   if (path.split('?')[0] === '/v1/edge/inbox/listen') { const t = setTimeout(() => { res.setHeader('x-sim-load', LEVELS[L[3]] ?? 'green'); res.end('{"items":[]}'); }, 30_000); req.on('close', () => clearTimeout(t)); return; }   // a long-poll
   // #1997: a resident client's other background routes: the live poll, a wait long-poll (its `timeout`, at most 30 s) and the event stream
-  if (path === '/v1/edge/live') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ souls: [{ id: 's_1' }], pid: process.pid }));
+  if (path === '/v1/edge/live') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ souls: [{ id: 's_1' }], pid: process.pid, at: Date.now(), clock: { worldDateTime: '2026-10-03T06:00:00.000Z', time: '06:00', minuteOfDay: 360, weekdayUTC: 6, paused: false, realMsPerWorldMinute: 2500, at: Date.now() } }));
+  // #2299: the still contract (#2241), as FAKE_STILL_FILE says at each ask (no file: a world without the route)
+  if (path === '/__sim/still') { let b = null; try { b = readFileSync(process.env.FAKE_STILL_FILE, 'utf8'); } catch { /* none */ } return b ? res.writeHead(200, { 'content-type': 'application/json' }).end(b) : res.writeHead(404).end('{}'); }
   if (path.split('?')[0] === '/v1/edge/wait') { const t = setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"events":[],"cursor":"c_1"}'), Math.min(30, Number(new URL(req.url, 'http://x').searchParams.get('timeout') ?? 25)) * 1000); req.on('close', () => clearTimeout(t)); return; }
   if (path.split('?')[0] === '/v1/edge/events') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('event: hello\ndata: {}\n\n'); const t = setInterval(() => res.write(': beat\n\n'), 200); req.on('close', () => clearInterval(t)); return; }
-  if (path === '/v1/config') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worldId: `${slug}-1`, worldKey: slug }));
+  if (process.env.FAKE_ACT === '1' && path === '/v1/edge/act' && req.method === 'POST') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, acted: true, pid: process.pid }));   // #2231
+  if (path === '/v1/config') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worldId: `${slug}-1`, worldKey: slug, pid: process.pid, host: req.headers['x-forwarded-host'] ?? req.headers.host ?? null }));
+  // a snapshot part (content-addressed, immutable); /v1/world/part/<32 0s> answers privately (a shared cache must not keep it)
+  if (/^\/v1\/world\/part\/[0-9a-f]{32}$/.test(path)) return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': path.endsWith('0'.repeat(32)) ? 'private, no-store' : 'public, max-age=31536000, immutable' }).end(JSON.stringify({ part: path.slice(-32), pid: process.pid, who: req.headers.authorization ?? null }));
   if (path === '/v1/god/status') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worldId: `${slug}-1`, hasOwner: false, you: 'anonymous', pending: [], entities: 3, seq: 1, timeZone: process.env.FAKE_STATUS_ZONE || process.env.WORLD_TIME_ZONE || null }));
   if (path === '/v1/god/edits?limit=1') return req.headers.authorization === 'Bearer god_ok' ? res.writeHead(200).end('{"edits":[]}') : res.writeHead(401).end('{}');
   if (path === '/v1/god/preview' && req.method === 'POST') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'pv_test', accepted: true, summary: { upserts: 1 } }));
