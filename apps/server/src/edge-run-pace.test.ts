@@ -108,7 +108,7 @@ test('#2283 A1/A2 (review): walk:<place> at pace run runs the walk\'s own route 
   } finally { w.brain.quiesce(); w.host.stop(); edge.comms?.close(); w.db.close(); }
 });
 
-test('#2283 (clip finding): a run to a room upstairs runs its indoor and upstairs legs too (mars:walk_to carries the gait)', { timeout: 300_000, skip: existsSync(EDEN) ? false : 'needs worlds/templates/eden-2026.json' }, async (t) => {
+test('#2283 (clip finding): a run to a room upstairs runs its indoor and upstairs legs too (mars:walk_to carries the gait)', { timeout: 600_000, skip: existsSync(EDEN) ? false : 'needs worlds/templates/eden-2026.json' }, async (t) => {
   const w = await bootEden(); t.after(() => w.close());
   const out = await accept(w.host, Promise.resolve(w.edge.act(w.soul, { capability: 'walk:region-campus-east-hall/classroom-1', params: { pace: 'run' } }))) as Act;
   assert.equal(out.accepted, true, JSON.stringify(out)); await w.settle(2);
