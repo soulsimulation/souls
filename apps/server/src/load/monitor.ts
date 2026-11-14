@@ -44,15 +44,16 @@ export class LevelState {
     if (s.service < 0.8 || s.loopP99Ms > loopEnter(200, b) || s.heapFrac > 0.70 || (this.queueArmed && s.oldestMs > 2000)) return 'amber';
     return 'green';
   }
+  /** #2124: while the tick is served (>= 0.95, the same test as a served window), loop delay holds amber only above its
+   *  enter band. Between the bands it is the queue amber's own smaller budget leaves (24 Souls: tick p99 80-90 ms, loop
+   *  p99 80-110 ms at service 1.0 crossed 100 ms every few seconds and held amber the whole run). */
+  amberLoopLeave(s: Signals): number { return s.service >= SERVED ? loopEnter(200, this.baselineMs) : loopLeave(100, this.baselineMs); }
   below(level: Level, s: Signals): boolean {
     const b = this.baselineMs;
     switch (level) {
       case 'black': return s.service >= 0.4 && s.heapFrac < 0.85;
       case 'red': return s.service >= 0.7 && s.loopP99Ms < loopLeave(400, b) && s.heapFrac < 0.75;
-      // #2124: while the tick is served (>= 0.95, the same test as a served window below), loop delay holds amber only
-      // above its enter band. Between the bands it is the queue amber's own smaller budget leaves (24 Souls: tick p99
-      // 80-90 ms, loop p99 80-110 ms at service 1.0 crossed 100 ms every few seconds and held amber the whole run).
-      case 'amber': return s.service >= 0.9 && s.loopP99Ms < (s.service >= SERVED ? loopEnter(200, b) : loopLeave(100, b)) && s.heapFrac < 0.60;
+      case 'amber': return s.service >= 0.9 && s.loopP99Ms < this.amberLoopLeave(s) && s.heapFrac < 0.60;
       default: return true;
     }
   }
