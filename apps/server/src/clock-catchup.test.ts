@@ -254,8 +254,8 @@ for (const [name, souls, settle, span] of [
   });
 }
 
-// #2298 A4/A4a/A4b: on the live clock a still world counts what it owes per frame and jumps once a second at most, so the
-// tick's age (what /healthz, live.json, the load monitor and the launcher's stall test read) stays under a second and the
+// #2298 A4/A4a/A4b: on the live clock a still world counts what it owes per frame and jumps every 1.5 s at most (half a second while watched), so the
+// tick's age (what /healthz, live.json, the load monitor and the launcher's stall test read) stays under the 2 s stall threshold and the
 // tick service stays whole; an hour away is caught up in a few ordinary ticks, and an input after it is accepted at once.
 test('#2298 A4a: a jumping world never reads as stalled, and an input right after a jump is accepted', { timeout: 120_000 }, async (t) => {
   const { STALL_MIN_MS } = await import('./load/monitor.ts');
@@ -274,7 +274,7 @@ test('#2298 A4a: a jumping world never reads as stalled, and an input right afte
   const wall = performance.now() - t0, ran = h.engine.world.tick - tick0;
   let gap = done[0] - t0; for (let i = 1; i < done.length; i++) gap = Math.max(gap, done[i] - done[i - 1]);
   t.diagnostic(JSON.stringify({ wallMs: Math.round(wall), ran, jumped: h.skipStats.ticksJumped - j0, completed: done.length, maxGapMs: Math.round(gap) }));
-  assert.ok(gap < Math.min(STALL_MIN_MS, 1500), `the longest gap between completed ticks was ${Math.round(gap)} ms`);
+  assert.ok(gap < STALL_MIN_MS - 300, `the longest gap between completed ticks was ${Math.round(gap)} ms`);
   assert.ok(ran >= wall / 50 - 25, `the clock kept wall pace (${ran} ticks in ${Math.round(wall)} ms)`);
   assert.ok(h.skipStats.ticksJumped - j0 > ran * 0.8 && done.length < ran * 0.2, 'most of it was jumped');
   assert.ok(beats >= Math.floor(ran / 100) - 1, `a heartbeat for every hundred (${beats})`);

@@ -623,9 +623,9 @@ export class WorldHost {
   skip = process.env.SIM_SKIP !== '0';
   /** #2298 A5: ordinary ticks run, ticks jumped over, jumps, and the horizon the last jump stopped at (null: none). */
   skipStats = { ticksComputed: 0, ticksJumped: 0, jumps: 0, lastHorizon: null as number | null };
-  /** #2298 A4b: the most ticks one jump covers on the live clock (one second), so a viewer's clock and sky keep moving and
-   *  the tick's age (healthz, the load monitor, the launcher's stall test) stays under a second. */
-  jumpCap = 20;
+  /** #2298 A4: the most ticks one jump covers on the live clock while nobody watches (1.5 s), so the tick's age (healthz,
+   *  the load monitor, the launcher's stall test, all at 2 s) stays under their stall threshold. */
+  jumpCap = 30;
   /** #2298 A4b: true while a viewer is connected (main.ts: the hub's clients). Then a jump covers at most one broadcast batch
    *  and lands on its boundary, so batches and the time of day go out as often as when every tick ran. */
   watched?: () => boolean;
