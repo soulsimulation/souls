@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // #2232: where one load's time, processor and memory go, for a small world (`hello-hamlet`) and Eden 2026. Per world:
 // a genesis boot (not counted) joins --souls Souls that never act (fake minds, Eyes off) and stops, so the world has a
-// snapshot and Souls like a world in use; then --boots cold boots of that data directory, each timed from spawn:
+// snapshot and Souls like a world in use (and the build's compile cache is filled, as the launcher's first boot of a
+// release fills it); then --boots cold boots of that data directory, each timed from spawn:
 //   phases from the world's own boot lines (main.ts): `[boot] listening … s after start: code, engine, the rest`,
 //   `[boot] projection … ms`, `[boot] prepare … ms`; the database and engine factory are the listen time less the other
 //   three; the post-listen cache warm (`edge capability caches warm after listen`) and the first /healthz answer.
@@ -30,7 +31,7 @@ const WORLDS = { small: 'hello-hamlet', eden: 'eden-2026' };
 const WORLD_LIST = opt('world', 'small,eden').split(',');
 for (const w of WORLD_LIST) if (!WORLDS[w]) throw new Error(`--world ${w}: ${Object.keys(WORLDS).join(' | ')}`);
 const OUT = resolve(opt('out', join(ROOT, '.local/bench/load', new Date().toISOString().replace(/[:.]/g, '-'))));
-const { defaultCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/children.mjs')).href);
+const { defaultCommand, compileCacheDir } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/children.mjs')).href);
 const { decorateCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/production.mjs')).href);
 const { worldHeapMb } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/registry.mjs')).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
@@ -58,7 +59,8 @@ function command(dir, slug, template) {
   const data = join(dir, 'data'), library = join(dir, 'library'); mkdirSync(data, { recursive: true }); mkdirSync(library, { recursive: true });
   const soul = (f) => join(ROOT, 'tools/world-launcher/soul', f), origin = `http://127.0.0.1:${PORT}`;
   const base = defaultCommand({ slug, dataDir: data, name: `Load ${slug}`, templateFile: join(ROOT, 'worlds/templates', `${template}.json`) }, PORT,
-    { publicOrigin: origin, marsWebDir: MARS_WEB, root: ROOT, libraryDir: library, soulControllerCliFile: soul('eden.mjs'), soulCliFile: soul('eden-agent.mjs'), soulSkillFile: soul('skill.md'), soulInstructionsFile: soul('instructions.md') });
+    { publicOrigin: origin, marsWebDir: MARS_WEB, root: ROOT, libraryDir: library, soulControllerCliFile: soul('eden.mjs'), soulCliFile: soul('eden-agent.mjs'), soulSkillFile: soul('skill.md'), soulInstructionsFile: soul('instructions.md'),
+      compileCache: compileCacheDir(OUT, 'load') });   // as the launcher boots its worlds: V8's compile cache and the strip cache, filled by the genesis boot
   const { cmd: node, args, env } = decorateCommand(base, { devAuth: true, publicOrigin: origin, base: '', worldHeapMb: worldHeapMb({ template }, 0), build: 'dev' });
   Object.assign(env, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake' });
   for (const k of Object.keys(env)) if (k.startsWith('EDGE_EYES')) delete env[k];   // no renders (Eyes off)
