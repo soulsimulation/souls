@@ -117,7 +117,9 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
       force((n) => n + 1);
     }, 200);
     // #2305: a tab hidden for five minutes lets go of its world, unless a god's edit panel (the God modal) is open
-    const stopRelease = releaseWhenHidden(st.conn!, { keep: () => !!document.querySelector('dialog[data-god-modal][open]') });
+    // (`sim.hiddenReleaseMs` in localStorage shortens the wait, for a proof clip)
+    let hiddenMs: number | undefined; try { hiddenMs = Number(localStorage.getItem('sim.hiddenReleaseMs')) || undefined; } catch { /* storage blocked */ }
+    const stopRelease = releaseWhenHidden(st.conn!, { hiddenMs, keep: () => !!document.querySelector('dialog[data-god-modal][open]') });
     return () => { clearInterval(t); stopRelease(); st.conn!.close();st.station?.dispose(); };
   }, []);
   // signing in or out: reconnect so the server re-reads who we are
