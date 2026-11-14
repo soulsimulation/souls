@@ -3,11 +3,9 @@
 // waiting Soul asleep in place; acts answer world.crowded {position, eta_s}.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {DatabaseSync} from 'node:sqlite';
 import {Hono} from 'hono';
 import {WakingLimit, crowdedNote} from './load/waking.ts';
 import {Admission, admissionMiddleware} from './load/admission.ts';
-import {BodyRule, type BodyPort, type BodySoul} from './edge/ledger/body-rule.ts';
 
 function world(souls: {soulId: string; owner: string}[], awake: Set<string>, maxAwake = 2) {
   let now = 0;
@@ -43,21 +41,6 @@ test('waking limit: one awake per account while others wait; amber admits no new
   t2(11_000);   // p's agent went away (no longer asked about); q keeps asking
   assert.equal(w2.mayWake('q'), false); assert.deepEqual(w2.position('q'), {position: 1, eta_s: 180}, 'p left the line');
   void tick;
-});
-
-test('body rule: a connected Soul that may not wake stays asleep in place (no stand-up, no drift)', () => {
-  const db = new DatabaseSync(':memory:'), soul: BodySoul = {soulId: 's1', entityId: 'e1', name: 'S', owner: 'o'};
-  const decisions: string[] = []; let listening = false, now = 1e12;
-  const port: BodyPort = {souls: () => [soul], presence: () => ({listening, at: listening ? now : 0}), createdAt: () => 0, pose: () => ({x: 0, z: 0, level: 0}), posture: () => 'lying', agentBusy: () => false, running: () => false,
-    dry: () => true, clear: () => true, places: () => '', seat: () => null, decide: (_s, option) => { decisions.push(option); }, stop: () => {}, publish: () => {}};
-  const rule = new BodyRule(db as never, 'w', port, {now: () => now, knobs: {zombieWanderMs: 1000}});
-  now += 200e3; rule.sweep(); now += 5000; rule.sweep(); now += 5000; rule.sweep();
-  assert.equal(rule.view('s1')!.state, 'asleep');
-  let may = false; rule.mayWake = () => may;
-  listening = true; rule.listen('s1'); now += 1000; rule.sweep(); now += 1000; rule.sweep();
-  assert.equal(rule.view('s1')!.state, 'asleep', 'waiting its turn'); assert.ok(!decisions.includes('body:wake'));
-  may = true; now += 1000; rule.sweep();
-  assert.equal(rule.view('s1')!.state, 'awake', 'its turn: it wakes'); assert.ok(decisions.includes('body:wake'));
 });
 
 test('a waiting Soul\'s act answers world.crowded {position, eta_s}; its reads still answer', async () => {

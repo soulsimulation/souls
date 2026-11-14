@@ -26,6 +26,8 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   'ambientChoice', 'navWarmFor', 'openShared', 'commitShared',
   // #1150: they tell Souls of a rewind or a relocation, called only from onRecovery on main
   'onRelocated', 'onRewound',
+  // #2295: attachPresence's body (it starts wind-down/1's body rule), called only from attachPresence on main
+  'startBodyRule',
   // #1369: it tells Souls of a quarantine, called only from onRecovery on main
   'onQuarantined',
   // #1496: it tells Souls their programmes stopped for a non-finite hold, called only from onRecovery on main
