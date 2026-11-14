@@ -253,7 +253,10 @@ export function healthDash(o) {
 
     const rows = worlds.map(({ w, st, kid }) => {
       const s = o.stats.get(w.slug), h = tick.get(w.slug);
-      return { slug: w.slug, name: w.name ?? w.slug, template: w.template ?? null, status: st.status, viewers: o.live.get(w.slug) ?? 0,
+      // #2233 A3/A4: the world's state, its ticks computed and jumped in the last hour, its time in memory, Pss and last load
+      const ticks = o.ticksLastHour?.(w.slug) ?? { computed: null, jumped: null };
+      return { slug: w.slug, name: w.name ?? w.slug, template: w.template ?? null, status: st.status, state: o.stateOf?.(w.slug) ?? null, viewers: o.live.get(w.slug) ?? 0,
+        ticksComputed1h: ticks.computed, ticksJumped1h: ticks.jumped, inMemorySec24h: st.inMemorySec24h ?? 0, pssMb: st.pssMb ?? null, lastLoad: st.lastLoad ? { reason: st.lastLoad.reason, at: iso(st.lastLoad.at) } : null,
         lastVisit: iso(kid?.lastUsed ?? w.lastLookAt ?? null), rssMb: st.pid ? rss.get(st.pid) ?? null : null, souls: s?.souls ?? w.souls ?? null,
         entities: s?.entities ?? w.entities ?? null, tickMs: h?.tickMs ?? null, clockRate: h?.clockRate ?? null, tickAt: iso(h?.at), lastEdit: iso(editAt(w.slug)),
         glitches: h?.glitches ?? null, ...(st.halted ? { halted: true } : {}), restarts: st.restarts ?? 0, ...(st.restartsByReason ? { restartsByReason: st.restartsByReason } : {}), watchdogPort: st.healthPort ?? null, ...(st.held ? { held: st.held } : {}), ...(o.ceilings ? { limits: o.ceilings.limits(w.slug), refused: o.ceilings.refused(w.slug) } : {}), upSince: iso(st.upSince), lastExit: st.lastExit ? { code: st.lastExit.code ?? null, signal: st.lastExit.signal ?? null, at: iso(st.lastExit.at) } : null };
@@ -273,7 +276,8 @@ export function healthDash(o) {
       host: { load: loadavg().map((x) => Math.round(10 * x) / 10), cpus: cpus().length, cpuPct: cpuPct(), memory: mem, units: units(host), disk: disk(),
         uptimeH: Math.round(uptime() / 360) / 10, caddy: caddyNow, check: host ? { ok: host.ok, at: host.at ?? null, stale: !!host.stale, problems: host.problems ?? [], codes: host.codes ?? [] } : null },
       stages: st, drill: drill(),
-      worlds: rows, totals: { worlds: rows.length, running: rows.filter((r) => r.status === 'running').length, viewers: rows.reduce((n, r) => n + r.viewers, 0) },
+      worlds: rows, totals: { worlds: rows.length, running: rows.filter((r) => r.status === 'running').length, viewers: rows.reduce((n, r) => n + r.viewers, 0),
+        ...Object.fromEntries(['awake', 'still', 'unloaded'].map((x) => [x, rows.filter((r) => r.state === x).length])), memory: worldsMemory() },
       arrivals: errs.arrivals,
       errors: { newSinceRelease: errs.newSinceRelease, kinds: errs.kinds, top: errs.top.filter((r) => r.new).slice(0, 8).map((r) => ({ kind: r.kind, message: r.message, source: r.source, count: r.count, visitors: r.visitors, first: r.first, last: r.last, worlds: Object.keys(r.worlds ?? {}).slice(0, 4) })) },
       watch: watch ? { at: iso(watch.at), ...(watch.down !== undefined ? { down: watch.down } : {}) } : null,
@@ -281,6 +285,12 @@ export function healthDash(o) {
     out.alerts = alerts(out, t);
     out.ms = Math.round(10 * (performance.now() - t0)) / 10;
     return out;
+  }
+
+  /** #2233 A4: memory the worlds use (running Pss, loading and waiting estimates) against the figure (null: none set). */
+  function worldsMemory() {
+    const m = o.pool.memUse?.() ?? { running: 0, loading: 0, waiting: 0 };
+    return { usedMb: m.running + m.loading, waitingMb: m.waiting, figureMb: o.worldsMemMb || null };
   }
 
   function alerts(d, t) {
@@ -379,9 +389,10 @@ function render(d){
     +Object.entries(h.units||{}).map(([k,u])=>tile('Worlds '+k,fmt(u.workingMb,' MB')+(u.maxMb?' <span class="muted">/ '+u.maxMb+' MB</span>':'')+(u.oomKills?' <span class="bad">'+u.oomKills+' OOM</span>':''),u.pct>=90?'bad':'')).join('')
     +tile('Caddy',esc(h.caddy??'—'),h.caddy&&h.caddy!=='active'?'bad':'')+tile('Up',fmt(h.uptimeH,' h'))
     +tile('Host check',h.check?(h.check.ok?'ok':'<span class="bad">'+esc(h.check.codes.join(', ')||'failed')+'</span>')+' <span class="muted">'+esc(ago(h.check.at))+'</span>':'—')+'</div>';
-  s+='<h2>Worlds <span class="muted">'+d.totals.running+' running of '+d.totals.worlds+' · '+d.totals.viewers+' watching</span></h2><div class="wrap"><table><thead><tr><th>World</th><th>State</th><th class="n">Now</th><th>Last visit</th><th class="n">Souls</th><th class="n">Tick ms</th><th class="n">Clock</th><th class="n hide-s">RSS</th><th>Last god edit</th><th class="n hide-s">Restarts</th><th></th></tr></thead><tbody>'
-    +d.worlds.map(w=>{const sc=w.halted?'bad':w.status==='running'?'ok':w.status==='failed'||w.status==='restarting'?'bad':'muted',tk=w.tickMs;
-      return '<tr><td title="'+esc(w.slug)+'">'+esc(w.name)+'</td><td><span class="'+sc+'">'+esc(w.halted?'halted':w.status)+'</span></td><td class="n">'+(w.viewers||'<span class="muted">0</span>')+'</td><td>'+esc(ago(w.lastVisit))+'</td><td class="n">'+fmt(w.souls)+'</td>'
+  const tm=d.totals.memory||{};
+  s+='<h2>Worlds <span class="muted">'+d.totals.awake+' awake · '+d.totals.still+' still · '+d.totals.unloaded+' unloaded of '+d.totals.worlds+' · '+d.totals.viewers+' watching · memory '+fmt(tm.usedMb,' MB')+(tm.figureMb?' of '+tm.figureMb+' MB':'')+'</span></h2><div class="wrap"><table><thead><tr><th>World</th><th>State</th><th class="n">Now</th><th>Last visit</th><th class="n">Souls</th><th class="n">Tick ms</th><th class="n">Clock</th><th class="n hide-s">RSS</th><th>Last god edit</th><th class="n hide-s">Restarts</th><th></th></tr></thead><tbody>'
+    +d.worlds.map(w=>{const st=w.state||w.status,sc=w.halted?'bad':st==='awake'||st==='running'?'ok':st==='failed'||w.status==='restarting'?'bad':'muted',tk=w.tickMs,ll=w.lastLoad;
+      return '<tr><td title="'+esc(w.slug)+'">'+esc(w.name)+'</td><td title="'+esc((ll?'loaded for '+ll.reason+' '+ago(ll.at)+' · ':'')+(w.ticksComputed1h!=null?w.ticksComputed1h+' ticks computed, '+w.ticksJumped1h+' jumped in 1 h · ':'')+Math.round(w.inMemorySec24h/60)+' min in memory in 24 h'+(w.pssMb!=null?' · Pss '+w.pssMb+' MB':''))+'"><span class="'+sc+'">'+esc(w.halted?'halted':st)+'</span></td><td class="n">'+(w.viewers||'<span class="muted">0</span>')+'</td><td>'+esc(ago(w.lastVisit))+'</td><td class="n">'+fmt(w.souls)+'</td>'
       +'<td class="n '+(tk&&tk.avg>50?'warn':'')+'">'+(tk?tk.avg+' <span class="muted">/ '+tk.max+'</span>':'—')+'</td><td class="n '+(w.clockRate!=null&&w.clockRate<0.9?'warn':'')+'">'+(w.clockRate==null?'—':Math.round(w.clockRate*100)+'%')+'</td><td class="n hide-s">'+fmt(w.rssMb,' MB')+'</td><td>'+esc(ago(w.lastEdit))+'</td><td class="n hide-s">'+w.restarts+'</td><td><button data-pic="'+esc(w.slug)+'">Picture</button></td></tr>'}).join('')+'</tbody></table></div>';
   const gl=d.worlds.flatMap(w=>Object.entries(w.glitches?w.glitches.byRule:{}).flatMap(([rule,by])=>Object.entries(by).map(([rung,n])=>({name:w.name,slug:w.slug,rule,rung,n}))));
   s+='<h2>Glitches <span class="muted">'+gl.reduce((n,g)=>n+g.n,0)+' since each world began</span></h2>'+(gl.length?'<div class="wrap"><table><thead><tr><th>World</th><th>Rule</th><th>Rung</th><th class="n">Count</th></tr></thead><tbody>'+gl.map(g=>'<tr><td title="'+esc(g.slug)+'">'+esc(g.name)+'</td><td class="mono">'+esc(g.rule)+'</td><td>'+esc(g.rung)+'</td><td class="n">'+g.n+'</td></tr>').join('')+'</tbody></table></div>':'<p class="muted">None reported by a running world.</p>');

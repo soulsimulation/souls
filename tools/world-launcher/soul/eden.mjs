@@ -787,6 +787,8 @@ const { createHash } = soulRecords$crypto;
 /** W5 local memory preparation. No HTTP, identity, model, CLI or queue runner. */
 
 const VERSION = 'eden-memory-folder/1';
+/** What a Soul said it would come to, and the invitations it heard and made (#1981). */
+const ENGAGEMENTS = ['calendar', 'invited', 'invited-by-me'];
 const ID = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,159}$/;
 const MAX_RECORD = 64 * 1024;
 const source = value => typeof value === 'string' && value.length>0&&value.length<=1000&&!/[\u0000-\u001f\u007f]/.test(value) ? value : fail('invalid source ID');
@@ -829,7 +831,7 @@ function validateContext(e) {
 
 function validateEvent(input) {
   // Reject credentials/raw transport fields instead of retaining arbitrary state.
-  const fields = {gazetteer: ['places'], 'public.references':['references'], 'place.observed':['place'], conversation:['conversationId','personId'], 'idle.sample':['milliseconds'], scorecard:['clock','period','from','to','metrics'], arrival: ['placeId'], 'act.accepted': ['receiptId', 'act'], meet: ['person', 'placeId'], communication:['person','channel','recipientPlace','conversationId'], speech: ['personId', 'text', 'untrusted', 'channel', 'conversationId', 'placeId'], outcome: ['receiptId', 'act', 'phase', 'summary', 'learned', 'produced', 'met', 'placeId', 'untrusted', 'messageId'], refusal: ['act', 'code'], lesson: ['attempt', 'fix', 'refusalId', 'successId'], cost: ['usd', 'modelCalls'], ledger: ['holding', 'marks'], queue: ['steps'], told: ['personIds', 'text', 'channel', 'conversationId'], commitment: ['personId', 'by', 'what'], 'commitment.kept': ['personId', 'commitmentId', 'evidence']};
+  const fields = {gazetteer: ['places'], 'public.references':['references'], 'place.observed':['place'], conversation:['conversationId','personId'], 'idle.sample':['milliseconds'], scorecard:['clock','period','from','to','metrics'], arrival: ['placeId'], 'act.accepted': ['receiptId', 'act'], meet: ['person', 'placeId'], communication:['person','channel','recipientPlace','conversationId'], speech: ['personId', 'text', 'untrusted', 'channel', 'conversationId', 'placeId'], outcome: ['receiptId', 'act', 'phase', 'summary', 'learned', 'produced', 'met', 'placeId', 'untrusted', 'messageId'], refusal: ['act', 'code'], lesson: ['attempt', 'fix', 'refusalId', 'successId'], cost: ['usd', 'modelCalls'], ledger: ['holding', 'marks'], queue: ['steps'], told: ['personIds', 'text', 'channel', 'conversationId'], engagement: ['kind', 'personIds', 'what', 'startsAt', 'placeId', 'source'], commitment: ['personId', 'by', 'what'], 'commitment.kept': ['personId', 'commitmentId', 'evidence']};
   if (!input || !Object.hasOwn(fields, input.type)) fail('unknown public event type');
   keys(input, ['type', 'id', 'at', ...CONTEXT, ...fields[input.type]]);
   id(input.id); instant(input.at); validateContext(input); const e = structuredClone(input);
@@ -857,6 +859,7 @@ function validateEvent(input) {
       list(e.produced, 32).forEach(o => {keys(o, ['id', 'title', 'kind', 'where']); id(o.id); text(o.title, 200); text(o.kind, 1000); if(o.where!==null)id(o.where);});
       list(e.met, 32).forEach(p => {keys(p, ['id', 'name', 'where']); id(p.id); text(p.name, 200); if(p.where!==null)id(p.where);}); break;
     case 'told': list(e.personIds, 16).forEach(id); text(e.text, 500); if (!['private-conversation', 'public-speech'].includes(e.channel)) fail('invalid communication channel'); if (e.conversationId !== undefined) id(e.conversationId); break;
+    case 'engagement': if (!ENGAGEMENTS.includes(e.kind)) fail('invalid engagement kind'); list(e.personIds, 16).forEach(id); text(e.what, 300); if (e.startsAt !== null) instant(e.startsAt); if (e.placeId !== null) id(e.placeId); source(e.source); break;
     case 'commitment': id(e.personId); if (!['me', 'them'].includes(e.by)) fail('invalid commitment party'); text(e.what, 300); break;
     case 'commitment.kept': id(e.personId); id(e.commitmentId); id(e.evidence); break;
     case 'refusal': text(e.act, 160); text(e.code, 100); break;
@@ -899,7 +902,7 @@ function validateRemember(input) {
 /** Byte budgets for the projections that grow with the log, for a caller that opts in (the Souls home does; 1.9 doesn't).
  *  Each keeps the newest entries that fit and says how many older ones are in the log only. */
 const PROJECTION_BUDGETS = Object.freeze({knowledge: 32 * 1024, places: 16 * 1024, ledger: 16 * 1024});
-const COST_DAYS = 31, NOTE_ROOM = 160;
+const COST_DAYS = 31, NOTE_ROOM = 160, PROMISES_MAX = 50, UPCOMING_MAX = 3, INVITE_FRESH_MS = 24 * 3600_000, STARTED_MS = 3600_000;
 const size = value => Buffer.byteLength(value);
 /** The newest entries whose lines fit in `room` bytes, oldest first; `items` is oldest first. */
 const newestFit = (items, line, room) => {let used = 0, i = items.length;while (i > 0 && used + size(line(items[i - 1])) + 1 <= room) used += size(line(items[--i])) + 1;return items.slice(i);};
@@ -924,7 +927,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
   const seen = new Map(), places = new Map(), people = new Map(), references = new Map(), knowledge = new Map(), objects = new Map(), goals = new Map(), impressions = new Map(), refusals = new Map(), successes = new Map(), terminals = new Map(), lessons = [];
   const scoreEvents=[],scorecards=[];
   let self = [], queue = [], holding = [], marks = [], recentOutcomes = [];
-  const journals = new Map(), costs = new Map();
+  const journals = new Map(), costs = new Map(), engagements = new Map();
   const stamp = e => e.world === undefined ? '' : ` (${e.world}${dayOf(e) === null ? '' : `, day ${dayOf(e)}`}${e.when?.time ? ` ${e.when.time}` : ''})`;
   const journal = (at, message) => {const day = at.slice(0, 10); const lines = journals.get(day) ?? []; lines.push(`${at.slice(11, 19)}Z ${message}`); journals.set(day, lines);};
   // A record that names what it saw stands on its own: the name as seen makes the place known, and a later name is a rename.
@@ -959,7 +962,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       return;
     }
     const e = record.value;
-    if (e.type === 'arrival' || e.type === 'meet'&&e.placeId!==null) knownPlace(e.placeId, e);
+    if (e.type === 'arrival' || (e.type === 'meet' || e.type === 'engagement')&&e.placeId!==null) knownPlace(e.placeId, e);
     if(e.type==='communication'&&e.recipientPlace!==null)knownPlace(e.recipientPlace, e);
     if (e.type === 'speech' && !people.has(e.personId) && seenAs(e, e.personId) === undefined) fail('speaker has no observed communication or confirmed meeting');
     if (e.type === 'speech' && e.placeId) knownPlace(e.placeId, e);
@@ -982,6 +985,8 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       if (!refusal || !success || refusal.act !== e.attempt || success.act !== e.fix || success.phase !== 'completed' || refusal.at > success.at || success.at > e.at) fail('lesson needs matching refusal and completed fix evidence');
     }
   };
+  const whoOf = e => e.personIds.map(p => seenAs(e, p) ?? people.get(p)?.name ?? p);
+  const engagementSaid = e => e.kind === 'calendar' ? `Said I will come: ${e.what}${e.placeId ? ` at ${asSeen(e.placeId, e)}` : ''}${e.startsAt ? `, starts ${e.startsAt}` : ''} [${e.source}].` : e.kind === 'invited' ? `${whoOf(e).join(', ') || 'Someone'} invited me: ${e.what} [${e.source}].` : `I invited ${whoOf(e).join(', ') || 'whoever was near'}: ${e.what} [${e.source}].`;
   const terminalValue = e => {const {id: _id, at: _at, ...value} = e; return canonical(value);};
   const apply = record => {
     observe?.(record);
@@ -1000,7 +1005,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       case 'gazetteer': for (const p of e.places) {const old = places.get(p.id); places.set(p.id, {...p,admittedDestination:p.admittedDestination===true, visits: old?.visits ?? 0, last: old?.last ?? null});} break;
       case 'arrival': {const p = places.get(e.placeId); scoreEvents.push({at:e.at,newPlaces:p.visits===0?1:0});p.visits++; p.last = e.at; journal(e.at, `Arrived at ${p.name} [${p.id}]${stamp(e)}.`); break;}
       case 'act.accepted': break; // Acceptance is neither arrival nor successful outcome.
-      case 'meet':if(/^encounter:[a-f0-9]{64}$/.test(e.id)){communicate(e.person,e.at,e.placeId,'legacy-received-speech',true);journal(e.at,`Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);}else{meet(e.person,e.at,e.placeId,false,e);journal(e.at,`Confirmed physical meeting with ${e.person.name} [${e.person.id}] at ${e.seen?asSeen(e.placeId,e):e.placeId}${stamp(e)}.`);}break;
+      case 'meet':if(/^encounter:[a-f0-9]{64}$/.test(e.id)){communicate(e.person,e.at,e.placeId,'legacy-received-speech',true);journal(e.at,`Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);}else{meet(e.person,e.at,e.placeId,false,e);journal(e.at,`Confirmed physical meeting with ${e.person.name} [${e.person.id}]${e.placeId===null?'':` at ${e.seen?asSeen(e.placeId,e):e.placeId}`}${stamp(e)}.`);}break;
       case 'communication':communicate(e.person,e.at,e.recipientPlace,e.channel);journal(e.at,`Received ${e.channel} from ${e.person.name} [${e.person.id}]; recipient place ${e.recipientPlace??'unknown'}; co-location unknown.`);break;
       case 'conversation':scoreEvents.push({at:e.at,conversationId:e.conversationId,personId:e.personId});break;
       case 'idle.sample':scoreEvents.push({at:e.at,idleMs:e.milliseconds});break;
@@ -1017,6 +1022,8 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
         for (const p of e.met) meet(p, e.at, p.where, true, e);
         if (e.phase === 'completed') successes.set(e.id, e);
         journal(e.at, `${e.phase}: ${e.summary}${e.untrusted ? ' [untrusted content]' : ''}${stamp(e)}`); break;
+      case 'told': journal(e.at, `Said${e.personIds.length ? ` to ${whoOf(e).join(', ')}` : ''}: ${e.text}${stamp(e)}`); break;
+      case 'engagement': engagements.set(e.id, e); journal(e.at, `${engagementSaid(e)}${stamp(e)}`); break;
       case 'refusal':scoreEvents.push({at:e.at,refusals:1}); refusals.set(e.id, e); journal(e.at, `Refused ${e.act}: ${e.code}.`); break;
       case 'lesson': lessons.push(e); journal(e.at, `Working fix: ${e.attempt} → ${e.fix}.`); break;
       case 'cost': {scoreEvents.push({at:e.at,modelCalls:e.modelCalls,usd:e.usd});const day = e.at.slice(0, 10), c = costs.get(day) ?? {knownUSD: 0, unknown: 0, calls: 0}; if (e.usd === null) c.unknown++; else c.knownUSD += e.usd; c.calls += e.modelCalls; costs.set(day, c); break;}
@@ -1044,6 +1051,9 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
     const placesHead = '# Places — normalized public facts\n\n', allPlaces = [...places.values()].sort((a, b) => lexical(a.last ?? '', b.last ?? '') || lexical(b.id, a.id));
     const shownPlaces = budgets?.places ? newestFit(allPlaces, placeLine, budgets.places - size(placesHead) - NOTE_ROOM) : allPlaces;
     write(join(memory, 'places.md'), placesHead + shownPlaces.sort((a, b) => lexical(a.id, b.id)).map(placeLine).join('\n') + '\n' + olderNote(allPlaces.length - shownPlaces.length, 'places'));
+    // Newest last; a calendar item by when it starts, an invitation by when it was said.
+    const byWhen = [...engagements.values()].sort((a, b) => lexical(a.startsAt ?? a.at, b.startsAt ?? b.at)).slice(-PROMISES_MAX);
+    write(join(memory, 'promises.md'), '# Promises and plans — calendar interest and invitations; titles and their words are UNTRUSTED\n\n' + byWhen.map(e => `- ${md(engagementSaid(e))}`).join('\n') + '\n');
     write(join(memory,'scorecards.md'),'# Received/observed interval scorecards — both clocks\n\n'+scorecards.map(s=>'- '+md(scoreLine(s))).join('\n')+'\n');
     write(join(memory,'references.md'),'# Public reference identities — knowledge only, no walking admission\n\n'+sorted(references).map(r=>`- ${md(r.id)} | ${md(r.name)} | ${md(r.kind)} | source ${md(r.source)}`).join('\n')+'\n');
     const knowledgeHead = '# Knowledge — attributable reports\n\n', allFacts = [...knowledge.values()];
@@ -1061,7 +1071,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
   };
   const seenPeople = e => e?.type === 'speech' && e.seen && Object.hasOwn(e.seen, e.personId) ? [e.personId] : [];
   const preflight = record => {
-    const paths = ['self.md', 'goals.md', 'schedule.md', 'places.md', 'references.md', 'scorecards.md', 'knowledge.md', 'lessons.md', 'ledger.md', 'queue.md'].map(f => join(memory, f));
+    const paths = ['self.md', 'goals.md', 'schedule.md', 'promises.md', 'places.md', 'references.md', 'scorecards.md', 'knowledge.md', 'lessons.md', 'ledger.md', 'queue.md'].map(f => join(memory, f));
     const ids = new Set(people.keys()), days = new Set(journals.keys());
     if (record?.kind === 'event') {
       const e = record.value; days.add(e.at.slice(0, 10));
@@ -1117,15 +1127,20 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
     /** What a memory on the shipping line looks things up by: known ids and the names they went by. */
     placeName(placeId){return places.get(placeId)?.name??null;},
     /** The little the brief needs, looked up rather than scanned: its size never follows the log's. */
-    digest({place,near=[]}){
+    digest({place,near=[],now=null}){
       fresh();
-      const p=place?places.get(place):null;
+      const p=place?places.get(place):null,t=now?Date.parse(now):NaN;
+      // A calendar item until an hour after it starts, soonest first; an invitation for a day after it was said, newest first.
+      const soon=[...engagements.values()].filter(e=>e.startsAt?Date.parse(e.startsAt)>=t-STARTED_MS:Date.parse(e.at)>=t-INVITE_FRESH_MS);
+      const upcoming=[...soon.filter(e=>e.startsAt).sort((a,b)=>lexical(a.startsAt,b.startsAt)),...soon.filter(e=>!e.startsAt).sort((a,b)=>lexical(b.at,a.at))].slice(0,UPCOMING_MAX)
+        .map(e=>({kind:e.kind,source:e.source,what:e.what,who:whoOf(e),place:e.placeId?asSeen(e.placeId,e):null,inMinutes:e.startsAt?Math.round((Date.parse(e.startsAt)-t)/60000):null}));
       return {
         place:p?{name:p.name,visits:p.visits,note:impressions.get(p.id)??null}:null,
         people:near.flatMap(personId=>{const row=people.get(personId);if(!row)return [];const m=row.meetings.at(-1);return [{id:row.id,name:row.name,met:row.meetings.length,last:m?{world:m.world??null,worldDay:m.day??null,place:m.seenAs??null}:null,note:row.impressions.at(-1)??null}];}),
         goals:sorted(goals).sort((a,b)=>['today','week','month'].indexOf(a.horizon)-['today','week','month'].indexOf(b.horizon)).slice(0,4).map(g=>({id:g.id,note:g.note,next:g.next})),
         recent:recentOutcomes.slice(-2).map(e=>({summary:e.summary,own:e.id.startsWith('owner:')})),
         self:self.slice(0,8),
+        upcoming,
       };
     },
     known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self],goals:sorted(goals).map(g=>({...g}))};},
@@ -1193,13 +1208,18 @@ const quoted = (v, max = WORLD_BYTES) => `"${cut(flat(v).replace(/["\\\p{Pi}\p{P
 const times = (n) => (n === 1 ? "once" : `${n} times`);
 const when = (w) => [w?.world ? quoted(w.world) : null, w?.worldDay === null || w?.worldDay === undefined ? null : `day ${w.worldDay}`].filter(Boolean).join(", ");
 
-/** `facts`: {people, place, promises, goals, schedule, recent, earlier, self}, each maybe empty. An empty memory is an empty brief. An episode is
+/** `facts`: {people, place, promises, goals, schedule, upcoming, recent, earlier, self}, each maybe empty. An empty memory is an empty brief. An episode is
  *  the Soul's own words only with `own`: a world saying nothing about its trust is not a world to be trusted. Room goes first
  *  to what the Soul and its owner wrote, so a world's long names can't push a promise out. */
 function buildBrief(facts, { bytes = BRIEF_BYTES } = {}) {
   const person = (p) => `${quoted(p.name)}: ${p.met ? `met ${times(p.met)}` : "only heard from"}${p.last ? `, last ${[when(p.last), p.last.place ? quoted(p.last.place) : null].filter(Boolean).join(" at ")}` : ""}.${p.note ? ` My note: ${mine(p.note, NOTE_BYTES)}` : ""}${p.open ? ` Open: ${mine(p.open, NOTE_BYTES)}` : ""}${p.claimed ? ` A world says this is ${quoted(p.claimed)}, whom I know elsewhere; I can't check that.` : ""}`;
   const promise = (c) => `[${c.id}] ${c.by === "me" ? "I promised" : "They promised"} ${quoted(c.with)}: ${c.what}`;
   const place = (p) => `${quoted(p.name)}: ${p.visits > 1 ? `been here ${times(p.visits)}` : "first time here"}.${p.note ? ` My note: ${mine(p.note, NOTE_BYTES)}` : ""}`;
+  const minutes = (m) => (m > 0 ? `starts in ${m} min` : m === 0 ? "starts now" : `started ${-m} min ago`);
+  const people = (who) => (who ?? []).slice(0, 3).map((n) => quoted(n)).join(", ");
+  // a source id comes from a world: shown bare only when it is plainly an id
+  const coming = (e) => `[${/^[\w:.-]{1,120}$/.test(e.source) ? e.source : "id withheld"}] ${e.kind === "calendar" ? `I said I'd come: ${quoted(e.what)}${e.place ? ` at ${quoted(e.place)}` : ""}${e.inMinutes === null ? "" : `, ${minutes(e.inMinutes)}`}`
+    : e.kind === "invited" ? `${people(e.who) || "Someone"} invited me: ${quoted(e.what, OPEN_BYTES)}` : `I invited ${people(e.who) || "whoever was near"}: ${mine(e.what, OPEN_BYTES)}`}`;
   const goal = (g) => `${g.id ? `[${g.id}] ` : ""}${g.note}${g.next ? ` Next: ${g.next}` : ""}`;
   // Goals can't take every line: the owner's next schedule entry always has one.
   const later = facts.schedule ?? [], open = [...[...(facts.promises ?? []).map(promise), ...(facts.goals ?? []).map(goal)].slice(0, OPEN_MAX - Math.min(later.length, 1)), ...later].slice(0, OPEN_MAX);
@@ -1207,6 +1227,7 @@ function buildBrief(facts, { bytes = BRIEF_BYTES } = {}) {
     { head: "Known people here", rank: 2, lines: (facts.people ?? []).slice(0, PEOPLE_MAX).map(person) },
     { head: "This place", rank: 3, lines: facts.place ? [place(facts.place)] : [] },
     { head: "Open commitments", rank: 0, lines: open.map((l) => mine(l, OPEN_BYTES)) },
+    { head: "Coming up", rank: 1, lines: (facts.upcoming ?? []).map(coming) },
     { head: "Last episode", rank: 4, lines: (facts.recent ?? []).slice(-EPISODES).map((e) => (e.own ? mine(e.summary, EPISODE_BYTES) : quoted(e.summary, EPISODE_BYTES))) },
     { head: "Earlier", rank: 5, lines: (facts.earlier ?? []).map((l) => quoted(l, EPISODE_BYTES)) },
     { head: "Self", rank: 1, lines: (facts.self ?? []).slice(0, SELF_MAX).map((l) => mine(l, SELF_BYTES)) },
@@ -1246,6 +1267,22 @@ const short = (v, max = LINE_BYTES) => { const t = String(v ?? ""); return Buffe
 const clock = (e) => [e.world, e.when?.worldDay == null ? null : `day ${e.when.worldDay}`, e.when?.time].filter(Boolean).join(", ");
 const own = (o, k) => (o && Object.hasOwn(o, k) ? o[k] : undefined);
 
+/** Words that ask the listener to come or join: an invitation, as a world's text can be read without a model. */
+const INVITING = /\b(?:come|join|see you|invit\w*|would you like|do you want|want to|let'?s|you should|(?:is|are) welcome)\b/i;
+/** A line said to this Soul: it names them (their first name, as a word). A private conversation is always to them. */
+function addressed(text, name) {
+  const first = String(name ?? "").trim().split(/[\s,]+/)[0];
+  return first.length >= 2 && new RegExp(`(?<![\\p{L}\\p{N}])${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(String(text ?? ""));
+}
+/** The lines worth keeping of what someone said: each line once, those said to this Soul first, then questions and
+ *  invitations, then the newest. */
+function quotes(words, n) {
+  const once = new Map();
+  for (const w of words) { const k = w.text.trim().toLowerCase(); once.delete(k); once.set(k, w); }
+  const rank = (w) => (w.toMe ? 2 : 0) + (w.text.includes("?") || INVITING.test(w.text) ? 1 : 0);
+  return [...once.values()].map((w, i) => ({ w, i })).sort((a, b) => rank(b.w) - rank(a.w) || b.i - a.i).slice(0, n).map((x) => x.w);
+}
+
 /** The file for a person: a readable start, and a hash of the whole traveller id so two ids never share a file. */
 const personFile = (traveller) => `${String(traveller).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 60)}-${createHash("sha256").update(String(traveller)).digest("hex").slice(0, 12)}.md`;
 
@@ -1253,7 +1290,7 @@ const personFile = (traveller) => `${String(traveller).replace(/[^A-Za-z0-9._-]+
  *  from a world is a claim about that world's own row: it decides which file the row is shown in, marked as a world's word,
  *  and nothing else. What this Soul wrote stays on the row it wrote about, so a stranger who claims to be a friend gets no note,
  *  no promise and no name of theirs. The price: a promise made to someone keeps only on what that same row did. */
-function createPeople({ world = null } = {}) {
+function createPeople({ world = null, me = null } = {}) {
   const rows = new Map(), conversations = new Map(), receipts = new Map(), dirty = new Set();
   let seq = 0;   // place in the log: a world picks its own timestamps, not this
   const at = (home, id) => `${home}/${id}`, groupOf = (row) => row.claims ?? row.key;
@@ -1286,7 +1323,7 @@ function createPeople({ world = null } = {}) {
       case "speech": {
         const row = person(e.personId, named(e, e.personId), e);
         contact(row, e, named(e, e.placeId));
-        row.words.push({ at: e.at, text: e.text });
+        row.words.push({ at: e.at, text: e.text, toMe: e.channel === "private-conversation" || addressed(e.text, me) });
         if (e.conversationId) {
           const key = at(home, e.conversationId);
           conversations.set(key, (conversations.get(key) ?? new Map()).set(e.personId, seq));
@@ -1328,7 +1365,7 @@ function createPeople({ world = null } = {}) {
       ...list("Last contact — place as a world named it, UNTRUSTED", row.last ? [`- ${place(row.last)}`] : []),
       ...list("Episodes — a world's words, UNTRUSTED", last(row.episodes).map((x) => `- ${short(md(x.line))} — ${x.kind} ${short(md(x.ref), NAME_BYTES)}`)),
       ...list("What a world says of them — UNTRUSTED", last(said, Math.min(keep, BELIEFS)).map((b) => `- ${short(md(b.text))} — ${short(md(b.provenance), NAME_BYTES)}`)),
-      ...list("What they said — UNTRUSTED", last(row.words, Math.min(keep, 3)).map((w) => `> ${short(md(w.text))}`)),
+      ...list("What they said — UNTRUSTED", quotes(row.words, Math.min(keep, 3)).map((w) => `> ${short(md(w.text))}`)),
       ...list("What I have told them", last(row.told, Math.min(keep, 6)).map((t) => `- ${short(md(t.text))}`)),
     ];
   }
@@ -1374,6 +1411,8 @@ function createPeople({ world = null } = {}) {
     /** Every open promise, whoever is near. Oldest first: they have waited longest. */
     promises() { return [...rows.values()].flatMap((row) => open(row).map((c) => ({ id: c.id, with: row.name, by: c.by, what: c.what, seq: c.seq }))).sort((a, b) => a.seq - b.seq).slice(0, OPEN_MAX); },
     commitment(id) { for (const row of rows.values()) if (row.commitments.has(id)) return { row, ...row.commitments.get(id) }; return null; },
+    /** Souls of this world met here whose first name the text says, as a word: who a line of this Soul's was for. */
+    named: (text) => [...rows.values()].filter((r) => r.world === world && r.met > 0 && addressed(text, r.name)).map((r) => r.id).slice(0, 16),
     /** Who has spoken in a conversation here. */
     conversation: (id) => [...(conversations.get(local(id))?.keys() ?? [])],
     /** The id that proves this promise kept, or null: since it was made, their own turn, or for a promise of mine a shared act. */
@@ -1385,7 +1424,7 @@ function createPeople({ world = null } = {}) {
     size: () => rows.size,
   };
 }
-return { personFile, createPeople };
+return { INVITING, addressed, personFile, createPeople };
 })();
 // </inline people.mjs>
 
@@ -1627,7 +1666,7 @@ const { join, relative } = soulMemory$path;
 const { PROJECTION_BUDGETS, openMemoryFolder } = soulRecords;
 const { buildBrief } = soulBrief;
 const { SUMMARY } = soulConsolidate;
-const { createPeople } = soulPeople;
+const { INVITING, addressed, createPeople } = soulPeople;
 // memory.mjs: one memory per Soul across worlds. It keeps the record format of memory-folder.mjs and
 // feeds it what the client already received: no HTTP, no model. Design: docs/design/soul-context.md section 2.
 //
@@ -1642,6 +1681,8 @@ const TERMINAL = new Set(["completed", "failed", "replaced"]);
 const MOVES = /^(?:walk|go|run|jog|stroll|hang-out|approach|follow|fly|ride)\b/;
 /** How close a Soul has to be for a first meeting: the distance `here` counts as local. */
 const NEAR_METRES = 8;
+/** How long the live picture has to keep a body in a new place before it counts as there: a walk passes through places. */
+const SETTLE_MS = 15_000;
 const SEARCH_MAX = 20, OPEN_FOR_MAX = 32, RECORD_BYTES = 56 * 1024, LOCK_TRIES = 150, LOCK_WAIT_MS = 20, LOCK_OLD_MS = 10_000, PLACE_ID_MAX = 200;
 /** `memory` fails closed: a line is the Soul's own only where nothing else writes. */
 const OWN_FILES = new Set(["self.md", "goals.md", "schedule.md"]), OWN_SECTION = /^(?:What I believe|What I have told them|Commitments|Judgments|Noted more than once)\b/, OWN_JOURNAL = /^- \S+ (?:completed|failed): /;
@@ -1690,7 +1731,7 @@ function lastSummary(file) {
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } }
 
 /** `world` is this home's key for the world the Soul is in, `role` home or visiting. */
-function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home", now = () => new Date().toISOString(), sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }) {
+function openSoulMemory(soulDir, { world, url = null, soul = null, name: soulName = null, role = "home", now = () => new Date().toISOString(), sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }) {
   const presenceFile = join(soulDir, "worlds", `${world}.json`), lock = join(soulDir, "runtime", ".memory.lock");
   const readPresence = () => { try { return JSON.parse(readFileSync(presenceFile, "utf8")); } catch { return null; } };
   let presence = readPresence() ?? { world, url, role, soul, place: null, placeName: null, posture: null, lastSeen: null, worldDay: null, time: null };
@@ -1706,11 +1747,11 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   // the log moved under it opens it again. A holder that died, or a lock older than any write takes, is passed over, one
   // writer at a time; a live one is waited for, then reported. Everything else stays what memory-folder.mjs says: a torn log
   // fails closed.
-  let records = null, travellers = {};
-  let people = createPeople({ world });
+  let records = null, travellers = {}, settling = null;
+  let people = createPeople({ world, me: soulName });
   // A day consolidation has summarized stays in the log, and its journal page doesn't come back.
   const journalAfter = () => { try { return JSON.parse(readFileSync(join(soulDir, "memory", "consolidation.json"), "utf8")).through ?? null; } catch { return null; } };
-  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
+  const openRecords = () => { people = createPeople({ world, me: soulName }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
   // No people/ folder until there is someone in it; a record folded into another leaves no file behind.
   function flushPeople() {
     const { write, remove } = people.changes(), dir = join(soulDir, "memory", "people");
@@ -1786,20 +1827,30 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   }
   /** What this place goes by: what the world just said, else what this memory knows, else its id until a name turns up. */
   const nameOf = (r, key, said) => clip(said, 200) || r.placeName(key) || (key === worldKey(world, presence.place) ? presence.placeName : null) || key.slice(world.length + 1);
-  const arrived = (r, when, rawPlace, said) => {
+  // A change of place is an arrival. With `again` (the world's own arrive event, at the end of a walk) so is coming back to
+  // where this memory already has the Soul, unless an arrival there is on record from that tick or later.
+  const arrived = (r, when, rawPlace, said, again = false) => {
     const placeId = typeof rawPlace === "string" ? clip(rawPlace, PLACE_ID_MAX) : "";
-    if (!placeId || placeId === presence.place) return false;
-    const place = worldKey(world, placeId), name = nameOf(r, place, said);
+    if (!placeId) return false;
+    if (placeId === presence.place && !(again && when.tick !== null && count(presence.arrivedTick) !== null && when.tick > presence.arrivedTick)) return false;
+    const place = worldKey(world, placeId), name = nameOf(r, place, typeof said === "function" ? said() : said);
     const wrote = fold(r, `arrival:${world}:${when.tick ?? when.real}:${placeId}`, { type: "arrival", placeId: place, when, seen: seenOf([[place, name]]) });
-    writePresence({ place: placeId, placeName: name, near: [], lastSeen: when, worldDay: when.worldDay, time: when.time });
+    writePresence({ place: placeId, placeName: name, near: [], lastSeen: when, worldDay: when.worldDay, time: when.time ?? presence.time, arrivedTick: when.tick });
     return wrote;
   };
   const here = (r) => { const key = typeof presence.place === "string" && presence.place ? worldKey(world, presence.place) : null; return key ? [key, nameOf(r, key)] : [null, null]; };
-  const met = (r, when, person) => {
+  /** Where a world says an event happened (its `where`: the other Soul's place), else where this memory has this Soul. */
+  const placeOf = (r, where) => {
+    const raw = typeof where?.placeId === "string" ? clip(where.placeId, PLACE_ID_MAX) : "";
+    if (!raw) return here(r);
+    const key = worldKey(world, raw);
+    return [key, nameOf(r, key, where.place)];
+  };
+  const met = (r, when, person, where = null) => {
     const name = clip(person?.name, 100);
     if (!safeId(person?.id) || person.id === soul || !name) return false;
     if (people.view(person.id)?.met > 0) return false;
-    const [place, placeName] = here(r);
+    const [place, placeName] = placeOf(r, where);
     return fold(r, `meet:${world}:${person.id}`, { type: "meet", person: { id: person.id, name }, placeId: place, when, seen: seenOf([[person.id, name], ...(place ? [[place, placeName]] : [])]) });
   };
 
@@ -1834,8 +1885,12 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   function heard(r, e, when) {
     const from = e.from ?? e.turn?.from, text = clip(e.text ?? e.turn?.text, 1000), person = from?.soulId ?? from?.id, name = clip(from?.name, 100);
     if (!safeId(person) || person === soul || !text || !name) return false;
-    const turn = e.kind === "conversation.turn", [place, placeName] = here(r);
-    return fold(r, `speech:${world}:${soul}:${e.id ?? sha([e.kind, e.conversation, e.turn?.seq, e.tick, person, text])}`, { type: "speech", personId: person, text, untrusted: true, channel: turn ? "private-conversation" : "public-speech", ...(turn && safeId(e.conversation) ? { conversationId: e.conversation } : {}), placeId: place, when, seen: seenOf([[person, name], ...(place ? [[place, placeName]] : [])]) });
+    const turn = e.kind === "conversation.turn", [place, placeName] = placeOf(r, e.where), key = e.id ?? sha([e.kind, e.conversation, e.turn?.seq, e.tick, person, text]);
+    const seen = seenOf([[person, name], ...(place ? [[place, placeName]] : [])]);
+    const wrote = fold(r, `speech:${world}:${soul}:${key}`, { type: "speech", personId: person, text, untrusted: true, channel: turn ? "private-conversation" : "public-speech", ...(turn && safeId(e.conversation) ? { conversationId: e.conversation } : {}), placeId: place, when, seen });
+    // An invitation said to this Soul is kept as one, with who and where; its when is in their words.
+    if ((turn || addressed(text, soulName)) && INVITING.test(text)) fold(r, `invited:${world}:${soul}:${key}`, { type: "engagement", kind: "invited", personIds: [person], what: clip(text, 300), startsAt: null, placeId: place, source: clip(`${world}:${e.saidId ?? e.id ?? key}`, 1000), when, seen });
+    return wrote;
   }
   const noted = (me, when) => { const posture = typeof me.posture === "string" ? clip(me.posture, 40) : null; if (posture !== presence.posture || when.worldDay !== presence.worldDay) writePresence({ posture, lastSeen: when, worldDay: when.worldDay, time: when.time }); };
 
@@ -1856,6 +1911,20 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
       const ids = near.filter((p) => safeId(p.id) && p.id !== soul && clip(p.name, 100)).map((p) => p.id).slice(0, 8);
       if (ids.join() !== (presence.near ?? []).join()) writePresence({ near: ids });
     },
+    /** Where the live picture has this Soul's body (`name` a name or a function giving one). A place it keeps for SETTLE_MS is
+     *  an arrival, however the body got there; one it only passes through on a walk is not. */
+    sawPlace({ place, name = null, tick = null } = {}) {
+      const placeId = typeof place === "string" ? clip(place, PLACE_ID_MAX) : "";
+      if (!placeId) return false;
+      presence = readPresence() ?? presence;   // the serve and a seat both watch the picture
+      if (placeId === presence.place) { settling = null; return false; }
+      const t = Date.parse(now());
+      if (settling?.place !== placeId) { settling = { place: placeId, since: t }; return false; }
+      if (t - settling.since < SETTLE_MS) return false;
+      settling = null;
+      const when = clockAt({ real: now(), tick, time: null });
+      return withRecords((r) => { presence = readPresence() ?? presence; return arrived(r, when, placeId, name); });
+    },
     /** Events off the stream or a `wait`. One the record won't take costs only itself. */
     sawEvents(events) {
       const wanted = rows(events, 1000).filter((e) => (e.kind === "receipt" && TERMINAL.has(e.receipt?.phase) && typeof e.receipt?.id === "string") || ["arrive", "approach", "speech", "conversation.turn"].includes(e.kind));
@@ -1866,8 +1935,8 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
           const when = clockAt({ real: Number.isFinite(e.at) ? realTime(Math.min(e.at, Date.parse(now())), now) : now(), tick: e.tick, time: e.clock });
           try {
             if (e.kind === "receipt") outcome(r, e.receipt, when);
-            else if (e.kind === "arrive") arrived(r, when, e.where?.placeId ?? e.placeId, e.where?.place ?? e.placePath?.[0]);
-            else if (e.kind === "approach") met(r, when, { id: e.from?.soulId, name: e.from?.name });
+            else if (e.kind === "arrive") arrived(r, when, e.where?.placeId ?? e.placeId, e.where?.place ?? e.placePath?.[0], true);
+            else if (e.kind === "approach") met(r, when, { id: e.from?.soulId, name: e.from?.name }, e.where);
             else heard(r, e, when);
           } catch (err) { if (stale(err)) throw err; problem ??= err; }
           if (moved(when)) { last = when; presence = { ...presence, lastSeen: when, worldDay: when.worldDay, time: when.time ?? presence.time }; }
@@ -1894,13 +1963,27 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
       withRecords((r) => fold(r, `${from}:${world}:${messageId}`, { type: "outcome", receiptId: worldKey(world, own ? messageId : `plan-${messageId}`), messageId, act: "owner-message", phase: done ? "completed" : "failed", summary: clip(text, 160), untrusted: !own, learned: [], produced: [], met: [], when, seen: {} }));
     },
     /** What this Soul just said: to the people near, or to a conversation, and then only to those in it. */
-    sawSaid(text, { to, conversationId } = {}) {
+    sawSaid(text, { to, conversationId, id = null } = {}) {
       const said = clip(text, 500); if (!said) return;
       const when = clockAt({ real: now(), tick: null, time: null }), private_ = safeId(conversationId);
       withRecords((r) => {
-        const personIds = [...(to ?? (private_ ? [] : presence.near ?? [])), ...(private_ ? people.conversation(conversationId) : [])].filter((id) => safeId(id) && people.view(id)).slice(0, 16);
-        if (!personIds.length) return;
-        fold(r, `told:${world}:${sha([said, personIds, when.real])}`, { type: "told", personIds, text: said, channel: private_ ? "private-conversation" : "public-speech", ...(private_ ? { conversationId } : {}), when, seen: seenOf(personIds.map((id) => [id, people.view(id)?.name])) });
+        // Those it was for: the conversation, or those near and those it names. Said to no one known, it is still journalled.
+        const personIds = [...new Set([...(to ?? (private_ ? [] : [...(presence.near ?? []), ...people.named(said)])), ...(private_ ? people.conversation(conversationId) : [])])].filter((id) => safeId(id) && people.view(id)).slice(0, 16);
+        const key = `${world}:${typeof id === "string" && id ? clip(id, 200) : sha([said, personIds, when.real]).slice(0, 32)}`, seen = seenOf(personIds.map((p) => [p, people.view(p)?.name]));
+        fold(r, `told:${key}`, { type: "told", personIds, text: said, channel: private_ ? "private-conversation" : "public-speech", ...(private_ ? { conversationId } : {}), when, seen });
+        if (INVITING.test(said)) {
+          const [place, placeName] = here(r);
+          fold(r, `inviting:${key}`, { type: "engagement", kind: "invited-by-me", personIds, what: clip(said, 300), startsAt: null, placeId: place, source: key, when, seen: { ...seen, ...(place ? seenOf([[place, placeName]]) : {}) } });
+        }
+      });
+    },
+    /** A calendar item this Soul said it would come to. Its title and place are a world's words. */
+    sawCalendar({ id, title = null, placeId = null, place = null, startsInMinutes = null, byId = null } = {}) {
+      if (typeof id !== "string" || !clip(id, 200)) return;
+      const at = now(), when = clockAt({ real: at, tick: null, time: null }), start = Number.isFinite(startsInMinutes) ? realTime(Date.parse(at) + startsInMinutes * 60_000, () => null) : null;
+      withRecords((r) => {
+        const where = typeof placeId === "string" && clip(placeId, PLACE_ID_MAX) ? worldKey(world, clip(placeId, PLACE_ID_MAX)) : null, by = safeId(byId) && people.view(byId) ? [byId] : [];
+        fold(r, `calendar:${world}:${clip(id, 200)}`, { type: "engagement", kind: "calendar", personIds: by, what: clip(title, 300) || clip(id, 300), startsAt: start, placeId: where, source: `${world}:${clip(id, 200)}`, when, seen: seenOf([...(where ? [[where, nameOf(r, where, place)]] : []), ...by.map((p) => [p, people.view(p)?.name])]) });
       });
     },
     /** A promise, to or from someone this Soul knows. `by` is me or them. */
@@ -1969,7 +2052,7 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
     brief({ bytes } = {}) {
       if (!existsSync(join(soulDir, "memory", "log", "memory-events.jsonl"))) return "";
       presence = readPresence() ?? presence;   // another process may be the one watching the world
-      const facts = withRecords((r) => ({ ...r.digest({ place: typeof presence.place === "string" && presence.place ? worldKey(world, presence.place) : null }), people: (presence.near ?? []).map((id) => people.view(id)).filter(Boolean), promises: people.promises() }));
+      const facts = withRecords((r) => ({ ...r.digest({ place: typeof presence.place === "string" && presence.place ? worldKey(world, presence.place) : null, now: now() }), people: (presence.near ?? []).map((id) => people.view(id)).filter(Boolean), promises: people.promises() }));
       const pinned = readLines(join(soulDir, "SOUL.md"), /^## Pinned\b/).map((l) => l.replace(/^- /, "")), schedule = readLines(join(soulDir, "memory", "schedule.md"), /^# Schedule\b/).filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
       return buildBrief({ ...facts, schedule, earlier: lastSummary(join(soulDir, "MEMORY.md")), self: pinned.length ? pinned : facts.self }, Number.isSafeInteger(bytes) && bytes >= 0 ? { bytes } : {});
     },
@@ -2022,7 +2105,7 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
     },
   };
 }
-return { NEAR_METRES, worldKey, presences, openSoulMemory };
+return { NEAR_METRES, SETTLE_MS, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
 // <inline digest.mjs> generated by inline.mjs: edit digest.mjs, not this block
@@ -3824,7 +3907,8 @@ export function heldPhase(e, receiptId) {
 // Idempotency-Key (the world returns the first answer to a repeat), are ever retried; `unreachable` gets full-jitter
 // exponential backoff (1 s base, 60 s cap, 6 tries) and then a clear exit 75. Nothing loops forever except listen,
 // which is one held long-poll per Soul (.listen.lock) and backs off the same way.
-export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
+// #2304: world.waking: the launcher held the call while the world loaded, past its hold; asked again after Retry-After
+export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.waking", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
@@ -3873,7 +3957,7 @@ export function retryClass(method, path) {
   return KEYED.test(p) ? "keyed" : "none";
 }
 const WAITING = {
-  "world.busy": "the world is busy", "world.crowded": "the world is crowded", "world.starting": "the world is starting",
+  "world.busy": "the world is busy", "world.crowded": "the world is crowded", "world.starting": "the world is starting", "world.waking": "the world is loading",
   "soul.busy": "your previous request is still being answered", "soul.slow-down": "you are asking faster than the world answers",
   "rate-limited": "you are asking faster than the world answers",
   "client.rate": "too many requests are coming from this address", "account.rate": "this account's Souls are asking faster than the world allows",
@@ -3897,7 +3981,7 @@ const REASON = {
   "client.rate": "too many requests at once from this address", "account.rate": "too many requests from this account's Souls",
   "soul.busy": "my previous request was still being answered", "soul.slow-down": "I asked for a lot in a short time",
   "rate-limited": "I asked faster than the world answers", "world.busy": "the world was too busy to answer in time",
-  "world.crowded": "the world is crowded", "world.starting": "the world is still starting up",
+  "world.crowded": "the world is crowded", "world.starting": "the world is still starting up", "world.waking": "the world was still loading",
   "lifecycle-pending": "the world is still finishing my arrival",
   unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
@@ -4166,7 +4250,7 @@ function memoryHere() {
   if (!HOME || SEAT?.kind !== "soul") return null;
   const s = load(), cfg = HOME.config(), world = soulHome.keyOf(cfg.worlds, s.world);
   if (!world) return null;
-  if (MEMORY?.world !== world) MEMORY = { world, memory: soulMemory.openSoulMemory(soulFolder(), { world, url: s.world, soul: s.soul, role: cfg.souls[SEAT.id]?.world === world ? "home" : "visiting" }) };
+  if (MEMORY?.world !== world) MEMORY = { world, memory: soulMemory.openSoulMemory(soulFolder(), { world, url: s.world, soul: s.soul, name: cfg.souls[SEAT.id]?.name ?? null, role: cfg.souls[SEAT.id]?.world === world ? "home" : "visiting" }) };
   return MEMORY.memory;
 }
 const MEMORY_ROUTE = /\/v1\/edge\/(here|wait|act|say|converse|receipts\/[^/?]+)(?:\?|$)/;
@@ -4182,8 +4266,26 @@ function noteForMemory(url, method, body, data) {
     else if (what === "wait") { if (!data.gap) memory.sawEvents(data.events); }
     else if (what === "act") { if (data.accepted && data.for) memory.sawAct(data.receipt?.id, data.for); }
     else if (what === "receipts") memory.sawReceipt(data.receipt);
-    else if (what === "say") memory.sawSaid(body?.text);
+    else if (what === "say") memory.sawSaid(body?.text, { id: data.said?.id });
     else if (what === "converse") { if (["say", "start"].includes(body?.op)) memory.sawSaid(body.text, { to: body.with, conversationId: body.conversation ?? data.conversation?.id ?? data.conversation }); }
+  } catch (e) { calm(`memory: ${e.message}`); }
+}
+/** #1981: where the live picture has this Soul's body goes to memory, so a place it is in without a walk counts too. */
+function noteLivePlace(copy) {
+  if (!HOME || SEAT?.kind !== "soul") return;
+  try {
+    const s = load(), me = copy?.world === s.world ? copy.live?.souls?.find((x) => x.id === s.soul) : null;
+    if (!me?.place) return;
+    const name = () => { const c = readJsonFile(CATALOG_FILE); return c?.world === s.world ? (c.catalog?.places ?? []).find((p) => p.id === me.place)?.name ?? null : null; };
+    memoryHere()?.sawPlace({ place: me.place, name, tick: Number.isSafeInteger(copy.live.tick) ? copy.live.tick : null });
+  } catch (e) { calm(`memory: ${e.message}`); }
+}
+/** #1981: a calendar item this Soul said it would come to, with its title, place and start from the world's calendar. */
+async function noteCalendar(id) {
+  try {
+    const memory = memoryHere(); if (!memory) return;
+    const r = await call("/v1/edge/calendar?withinMinutes=10080&limit=200").catch(() => null), d = r?.status === 200 ? r.data : null, x = (d?.items ?? []).find((i) => i?.id === id);
+    memory.sawCalendar({ id, title: x?.title, placeId: x?.placeId, place: x?.placeName, startsInMinutes: x && Number.isFinite(x.startsAtTick) && Number.isFinite(d.tick) ? Math.round((x.startsAtTick - d.tick) / TICKS_A_MINUTE) : null, byId: x?.proposedById });
   } catch (e) { calm(`memory: ${e.message}`); }
 }
 /** What this Soul knows about here and now, when it knows anything. Always built here, from this folder's own memory: a `brief`
@@ -5076,7 +5178,7 @@ async function syncLive({ force = false } = {}) {
     if (now?.live?.epoch && got.epoch === now.live.epoch && Number(got.seq) < Number(now.live.seq)) return now;
     const next = soulLive.wholeCopy(world, now, got, Date.now());
     if (now?.push) next.push = now.push;
-    writeJsonFile(LIVE_FILE, next); return next;
+    writeJsonFile(LIVE_FILE, next); noteLivePlace(next); return next;
   } catch { return mine ? { ...mine, stale: true } : null; }
 }
 /** The catalog's lookups, the live picture and this Soul in it. A catalog the world has replaced is fetched first. */
@@ -5129,7 +5231,7 @@ function onLiveFrame(event, data) {
     LIVE_RESYNC_AT = Date.now(); LIVE_RESYNC = r.whole; return r.whole;
   }
   if (!r.copy) return null;
-  writeJsonFile(LIVE_FILE, { ...r.copy, push });
+  writeJsonFile(LIVE_FILE, { ...r.copy, push }); noteLivePlace(r.copy);
   if (frame.catalog !== undefined || event === "live.full") {
     if (catalogOld(readJsonFile(CATALOG_FILE), world, r.copy)) syncCatalog().catch(() => {});
   }
@@ -5834,7 +5936,12 @@ async function calendarCommand(sub, ...args) {
     const d = ok(await call("/v1/edge/calendar?limit=50"), "calendar");
     return { items: (d.items ?? []).map((x) => calendarRow(x, d.tick, load().soul)), calendarNote: CALENDAR_NOTE };
   }
-  if (sub === "interest" || sub === "not-coming") { if (!args[0]) throw new Error(usage); return object(args[0], sub); }
+  if (sub === "interest" || sub === "not-coming") {
+    if (!args[0]) throw new Error(usage);
+    const out = await object(args[0], sub);
+    if (sub === "interest" && out?.accepted === true) await noteCalendar(args[0]);
+    return out;
+  }
   if (sub !== "add") throw new Error(usage);
   const o = {}, words = [];
   for (let i = 0; i < args.length; i++) { const f = /^--(place|in|for)$/.exec(args[i]); if (f) o[f[1]] = args[++i]; else words.push(args[i]); }

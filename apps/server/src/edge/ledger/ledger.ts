@@ -826,6 +826,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (r.program_id) try {void this.host.enqueue('edge-stop', `edge:${r.soul_id}`, {soulId: r.soul_id, entityId, programId: r.program_id, why: why.code}).catch(() => {/* best effort */});} catch {/* clock not ready */}
     }
   }
+  /** #2085: this body's open act's bound effect landed (a harvest pick): kept in its receipt row when it lands, so a
+   *  restart before the programme ends ends the act completed (#2051), not lost. */
+  actApplied(entityId: string, capability: string) {
+    for (const r of this.rows("capability=? AND phase IN ('waiting','started')", capability)) if (this.host.minds.get(r.soul_id)?.entityId === entityId) this.setDetail(r.receipt_id, {contactAppliedV1: {tick: this.host.engine.world.tick}});
+  }
   private onProgram(ev: {id: string; kind: string; code?: string; message?: string}) {
     if (ev.kind === 'step') return;
     const r = this.rows("program_id=? AND phase IN ('waiting','started')", ev.id)[0]; if (!r) return;
@@ -1699,13 +1704,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
         // CN5 (acceptance): 150 m, so the fire is offered from the pond and the shore too
         if (!isCampfire(e) || Math.hypot(e.pose.p[0] - me.pose.p[0], e.pose.p[2] - me.pose.p[2]) > 150) continue;
         const id = 'warm-by-fire:' + e.id, label = e.def === 'campfire' ? 'Warm up by the fire with whoever is there' : `Warm up by ${e.label && !/^ew:/.test(e.label) ? e.label : 'the campfire'} with whoever is there`;
-        caps.push({id, verb: 'warm-by-fire', label, target: {id: e.id, kind: 'object'}, available: true, params: secondsOf(120, 600)});
+        caps.push({id, verb: 'warm-by-fire', label, target: {id: e.id, kind: 'object'}, available: true, params: secondsOf(120, ACTIVITY_SECONDS_MAX)});
         plans.set(id, {label, steps: [{verb:'walk_to',params:{to:e.id,standoff:2}},{verb: 'mars:campfire_circle', params: {actors: [soul.entityId], fire: e.id}}, {verb: 'rest', params: {seconds: 120}}], seconds: true});
       }
       for (const [rid, r] of Object.entries(w.regions ?? {}) as [string, {polygon: [number, number][]}][]) {
         const [cx, cz] = centroid(r.polygon); if (Math.hypot(cx - me.pose.p[0], cz - me.pose.p[2]) > 60 || !this.places.byId.has(rid)) continue;
         const id = 'gather:' + rid, label = `Gather with others at ${this.places.byId.get(rid)!.name}`;
-        caps.push({id, verb: 'gather', label, target: {id: rid, kind: 'place'}, available: true, params: secondsOf(120, 600)});
+        caps.push({id, verb: 'gather', label, target: {id: rid, kind: 'place'}, available: true, params: secondsOf(120, ACTIVITY_SECONDS_MAX)});
         plans.set(id, {label, steps: [{verb: 'gather', params: {at: rid, seconds: 120}}], seconds: true});
       }
     }
@@ -2352,7 +2357,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // CN5 (acceptance): a capability that takes no seconds (a swim) ignores them instead of refusing
     if (params.seconds !== undefined && !plan.seconds) delete params.seconds;
     if (params.seconds !== undefined) {
-      const posed = steps.some(s => s.verb === 'mars:pose_v1'), max = posed ? ACTIVITY_SECONDS_MAX : 600;
+      // #2294: an hour for every activity in place; a juggle or a body motion keeps its own 600 s engine bound, and a
+      // stroll (ambient_wander) moves the body, so it is no activity in place and keeps 600 s
+      const posed = steps.some(s => s.verb === 'mars:pose_v1'), max = posed || !steps.some(s => s.verb === 'mars:juggle_v1' || s.verb === 'mars:body_motion_v1' || s.verb === 'ambient_wander') ? ACTIVITY_SECONDS_MAX : 600;
       if (!plan.seconds || !Number.isInteger(params.seconds) || (params.seconds as number) < 1 || (params.seconds as number) > max) return refuse('capability.params', `seconds must be an integer 1..${max} for this capability.`);
       // an activity's own pose takes the seconds (not the short shelf visits); otherwise the resting/strolling step does
       if (posed) {for (const s of steps) if (s.verb === 'mars:pose_v1' && s.params.activity !== 'browse') s.params.seconds = params.seconds;}

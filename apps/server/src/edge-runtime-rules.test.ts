@@ -51,14 +51,17 @@ test('main.ts activates edge startup rules through the shared helper with the wo
  assert.doesNotMatch(main,/enableOccupiedLinkRoutingV1|enableConcurrentLinkEgressV1|enableStairLandingClearanceV1/);
 });
 
-test('#2133 every world adopts stall-release-support/1 at boot, last, after stand-height/2, and the engine has it on',async()=>{
+test('#2133 every world adopts stall-release-support/1 at boot after stand-height/2, then #2294 held-activity/1 last, and the engine has both on',async()=>{
  const db=new Db(':memory:'),host=new WorldHost(db,await marsFactory(GREEN_FIELD_WORLD),'edge-rules',1e9,'boot-1');
  try{
   host.boot();let done=false;const p=adoptBootRuntimePoliciesV1(host,{edge:false,worldKey:'boot'}).finally(()=>{done=true;});
   while(!done){host.drainInputs();await setImmediate();}await p;
   const rules=(db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='rules' ORDER BY seq").all(host.worldId) as {payload:string}[]).map(r=>JSON.parse(r.payload).runtimePolicy??{});
   const first=rules.findIndex(r=>r.stallReleaseSupportV1===true);
-  assert.equal(first,rules.length-1,'adopted by the last rules event');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
-  assert.equal((host.engine.snapshot() as unknown as {cfg:{stallReleaseSupportV1?:boolean}}).cfg.stallReleaseSupportV1,true);
+  assert.equal(first,rules.length-3,'adopted by the rules event two before the last');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
+  assert.equal(rules.findIndex(r=>r.climbSpacingV1===true),rules.length-2,'climb-spacing/1 by the rules event before the last');
+  assert.equal(rules.findIndex(r=>r.heldActivitiesV1===true),rules.length-1,'held-activity/1 by the last rules event');assert.equal(rules[rules.length-1].stallReleaseSupportV1,true,'after stall-release-support/1');assert.equal(rules[rules.length-1].climbSpacingV1,true,'after climb-spacing/1');
+  const cfg=(host.engine.snapshot() as unknown as {cfg:{stallReleaseSupportV1?:boolean;climbSpacingV1?:boolean;heldActivitiesV1?:boolean}}).cfg;
+  assert.equal(cfg.stallReleaseSupportV1,true);assert.equal(cfg.climbSpacingV1,true);assert.equal(cfg.heldActivitiesV1,true);
  }finally{host.stop();db.close();}
 });

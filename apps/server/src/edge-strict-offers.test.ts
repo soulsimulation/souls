@@ -14,6 +14,7 @@ import {getRequestListener} from '@hono/node-server';
 import {fixture, invite, accept, factory} from '../test/native-owner-fixture.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes} from './edge/routes.ts';
+import {resolveCandidates} from './edge/intents/strict.ts';
 import {paramsProblem, offerParams} from './edge/intents/offer-schema.ts';
 import {compactDoHere} from './edge/perception/here.ts';
 import {bootEden} from '../test/eden-capabilities-timing.ts';
@@ -78,14 +79,22 @@ test('strict act: a place by name is not an id; params are checked against the o
   assert.equal(shape.code, 'capability.params');
 });
 
-test('resolve advises: ranked candidates with schemas and availability, and it never executes', async t => {
+test('#1910: the resolve route is gone: 410 naming the client\'s find, and nothing happens', async t => {
+  const w = await world(t), before = w.receipts();
+  const res = await w.app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: 'walk to the pond'})});
+  assert.equal(res.status, 410);
+  assert.deepEqual(await res.json(), {ok: false, code: 'gone', message: "resolve was removed; use the client's find"});
+  assert.equal(w.receipts(), before);
+});
+
+test('candidates for words: ranked, with schemas and availability, and nothing executes', async t => {
   const w = await world(t);
   const {capabilities} = await w.get('/v1/edge/capabilities');
   const walk = capabilities.find((c: any) => c.verb === 'walk' && c.available);
   const before = w.receipts();
-  const {resolve} = await w.post('/v1/edge/resolve', {capability: `walk to ${walk.label}`});
-  assert.ok(resolve.candidates.length >= 1, JSON.stringify(resolve));
-  const first = resolve.candidates[0];
+  const candidates = resolveCandidates(w.edge, w.soul, w.edge.intents.dryRun(w.soul, {capability: `walk to ${walk.label}`})) as any[];
+  assert.ok(candidates.length >= 1, JSON.stringify(candidates));
+  const first = candidates[0];
   assert.equal(first.verb, 'walk'); assert.equal(typeof first.available, 'boolean'); assert.ok(first.params.with);
   assert.equal(w.receipts(), before);
 });
