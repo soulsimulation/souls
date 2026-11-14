@@ -3104,7 +3104,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // One synchronous, read-only activity listing: entity membership is fixed, but group state is read on every call.
     // Reuse the human references here; never retain a group count or this subset across listings/ticks.
     const humans = Object.values(w.entities).filter(e => e.kind === 'human');
-    const others = humans.filter(e => e.id !== soul.entityId).map(e => [e.pose.p[0], e.pose.p[2]] as [number, number]);
+    const otherBodies = humans.filter(e => e.id !== soul.entityId), others = otherBodies.map(e => [e.pose.p[0], e.pose.p[2]] as [number, number]);
     const claimed = new Set<string>();
     for (const m of this.host.minds.values()) if (m.soulId !== soul.soulId) for (const r of this.openReceipts(m.soulId)) claimed.add(r.capability.slice(r.capability.indexOf(':') + 1));
     const navIds = new Set(((w as {navV1?: {solids: {id: string}[]}}).navV1?.solids ?? []).map(x => x.id));
@@ -3117,6 +3117,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
       open: (at: [number, number], min: number, rings: number) => level === 0 && engine.nearestStandableV1 ? engine.nearestStandableV1(at, soul.entityId, min, rings) : null,
       // (claims are covered by the menu key's cell versions; the bodies part is recorded for the kept-menu check)
       taken: (at: [number, number], spotId?: string) => {const v = others.some(o => Math.hypot(o[0] - at[0], o[1] - at[1]) < 0.7); this.menuReads?.taken.push({at: [at[0], at[1]], v}); return v || (!!spotId && claimed.has(spotId));},
+      // #2189: who is using a taken spot, for its refusal: only a Soul whose body stands there, as anyone at the spot sees
+      // it; never a Soul still on its way (an open act), nor one inside a secret place this Soul does not know
+      takenBy: (at: [number, number]) => {
+        if (this.knowledge.hidesPoint(soul.soulId, at)) return null;
+        for (const o of otherBodies) if (Math.hypot(o.pose.p[0] - at[0], o.pose.p[2] - at[1]) < 0.7) {const n = this.host.mindByEntity?.get(o.id)?.name; if (n) return n;}
+        return null;
+      },
       // a spot inside a building is offered only when that building's interior was admitted (its walls are a shell, nav/1)
       enterable: (place: string | undefined) => {const b = enclosingBuilding(place); return !b || !!w.regions[b] || !!this.placeWalkable?.(b) || [...navIds].some(id => id.startsWith('nav-solid:' + b + '#w'));},
       seat: (radius: number, near?: boolean) => {
