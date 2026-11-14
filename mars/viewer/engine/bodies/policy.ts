@@ -127,6 +127,7 @@ export const FLOATER_POLICY: Readonly<Record<string, VerbPolicy>> = {
   forklift_back: refuse(R.ride, 'needs a mounted forklift operator'),
   // objects and seated work
   display_control: works(R.noBody, 'no actor: switches a display directly'),
+  classroom_tv: works(R.control, 'switching a classroom TV is a control, not a hand task'),
   work_at: HANDS('typing at a computer'),
   read_book: HANDS('holding a book and turning pages'),
   chess_move: HANDS('moving a chess token'),

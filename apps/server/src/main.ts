@@ -35,6 +35,7 @@ import {edenCoreRequested,installEdenCore,settleEmptyEden,drainEdenThought,insta
 import {IntentControlV2} from './intent-control.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
 import {installPuntActivities} from './punt-install.ts';
+import {installClassroomTv} from './classroom-tv.ts';   // #2302
 import {readFileSync} from 'node:fs';
 import {installBirthLooks} from './god/birth-look.ts';
 import { setKitViewerContract } from '@souls/generators';
@@ -171,7 +172,7 @@ const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):
 const edge = config.mindDriver === 'edge' ? new EdgeLedger(host, db, process.env.PLACE_DATA ? JSON.parse(readFileSync(process.env.PLACE_DATA, 'utf8')) : undefined) : undefined;
 // Boot runtime policies one after another (edge-runtime-rules.ts): the edge rules after the courtesy event, then #1332 body-step-guard/1
 // (Eden core too: its physical-binding readers take the rule as a runtime policy, #1362).
-if (host.engine.configureRuntimePolicy) void adoptBootRuntimePoliciesV1(host, { after: courtesy, edge: !!edge, worldKey: config.worldKey }).catch((e) => console.error('[world] a boot runtime policy could not be adopted:', String(e).slice(0, 300)));
+if (host.engine.configureRuntimePolicy) void adoptBootRuntimePoliciesV1(host, { after: courtesy, edge: !!edge, worldKey: config.worldKey }).then(() => { if (edge) installClassroomTv(host, edge); }).catch((e) => console.error('[world] a boot runtime policy could not be adopted:', String(e).slice(0, 300)));
 // God mode + entity world (spec eden4/28): the owner's edge agent builds the world; viewers get diffs over the hub.
 const genesis = process.env.GENESIS_FILE ? JSON.parse(readFileSync(process.env.GENESIS_FILE, 'utf8')) : undefined;
 const god = config.worldEngine ? new GodMode(db, { genesis, worldId: host.worldId, ownerId: process.env.WORLD_OWNER_ID || null /* explicit only: on a fresh world the first person to claim it becomes its god */, tick: () => host.engine.world.tick, emit: (m) => hub.broadcast(m as never), cobuilders: process.env.SIM_COBUILDERS === '1' /* off: one god per world (Gene 2026-10-16) */ }) : undefined;

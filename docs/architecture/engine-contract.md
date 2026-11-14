@@ -66,6 +66,13 @@ ride is parked and nothing is queued; `untilTick` is the earliest held end or pr
 Without the policy no world is still. With it, the held ends enter `stateHash()` (`held`), and history before the
 event replays as recorded.
 
+**Classroom TV** (`classroom-tv/1`, #2302, cfg `classroomTvV1`, adopted at boot after need-anchor/1). Its adoption
+marks the installed lecture screen a TV once (`equipment.config.tv`, `picture: 'lesson'`; mode and lesson text kept),
+and the rules event logs the screens it marked (`classroomTvV1.screens`). A body within 12 m works it with
+`classroom_tv` (`on`, `off`, `next`: lesson, garden, sea, stars, test card, the core-television@2 pictures); it is
+refused while a class holds `display:<id>`, and a class's focus puts the lesson back on. A display that is no TV keeps
+its bytes. The `classroom-tv` comms object offers `object:<screen>:switch-on|switch-off|change-picture` in the room.
+
 - **Program** `{ actor, label, steps: {verb, params}[] }`: the verb steps one body runs. A `decision` event starts one.
   One actor runs one program.
 - **ProgramEvent** `{ tick, id, actor, kind: 'step'|'completed'|'failed'|'cancelled', step, code?, message? }`: how the

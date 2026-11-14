@@ -1461,6 +1461,14 @@ export class WorldHost {
   /** #2294 held-activity/1, one logged rules event (prospective): an activity in place started after it (a solo pose, a mat
    *  sleep) keeps a start and an end tick instead of a running sum; seats, slots and circles once taken are held with no end;
    *  the engine reads whether the world is still and until which tick. History before the event replays as it was. Main adopts it at boot. */
+  /** #2302 classroom-tv/1: the installed lecture screen becomes a TV (on or off; a picture or the lesson), once, at this event;
+   *  the screens it marks are logged with it. A world without a lecture adopts the flag and changes nothing. */
+  enableClassroomTvV1(author='operator:classroom-tv'){
+    if((this.extra.runtimePolicy as {classroomTvV1?:boolean}|undefined)?.classroomTvV1)return Promise.resolve();
+    const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,classroomTvV1:true},why:'classroom-tv/1 (#2302): the lecture screen is a TV a Soul in the room switches on or off and changes the picture of (garden, sea, stars, test card, or the lesson); a running class still puts its lesson on it; retain historical replay before this event'};
+    const guard:AcceptanceGuard=()=>{payload.classroomTvV1={screens:this.engine.classroomTvScreensV1?.()??[]};return true;};
+    return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
+  }
   enableHeldActivitiesV1(author='operator:held-activity'){if((this.extra.runtimePolicy as {heldActivitiesV1?:boolean}|undefined)?.heldActivitiesV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,heldActivitiesV1:true},why:'held-activity/1 (#2294): an activity in place has a start and an end tick and costs nothing between them; retain historical replay before this event'});}
   /** #2196 park-away/1, one logged rules event (prospective): an empty ride that landed away from its home parks where it landed and
    *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event

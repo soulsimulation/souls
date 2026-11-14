@@ -212,7 +212,7 @@ const MARS_PART = { 'upright-8ft': ['construction', 'core/pallet-rack@1'], 'beam
   'plywood-4x6': ['construction', 'core/plywood-stack@1'], 'stair-flight-10': ['construction', 'stairs/1'], 'stair-tread': ['construction', 'stairs/1'] };
 const MARS_VERB = { walk_to: 'a-walk', ambient_wander: 'a-walk', converse: 'a-walk', group_warmup: 'a-walk', campfire_circle: 'a-walk', sit: 'a-sit', prepare_food: 'a-eat',
   put_item: 'a-carry', take_item: 'a-carry', shared_food_break: 'a-eat', serve: 'a-eat', eat: 'a-eat', work_at: 'a-make', computer_music: 'a-music', read_book: 'a-read',
-  chess_move: 'a-chess', drawing_work: 'a-make', classroom_session: 'a-class', display_control: 'a-class', sleep: 'a-sleep', garden_care: 'a-garden', seed_planting: 'a-garden',
+  chess_move: 'a-chess', drawing_work: 'a-make', classroom_session: 'a-class', display_control: 'a-class', classroom_tv: 'a-class', sleep: 'a-sleep', garden_care: 'a-garden', seed_planting: 'a-garden',
   carry: 'a-carry', raise_upright: 'a-build', connect_beam: 'a-build', release_support: 'a-build', install_joist: 'a-build', install_plywood: 'a-build',
   install_stair_flight: 'a-build', install_tread: 'a-build' };
 // Eden client kits (mars/viewer/app/engine-view/content/assets): each maps to the row(s) it covers.
