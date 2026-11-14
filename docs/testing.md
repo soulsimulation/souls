@@ -242,8 +242,8 @@ gh workflow run timed-run.yml -f command=hundred -f ref=<branch> -f args='--shor
 `--short` uses short knobs, stated in the report: agents act every 0.5 to 1.5 minutes for 6, the wind-down is shortened
 with `SIM_BODY_KNOBS` (silent 1 minute, walked out within 2; dev worlds only), a still world unloads after 1 quiet
 minute instead of 10, and the gap is 3 minutes. The full run (no `--short`: 60 active minutes, the real one-hour
-wind-down, a one-hour gap) takes about three and a half hours and does not fit the job's 120 minutes; run it on the
-host the tranche names. A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
+wind-down, a one-hour gap) takes about three and a half hours; the timed-run job allows `hundred` 270 minutes (every
+other command keeps 120). A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
 wind-down, the load queue, `--worlds-mem-mb`) is listed under "Missing from this checkout" with its issue, and the
 parts that need it are reported as not shown, never as passed.
 
