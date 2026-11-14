@@ -152,13 +152,15 @@ export const ROOT = resolve(here, '../..');
 /** The Soul CLI and guides every world serves unless overridden (tools/world-launcher/soul/SOURCES.json). */
 /** Keep-alive idle timeout of the public server: longer than Caddy's upstream idle timeout (2 min). */
 export const KEEP_ALIVE_MS = 130_000;
-/** Freeze a world nobody has asked anything for this long (children.mjs freezeIdle; --sleep-ms, 0 = never). Lane P3. */
-export const SLEEP_MS = 10 * 60_000;
+/** Freeze a world nobody has asked anything for this long (children.mjs freezeIdle; --sleep-ms, 0 = never). Lane P3.
+ *  #2235: 0 by default; world time must never stop, and no world yet proves it may (see freezeIdle). */
+export const SLEEP_MS = 0;
 /** A world asleep this long more exits, giving its memory back; its next visit cold-boots it (children.mjs releaseIdle;
- *  SIM_WORLD_IDLE_EXIT_MIN minutes, default 60; 0 = never; SIM_WORLD_IDLE_EXIT_FORKS=1 includes the old-engine forks). Lane SLEEP. */
+ *  SIM_WORLD_IDLE_EXIT_MIN minutes, 0 = never and the default since #2235, which also needs sleep on;
+ *  SIM_WORLD_IDLE_EXIT_FORKS=1 includes the old-engine forks). Lane SLEEP. */
 export function idleExitMs(env = process.env) {
-  const v = Number(env.SIM_WORLD_IDLE_EXIT_MIN ?? 60);
-  return Number.isFinite(v) && v >= 0 ? v * 60_000 : 60 * 60_000;
+  const v = Number(env.SIM_WORLD_IDLE_EXIT_MIN ?? 0);
+  return Number.isFinite(v) && v >= 0 ? v * 60_000 : 0;
 }
 /** Reads that only report on a world (health, config, the homepage's numbers): answered, but not a visit. */
 // the Eyes render worker inside a world (apps/server/src/edge/eyes, user agent tag EdenEyes/1, same test as isEyesAgent in
@@ -275,6 +277,9 @@ export async function openLauncher(cfg = {}) {
   /** #1997: resident long-polls waiting here for their sleeping world to wake (slug -> wake callbacks), and resident
    *  requests in flight to a world (slug -> responses), ended cleanly when it falls asleep under them. */
   const parked = new Map(), residents = new Map();
+  /** #2231: Soul API calls held here while their world boots (slug -> count). At most bootHoldMax per world (past it,
+   *  503 world.busy); each waits at most its own deadline: a listen's or wait's timeout, any other call bootHoldMs. */
+  const bootHeld = new Map(), BOOT_HOLD_MAX = cfg.bootHoldMax ?? 200, BOOT_HOLD_MS = cfg.bootHoldMs ?? 20_000;
   /** What the launcher sees go past, per world (not persisted beyond the registry's own fields). */
   const seen = new Map();
   const seenOf = (slug) => { let s = seen.get(slug); if (!s) { s = { looks: registry.get(slug)?.looks ?? 0, lastLookAt: registry.get(slug)?.lastLookAt ?? null, agentSeenAt: registry.get(slug)?.agentSeenAt ?? null, previews: [] }; seen.set(slug, s); } return s; };
@@ -758,6 +763,38 @@ export async function openLauncher(cfg = {}) {
     if (maxBody > 0 && !req.readableEnded) { let n = 0; req.on('data', (c) => { n += c.length; if (n > maxBody) { up.destroy(); req.unpipe(up); if (!res.headersSent) json(res, 413, { ok: false, code: 'request.too-large', message: `a request body may be at most ${Math.round(maxBody / 1024)} KB` }, { connection: 'close' }); } }); }
     if (req.readableEnded) up.end(); else req.pipe(up);   // a retried GET: its (empty) body was already read
   }
+  /** ensure() refused: a world handed over (or going back) is asked through the keeper, any other is answered 503. */
+  async function unreachable(req, res, slug, e) {
+    if (e.code === 'handed-over' && retiredTo) { forward(req, res); return; }
+    // our canary failed and the world is going back to the previous launcher: wait for the keeper to switch back
+    if (await waitHandBack(slug, e)) { forward(req, res); return; }
+    json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'starting' ? '5' : '3' });
+  }
+  /** #2231: hold a Soul API call until its booting world listens, at most `ms` (the call's own deadline). Resolves with
+   *  the ms it waited, or null once it was answered here (over the world's cap, past its deadline, a refused boot) or its
+   *  client went. The world's boot goes on either way; a held call never starts or stops one. */
+  async function holdForBoot(req, res, slug, w, ms, passive) {
+    const n = bootHeld.get(slug) ?? 0;
+    if (n >= BOOT_HOLD_MAX) {
+      ceilings.note(slug, 'world.busy', 'boot');
+      json(res, 503, { ...refusalBody('world.busy', `The world is starting up and ${n} calls are already waiting for it. It asked you to wait 5 s`, 5000, 'boot'), slug }, { 'retry-after': '5', 'cache-control': 'no-store' });
+      return null;
+    }
+    bootHeld.set(slug, n + 1);
+    const t0 = Date.now();
+    let gone, out;
+    const left = new Promise((r) => { gone = () => r('gone'); res.once('close', gone); });
+    try { out = await Promise.race([pool.ensure(worldEnv(w), { timeoutMs: Math.max(1, ms), passive }).then(() => 'up'), left]); }
+    catch (e) { out = e; }
+    finally { res.off('close', gone); const m = (bootHeld.get(slug) ?? 1) - 1; if (m > 0) bootHeld.set(slug, m); else bootHeld.delete(slug); }
+    if (out === 'gone' || clientGone(req, res)) return null;
+    if (out === 'up') return Date.now() - t0;
+    if (out?.code !== 'starting') { await unreachable(req, res, slug, out); return null; }
+    const b = pool.status(slug).boot, s = (x) => Math.round(x / 1000);
+    ceilings.note(slug, 'world.starting', 'boot');
+    json(res, 503, { ...refusalBody('world.starting', `The world is still booting${b ? ` (for ${s(Date.now() - b.since)} s${b.stage ? `, at ${b.stage}` : ''})` : ''}; this call waited ${s(Date.now() - t0)} s for it, its own limit. It asked you to wait 5 s`, 5000, 'boot'), slug }, { 'retry-after': '5', 'cache-control': 'no-store' });
+    return null;
+  }
   async function toWorld(req, res, slug, url, retried = false) {
     const w = registry.get(slug);
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
@@ -765,10 +802,18 @@ export async function openLauncher(cfg = {}) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
       json(res, 404, { ok: false, code: 'world.not-served', slug }); return;
     }
-    // lane L1 (LOAD-CONTRACT §4): the Soul API of a booting world, a world just restarted, or a world at red/black is
-    // answered here at once (before the ceilings: a boot is not a client's fault), without waiting on the world
+    // lane L1 (LOAD-CONTRACT §4): the Soul API of a world just restarted or at red/black is answered here at once, and
+    // that of a booting world waits here for it (#2231), both before the ceilings: a boot is not a client's fault
     const edgeRest = url.pathname.slice(wp(slug).length) || '/', edgeCls = !retried && edgeRest.startsWith('/v1/edge/') ? requestClass(edgeRest, req.method) : null;
-    let held = edgeCls ? admission(slug, { cls: edgeCls, soul: ceilings.soulOf(req) }) : null;
+    let held = edgeCls ? admission(slug, { cls: edgeCls, soul: ceilings.soulOf(req) }) : null, path;
+    // #2231: a call to a booting world waits here for it (up to its own deadline, bootHoldMax per world) and is then
+    // admitted as any other; a listen or wait goes on with what is left of its deadline
+    if (held?.scope === 'boot') {
+      const waited = await holdForBoot(req, res, slug, w, edgeCls === 'listen' ? listenTimeoutMs(edgeRest, url.search) : BOOT_HOLD_MS, !!residentRead(edgeRest, req.method));
+      if (waited == null) return;
+      if (edgeCls === 'listen') path = withDeadlineLeft(req.url, edgeRest, url.search, waited);
+      held = admission(slug, { cls: edgeCls, soul: ceilings.soulOf(req) });
+    }
     // Stage B (lane B-port): shedding is for a world that cannot answer. At red/black a C2 read its read workers answer
     // (live.json lists them, lag ≤ READ_SHED_LAG_GENS) goes to them instead of being refused here (counted by level)
     if (held?.scope?.startsWith('load:') && readTarget(slug, w, edgeRest, req.method, url.search, { maxLagGens: READ_SHED_LAG_GENS })) held = null;
@@ -797,7 +842,6 @@ export async function openLauncher(cfg = {}) {
     const passive = !!resident || (PASSIVE_READ.test(url.pathname) && (req.method === 'GET' || req.method === 'HEAD') && !req.headers.authorization) || eyesAgent(req.headers['user-agent']);
     // #1997: a resident's poll or long-poll never wakes or boots a sleeping world: the poll gets the last live picture, a
     // long-poll waits here for the world to wake (then goes on with what is left of its own deadline) or ends as a retry
-    let path;
     if (resident && sleeping(slug)) {
       if (resident === 'live') { asleepLive(req, res, slug, url); return; }
       const t0 = Date.now();
@@ -806,12 +850,7 @@ export async function openLauncher(cfg = {}) {
     }
     let p;
     try { p = await pool.ensure(worldEnv(w), { passive }); }
-    catch (e) {
-      if (e.code === 'handed-over' && retiredTo) { forward(req, res); return; }
-      // our canary failed and the world is going back to the previous launcher: wait for the keeper to switch back
-      if (await waitHandBack(slug, e)) { forward(req, res); return; }
-      json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'starting' ? '5' : '3' }); return;
-    }
+    catch (e) { await unreachable(req, res, slug, e); return; }
     if (clientGone(req, res)) return;   // before httpLive: a closed response never fires 'close' again to undo it
     // a request in flight (a god's long-poll listen, a slow upload) keeps the world awake (pool busy), and its end counts as
     // use; a resident's does neither (#1997), and is ended cleanly if the world falls asleep under it (endResidents)
@@ -908,8 +947,8 @@ export async function openLauncher(cfg = {}) {
   const loads = new Map();   // slug -> { level, at }
   function sawLoad(slug, level) { if (typeof level === 'string' && LEVELS.includes(level)) loads.set(slug, { level, at: Date.now() }); }
   function levelOf(slug) { const h = loads.get(slug); if (h && Date.now() - h.at < 10_000) return h.level; return pool.status(slug).level ?? 'green'; }
-  /** null (go on), or why this Soul API call is answered 503 now: world.starting while the world boots or waits to
-   *  restart (Retry-After 5); world.busy for C1/C2 during the 60 s ramp after a restart (a share admitted that grows
+  /** null (go on), or why this Soul API call is not sent on now: world.starting (scope boot) while the world boots or
+   *  waits to restart, which toWorld holds (#2231); world.busy for C1/C2 during the 60 s ramp after a restart (a share admitted that grows
    *  25 % -> 100 %, by Soul so one Soul is not admitted and refused in turn) and for C2 at red/black (C3 is micro-cached). */
   function admission(slug, gated) {
     const st = pool.status(slug), now = Date.now();
@@ -1307,6 +1346,26 @@ export async function openLauncher(cfg = {}) {
   writeProblems(); const problemsTimer = setInterval(writeProblems, cfg.problemsEveryMs ?? 10_000); problemsTimer.unref();
   const wakeRecent = () => { for (const w of [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).slice(0, cfg.eager ?? 4)) if (pool.status(w.slug).status !== 'running') pool.ensure(worldEnv(w)).then((p) => log(`woke ${w.slug} on :${p}`), (e) => log(`could not wake ${w.slug}: ${e.message}`)); };
   if (!adopting) wakeRecent();   // a handover wakes nothing until it has taken over (takeOverAll)
+  // #2235: every registered world keeps living. Every keepAliveMs, one registered world with no process (never booted
+  // since this launcher started, put to sleep to make room, or crashed past its restarts) is booted, most recent first,
+  // and only into free room: a keep-alive boot never puts another world to sleep, so when the registry does not fit, the
+  // oldest worlds wait until room frees, and a visitor's boot still evicts the least recently used idle world. A world
+  // that comes back catches up the time it was away (apps/server/src/clock-catchup.ts). On for real worlds; off with
+  // --eager 0 or a custom command (tests and harnesses that boot what they use) unless keepAlive is set. A held world
+  // (the breaker) stays held.
+  const keepAlive = cfg.keepAlive ?? (!cfg.command && (cfg.eager ?? 4) > 0);
+  let keeping = false, keepAliveFrom = !adopting;   // a handover keeps nothing alive until it has taken over
+  const keepAliveOnce = () => {
+    if (keeping || !keepAliveFrom || phase !== 'active' || gate || pool.closing || pool.fenced) return;
+    // (a failed takeover, still adopted, or a world going back to the previous launcher: ensure refuses those, so they
+    // are passed over rather than picked every round ahead of older worlds)
+    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status) && !pool.state(x.slug)?.adopted && !pool.state(x.slug)?.handedBack);
+    if (!w || !pool.roomFor(w.slug).ok) return;
+    keeping = true;
+    pool.ensure(worldEnv(w), { passive: true }).then((p) => log(`kept ${w.slug} living on :${p}`), (e) => log(`could not keep ${w.slug} living: ${e.message}`)).finally(() => { keeping = false; });
+  };
+  const keepAliveTimer = keepAlive ? setInterval(keepAliveOnce, cfg.keepAliveMs ?? 15_000) : null;
+  keepAliveTimer?.unref();
   // idle worlds sleep (frozen in place) and wake on their next request; see ChildPool.freezeIdle
   const sleepMs = cfg.sleepMs ?? SLEEP_MS;
   // ...and a world asleep for exitMs more exits (its memory given back) and cold-boots on its next request; see ChildPool.releaseIdle
@@ -1410,7 +1469,7 @@ export async function openLauncher(cfg = {}) {
       }
       const lanes = Array.from({ length: Math.max(1, concurrency) }, async () => { while (todo.length) await one(todo.shift()); });
       await Promise.all(lanes);
-      wakeRecent();
+      wakeRecent(); keepAliveFrom = true;
       return { worlds: out };
     },
     /** Open (non-upgraded) requests still being answered here. */
@@ -1422,7 +1481,7 @@ export async function openLauncher(cfg = {}) {
      *  a held port every moment here is refused connections, so it stops at once, as before. After a handover (`gentle`)
      *  the keeper's port is served by the next launcher, so that exit is gentle too. */
     close: async ({ drainMs = 3_000, idleMs = 1_500, gentle = process.env.SIM_PORT_HELD === '1' } = {}) => {
-      if (closed) return; closed = true; clearInterval(sweep); errors.flush();
+      if (closed) return; closed = true; clearInterval(sweep); clearInterval(keepAliveTimer); errors.flush();
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)

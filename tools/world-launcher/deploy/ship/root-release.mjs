@@ -3,7 +3,8 @@
 // the activation preconditions. Each command reads local files, prints what it found and exits 1 with the reason.
 //   node root-release.mjs receipts <gate receipt> <ship receipt> <sha>
 //   node root-release.mjs receipt <release-receipt.json> <sha>   (the publishable release receipt, ship-receipt.mjs --public)
-//   node root-release.mjs accepted <receipts folder> <accepted-exceptions.json> <sha>   (a gate blocked only by accepted exceptions)
+//   node root-release.mjs accepted <receipts folder> <accepted-exceptions.json> <sha>   (a gate blocked only by accepted exceptions;
+//        a folder with release-receipt.json alone is checked from it, as release.yml does)
 //   node root-release.mjs snapshot <healthz.json> <remote.json> <label sha> <out.json> [accepted host codes, comma-separated]
 //   node root-release.mjs drift <snapshot.json> <healthz.json> <remote.json>
 //   node root-release.mjs backup <backup.log> <quick-check.log> <snapshot.json> <label> <out.json>
@@ -114,6 +115,17 @@ export function acceptedProblems(gate, gateSha256, companion, x, sha) {
   return { problems: receiptProblems({ ...gate, status, blockers: [], removed: [], unexpectedSkips: [] }, { ...companion, status, blockers: [] }, sha, gateSha256), lines };
 }
 
+/** The same verdict from the publishable release receipt alone, as the release workflow holds it (#2262): a blocked gate's
+ *  release receipt carries its count blocker lines and the removed and skipped tests, and the raw gate receipt's sha256.
+ *  Lists that disagree with their counts, or are missing, refuse. */
+export function acceptedReleaseProblems(r, x, sha) {
+  const g = r?.gate ?? {}, n = k => Array.from({ length: Number(g[k]) || 0 }, () => ({}));
+  if (!Array.isArray(g.blockerLines) || g.blockerLines.length !== g.blockers || g.removedTests?.length !== g.removed || g.unexpectedSkipTests?.length !== g.unexpectedSkips)
+    return { problems: ['the release receipt does not list the gate\'s blockers and tests (ship-receipt.mjs --public from #2262 on)'], lines: [] };
+  const gate = { status: g.status, blockers: g.blockerLines, newFailures: n('newFailures'), quarantined: n('quarantined'), removed: g.removedTests, unexpectedSkips: g.unexpectedSkipTests };
+  return acceptedProblems(gate, g.sha256, r, x, sha);
+}
+
 export function snapshotProblems(health, remote, sha = '', accepted = []) {
   const out = [], previous = remote.productionTarget.split('/').pop();
   if (sha && previous === `we-${sha.slice(0, 12)}`) out.push('this commit is already live: a new snapshot would name it as the previous build');
@@ -170,7 +182,8 @@ export function main(argv) {
   if (cmd === 'receipt') { const p = releaseReceiptProblems(read(a[0]), a[1]); if (p.length) fail(p); console.log('the release receipt is clean for this commit'); }
   else if (cmd === 'accepted') {
     const gate = join(a[0], 'receipt.json'), release = join(a[0], 'release-receipt.json');
-    const { problems, lines } = acceptedProblems(read(gate), digest(gate), read(existsSync(release) ? release : join(a[0], 'ship-receipt.json')), read(a[1]), a[2]);
+    // the raw gate receipt when the folder has it (the laptop); the release receipt alone otherwise (release.yml, #2262)
+    const { problems, lines } = !existsSync(gate) ? acceptedReleaseProblems(read(release), read(a[1]), a[2]) : acceptedProblems(read(gate), digest(gate), read(existsSync(release) ? release : join(a[0], 'ship-receipt.json')), read(a[1]), a[2]);
     if (problems.length) fail(problems);
     for (const l of lines) console.log(l);
     console.log('the receipts are clean for this commit apart from the exceptions the maintainer accepted');

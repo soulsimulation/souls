@@ -1,8 +1,5 @@
 // #1145: instructions.md is what a new Soul's agent follows first. `act` takes an offered id and refuses words.
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -13,23 +10,10 @@ test('the guide shows act with an offered id, never with quoted words', () => {
   assert.match(guide, /`node eden\.mjs act wave:here --wait`/);
 });
 
-// An onboarding in a read-only agent sandbox failed noisily on the skill copy: it is optional, so a folder it cannot write
-// falls back to ./SKILL.md with one quiet line.
-test('step 1 copies the skill where it can and otherwise says, in one line, that ./SKILL.md is used', (t) => {
-  const copy = guide.split('\n').filter((l) => /^ {3}\{ mkdir -p \.claude\/skills|^ {5}\|\| echo/.test(l)).join('\n');
-  assert.match(copy, /\|\| echo "note: /, 'the copy step and its fallback note');
-  const run = (dir) => spawnSync('bash', ['-c', copy], { cwd: dir, encoding: 'utf8' });
-  const home = () => {
-    const d = mkdtempSync(join(tmpdir(), 'souls-instructions-'));
-    t.after(() => { chmodSync(d, 0o755); rmSync(d, { recursive: true, force: true }); });
-    writeFileSync(join(d, 'SKILL.md'), 'skill'); return d;
-  };
-  const writable = home(), ok = run(writable);
-  assert.deepEqual([ok.status, ok.stdout, ok.stderr], [0, '', '']);
-  assert.equal(readFileSync(join(writable, '.claude/skills/souls/SKILL.md'), 'utf8'), 'skill');
-  const sandbox = home(); chmodSync(sandbox, 0o555);
-  const ro = run(sandbox);
-  assert.equal(ro.status, 0); assert.equal(ro.stderr, '');
-  assert.match(ro.stdout, /^note: \.claude\/skills is not writable here; using \.\/SKILL\.md\n$/);
-  assert.equal(existsSync(join(sandbox, '.claude')), false);
+// An onboarding in a read-only agent sandbox failed noisily on the skill copy: it is optional, so a folder the agent
+// cannot write falls back to ./SKILL.md.
+test('step 1 copies the skill where the harness reads skills, or reads ./SKILL.md when that folder is not writable', () => {
+  const step1 = guide.slice(guide.indexOf('1. **This folder'), guide.indexOf('2. **Name.**')).replace(/\s+/g, ' ');
+  assert.match(step1, /Put a copy of SKILL\.md where your harness reads skills/);
+  assert.match(step1, /if that folder is not writable \(a read-only sandbox\), skip the copy and read `\.\/SKILL\.md`/);
 });

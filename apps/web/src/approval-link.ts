@@ -1,5 +1,7 @@
-/** `#approve/ap_…` — the link the Soul CLI prints for its human. No imports: node tests and the page shell both read it. */
-export const approvalFromHash = (hash: string) => /^#approve\/(ap_[a-f0-9]{32})$/.exec(hash)?.[1] ?? null;
+/** `#approve/ap_…` — the link the Soul CLI prints for its human — or `#approve/aq_…`, an account request (#2245: a login
+ *  or a retire); callers branch on the prefix (`isAccountRequest`). No imports: node tests and the page shell both read it. */
+export const approvalFromHash = (hash: string) => /^#approve\/(a[pq]_[a-f0-9]{32})$/.exec(hash)?.[1] ?? null;
+export const isAccountRequest = (id: string) => id.startsWith('aq_');
 
 const MODES = ['create', 'repair'], STATUSES = ['pending', 'creating', 'ready', 'refused', 'cancelled', 'expired'];
 /** A world's answer about one approval is that request (`id`), well formed, and ready only together with its Soul. With

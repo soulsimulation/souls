@@ -14,11 +14,14 @@ export const MODULES = [
   ["people.mjs", "soulPeople"],
   ["consolidate.mjs", "soulConsolidate"],
   ["memory.mjs", "soulMemory"],
+  ["digest.mjs", "soulDigest"],
   ["client-body-kit.mjs", "soulBodyKit"],
   ["catalog.mjs", "soulCatalog"],
   ["live.mjs", "soulLive"],
   ["wake.mjs", "soulWake"],
   ["net.mjs", "soulNet"],
+  ["dashboard.mjs", "soulDashboard"],
+  ["render.mjs", "soulRender"],
 ];
 
 /** A module as a generated block: node imports hoisted under private names, another inlined module read from its closure,
