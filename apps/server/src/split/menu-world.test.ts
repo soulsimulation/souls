@@ -31,7 +31,9 @@ const LEDGER_MAIN_ONLY = new Set(['constructor', 'attachComms', 'attachPresence'
   // #1496: it tells Souls their programmes stopped for a non-finite hold, called only from onRecovery on main
   'onNonFiniteHeld',
   // #1324: the steer act's landing preview (previewSteerLandingV1), called only from the ride object's steer act on main
-  'steerLanding']);
+  'steerLanding',
+  // #2085: it marks the open harvest act's landed pick, called only from the harvest faculty's tick on main
+  'actApplied']);
 
 test('grep: no engine reach in the read code (ledger read methods, perception, together, god-nav, human capabilities, deck)', () => {
   const ledger = [...reaches('edge/ledger/ledger.ts', /host\.engine/g)].filter(([m]) => !LEDGER_MAIN_ONLY.has(m));
