@@ -290,6 +290,9 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
       const rules = e.payload as { runtimePolicy?: {sleepBlockTicks:number;quietSeatCourtesy?:boolean}; dayConfig?: { origin: number; dayTicks: number }; quiet?: boolean; compact?: boolean; adoptCamp?: boolean; restockCamp?: boolean; anchors?: import('@souls/engine-contract').Anchor[]; soulId?: string; character?: string };
       if (rules?.runtimePolicy) {
         if (!engine.configureRuntimePolicy) throw Error('runtime-policy.unsupported');
+        // #2302 classroom-tv/1: the screens it marks are the ones its event logged, or the refold stops here
+        const tv = (e.payload as {classroomTvV1?: {screens?: string[]}} | null)?.classroomTvV1;
+        if (tv && JSON.stringify(engine.classroomTvScreensV1?.() ?? []) !== JSON.stringify(tv.screens ?? [])) throw Error('classroom-tv.screens-differ');
         engine.configureRuntimePolicy(rules.runtimePolicy);
         // #1521 stand-height/2's one-time repair, logged with its adoption: the same bodies to the same places, nothing read again
         const stood = (e.payload as {standHeightRepairV2?: {bodies?: {id: string; p: [number, number, number]}[]}} | null)?.standHeightRepairV2;
