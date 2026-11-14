@@ -336,6 +336,35 @@ export function awayText(since, heartbeat, now) {
 }
 /** Pure: the mind went away: the away line that was set, and the line it replaced (null for none), kept. */
 export const wentAway = (wake, since, text, stored) => ({ ...wake, mind: { ...wake?.mind, away: { since, text, stored } } });
+// #2309: the world's wind-down (#2295, wind-down/1). An hour after the agent's last act the world walks the body out of town
+// (idle), half an hour later to open ground (zombie), where it sleeps (asleep) until the agent acts. Serve reads the world's
+// view of this Soul's body ({state, doing, since}: observe's self.body) and keeps it; look and the dashboard show it.
+export const WIND_DOWN_MS = 3_600_000, WIND_DOWN_OUT_MS = 1_800_000, BODY_READ_MS = 600_000;
+const PHASE = { awake: "owned", idle: "wandering out", zombie: "wandering out", asleep: "asleep" };
+const isoOf = (ms) => new Date(ms).toISOString();
+/** Pure: what look and the dashboard say of the body view serve kept (`read`: when it read it), or null for none. */
+export function bodyPhase(body, now) {
+  if (!body || !PHASE[body.state]) return null;
+  const since = Number(body.since) > 0 ? Number(body.since) : null, end = body.state === "awake" && since ? since + WIND_DOWN_MS : null;
+  return { phase: PHASE[body.state], ...(body.doing ? { doing: body.doing } : {}), ...(since ? { since: isoOf(since) } : {}),
+    ...(end ? { hourEndsAt: isoOf(end), minutesLeft: Math.max(0, Math.ceil((end - now) / 60_000)) } : {}),
+    ...(Number.isFinite(body.read) ? { readSecondsAgo: Math.max(0, Math.round((now - body.read) / 1000)) } : {}),
+    note: end ? "An hour after your last act the world walks your body out of town; an act keeps it, reading and listening do not."
+      : body.state === "asleep" ? "Asleep until you act; your next act wakes it." : "Walking out on its own; your next act brings it back." };
+}
+/** Pure: when serve reads the body again (observe is a heavy read): just after the world's next step is due, at the latest
+ *  `BODY_READ_MS` (× `scale`) on; never while asleep, which only an act ends (and an act asks again). */
+export function nextBodyRead(body, now, scale = 1) {
+  if (body?.state === "asleep") return Infinity;
+  const since = Number(body?.since) > 0 ? Number(body.since) : null, late = now + BODY_READ_MS * scale;
+  const due = !since ? late : body.state === "awake" ? since + WIND_DOWN_MS : body.state === "idle" ? since + WIND_DOWN_OUT_MS : late;
+  return Math.max(now + 5_000 * scale, Math.min(late, due + 5_000));
+}
+/** Pure: the body after an act the agent sent was accepted, as the world's rule takes it: owned again from now. `{body, read}`:
+ *  an owned body only moves its hour on (no read); any other phase is read again soon, to see the world bring it back. */
+export function actedBody(body, now) {
+  return body?.state === "awake" ? { body: { ...body, since: now }, read: false } : { body, read: true };
+}
 /** Pure: the mind is back (an acting command, serve --stop, `wake away off`). `line`: the public line now; `own`: the command sets
  *  its own line. {wake, restore}: restore is the kept line to set again (null clears it), or undefined when nothing is set. The kept
  *  line comes back only while the public line still says away, and a command's own line wins over it. */

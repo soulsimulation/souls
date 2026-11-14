@@ -118,7 +118,7 @@ export class PersistedIntentAdmissionFault extends Error {
   constructor(decisionSeq:number) { super('decision and admission persisted; physical application requires reconciliation'); this.decisionSeq=decisionSeq; }
 }
 type Pending = { kind: EventKind; author: string; payload: any; resolve?: (e: LogEvent) => void; guard?: AcceptanceGuard; journal?: AcceptanceJournal; reject?: (error: unknown) => void; purpose?: PurposeRef; stationEra?:boolean; atomicObjectDecision?:boolean };
-export type BootStats = { from: 'genesis' | 'snapshot'; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
+export type BootStats = { from: 'genesis' | 'snapshot'; /** the restored snapshot's state hash */ fromStateHash?: string; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
 export type SnapshotBody = { runtime: EngineSnapshot; minds: Mind[]; seq: number; extra: Record<string, unknown>; kernel?: KState; counts?: Record<string, number>; faultedHeadV1?: true };
 export type HostListener = {
   onBatch?(b: Batch): void;
@@ -198,6 +198,9 @@ export class WorldHost {
   tickSpans: { file: string; rows: string[] } | null = process.env.SOULS_TICK_SPANS ? { file: process.env.SOULS_TICK_SPANS, rows: [] } : null;
   /** The last boot's phases (lane L5): restore = snapshot read + decode + engine restore; replay = stepping logged history to its head. */
   bootStats: BootStats | null = null;
+  /** Asked at each snapshot's capture (same tick); what it returns runs once that snapshot is saved (the god bridge's boot
+   *  record beside it: engine-bridge.ts bootRecord). */
+  snapshotSidecar: (() => (at: { tick: number; stateHash: string }) => void) | null = null;
   private queue: Pending[] = [];
   private intentControllerFaults = new Set<string>();
   private intentObservations: IntentObservations;
@@ -380,7 +383,7 @@ export class WorldHost {
     if (!this.db.hasVocabulary(this.worldId)) void this.enqueue('rules', 'system', { vocabulary: structuredClone(baseVocabulary(this.kernel)), why: 'the vocabulary this world began with' });
     if (this.pendingBootstrap) { void this.enqueue('rules', 'system', { kernelBootstrap: this.pendingBootstrap, why: 'the kernel begins here for a world that predates it' }); this.pendingBootstrap = null; }
     const end = performance.now();
-    const stats: BootStats = { from, restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
+    const stats: BootStats = { from, ...(snap ? { fromStateHash: snap.stateHash } : {}), restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
       replayTicks, replayEvents: later.length, fromTick, toTick: this.engine.world.tick, minds: this.minds.size };
     this.bootStats = stats;
     console.log(`[boot] restore ${stats.restoreMs} ms from ${from} tick ${fromTick} (snapshot read+decode ${stats.readMs} ms, ${stats.minds} minds)`);
@@ -1443,6 +1446,12 @@ export class WorldHost {
   /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
    *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
   enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
+  /** #1952 wait-bound/1, one logged rules event (prospective): off a stair flight, a walk whose body has not left a 0.5 m disc
+   *  or changed level for a minute ends route.blocked, named waits included; a forced release leaves no walk exec. Main adopts it at boot. */
+  enableWaitBoundV1(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV1?:boolean}|undefined)?.waitBoundV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV1:true},why:'wait-bound/1 (#1952): a walk that makes no headway for a minute ends route.blocked and names what it waited for, and a released walk leaves nothing behind; retain historical replay before this event'});}
+  /** #1288 wait-bound/2, one logged rules event (prospective): wait-bound/1's bound for a swim or a journey through water too
+   *  (swim_to, ground_travel, swim_in), so a swim held behind a body in the water ends route.blocked. Main adopts it at boot, after wait-bound/1. */
+  enableWaitBoundV2(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV2?:boolean}|undefined)?.waitBoundV2)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV2:true},why:'wait-bound/2 (#1288): a swim or a journey through water that makes no headway for a minute ends route.blocked and names what it waited for; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
@@ -1474,6 +1483,10 @@ export class WorldHost {
    *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event
    *  replays as it was. Main adopts it at boot. */
   enableCarrierParkAwayV1(author='operator:park-away'){if((this.extra.runtimePolicy as {carrierParkAwayV1?:boolean}|undefined)?.carrierParkAwayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,carrierParkAwayV1:true},why:'park-away/1 (#2196): a ride never moves with nobody aboard; one that landed away parks there and the next rider flies it home; retain historical replay before this event'});}
+  /** board-path/1, one logged rules event (prospective): a boarder's step into a carrier never brings it within the human-human
+   *  separation of another body; it goes round the basket the other way or waits, then gives the seat up with a named reason,
+   *  never brushing past (collision.human-human and a recovery). History before the event replays as it was. Main adopts it at boot. */
+  enableCarrierBoardPathV1(author='operator:board-path'){if((this.extra.runtimePolicy as {carrierBoardPathV1?:boolean}|undefined)?.carrierBoardPathV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,carrierBoardPathV1:true},why:'board-path/1: a boarder goes round or waits for a body in its way to the boarding step, never brushing it; retain historical replay before this event'});}
   /** #1496 nonfinite-hold/1 (prospective, needs quarantine/1): a non-finite number the frontier hash meets that quarantine/1 doesn't hold is put back to its last good value by a logged event, never a halt. */
   enableNonFiniteHoldV1(author='operator:nonfinite-hold'){if((this.extra.runtimePolicy as {nonFiniteHoldV1?:boolean}|undefined)?.nonFiniteHoldV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteHoldV1:true},why:'nonfinite-hold/1 (#1496): a number in the hashed head that is no number is put back to its value in the last good snapshot by a logged patch, and what it touched stops; retain historical replay before this event'});}
   /** #1369 quarantine/1, one logged rules event (prospective): when the repair ladder can't go back (rung 3's restore fails), or a
@@ -1812,15 +1825,15 @@ export class WorldHost {
     try { corrupt = (this.engine.corruptBodiesV1?.() ?? []).flatMap(k => k.subjects); } catch (failure) { console.error('[world] could not look for broken bodies:', String(failure).slice(0, 200)); }
     return { bodies: [...new Set([...this.namedBodies(error), ...corrupt, ...this.thrownSources(error)])].sort(), corrupt };
   }
-  /** #1377: an invariant that threw names nobody. What it was reading is found on a scratch restore of the head (the engine
-   *  takes entities out there, one half at a time), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
+  /** #1377: an invariant that threw names nobody. What it was reading is found on the engine's own copy of the entity table
+   *  (it takes entities out there, one half at a time; #2168: so a head that won't restore or snapshot is read too), at most once a tick for one fault; the quarantine event logs it, so a replay reads that. */
   private thrownAt: {tick: number; fault: string; ids: string[]} | null = null;
   private thrownSources(error: unknown): string[] {
     if (!this.quarantineRule || !faultKeys(error).some(k => k.code === THROWN_RULE && !k.subjects.length)) return [];
     const tick = this.engine.world.tick, fault = String(error);
     if (this.thrownAt?.tick !== tick || this.thrownAt.fault !== fault) {
       let ids: string[] = [];
-      try { if (this.engine.thrownSourcesV1 && this.engine.canSnapshot?.() !== false) ids = this.factory.restore(structuredClone(this.engine.snapshot())).thrownSourcesV1?.() ?? []; }
+      try { ids = this.engine.thrownSourcesV1?.() ?? []; }
       catch (failure) { console.error('[world] could not find what a thrown invariant was reading:', String(failure).slice(0, 200)); }
       this.thrownAt = {tick, fault, ids};
     }
@@ -2414,9 +2427,9 @@ export class WorldHost {
   private captureHead() {
     const t0 = performance.now();
     const runtime = this.engine.snapshot();
-    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash() };
+    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash(), sidecar: this.snapshotSidecar?.() };
   }
-  private commitHead({ t0, runtime, body, physicalHash }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
+  private commitHead({ t0, runtime, body, physicalHash, sidecar }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
     // captureBody owns every field; persistence only reads it, and restoration/
     // recovery recipes clone before mutation. Keep one immutable captured body.
     // #1150: a head captured here during a failing stretch is marked and serves a boot, never a rewind. A sliced capture
@@ -2427,7 +2440,7 @@ export class WorldHost {
     this.snapshotMs.capture = performance.now() - t0;
     this.lastSnapshotTick = runtime.tick; this.snapshotTaken();
     const generation = this.snapshotGeneration;
-    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1;
+    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1; sidecar?.(meta);
       this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.persist; };
     if (sync) persist(); else setImmediate(persist);
     return { tick: runtime.tick, stateHash: runtime.stateHash };
@@ -2453,11 +2466,12 @@ export class WorldHost {
       const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
       const fields = this.captureHostState();
       const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const sidecar = this.snapshotSidecar?.();
       const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
       const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
         return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
       })();
-      return { checkpoint, legacy, fields, steps };
+      return { checkpoint, legacy, fields, steps, sidecar };
     };
     // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
     // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
@@ -2474,7 +2488,7 @@ export class WorldHost {
       if (code === 'snapshot.non-finite' && this.nonFiniteHoldRule && this.holdNonFinite(error)) this.snapshotSoon ??= 'a non-finite number was put back';
       return;
     }
-    const { checkpoint, legacy, fields, steps } = parts;
+    const { checkpoint, legacy, fields, steps, sidecar } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
@@ -2516,7 +2530,7 @@ export class WorldHost {
         const at = performance.now(), json = JSON.stringify(body);
         this.snapshotMs.serialize = performance.now() - at;
         later(() => {
-          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json);
+          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json); sidecar?.(meta);
           this.snapshotMs.persist = performance.now() - at;
           this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.finish + this.snapshotMs.serialize + this.snapshotMs.persist;
           this.periodicSnapshot = null;

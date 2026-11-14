@@ -14,9 +14,12 @@ import {CATALOG} from '../../../../mars/viewer/engine/world/catalog.ts';
 import {MAX_KG_PER_CARRIER} from '../../../../mars/viewer/engine/carry/formation.ts';
 import {JUGGLE} from '../../../../mars/viewer/engine/items/juggle.ts';
 import { deckRaised, railGaps, rasterOf } from '@souls/generators';
-import { applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
+import { hashOf, applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { legalEditsV1 } from '../edge-runtime-rules.ts';
+import { previewWorldEditOffThreadV1, type PreviewViolationV1 } from './edit-preview.ts';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
 import type { LogEvent } from '@souls/protocol';
@@ -105,6 +108,9 @@ type EngineV1 = {
 };
 
 const EVACUATE_RETRY_TICKS = 400; // a closure walk-out the engine could not land is retried after this many ticks
+/** legal-edits/1: a preview verdict stands for this many ticks (30 s at 20 Hz, past the preview's own 20 s timeout); the
+ *  walk-out planner re-checks residents at commit. */
+const VERDICT_TICKS = 600;
 /** `sent` marker for a thing a walk-out took out of a resident's hands: whatever the entity world says next (a place on
  *  the ground, or nothing: removed) differs from it, so it is always sent. */
 const RELEASED = '"released"';
@@ -159,7 +165,14 @@ export function helixEnds(path: Vec2[]): { foot: Vec2; head: Vec2; stepFrom: Vec
 }
 
 export type BridgeOptions = { host: WorldHost; god: GodMode; edge?: EdgeLedger; log?: (m: string) => void; /** Highest level id levelFor hands out (default and most: MAX_LEVEL_ID; tests use fewer to reach the reuse path) */ maxLevel?: number; /** F3: new-world lore (default: any world key but eden/mars/littlemartians/toy) */ worldLore?: boolean; /** F3: the world clock from the god's time.dayTicks (default: a god world without ENABLE_LIVING_WORLD) */ worldClock?: boolean; /** B-facade: the read worker's bridge (split/read-bridge.ts): the read side only, over a GodReplica and the
- *  worker's MenuWorld (no engine listeners, no projection, no writes; acts go to main) */ read?: boolean };
+ *  worker's MenuWorld (no engine listeners, no projection, no writes; acts go to main) */ read?: boolean;
+  /** Boot reconcile skip: the file beside the snapshot (in the data directory) that says each snapshot was written by
+   *  `build` with the bridge in step at a god edit sequence; a boot from that snapshot at that edit skips the derive.
+   *  Off when absent (tests, tools) or when `build` is 'dev' (a dev checkout can change code without changing it). */
+  bootRecord?: { file: string; build: string } };
+/** What the boot record says about one snapshot: written by `build`, the engine's physics derived from the god model at
+ *  `editSeq` with nothing pending, and the door facts the derive would have found (the only state a skipped derive keeps). */
+export type BootRecordV1 = { contract: 'boot-reconcile/1'; worldId: string; build: string; tick: number; stateHash: string; editSeq: number; physicsHash: string; doorIds: string[]; gated: string[]; /** deriveInputs() */ inputs: string };
 
 /** Load lane L4: per-step ms of the bridge's tick work, the tick-ms distribution and the derived-work counters since the
  *  last line. Only built with SIM_L4_STATS=1. */
@@ -269,7 +282,7 @@ export class EngineBridge {
    *  pose: what nav and perceive re-derive on. */
   private version = 0;
   private log: (m: string) => void;
-  stats = { edits: 0, entities: 0, writeBacks: 0, refusals: 0, bodies: 0, lastMs: 0 };
+  stats = { edits: 0, entities: 0, writeBacks: 0, refusals: 0, bodies: 0, lastMs: 0, bootSkipped: false };
   /** P4: Souls walk to god-built named things (nav.ts). */
   readonly nav: GodNav;
   /** F1: god-built things Souls can see, look at and read (perceive.ts). */
@@ -298,6 +311,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
+    if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
     this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
@@ -383,7 +397,8 @@ export class EngineBridge {
     if (!R) syncProviders.set(this.god.model, () => { this.flush(); return this.physics?.hash === this.engine.world.entityPhysicsV1?.hash; });
     seatProviders.set(this.god.model, (id) => { const f = (this.engine as unknown as { seatOccupantsV1?: (id: string) => { slot: string; body: string }[] }).seatOccupantsV1; return f ? f.call(this.engine, id).map((x) => ({ slot: x.slot, soul: this.soulName(x.body) })) : []; });
     usesProviders.set(this.god.model, (id) => { const u = this.usesOf(id); return u ? { soul: u.soul, body: u.body, how: u.how, thing: this.model.pathOf(u.id) } : null; });
-    // G1 "god rules": god edits are never refused for residents; the ones in the way are walked out (walkout.ts).
+    // G1 "god rules" (before legal-edits/1): god edits are never refused for residents; the ones in the way are walked out
+    // (walkout.ts). Under legal-edits/1 such an edit is refused instead (legalCheck) and nobody is walked out.
     // prepare plans on the would-be world before the commit and moves nobody, so a refused batch, a failed SQL write,
     // a preview or a receipt retry never moves a resident; apply logs and folds the planned moves after the commit,
     // before the new geometry reaches the engine, in the same request. Only body entities themselves are refused.
@@ -396,6 +411,7 @@ export class EngineBridge {
       refuse: (after, diff, ops, o) => this.protectedBody(after, diff, ops, o?.undo === true),
       prepare: (before, after, diff, _ops, o) => { if (o?.dry !== true) { try { this.arrivalShaped = shapedIds(before, diff); } catch { this.arrivalShaped = null; } this.navShaped = this.arrivalShaped && navDoorFlips(before, diff, this.arrivalShaped); this.navBefore = this.navSpots(before, [...diff.removes, ...(this.navShaped ?? diff.upserts.map(e => e.id))]); } return this.prepareWalkouts(before, after, diff, o?.dry === true); },
       apply: (moved, o) => { const late = this.applyWalkouts(moved, this.stuckPlanned.splice(0)); this.stageMapNotices(o); return late; },
+      legal: (before, after, diff, o) => this.legalCheck(before, after, diff, o?.dry === true), legalRun: () => this.legalRun(), legalDone: () => { this.verdict = null; this.wanted = null; },
       arrivalNote: diff => this.arrivalNoteFor(diff),
       navNote: (diff, said) => this.navNoteFor(diff, said),
       framesNote: () => this.framesNote(),
@@ -425,7 +441,9 @@ export class EngineBridge {
   private get engine(): EngineV1 { return this.host.engine as unknown as EngineV1; }
   /** B-facade: the Soul listing (`capabilities`) reads the world through the read-only facade (split/menu-world.ts). */
   private get mw(): MenuWorld { return menuWorldOf(this.host); }
-  private get model(): WorldModel { return this.god.model; }
+  /** legal-edits/1: the would-be world a draft is derived from (draftFor), else the god's own. */
+  private draftModel: WorldModel | null = null;
+  private get model(): WorldModel { return this.draftModel ?? this.god.model; }
 
   /** True only at a completed normal tick frontier, with every derived draft accepted by this engine.
    * Call again immediately before publishing HTTP: a model commit may occur between promise continuations. */
@@ -558,22 +576,88 @@ export class EngineBridge {
     // seed `sent` from the engine's own state so only real differences are sent
     for (const [id, part] of Object.entries(ep?.byEntity ?? {})) this.sent.set(id, sentKey(JSON.stringify(normPart(part as Part))));
     for (const [id, e] of Object.entries(this.engine.world.entities)) if (e.tags?.includes('entity-world')) this.sent.set(id, sentKey(JSON.stringify(normPart({ ...(ep?.byEntity[id] ?? {}), fixture: fixtureOfEngine(e) } as Part))));
+    // the engine snapshot was written by this build with the bridge in step at the god model's present edit: a derive of
+    // every entity would find nothing to send, so only what it keeps (the door facts) is taken from the record
+    const rec = this.bootRecordMatch(ep);
+    if (rec) {
+      this.doorIds = new Set(rec.doorIds); this.gated = new Set(rec.gated); this.stats.bootSkipped = true;
+      this.log(`boot: snapshot at tick ${rec.tick} written by this build at edit ${rec.editSeq}: nothing to derive`); return;
+    }
     const all = new Set<string>([...this.model.entities.keys(), ...this.sent.keys()]);
     this.send(all, 0, 'boot');
+  }
+  private bootRecord?: { file: string; build: string };
+  /** The boot record, when it is for exactly the snapshot this boot restored, with nothing replayed after it, the same
+   *  build and the god model at the recorded edit (else null: the boot derives everything). */
+  private bootRecordMatch(ep: EntityPhysicsV1 | undefined): BootRecordV1 | null {
+    const r = this.bootRecord, b = this.host.bootStats;
+    if (!r || r.build === 'dev' || !b || !ep || b.from !== 'snapshot' || b.replayEvents || b.replayTicks) return null;
+    let rec: BootRecordV1;
+    try { rec = JSON.parse(readFileSync(r.file, 'utf8')) as BootRecordV1; } catch { return null; }
+    return rec?.contract === 'boot-reconcile/1' && rec.worldId === this.host.worldId && rec.build === r.build && rec.tick === b.fromTick &&
+      rec.stateHash === b.fromStateHash && rec.editSeq === this.model.editSeq && rec.physicsHash === ep.hash &&
+      Array.isArray(rec.doorIds) && Array.isArray(rec.gated) && rec.inputs === this.deriveInputs() ? rec : null;
+  }
+  /** At a snapshot's capture: the facts of this head if the bridge is in step with the engine (everything derived is
+   *  folded, nothing pending), written once the snapshot is saved; otherwise the record is removed. */
+  private recordAtCapture(r: { file: string; build: string }): (at: { tick: number; stateHash: string }) => void {
+    const ep = this.engine.world.entityPhysicsV1;
+    const inStep = r.build !== 'dev' && this.reconciled && !this.pending.size && !this.projectionDrafts.size && !!ep && this.physics?.hash === ep.hash && this.engineAgrees();
+    const rec = inStep ? { contract: 'boot-reconcile/1' as const, worldId: this.host.worldId, build: r.build, editSeq: this.model.editSeq, physicsHash: ep!.hash, doorIds: [...this.doorIds].sort(), gated: [...this.gated].sort(), inputs: this.deriveInputs() } : null;
+    return (at) => {
+      const tmp = `${r.file}.${process.pid}.tmp`;
+      try {
+        if (!rec) { rmSync(r.file, { force: true }); return; }
+        writeFileSync(tmp, JSON.stringify({ ...rec, tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
+      } catch (e) { rmSync(tmp, { force: true }); this.log(`boot record not written: ${(e as Error).message}`); }
+    };
+  }
+  /** What a boot's full derive compares, per entity: the engine's own physics part, with its fixture as the engine holds
+   *  it for a god thing (the same key reconcile seeds `sent` with). */
+  private engineKey(id: string): string | null {
+    const part = this.engine.world.entityPhysicsV1?.byEntity[id] as Part | undefined, e = this.engine.world.entities[id];
+    if (e?.tags?.includes('entity-world')) return sentKey(JSON.stringify(normPart({ ...(part ?? {}), fixture: fixtureOfEngine(e) } as Part)));
+    return part ? sentKey(JSON.stringify(normPart(part))) : null;
+  }
+  /** A boot's full derive would send nothing: every god thing's last derived key is what the engine holds (a thing a Soul
+   *  moved natively, or an engine act the model took without sending, differs until it is sent), and the engine holds
+   *  nothing the model no longer has. One key per god thing; no derive. */
+  private engineAgrees(): boolean {
+    const ents = this.engine.world.entities as Record<string, { tags?: string[] }>;
+    for (const id of Object.keys(this.engine.world.entityPhysicsV1?.byEntity ?? {})) if (!this.model.entities.has(id)) return false;
+    for (const [id, e] of Object.entries(ents)) if (e.tags?.includes('entity-world') && !this.model.entities.has(id)) return false;
+    for (const e of this.model.entities.values()) if (!this.engineOwned(e) && (this.sent.get(e.id) ?? null) !== this.engineKey(e.id)) return false;
+    return true;
+  }
+  /** The derive's inputs besides the build and the god model: the shared-carry flag (fixture specs) and, for each mesh
+   *  thing, whether its asset and footprint are on disk (a late asset pull changes what bakes). */
+  private deriveInputs(): string {
+    const meshes = new Set<string>();
+    for (const e of this.model.entities.values()) {
+      const m = this.model.resolvedDef(e.def)?.make as { kind?: string; asset?: string; footprint?: string } | undefined;
+      if (m?.kind !== 'mesh' || !m.asset) continue;
+      const info = this.model.assets(m.asset), fp = m.footprint ? this.model.assets(m.footprint) : undefined;
+      meshes.add(`${m.asset}:${info ? info.tris : '-'}:${m.footprint ?? ''}:${fp?.baked ? createHash('sha256').update(JSON.stringify(fp.baked)).digest('hex').slice(0, 16) : '-'}`);
+    }
+    return createHash('sha256').update(JSON.stringify({ sharedCarry: !!this.edge?.sharedCarry, meshes: [...meshes].sort() })).digest('hex');
   }
 
   /** Commits between two ticks coalesce into one world-edit (one Spatial re-base per tick at most). */
   private pending = new Set<string>();
   private onCommit(diff: Diff) {
     if (!this.reconciled) return; // the first tick reconciles everything
-    for (const e of diff.upserts) for (const id of this.model.subtree(e.id)) this.pending.add(id);
-    for (const id of diff.removes) this.pending.add(id);
+    this.affected(diff, this.pending);
+  }
+  /** The ids a committed diff makes the bridge derive again (in `this.model`: the god's, or a draft's would-be world). */
+  private affected(diff: Diff, into: Set<string>) {
+    for (const e of diff.upserts) for (const id of this.model.subtree(e.id)) into.add(id);
+    for (const id of diff.removes) into.add(id);
     // PC16 (#695): a floor going away, or a sheet no longer laid, changes the landing at a flight's top
-    if (diff.removes.some((id) => (this.physics?.byEntity?.[id] as Part | undefined)?.surfaces?.some((f) => f.level > 0)) || diff.upserts.some((e) => this.isDeckSheet(this.model.resolvedDef(e.def)))) for (const f of this.model.entities.values()) if (f.joins && this.isStairFlight(this.model.resolvedDef(f.def))) this.pending.add(f.id);
+    if (diff.removes.some((id) => (this.physics?.byEntity?.[id] as Part | undefined)?.surfaces?.some((f) => f.level > 0)) || diff.upserts.some((e) => this.isDeckSheet(this.model.resolvedDef(e.def)))) for (const f of this.model.entities.values()) if (f.joins && this.isStairFlight(this.model.resolvedDef(f.def))) into.add(f.id);
     // doorblock: a door put into, moved out of or taken from a wall's gate gap changes whether that gate yields to it
-    if (diff.upserts.some((e) => this.doorIds.has(e.id) || this.isDoor(e)) || diff.removes.some((id) => this.doorIds.has(id))) for (const id of this.gated) this.pending.add(id);
+    if (diff.upserts.some((e) => this.doorIds.has(e.id) || this.isDoor(e)) || diff.removes.some((id) => this.doorIds.has(id))) for (const id of this.gated) into.add(id);
     // terrain moved under things (pads, landforms): re-derive everything (each entity is only sent if it changed)
-    if (diff.tiles.length) for (const id of this.model.entities.keys()) this.pending.add(id);
+    if (diff.tiles.length) for (const id of this.model.entities.keys()) into.add(id);
   }
   /** Send what the commits since the last tick changed (also called by tests and `reach`, so reads see the latest edit). */
   flush() { if (!this.pending.size) return; const ids = this.pending; this.pending = new Set(); this.send(ids, this.model.editSeq, 'commit'); }
@@ -581,6 +665,30 @@ export class EngineBridge {
   /** Derive the changed entities and enqueue one world-edit carrying exactly what differs. */
   private send(ids: Set<string>, seq: number, why: string) {
     const t0 = performance.now();
+    const { set, assets } = this.deriveSet(ids);
+    if (!Object.keys(set).length) return;
+    const draft: WorldEditV1 = { contract: 'world-edit/1', seq, hash: '', levels: structuredClone(this.levels), set, ...(Object.keys(assets).length ? { assets } : {}) };
+    this.physics = buildWorldEditPhysics(this.physics, draft);
+    draft.hash = this.physics.hash;
+    this.stats.edits++; this.stats.entities += Object.keys(set).length; this.stats.lastMs = Math.round((performance.now() - t0) * 10) / 10;
+    const acceptance = { applied: false };
+    this.projectionDrafts.set(draft, acceptance);
+    try {
+      void this.host.enqueue('world-edit', 'god', draft).then(event => {
+        this.projectionDrafts.delete(draft);
+        if (event.payload !== draft || !acceptance.applied || this.engineReplaced()) {
+          this.failProjection(new Error('bridge.readiness.draft-not-accepted')); return;
+        }
+        this.checkProjectionSoon();
+      }, err => {
+        this.projectionDrafts.delete(draft);
+        this.failProjection(err); this.log(`world-edit ${seq} not logged: ${err?.message ?? err}`);
+      });
+    } catch (error) { this.failProjection(error); throw error; }
+    if (why !== 'commit' || Object.keys(set).length > 8) this.log(`${why}: world-edit seq ${seq}, ${Object.keys(set).length} entities, ${this.stats.lastMs} ms`);
+  }
+  /** The parts of `ids` (and the raised decks a moved link re-opens) that differ from what the engine holds; updates `sent`. */
+  private deriveSet(ids: Set<string>): { set: WorldEditV1['set']; assets: Record<string, unknown> } {
     this.doorSpotsCache = null;
     this.levelsNow.clear(); this.sendFloors = new Map(); this.sendIds = ids;
     const set: WorldEditV1['set'] = {}, assets: Record<string, unknown> = {};
@@ -613,28 +721,22 @@ export class EngineBridge {
       if (key) this.sent.set(e.id, key); else this.sent.delete(e.id);
     }
     this.sendIds = null;
-    if (!Object.keys(set).length) return;
-    const draft: WorldEditV1 = { contract: 'world-edit/1', seq, hash: '', levels: structuredClone(this.levels), set, ...(Object.keys(assets).length ? { assets } : {}) };
-    this.physics = buildWorldEditPhysics(this.physics, draft);
-    draft.hash = this.physics.hash;
-    this.stats.edits++; this.stats.entities += Object.keys(set).length; this.stats.lastMs = Math.round((performance.now() - t0) * 10) / 10;
-    const acceptance = { applied: false };
-    this.projectionDrafts.set(draft, acceptance);
-    try {
-      void this.host.enqueue('world-edit', 'god', draft).then(event => {
-        this.projectionDrafts.delete(draft);
-        if (event.payload !== draft || !acceptance.applied || this.engineReplaced()) {
-          this.failProjection(new Error('bridge.readiness.draft-not-accepted')); return;
-        }
-        this.checkProjectionSoon();
-      }, err => {
-        this.projectionDrafts.delete(draft);
-        this.failProjection(err); this.log(`world-edit ${seq} not logged: ${err?.message ?? err}`);
-      });
-    } catch (error) { this.failProjection(error); throw error; }
-    if (why !== 'commit' || Object.keys(set).length > 8) this.log(`${why}: world-edit seq ${seq}, ${Object.keys(set).length} entities, ${this.stats.lastMs} ms`);
+    return { set, assets };
   }
-
+  /** legal-edits/1: the world-edit the bridge would send once `after` (the would-be world of `diff`) commits, derived without
+   *  sending it: every bridge field the derivation writes is put back. Null: the edit changes no physics. */
+  private draftFor(after: WorldModel, diff: Diff): WorldEditV1 | null {
+    const saved = { sent: new Map(this.sent), physics: this.physics, levels: structuredClone(this.levels), levelsNow: new Set(this.levelsNow), sendFloors: this.sendFloors, sendIds: this.sendIds, doorIds: new Set(this.doorIds), gated: new Set(this.gated), doorSpotsCache: this.doorSpotsCache, describeEpoch: this.describeEpoch, pending: new Set(this.pending) };
+    this.draftModel = after;
+    try {
+      const ids = new Set<string>(); this.affected(diff, ids);
+      const { set, assets } = this.deriveSet(ids);
+      if (!Object.keys(set).length) return null;
+      const draft: WorldEditV1 = { contract: 'world-edit/1', seq: this.god.model.editSeq, hash: '', levels: structuredClone(this.levels), set, ...(Object.keys(assets).length ? { assets } : {}) };
+      draft.hash = buildWorldEditPhysics(this.physics, draft).hash;
+      return draft;
+    } finally { this.draftModel = null; Object.assign(this, saved); }
+  }
   /** A body entity, or anything whose ancestor is a body (a carried bowl): the engine owns its physical state. */
   private engineOwned(e: Entity): boolean {
     for (let cur: Entity | undefined = e; cur; cur = cur.in.parent === 'world' ? undefined : this.model.entities.get(cur.in.parent)) if (this.model.resolvedDef(cur.def)?.components.body) return true;
@@ -1479,11 +1581,65 @@ export class EngineBridge {
       if (!dry) { this.flush(); this.host.drainInputs(); this.stuckPlanned = []; this.mapPlanned = null; }
       // Nothing goes into a resident's hands (an undo of a take): set down first, so the plan sees where it lands.
       const kept = dry ? { warnings: [], touched: [] } : unhand(this.engine, before, after, diff);
-      const { moved, stuck } = planWalkouts(this.engine, before, after, diff, this.host.minds.values());
+      // legal-edits/1: nobody is walked out; an edit with a resident in its way was refused before this (legalCheck)
+      const { moved, stuck } = legalEditsV1(this.host) ? { moved: [], stuck: [] } : planWalkouts(this.engine, before, after, diff, this.host.minds.values());
       const warnings = [...kept.warnings, ...stuck.map(stuckWarning)], touched = [...kept.touched];
       if (!dry) { this.stuckPlanned = stuck; touched.push(...dropReleased(after, diff, moved)); this.mapPlanned = this.planMap(before, after, diff, new Set([...moved, ...stuck].map(x => x.soulId)), touched); }
       return { moved, warnings, touched };
     } catch (e) { this.log(`walk-out planning: ${(e as Error).message}`); return { moved: [], warnings: [], touched: [] }; }
+  }
+  // ---- legal-edits/1 (legal by construction 1b, docs/design/legal-by-construction.md part 1)
+  /** The last preview's verdict, by key (the physics it applies to and the draft): what it found, the tick it was taken at,
+   *  and whether a dry run asked for it. It lives only inside the request that waited for it (`legalDone` drops it when that
+   *  request ends, and a new preview replaces it). A commit uses only a verdict a commit asked for, and uses it up; a dry run or
+   *  preview reads any verdict without using it up. So a commit is always checked against the world as it is at that commit. */
+  private verdict: { key: string; tick: number; failures: Failure[]; dry: boolean } | null = null;
+  /** The edit the last check found unpreviewed: `legalRun` previews it off the tick thread. */
+  private wanted: { key: string; draft: WorldEditV1; dry: boolean } | null = null;
+  /** Tests: how long an edit's preview may take (default edit-preview.ts PREVIEW_TIMEOUT_MS). */
+  legalTimeoutMs?: number;
+  /** Under legal-edits/1, a god edit, undo or redo is refused when its preview (the world-edit it would send, applied to a
+   *  detached copy of the engine, edit-preview.ts) breaks a rule, naming each body with its rule and nearest legal place, and
+   *  when it has a resident in its way or changes what one sits in, lies on or holds (the walk-out planner, which no longer
+   *  moves anyone). 'pending': its preview has not run, or is older than VERDICT_TICKS. Null: the rule is off or the edit passes. */
+  private legalCheck(before: WorldModel, after: WorldModel, diff: Diff, dry = false): Failure[] | 'pending' | null {
+    if (!legalEditsV1(this.host)) return null;
+    // Known limit: `unhand` (an undo of a take sets things down at the resident's feet, prepareWalkouts) runs after this check,
+    // so that set-down is not in the preview. It rewrites the would-be world and its `touched` list is journaled by the commit
+    // that ran it; running it here would rewrite a world that a pending round throws away and leave the commit nothing to journal.
+    this.flush(); this.host.drainInputs();
+    const draft = this.draftFor(after, diff), failures: Failure[] = [];
+    if (draft) {
+      const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key && (dry || !this.verdict.dry) ? this.verdict : null;
+      if (!dry) this.verdict = null;
+      if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft, dry }; return 'pending'; }
+      failures.push(...v.failures);
+    }
+    const named = new Set(failures.map(f => f.entity));
+    const { moved, stuck } = planWalkouts(this.engine, before, after, diff, this.host.minds.values());
+    for (const m of moved) if (!named.has(m.body)) failures.push({ op: -1, code: m.released.length || m.how === 'stopped' ? 'body.in-use' : 'body.in-the-way', entity: m.body, field: 'legal-edits/1',
+      detail: m.released.length ? `${m.name} is using ${m.released.map(id => before.pathOf(id) || id).join(', ')}, which this edit changes (${m.reason}).` : `${m.name} is in this edit's way (${m.reason}).`,
+      measured: { soul: m.soulId, at: m.from, ...(m.level ? { level: m.level } : {}) }, suggest: { p: m.to }, fix: `Wait until ${m.name} has moved on, or build elsewhere; Souls are not moved for an edit.` });
+    for (const x of stuck) if (!named.has(x.body)) failures.push({ op: -1, code: 'body.in-the-way', entity: x.body, field: 'legal-edits/1', detail: `${x.name} is in this edit's way (${x.reason}).`, measured: { soul: x.soulId }, fix: `Wait until ${x.name} has moved on, or build elsewhere.` });
+    return failures.length ? failures : null;
+  }
+  /** Preview the edit the last check left pending, off the tick thread, and keep the verdict for the request's next try. A
+   *  preview that could not run (no worker, a timeout, too many in flight) refuses the request with a retryable code: an edit
+   *  is never accepted unchecked. */
+  private async legalRun(): Promise<Failure[] | null> {
+    const want = this.wanted; this.wanted = null; this.verdict = null; if (!want) return null;
+    const tick = this.engine.world.tick, p = await previewWorldEditOffThreadV1(this.host, want.draft, this.legalTimeoutMs ? { timeoutMs: this.legalTimeoutMs } : {});
+    if (!p.ok) return [{ op: -1, code: p.code, field: 'legal-edits/1', detail: `This edit could not be checked, so it was not made: ${'message' in p ? p.message : p.code}.`, measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }];
+    const failures = p.violations.flatMap(v => this.violationFailures(v));
+    this.verdict = { key: want.key, tick, failures, dry: want.dry };
+    return null;
+  }
+  private violationFailures(v: PreviewViolationV1): Failure[] {
+    if (!v.bodies.length) return [{ op: -1, code: 'legal.violation', ...(v.subjects[0] ? { entity: v.subjects[0] } : {}), field: 'legal-edits/1', detail: `This edit breaks ${v.rule}: ${v.message}`, measured: { rule: v.rule, subjects: v.subjects }, fix: 'Change the edit so that the rule holds.' }];
+    return v.bodies.map(b => { const name = this.soulName(b.id); return { op: -1, code: 'body.in-the-way', entity: b.id, field: 'legal-edits/1',
+      detail: `${name} stands at (${b.at.map(n => Math.round(n * 100) / 100).join(', ')}${b.level ? `, floor level ${b.level}` : ''}), where this edit breaks ${v.rule}.`,
+      measured: { rule: v.rule, at: b.at, ...(b.level ? { level: b.level } : {}) }, ...(b.alternative ? { suggest: { p: b.alternative } } : {}),
+      fix: `Wait until ${name} has moved on, or build elsewhere${b.alternative ? `; the nearest place ${name} could stand with this edit made is (${b.alternative.map(n => Math.round(n * 100) / 100).join(', ')})` : ''}.` }; });
   }
   /** Log and fold each planned move now (no tick, no animation wait), interrupt the resident's act, tell it why. A
    *  resident the engine could not land at its planned exit is told so and named in the returned warnings. */

@@ -114,6 +114,13 @@ on. The leg to the door waits while the door spot isn't clear. The last leg goes
 that a straight step from the door reaches. The rider stands at the ground's height there. A 12 s set-down uses the same check,
 searching up to 12 m round the exit, and a rider with nowhere clear stays aboard instead
 of being placed in a wall. God edits never walk out a rider whose ride is in the air (#1339).
+Under `board-path/1` (cfg `carrierBoardPathV1`, adopted at boot last) a boarder's step is checked along its whole way to the next
+point, not only at it: a step that would bring it within the `collision.human-human` separation of another body is not taken.
+Outside the basket it goes round the other way (either side, round the far end if need be) when that way is clear of bodies,
+the basket and static geometry; otherwise it waits (`boarding-wait`, a `carrier.board-path-blocked` mark naming the body).
+After 15 s of waiting or rerouting, a boarder still before the boarding step (or a punt's plank) gives the seat up with the
+refusal `carrier.board-path-blocked`; one already past the step steps out as a timed-out boarder always has. Before the rule
+a boarder could brush someone beside the basket, and the world answered with a recovery.
 
 `dance:here` uses the body's current standing footprint and never inserts a walk to a larger clearing or another
 venue. A seated Soul still stands first; active movement and occupied support keep their native admission rules.
@@ -139,6 +146,10 @@ stand a body only where its own radius fits (a floater's 0.35 m or its own) and 
 stall release with nothing clear near leaves the body where it stands; upstairs under `stall-release-support/1` (#2133) it goes to the nearer clear landing of its flight instead, else stays held (`stall.no-floor-spot`). Under `stair-way/1` (#1428), a second logged runtime policy adopted at boot right after the guard, a walk climbing a stair has the stair's exit as its way, so another walker's make-way test that reads it never throws; without it the read is as recorded. Under `stand-height/1` (#1454), adopted at boot after quarantine-mark/1, a body the engine places upstairs (a restore, a settle, a stall release not from a carrier) stands at its floor's own height, never at the height it had; without it a body caught mid-climb could be stood on a floor cell in the air. Under `stand-height/2` (#1521), adopted right after it, the same holds on the ground floor of a world without a ground field (Eden core): a stall release on level 0 stands the body at that level's floor height. Without it, a body stalled mid-climb onto the commons deck was set down at y 0.24 in the air, and every later walk was refused `motion.teleport`, because the walk's first tick puts the body on its floor. Adopting `stand-height/2` also stands any free body already left that way on its floor, once. A free body is idle, with no programme, nothing holding it and not seated or riding, and stands more than a step (0.15 m) above level 0's floor. It goes to the same point if that point is clear, otherwise to the nearest free standing spot, with each spot in one plan kept apart from the others. Planning only reads: it never takes a body out of the entity table, so the live table keeps the same order as a replay. A stall release on level 0 that finds nowhere clear near a body standing in the air, not even its own point, leaves the body held (`stall.no-floor-spot`), never released in the air. The stall guard tells the owner once, with a failed `stall.no-floor-spot` receipt, and a `stand:here` answers the same refusal. The guard doesn't log another release while that hold is unchanged. The adoption's own event carries each body, its place and its Soul, and the Soul is told (`world.stood-on-floor`). Under `climb-spacing/1` (#1530), adopted at boot last (after stall-release-support/1), a climber's step is also refused where `collision.human-human` would flag it against another body of its level id (within 1 m in height and horizontally closer than both radii less 0.08 m, with a 2 cm margin), unless the step widens that horizontal gap. On a steep or turning flight the stair's own ellipsoid check let a follower close to about 0.99 m under a climber waiting ahead, and the separation rule then settled the follower off the flight. Under the policy it waits behind on the stair as for any stair blocker, and a way that never clears ends its walk as any blocked climb does (`route.blocked`, then off at the nearer landing). The exception for a step apart holds only between bodies the invariant already flags. A stopped climb backing off to a landing asks an idle body on that landing's floor, which holds its way off, to make way, so the climber always steps off and can walk again (details: docs/mars/movement.md, Occupied landings). Births keep their own arrival check. A carrier's rider
 legs and set-downs are not covered yet: #1348 checks them on the same fine raster behind the ride's own marker. Other action-owned steps keep their own checks (the hand actuator above, hand-holding,
 handovers, social poses, shore and swim travel) and do not go through the guard yet.
+
+Under `wait-bound/1` (#1952), adopted at boot, a walk going nowhere off a stair flight ends `route.blocked` within a
+minute ([movement](../mars/movement.md)), and an action ended without its def (a stall release's `forceCancel`) leaves no
+walk exec behind. `wait-bound/2` (#1288), adopted after it, applies the same bound to swims and journeys through water.
 
 ## Refusal
 
@@ -286,13 +297,14 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
 - The in-place rung (a fault within the rewind cooldown, or with no baseline) does the same for a fault that names bodies,
   while steps are failing too (#1378). A fault that names none still stops everything in place, as above, unless it is an
   invariant that threw and what it was reading is found (#1377, below).
-- An invariant that throws names nobody (`engine.thrown`). Under quarantine/1 the host restores the head to a scratch engine,
-  and there the engine takes entities out of the table half at a time, bodies first (`thrownSourcesV1`), to find the one
-  entity whose absence alone stops the throw (#1377). That entity is quarantined alone, at once, with no rewind, since going
+- An invariant that throws names nobody (`engine.thrown`). Under quarantine/1 the engine takes entities out of its own
+  shallow copy of the entity table half at a time, bodies first (`thrownSourcesV1`), to find the one entity whose absence
+  alone stops the throw (#1377). It reads on a view of the live runtime with fresh per-runtime invariant memory, so a head
+  that won't snapshot or restore is read too (#2168). The live entity table and invariant memory are untouched. The
+  navigation scene is shared, so it is synced back to the live world afterwards with its epoch kept, as a restore keeps it. That entity is quarantined alone, at once, with no rewind, since going
   back would read it again. Everyone else's programmes go on. The glitch row names it (`thrownReading`), and the
   `quarantineV1` event carries it, so a replay reads the log and never probes. While steps fail, only that body is refused.
-  A throw that no single entity explains, a step that throws outside any action, or a head that won't snapshot or restore
-  keeps the stop-all, counted as before.
+  A throw that no single entity explains, or a step that throws outside any action, keeps the stop-all, counted as before.
 - A body quarantined again within the cooldown is held whole (#1378): the event also contains every rule on it (key
   `{code: '*', subjects: [body]}`), so a fault that comes back under a new rule each tick is absorbed instead of faulting
   the step. Only a violation whose every subject is held whole is covered; one that names a free body still faults.
