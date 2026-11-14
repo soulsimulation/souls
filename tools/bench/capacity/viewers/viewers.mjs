@@ -159,7 +159,9 @@ async function repeat(k) {
     sampler = setInterval(() => { const pid = run.launcher.worldPid(); run.samples.push({ at: Date.now(), live: run.launcher.live(), ...(pid ? proc(pid) : {}) }); }, SAMPLE_MS);
     const souls = [];
     for (let i = 0; i < SOULS; i += 4) souls.push(...await Promise.all(Array.from({ length: Math.min(4, SOULS - i) }, (_, j) => joinSoul(run, i + j))));
-    const pic = await startPicture(`${BASE}/w/${SLUG}`, souls[0]), walks = catalogIds(pic.catalog).walk;
+    // the catalog may answer 503 while the world settles after the joins: ask again for up to 5 min
+    let pic; for (const t0 = Date.now(); !(pic = await startPicture(`${BASE}/w/${SLUG}`, souls[0])).catalog && Date.now() - t0 < 300_000;) { log(`r${k}: catalog ${pic.catalogStatus}; asking again`); await sleep(10_000); }
+    const walks = catalogIds(pic.catalog).walk;
     if (!walks.length) throw new Error(`no walk ids in the catalog (catalog ${pic.catalogStatus})`);
     out.walkPlaces = walks.length; log(`r${k}: ${souls.length} Souls joined; ${walks.length} places to walk to`);
     for (const s of souls) walk(run, s, walks);
@@ -195,3 +197,4 @@ writeFileSync(join(OUT, 'REPORT.md'), [`# Viewers on one world (#2308)`, '', `co
   '| repeat | viewers | tick p50 / p99 ms | tick service | act queue p50 / p95 ms | act handler p50 / p99 ms | amber share | amber s per signal | world CPU (cores) | RSS MB | bytes/s per viewer | world calls by viewers | refusals |',
   '|---|---|---|---|---|---|---|---|---|---|---|---|---|', ...rows].join('\n') + '\n');
 log('done: REPORT.md');
+if (repeats.some((r) => r.error)) process.exitCode = 1;
