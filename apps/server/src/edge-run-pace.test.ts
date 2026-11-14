@@ -6,7 +6,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { advanceNeeds, newLife } from '@souls/brain';
-import { fixture, invite, accept } from '../test/native-owner-fixture.ts';
+import { coreRef } from '@souls/world-compiler';
+import { fixture, invite, accept, factory } from '../test/native-owner-fixture.ts';
+import { GodMode } from './god/god.ts';
+import { installEngineBridge } from './god/engine-bridge.ts';
 import { EdgeLedger } from './edge/ledger/ledger.ts';
 import { paramsProblem, paramsByVerb } from './edge/intents/offer-schema.ts';
 import { WALK_SPEED_CAP } from '../../../mars/viewer/engine/locomotion/walk.ts';
@@ -78,4 +81,25 @@ test('#2283 A3: running spends energy faster than walking', () => {
   const walk = newLife(0), run = newLife(0);
   advanceNeeds(walk, 7200, 'walk', false); advanceNeeds(run, 7200, 'run', false);
   assert.ok(run.needs.energy < walk.needs.energy, `run ${run.needs.energy}, walk ${walk.needs.energy}`);
+});
+
+test('#2283 A1/A2 (review): walk:<place> at pace run runs the walk\'s own route and arrives', { timeout: 300_000 }, async () => {
+  const w = fixture(':memory:', factory, { durableClockV1: true }); w.brain.quiesce();
+  const god = new GodMode(w.db, { worldId: w.host.worldId, ownerId: 'owner', tick: () => w.host.engine.world.tick, emit: () => {} });
+  const edge = new EdgeLedger(w.host, w.db); installEngineBridge({ host: w.host, god, edge, log() {}, worldClock: false, worldLore: false });
+  const settle = async (n = 3) => { for (let i = 0; i < n; i++) { w.host.tickOnce(); await setImmediate(); w.host.drainInputs(); } };
+  try {
+    const built = god.act({ ops: [{ op: 'place', def: coreRef('pavilion'), name: 'bandstand', p: [18, 6] }] });
+    assert.equal(built.accepted, true, JSON.stringify(built)); await settle();
+    await invite(w, 'ana'); const row: any = await accept(w.host, w.souls.create('dev:ana', { name: 'Ana', description: 'curious' })); await settle(3);
+    const soul = { soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner }, body = () => w.host.engine.world.entities[soul.entityId]!;
+    const walk = edge.capabilities(soul).find(c => c.verb === 'walk' && c.available && /bandstand/.test(c.id));
+    assert.ok(walk, 'a walk to the bandstand is offered');
+    const out = await accept(w.host, Promise.resolve(edge.act(soul, { capability: walk!.id, params: { pace: 'run' } }))) as Act;
+    assert.equal(out.accepted, true, JSON.stringify(out));
+    const seen = new Set<string>(), t0 = w.host.engine.world.tick; let phase = 'accepted';
+    while (['accepted', 'waiting', 'started'].includes(phase) && w.host.engine.world.tick - t0 < 60 * 20) { await settle(1); seen.add(body().human!.activity); phase = edge.receipt(soul.soulId, out.receipt!.id)!.phase; }
+    assert.equal(phase, 'completed'); assert.ok(seen.has('run'), `seen: ${[...seen]}`);
+    assert.deepEqual(w.host.engine.runtime.violations, []);
+  } finally { w.brain.quiesce(); w.host.stop(); edge.comms?.close(); w.db.close(); }
 });
