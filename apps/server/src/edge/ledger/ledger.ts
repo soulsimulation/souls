@@ -1636,7 +1636,18 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if(me?.body?.motion?.dance||hasDeclaredProfile(me?.body))for(const c of caps){if(!['dance:here','rest:here','nap:here','lie:here'].includes(c.id))continue;const p=plans.get(c.id);if(p){const issue=this.mw.feasibility.canPerform({actor:soul.entityId,label:p.label,steps:p.steps});if(issue){c.available=false;c.blocked={code:issue.code,reason:issue.message};}}}
     // knowledge/1: an offer that leads to (or names) a secret place this Soul has not been to or found is not offered
     if (this.knowledge.marked().size) for (let i = caps.length - 1; i >= 0; i--) {if (this.secretOffer(soul,caps[i]!)) {plans.delete(caps[i]!.id); caps.splice(i, 1);}}
+    // strict offers: an offer whose plan needs a verb this world's engine does not have (the toy engine has no
+    // mars:pose_v1) could only be refused as action.unknown-verb, so it is not offered
+    const verbs = this.engineVerbs();
+    for (let i = caps.length - 1; i >= 0; i--) {const p = plans.get(caps[i]!.id); if (p?.steps.some(s => !verbs.has(s.verb))) {plans.delete(caps[i]!.id); caps.splice(i, 1);}}
     return {caps, plans};
+  }
+  private verbSet: {of: unknown; verbs: ReadonlySet<string>} | null = null;
+  /** The verbs this world's engine can perform (its registry does not change while it runs). */
+  private engineVerbs(): ReadonlySet<string> {
+    const e = this.host.engine;
+    if (this.verbSet?.of !== e) this.verbSet = {of: e, verbs: new Set(e.describeVerbs().map(v => v.verb))};
+    return this.verbSet.verbs;
   }
   /** The menu before the tail (see binds): cached. */
   private bindsCore(soul: EdgeSoul, focus?: MenuFocus, every = false): {caps: EdgeCapability[]; plans: Plans} {
