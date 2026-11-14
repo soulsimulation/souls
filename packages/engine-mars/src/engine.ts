@@ -1250,7 +1250,7 @@ export class MarsEngine implements Engine {
     const tick=this.rt.tick,wait=p.waterWait?.step===p.index?p.waterWait:{step:p.index,since:tick,attempts:0};
     p.waterWait=wait;if(++wait.attempts>60)return false;
     const yielded=p.steps[p.index]?.params?.spreadWaitPolicy===SHARED_WATER_WAIT_POLICY_V2&&this.sharedWaterYieldV2(p,d);
-    p.index--;p.ops=[{wait:yielded?3*TPS:TPS}];return true;
+    p.index--;p.ops=[{wait:yielded?3*TPS:TPS}];if(p.waitBoundV1)p.waitBoundV1=undefined;return true;   // #2032: the retried walk starts its own wait-bound clock
   }
   /** shared-water-wait/2: two swimmers standing in each other's shore route (each programme waiting on the other)
    * would both wait a minute and fail together. The larger entity id steps aside with a native courtesy walk. */
@@ -1268,7 +1268,7 @@ export class MarsEngine implements Engine {
     if (this.cfg.yieldTimeoutV1 !== true || !code || !/occupied/.test(code)) return false;
     const spread = String(p.steps[p.index]?.params?.spread ?? '');
     if (!['pond/1','region/1','pond-lap/1'].includes(spread) || (p.spreadWaits = (p.spreadWaits ?? 0) + 1) > 60) return false;
-    p.index--; p.ops = [{ wait: 20 }]; return true;
+    p.index--; p.ops = [{ wait: 20 }]; if (p.waitBoundV1) p.waitBoundV1 = undefined; return true;   // #2032: as a shared-water retry
   }
   /** edgeMotionV1 stroll: every leg is a checked native walk (at least 1.5 m, on the body's own level or the ground
    * around a raised place), so a stroll always visibly moves; when nothing nearby is walkable it refuses honestly. */
