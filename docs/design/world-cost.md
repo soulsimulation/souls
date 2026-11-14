@@ -170,5 +170,10 @@ every tick it owed. Earlier runs at load 25 caught up at 3 ticks a second and st
 (#2235's limit), so an overloaded host still loses clock time on a restart. Without a heap cap, the same leak ran 45 s
 to 3.9 GB before the heap rule ended it. With the default 10 s limit, a hang ends about 5 s later than above.
 
+The same test on a GitHub-hosted CI runner (run 43638957576): the hang was gone at 5.6 s and serving again at 7.5 s,
+with 154 ticks caught up in 0.4 s. The one-turn runaway and the growing heap reached V8's own heap limit first and
+aborted (SIGABRT) at 13.1 s and 16.0 s; they were serving again at 16.9 s and 20.4 s. That is the same recovery path,
+and exact by the same checks. On that runner's heap the heap rule is a backstop, not the first to act.
+
 For the shards (B5), every limit here ends the whole program, as the table above (A4) says: one world's hang, heap or
 fault storm ends its shard, and the launcher reloads all of its worlds.
