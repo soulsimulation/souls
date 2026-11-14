@@ -32,9 +32,12 @@ export class WallClock {
   readonly file: string;
   private host: Host;
   private now: () => number;
+  private quiet?: () => boolean;
   private timer: NodeJS.Timeout | null = null;
-  constructor(host: Host, dataDir: string, o: { now?: () => number } = {}) {
-    this.host = host; this.now = o.now ?? Date.now;
+  /** `quiet`: while it answers true the periodic save is skipped (#2298: a still world keeps wall pace by jumping, so the
+   *  last (wall, tick) pair still gives the ticks owed); the save as the clock stops always runs. */
+  constructor(host: Host, dataDir: string, o: { now?: () => number; quiet?: () => boolean } = {}) {
+    this.host = host; this.now = o.now ?? Date.now; this.quiet = o.quiet;
     this.file = join(dataDir, 'clock-wall.json');
   }
   /** The anchor the last run left, if it is this world's. */
@@ -54,7 +57,7 @@ export class WallClock {
     try { writeFileSync(tmp, JSON.stringify(a) + '\n'); renameSync(tmp, this.file); } catch { /* next time */ }
   }
   /** Save the anchor every `everyMs` while the world runs (and at once). */
-  start(everyMs = 5_000) { this.save(); this.timer = setInterval(() => this.save(), everyMs); this.timer.unref?.(); return this; }
+  start(everyMs = 5_000) { this.save(); this.timer = setInterval(() => { if (!this.quiet?.()) this.save(); }, everyMs); this.timer.unref?.(); return this; }
   /** Stop saving and record the final anchor, once (call as the clock stops: the wall time after it is owed). */
   stop() { if (!this.timer) return; clearInterval(this.timer); this.timer = null; this.save(); }
 }
