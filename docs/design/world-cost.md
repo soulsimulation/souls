@@ -39,6 +39,8 @@ world includes the program.
 - Form 2 saves about 155 MB per further small world and 240 to 290 MB per Eden world. A program of six holds 37 %
   less than six programs.
 
+**Form 1 without the shared template.** Form 1 ran without its navigation and geometry held once and shared read-only. Sharing them means building the navigation on `SharedArrayBuffer`s, which is a product change and more than a bench can do. #1973 measured the byte-identical buffers of an Eden world at about 68 MB: navigation 62 and geometry 5.5. The same-shaped objects, about 30 MB, cannot be shared between isolates. With sharing, form 1 is *estimated* at about 420 MB for each further Eden world and still about 220 MB for a small one. That is 15 % below the baseline for Eden, and it does not change the recommendation.
+
 ### Tick time: ms per tick, p50 / p99, 1,200 ticks in 60 s
 
 | Form | Small world, quiet | Small world, while e1 is busy | Eden e2, quiet | Eden e2, while e1 is busy | e1 busy (10 walkers) |
