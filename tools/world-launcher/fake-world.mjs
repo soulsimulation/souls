@@ -115,6 +115,9 @@ if (process.env.SIM_READ_WORKER === '1') { L[5] = process.env.FAKE_READ_MODE ===
 if (process.env.FAKE_BOOT_TICK_MS) { const t = setInterval(() => { if (L[1] === 1) return clearInterval(t); L[2]++; if (process.env.FAKE_LIVE !== '1') console.log(`replay ${L[2]}`); }, Number(process.env.FAKE_BOOT_TICK_MS)); }
 server.on('listening', () => {
   L[1] = 1;
+  // #2367: FAKE_DUE_FILE ({ dueAt, out }): a reminder the running world delivers at dueAt (at once if it loads later),
+  // appending the delivery time to `out`, as the reminders' pump does
+  if (process.env.FAKE_DUE_FILE) { let d = null; try { d = JSON.parse(readFileSync(process.env.FAKE_DUE_FILE, 'utf8')); } catch { /* none */ } if (d) setTimeout(() => appendFileSync(d.out, `${Date.now()}\n`), Math.max(0, d.dueAt - Date.now())).unref(); }
   if (process.env.FAKE_LIVE === '1') process.on('SIGUSR2', () => console.log('[report] (a process report, as lane L2 writes one)'));
   if (process.env.FAKE_FLAP_MS) setTimeout(() => process.exit(3), Number(process.env.FAKE_FLAP_MS));
   if (process.env.FAKE_PLANNED_MS) setTimeout(() => process.exit(75), Number(process.env.FAKE_PLANNED_MS));
