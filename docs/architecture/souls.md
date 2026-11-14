@@ -646,4 +646,5 @@ step-out cooldown, it is out about 10-13 s after the walk ends. The server log s
 `nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it
 (#1548). A stream of god edits re-arms the first build faster than its 20 ms slices finish; with a Soul waiting, every
 tenth tick the rescue read takes that tick instead of the slice, so the same forced relabel fires under edits every tick
-too: the Soul is asked within 210 ticks of the walk ending (#1744).
+too (also after a re-warm error): when that relabel fits in 250 ms, the Soul is asked within 210 ticks of the walk ending
+(#1744).

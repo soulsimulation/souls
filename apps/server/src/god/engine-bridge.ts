@@ -1446,7 +1446,7 @@ export class EngineBridge {
       // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
       // waiting Souls out and re-arms the re-warm.
       if (!E.navWarmV1?.(0)) {
-        if (this.navCold === null) { this.navWarm = false; this.navPending = true; return; }
+        if (this.navCold === null && !this.navPending) { this.navWarm = false; this.navPending = true; return; }   // #1744: already pending (edits keep cancelling it), the forced relabel below still applies
         this.navCold = true; this.navHeld = true;
         if (!this.navForceRelabel(E, souls.length)) return;
         this.navHeld = false;
