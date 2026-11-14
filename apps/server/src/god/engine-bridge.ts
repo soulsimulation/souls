@@ -18,7 +18,8 @@ import { hashOf, applyBatch, containerClaims, containerHidden, containerInside, 
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { legalEditsV1 } from '../edge-runtime-rules.ts';
+import { legalEditsV1, legalEditsV2 } from '../edge-runtime-rules.ts';
+import { sealedBy, type SealResident, type Sealed } from './seal-check.ts';
 import { previewWorldEditOffThreadV1, type PreviewViolationV1 } from './edit-preview.ts';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
@@ -1621,7 +1622,19 @@ export class EngineBridge {
       detail: m.released.length ? `${m.name} is using ${m.released.map(id => before.pathOf(id) || id).join(', ')}, which this edit changes (${m.reason}).` : `${m.name} is in this edit's way (${m.reason}).`,
       measured: { soul: m.soulId, at: m.from, ...(m.level ? { level: m.level } : {}) }, suggest: { p: m.to }, fix: `Wait until ${m.name} has moved on, or build elsewhere; Souls are not moved for an edit.` });
     for (const x of stuck) if (!named.has(x.body)) failures.push({ op: -1, code: 'body.in-the-way', entity: x.body, field: 'legal-edits/1', detail: `${x.name} is in this edit's way (${x.reason}).`, measured: { soul: x.soulId }, fix: `Wait until ${x.name} has moved on, or build elsewhere.` });
+    if (legalEditsV2(this.host)) failures.push(...this.sealFailures(before, after, diff, new Set([...named, ...moved.map(m => m.body), ...stuck.map(x => x.body)])));
     return failures.length ? failures : null;
+  }
+  /** legal-edits/2 (#2188): the Souls this edit would leave with no walk out (seal-check.ts), each named; `named` already are. */
+  private sealFailures(before: WorldModel, after: WorldModel, diff: Diff, named: Set<string | undefined>): Failure[] {
+    const residents: SealResident[] = [];
+    for (const m of this.host.minds.values()) { const b = this.engine.world.entities[m.entityId]; if (b && !named.has(m.entityId)) residents.push({ body: m.entityId, soulId: m.soulId, name: m.name, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0 }); }
+    if (!residents.length) return [];
+    let sealed: Sealed[];
+    try { sealed = sealedBy(before, after, diff, residents); } catch (e) { this.log(`seal check: ${(e as Error).message}`); return []; }
+    return sealed.map(s => ({ op: -1, code: 'body.sealed-in', entity: s.body, field: 'legal-edits/2',
+      detail: `${s.name} would have no walk out: this edit closes ${s.name} in ${s.pocket} m² at (${s.at.map(n => Math.round(n * 10) / 10).join(', ')}), shut off by ${s.by.slice(0, 2).map(id => after.pathOf(id) || id).join(' and ')}${s.by.length > 2 ? ` and ${s.by.length - 2} more` : ''}.`,
+      measured: { soul: s.soulId, at: s.at, pocket: s.pocket, by: s.by }, fix: `Leave a way out (a gap of 1 m, a door or a gate), or wait until ${s.name} has walked out.` }));
   }
   /** Preview the edit the last check left pending, off the tick thread, and keep the verdict for the request's next try. A
    *  preview that could not run (no worker, a timeout, too many in flight) refuses the request with a retryable code: an edit
