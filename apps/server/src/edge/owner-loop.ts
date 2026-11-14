@@ -239,6 +239,25 @@ export class OwnerLoop {
       try {this.sweepOne(tick, id, l);} catch {/* one link's fault never stops the others; it is looked at again next time */}
     }
   }
+  /** #2298: the next sweep tick (on its 20-tick grid) at which the sweep closes something: a replaced act's messages, an
+   *  overlong act, a ride past RIDE_TICKS or back on the ground, an end this process missed. Null: none. Never busy: a
+   *  still world is jumped to it, so its closures land on the tick a world ticked straight through gives them. */
+  nextDue(tick: number): number | null {
+    const grid = (t: number) => Math.ceil(Math.max(t, tick + 1) / SWEEP_TICKS) * SWEEP_TICKS;
+    let due: number | null = null;
+    const at = (t: number) => {const g = grid(t); due = due === null ? g : Math.min(due, g);};
+    for (const [id, l] of this.links) {
+      try {
+        if (l.gone !== undefined) {at(l.gone + GONE_TICKS); continue;}
+        const soul = l.scope.scope.slice(5), r = this.peek(soul, id);
+        if (!r) continue;   // dropped at the next sweep: nothing the owner sees
+        if (!OPEN.includes(r.phase)) {at(l.ride?.since !== undefined && this.world?.aboard?.(soul) ? l.ride.since + RIDE_TICKS : tick + 1); continue;}
+        if (l.late) continue;   // its end closes it (`ended`)
+        at(r.acceptedTick + Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0)));
+      } catch {at(tick + 1);}
+    }
+    return due;
+  }
   private sweepOne(tick: number, id: string, l: Link) {
     const soul = l.scope.scope.slice(5), r = this.peek(soul, id);
     if (!r) {this.forget(id); return;}

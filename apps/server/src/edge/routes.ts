@@ -52,7 +52,8 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
       rideName: id => L.rideName(id), aboard: soulId => {const m = deps.host.minds.get(soulId), a = m ? L.aboard(m.entityId) : null; return a ? {phase: a.phase} : null;}}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
   // #1295: the loop closes what a replaced or overlong act left open, once a second of world time. SIM_OWNER_HOLD_S
   // shortens the hold limit (15 minutes) for tests and proof worlds.
-  if (loop) L.onTick(tick => loop.sweep(tick));
+  // #2298: the sweep's next closure is a deadline of the still contract, so a jumped world lands on it (never busy)
+  if (loop) {L.onTick(tick => loop.sweep(tick)); deps.host.listeners.push({stillness: tick => {const t = loop.nextDue(tick); return t === null ? [] : [{name: 'edge.owner-loop', tick: t}];}});}
   mountBootRoutes(app,deps,[...EDGE_ACT_VERBS,...INTENT_VERBS]);
   // #1737: the world's structure as one public file a Soul's client keeps on disk
   const catalog = mountCatalogRoute(app,deps);
