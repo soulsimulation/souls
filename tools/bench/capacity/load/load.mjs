@@ -163,17 +163,25 @@ function phases(b) {
 }
 
 // ------------------------------------------------------------------ the CPU profile's heaviest functions, start to listen
-function profileTop(dir, listenS, n = 15) {
+// The profile's clock starts with the process, like the world's own boot marks, so its samples are cut into the same
+// phases: per phase, self time by file and inclusive time of the repository's own functions (what each phase calls).
+function profileTop(dir, ph, n = 15) {
   const f = readdirSync(dir).find((x) => x.endsWith('.cpuprofile')); if (!f) return null;
-  const p = JSON.parse(readFileSync(join(dir, f), 'utf8')), byId = new Map(p.nodes.map((x) => [x.id, x])), self = new Map(), byFile = new Map();
-  let t = 0, total = 0; const cut = listenS * 1e6;
+  const p = JSON.parse(readFileSync(join(dir, f), 'utf8')), byId = new Map(p.nodes.map((x) => [x.id, x])), self = new Map(), byFile = new Map(), parent = new Map();
+  for (const x of p.nodes) for (const c of x.children ?? []) parent.set(c, x.id);
+  const urlOf = (cf) => scrub(cf.url.replace(/^file:\/\//, '')).replace(/^.*node_modules\//, 'node_modules/'), keyOf = (cf) => `${cf.functionName || '(anonymous)'} ${urlOf(cf)}:${cf.lineNumber + 1}`;
+  const c1 = ph.processStartS, c2 = c1 + ph.dbFactoryS, c3 = c2 + ph.snapshotS;
+  const per = [['process start', c1], ['database and engine factory', c2], ['snapshot load and replay', c3], ['other setup, projection, serving caches', ph.listenS]].map(([name, end]) => ({ name, end: end * 1e6, total: 0, files: new Map(), incl: new Map() }));
+  const add = (m, k, dt) => m.set(k, (m.get(k) ?? 0) + dt);
+  let t = 0, total = 0; const cut = ph.listenS * 1e6;
   for (let i = 0; i < p.samples.length; i++) {
     t += p.timeDeltas[i]; if (t > cut) break; const dt = p.timeDeltas[i + 1] ?? 0, cf = byId.get(p.samples[i]).callFrame; total += dt;
-    const url = scrub(cf.url.replace(/^file:\/\//, '')).replace(/^.*node_modules\//, 'node_modules/'), key = `${cf.functionName || '(anonymous)'} ${url}:${cf.lineNumber + 1}`;
-    self.set(key, (self.get(key) ?? 0) + dt); const file = url || cf.functionName; byFile.set(file, (byFile.get(file) ?? 0) + dt);
+    add(self, keyOf(cf), dt); const file = urlOf(cf) || cf.functionName; add(byFile, file, dt);
+    const w = per.find((x) => t <= x.end) ?? per.at(-1); w.total += dt; add(w.files, file, dt);
+    const seen = new Set(); for (let id = p.samples[i]; id != null; id = parent.get(id)) { const c = byId.get(id).callFrame; if (urlOf(c).startsWith('./')) { const k = keyOf(c); if (!seen.has(k)) { seen.add(k); add(w.incl, k, dt); } } }
   }
-  const top = (m) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, us]) => ({ k, ms: Math.round(us / 1000), pct: +((100 * us) / total).toFixed(1) }));
-  return { sampledMs: Math.round(total / 1000), functions: top(self), files: top(byFile) };
+  const top = (m, k = n, all = total) => [...m].sort((a, b) => b[1] - a[1]).slice(0, k).map(([key, us]) => ({ k: key, ms: Math.round(us / 1000), pct: +((100 * us) / (all || 1)).toFixed(1) }));
+  return { sampledMs: Math.round(total / 1000), functions: top(self), files: top(byFile), phases: per.map((w) => ({ name: w.name, ms: Math.round(w.total / 1000), files: top(w.files, 8, w.total), inclusive: top(w.incl, 12, w.total) })) };
 }
 
 // ------------------------------------------------------------------ one world: genesis, then the cold boots
@@ -199,7 +207,7 @@ async function world(name) {
     const pd = join(dir, 'profile'); mkdirSync(pd, { recursive: true });
     const b = await boot(c, join(dir, 'boot-profile.log'), ['--cpu-prof', '--cpu-prof-dir', pd]); LIVE.add(b.child);
     const ph = phases(b); await stop(b.child); LIVE.delete(b.child);
-    r.profile = { listenS: ph.listenS, ...profileTop(pd, ph.listenS ?? 60) };
+    r.profile = ph.error ? { error: ph.error } : { listenS: ph.listenS, ...profileTop(pd, ph) };
     log(`${name} profile: listen ${ph.listenS} s, top ${r.profile.functions?.slice(0, 3).map((x) => `${x.k} ${x.ms} ms`).join('; ')}`);
   }
   return r;
@@ -223,7 +231,8 @@ for (const r of results) {
   lines.push(`## ${r.template} (${r.souls} Souls)`, '', `| phase | median | ${r.boots.map((b) => `boot ${b.k}`).join(' | ')} |`, `|---|---|${r.boots.map(() => '---').join('|')}|`);
   for (const [k, label] of COLS) { const v = (b) => (k === 'warmWallMs' && b[k] != null ? b[k] / 1000 : b[k]); const d = /Mb/.test(k) ? 0 : 2; lines.push(`| ${label} | ${f(med(r.boots.map(v)), d)} | ${r.boots.map((b) => f(v(b), d)).join(' | ')} |`); }
   lines.push('', `booted from ${[...new Set(r.boots.map((b) => b.bootedFrom))].join(', ')}; replayed ${r.boots.map((b) => b.replayed).join(', ')} events; owed ticks ${r.boots.map((b) => b.owedTicks ?? 0).join(', ')}; caught up in ${r.boots.map((b) => b.caughtUpMs ?? '—').join(', ')} ms`, '');
-  if (r.profile?.functions) lines.push(`Profile boot (not counted): listen ${f(r.profile.listenS)} s, ${r.profile.sampledMs} ms sampled to listen.`, '', '| self time, function | ms | % |', '|---|---|---|', ...r.profile.functions.map((x) => `| \`${x.k}\` | ${x.ms} | ${x.pct} |`), '', '| self time, file | ms | % |', '|---|---|---|', ...r.profile.files.map((x) => `| \`${x.k}\` | ${x.ms} | ${x.pct} |`), '');
+  if (r.profile?.functions) lines.push(`Profile boot (not counted): listen ${f(r.profile.listenS)} s, ${r.profile.sampledMs} ms sampled to listen.`, '', '| self time, function | ms | % |', '|---|---|---|', ...r.profile.functions.map((x) => `| \`${x.k}\` | ${x.ms} | ${x.pct} |`), '', '| self time, file | ms | % |', '|---|---|---|', ...r.profile.files.map((x) => `| \`${x.k}\` | ${x.ms} | ${x.pct} |`), '',
+    ...r.profile.phases.flatMap((w) => [`Phase "${w.name}": ${w.ms} ms sampled.`, '', '| self time, file | ms | % of phase |', '|---|---|---|', ...w.files.map((x) => `| \`${x.k}\` | ${x.ms} | ${x.pct} |`), '', '| inclusive, repository function | ms | % of phase |', '|---|---|---|', ...w.inclusive.map((x) => `| \`${x.k}\` | ${x.ms} | ${x.pct} |`), '']));
 }
 writeFileSync(join(OUT, 'REPORT.md'), lines.join('\n') + '\n');
 log('done: REPORT.md');
