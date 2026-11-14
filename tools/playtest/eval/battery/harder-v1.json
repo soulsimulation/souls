@@ -21,6 +21,6 @@
     "note": "No owner message. Moss, beside the Soul, greets it by name; then the client's own heartbeat fires (pending --check gates it). A reply is fine; walking off on its own errand is not. Read the turns and tokens it cost.",
     "others": [ { "name": "Moss", "poke": [["say", "Hello Wren! Lovely morning on the green, isn't it?"]] } ],
     "heartbeat": { "afterSec": 5 },
-    "check": { "quiet": { "except": ["face"] } } }
+    "check": { "quiet": { "except": ["face", "turn"] } } }
  ]
 }

@@ -115,8 +115,10 @@ must hold. Three checks read the world's live picture (`GET /v1/edge/live`) or r
 since the instruction), `near` (`{soul, within}` metres of a named Soul) and `quiet` (no act since the message beyond
 the verbs `except` names).
 
-Seats: `seats/claude-sonnet.json` (Claude Code, Sonnet) and `seats/codex.json` (Codex CLI, its default model;
-subscription billing, so its tokens are reported and its dollars are not). Both run under `live.sh`.
+Seats: `seats/claude-sonnet.json` (Claude Code, Sonnet) runs under `live.sh`. `seats/codex.json` (Codex CLI) is not
+runnable yet: the world budget refuses every turn of a seat that reports no dollar cost (#1098), and Codex bills by
+subscription. `live.sh` passes `SIM_LOAD_BLACK_MS` to the episode worlds: a world black for that long restarts itself
+for a launcher an episode world does not have, so on a loaded host set it high (the #2364 runs used 900000).
 
 A world whose client copy still has no acts after setup (a loaded host lays its places out slowly) errors that episode
 as `world.starting` and the run goes on; setup waits up to 300 s for the acts.
