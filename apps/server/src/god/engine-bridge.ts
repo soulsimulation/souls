@@ -581,12 +581,12 @@ export class EngineBridge {
   private recordAtCapture(r: { file: string; build: string }): (at: { tick: number; stateHash: string }) => void {
     const ep = this.engine.world.entityPhysicsV1;
     const inStep = r.build !== 'dev' && this.reconciled && !this.pending.size && !this.projectionDrafts.size && !!ep && this.physics?.hash === ep.hash && this.engineAgrees();
-    const rec = inStep ? { contract: 'boot-reconcile/1' as const, worldId: this.host.worldId, build: r.build, editSeq: this.model.editSeq, physicsHash: ep!.hash, doorIds: [...this.doorIds].sort(), gated: [...this.gated].sort() } : null;
+    const rec = inStep ? { contract: 'boot-reconcile/1' as const, worldId: this.host.worldId, build: r.build, editSeq: this.model.editSeq, physicsHash: ep!.hash, doorIds: [...this.doorIds].sort(), gated: [...this.gated].sort(), inputs: this.deriveInputs() } : null;
     return (at) => {
       const tmp = `${r.file}.${process.pid}.tmp`;
       try {
         if (!rec) { rmSync(r.file, { force: true }); return; }
-        writeFileSync(tmp, JSON.stringify({ ...rec, inputs: this.deriveInputs(), tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
+        writeFileSync(tmp, JSON.stringify({ ...rec, tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
       } catch (e) { rmSync(tmp, { force: true }); this.log(`boot record not written: ${(e as Error).message}`); }
     };
   }
