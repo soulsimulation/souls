@@ -679,6 +679,9 @@ export class Runtime {
     }
     for (const e of Object.values(ents)) if (e.reservedBy === id && e.phase !== 'carried' && e.phase !== 'raising') e.reservedBy = undefined;
     const traffic = this.services.traffic as Map<string, { actors: Set<string> }> | undefined;
+    // #1952 wait-bound/1: an action ended without its def (forceCancel, a forced finish) leaves no walk exec (walk.ts
+    // `services.walkExecs`) behind for ground paging or hands to read. Without the policy the old bytes stay.
+    if (this.services.waitBoundV1 === true) (this.services.walkExecs as Map<string, unknown> | undefined)?.delete(id);
     for (const e of Object.values(ents)) {
       if (!e.human || e.human.task !== id) continue;
       e.human.task = undefined;
