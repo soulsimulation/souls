@@ -131,14 +131,14 @@ test('LINK body: a TEST Soul\'s body clocks shorten (never lengthen) for the liv
   const soulId = (await w.ready(mine)).soulId as string;
   const read = await w.op('body', { soulId, name: 'TestBody' });
   assert.equal(read.status, 200, JSON.stringify(read.data)); assert.deepEqual(read.data.knobs, BODY_KNOBS);
-  const set = await w.op('body', { soulId, name: 'TestBody', knobs: { sleepGraceMs: 10_000, zombieWanderMs: 60_000 } });
-  assert.equal(set.status, 200); assert.equal(set.data.knobs.sleepGraceMs, 10_000); assert.equal(set.data.knobs.zombieWanderMs, 60_000); assert.equal(set.data.knobs.idleStartMs, BODY_KNOBS.idleStartMs);
-  assert.equal((await w.op('body', { soulId, name: 'TestBody', knobs: { sleepGraceMs: 10 * 60_000 } })).status, 400, 'never longer than the default');
-  assert.equal((await w.op('body', { soulId, name: 'TestBody', knobs: { sleepGraceMs: 10 } })).status, 400, 'at least a second');
+  const set = await w.op('body', { soulId, name: 'TestBody', knobs: { wanderTicks: 1200, zombieTicks: 2400 } });
+  assert.equal(set.status, 200); assert.equal(set.data.knobs.wanderTicks, 1200); assert.equal(set.data.knobs.zombieTicks, 2400); assert.equal(set.data.knobs.boundTicks, BODY_KNOBS.boundTicks);
+  assert.equal((await w.op('body', { soulId, name: 'TestBody', knobs: { wanderTicks: 2 * 72_000 } })).status, 400, 'never longer than the default');
+  assert.equal((await w.op('body', { soulId, name: 'TestBody', knobs: { wanderTicks: 10 } })).status, 400, 'at least a second');
   assert.equal((await w.op('body', { soulId, name: 'TestBody', knobs: { bogus: 1 } })).status, 400);
   assert.deepEqual((await w.op('body', { soulId, name: 'TestBody', knobs: null })).data.knobs, BODY_KNOBS, 'null restores the defaults');
   assert.equal((await w.op('body', { soulId, name: 'TestBody' }, { key: null })).status, 404, 'launcher only');
   // Gene's own Souls are never touched
   const his = await w.request('0303', 'TestGene'); await w.call(`/v1/account/approvals/${his.id}/approve`, {}, { token: 'gene', key: null }); const hisId = (await w.ready(his)).soulId as string;
-  assert.equal((await w.op('body', { soulId: hisId, name: 'TestGene', knobs: { sleepGraceMs: 5000 } })).status, 403);
+  assert.equal((await w.op('body', { soulId: hisId, name: 'TestGene', knobs: { wanderTicks: 1200 } })).status, 403);
 });

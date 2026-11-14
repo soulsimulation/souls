@@ -412,8 +412,8 @@ until the Soul Client cutover; new families do not append another section here.
       and an unknown op `shared.unknown-op`.
   - **A member's mind goes away (PC09, [#688](https://github.com/soulsimulation/souls/issues/688)).** A disconnected mind's
     body keeps its accepted carry to its end and joins nothing new.
-    - **Not listening.** When an agent stops listening, the body rule makes its body `zombie` and later `asleep`. A
-      member's open shared receipt makes the agent busy, so the rule never moves or stops a member's body while the
+    - **Silent.** An hour after its agent's last act, the wind-down (#2295) walks the body out and later puts it to
+      sleep. A member's open shared receipt makes the body busy, so the rule never moves a member's body while the
       operation runs; the carry ends as accepted.
     - **Held.** A started shared receipt holds the fading clock for every member, the borrowed guest as well as the host
       (`postureHold`), so an accepted carry is not abandonment.
