@@ -262,7 +262,8 @@ export class LoadMonitor {
     // the serving turn's own warm-up (JIT, first projections) is not load: loop delay counts for levels once two windows
     // have closed (the first window's p99 carries into the second); service, heap and queue count at once
     const warm = this.startedAt !== null && now - this.startedAt < 2 * this.windowMs, judged = warm ? {...this.signals, loopP99Ms: 0} : this.signals;
-    const from = this.level, to = this.o.drill ? (this.state.level = this.o.drill) : this.state.update(judged, now);
+    const from = this.level, to = (this.state.level = this.o.drill ?? 'green');   // #2307 arm (b), throwaway: hold green; judged unused
+    void judged;
     if (to !== from) this.changed(from, to);
     if (to === 'black') {
       this.blackSince ??= now;
