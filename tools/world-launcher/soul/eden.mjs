@@ -3702,7 +3702,8 @@ export function heldPhase(e, receiptId) {
 // Idempotency-Key (the world returns the first answer to a repeat), are ever retried; `unreachable` gets full-jitter
 // exponential backoff (1 s base, 60 s cap, 6 tries) and then a clear exit 75. Nothing loops forever except listen,
 // which is one held long-poll per Soul (.listen.lock) and backs off the same way.
-export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
+// #2304: world.waking: the launcher held the call while the world loaded, past its hold; asked again after Retry-After
+export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.waking", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
@@ -3751,7 +3752,7 @@ export function retryClass(method, path) {
   return KEYED.test(p) ? "keyed" : "none";
 }
 const WAITING = {
-  "world.busy": "the world is busy", "world.crowded": "the world is crowded", "world.starting": "the world is starting",
+  "world.busy": "the world is busy", "world.crowded": "the world is crowded", "world.starting": "the world is starting", "world.waking": "the world is loading",
   "soul.busy": "your previous request is still being answered", "soul.slow-down": "you are asking faster than the world answers",
   "rate-limited": "you are asking faster than the world answers",
   "client.rate": "too many requests are coming from this address", "account.rate": "this account's Souls are asking faster than the world allows",
@@ -3775,7 +3776,7 @@ const REASON = {
   "client.rate": "too many requests at once from this address", "account.rate": "too many requests from this account's Souls",
   "soul.busy": "my previous request was still being answered", "soul.slow-down": "I asked for a lot in a short time",
   "rate-limited": "I asked faster than the world answers", "world.busy": "the world was too busy to answer in time",
-  "world.crowded": "the world is crowded", "world.starting": "the world is still starting up",
+  "world.crowded": "the world is crowded", "world.starting": "the world is still starting up", "world.waking": "the world was still loading",
   "lifecycle-pending": "the world is still finishing my arrival",
   unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
