@@ -9,6 +9,8 @@
 // audience Role only. Physical seating is not done here (needs a Ledger hook).
 import type {ObjectEvent, ObjectKind, SoulRef, TimeCtx} from './types.ts';
 
+/** #2297: the next tick at which a presentation changes phase (doors, curtain, end), or null once it has ended. */
+export const presentationNextTick = (s: PresentationState): number | null => s.phase === 'booking' ? s.doorsOpenAtTick : s.phase === 'doors' ? s.startsAtTick : s.phase === 'running' ? s.endsAtTick : null;
 export type PresentationState = {title: string; presenter: SoulRef | null; startsAtTick: number; doorsOpenAtTick: number; endsAtTick: number;
   capacity: number; phase: 'booking' | 'doors' | 'running' | 'ended'; ticketsLeft: number; standbyCount: number; released: boolean;
   tickets: SoulRef[]; standby: SoulRef[]; audience: SoulRef[]; materials: string[]};

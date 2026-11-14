@@ -138,7 +138,17 @@ export type HostListener = {
   /** Notification only: the clock was stopped; no queued work is drained. */
   onStop?(): void;
   onClockUnavailable?():void;
+  /** #2297: what this listener keeps outside the engine that can change the world, from stored state only: `busy` (it has
+   *  work under way, so the world is not still) and its deadlines, each the next tick at which it changes something (`move`
+   *  when that change moves a body). A periodic check that would find nothing is not a deadline. */
+  stillness?(tick: number): StillPart[];
 };
+/** #2297: one deadline (or a busy flag) a part of the world reports to `WorldHost.stillUntil`. */
+export type StillPart = { name: string; tick?: number | null; move?: boolean; busy?: boolean };
+/** #2297 the still contract (#2241) as the host answers it: `untilTick` the earliest deadline, `moveTick` the earliest at
+ *  which the world itself moves a body; the step that reaches either tick may change the world, every step before it
+ *  changes only the clock. `parts` names what set them (and what keeps the world busy), for the check and reports. */
+export type StillAnswer = { still: boolean; tick: number; untilTick: number | null; moveTick: number | null; why?: string; due: StillPart[] };
 
 const TICK_MS = 50;
 const BATCH_TICKS = 10;      // 500 ms at rate 1
@@ -557,6 +567,59 @@ export class WorldHost {
   }
   /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
   owedTicks = 0;
+  /** #2297 A1: am I still, and until which tick? Still only when the engine is still (#2294), no input is queued, no
+   *  catch-up runs, the clock is not paused or halted and no listener is busy. `untilTick` is the earliest deadline of the
+   *  engine and of every listener (`HostListener.stillness`), or null; `moveTick` the earliest at which the world itself
+   *  moves a body (the engine's held ends and programme waits, the body rule's next step), or null. Reads only; skips nothing. */
+  stillUntil(): StillAnswer {
+    const tick = this.engine.world.tick, due: StillPart[] = [];
+    const not = (why: string): StillAnswer => ({ still: false, tick, untilTick: null, moveTick: null, why, due });
+    const eng = (this.engine as unknown as { stillnessV1?(): { still: boolean; untilTick: number | null } }).stillnessV1?.();
+    if (!eng?.still) return not('engine');
+    if (this.queue.length) return not('queued');
+    if (this.owedTicks > 0) return not('catching-up');
+    if (this.paused || !this.clockAvailable) return not('paused');
+    if (eng.untilTick !== null) due.push({ name: 'engine.held', tick: eng.untilTick, move: true });
+    const gaze = (this.engine as unknown as { attentionDueV1?(): number | null }).attentionDueV1?.() ?? null;
+    if (gaze !== null) due.push({ name: 'engine.gaze', tick: gaze });
+    for (const l of this.listeners) for (const p of l.stillness?.(tick) ?? []) { if (p.busy) return not(p.name); if (p.tick != null) due.push(p); }
+    let untilTick: number | null = null, moveTick: number | null = null;
+    for (const p of due) p.tick = Math.max(tick + 1, p.tick!);   // a deadline already passed is due at the next step
+    for (const p of due) { untilTick = untilTick === null ? p.tick! : Math.min(untilTick, p.tick!); if (p.move) moveTick = moveTick === null ? p.tick! : Math.min(moveTick, p.tick!); }
+    return { still: true, tick, untilTick, moveTick, due: due.filter((p) => p.tick === untilTick) };
+  }
+  /** #2297 A6: the still check, off unless SIM_STILL_CHECK=1 (or set by a test). Once the world claims still until a tick,
+   *  every step before that tick is checked: it grew no log, drew no world RNG and changed the engine state hash only in its
+   *  clock fields, and left nothing queued (a listener's enqueue is logged only at the next tick's drain). The claim is asked
+   *  again when it ends, when an input is queued or after a breach. `closed`: no input comes from outside (a test), so an
+   *  input queued between two ticks inside a claim (a listener's deferred work) is a breach too. `fell` counts the deadlines that fell due, by name. */
+  stillCheck: { claimed: number; failures: { tick: number; what: string; why: string }[]; fell: Map<string, number>; every: number; closed?: boolean; claim?: { until: number | null; due: string[]; at?: { hash: string; rng: string } } | null } | null =
+    process.env.SIM_STILL_CHECK === '1' ? { claimed: 0, failures: [], fell: new Map(), every: 1 } : null;
+  private stillCheckBefore() {
+    const chk = this.stillCheck!, tick = this.engine.world.tick;
+    let c = chk.claim;
+    if (c && this.queue.length && chk.closed && (c.until === null || tick + 1 < c.until)) { chk.failures.push({ tick, what: 'an input was queued between ticks', why: c.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${tick}: an input was queued between ticks inside a claimed horizon`); }
+    if (!c || this.queue.length || (c.until !== null && tick + 1 >= c.until)) {
+      if (c && c.until !== null && tick + 1 >= c.until) for (const n of c.due) chk.fell.set(n, (chk.fell.get(n) ?? 0) + 1);
+      const s = this.stillUntil();
+      c = chk.claim = s.still && (s.untilTick === null || tick + 1 < s.untilTick) ? { until: s.untilTick, due: s.due.map((p) => p.name) } : null;
+      if (!c) return null;
+    }
+    const hash = chk.every <= 1 || tick % chk.every === 0;
+    c.at ??= (this.engine as unknown as { stillCheckV1(): { hash: string; rng: string } }).stillCheckV1();
+    return { tick, seq: this.seq, hash, at: c.at };
+  }
+  private stillCheckAfter(b: NonNullable<ReturnType<WorldHost['stillCheckBefore']>>) {
+    const chk = this.stillCheck!; chk.claimed++;
+    const now = (this.engine as unknown as { stillCheckV1(): { hash: string; rng: string } }).stillCheckV1();
+    let failed = false;
+    const fail = (what: string) => { failed = true; chk.failures.push({ tick: b.tick, what, why: chk.claim?.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${b.tick}: ${what} inside a claimed horizon (until ${chk.claim?.until ?? 'none'})`); };
+    if (this.seq !== b.seq) fail('the log grew');
+    if (now.rng !== b.at.rng) fail('the world RNG drew');
+    if (b.hash && now.hash !== b.at.hash) fail('the state hash changed beyond the clock');
+    if (this.queue.length) fail('an input was queued');
+    if (failed) chk.claim = null; else if (chk.claim) chk.claim.at = now;
+  }
   /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
    *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
    *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
@@ -621,6 +684,11 @@ export class WorldHost {
 
   tickOnce() {
     this.assertClockReady();
+    const still = this.stillCheck ? this.stillCheckBefore() : null;   // #2297 A6 (off: one null test)
+    if (still) { try { this.tickOnceInner(); } finally { this.stillCheckAfter(still); } return; }
+    this.tickOnceInner();
+  }
+  private tickOnceInner() {
     const t0 = performance.now();
     const tick = this.engine.world.tick;
     if (this.recoveryForEdge) this.validPoses = { tick, poses: this.soulPoses() };
