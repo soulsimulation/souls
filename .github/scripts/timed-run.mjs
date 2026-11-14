@@ -370,7 +370,7 @@ async function runClip(inp, rec, out, env) {
   const made = readdirSync(dir).find((f) => /\.(mp4|webm)$/.test(f)) ?? null, side = made ? readJ(join(dir, `${made}.json`)) : {};
   let timing = null;
   if (made) {
-    const r = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=pts_time', '-of', 'csv=p=0', join(dir, made)], { encoding: 'utf8', maxBuffer: 64 << 20 });
+    const r = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'csv=p=0', join(dir, made)], { encoding: 'utf8', maxBuffer: 64 << 20 });
     if (r.status === 0) timing = frameTiming(r.stdout.split('\n').map((x) => Number.parseFloat(x)));
   }
   const clip = { kit: kitName, template: k.template, viewport, exitCode: code, wallMs: Date.now() - t1, file: made, gl: side.gl ?? null,

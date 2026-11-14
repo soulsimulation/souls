@@ -141,9 +141,9 @@ jobs:
         if: env.INPUT_COMMAND != 'walk' && env.INPUT_COMMAND != 'counted'
         working-directory: src
         run: pnpm --filter @souls/web build
-      # the capacity benches' worlds refuse genesis without the viewer bundle
+      # the capacity benches' worlds refuse genesis without the viewer bundle; a clip's people are drawn from it
       - name: Build the viewer
-        if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile'
+        if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile' || env.INPUT_COMMAND == 'clip'
         working-directory: src
         run: pnpm build:viewer
       # clip: the ref's Playwright version of Chromium, installed in the per-run directory (the shared home stays untouched).
