@@ -15,7 +15,7 @@ const run = (script, cwd, args) => {
   return r.stdout + r.stderr;
 };
 
-run(GOD, join(CLIP_WORK, 'god'), ['place', 'core/television@2', '--at', '2,-3', '--facing', 'plaza', '--name', 'tv', '--param', 'variant=flat']);
+run(GOD, join(CLIP_WORK, 'god'), ['place', 'core/television@2', '--at', '2,-3', '--yaw', '0', '--name', 'tv', '--param', 'variant=flat']);
 let TV = null;
 for (let i = 0; i < 20 && !TV; i++) {
   TV = /object:([^:\s"']+):switch-on/.exec(run(EDEN, DIR, ['caps', '--search', 'television']))?.[1] ?? null;
@@ -35,7 +35,10 @@ export default async function steps(page, { mark }) {
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
   mark('follow Tess');
-  await page.waitForTimeout(3500);
+  await page.waitForTimeout(2500);
+  await page.mouse.move(640, 400);
+  for (let i = 0; i < 4; i++) { await page.mouse.wheel(0, -240); await page.waitForTimeout(150); }   // closer, the screen in view
+  await page.waitForTimeout(1000);
   for (const [act, label] of [['switch-on', 'on'], ['change-channel', 'channel 2'], ['change-channel', 'channel 3'], ['change-channel', 'channel 4'], ['switch-off', 'off']]) {
     await eden(['act', `object:${TV}:${act}`, '--wait', '40', '--json'], 50_000);
     mark(label);

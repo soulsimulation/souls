@@ -9,14 +9,13 @@ const { CLIP_CHECKOUT = '.', CLIP_WORK } = process.env;
 const EDEN = join(CLIP_CHECKOUT, 'tools/world-launcher/soul/eden.mjs'), DIR = join(CLIP_WORK, 'soul-runa');
 const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
 
-/** The nearest offered walk to an upstairs room (the catalog's rows come nearest first). */
+/** The nearest offered walk to an upstairs room (`caps --search`, the local catalog, with each row's metres). */
 function target() {
   for (const words of ['upstairs', 'roof']) {
-    const r = spawnSync(process.execPath, [EDEN, 'find', words, '--verb', 'walk', '--limit', '12', '--json'], { cwd: DIR, encoding: 'utf8', timeout: 60_000 });
-    const found = parse(r.stdout)?.found ?? [];
-    console.error(`kit: find ${words}: ${JSON.stringify(found.slice(0, 6)).slice(0, 1500)}`);
-    const row = found.find((f) => /^walk:/.test(f.act ?? ''));
-    if (row) return row.act;
+    const r = spawnSync(process.execPath, [EDEN, 'caps', '--search', words, '--verb', 'walk', '--all', '--json'], { cwd: DIR, encoding: 'utf8', timeout: 60_000 });
+    const offers = (parse(r.stdout)?.offers ?? []).filter((o) => /^walk:/.test(o.id ?? '')).sort((a, b) => (a.metres ?? 1e9) - (b.metres ?? 1e9));
+    console.error(`kit: caps --search ${words}: ${JSON.stringify(offers.slice(0, 6))} ${r.status ? r.stderr.slice(0, 400) : ''}`);
+    if (offers[0]) return offers[0].id;
   }
   throw Error('kit: no walk to an upstairs room is offered');
 }
