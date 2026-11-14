@@ -1368,6 +1368,10 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1530 climb-spacing/1, one logged rules event (prospective): a climber's step is refused where collision.human-human would
+   *  flag it against another body on its level (|dy| <= 1 m, closer than both radii), so a follower waits behind on the stair and
+   *  is never settled off it. History before the event replays as it was. Main adopts it at boot. */
+  enableClimbSpacingV1(author='operator:climb-spacing'){if((this.extra.runtimePolicy as {climbSpacingV1?:boolean}|undefined)?.climbSpacingV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,climbSpacingV1:true},why:'climb-spacing/1 (#1530): a climber waits behind a body ahead on the stair rather than stepping where the separation invariant flags them; retain historical replay before this event'});}
   /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
    *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
   enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
@@ -1386,6 +1390,10 @@ export class WorldHost {
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
   }
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
+  /** #2294 held-activity/1, one logged rules event (prospective): an activity in place started after it (a solo pose, a mat
+   *  sleep) keeps a start and an end tick instead of a running sum; seats, slots and circles once taken are held with no end;
+   *  the engine reads whether the world is still and until which tick. History before the event replays as it was. Main adopts it at boot. */
+  enableHeldActivitiesV1(author='operator:held-activity'){if((this.extra.runtimePolicy as {heldActivitiesV1?:boolean}|undefined)?.heldActivitiesV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,heldActivitiesV1:true},why:'held-activity/1 (#2294): an activity in place has a start and an end tick and costs nothing between them; retain historical replay before this event'});}
   /** #2196 park-away/1, one logged rules event (prospective): an empty ride that landed away from its home parks where it landed and
    *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event
    *  replays as it was. Main adopts it at boot. */

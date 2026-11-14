@@ -78,7 +78,7 @@ export function clockBlockOf(c: ClockState | null | undefined): {stalled: true; 
 }
 
 /** The routes a read worker answers itself, by mode (S.readMode): what the launcher may route to its port. */
-export const READ_ROUTES: Record<number, string[]> = {1: ['here', 'capabilities'], 2: ['here', 'observe', 'capabilities', 'resolve', 'view']};
+export const READ_ROUTES: Record<number, string[]> = {1: ['here', 'capabilities'], 2: ['here', 'observe', 'capabilities', 'view']};
 
 export const newSharedLoad = () => new Float64Array(new SharedArrayBuffer(S.size * Float64Array.BYTES_PER_ELEMENT));
 /** The process's one shared array (the watchdog gets this buffer). Tests make their own with newSharedLoad(). */

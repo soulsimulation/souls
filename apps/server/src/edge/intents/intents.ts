@@ -252,11 +252,14 @@ export class Intents {
    *  the paged planner proves only its first hop, no walk joins the point to where the body stands). */
   private walkTo(P: Perception, s: Record<string, unknown>): Resolution {
     const at = s.at; if (!Array.isArray(at) || at.length !== 2 || !at.every(n => typeof n === 'number' && Number.isFinite(n))) return no('capability.params', 'walk-to needs at: [x, z], two finite numbers.');
+    // #2283: pace run is the same walk at the engine's run gait (stairs stay slow; a wet route walks)
+    if (s.pace !== undefined && s.pace !== 'walk' && s.pace !== 'run') return no('capability.params', 'pace is walk or run.');
+    const run = s.pace === 'run';
     const asked: V2 = [at[0] as number, at[1] as number], name = `[${asked[0]}, ${asked[1]}]`, level = P.w.entities[P.soul.entityId]?.human?.level ?? 0, mw = this.L.mw;
     // standing ground on the body's own level within 1 m (the engine's goal check: body radius + planning margin)
     const to = mw.standableNearV1 ? mw.standableNearV1(asked, level, P.soul.entityId, WALK_TO_ROOM, WALK_TO_SNAP_RINGS) : asked;
     if (!to) return no('route.goal-blocked', level ? `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on level ${level}, the floor you are on: walk-to stays on your own level, so for a point outdoors or on another floor, walk down or to a place there first.` : `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on the ground (level 0): it is inside something solid or off the walkable ground.`);
-    const steps: Steps = [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1'}}];
+    const steps: Steps = [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1', ...(run ? {gait: 'run'} : {})}}];
     // a point inside a site under construction is refused as approach's target is
     const blocked = this.planRefusal?.(P.soul, steps); if (blocked) return no(blocked.code, blocked.reason);
     // and a point inside someone else's private building as the walk to that building is (object.private)
@@ -269,7 +272,7 @@ export class Intents {
       // (a body where the labels see no room, seated or in a tight spot, has no area to compare: the planner decides)
       if (goal?.code === 'nav.disconnected' && (me?.ok || (me?.area !== undefined && me.area !== goal.area))) return no('route.unreachable', `No walkable route joins ${name} to where you stand: it lies in a separate area${goal.pocket ? ` of ${Math.round(goal.pocket)} m²` : ''} (behind a cliff, water, a wall or a closed door), so walk-to refuses it rather than walking part way.`);
     }
-    return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `Walk to ${name}`, steps, chosen: {at: asked, goal: to, short: round1(dist2(asked, to))}};
+    return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `${run ? 'Run' : 'Walk'} to ${name}`, steps, chosen: {at: asked, goal: to, short: round1(dist2(asked, to))}};
   }
 
   private follow(P: Perception, s: Record<string, unknown>): Resolution {
@@ -415,7 +418,7 @@ export class Intents {
     return words.flatMap(w => w.split('-')).every(w => held.has(w)) ? {...out, would: {...would, resolved: `${asked} names ${would.capability}`}} : null;
   }
 
-  /** POST /v1/edge/resolve: what act would do, without doing anything. */
+  /** What act would do, without doing anything (the strict gate's check; its route is closed, #1910). */
   dryRun(soul: EdgeSoul, input: IntentInput & {capability?: unknown}): Record<string, unknown> {
     // #1152: how an owner asks ("could you ...?") is not what is asked
     if (typeof input.capability === 'string' && input.verb === undefined && !input.capability.includes(':')) input = {...input, capability: input.capability.replace(/^\s*(?:(?:that'?s\s+all|ok(?:ay)?|alright|now|then|next)[,\s]+)*(?:(?:could|can|would|will)\s+you\s+)?(?:please\s+)?(?:go\s+and\s+)?/i, '').replace(/[\s,]*(?:please)?[\s.?!]*$/i, '')};

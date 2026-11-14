@@ -72,6 +72,41 @@ async function reboot(t: test.TestContext, path: string, ambient: boolean) {
   return f;
 }
 
+// #2294 A4: a held read keeps its end tick in snapshotted state and in the state hash, so a world stopped halfway through
+// it and caught up by ticking ends it on the control's tick.
+test('held-activity/1: a world cold-booted halfway through a 3,600 s read ends it on the control\'s tick, hashes equal', { timeout: 900_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'catchup-held-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const boot = (path: string) => { const f = fixture(path, undefined, { durableClockV1: true }); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); }); return f; };
+  const control = boot(join(dir, 'world.db')), copy = join(dir, 'away.db');
+  await accept<unknown>(control.host, control.host.enableHeldActivitiesV1());
+  await invite(control, 'ana'); await accept(control.host, control.souls.create('dev:ana', { name: 'ana', description: 'a reader' }));
+  for (let i = 0; i < 20; i++) { control.host.tickOnce(); await turn(); }
+  const m = [...control.host.minds.values()][0], body = (f: F) => f.host.engine.world.entities[m.entityId]?.human?.activity;
+  const engine = (f: F) => f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } };
+  await accept(control.host, control.host.enqueue('decision', 'fixture', { soulId: m.soulId, entityId: m.entityId, option: 'rest', card: 'rest', target: null, label: 'Read a book',
+    steps: [{ verb: 'mars:pose_v1', params: { activity: 'read', prop: 'book', seconds: 3600 } }], approachLen: 0, reevalTicks: 1e9, fallback: true, trigger: 'fixture' }));
+  for (let i = 0; i < 5; i++) { control.host.tickOnce(); await turn(); }
+  const { still, untilTick: end } = engine(control).stillnessV1();
+  assert.equal(body(control), 'read'); assert.equal(still, true, 'a reading Soul alone: the world is still');
+  const left = end! - control.host.engine.world.tick; assert.ok(left > 72_000 - 10 && left < 72_000, 'the read ends an hour after it started');
+  for (let i = 0; control.host.engine.world.tick < end! - 36_000; i++) { control.host.tickOnce(); if (i % 500 === 0) await turn(); }
+  control.host.saveSnapshot(true); control.db.db.exec(`VACUUM INTO '${copy}'`);
+  const away = control.host.engine.world.tick;
+  for (let i = 0; control.host.engine.world.tick < end! - 1; i++) { control.host.tickOnce(); if (i % 500 === 0) await turn(); }
+  assert.equal(body(control), 'read', 'still reading the tick before its end');
+  control.host.tickOnce(); await turn();
+  assert.equal(body(control), 'idle', 'the control stood up by itself at the end tick');
+  const after = boot(copy);
+  assert.equal(after.host.engine.world.tick, away, 'booted halfway through the read');
+  assert.equal(engine(after).stillnessV1().untilTick, end, 'the end tick came back with the snapshot');
+  await after.host.catchUp(end! - 1 - away, turn);
+  assert.equal(body(after), 'read');
+  await after.host.catchUp(1, turn);
+  assert.equal(after.host.engine.world.tick, end);
+  assert.equal(body(after), 'idle', 'the rebooted world ends the read on the same tick');
+  assert.equal(after.host.engine.stateHash(), control.host.engine.stateHash(), 'equal hashes at the end tick');
+});
+
 for (const how of ['restart', 'crash'] as const) for (const ambient of [false, true]) {
   const what = `${how === 'restart' ? 'stopped and cold-booted' : 'that crashed and cold-booted'}, ${ambient ? 'idle Souls with the edge ambient-life reflex' : 'idle Souls, needs and day moving'}`;
   // #2236: the ambient-life reflex keeps its idle clock in memory, so a reboot shifts the idle Souls' next acts: unproved
@@ -97,3 +132,45 @@ for (const how of ['restart', 'crash'] as const) for (const ambient of [false, t
     assert.deepEqual(state(after), state(control));
   });
 }
+
+// #2295 A5: two Souls taken from their agents' last acts to both asleep by the wind-down (short knobs), once ticked
+// straight through and once stopped and cold-booted twice on the way (the second boot without the rule's cache):
+// the same state hash and the same log.
+test('wind-down/1: a world stopped and cold-booted twice between the last agent act and both asleep matches one ticked straight through', { timeout: 900_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'catchup-winddown-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const knobs = { wanderTicks: 400, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 1500 };
+  const boot = (path: string) => {
+    const f = fixture(path, undefined, { durableClockV1: true }); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
+    const ledger = new EdgeLedger(f.host, f.db); return { f, rule: ledger.startBodyRule(knobs)! };
+  };
+  const control = boot(join(dir, 'world.db'));
+  await accept<unknown>(control.f.host, control.f.host.enableHeldActivitiesV1());
+  for (const n of ['ana', 'ben']) { await invite(control.f, n); await accept(control.f.host, control.f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
+  for (const m of control.f.host.minds.values()) await accept(control.f.host, control.f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
+    steps: [{ verb: 'mars:pose_v1', params: { activity: 'read', prop: 'book', seconds: 10 } }], reevalTicks: 1e9, fallback: false, trigger: 'edge-act:r_last' }));
+  const run = async (w: ReturnType<typeof boot>, to: number) => { for (let i = 0; w.f.host.engine.world.tick < to; i++) { w.f.host.tickOnce(); if (i % 200 === 0) await turn(); } };
+  const start = control.f.host.engine.world.tick, end = start + knobs.wanderTicks + knobs.boundTicks + 40;
+  const save = (w: ReturnType<typeof boot>, name: string) => { w.f.host.saveSnapshot(true); const p = join(dir, name); w.f.db.db.exec(`VACUUM INTO '${p}'`); return p; };
+  await run(control, start + knobs.wanderTicks + 250); const first = save(control, 'first.db');
+  await run(control, end);
+  const asleep = () => [...control.f.host.minds.values()].map((m) => control.rule.view(m.soulId)?.state);
+  assert.deepEqual(asleep(), ['asleep', 'asleep'], 'the control put both to sleep');
+  assert.deepEqual([...control.f.host.minds.values()].map((m) => control.f.host.engine.world.entities[m.entityId]?.human?.activity), ['nap', 'nap'], 'lying in the held sleep');
+  const still = () => (control.f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } }).stillnessV1();
+  assert.deepEqual(still(), { still: true, untilTick: null }, 'a held sleep with no end');
+  assert.equal(control.rule.nextMoveTick(), null, 'and the rule has nothing due');
+  // from a still tick, one more step changes no body and no live action
+  const bodies = () => JSON.stringify([...control.f.host.minds.values()].map((m) => control.f.host.engine.world.entities[m.entityId]));
+  const before = bodies(); control.f.host.tickOnce(); control.f.host.tickOnce();
+  assert.equal(bodies(), before, 'one more step changes nothing'); assert.deepEqual(still(), { still: true, untilTick: null });
+  assert.ok(control.f.db.events(control.f.host.worldId).filter((e) => (e.payload as { trigger?: string })?.trigger === 'edge-body').length >= 6, 'the wind-down moved them');
+  const a = boot(first); assert.equal(a.f.host.engine.world.tick, start + knobs.wanderTicks + 250);
+  await a.f.host.catchUp(250, turn);   // partway through Wander: a second stop before the walk out
+  const second = save(a, 'second.db');
+  const b0 = new (await import('node:sqlite')).DatabaseSync(second); b0.exec('DELETE FROM edge_body_v1'); b0.close();   // A3: the cache is lost
+  const b = boot(second);
+  await b.f.host.catchUp(control.f.host.engine.world.tick - b.f.host.engine.world.tick, turn);
+  assert.equal(b.f.host.engine.world.tick, end + 2);
+  assert.equal(b.rule.nextMoveTick(), null, 'nothing more is due');
+  assert.deepEqual(state(b.f), state(control.f));
+});
