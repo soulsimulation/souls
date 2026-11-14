@@ -40,8 +40,15 @@ export default async function steps(page, { mark }) {
   mark('follow Pia');
   await page.waitForTimeout(3000);                        // the camera settles on Pia
   mark(`act ${TARGET}`);
-  const r = await eden(['act', TARGET, '--wait', '75', '--json'], 85_000);
-  console.error(`kit: act exit ${r.code}: ${(r.out || r.err).slice(0, 1500)}`);
-  mark(r.code === 0 && /"accepted": true/.test(r.out) ? 'at the easel' : 'act refused or ended');
-  await page.waitForTimeout(6000);                        // Pia at the easel, painting
+  const r = await eden(['act', TARGET, '--json'], 30_000);
+  console.error(`kit: act exit ${r.code}: ${(r.out || r.err).slice(0, 800)}`);
+  // painting has no end of its own, so `act --wait` would hold the whole window: wait in short polls until Pia paints
+  let painting = false;
+  for (let i = 0; i < 12 && !painting && /"accepted": true/.test(r.out); i++) {
+    const w = await eden(['wait', '6', '--json'], 15_000);
+    painting = /"activity": "paint"/.test(w.out);
+  }
+  console.error(`kit: painting ${painting}`);
+  mark(painting ? 'painting at the easel' : 'not painting');
+  await page.waitForTimeout(8000);                        // Pia at the easel, painting
 }
