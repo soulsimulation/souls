@@ -75,7 +75,7 @@ PR that causes it; and V3-bundle in the release gate. A PR that changes only the
 Old history must keep its meaning. `apps/server/test/fixtures/replay-corpus/` holds frozen event logs from fake-mind
 worlds recorded in a temporary database (never production): a toy world, a green-field god world with world-edits that
 adopts the boot runtime-policy chain at its first boot, and a Mars campus world with decisions, a body assignment and a
-retire that adopts the chain mid-history, so it has pins before and after. Each entry is `<name>.log.json.br` (the world
+retire that adopts the chain mid-history, so it has pins before and after. Each entry is `<name>.log.json` (the world
 row, every event, one snapshot; never rewritten) and `<name>.pins.json` (its reader, the policies its log adopts, and
 the state and kernel hashes at a few ticks and at its head). `apps/server/src/replay-corpus.test.ts` refolds every log
 with the current engine from genesis at each pinned tick, and boots it as a restarting server does, from genesis and from

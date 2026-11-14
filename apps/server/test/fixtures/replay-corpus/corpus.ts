@@ -3,9 +3,8 @@
 // change that moves a pin either ships a logged rules fact (so old history keeps its old meaning) or is a deliberate,
 // reviewed re-pin (`record.ts --write`, in its own commit). record.ts adds logs. docs/testing.md#replay-corpus.
 //
-// Per entry, two files: `<name>.log.json.br` (the world row, every logged event and one snapshot; never rewritten) and
+// Per entry, two files: `<name>.log.json` (the world row, every logged event and one snapshot; never rewritten) and
 // `<name>.pins.json` (how to read it and the pinned hashes; changes only with --write).
-import { brotliCompressSync, brotliDecompressSync } from 'node:zlib';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { EngineFactory } from '@souls/engine-contract';
@@ -38,15 +37,17 @@ export type Log = {
   snapshot: { tick: number; seq: number; stateHash: string; rulesVersion: string; text: string };
 };
 
-export const logPath = (name: string) => join(CORPUS_DIR, `${name}.log.json.br`);
+export const logPath = (name: string) => join(CORPUS_DIR, `${name}.log.json`);
 export const pinsPath = (name: string) => join(CORPUS_DIR, `${name}.pins.json`);
 export const entries = (): string[] => readdirSync(CORPUS_DIR).filter((f) => f.endsWith('.pins.json')).map((f) => f.slice(0, -'.pins.json'.length)).sort();
 export const readPins = (name: string): Pins => JSON.parse(readFileSync(pinsPath(name), 'utf8'));
 export const writePins = (p: Pins) => writeFileSync(pinsPath(p.name), JSON.stringify(p, null, 1) + '\n');
-export const readLog = (name: string): Log => JSON.parse(brotliDecompressSync(readFileSync(logPath(name))).toString('utf8'));
+export const readLog = (name: string): Log => JSON.parse(readFileSync(logPath(name), 'utf8'));
+/** Plain text, one event per line, so a review reads what history the corpus holds. */
+export const formatLog = (log: Log) => `{"world":${JSON.stringify(log.world)},\n"snapshot":${JSON.stringify(log.snapshot)},\n"events":[\n${log.events.map((e) => JSON.stringify(e)).join(',\n')}\n]}\n`;
 export function writeLog(name: string, log: Log) {
   if (existsSync(logPath(name))) throw Error(`replay-corpus: ${name} is frozen history; record a new entry instead`);
-  writeFileSync(logPath(name), brotliCompressSync(Buffer.from(JSON.stringify(log))));
+  writeFileSync(logPath(name), formatLog(log));
 }
 
 export const readerFactory = (r: Reader): Promise<EngineFactory> =>

@@ -1,7 +1,7 @@
 // Replay-compatibility corpus recorder (#1395). Fake minds, a temporary database, nothing live or production.
 //
 //   node apps/server/test/fixtures/replay-corpus/record.ts <name> --recipe <toy|god-greenfield|mars-campus>
-//       records a NEW entry: runs the recipe with this tree's engine and boot chain, writes <name>.log.json.br (frozen
+//       records a NEW entry: runs the recipe with this tree's engine and boot chain, writes <name>.log.json (frozen
 //       from then on) and <name>.pins.json. Refuses a name that exists: history is never re-recorded.
 //   node apps/server/test/fixtures/replay-corpus/record.ts --write <name|all>
 //       re-pins an existing entry by refolding its frozen log with this tree's engine. Only for a deliberate change, in
