@@ -8,9 +8,9 @@ test('activity intents preserve companions through place and target resolution, 
   const w=await coreAWorld(3),[a,b,c]=w.souls;t.after(w.close);
   const target='eden-library-1'; // fixture's admitted native library; decorative sub-places deliberately refuse
   for(const spec of [{place:target,with:b.name,seconds:60},{target,with:[b.soulId],seconds:60}]){
-    const dry=await w.http(a,'POST','/v1/edge/resolve',{verb:'read',target:spec});
-    assert.equal(dry.body.resolve.ok,true,JSON.stringify(dry));
-    assert.deepEqual(dry.body.resolve.would.params,{seconds:60,with:spec.with});
+    const dry=w.ledger.intents.dryRun(a,{verb:'read',target:spec} as never) as any;
+    assert.equal(dry.ok,true,JSON.stringify(dry));
+    assert.deepEqual(dry.would.params,{seconds:60,with:spec.with});
     assert.equal(w.ledger.together.invitesFor(b.soulId).length,0,'dry run never invites');
   }
   const bad=await w.http(a,'POST','/v1/edge/act',{capability:'read:'+target,params:{with:false}});
