@@ -139,8 +139,13 @@ With a login (#2246), `adopt <name|id>` and `pair <id>` need no window code and 
 the Soul token. A name is looked up in `GET /v1/agent/account` (folded as the world folds names; two Souls with one
 name is an error listing both ids). A Soul paired this way is tagged with its account (`config.souls.<id>.account`),
 and every later move, revoke or retire of it uses that account's login whatever `--as` says; an untagged Soul uses
-`--as`, else the origin's active login. The last device to ask wins: the world disconnects the one before
-(`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
+`--as`, else the origin's active login. Moving follows #2401 (D1, decided 14 November): while no agent is connected
+for the Soul (its link is not `connected`), another device takes it freely; while one is connected, the pair route
+answers 409 `soul.held-elsewhere` naming that device (`heldBy`, its `agent.label`) and the client prints it with the
+same command plus `--move` as `next`; `--move` (body `move: true`) forces it. Only the account's own Soul gets that
+answer, and a retry of an already made request is not refused. A browser click never takes a Soul. When the home
+taking it has no memory for it, the answer says so in `memory`, naming `export` there and `import` here. A take
+disconnects the device before (`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
 (`runs`, the `agent.label` from one account read, when that home is logged in) and gives `adopt <name>` as `next`;
 the Soul becomes `unpaired` there and its dead token is removed, its memory untouched, so it no longer makes a bare
 command ambiguous. A `revoked` token is treated the same. No resident process (`serve`, `listen`) ever pairs again by
