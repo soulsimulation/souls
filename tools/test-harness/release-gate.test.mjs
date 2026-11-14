@@ -746,6 +746,29 @@ test('cache-add stores a bare remote-suite run (no gate receipt) only when it pa
   writeFileSync(meta, JSON.stringify({ ...m, harnessTree: 'a'.repeat(40) }));
   assert.match(cacheAdd(failing, { root: repo.dir, cacheDir: cache }).reason, /metadata mismatch: harnessTree/);
 });
+test('cache-add stores a steps-only run (a CI-evidence baseline) under its steps key, never as a full run', async t => {
+  const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
+  const c1 = repo.commit('apps/web/src/a.ts', 'one\n'), head = gitIn(repo.dir, 'rev-parse', 'HEAD');
+  const only = REQUIRED_STEPS.filter(step => !['V1-types', 'V2-build-root', 'V3-client-cli', 'V3-launcher-unit', 'V4-web'].includes(step));
+  const bare = join(repo.dir, '.lane/runs/only');
+  await fakeModal([])(bare, c1, head, '22', repo.dir, only);
+  const added = cacheAdd(bare, { root: repo.dir, cacheDir: cache });
+  assert.equal(added.stored, true, added.reason);
+  const suite = suiteTree(repo.dir, 'HEAD');
+  assert.equal(added.key, cacheKey({ sourceSha: c1, suiteTree: suite, node: '22', only }));
+  const entry = JSON.parse(readFileSync(join(added.dir, 'CACHE.json'), 'utf8'));
+  assert.deepEqual(entry.only, only); assert.deepEqual(entry.provenance, { via: 'cache-add-bare', receipt: null, ciEvidence: true, only });
+  assert.equal(lookupCache(cache, { sourceSha: c1, suiteTree: suite, node: '22', only }, manifest(), only, {}, repo.dir).hit, true, 'a gate executing the same steps reads it');
+  assert.equal(lookupCache(cache, { sourceSha: c1, suiteTree: suite, node: '22' }, manifest(), REQUIRED_STEPS, {}, repo.dir).hit, false, 'never read as a full run');
+  const other = only.slice(1);
+  assert.equal(lookupCache(cache, { sourceSha: c1, suiteTree: suite, node: '22', only: other }, manifest(), other, {}, repo.dir).hit, false, 'nor for another step set');
+  // a step the run claims but did not return is refused
+  const short = join(repo.dir, '.lane/runs/short');
+  await fakeModal([])(short, c1, head, '22', repo.dir, only);
+  const meta = join(short, 'out/RUN-METADATA.json');
+  writeFileSync(meta, JSON.stringify({ ...JSON.parse(readFileSync(meta, 'utf8')), only: [...only, 'V1-types'] }));
+  assert.equal(cacheAdd(short, { root: repo.dir, cacheDir: mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')) }).stored, false);
+});
 test('suite tree: a driver-only edit keeps the cache key and reuses the baseline; a container-side edit changes it', async t => {
   const repo = gateRepo(t), cache = mkdtempSync(join(dirname(repo.dir), 'souls-gate-cache-')); t.after(() => retireFixture(cache));
   repo.commit('tools/test-harness/modal_suite.py', 'V5_SHARDS = 2\n'); repo.commit('tools/test-harness/release-gate.mjs', '// driver v1\n');

@@ -682,7 +682,11 @@ export function cacheAdd(runDir, { root = ROOT, cacheDir = defaultCacheDir(root)
     const harnessTree = gitAt(root, 'rev-parse', `${meta.harnessRef}:tools/test-harness`);
     const archive = execFileSync('git', ['-C', root, 'archive', '--format=tar.gz', meta.harnessRef, 'tools/test-harness'], { maxBuffer: MAX_BUFFER });
     const manifest = JSON.parse(execFileSync('git', ['-C', root, 'show', `${meta.harnessRef}:tools/test-harness/quarantine.json`], { maxBuffer: MAX_BUFFER }));
-    run = readRun(runDir, { schemaVersion: 1, sourceSha: meta.sourceSha, harnessRef: meta.harnessRef, harnessTree, harnessArchiveSha256: sha256(archive), node: meta.node }, manifest, REQUIRED_STEPS, { root });
+    // A steps-only run (a CI-evidence gate's baseline, #1463) is validated on exactly its steps and stored under the key
+    // naming them, so only a gate that executes the same steps reads it; it is never read as a full run.
+    const only = Array.isArray(meta.only) && meta.only.length ? meta.only : null;
+    if (only && only.some(step => !REQUIRED_STEPS.includes(step))) throw Error(`steps-only run names an unknown step: ${only.filter(step => !REQUIRED_STEPS.includes(step)).join(', ')}`);
+    run = readRun(runDir, { schemaVersion: 1, sourceSha: meta.sourceSha, harnessRef: meta.harnessRef, harnessTree, harnessArchiveSha256: sha256(archive), node: meta.node, ...(only && { only }) }, manifest, only || REQUIRED_STEPS, { root });
     // On its own terms, the run must pass as a gate baseline: every failure, skip and TODO has its exact quarantine,
     // no test file failed to load and no V6 scenario failed (compareRuns of the run with itself, on its own source tree).
     const sourceFiles = new Set(gitAt(root, 'ls-tree', '-r', '--name-only', meta.sourceSha).split('\n'));
@@ -701,7 +705,7 @@ export function cacheAdd(runDir, { root = ROOT, cacheDir = defaultCacheDir(root)
       provenance = { via: 'cache-add', receipt: receiptPath, receiptSha256: sha256(receiptBytes), label };
     }
     if (run.errors.length) return { stored: false, reason: run.errors.join('; ') };
-    return storeCache(cacheDir, run, provenance, root);
+    return storeCache(cacheDir, run, { ...provenance, ...(only && { ciEvidence: true, only }) }, root);
   } catch (e) { return { stored: false, reason: e.message }; }
 }
 
