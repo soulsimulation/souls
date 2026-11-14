@@ -40,10 +40,10 @@ export default async function steps(page, { mark }) {
   await page.waitForTimeout(500);
   await page.keyboard.press('Enter');
   mark('follow Runa');
-  await page.waitForTimeout(4000);                        // the camera settles on Runa
+  await page.waitForTimeout(3000);                        // the camera settles on Runa
   mark(`run to ${TARGET}`);
-  const r = await eden(['act', TARGET, '--run', '--wait', '70', '--json'], 80_000);
+  const r = await eden(['act', TARGET, '--run', '--wait', '76', '--json'], 85_000);
   console.error(`kit: act exit ${r.code}: ${(r.out || r.err).slice(0, 1500)}`);
   mark(r.code === 0 ? 'arrived' : 'act ended');
-  await page.waitForTimeout(4000);                        // Runa upstairs, at rest
+  await page.waitForTimeout(3000);                        // Runa upstairs, at rest
 }
