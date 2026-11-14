@@ -44,6 +44,34 @@ waiting, by reason, and the wait of the last 100 (median, 95th percentile, longe
 `tools/world-launcher/deploy/install.sh` writes the production and staging files once and never edits an existing
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
 
+**Memory for worlds (#2233).** `--worlds-mem-mb` is the memory all of a stage's worlds may use together. A world loads
+only while the running worlds' measured memory (Pss, read at most every 30 s) plus a fixed estimate for each world
+loading (310 MB for a small world, 650 MB for an Eden-class one, chosen by the template's size: the load peaks #2232 measured) stays under it;
+`--min-free-mb` stays a second guard, and `--max-running` no longer limits. To make room the launcher unloads a still
+world whose next event is at least 60 s away, then a world with no act and no visitor for 10 minutes (`--idle-ms`), the
+one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
+is refused with the retriable `503 world.capacity`, and `/__sim/healthz` carries the host problem code
+`worlds.capacity` for 10 minutes. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
+`/__sim/worlds.json` beside the old `status`; the health page (`/__sim/health?json=1`) adds per world its ticks computed
+and jumped in the last hour (from the world's own counters, once it reports them), seconds in memory in 24 h, Pss and
+last load reason, and in total the worlds awake, still and unloaded and the memory used against the figure.
+
+One command sets a stage's capacity: `bash install.sh capacity <stage> <GB>`, as root on the host. It rewrites the
+memory drop-in and, in `<stage>.conf`, `--worlds-mem-mb`, `--max-running`, `--range` (two ports per world that can run,
+above the stage's `--port`; it refuses a range that would reach another stage's ports) and `--max-worlds`, prints
+before and after, and takes effect at the next restart. An ordinary release never runs it; `release.sh <stage>
+--capacity <GB>` runs it once and restarts. The production host's worlds may use 24 GB of its 31 GB (#2241); the
+release owner applies it. What each figure gives (production, `--port 4620`; small and Eden worlds at their settled
+memory of 250 and 575 MB, #2240):
+
+| GB | MemoryHigh / Max | `--worlds-mem-mb` | `--max-running` | `--range` | `--max-worlds` | Small worlds settled | Eden-class settled |
+| ---: | --- | ---: | ---: | --- | ---: | ---: | ---: |
+| 8 | 8G / 10G | 6,144 | 24 | 4621-4668 | 60 | 24 | 10 |
+| 16 | 16G / 18G | 14,336 | 57 | 4621-4734 | 114 | 57 | 24 |
+| 24 | 24G / 26G | 22,528 | 90 | 4621-4800 | 180 | 90 | 39 |
+
+`--max-worlds` is at least twice `--max-running` (an existing higher value is kept): unloaded worlds cost only disk.
+
 Caddy terminates TLS and sends the canonical root site to production; `souls.game` redirects to `soul.game`.
 `sim.eden.art`, the former origin and still the Clerk primary origin, moves to the production host. There it
 redirects to `soul.game` with the same path and query (301 for GET and HEAD, 308 otherwise), except `/sign-in`, which

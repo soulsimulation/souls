@@ -118,8 +118,10 @@ for (const [who, when] of [['Bo', 'move'], ['Ada', 'gather'], ['Bo', 'lift']]) {
     assert.equal(during.fresh.accepted, false); assert.equal(during.fresh.code, 'shared.busy', JSON.stringify(during.fresh)); assert.equal(during.fresh.op, r.op.id);
     assert.deepEqual(during.after, during.counts, 'a refused accept makes no receipt');
     assert.ok(gone !== null, `${who} disconnected during ${when}`);
-    // A1a: the body was left alone by the body rule (no reflex move or stop) and the accepted carry arrived
-    assert.ok(r.seen.states[who].has('zombie') && r.seen.states[who].has('asleep'), `${who}'s body went zombie, then asleep, during the carry: ${[...r.seen.states[who]]}`);
+    // A1a: the body was left alone by the body rule (no reflex move or stop) and the accepted carry arrived; under
+    // wind-down/1 (#2241) presence no longer changes the body, so it stays awake and owned through the carry
+    assert.deepEqual([...r.seen.states[who]], ['awake'], `${who}'s body stayed awake during the carry: ${[...r.seen.states[who]]}`);
+    assert.equal(w.f.db.soul(away.soulId)?.owner, away.owner, `${who}'s body stayed owned during the carry`);
     assert.deepEqual(bodyMoves(w, away, r.since), [], 'no body-rule move while the carry ran');
     assert.deepEqual(bodyStops(w, away, r.since), [], 'no body-rule stop while the carry ran');
     assert.equal(during.receipt.phase, 'started'); assert.equal(during.receipt.shared.phase, 'started');
