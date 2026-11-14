@@ -1,0 +1,2 @@
+{ "template": "hello-hamlet", "viewport": "desktop", "localStorage": { "sim.dev": "admin" },
+  "bodyKnobs": { "wanderTicks": 600, "zombieTicks": 600, "legMinTicks": 200, "legMaxTicks": 300, "boundTicks": 1200 } }
