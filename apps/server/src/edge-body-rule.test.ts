@@ -8,13 +8,14 @@ import type {WorldState as NativeWorld} from '../../../mars/viewer/engine/world/
 import {fixture,invite,accept} from '../test/native-owner-fixture.ts';
 import {LivingWorld} from './living.ts';
 import {EdgeLedger} from './edge/ledger/ledger.ts';
+import {WorldHost} from './world.ts';
 import {registerEdgeComms} from './edge/comms/index.ts';
 import {edgeSoulResolver} from './edge/routes.ts';
 import type {BodyKnobs} from './edge/ledger/body-rule.ts';
 
 const SEC=1000,MIN=60*SEC;
 async function world(names:string[],knobs:Partial<BodyKnobs>={},fixedSoulId?:string){
- const f=fixture(':memory:',nativeSleepSnapshotFactoryV1(await retainedCommonsShoreFactory()),{durableClockV1:true});f.souls.enableLifecycle();f.brain.quiesce();
+ const factory=nativeSleepSnapshotFactoryV1(await retainedCommonsShoreFactory()),f=fixture(':memory:',factory,{durableClockV1:true});f.souls.enableLifecycle();f.brain.quiesce();
  await accept<unknown>(f.host,new LivingWorld(f.host).install(['Owners drive their Souls.']));for(let i=0;i<4;i++)f.host.tickOnce();
  await accept(f.host,f.host.installCommonsProvisionsV1());await accept(f.host,f.host.installRetainedCommonsShoreV1());
  await accept<unknown>(f.host,f.host.enableQuietStallReleaseV1());await accept<unknown>(f.host,f.host.enableYieldTimeoutV1());await accept<unknown>(f.host,f.host.enableShoreDepartV1());
@@ -36,7 +37,7 @@ async function world(names:string[],knobs:Partial<BodyKnobs>={},fixedSoulId?:str
  const run=(ms:number,step=50,each?:()=>void)=>{for(let t=0;t<ms;t+=step){clock.now+=step;f.host.tickOnce();f.host.drainInputs();each?.();}};
  const ents=()=>(f.host.engine.world as NativeWorld).entities;
  const close=()=>{comms.close();f.host.stop();f.db.close();};
- return {f,ledger,comms,rule,souls,listen,send,run,clock,ents,spectated,close};
+ return {f,factory,ledger,comms,rule,souls,listen,send,run,clock,ents,spectated,close};
 }
 
 const stateOf=(w:any,i=0)=>w.rule.view(w.souls[i].soulId);
@@ -158,4 +159,23 @@ test('idle reflex: a silent connected Soul sits and dozes within 2 h; an owner m
  w.run(5*SEC,50);w.send(0);assert.equal(stateOf(w).state,'awake','owner message ends the reflex at once');
  w.run(2*SEC,50);assert.notEqual(String((e.human as any).activity),'nap','a doze stands up');
  assert.deepEqual(w.f.host.engine.runtime.violations,[]);
+});
+
+test('#1981 A4.1: a seat sit the idle reflex logged before the same-place check replays to the same state; replay never re-runs the rule',{timeout:300000},async t=>{
+ const w=await world(['ana']);t.after(w.close);const s=w.souls[0];
+ w.listen(0,true);w.run(5*SEC);
+ // Exactly what the reflex logged before the check: body:sit (trigger edge-body) on the first seat offer, wherever it is.
+ const {caps,plans}=w.ledger.ambientPlans(s),c=caps.find(c=>c.verb==='sit'&&c.id!=='sit:here'&&c.available&&c.target);
+ assert.ok(c&&plans.get(c.id),'the fixture offers a seat');
+ const steps=structuredClone(plans.get(c!.id)!.steps);for(const x of steps)if(x.params&&'seconds' in x.params)x.params.seconds=600;
+ await accept(w.f.host,w.f.host.enqueue('decision','edge:'+s.soulId,{soulId:s.soulId,entityId:s.entityId,option:'body:sit',label:'Sitting for a while',steps,reevalTicks:1e9,fallback:false,trigger:'edge-body'}));
+ const e=w.ents()[s.entityId],from=[e.pose.p[0],e.pose.p[2]];
+ w.run(60*SEC);
+ assert.ok(Math.hypot(e.pose.p[0]-from[0],e.pose.p[2]-from[1])>0.5,'the logged sit moved the body (it walked to the seat)');
+ const hash=w.f.host.engine.stateHash();w.f.host.saveSnapshot(true);
+ for(const mode of ['snapshot','genesis']){
+  if(mode==='genesis')w.f.db.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(w.f.host.worldId);
+  const replay=new WorldHost(w.f.db,w.factory,w.f.host.seed,1e9,w.f.host.worldId,{durableClockV1:true});
+  assert.equal(replay.boot().from,mode);assert.equal(replay.engine.stateHash(),hash,`${mode} replay is exact`);replay.stop();
+ }
 });

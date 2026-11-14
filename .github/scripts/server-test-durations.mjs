@@ -13,6 +13,13 @@
 // is the step from the previous file's last report to its own (process start, imports and teardown included). Times are
 // averaged over every log that ran the file. Files the logs never attribute a test to get no entry; the planner uses
 // the median for them.
+//
+// The server jobs now run most files in parallel, where report times are not file times. For those logs, fill gaps:
+//   node .github/scripts/server-test-durations.mjs --fill .github/scripts/server-test-durations.json job.log... > out.json
+// keeps every existing entry and adds the files it lacks, each timed as the sum of its top-level tests' duration_ms
+// (node reports a parallel run's files in list order, so attribution holds), scaled by the ratio of existing seconds to
+// summed test time over the files both measure. Test time under parallel load is not wall time; the ratio corrects it
+// on average, which is all the shard balance needs.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -21,32 +28,67 @@ export function parseLog(text) {
   const head = lines.find((l) => l.s.startsWith('{"shard"'));
   if (!head) return null;
   const { files } = JSON.parse(head.s);
-  const tests = lines.filter((l) => /^(ok|not ok) \d+ - /.test(l.s)).map((l) => ({ t: l.t, name: l.s.replace(/^(ok|not ok) \d+ - /, '').replace(/ # (SKIP|TODO).*$/, '') }));
+  const tests = [];
+  for (const l of lines) {
+    if (/^(ok|not ok) \d+ - /.test(l.s)) tests.push({ t: l.t, name: l.s.replace(/^(ok|not ok) \d+ - /, '').replace(/ # (SKIP|TODO).*$/, ''), ms: null });
+    else { const d = /^ {2}duration_ms: ([\d.]+)/.exec(l.s); if (d && tests.length && tests.at(-1).ms == null) tests.at(-1).ms = Number(d[1]); }
+  }
   return { start: head.t, files, tests };
 }
 
-/** {file: seconds} for one log. `sourceOf(file)` returns the file's text (or '' when absent). */
-export function fileTimes({ start, files, tests }, sourceOf) {
-  const src = files.map((f) => sourceOf(f)), last = new Array(files.length).fill(null);
+// The file index of each test, in order. `sourceOf(file)` returns the file's text (or '' when absent).
+function attribute(files, tests, sourceOf) {
+  const src = files.map((f) => sourceOf(f));
   let cur = 0;
-  for (const x of tests) {
+  return tests.map((x) => {
     const needle = x.name.slice(0, 80).replace(/\\(.)/g, '$1');
     let k = cur; while (k < files.length && !src[k].includes(needle)) k++;
     if (k < files.length) cur = k;   // not found anywhere ahead (a computed name): stays with the current file
-    last[cur] = x.t;
-  }
+    return cur;
+  });
+}
+
+/** {file: seconds} for one serial log. */
+export function fileTimes({ start, files, tests }, sourceOf) {
+  const last = new Array(files.length).fill(null);
+  attribute(files, tests, sourceOf).forEach((k, j) => { last[k] = tests[j].t; });
   const out = {}; let prev = start;
   for (let i = 0; i < files.length; i++) { if (last[i] == null) continue; out[files[i]] = Math.max(0, (last[i] - prev) / 1000); prev = last[i]; }
   return out;
 }
 
+/** {file: seconds} for one log of any concurrency: the sum of each file's top-level test durations. */
+export function testTimes({ files, tests }, sourceOf) {
+  const out = {};
+  attribute(files, tests, sourceOf).forEach((k, j) => { if (tests[j].ms != null) out[files[k]] = (out[files[k]] ?? 0) + tests[j].ms / 1000; });
+  return out;
+}
+
+/** `existing` plus each file it lacks from `measured` (test-time seconds), scaled by existing/measured over the files both have. */
+export function fillGaps(existing, measured) {
+  const both = Object.keys(measured).filter((f) => Number.isFinite(existing[f]));
+  const num = both.reduce((a, f) => a + existing[f], 0), den = both.reduce((a, f) => a + measured[f], 0);
+  if (!den) throw new Error('no file is measured both ways; cannot scale');
+  const ratio = num / den, out = { ...existing };
+  for (const [f, s] of Object.entries(measured)) if (!Number.isFinite(out[f])) out[f] = Math.round(10 * s * ratio) / 10;
+  return { ratio, seconds: Object.fromEntries(Object.keys(out).sort().map((f) => [f, out[f]])) };
+}
+
 function main(argv) {
-  const i = argv.indexOf('--src'), root = i >= 0 ? argv[i + 1] : 'apps/server', logs = argv.filter((a, j) => !(j === i || j === i + 1));
+  const i = argv.indexOf('--src'), root = i >= 0 ? argv[i + 1] : 'apps/server', g = argv.indexOf('--fill'), fill = g >= 0 ? argv[g + 1] : null;
+  const flagged = [i, g].filter((x) => x >= 0).flatMap((x) => [x, x + 1]), logs = argv.filter((a, j) => !flagged.includes(j));
   const cache = new Map(), sourceOf = (f) => { if (!cache.has(f)) { const p = join(root, f); cache.set(f, existsSync(p) ? readFileSync(p, 'utf8') : ''); } return cache.get(f); };
   const sum = {}, n = {};
   for (const log of logs) {
     const parsed = parseLog(readFileSync(log, 'utf8')); if (!parsed) { console.error(`${log}: no server shard header`); continue; }
-    for (const [f, s] of Object.entries(fileTimes(parsed, sourceOf))) { sum[f] = (sum[f] ?? 0) + s; n[f] = (n[f] ?? 0) + 1; }
+    for (const [f, s] of Object.entries((fill ? testTimes : fileTimes)(parsed, sourceOf))) { sum[f] = (sum[f] ?? 0) + s; n[f] = (n[f] ?? 0) + 1; }
+  }
+  if (fill) {
+    const prior = JSON.parse(readFileSync(fill, 'utf8')), mean = Object.fromEntries(Object.keys(sum).map((f) => [f, sum[f] / n[f]]));
+    const { ratio, seconds } = fillGaps(prior.seconds, mean), added = Object.keys(seconds).length - Object.keys(prior.seconds).length;
+    console.error(`added ${added} files, scale ${ratio.toFixed(2)}`);
+    process.stdout.write(JSON.stringify({ ...prior, seconds }, null, 1) + '\n');
+    return;
   }
   const seconds = Object.fromEntries(Object.keys(sum).sort().map((f) => [f, Math.round(10 * sum[f] / n[f]) / 10]));
   process.stdout.write(JSON.stringify({ about: 'Mean wall seconds per server test file on ubuntu-latest, from server-* CI job logs (server-test-durations.mjs). Regenerate when shards drift; files missing here use the median.', logs: logs.length, seconds }, null, 1) + '\n');

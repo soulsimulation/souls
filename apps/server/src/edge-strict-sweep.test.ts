@@ -32,6 +32,7 @@ export function exampleParams(schema: ParamSchema): Record<string, unknown> {
     else if (spec.type === 'boolean') out[name] = true;
     else if (spec.type === 'array') out[name] = [];
     else if (spec.type === 'object') out[name] = {};
+    else if (spec.type === 'point') out[name] = [0, 0];   // #1916 walk-to's [x, z]
     else out[name] = 'x';
   }
   return out;
