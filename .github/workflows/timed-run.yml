@@ -146,13 +146,16 @@ jobs:
         if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile'
         working-directory: src
         run: pnpm build:viewer
-      # clip: the ref's Playwright version of Chromium, installed in the per-run directory (the shared home stays untouched)
+      # clip: the ref's Playwright version of Chromium, installed in the per-run directory (the shared home stays untouched).
+      # The runners are Ubuntu 20.04, which this Playwright no longer names; its Ubuntu 22.04 build runs there.
       - name: Browsers
         if: env.INPUT_COMMAND == 'clip'
         working-directory: src
         run: |
-          echo "PLAYWRIGHT_BROWSERS_PATH=$PER_RUN/pw-browsers" >> "$GITHUB_ENV"
-          PLAYWRIGHT_BROWSERS_PATH="$PER_RUN/pw-browsers" mars/viewer/node_modules/.bin/playwright install chromium 2>&1 | grep -v "%" | tail -20; test "${PIPESTATUS[0]}" = 0
+          export PLAYWRIGHT_BROWSERS_PATH="$PER_RUN/pw-browsers"
+          if grep -q 'VERSION_ID="20.04"' /etc/os-release; then export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64; fi
+          { echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"; echo "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-}"; } >> "$GITHUB_ENV"
+          mars/viewer/node_modules/.bin/playwright install chromium 2>&1 | grep -v "%" | tail -20
       - name: Start load
         working-directory: src
         run: node "$CTL" load --record "$RECORD"
