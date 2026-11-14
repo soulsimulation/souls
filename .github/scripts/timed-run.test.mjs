@@ -21,7 +21,9 @@ test('inputs: ref, command and repeats are checked before anything runs', () => 
 test('args: only each command\'s own allowlisted flags, with checked values, once each', () => {
   assert.deepEqual(checkArgs('walk', ' --world fuzz,bench-hamlet '), ['--world', 'fuzz,bench-hamlet']);
   assert.deepEqual(checkArgs('eval-scripted', '--items bench-sit,music --warm-sec 40'), ['--items', 'bench-sit,music', '--warm-sec', '40']);
-  for (const [c, a] of [['walk', '--write'], ['walk', '--from x'], ['walk', '--world nowhere'], ['walk', '--world fuzz,fuzz'], ['walk', '--world fuzz --world fuzz'], ['walk', '--world'],
+  assert.deepEqual(checkArgs('eval-scripted', '--battery hostile-v1 --seat scripted --items act-spam'), ['--battery', 'hostile-v1', '--seat', 'scripted', '--items', 'act-spam']);
+  for (const [c, a] of [['eval-scripted', '--seat claude-sonnet'], ['eval-scripted', '--battery ../x'], ['eval-scripted', '--battery tools/playtest/eval/battery/m4-v1.json'], ['eval-scripted', '--battery'],
+    ['walk', '--write'], ['walk', '--from x'], ['walk', '--world nowhere'], ['walk', '--world fuzz,fuzz'], ['walk', '--world fuzz --world fuzz'], ['walk', '--world'],
     ['walk', '--items a'], ['eval-scripted', '--seat tools/playtest/eval/seats/claude-sonnet.json'], ['eval-scripted', '--max-usd 1'], ['eval-scripted', '--out /x'],
     ['eval-scripted', '--world https://example.org'], ['eval-scripted', '--items A;B'], ['eval-scripted', '--warm-sec 0'], ['eval-scripted', '--warm-sec 900'], ['eval-scripted', 'x --items a']])
     assert.throws(() => checkArgs(c, a), /input args/, `${c} ${a}`);
