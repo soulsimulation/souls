@@ -177,6 +177,22 @@ test('an authored world (no god) keeps real time through the same keeper; custom
   keeper.stop();
 });
 
+test('#2235: a boot catch-up still owed is read as done, so the keeper does not move the clock by the time away', async () => {
+  let wall = Date.UTC(2026, 10, 9, 12, 0), tick = 1000;
+  const events: any[] = [];
+  const host: any = { engine: { world: { get tick() { return tick; } } }, living: undefined, pace: 1, paused: false, running: true, owedTicks: 0,
+    enqueue(_k: string, _a: string, p: any) { events.push(p); host.living = { ...p.dayConfig }; return Promise.resolve(); } };
+  const keeper = installRealClock(host, { zone: () => 'UTC', now: () => wall, checkMs: 3_600_000 });
+  await keeper.sync();
+  assert.equal(events.length, 1);
+  wall += 3 * 3_600_000; host.owedTicks = 3 * 3600 * 20;   // the process was gone 3 h; the boot owes those ticks
+  await keeper.sync();
+  assert.equal(events.length, 1, 'in step once the owed ticks have run: nothing logged');
+  tick += host.owedTicks; host.owedTicks = 0;
+  assert.equal(clockAt(tick, host.living.origin, host.living.dayTicks).datetime.slice(11, 16), '15:00', 'after the catch-up the clock reads the wall');
+  keeper.stop();
+});
+
 test('the periodic check re-aligns a watched, running world and leaves slowed, paused or stopped ones alone', async () => {
   let wall = Date.UTC(2026, 10, 9, 12, 0), tick = 0;
   const events: any[] = [];

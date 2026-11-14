@@ -222,7 +222,9 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from.
+`memory <words>` searches the projections and says where each line came from. `digest [--since <time>]` reads only the
+log, makes no request and no model call, and writes at most 200 words for the owner since the last digest (`lastDigest` in
+the Soul's state); `--refs` ends each line with the records it came from, and `--json` gives the same as data.
 
 The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
 `ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/world-launcher/soul/memory-folder.mjs`). Each keeps its newest
@@ -320,7 +322,7 @@ whole world, wherever the Soul's body is. Each answer carries `scope: "public"`,
 withholds. Owner messages and credentials are never in it.
 
 - **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
-  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier), things (id, name, kind, place, position) and the acts that can be
+  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier; a building's `doors`, each `{at: [x, z], level, facing}` with facing a compass word), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A thing upstairs is
   located on its level. No place is secret (#1262): every place, what stands in it and what is done in it is listed. A `ref` two places share (a lake and its bank) is left off both, so
@@ -519,6 +521,17 @@ gets the caption. The launcher passes its own `EDGE_EYES*` settings to children 
 list of slugs). Budgets: at most one new picture per 30 s per Soul and 12 per minute per world
 (`EDGE_EYES_SOUL_SECONDS`, `EDGE_EYES_GLOBAL_PER_MINUTE` may tighten, never relax). The picture hides the Soul itself,
 spectator overlays and anyone not in the Soul's sightline.
+
+**Renders on the owner's machine (`shoot`, #2260).** `eden.mjs shoot` renders any view of the public world in a
+headless browser on the agent's own machine, with the site's own viewer, so nothing is rendered by the world: the world
+page as a visitor sees it (`page`), the broadcast camera's shot (`broadcast`), the page's own Follow of any Soul
+(`follow <soul>`, through the `sim:follow-soul` event), another Soul's eyes (`eyes <soul>`), an overhead map (`map`)
+and a free camera (`free --at x,y,z --look x,y,z` or `--from <place|soul|thing>`); a still, or `--clip <s>` as mp4
+(needs ffmpeg). The last three use eyes mode (`?eyes=1`, `edenEyes.capture`), placed by name from
+`edenEyes.where()` (Souls, places and things as the public replica draws them; `?render=1` exposes the same list as
+`edenWhere()` on the ordinary page). The browser is anonymous (no token, no sign-in, cookies cleared), so it sees only
+what any visitor sees; its profile (`.souls/cache/shoot-browser`) keeps the CDN's assets between shots. With no
+Playwright on the machine, `shoot` says so and names `view` as the fallback. `view` stays the Soul's own eyes.
 
 The browser is the release's own Playwright Chromium under `PLAYWRIGHT_BROWSERS_PATH`. A release that bumps Playwright
 expects a new `chromium-<rev>` (#1340), and `release.sh`'s stage installs it ([release](../release.md)). The worker launches, in order:
