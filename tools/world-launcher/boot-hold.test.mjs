@@ -60,7 +60,7 @@ test('A1: a call whose own deadline passes before the world listens is refused w
       assert.ok(r.ms >= ms - 50 && r.ms < ms + 1000, `refused at its deadline (${r.ms.toFixed(0)} ms, deadline ${ms} ms)`);
     }
     assert.equal(L.pool.status('late').status, 'starting', 'refused while it still boots; the boot goes on');
-    assert.equal((await first).status, 200);
+    assert.equal((await first).body.code, 'world.waking', '#2304: the call that started the load is held to the same limit');
     console.log(`# A1: past their deadlines: act refused at ${act.ms.toFixed(0)} ms, wait at ${wait.ms.toFixed(0)} ms: "${act.body.message}"`);
   } finally { await L.close(); }
 });
