@@ -141,10 +141,15 @@ test('legal-edits/1: a preview that times out refuses the edit with a retryable 
   const real = previewWorkerScriptV1(new URL(`data:text/javascript,${encodeURIComponent('import { parentPort } from "node:worker_threads";\nparentPort.on("message", () => {});')}`));
   t.after(() => { previewWorkerScriptV1(real); cleanup(w)(); });
   await w.settle(2);
+  const bo = await w.soul('bo', 'Bo');
   await accept(w.host, enableLegalEditsV1(w.host, 'test:legal-edits') as never); await w.settle(2);
   w.bridge.legalTimeoutMs = 300;
+  // an edit with nothing a rule watches within 8 m needs no preview: it goes through without one (the worker never answers)
+  const [bx, bz] = w.at(bo.entityId), near: [number, number] = [bx, bz + 3];
+  const far: any = await w.god.checked(() => w.god.act(wall('far-wall', [bx + 30, bz + 30])));
+  assert.equal(far.accepted, true, JSON.stringify(far));
   const seq = w.god.model.editSeq;
-  const r: any = await w.god.checked(() => w.god.act(wall('wall', [5, 5])));
+  const r: any = await w.god.checked(() => w.god.act(wall('wall', near)));
   assert.equal(r.accepted, false, JSON.stringify(r));
   assert.equal(r.failures[0].code, 'edit-preview.worker-unavailable');
   assert.equal(r.failures[0].measured.retryable, true); assert.equal(r.ok, false, 'a build rewind client reads ok');
@@ -152,7 +157,7 @@ test('legal-edits/1: a preview that times out refuses the edit with a retryable 
   assert.equal(w.god.model.get('wall'), undefined); assert.equal(w.god.model.editSeq, seq, 'nothing committed');
   // with a working preview the same request goes through
   previewWorkerScriptV1(real); w.bridge.legalTimeoutMs = undefined;
-  const ok: any = await w.god.checked(() => w.god.act(wall("wall", [5, 5])));
+  const ok: any = await w.god.checked(() => w.god.act(wall("wall", near)));
   assert.equal(ok.accepted, true, JSON.stringify(ok));
   // a land edit (POST /v1/god/land) waits for its preview the same way
   const raised: any = await w.god.checked(() => land(w.god, { verb: 'raise', at: [30, 30], radius: 6, amount: 0.5, force: true } as never));
