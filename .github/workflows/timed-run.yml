@@ -152,7 +152,7 @@ jobs:
         working-directory: src
         run: |
           echo "PLAYWRIGHT_BROWSERS_PATH=$PER_RUN/pw-browsers" >> "$GITHUB_ENV"
-          PLAYWRIGHT_BROWSERS_PATH="$PER_RUN/pw-browsers" pnpm --filter mars-campus-viewer exec playwright install chromium > /dev/null
+          PLAYWRIGHT_BROWSERS_PATH="$PER_RUN/pw-browsers" mars/viewer/node_modules/.bin/playwright install chromium 2>&1 | grep -v "%" | tail -20; test "${PIPESTATUS[0]}" = 0
       - name: Start load
         working-directory: src
         run: node "$CTL" load --record "$RECORD"
