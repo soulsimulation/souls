@@ -120,7 +120,7 @@ async function buildFixture() {
     const tw = Date.now(), url = `${ORIGIN}/w/${w.slug}`;
     for (let up = false; !up; ) { up = (await getJ(`${url}/healthz`, { ms: 30_000 })).j?.ok; if (!up) { if (Date.now() - tw > 900_000) throw new Error(`${w.slug} did not boot in 15 min`); await sleep(1000); } }
     w.bootS = +((Date.now() - tw) / 1000).toFixed(1);
-    if (!ids[w.template]) { const { catalogIds } = await import(pathToFileURL(join(ROOT, 'tools/bench/capacity/meetup/client-soul.mjs')).href); ids[w.template] = catalogIds((await getJ(`${url}/v1/edge/catalog`, { ms: 60_000, headers: { 'x-soul-client': 'bench/1' } })).j); }
+    if (!ids[w.template]) { const { catalogIds } = await import(pathToFileURL(join(ROOT, 'tools/bench/capacity/meetup/client-soul.mjs')).href); let cat = null; for (let k = 0; k < 30 && !cat?.places; k++) { cat = (await getJ(`${url}/v1/edge/catalog`, { ms: 60_000, headers: { 'x-soul-client': 'bench/1' } })).j; if (!cat?.places) await sleep(2000); } ids[w.template] = catalogIds(cat); }
     w.dirs = [];
     for (let k = 1; k <= w.souls; k++) {
       const dir = join(FIX, 'souls', w.slug, String(k)); mkdirSync(dir, { recursive: true });
@@ -178,8 +178,8 @@ function stopListeners() { for (const h of listeners) h.on = false; }
 // ------------------------------------------------------------------ helpers on a world's own files (read-only)
 const worldDir = (slug) => join(LDATA, 'worlds', slug);
 function dbRead(slug, fn) { let db; try { db = new DatabaseSync(join(worldDir(slug), 'sim.db'), { readOnly: true }); return fn(db); } catch (e) { return { error: clean(e.message) }; } finally { db?.close(); } }
-const frontier = (slug) => dbRead(slug, (db) => { const r = db.prepare('SELECT body FROM clock_frontiers_v1 LIMIT 1').get(); return r ? (({ tick, throughSeq, engineHash }) => ({ tick, throughSeq, engineHash }))(JSON.parse(r.body)) : null; });
-const lastSnapshotTick = (slug) => dbRead(slug, (db) => db.prepare('SELECT MAX(tick) AS t FROM snapshots').get().t);
+/** The tick a world last stopped at, from its own log line (SIM_BOOT_HASH). */
+const stopTick = (slug) => { try { const m = [...readFileSync(join(LDATA, 'logs', `${slug}.log`), 'utf8').matchAll(/\[world\] \w+: state at tick (\d+):/g)].at(-1); return m ? Number(m[1]) : null; } catch { return null; } };
 const reminderRows = (slug) => dbRead(slug, (db) => db.prepare('SELECT client_ref, due_real_ms, state, delivered_at FROM edge_personal_reminders_v1').all());
 const childStill = async (slug) => { const port = (await ps())?.worlds?.[slug]?.port; return port ? (await getJ(`http://127.0.0.1:${port}/__sim/still`, { ms: 3000 })) : { status: 0, j: null }; };
 const needsOf = (j) => { const find = (o, d = 0) => { if (!o || typeof o !== 'object' || d > 4) return null; if (o.needs && typeof o.needs === 'object') return o.needs; for (const v of Object.values(o)) { const x = find(v, d + 1); if (x) return x; } return null; }; return find(j); };
@@ -190,7 +190,6 @@ async function run(fx) {
   const smalls = worlds.filter((w) => w.template === 'hello-hamlet'), edens = worlds.filter((w) => w.template === 'eden-2026');
   const a4 = [smalls[0], edens[0]].filter(Boolean), sampled = [...a4, smalls[1]].filter(Boolean), a5 = smalls.at(-1) && !a4.includes(smalls.at(-1)) ? smalls.at(-1) : null;
   R.worlds = { registered: fx.worlds.length, withSouls: worlds.length, small: smalls.length, eden: edens.length, a4: a4.map((w) => w.slug), sampled: sampled.map((w) => w.slug), a5: a5?.slug ?? null };
-  for (const w of sampled) w.startSnapshotTick = lastSnapshotTick(w.slug);
   await startLauncher({ unload: true });
   R.launcher = { memoryFigure: L.memSupported ? `--worlds-mem-mb ${MEM_MB}` : `missing #2233: --max-running ${L.cfg.maxRunning} (${MEM_MB} MB / ${SMALL_MB} MB a small world)` };
   startSampling(5000);
@@ -199,7 +198,7 @@ async function run(fx) {
   const acts = [], t0 = Date.now(), end = t0 + ACTIVE_MS;
   log(`A6: ${worlds.length} agents act every ${ACT_LO}-${ACT_HI} min for ${ACTIVE_MS / 60_000} min`);
   await Promise.all(worlds.map(async (w, i) => {
-    const rnd = mulberry(SEED * 1000 + i), dir = soulDir(w), ids = fx.ids[w.template] ?? {}, walks = ids.walk?.length ? ids.walk : ['sit-ground:here'];
+    const rnd = mulberry(SEED * 1000 + i), dir = soulDir(w), ids = fx.ids[w.template] ?? {}, walks = ids.walk?.length ? ids.walk : ['sit-ground:here'];   // a world with no walk to offer sits instead
     for (const [k, at] of gapsFor(rnd, t0, end, ACT_LO * 60_000, ACT_HI * 60_000).entries()) {
       await sleep(at - Date.now());
       const before = samples.at(-1)?.status?.[w.slug] ?? null, walk = k % 2 === 0;
@@ -265,13 +264,13 @@ async function run(fx) {
   await sleep(gapFrom + GAP_MS - Date.now());
   R.a4 = {};
   for (const w of a4) {
-    const f0 = frontier(w.slug), wasIn = (await ps())?.worlds?.[w.slug]?.status;
-    const walks = fx.ids[w.template]?.walk ?? ['sit-ground:here'], t = Date.now();
+    const f0 = stopTick(w.slug), wasIn = (await ps())?.worlds?.[w.slug]?.status;
+    const walks = fx.ids[w.template]?.walk?.length ? fx.ids[w.template].walk : ['sit-ground:here'], t = Date.now();
     const r = await cli(soulDir(w), ['act', walks[0], '--json'], 120_000);
     const still = await childStill(w.slug), here = await soulApi(soulDir(w), '/v1/edge/here');
     R.a4[w.slug] = { template: w.template, statusBefore: wasIn, gapS: Math.round((t - (unloadedAt[w.slug] ?? t)) / 1000), actMs: r.ms, accepted: r.j?.accepted ?? null, code: r.j?.code ?? null,
-      frontierAtUnload: f0 && !f0.error ? { tick: f0.tick } : f0, still: still.status === 200 ? still.j : `missing (${still.status || 'no answer'}) #2297`,
-      ticksMoved: f0?.tick != null && Number.isFinite(still.j?.tick) ? still.j.tick - f0.tick : null, ticksForGap: Math.round((t - (unloadedAt[w.slug] ?? t)) / 50), needsBefore: before[w.slug]?.needs ?? null, needsAfter: needsOf(here.j) };
+      tickAtUnload: f0, still: still.status === 200 ? still.j : `missing (${still.status || 'no answer'}) #2297`,
+      ticksMoved: f0 != null && Number.isFinite(still.j?.tick) ? still.j.tick - f0 : null, ticksForGap: Math.round((t - (unloadedAt[w.slug] ?? t)) / 50), needsBefore: before[w.slug]?.needs ?? null, needsAfter: needsOf(here.j) };
     log(`A4 ${w.slug}: act ${r.ms} ms (${r.j?.accepted === false ? `refused ${r.j?.code}` : 'accepted'}), world was ${wasIn}, ticks moved ${R.a4[w.slug].ticksMoved ?? '?'} for ${R.a4[w.slug].ticksForGap} in the gap`);
   }
   if (a5) {
@@ -290,25 +289,27 @@ async function run(fx) {
   for (const w of sampled) R.a2[w.slug] = await twin(w);
 }
 async function twin(w) {
-  const f = frontier(w.slug); if (!f || f.error) return { shown: false, why: `no clock frontier (${f?.error ?? 'none'})` };
-  const dir = join(OUT, 'twins', w.slug), data = join(dir, 'data'); mkdirSync(dir, { recursive: true });
+  // the jumped world's own last stop: its state hash at the tick it stopped (SIM_BOOT_HASH, printed by the world)
+  let text = ''; try { text = readFileSync(join(LDATA, 'logs', `${w.slug}.log`), 'utf8'); } catch { /* none */ }
+  const stop = [...text.matchAll(/\[world\] \w+: state at tick (\d+): ([0-9a-f]{16,})/g)].at(-1);
+  if (!stop) return { shown: false, why: 'the world printed no state hash at its stop' };
+  const T = Number(stop[1]), H = stop[2], dir = join(OUT, 'twins', w.slug), data = join(dir, 'data'); mkdirSync(dir, { recursive: true });
   cpSync(worldDir(w.slug), data, { recursive: true });
-  // the twin starts where the run started: snapshots taken during the run go, so the boot replays every tick since
-  const db = new DatabaseSync(join(data, 'sim.db')); let dropped = 0;
-  try { dropped = Number(db.prepare('DELETE FROM snapshots WHERE tick > ?').run(w.startSnapshotTick ?? -1).changes); } finally { db.close(); }
   const { defaultCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/children.mjs')).href);
   const { decorateCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/production.mjs')).href);
-  const port = RANGE[0], base = defaultCommand({ slug: w.slug, dataDir: data, name: `Twin ${w.slug}`, templateFile: join(ROOT, 'worlds/templates', `${w.template}.json`) }, port, { publicOrigin: `http://127.0.0.1:${port}`, marsWebDir: MARS_WEB, root: ROOT, libraryDir: join(dir, 'library') });
-  const { cmd, args, env } = decorateCommand(base, { devAuth: true, publicOrigin: `http://127.0.0.1:${port}`, base: '', worldHeapMb: 0, build: 'dev' });
-  Object.assign(env, { SIM_SKIP: '0', SIM_BOOT_HASH: '1', BRAIN_MODE: 'fake' }); for (const k of Object.keys(env)) if (k.startsWith('EDGE_EYES')) delete env[k];
-  const t0 = Date.now(), child = spawn(cmd, args, { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] }); let text = '';
-  const on = (b) => { text += b; appendFileSync(join(dir, 'world.log'), b); }; child.stdout.on('data', on); child.stderr.on('data', on);
-  let up = false; while (!up && child.exitCode == null && Date.now() - t0 < 30 * 60_000) { up = (await getJ(`http://127.0.0.1:${port}/healthz`, { ms: 3000 })).j?.ok === true; if (!up) await sleep(2000); }
-  child.kill('SIGTERM'); for (let k = 0; k < 60 && child.exitCode == null; k++) await sleep(500); if (child.exitCode == null) child.kill('SIGKILL');
-  const replay = /\[boot\] replay (\d+) ms (\d+) ticks (\d+) events to tick (\d+)/.exec(text), differs = /replay.differs|replay differs/.test(text);
-  const out = { shown: up && !!replay, startTick: w.startSnapshotTick, stopTick: f.tick, snapshotsDropped: dropped, replayTicks: replay ? Number(replay[2]) : null, replayEvents: replay ? Number(replay[3]) : null,
-    replayS: replay ? +(Number(replay[1]) / 1000).toFixed(1) : null, hashAtStop: f.engineHash.slice(0, 16), equal: up && !!replay && !differs, ...(differs ? { differs: true } : {}), ...(!up ? { why: clean(text.trim().split('\n').slice(-3).join(' | ')).slice(0, 300) } : {}) };
-  log(`A2 ${w.slug}: twin replayed ${out.replayTicks ?? '?'} ticks (${out.replayEvents ?? '?'} events) from tick ${out.startTick} to ${f.tick}: ${out.equal ? 'state hash equal' : `NOT shown${differs ? ' (differs)' : ''}`}`);
+  const base = defaultCommand({ slug: w.slug, dataDir: data, name: `Twin ${w.slug}`, templateFile: join(ROOT, 'worlds/templates', `${w.template}.json`) }, RANGE[0], { publicOrigin: `http://127.0.0.1:${RANGE[0]}`, marsWebDir: MARS_WEB, root: ROOT, libraryDir: join(dir, 'library') });
+  const { cmd, args, env } = decorateCommand(base, { devAuth: true, publicOrigin: `http://127.0.0.1:${RANGE[0]}`, base: '', worldHeapMb: 0, build: 'dev' });
+  for (const k of Object.keys(env)) if (k.startsWith('EDGE_EYES')) delete env[k];
+  // the world's own command, with the twin in place of the server's entry (node flags kept)
+  const at = args.findIndex((a) => /apps\/server\/src\/main\.ts$/.test(String(a)));
+  if (at < 0) return { shown: false, why: 'the world command has no apps/server/src/main.ts entry' };
+  const twinArgs = [...args.slice(0, at), join(ROOT, 'tools/bench/capacity/hundred/twin.ts'), String(T)];
+  const r = await new Promise((done) => { const p = spawn(cmd, twinArgs, { cwd: ROOT, env: { ...env, SIM_SKIP: '0' }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err = (err + d).slice(-4000); }); const k = setTimeout(() => p.kill('SIGKILL'), 30 * 60_000); p.on('exit', (code) => { clearTimeout(k); done({ code, out, err }); }); });
+  writeFileSync(join(dir, 'twin.log'), r.out + r.err);
+  let j = null; try { j = JSON.parse(r.out.trim().split('\n').at(-1)); } catch { /* no answer */ }
+  const out = j ? { shown: true, stopTick: T, twinTick: j.tick, events: j.events, replayS: +(j.ms / 1000).toFixed(1), hashAtStop: H.slice(0, 16), twinHash: j.stateHash.slice(0, 16), equal: j.tick === T && j.stateHash === H }
+    : { shown: false, stopTick: T, why: clean(r.err.trim().split('\n').slice(-2).join(' | ')).slice(0, 300) };
+  log(`A2 ${w.slug}: twin ticked ${T} ticks from genesis over ${out.events ?? '?'} events: ${out.shown ? (out.equal ? 'state hash equal' : 'state hash DIFFERS') : `not shown (${out.why})`}`);
   return out;
 }
 
@@ -324,7 +325,7 @@ function report() {
   if (R.a7) L2.push('## A7 everything at once', '', `Shared instant at +${R.a7.sharedAtS} s: at most ${R.a7.maxStartingAtOnce} worlds loading at once (launcher loads data: ${f(R.a7.maxLoadsReported)}); reminders delivered ${R.a7.remindersDelivered} of ${R.a7.remindersSet}, late p50 ${f(R.a7.deliveryLateMs.p50)} max ${f(R.a7.deliveryLateMs.max)} ms; failed ${R.a7.failed}; all unloaded again after ${f(R.a7.allUnloadedAgainAfterS)} s. Crawler fetch of ${R.a7.crawl.pages} pages: ${R.a7.crawl.refused} refused, loaded ${R.a7.crawl.loaded.length} world(s).`, '');
   if (R.a4) L2.push('## A4 exact on return', '', '| world | status before | gap s | act ms | accepted | ticks moved / for the gap | counters |', '|---|---|---|---|---|---|---|', ...Object.entries(R.a4).map(([s, a]) => `| ${s} (${a.template}) | ${f(a.statusBefore)} | ${a.gapS} | ${a.actMs} | ${f(a.accepted)}${a.code ? ` ${a.code}` : ''} | ${f(a.ticksMoved)} / ${a.ticksForGap} | ${typeof a.still === 'string' ? a.still : f(Object.fromEntries(Object.entries(a.still ?? {}).filter(([k]) => /tick|jump/i.test(k))))} |`), '', `Needs before → after: ${Object.entries(R.a4).map(([s, a]) => `${s} ${f(a.needsBefore)} → ${f(a.needsAfter)}`).join('; ')}`, '');
   if (R.a5) L2.push('## A5 listening', '', `${R.a5.slug}: reminder due +${R.a5.dueInGapS} s, ${f(R.a5.state)}${R.a5.deliveredLateMs != null ? ` ${R.a5.deliveredLateMs} ms after due` : ''}; loads by its alarm ${R.a5.alarmLoads}; unloaded again ${R.a5.unloadedAfter}.`, '');
-  if (R.a2) L2.push('## A2 same state', '', '| world | from tick | to tick | ticks replayed straight through | events | replay s | state hash equal |', '|---|---|---|---|---|---|---|', ...Object.entries(R.a2).map(([s, a]) => `| ${s} | ${f(a.startTick)} | ${f(a.stopTick)} | ${f(a.replayTicks)} | ${f(a.replayEvents)} | ${f(a.replayS)} | ${a.equal ? `yes (${a.hashAtStop}…)` : `not shown${a.why ? `: ${a.why}` : ''}`} |`), '');
+  if (R.a2) L2.push('## A2 same state', '', '| world | stop tick (jumped world) | twin: ticks from genesis | log events folded | twin s | state hash equal |', '|---|---|---|---|---|---|', ...Object.entries(R.a2).map(([s, a]) => `| ${s} | ${f(a.stopTick)} | ${f(a.twinTick)} | ${f(a.events)} | ${f(a.replayS)} | ${!a.shown ? `not shown: ${a.why}` : a.equal ? `yes (${a.hashAtStop}…)` : `NO: ${a.hashAtStop}… vs ${a.twinHash}…`} |`), '');
   writeFileSync(join(OUT, 'REPORT.md'), L2.join('\n') + '\n');
 }
 
