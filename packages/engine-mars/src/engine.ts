@@ -2863,10 +2863,12 @@ export class MarsEngine implements Engine {
    *  and the caller logs a god walk-out (the body rises and lands at `to`), since a plain relocate refuses a held body.
    *  Any other held body (a berth, mid-action) is never answered: a relocate refuses it. A body sitting or lying with no
    *  hold is judged where it is. Seated or resting, no standing room (under it, or at a tight approach) is not a pocket:
-   *  only a closed-off area moves it.
+   *  only a closed-off area moves it. A body in deep water (treading or swimming) is never answered: water is not a pocket,
+   *  and a relocate ashore would carry it metres in one tick.
    *  Pure read; the caller logs the move (edge-relocate). */
   navRescueV1(id:string,budgetMs=50,maxPocket=NAV_RESCUE_MAX_POCKET):{to:[number,number];code:string;pocket?:number;level:number;seated?:true}|null{
     const e=this.ents[id],h=e?.human;if(!h||this.byActor.has(id)||h.sleepPose||h.on||h.riding||h.carrier)return null;
+    if(inDeepWater(this.rt,id))return null;   // a body in deep water is not in a pocket: it swims out, never stepped ashore
     const seat=this.seatStand(id);if(!seat&&this.holders(id).length)return null;
     const anchored=!seat&&(NAV_ANCHORED.has(h.activity)||NAV_ANCHORED.has(h.baseActivity));
     if(!this.navWarmV1(budgetMs))return null;
