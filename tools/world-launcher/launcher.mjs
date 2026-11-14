@@ -794,8 +794,7 @@ export async function openLauncher(cfg = {}) {
     const head = { 'x-sim-cache': 'unloaded' };
     if (rest.startsWith('/assets/')) { const f = inside(webDir, rest); if (f && serveFile(res, f, 'public, max-age=31536000, immutable', req)) return true; return false; }
     if (rest === '/manifest.webmanifest') return serveFile(res, join(webDir, 'manifest.webmanifest'), 'public, max-age=3600', req);
-    const page = rest === '/' || rest === '/index.html' || (!/^\/(?:v1|mcp|__)(?:\/|$)/.test(rest) && !extname(rest) && String(req.headers.accept ?? '').includes('text/html'));
-    if (!page) return false;
+    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
     const body = Buffer.from(withWorldMeta(html, { name: w.name ?? slug, url: `${publicOrigin}${wp(slug)}/` }));
     res.writeHead(200, robotsOf(slug, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), ...head })).end(req.method === 'HEAD' ? undefined : body);
@@ -932,11 +931,22 @@ export async function openLauncher(cfg = {}) {
     if (maxBody > 0 && !req.readableEnded) { let n = 0; req.on('data', (c) => { n += c.length; if (n > maxBody) { up.destroy(); req.unpipe(up); if (!res.headersSent) json(res, 413, { ok: false, code: 'request.too-large', message: `a request body may be at most ${Math.round(maxBody / 1024)} KB` }, { connection: 'close' }); } }); }
     if (req.readableEnded) up.end(); else req.pipe(up);   // a retried GET: its (empty) body was already read
   }
+  /** #2393: a browser asking for one of a world's pages (not the Soul API, MCP, the launcher's routes or a file). */
+  const pageAsk = (req, rest) => (req.method === 'GET' || req.method === 'HEAD') && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(rest) && !extname(rest) && String(req.headers.accept ?? '').includes('text/html');
+  /** #2393: a page asked of a world still loading (or waiting for room) gets a small page that names the world and asks
+   *  again by itself every `s` seconds (a meta refresh: no script, nothing loaded from elsewhere) until the world answers.
+   *  Still a 503 with Retry-After, so nothing caches or indexes it. */
+  function wakingPage(req, res, slug, s) {
+    const name = String(registry.get(slug)?.name ?? slug).replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const body = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="${s}"><meta name="robots" content="noindex"><title>${name} is waking up · Souls</title><style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:18vh auto;padding:0 20px}p{opacity:.75}</style></head><body><h1>${name} is waking up</h1><p>This world was resting and is loading now. This page tries again every ${s} seconds and opens the world as soon as it is ready.</p></body></html>`);
+    res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'retry-after': String(s), 'x-robots-tag': NOINDEX, 'x-sim-cache': 'waking', 'content-length': String(body.length), 'server-timing': launcherTiming(res, 'answered') }).end(req.method === 'HEAD' ? undefined : body);
+  }
   /** ensure() refused: a world handed over (or going back) is asked through the keeper, any other is answered 503. */
-  async function unreachable(req, res, slug, e) {
+  async function unreachable(req, res, slug, e, rest = null) {
     if (e.code === 'handed-over' && retiredTo) { forward(req, res); return; }
     // our canary failed and the world is going back to the previous launcher: wait for the keeper to switch back
     if (await waitHandBack(slug, e)) { forward(req, res); return; }
+    if ((e.code === 'capacity' || e.code === 'starting') && rest != null && pageAsk(req, rest)) { ceilings.note(slug, 'world.waking', e.code === 'capacity' ? 'memory' : 'boot'); wakingPage(req, res, slug, e.code === 'capacity' ? 15 : 5); return; }
     if (e.code === 'capacity') { ceilings.note(slug, 'world.waking', 'memory'); json(res, 503, { ...refusalBody('world.waking', `The world is waiting for room to load: ${e.message}. It asked you to wait 15 s`, 15_000, 'memory'), slug }, { 'retry-after': '15', 'cache-control': 'no-store' }); return; }
     json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'starting' ? '5' : '3', ...(e.code === 'starting' ? { 'cache-control': 'no-store' } : {}) });
   }
@@ -1037,7 +1047,7 @@ export async function openLauncher(cfg = {}) {
     // #2304: the load's place in the queue (an act or god call first) and the hold, past which the answer is world.waking
     const reason = resident ? 'listener' : passive ? 'background' : edgeRest.startsWith('/v1/god/') ? 'god' : req.headers.authorization || /^\/(?:v1\/(?:edge|god|agent)\/|mcp\b)/.test(edgeRest) ? 'act' : 'visitor';
     try { p = await pool.ensure(worldEnv(w), { passive, reason, timeoutMs: BOOT_HOLD_MS }); }
-    catch (e) { await unreachable(req, res, slug, e); return; }
+    catch (e) { await unreachable(req, res, slug, e, edgeRest); return; }
     if (clientGone(req, res)) return;   // before httpLive: a closed response never fires 'close' again to undo it
     // a request in flight (a god's long-poll listen, a slow upload) keeps the world awake (pool busy), and its end counts as
     // use; a resident's does neither (#1997), and is ended cleanly if the world falls asleep under it (endResidents)
