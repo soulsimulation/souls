@@ -2289,7 +2289,7 @@ export class EngineBridge {
           const block = mine ? { code: 'seat.yours', reason: `You are sitting on ${name(x.id)} already; stand:here to get up.` } : far ? { code: far.code, reason: `${name(x.id)} is out of reach: ${far.message}.` } : full ? { code: 'seat.taken', reason: `${(others.length ? others : [u!.body]).map((b) => this.soulName(b)).join(' and ')} ${others.length > 1 ? 'are' : 'is'} sitting there.` } : inside;
           const label = labelOf(onTop);
           if (block?.code === 'seat.inside' || block?.code === 'seat.out-of-reach') unusable.push(caps.length); else if (!block) usable.push({ id, label, d });
-          caps.push({ id, verb: 'sit', label, target: { id: x.id, kind: 'object' }, available: !block, ...(block ? { blocked: block } : {}), params: { seconds: { type: 'integer', min: 1, max: 600, default: 60 } } });
+          caps.push({ id, verb: 'sit', label, target: { id: x.id, kind: 'object' }, available: !block, ...(block ? { blocked: block } : {}), params: { seconds: { type: 'integer', min: 1, max: 3600, default: 60 } } });   // #2294: an hour on a seat, as every activity in place
           // #1083: seated elsewhere, she stands first (from inside a god-built seat's footprint a bare walk to another seat was refused route.start-blocked)
           plans.set(id, { label, steps: [...stand, { verb: 'sit', params: { on: x.id, seconds: 60 } }], seconds: true });
         }
