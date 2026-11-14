@@ -56,6 +56,14 @@ function roofRise(roof: string, pitchDeg: number, W: number, D: number, round: b
   }
 }
 
+/** #2383: a doorway a door-fitted revision leaves bare for a door thing: an outside door (not an arch or a window) on the
+ *  ground floor, not out onto a balcony. Inside doors (a second door in series) and upper floors keep their drawn leaf
+ *  until a walk passes several closed doors in a row and climbs to doors upstairs (#2370). */
+export function fittedDoorway(o: { kind: string; floor: number; to?: string; exterior: boolean }): boolean { return o.kind === 'door' && o.exterior && o.floor === 0 && o.to !== 'balcony'; }
+
+/** The narrowest bare doorway a door-fitted revision leaves (core/door@2 at its least stretch is 0.93 m across the frame). */
+export const FITTED_MIN_W = 1.0;
+
 const layoutCache = new Map<string, BuildingLayout>();
 /** The full layout (canonical frame + yaw) for params and def args; cached by value. */
 export function buildingLayout(params: Record<string, unknown>, args: Record<string, unknown> = {}): BuildingLayout {
@@ -74,6 +82,10 @@ export function buildingLayout(params: Record<string, unknown>, args: Record<str
   // a bare doorway (leaf: false) only where the def revision opts in (core/hall@2, #2282); older revisions draw every leaf
   if (!args.bareDoors) for (const e of plan.ext) delete e.leaf;
   const L = realize(plan);
+  // #2383 a door-fitted revision (make.args.doorThings): every ground-floor doorway is bare, and a real door thing set in
+  // it (buildingDoorFits) is the door. A doorway narrower than FITTED_MIN_W is widened to it, so the door's frame stands
+  // clear of its jambs.
+  if (args.doorThings) for (const o of L.openings) if (fittedDoorway(o)) { o.leaf = false; o.width = Math.max(o.width, FITTED_MIN_W); }
   const roof = s(params.roof, 'gable');
   const out: BuildingLayout = { ...L, yaw: usePlan ? 0 : FRONT_YAW[front] ?? 0, front: usePlan ? 's' : front, style: usePlan ? 'plan' : style, roof, roofPitch: n(params.roofPitch, 32), roofRise: roofRise(roof, n(params.roofPitch, 32), L.W, L.D, !!L.round), material: s(params.material, 'plaster'), checks: architectureChecks(L), params, args };
   if (layoutCache.size > 256) layoutCache.clear();

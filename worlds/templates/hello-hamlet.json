@@ -59,7 +59,7 @@
         {
           "op": "place",
           "tmp": "$c",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cottage",
           "p": [
             44,
@@ -71,6 +71,23 @@
               "ref": "pond"
             }
           ]
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cottage-door-1",
+          "p": [
+            42.032,
+            12.421
+          ],
+          "r": -1.069,
+          "params": {
+            "sx": 0.84,
+            "sy": 0.9
+          },
+          "state": {
+            "open": false
+          }
         },
         {
           "op": "place",
@@ -298,7 +315,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "lab-presentation-hall",
           "p": [
             14,
@@ -309,6 +326,23 @@
             "d": 8,
             "floors": 1,
             "front": "s"
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "lab-presentation-hall-door-1",
+          "p": [
+            14,
+            -4.11
+          ],
+          "r": 0,
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": false
           }
         },
         {
@@ -356,7 +390,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "lab-pond-hall",
           "p": [
             2,
@@ -367,6 +401,23 @@
             "d": 8,
             "floors": 1,
             "front": "n"
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "lab-pond-hall-door-1",
+          "p": [
+            2,
+            36.11
+          ],
+          "r": -3.141,
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": false
           }
         },
         {

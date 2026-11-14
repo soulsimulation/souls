@@ -235,7 +235,7 @@
    "ops": [
     {
      "op": "place",
-     "def": "core/pavilion@1",
+     "def": "core/pavilion@2",
      "name": "commons-pavilion",
      "p": [
       9,
@@ -374,7 +374,7 @@
    "ops": [
     {
      "op": "place",
-     "def": "core/cottage@1",
+     "def": "core/cottage@2",
      "name": "eden-house-1",
      "p": [
       34,
@@ -392,7 +392,24 @@
     },
     {
      "op": "place",
-     "def": "core/cottage@1",
+     "def": "core/door@2",
+     "name": "eden-house-1-door-1",
+     "p": [
+      35.175,
+      17.89
+     ],
+     "r": 0,
+     "params": {
+      "sx": 0.84,
+      "sy": 0.9
+     },
+     "state": {
+      "open": false
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/cottage@2",
      "name": "eden-house-2",
      "p": [
       52,
@@ -411,7 +428,24 @@
     },
     {
      "op": "place",
-     "def": "core/cottage@1",
+     "def": "core/door@2",
+     "name": "eden-house-2-door-1",
+     "p": [
+      53.175,
+      17.89
+     ],
+     "r": 0,
+     "params": {
+      "sx": 0.84,
+      "sy": 0.9
+     },
+     "state": {
+      "open": false
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/cottage@2",
      "name": "eden-house-3",
      "p": [
       33.98,
@@ -430,7 +464,24 @@
     },
     {
      "op": "place",
-     "def": "core/cottage@1",
+     "def": "core/door@2",
+     "name": "eden-house-3-door-1",
+     "p": [
+      32.244,
+      25.11
+     ],
+     "r": -3.141,
+     "params": {
+      "sx": 0.84,
+      "sy": 0.9
+     },
+     "state": {
+      "open": false
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/cottage@2",
      "name": "eden-house-4",
      "p": [
       53.98,
@@ -449,7 +500,24 @@
     },
     {
      "op": "place",
-     "def": "core/hall@1",
+     "def": "core/door@2",
+     "name": "eden-house-4-door-1",
+     "p": [
+      52.244,
+      25.11
+     ],
+     "r": -3.141,
+     "params": {
+      "sx": 0.84,
+      "sy": 0.9
+     },
+     "state": {
+      "open": false
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/hall@3",
      "name": "eden-library-1",
      "p": [
       74,
@@ -461,6 +529,23 @@
       "front": "s",
       "wall": "#efe6d4",
       "windows": 0.8
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "eden-library-1-door-1",
+     "p": [
+      74,
+      -2.91
+     ],
+     "r": 0,
+     "params": {
+      "sx": 1.35,
+      "sy": 0.9
+     },
+     "state": {
+      "open": false
      }
     }
    ]
