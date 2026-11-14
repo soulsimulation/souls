@@ -1,5 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {ANYWHERE, buildCatalog, kindOf, type CatalogInput} from './catalog.ts';
 import {EDGE_ACT_VERBS} from '../events/schema.ts';
 
@@ -42,6 +43,12 @@ test('a place keeps its id, names its ref, and a carrier place is marked fixed',
   assert.equal(payload.places.find(p => p.id === 'basket')!.fixed, true);
 });
 
+test('a place carries its outline to 0.1 m; a place on a carrier, in the carrier\'s own frame, has none (#1915)', () => {
+  const base = input(), {payload} = buildCatalog({...base, places: base.places.map(p => p.id === 'g-library' ? {...p, polygon: [[0.04, 0], [10.06, 0], [10, 9.96], [0, 10]]} : p)});
+  assert.deepEqual(payload.places.find(p => p.id === 'g-library')!.outline, [[0, 0], [10.1, 0], [10, 10], [0, 10]]);
+  assert.equal(payload.places.find(p => p.id === 'basket')!.outline, undefined);
+});
+
 test('every spot activity is an act by id, tied to its thing and place', () => {
   const {payload} = buildCatalog(input());
   assert.deepEqual(payload.acts.filter(a => a.place === 'g-library').map(a => a.id), ['drink:eat.e_0aa1', 'eat:eat.e_0aa1']);
@@ -53,18 +60,11 @@ test('every spot activity is an act by id, tied to its thing and place', () => {
   assert.equal(seesaw.label, 'Ride the see-saw (world)');
 });
 
-test('a secret place, what stands in it and what is done in it are left out', () => {
-  const {payload, serialized} = buildCatalog(input());
-  assert.equal(payload.places.some(p => p.id === 'g-grove'), false);
-  assert.equal(payload.things.some(t => t.id === 'e_0dd4'), false);
-  assert.equal(payload.acts.some(a => a.place === 'g-grove'), false);
-  assert.equal(serialized.includes('Hidden Grove'), false);
-});
-
-test('everything published is public, and the counts match', () => {
+test('everything published is public, and the counts match; a place whose data says secret is listed (#1262)', () => {
   const {payload} = buildCatalog(input());
   assert.equal(payload.scope, 'public');
-  assert.deepEqual(payload.counts, {places: 3, things: 1, acts: 3, kinds: 1, handKinds: 0, handThings: 0});
+  assert.deepEqual(payload.counts, {places: 4, things: 2, acts: 4, kinds: 2, handKinds: 0, handThings: 0});
+  assert.ok(payload.places.some(p => p.id === 'g-grove') && payload.things.some(t => t.id === 'e_0dd4') && payload.acts.some(a => a.place === 'g-grove'));
 });
 
 test('what can be done on the spot is published as <verb>:here, and every such verb is one the world acts on', () => {
@@ -72,6 +72,11 @@ test('what can be done on the spot is published as <verb>:here, and every such v
   assert.ok(payload.anywhere.some(a => a.id === 'sit-ground:here' && /floor/.test(a.label)));
   assert.equal(payload.anywhere.length, ANYWHERE.length);
   for (const [verb] of ANYWHERE) assert.ok((EDGE_ACT_VERBS as readonly string[]).includes(verb), verb);
+});
+
+test('walk-to:here is published with the acts done on the spot (#1916)', () => {
+  const {payload} = buildCatalog(input());
+  assert.deepEqual(payload.anywhere.find(a => a.id === 'walk-to:here'), {id: 'walk-to:here', verb: 'walk-to', label: 'Walk to a point on your level'});
 });
 
 // #1751: what a kind of thing takes by hand, from the def's own action list (the engine bridge's thingActs)
@@ -92,8 +97,8 @@ test('a kind worked by hand is published once with its acts and the state they r
   assert.deepEqual(payload.kinds['core-desk-lamp']!.state, {on: true});
   assert.equal(payload.things.find(t => t.id === 'e_l0')!.byHand, false);
   assert.equal(payload.things.find(t => t.id === 'e_l1')!.byHand, undefined);
-  assert.equal(payload.things.some(t => t.id === 'e_l9'), false, 'nothing in a secret place');
-  assert.equal(payload.counts.handKinds, 3); assert.equal(payload.counts.handThings, 4);
+  assert.equal(payload.things.some(t => t.id === 'e_l9'), true, 'a thing in a place whose data says secret is listed too (#1262)');
+  assert.equal(payload.counts.handKinds, 3); assert.equal(payload.counts.handThings, 5);
 });
 
 test('a ref two places share is published for neither: walk:<id> names its place, walk:<ref> would name none (#1737)', () => {
@@ -102,4 +107,21 @@ test('a ref two places share is published for neither: walk:<id> names its place
   const jetty = {id: 'g-jetty', ref: 'jetty', name: 'Jetty', kind: 'pier', parent: 'world', level: 0, polygon: square(0, 0)};
   const {payload} = buildCatalog({worldId: 'w', places: [lake, bank, jetty], spots: [], things: []});
   assert.deepEqual(payload.places.map(p => [p.id, p.ref ?? null]), [['g-jetty', 'jetty'], ['g-lake', null], ['g-lake.bank', null]]);
+});
+
+test('native Eden: a building with an interior gives its doors, with position, level and facing, from its door gaps (#2261)', () => {
+  const read = (f: string) => JSON.parse(readFileSync(new URL(`../../../../../worlds/eden/${f}`, import.meta.url), 'utf8'));
+  const {places} = read('places.v1.json') as {places: CatalogInput['places']}, {interiors} = read('activity-spots.v1.json') as {interiors: NonNullable<CatalogInput['interiors']>};
+  const {payload} = buildCatalog({worldId: 'eden', places, spots: [], things: [], interiors});
+  const place = (id: string) => payload.places.find(p => p.id === id)!;
+  // the Library: one door, the middle of its south wall (z -2.8), where #2224 read it from a walk in
+  assert.deepEqual(place('eden-library-1').doors, [{at: [74, -2.8], level: 0, facing: 'south', approach: [74, -1.8]}]);
+  // the Yurt: its south wall runs x 64.5..70.5 (middle 67.5); its door is 1.7 m west of the middle
+  const yurt = place('eden-yurt');
+  assert.deepEqual(yurt.doors, [{at: [65.8, -15.5], level: 0, facing: 'south', approach: [65.8, -14.5]}]);
+  assert.ok(Math.abs(yurt.doors![0]!.at[0] - yurt.at[0]) > 1.5);
+  // a door on a side wall faces that way (the Greenhouse's west wall); a place with no interior has none
+  assert.deepEqual(place('eden-greenhouse').doors, [{at: [64, 35], level: 0, facing: 'west', approach: [63, 35]}]);
+  assert.equal(payload.places.filter(p => p.doors).length, interiors.length);
+  assert.equal(place('region-campus.library-annex').doors, undefined);
 });

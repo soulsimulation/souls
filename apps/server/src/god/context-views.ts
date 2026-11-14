@@ -19,6 +19,8 @@ import { PlaceIndex, type Place } from '../edge/ledger/places.ts';
 import { checkArtOriginals, readArtOriginal, type ArtOriginals } from './context-original-art.ts';
 export const CONTEXT_PRESENTATION = { source: 'architectural-context', lighting: 'fixed clear late morning (2026-06-21 10:30)', doors: 'definition default', omitted: ['Souls', 'carried and carryable items', 'live wildlife', 'live simulation clock'], live: false } as const;
 const live = new Map<ContextViewCache, () => Promise<void>>();
+/** #2192: a picture URL names its content key, so its bytes never change; private, because access is checked per viewer. */
+export const PICTURE_CACHE = 'private, max-age=31536000, immutable';
 /** Pending rows already live in SQLite. Bound cleanup even if a renderer fails to honor abort. */
 export async function closeContextViews(timeoutMs = 3000) {
     const closing = Promise.allSettled([...live.values()].map(close => close()));
@@ -45,6 +47,7 @@ type Deps = {
     limit(c: Context): void;
     renderer?: (input: ContextInput, signal: AbortSignal) => Promise<{
         png?: Uint8Array;
+        thumb?: Uint8Array;
         reason?: string;
     }>;
 };
@@ -182,10 +185,10 @@ export function mountContextViews(app: Hono, d: Deps) {
             detail: boolean;
         }, at = payload.target.point, r = payload.target.radius;
         const shot = lookSchema.parse({ eye: payload.target.viewpoint?.eye ?? [at[0] + r * 1.5, at[1] + r, at[2] + r * 1.5], at, width: payload.detail ? 640 : 320, height: payload.detail ? 448 : 224 });
-        let photo: Record<string, unknown> | undefined;
+        let photo: Record<string, unknown> | undefined, thumb: Uint8Array | undefined;
         try {
-            const png = await renderLook(d.worldUrl, shot, 0, signal, i.payload, metadata => { photo = metadata; });
-            return { png, photo };
+            const png = await renderLook(d.worldUrl, shot, 0, signal, i.payload, metadata => { photo = metadata; }, webp => { thumb = webp; });
+            return { png, thumb, photo };
         } catch (error) {
             if (photo) return { photo, reason: error instanceof Error ? error.message : 'context capture unavailable' };
             throw error;
@@ -330,9 +333,11 @@ export function mountContextViews(app: Hono, d: Deps) {
     const originalFor = (t: ContextTarget) => t.original && !moderation.isHidden(t.original.sha) ? { sha: t.original.sha, ext: t.original.ext, source: 'original-image', version: t.original.sha, url: `/v1/world/context/original?ref=${encodeURIComponent(t.ref)}&version=${t.original.sha}` } : undefined;
     const safeTarget = (t: ContextTarget) => ({ ...t, enclosed: contextEnclosed(preparedModel!, t), camera: cameraFor(t).viewpoint, original: originalFor(t) });
     const manifest = (t: ContextTarget, detail = false) => {
-        const record = cache.request(imageRef({ ref: t.ref, detail }))!, { ref: _ref, ...r } = record;
+        const record = cache.request(imageRef({ ref: t.ref, detail }))!, { ref: _ref, thumbBytes, ...r } = record;
         return { ...safeTarget(t), ...r, ref: t.ref, source: 'architectural-context', freshness: record.status === 'ready' ? 'current' : 'missing', presentation: CONTEXT_PRESENTATION,
             url: record.status === 'ready' ? `/v1/world/context/image?ref=${encodeURIComponent(t.ref)}&key=${record.key}${detail ? '&detail=1' : ''}` : null,
+            // #2192: the same picture as a compact WebP (Explore's cards); absent for pictures rendered before it existed
+            thumb: record.status === 'ready' && thumbBytes ? `/v1/world/context/thumb?ref=${encodeURIComponent(t.ref)}&key=${record.key}${detail ? '&detail=1' : ''}` : null,
             original: originalFor(t) };
     };
     const awaitContext = async (c: Context, next: () => Promise<void>) => {
@@ -340,7 +345,7 @@ export function mountContextViews(app: Hono, d: Deps) {
             throw new ApiError(503, 'context.unavailable', 'Maintained world context is unavailable');
         try {
             if (!d.contextReady()) await d.waitForContext(c.req.raw.signal);
-            const picture = /\/context\/(views|image|sheet)$/.test(c.req.path);
+            const picture = /\/context\/(views|image|thumb|sheet)$/.test(c.req.path);
             if (!picture) { await prepare(false, c.req.raw.signal); current(); }
             if (!d.contextReady()) throw new Error('context changed before publication');
         } catch { throw new ApiError(503, 'context.pending', 'World meaning is catching up; retry shortly'); }
@@ -399,7 +404,15 @@ export function mountContextViews(app: Hono, d: Deps) {
         const t = authorized(c, c.req.query('ref') ?? ''), png = cache.image(imageRef({ ref: t.ref, detail: c.req.query('detail') === '1' }), c.req.query('key') ?? '');
         if (!png)
             throw new ApiError(404, 'context.stale', 'Picture unavailable or superseded; request current views');
-        return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': PICTURE_CACHE, 'x-content-type-options': 'nosniff' });
+    });
+    app.get('/v1/world/context/thumb', async c => {
+        await prepare(true, c.req.raw.signal);
+        if (!d.contextReady?.()) throw new ApiError(503, 'context.pending', 'World meaning changed');
+        const t = authorized(c, c.req.query('ref') ?? ''), webp = cache.thumb(imageRef({ ref: t.ref, detail: c.req.query('detail') === '1' }), c.req.query('key') ?? '');
+        if (!webp)
+            throw new ApiError(404, 'context.stale', 'Picture unavailable or superseded; request current views');
+        return c.body(new Uint8Array(webp), 200, { 'content-type': 'image/webp', 'cache-control': PICTURE_CACHE, 'x-content-type-options': 'nosniff' });
     });
     app.get('/v1/world/context/sheet', async c => {
         await prepare(true, c.req.raw.signal);
@@ -420,7 +433,7 @@ export function mountContextViews(app: Hono, d: Deps) {
         const key = c.req.query('key') ?? '', png = key === sheetKey(refs) ? cache.image(sheetRef(refs), key) : null;
         if (!png)
             throw new ApiError(404, 'context.stale', 'Sheet unavailable or superseded');
-        return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        return c.body(new Uint8Array(png), 200, { 'content-type': 'image/png', 'cache-control': PICTURE_CACHE, 'x-content-type-options': 'nosniff' });
     });
     app.get('/v1/world/context/original', c => {
         const t = authorized(c, c.req.query('ref') ?? ''), asset = t.original;

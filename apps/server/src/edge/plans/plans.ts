@@ -113,6 +113,18 @@ export class Plans {
   }
   close() { this.closed = true; if (this.timer) clearInterval(this.timer); this.timer = null; }
 
+  /** #2297: the wall time (ms) at which a running plan's step next moves on by time (its `for` deadline, its `until` limit, a
+   *  transient retry), or `now` for a step about to start; null when no running plan waits on time (receipts and events wake it). */
+  nextDueMs(): number | null {
+    let t: number | null = null; const at = (ms: number | undefined) => {if (ms !== undefined) t = t === null ? ms : Math.min(t, ms);};
+    for (const id of this.active.values()) {
+      const p = this.byId.get(id), s = p?.state === 'running' ? p.steps[p.current] : undefined; if (!s) continue;
+      if (s.state.status === 'pending') at(this.core.now());
+      else if (s.state.status === 'starting') at(s.state.retryAt ?? this.core.now());
+      else if (s.state.status === 'running') {at(s.state.deadline); at(s.state.untilBy);}
+    }
+    return t;
+  }
   private planOf(soulId: string) { const id = this.active.get(soulId); return id ? this.byId.get(id) ?? null : null; }
   private load(id: string): Plan | null {
     const hit = this.byId.get(id); if (hit) return hit;

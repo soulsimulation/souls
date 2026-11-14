@@ -7,11 +7,14 @@
 # CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (qualify, smoke) only for a ready PR
 # labelled merge:ready or ci:run; otherwise it runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs
 # were selected. Adding either label starts a fresh pull_request run with the window open: the merge queue reads required
-# checks from that event, so a green dispatch never clears a deferred ci-ok. It queues behind a run in progress, cancels
-# nothing, and does no heavy work if that run passes at the same head. Any other label does nothing: its run gets a group of
-# its own, so it cancels nothing, and every job skips with no runner. A skipped required check reads as a pass, so ci-ok is
-# named differently in that run and can never replace a real result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still
-# runs a PR's path-scoped CI by hand, but its checks don't count for the queue.
+# checks from that event, so a green dispatch never clears a deferred ci-ok. Any other label starts the same kind of run
+# (#2018): the queue reads only the newest ci run at a head, so a run without ci-ok would hide the real one. A label run
+# queues behind a run in progress, cancels nothing, and does no heavy work if the head's newest run passed, so its ci-ok
+# repeats that result. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
+# checks don't count for the queue.
+# A push to main of a commit whose merge_group run passed every qualify job (the queue fast-forwards main to it) does no
+# heavy work: `merge-group-covered` runs instead, and readers of main's CI take that job as full scope
+# (.github/scripts/ci-main.mjs, docs/testing.md#ci-window, CI on main). Any other push to main runs everything.
 name: ci
 on:
   pull_request:
@@ -28,14 +31,13 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}
+  group: ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'labeled' }}
 env:
   # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
   SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
 jobs:
   scope:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -48,6 +50,8 @@ jobs:
       smoke: ${{ steps.scope.outputs.smoke }}
       deferred: ${{ steps.scope.outputs.deferred }}
       window: ${{ steps.scope.outputs.window }}
+      covered: ${{ steps.queued.outputs.covered || 'false' }}
+      covered-run: ${{ steps.queued.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
@@ -62,6 +66,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: echo "green=$(node .github/scripts/ci-scope.mjs green --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" --self "$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
+      # A push to main the merge queue already tested in full at this sha (ci-main.mjs) has no heavy work left.
+      - id: queued
+        name: Tested in full by the merge queue
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node .github/scripts/ci-main.mjs --repo "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA"
       - id: scope
         name: Pick jobs from changed paths
         env:
@@ -70,13 +81,12 @@ jobs:
           EVENT: ${{ inputs.pr && 'request' || github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft || false }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          GREEN: ${{ steps.green.outputs.green || false }}
+          GREEN: ${{ steps.green.outputs.green || steps.queued.outputs.covered || false }}
         # A push to main and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
         run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
 
   # Fast, dependency-free checks of the repo's own tooling; always runs.
   repo:
-    if: github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -96,6 +106,7 @@ jobs:
           tools/assets/manifest.test.mjs
           tools/assets/mars-web.test.mjs
           .github/scripts/ci-scope.test.mjs
+          .github/scripts/ci-main.test.mjs
           .github/scripts/gate-renames.test.mjs
           .github/scripts/server-test-files.test.mjs
           .github/scripts/server-test-durations.test.mjs
@@ -115,10 +126,11 @@ jobs:
     name: ${{ matrix.name }}
     needs: scope
     if: needs.scope.outputs.any == 'true'
-    # The qualify jobs (no browser) run on the repository variable CI_HEAVY_RUNNER when it is set, else ubuntu-latest.
-    # Its value is one runner label (`souls-ci`) or a JSON array of labels (`["self-hosted","souls-ci"]`).
-    # `native` stays on ubuntu-latest: its camera perf budget is wall time, and a shared host under load misses it (#1162).
-    runs-on: ${{ matrix.kind != 'native' && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
+    # A job the matrix marks heavy (ci-scope.mjs: the server shards and the long legs) runs on the repository variable
+    # CI_HEAVY_RUNNER when it is set; every other job, and every job while it is unset, runs on ubuntu-latest, so a run
+    # uses both pools at once. The value is one runner label (`souls-ci`) or a JSON array (`["self-hosted","souls-ci"]`).
+    # `native` is never heavy: its camera perf budget is wall time, and a shared host under load misses it (#1162).
+    runs-on: ${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}
     # The recursive server inventory (about an hour of tests in all) runs in duration-balanced shards of ~10 minutes each.
     timeout-minutes: ${{ matrix.kind == 'server' && 45 || 60 }}
     strategy:
@@ -191,15 +203,19 @@ jobs:
               # and the release gate runs the step on Modal.
               if [ "$(uname -m)" = x86_64 ] && ! command -v restic >/dev/null; then
                 mkdir -p "$RUNNER_TEMP/bin"
-                # #1507: the release CDN 504s at times; retry with backoff, and still fail loudly once retries run out
-                curl -fsSL --connect-timeout 20 --retry 5 --retry-all-errors --retry-delay 5 -o "$RUNNER_TEMP/restic.bz2" \
+                # #1507: the release CDN 504s at times; retry with backoff, and still fail loudly once retries run out.
+                # #2144: the self-hosted runners' curl predates --retry-all-errors (7.71); there --retry covers 5xx and timeouts.
+                retry_all=--retry-connrefused
+                # grep reads all input (no -q): under pipefail an early exit would SIGPIPE curl and hide the option.
+                curl --help all 2>/dev/null | grep -- --retry-all-errors >/dev/null && retry_all=--retry-all-errors
+                curl -fsSL --connect-timeout 20 --retry 5 "$retry_all" --retry-delay 5 -o "$RUNNER_TEMP/restic.bz2" \
                   https://github.com/restic/restic/releases/download/v0.16.4/restic_0.16.4_linux_amd64.bz2 \
                   || { echo "::error::restic download failed after 5 retries (#1507); backup-restic.test.mjs would only skip, so this job fails"; exit 1; }
                 echo "3d4d43c169a9e28ea76303b1e8b810f0dcede7478555fdaa8959971ad499e324  $RUNNER_TEMP/restic.bz2" | sha256sum -c -
                 bunzip2 -c "$RUNNER_TEMP/restic.bz2" > "$RUNNER_TEMP/bin/restic" && chmod 755 "$RUNNER_TEMP/bin/restic"
                 export PATH="$RUNNER_TEMP/bin:$PATH"; restic version
               fi
-              node --test --test-concurrency=1 tools/world-launcher/*.test.mjs
+              node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs
               ;;
             client-cli)
               # V3-client-cli
@@ -279,8 +295,16 @@ jobs:
         with:
           path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
           key: pw-chromium-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      # If the runner's apt mirror (azure.archive.ubuntu.com) is unreachable, point apt at archive.ubuntu.com and retry
+      # once: same packages, same browser, only the download host changes.
       - name: Install Chromium and its system libraries
-        run: pnpm --filter mars-campus-viewer exec playwright install --with-deps --only-shell chromium
+        run: |
+          pw_install() { pnpm --filter mars-campus-viewer exec playwright install --with-deps --only-shell chromium; }
+          pw_install && exit 0
+          echo "::warning::apt install failed; retrying against archive.ubuntu.com"
+          sudo sed -i 's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' \
+            /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          pw_install
       - name: Local smoke
         timeout-minutes: 10
         run: node e2e/local-smoke.mjs --build --port 9950 --out .local/e2e/ci
@@ -296,14 +320,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # A push to main that the merge queue's run at this sha covered (ci-main.mjs): the merge train's fullScope and the
+  # release gate's ciEvidence find this job by name and take the merge_group run as main's full-scope result.
+  merge-group-covered:
+    needs: scope
+    if: needs.scope.outputs.covered == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RUN: ${{ needs.scope.outputs.covered-run }}
+        run: echo "Every qualify job passed in merge_group run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$RUN at $GITHUB_SHA; nothing heavy re-runs."
+
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
   # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
   ci-ok:
-    # Skipped on another label's event, under another name: a skipped `ci-ok` would read as a pass over a deferred one.
-    name: ${{ (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready') && 'ci-ok' || 'other-label' }}
     runs-on: ubuntu-latest
-    needs: [scope, repo, qualify, smoke]
-    if: always() && (github.event.action != 'labeled' || github.event.label.name == 'ci:run' || github.event.label.name == 'merge:ready')
+    needs: [scope, repo, qualify, smoke, merge-group-covered]
+    if: always()
     steps:
       - name: Full CI deferred
         if: needs.scope.outputs.deferred == 'true'
@@ -319,9 +353,12 @@ jobs:
           ANY: ${{ needs.scope.outputs.any }}
           SMOKE: ${{ needs.smoke.result }}
           SMOKE_SELECTED: ${{ needs.scope.outputs.smoke }}
+          COVERED: ${{ needs.merge-group-covered.result }}
+          COVERED_SELECTED: ${{ needs.scope.outputs.covered }}
         run: |
-          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED"
+          echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED covered=$COVERED covered_selected=$COVERED_SELECTED"
           test "$SCOPE" = success
           test "$REPO" = success
           if [ "$ANY" = true ]; then test "$QUALIFY" = success; else test "$QUALIFY" = skipped; fi
           if [ "$SMOKE_SELECTED" = true ]; then test "$SMOKE" = success; else test "$SMOKE" = skipped; fi
+          if [ "$COVERED_SELECTED" = true ]; then test "$COVERED" = success; else test "$COVERED" = skipped; fi

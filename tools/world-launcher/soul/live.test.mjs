@@ -1,0 +1,56 @@
+// #1755: the client applies the world's live frames exactly as the world builds them, and hashes its copy as the world does.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { applyFrame, liveHash, resumeFrom, wholeCopy } from "./live.mjs";
+import { liveDelta, liveHash as worldHash } from "../../../apps/server/src/edge/catalog/live-delta.ts";
+
+const W = "http://world.test";
+const pic = (tick, souls, extra = {}) => ({ contract: "soul-live/1", worldId: "w", scope: "public", tick, at: tick, catalog: "c1", souls, speech: [], ...extra });
+const row = (id, at, place = "g-yard") => ({ id, name: id, at, place, doing: null });
+
+test("frames from the world's differ keep a copy whose hash is the world's", () => {
+  const p1 = pic(1, [row("s_a", [1, 1]), row("s_b", [2, 2])], { things: { e_1: { on: true } } });
+  let copy = applyFrame(null, W, "live.full", { ...p1, epoch: "ep", seq: 1 }, 1).copy;
+  assert.equal(resumeFrom(copy, W), "ep:1");
+  const p2 = pic(2, [row("s_b", [3, 3], "g-hall")], { catalog: "c2", things: { e_1: { on: false }, e_2: { open: true } }, speech: [{ id: "sp1", at: 2, text: "hi" }] });
+  const d = liveDelta(p1, p2, 2);
+  copy = applyFrame(copy, W, "live", JSON.parse(JSON.stringify({ epoch: "ep", ...d })), 2).copy;
+  assert.equal(liveHash(copy.live), worldHash(p2));
+  assert.equal(copy.live.catalog, "c2"); assert.deepEqual(copy.speech.map((l) => l.id), ["sp1"]);
+  assert.deepEqual(applyFrame(copy, W, "live", { epoch: "ep", seq: 2, check: worldHash(p2) }, 3).copy.receivedAt, 3, "a check that agrees keeps the copy current");
+  assert.deepEqual(applyFrame(copy, W, "live", { epoch: "ep", ...d }, 4), { copy: null }, "a change already applied is not applied twice");
+});
+
+test("a copy not on the frame's seq, from another epoch, or with a hash that disagrees takes the whole picture", () => {
+  const copy = wholeCopy(W, null, { ...pic(1, [row("s_a", [1, 1])]), epoch: "ep", seq: 5 }, 1);
+  assert.deepEqual(applyFrame(copy, W, "live", { epoch: "ep", seq: 7, base: 6, tick: 2, at: 2 }, 2), { whole: "gap" });
+  assert.deepEqual(applyFrame(copy, W, "live", { epoch: "other", seq: 6, base: 5, tick: 2, at: 2 }, 2), { whole: "epoch" });
+  assert.deepEqual(applyFrame(copy, W, "live", { epoch: "ep", seq: 5, check: "0000000000000000" }, 2), { whole: "hash" });
+  assert.deepEqual(applyFrame(copy, W, "live", { epoch: "ep", seq: 9, check: "0000000000000000" }, 2), { whole: "behind" });
+  assert.deepEqual(applyFrame({ ...copy, world: "http://other.test" }, W, "live", { epoch: "ep", seq: 6, base: 5 }, 2), { whole: "epoch" }, "a copy of another world");
+});
+
+test("speech is kept by id: a line sent again is one line", () => {
+  const line = { id: "sp1", at: 1, text: "hi" };
+  let copy = wholeCopy(W, null, { ...pic(1, [], { speech: [line] }), epoch: "ep", seq: 1 }, 1);
+  copy = wholeCopy(W, copy, { ...pic(2, [], { speech: [line, { id: "sp2", at: 2, text: "yo" }] }), epoch: "ep", seq: 2 }, 2);
+  assert.deepEqual(copy.speech.map((l) => l.id), ["sp1", "sp2"]);
+});
+
+test("#1918: the copy keeps the world's clock from a whole picture and from each check, and it is not in the hash", () => {
+  const clock = (minuteOfDay, at) => ({ worldDateTime: "2026-10-03T07:00:00.000Z", time: "07:00", weekdayUTC: 6, minuteOfDay, paused: false, realMsPerWorldMinute: 2500, at });
+  const p1 = pic(1, [row("s_a", [1, 1])], { clock: clock(420, 1) });
+  let copy = applyFrame(null, W, "live.full", { ...p1, epoch: "ep", seq: 1 }, 1).copy;
+  assert.equal(copy.live.clock.minuteOfDay, 420);
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 1, check: worldHash(p1), clock: clock(422, 5001) }, 5001).copy;
+  assert.deepEqual(copy.live.clock, clock(422, 5001));
+  assert.equal(liveHash(copy.live), worldHash({ ...p1, clock: undefined }));
+});
+
+test("#1978: a changed row is merged: `now` and `about` left out are kept, null clears", () => {
+  let copy = applyFrame(null, W, "live.full", { ...pic(1, [{ ...row("s_a", [1, 1]), now: "rowing", about: "A miller." }]), epoch: "ep", seq: 1 }, 1).copy;
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 2, base: 1, tick: 2, at: 2, souls: { set: [row("s_a", [2, 2])], del: [] } }, 2).copy;
+  assert.deepEqual(copy.live.souls[0], { ...row("s_a", [2, 2]), now: "rowing", about: "A miller." }, "moving keeps both");
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 3, base: 2, tick: 3, at: 3, souls: { set: [{ ...row("s_a", [2, 2]), now: null }], del: [] } }, 3).copy;
+  assert.deepEqual(copy.live.souls[0], { ...row("s_a", [2, 2]), about: "A miller." }, "null clears the status line");
+});

@@ -12,15 +12,17 @@ const sources = JSON.parse(readFileSync(dir + 'SOURCES.json', 'utf8'));
 const sha = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
 const capture = readFileSync(dir + 'instructions.md', 'utf8');
 
-// Keep the historical test identity for release-gate comparison; this release publishes polite + continuity controller 2.32.0 (a Soul home reachable from any folder, upgrade refreshes client and skill, one version for both, #1875; things worked by hand, with their state, in the local copy, #1751; 2.29.0: the session record, #1773; 2.26.0: an owner message in one call: the wake carries look and found, act --for acknowledges, #1753; the world on this machine: catalog, find, query, look, #1737; 2.7.0 on R4 plus R5's slowed sentence and lifecycle-pending create wait; 2.8.0 prints refusal alternatives, #824; 2.8.1 prints `failed` for a failed or replaced receipt, #373; 2.8.2 ends a wait once a sit, lie or ride holds its pose, #378; 2.9.0 sends offered ids only, #1093; 2.11.0 adds inspect, #1094; 2.12.0 adds the resident client, #1096; 2.13.0 adds durable plans, #1100; 2.14.0 wakes on addressed speech, #476).
+// Keep the historical test identity for release-gate comparison. Versions and hashes are stamped once per release by the
+// release owner (tools/world-launcher/soul/stamp.mjs; the release gate runs its --check, #1935), so these tests compare what
+// the server publishes with what the files on disk state and hash to, and a client change edits no literal here.
+const cliVersion = /^const VERSION = "([0-9.]+)";$/m.exec(readFileSync(dir + 'eden.mjs', 'utf8'))?.[1] ?? '';
+const skillVersion = /^  version: "([0-9.]+)"$/m.exec(readFileSync(dir + 'skill.md', 'utf8'))?.[1];
 test('SOURCES.json pins every published Soul file by sha: the 2.2.1 controller and guides (soul fix round 1 release candidate), and the retained 1.9 CLI', () => {
-  for (const k of ['controllerCli', 'cli', 'skill', 'instructions']) assert.equal(sha(readFileSync(dir + sources[k].file)), sources[k].sha256, k);
-  assert.equal(sources.controllerCli.file, 'eden.mjs'); assert.equal(sources.controllerCli.version, '2.32.0');
+  assert.equal(sources.controllerCli.file, 'eden.mjs'); assert.match(cliVersion, /^[0-9]+(\.[0-9]+)*$/, 'eden.mjs states its version');
   assert.equal(sources.skill.version, sources.controllerCli.version, '#1875 A1: the skill and the CLI carry one version');
-  assert.match(readFileSync(dir + 'skill.md', 'utf8'), /^  version: "2\.32\.0"$/m);
+  assert.equal(skillVersion, cliVersion, '#1875 A1: and so do the files');
   assert.ok(!readFileSync(dir + 'skill.md', 'utf8').includes('{{'), '#1875: no template, so the bytes /v1/config describes are the bytes /skill.md serves');
-  assert.match(readFileSync(dir + 'eden.mjs', 'utf8'), /const VERSION = "2\.32\.0";/);
-  assert.equal(sources.cli.file, 'eden-agent.mjs'); assert.equal(sources.cli.version, '1.9', 'the legacy CLI keeps its version');
+  assert.equal(sources.cli.file, 'eden-agent.mjs'); assert.ok(readFileSync(dir + 'eden-agent.mjs', 'utf8').includes(`SKILL_VERSION = "${sources.cli.version}.`), 'the legacy CLI keeps its version');
   assert.deepEqual(sources.instructions.capture, CAPTURE, 'the server recognises exactly the recorded capture');
   assert.ok(sources.legacy.skill.sha256 && sources.legacy.instructions.sha256, 'the 1.9 guide provenance is kept');
 });
@@ -32,7 +34,7 @@ test('the capture gets the world URL, name and a valid window code; no code or a
     const out = fillInstructions(capture, 'https://spoofed.test/w/x', world, code, base);
     assert.ok(out.startsWith(`# Create a Soul in ${world}\n\nWorld: ${base} (the world's name is **${world}**;`));
     assert.equal(out.split(`${base}/eden.mjs`).length - 1, 1); assert.equal(out.split(`register ${base}\n`).length - 1, 1);
-    assert.equal(out.split(` --for ${code}`).length - 1, 2); assert.match(out, /open Sim window/);
+    assert.equal(out.split(` --for ${code}`).length - 1, 3);   // create, a renamed create, login (#2257) assert.match(out, /open Sim window/);
     for (const gone of [CAPTURE.code, 'eden-2026', 'Eden 2026', 'spoofed.test']) assert.ok(!out.includes(gone), gone);
     assert.ok(out.includes('`pair <soulId> --for <CODE>`'), 'the generic pairing placeholder is not a captured code');
   }
@@ -48,17 +50,17 @@ test('the capture gets the world URL, name and a valid window code; no code or a
 
 test('HTTP: the real published files are served by hash; the guide uses configuration, never the request host', async t => {
   const f = fixture(':memory:'); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
-  Object.assign(f.souls.cfg, {cliFile: dir + 'eden-agent.mjs', controllerCliFile: dir + 'eden.mjs', skillFile: dir + 'skill.md', instructionsFile: dir + 'instructions.md', publicUrl: 'https://sim.example.test'});
-  assert.equal(sha(Buffer.from(await (await f.request('/eden.mjs')).arrayBuffer())), sources.controllerCli.sha256);
+  Object.assign(f.souls.cfg, {controllerCliFile: dir + 'eden.mjs', skillFile: dir + 'skill.md', instructionsFile: dir + 'instructions.md', publicUrl: 'https://sim.example.test'});
+  const onDisk = (file: string) => sha(readFileSync(dir + file));
+  assert.equal(sha(Buffer.from(await (await f.request('/eden.mjs')).arrayBuffer())), onDisk('eden.mjs'));
   const described = (await (await f.request('/v1/config')).json() as {soulClient: {sha256: string; skill: {version: string; sha256: string}}}).soulClient;
-  assert.equal(described.sha256, sources.controllerCli.sha256, '/v1/config describes the bundle it serves');
-  assert.deepEqual([described.skill.version, described.skill.sha256], [sources.skill.version, sources.skill.sha256], '#1875: and the skill beside it');
-  assert.equal(sha(Buffer.from(await (await f.request('/eden-agent.mjs')).arrayBuffer())), sources.cli.sha256);
-  assert.equal(sha(await (await f.request('/skill.md')).text()), sources.skill.sha256, 'the 2.1 skill has no templates');
-  assert.equal(sha(readFileSync(dir + 'schema-notes.md')), sources.schemaNotes.sha256, 'the reference\'s notes are pinned too');
-  // CTRL-7 (#1099): a short core; the reference is its notes plus the generated schema, cacheable by ETag
+  assert.equal(described.sha256, onDisk('eden.mjs'), '/v1/config describes the bundle it serves');
+  assert.deepEqual([described.skill.version, described.skill.sha256], [skillVersion, onDisk('skill.md')], '#1875: and the skill beside it');
+  assert.equal((await f.request('/eden-agent.mjs')).status, 404, '#1754: the legacy client is not served');
+  assert.equal(sha(await (await f.request('/skill.md')).text()), onDisk('skill.md'), 'the 2.1 skill has no templates');
+  // CTRL-7 (#1099): a short core (its size limit is a client test now, tools/world-launcher/soul-skill-size.test.mjs, #1935);
+  // the reference is its notes plus the generated schema, cacheable by ETag
   const core = await (await f.request('/skill.md')).text();
-  assert.ok(Buffer.byteLength(core) <= 3072, 'core skill ' + Buffer.byteLength(core));
   assert.doesNotMatch(core, /\b(cannot|can't|must not)\b/i, 'the offers say what is possible');
   const ref = await f.request('/schema.md'), refText = await ref.text(), etag = ref.headers.get('etag')!;
   assert.match(refText, /\| walk \| via \|/); assert.match(refText, /When things go wrong/);

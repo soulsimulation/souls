@@ -22,6 +22,9 @@
 //        (what visitors' pages reported: top errors by count, world, browser, first/last seen, build; client-errors.mjs)
 //   node tools/world-launcher/op.mjs glitches --port 4620 [--base /worlds] [--world <slug>] [--limit N]
 //        (every world's recoveries and halts by rule and rung, from each store; --world adds its records with their evidence)
+//   node tools/world-launcher/op.mjs usage --port 4620 [--base /worlds] [--days N]
+//        (per UTC day: accounts and Souls that acted, new and returning accounts, acts, refusals, clients; per account: first
+//        and last seen, days active; test worlds left out. From <data>/usage.sqlite, usage.mjs)
 //   node tools/world-launcher/op.mjs set-test --port 4620 [--base /worlds] --slug <slug> --test true|false
 //        (a scratch world operator TEST-Soul commands may use; product worlds and old-world forks are refused)
 //   node tools/world-launcher/op.mjs soul-pending --port 4620 [--base /worlds] --slug <test world>
@@ -36,6 +39,11 @@
 //        separator, or "test-…"; approve refuses a request sent to a person's window, a repair, or a deny-listed name
 //        (Kwyjibo); message/inbox/delete reach only Souls an operator approved (owner op:test-operator), by name + id.
 //        The message goes into the inbox exactly as the browser card sends it. Every use is an audit row, by operator.)
+//
+//   node tools/world-launcher/op.mjs feed-post --port 4620 [--base /worlds] --kind announcement|release|world|event --title <t>
+//        [--body <text>] [--url https://…] [--starts-at <ISO time>] [--place <text>] [--min-client <version>] [--replaces <id>]
+//   node tools/world-launcher/op.mjs feed-stats --port 4620 [--base /worlds]   (feed reads per UTC day by client version)
+//        (#1876: the platform feed every client pulls from <base>/v1/feed; feed.mjs)
 //
 // create-world: the world is born owned by that existing account (its god), exactly as if that person had created it signed in.
 // register-fork: serve the copy of an old world already in <data>/worlds/<slug>/sim.db under <base>/w/<slug> (lane FORKS).
@@ -57,18 +65,26 @@ const usage = () => {
     + '       op.mjs list-archive --port <launcher port> [--base /worlds]\n'
     + '       op.mjs audit --port <launcher port> [--base /worlds] [--slug <slug>]\n'
     + '       op.mjs glitches --port <launcher port> [--base /worlds] [--world <slug>] [--limit N]\n'
+    + '       op.mjs usage --port <launcher port> [--base /worlds] [--days N]\n'
     + '       op.mjs set-test --port <launcher port> [--base /worlds] --slug <slug> --test true|false\n'
     + '       op.mjs soul-pending --port <launcher port> [--base /worlds] --slug <test world>\n'
     + '       op.mjs soul-approve --port <launcher port> [--base /worlds] --slug <test world> --request <ap_id> --name <TestName>\n'
     + '       op.mjs soul-message|soul-inbox|soul-delete --port <launcher port> [--base /worlds] --slug <test world> --soul <s_id> --name <TestName> [--text <text> (soul-message)]\n'
     + '       op.mjs god-pending --port <launcher port> [--base /worlds] --slug <test world>\n'
-    + '       op.mjs god-approve --port <launcher port> [--base /worlds] --slug <test world> --code <pairing code>');
+    + '       op.mjs god-approve --port <launcher port> [--base /worlds] --slug <test world> --code <pairing code>\n'
+    + '       op.mjs feed-post --port <launcher port> [--base /worlds] --kind <announcement|release|world|event> --title <t> [--body <b>] [--url <https url>] [--starts-at <iso>] [--place <p>] [--min-client <v>] [--replaces <id>]\n'
+    + '       op.mjs feed-stats --port <launcher port> [--base /worlds]');
   process.exit(2);
 };
 if (cmd === 'glitches' && flag('port')) {
   const q = new URLSearchParams({ ...(flag('world') ? { world: flag('world') } : {}), ...(flag('limit') ? { limit: flag('limit') } : {}) });
   const r = await fetch(`http://127.0.0.1:${Number(flag('port'))}${(flag('base') ?? '').replace(/\/$/, '')}/__sim/glitches?${q}`, { signal: AbortSignal.timeout(30_000) });
   console.log(JSON.stringify(await r.json().catch(() => ({ status: r.status })), null, 2)); process.exit(r.ok ? 0 : 1);
+}
+if (cmd === 'usage' && flag('port')) {
+  const { formatReport } = await import('./usage.mjs');
+  const r = await fetch(`http://127.0.0.1:${Number(flag('port'))}${(flag('base') ?? '').replace(/\/$/, '')}/__sim/usage${flag('days') ? `?days=${Number(flag('days'))}` : ''}`, { signal: AbortSignal.timeout(30_000) });
+  const d = await r.json().catch(() => ({ status: r.status })); console.log(r.ok ? formatReport(d) : JSON.stringify(d, null, 2)); process.exit(r.ok ? 0 : 1);
 }
 if (cmd === 'client-errors' && flag('port')) {
   const q = new URLSearchParams({ ...(flag('world') ? { world: flag('world') } : {}), ...(flag('limit') ? { limit: flag('limit') } : {}) });
@@ -133,6 +149,12 @@ if (cmd === 'create-world') {
 } else if (cmd === 'god-approve') {
   if (!flag('port') || !flag('slug') || !flag('code')) usage();
   body = { slug: flag('slug'), code: flag('code') };
+} else if (cmd === 'feed-post') {
+  if (!flag('port') || !flag('kind') || !flag('title')) usage();
+  body = { kind: flag('kind'), title: flag('title'), ...Object.fromEntries([['body', 'body'], ['url', 'url'], ['startsAt', 'starts-at'], ['place', 'place'], ['minClient', 'min-client'], ['replaces', 'replaces']].filter(([, f]) => flag(f) !== undefined).map(([k, f]) => [k, flag(f)])) };
+} else if (cmd === 'feed-stats') {
+  if (!flag('port')) usage();
+  body = {};
 } else usage();
 const base = (flag('base') ?? '').replace(/\/$/, '');
 const r = await fetch(`http://127.0.0.1:${Number(flag('port'))}${base}/__sim/op/${cmd}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(240_000) });

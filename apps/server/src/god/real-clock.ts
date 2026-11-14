@@ -119,7 +119,9 @@ type ClockHost = {
   engine: { world: { tick: number } };
   living?: { origin: number; dayTicks: number; customs?: string[] } | undefined;
   enqueue(kind: 'rules', author: string, payload: unknown): Promise<unknown>;
-  pace?: number; paused?: boolean; running?: boolean;
+  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number;
+  /** #2297: the keeper reports the zone's next daylight-saving change as a deadline (WorldHost.stillUntil). */
+  listeners?: { stillness?(tick: number): { name: string; tick?: number | null }[] }[];
 };
 export type RealClockOptions = {
   /** The world's zone now. */ zone: () => string;
@@ -136,6 +138,19 @@ export type RealClockOptions = {
 const kept = new WeakSet<object>();
 /** Whether a real-time keeper already runs this host's clock. */
 export function hasRealClock(host: object): boolean { return kept.has(host); }
+
+/** #2297: the next instant (UTC ms, to the minute) after `utcMs` at which `timeZone`'s offset changes (a daylight-saving
+ *  change), within `horizonDays`; null when none (UTC, or a zone without one). */
+export function nextOffsetChangeMs(utcMs: number, timeZone: string, horizonDays = 400): number | null {
+  const off = (u: number) => localWallMs(u, timeZone) - u, at = off(utcMs), DAY = 86_400_000;
+  for (let d = 1; d <= horizonDays; d++) {
+    if (off(utcMs + d * DAY) === at) continue;
+    let lo = utcMs + (d - 1) * DAY, hi = utcMs + d * DAY;   // off(lo) == at, off(hi) != at
+    while (hi - lo > 60_000) { const mid = lo + Math.floor((hi - lo) / 2 / 60_000) * 60_000 || lo + 60_000; if (off(mid) === at) lo = mid; else hi = mid; }
+    return hi;
+  }
+  return null;
+}
 
 /** The one real-time clock keeper (god worlds through world-clock.ts, authored worlds through main.ts): logs the
  *  day clock that reads the local time, at once, on demand (`sync`) and whenever a watched, running world has drifted
@@ -156,7 +171,8 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
   const sync = (): Promise<void> => {
     if (!active()) return Promise.resolve();
     if (pending) return pending.then(sync);
-    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick, zone = o.zone();
+    // #2235: during a boot catch-up the clock is read as caught up (the event applies after the owed ticks)
+    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick + (host.owedTicks ?? 0), zone = o.zone();
     mapCut(l?.cutOver);
     let payload: { dayConfig: Record<string, unknown>; why: string };
     if (o.paused?.()) {
@@ -181,6 +197,14 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
     return pending.then(sync);
   };
   const schedule = () => { void sync().catch((e: Error) => o.log?.(`world clock: ${e.message}`)); };
+  // #2297: the zone's next daylight-saving change is a deadline: the keeper logs a re-alignment there (cached until it passes)
+  let dst: { zone: string; from: number; at: number | null } | undefined;
+  host.listeners?.push({ stillness: (tick) => {
+    if (o.paused?.()) return [];
+    const zone = o.zone(), t = now();
+    if (!dst || dst.zone !== zone || (dst.at !== null && t >= dst.at) || (dst.at === null && t - dst.from > 86_400_000)) dst = { zone, from: t, at: nextOffsetChangeMs(t, zone) };
+    return dst.at === null ? [] : [{ name: 'clock.daylight-saving', tick: tick + Math.max(1, Math.ceil((dst.at - t) / TICK_MS)) }];
+  } });
   schedule();
   const timer = setInterval(() => { if ((host.pace ?? 1) >= 1 && !host.paused && host.running !== false) schedule(); }, o.checkMs ?? 15_000);
   timer.unref?.();

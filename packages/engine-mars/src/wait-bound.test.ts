@@ -13,13 +13,13 @@ const factory=await marsFactory();
 const B='h_block0000',W='h_walker000';
 const execOf=(e:MarsEngine,actor:string):any=>[...((e as any).rt.services.walkExecs?.values()??[])].find((x:any)=>x.actor===actor);
 
-function yieldBesideWall(policy:Record<string,boolean>={}){
+function yieldBesideWall(policy:Record<string,boolean>={},gait?:'jog'){
   const e=factory.create(factory.genesis('wait-bound')) as MarsEngine;
   e.configureRuntimePolicy({sleepBlockTicks:1200,...policy} as never);
   e.spawnHuman({id:B,soul:'s_'+B,label:'Blocker',near:{at:[15,-14.8],first:true}});
   e.spawnHuman({id:W,soul:'s_'+W,label:'Walker',near:{at:[19,-17],first:true}});
   assert.deepEqual([e.world.entities[B].pose.p,e.world.entities[W].pose.p],[[15,0,-14.8],[19,0,-17]],'both bodies stand where the scene puts them');
-  const r=e.perform({actor:W,label:'through the passage',steps:[{verb:'mars:walk_to',params:{x:14.8,z:-10}}]});assert.equal(r.ok,true,JSON.stringify(r));
+  const r=e.perform({actor:W,label:'through the passage',steps:[{verb:'mars:walk_to',params:{x:14.8,z:-10,...(gait?{gait}:{})}}]});assert.equal(r.ok,true,JSON.stringify(r));
   return {e,id:r.id!};
 }
 /** Steps the scene. The blocker stands in the passage holding it, as a walker inside it would, and never leaves. */
@@ -103,4 +103,58 @@ test('#1952 A4 under wait-bound/1 a forced cancel and a normal release both remo
     const nx=execOf(normal.e,W);assert.ok(nx);(normal.e as any).rt.cancel(nx.id,{code:'route.blocked',message:'test release'});
     assert.equal((normal.e as any).rt.isActive(nx.id),false);assert.equal(execOf(normal.e,W),undefined,'a normal release leaves no walk exec');
   }
+});
+
+test('#1288 A2 jog: a jog held by a yield beside a wall rocks on without the bound, and ends route.blocked within 1,200 ticks under it',()=>{
+  const off=yieldBesideWall({},'jog');off.e.step();assert.equal(execOf(off.e,W)?.speed,2.5,'at jog pace');const offRun=run(off.e,1500);
+  assert.ok(offRun.firstBlocked!==undefined&&offRun.firstBlocked<200,'the jogger yields at the passage');
+  assert.equal(off.e.programOf(W),off.id,'without the bound it is still jogging');assert.equal(offRun.events.some(x=>x.id===off.id&&x.kind!=='step'),false);
+  const {e,id}=yieldBesideWall({waitBoundV1:true,waitBoundV2:true},'jog'),{events,headway}=run(e,1500);
+  const failed=events.filter(x=>x.id===id&&x.kind==='failed');assert.equal(failed.length,1);
+  assert.equal(failed[0].code,'route.blocked');assert.match(failed[0].message!,new RegExp(`^wait-bound/1: the walk .*traffic\\.yield.*${B}`));
+  assert.ok(failed[0].tick>=headway+1199&&failed[0].tick<=headway+1201,`ended at ${failed[0].tick}, last headway at ${headway}`);
+  assert.equal(e.programOf(W),null);assert.equal(execOf(e,W),undefined,'nothing left behind');assert.deepEqual(e.runtime.violations,[]);
+});
+
+test('#1288 wait-bound/2 is a named state-hash input of its own',()=>{
+  const one=factory.create(factory.genesis('wait-bound-2-hash')) as MarsEngine,two=factory.create(factory.genesis('wait-bound-2-hash')) as MarsEngine;
+  one.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true} as never);two.configureRuntimePolicy({sleepBlockTicks:1200,waitBoundV1:true,waitBoundV2:true} as never);
+  assert.notEqual(one.stateHash(),two.stateHash());
+});
+
+test('#2032 item 2: a walk retried after the blocked-walk timeout starts its own wait-bound clock and is not ended early',async()=>{
+  // The walker spreads into a small fixture region beyond the passage and is held there. Its blocked-walk timer (walk-block/1)
+  // is set 50 ticks before its wait-bound clock started (a walk blocked before its last sidestep), so that timeout fires
+  // first and the spread step re-chooses (yieldTimeoutV1): a new walk starts from where the body waits.
+  const f=await marsFactory({scene:'proving-ground',arrival:[-24,-10.5],arrivalPlace:'lawn',reference:[-24,-8],grounds:{id:'grounds',name:'the grounds'},walkBlockV1:true}),w=f.genesis('wait-bound-retry');
+  (w.regions as any).beyond={id:'beyond',label:'Hypothetical beyond the passage',provenance:{origin:'test-fixture',confidence:'hypothetical'},kind:'place',polygon:[[14.3,-10.5],[15.3,-10.5],[15.3,-9.5],[14.3,-9.5]]};
+  const e=f.create(w) as MarsEngine;e.configureRuntimePolicy({sleepBlockTicks:1200,yieldTimeoutV1:true,waitBoundV1:true} as never);
+  e.spawnHuman({id:B,soul:'s_'+B,label:'Blocker',near:{at:[15,-14.8],first:true}});
+  e.spawnHuman({id:W,soul:'s_'+W,label:'Walker',near:{at:[19,-17],first:true}});
+  const r=e.perform({actor:W,label:'through the passage',steps:[{verb:'walk_to',params:{to:'beyond',spread:'region/1'}}]});assert.equal(r.ok,true,JSON.stringify(r));const id=r.id!;
+  const rt=(e as any).rt,events:ProgramEvent[]=[],walks:{id:string;at:number}[]=[];
+  for(let i=0;i<2700&&e.programOf(W)===id;i++){
+    events.push(...e.step().programs);
+    const ex=execOf(e,W);if(ex&&!walks.some(w=>w.id===ex.id))walks.push({id:ex.id,at:e.world.tick});
+    if(ex?.narrows.length&&!rt.services.traffic?.size){const n=ex.narrows[0];(rt.services.traffic??=new Map()).set(n.res,{actors:new Set([B]),entry:n.entry,dir:[-n.dir[0],-n.dir[1]]});}
+    const prog=(e as any).programs.get(id);if(e.world.tick===600){assert.ok(prog.waitBoundV1&&prog.blockedSince!==undefined,'held, both clocks running');prog.blockedSince=prog.waitBoundV1.since-50;}
+  }
+  assert.ok(walks.length>=2,`the timeout retried the walk (${walks.length} walks)`);
+  assert.match(rt.records.get(walks[0].id).diagnostic.message,/^walking has remained blocked for a minute/,'the first walk ended by the blocked-walk timeout');
+  const retry=walks[1],end=rt.records.get(retry.id),endTick=walks[2]?.at??e.world.tick;
+  assert.ok(!/wait-bound\/1/.test(end.diagnostic?.message??'')||endTick>=retry.at+1199,`the retried walk (from tick ${retry.at}) was ended by wait-bound/1 by tick ${endTick}: ${end.diagnostic?.message}`);
+  assert.ok(endTick>=retry.at+1199,`the retried walk lasted its own bound (${retry.at} to ${endTick})`);
+  assert.deepEqual(e.runtime.violations,[]);
+});
+
+test('#2294 a walk held inside its wait bound keeps the world from being still (stillnessV1)',()=>{
+  const {e,id}=yieldBesideWall({heldActivitiesV1:true,waitBoundV1:true,waitBoundV2:true});
+  let held=0;const rt=(e as any).rt;
+  for(let i=0;i<1100;i++){
+    e.step();const ex=execOf(e,W);
+    if(ex&&!rt.services.traffic?.size&&ex.narrows.length){const n=ex.narrows[0];(rt.services.traffic??=new Map()).set(n.res,{actors:new Set([B]),entry:n.entry,dir:[-n.dir[0],-n.dir[1]]});}
+    const rec=ex?rt.records.get(ex.id):undefined;
+    if(rec?.status==='blocked'){held++;assert.equal(e.stillnessV1().still,false,`tick ${e.world.tick}: a held walk is not still`);}
+  }
+  assert.ok(held>800,`the walk was held inside its bound (${held} ticks)`);assert.equal(e.programOf(W),id,'and still under way');
 });

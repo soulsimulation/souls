@@ -52,8 +52,9 @@ fields and preserves additive ones. On edge worlds, an action's lifecycle is its
 completed / failed / replaced), read from `/v1/edge/receipts/:id` or the event stream. `started` (`startedTick`) means
 the body program began executing, not that the body visibly moved: a walk from idle can read `started` for about ten
 ticks before the first step. `firstMotionTick` is the first tick at or after it at which the body's engine activity changed
-or its root moved more than 5 cm; it is absent until then, on receipts with no body program, and on a receipt still running across a server
-restart that had not moved before it (#790, D021). An act handed to the world before its row is written answers HTTP
+or its root moved more than 5 cm; it is absent until then, and on receipts with no body program. An act still
+`waiting` or `started` when the world restarts ends `failed` with `receipt.lost-on-restart` before the world serves its
+first request, and its body program is stopped (#2051; a share of a running shared carry is left to its crew's reconcile); an act whose bound effect had already landed (a hand-contact effect, a harvest pick, #2085) ends `completed`; a receipt that had already ended keeps its phase. An act handed to the world before its row is written answers HTTP
 202 with phase `pending` ([souls.md](souls.md#the-edge-api)); `pending` is never stored.
 
 ## Privacy

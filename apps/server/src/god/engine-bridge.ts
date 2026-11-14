@@ -17,6 +17,7 @@ import { deckRaised, railGaps, rasterOf } from '@souls/generators';
 import { applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
 import type { LogEvent } from '@souls/protocol';
@@ -26,6 +27,7 @@ import type { GodMode } from './god.ts';
 import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
+import { flightPath, slopePieces } from './slope-solids.ts';
 import { tokenHit } from '../edge/ledger/vocabulary.ts';
 import {outdoorRegionExclusions} from '../edge/ledger/region-arrival.ts';
 import { doorInGap, freeDoorOpening, isDoorDef, isShut } from './doors.ts';
@@ -158,7 +160,14 @@ export function helixEnds(path: Vec2[]): { foot: Vec2; head: Vec2; stepFrom: Vec
 }
 
 export type BridgeOptions = { host: WorldHost; god: GodMode; edge?: EdgeLedger; log?: (m: string) => void; /** Highest level id levelFor hands out (default and most: MAX_LEVEL_ID; tests use fewer to reach the reuse path) */ maxLevel?: number; /** F3: new-world lore (default: any world key but eden/mars/littlemartians/toy) */ worldLore?: boolean; /** F3: the world clock from the god's time.dayTicks (default: a god world without ENABLE_LIVING_WORLD) */ worldClock?: boolean; /** B-facade: the read worker's bridge (split/read-bridge.ts): the read side only, over a GodReplica and the
- *  worker's MenuWorld (no engine listeners, no projection, no writes; acts go to main) */ read?: boolean };
+ *  worker's MenuWorld (no engine listeners, no projection, no writes; acts go to main) */ read?: boolean;
+  /** Boot reconcile skip: the file beside the snapshot (in the data directory) that says each snapshot was written by
+   *  `build` with the bridge in step at a god edit sequence; a boot from that snapshot at that edit skips the derive.
+   *  Off when absent (tests, tools) or when `build` is 'dev' (a dev checkout can change code without changing it). */
+  bootRecord?: { file: string; build: string } };
+/** What the boot record says about one snapshot: written by `build`, the engine's physics derived from the god model at
+ *  `editSeq` with nothing pending, and the door facts the derive would have found (the only state a skipped derive keeps). */
+export type BootRecordV1 = { contract: 'boot-reconcile/1'; worldId: string; build: string; tick: number; stateHash: string; editSeq: number; physicsHash: string; doorIds: string[]; gated: string[]; /** deriveInputs() */ inputs: string };
 
 /** Load lane L4: per-step ms of the bridge's tick work, the tick-ms distribution and the derived-work counters since the
  *  last line. Only built with SIM_L4_STATS=1. */
@@ -268,7 +277,7 @@ export class EngineBridge {
    *  pose: what nav and perceive re-derive on. */
   private version = 0;
   private log: (m: string) => void;
-  stats = { edits: 0, entities: 0, writeBacks: 0, refusals: 0, bodies: 0, lastMs: 0 };
+  stats = { edits: 0, entities: 0, writeBacks: 0, refusals: 0, bodies: 0, lastMs: 0, bootSkipped: false };
   /** P4: Souls walk to god-built named things (nav.ts). */
   readonly nav: GodNav;
   /** F1: god-built things Souls can see, look at and read (perceive.ts). */
@@ -297,6 +306,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
+    if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
     this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
@@ -354,7 +364,7 @@ export class EngineBridge {
     // Entry 43: the tea acts (tea.ts), the same way
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
     // #438: the picking acts (harvest.ts), the same way
-    this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why) });
+    this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why), actApplied: (body, capability) => this.edge?.actApplied(body, capability) });
     this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
@@ -375,6 +385,8 @@ export class EngineBridge {
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
+      // #2297: a god edit not yet folded keeps the world busy; the gardens dry at the next world day (the stored day, A3)
+      stillness: () => { if (this.projectionDrafts.size) return [{ name: 'god.edit', busy: true }]; const l = this.host.living, d = this.gardenDay ?? this.gardenDayStored(); return l && l.dayTicks > 0 && d !== null && dryingOps(this.god.model, 1).length ? [{ name: 'garden.drying', tick: l.origin + (d + 1) * l.dayTicks }] : []; },   // only when something would dry
     });
     reachProviders.set(this.god.model, (from, to) => this.reach(from, to));
     if (!R) syncProviders.set(this.god.model, () => { this.flush(); return this.physics?.hash === this.engine.world.entityPhysicsV1?.hash; });
@@ -492,15 +504,26 @@ export class EngineBridge {
   harvest?: HarvestFaculty;
   /** Entry 18: when the world day changes, gardens dry by the days passed (capped at 3; time set backwards restarts the count). */
   private gardenDay: number | null = null;
+  /** #2297 A3: the last world day the gardens were dried to is stored (garden_day_v1), never only in memory, so a world loaded
+   *  after days away dries exactly as one that ran (a boot used to start the count again from the day it booted on). */
+  private gardenDayStored(day?: number): number | null {
+    const db = this.host.db.db;
+    if (!this.gardenTable) { db.exec('CREATE TABLE IF NOT EXISTS garden_day_v1 (world_id TEXT PRIMARY KEY, day INTEGER NOT NULL) WITHOUT ROWID'); this.gardenTable = true; }
+    if (day !== undefined) { db.prepare('INSERT INTO garden_day_v1 (world_id, day) VALUES (?, ?) ON CONFLICT(world_id) DO UPDATE SET day=excluded.day').run(this.host.worldId, day); return day; }
+    return (db.prepare('SELECT day FROM garden_day_v1 WHERE world_id=?').get(this.host.worldId) as { day: number } | undefined)?.day ?? null;
+  }
+  private gardenTable = false;
   private gardenTick(tick: number) {
     const l = this.host.living; if (!l || !(l.dayTicks > 0)) return;
     const day = Math.floor(Math.max(0, tick - l.origin) / l.dayTicks);
+    if (this.gardenDay === null) this.gardenDay = this.gardenDayStored();
     // #430: the clock set back also changes how far a drawing has faded
     if (this.gardenDay !== null && day < this.gardenDay) this.noteFading(day, this.gardenDay);
-    if (this.gardenDay === null || day < this.gardenDay) { this.gardenDay = day; return; }
+    if (this.gardenDay === null || day < this.gardenDay) { this.gardenDay = this.gardenDayStored(day); return; }
     if (day === this.gardenDay) return;
     const days = Math.min(3, day - this.gardenDay), prev = this.gardenDay; this.gardenDay = day;
-    setImmediate(() => { try { const ops = dryingOps(this.god.model, days); if (ops.length) this.god.engineAct(ops as never, `garden: ${days} day(s) of drying`, () => {}); } catch (e) { this.log(`garden drying: ${(e as Error).message}`); }
+    // the day is stored once the drying is applied, so a crash in between dries that day again at the next load, never loses it
+    setImmediate(() => { try { const ops = dryingOps(this.god.model, days); if (ops.length) this.god.engineAct(ops as never, `garden: ${days} day(s) of drying`, () => {}); this.gardenDayStored(day); } catch (e) { this.log(`garden drying: ${(e as Error).message}`); }
       // #430: a fading drawing's perceived line follows the world day (no edit: its age is read from its drawn day)
       this.noteFading(day, prev); });
   }
@@ -544,8 +567,70 @@ export class EngineBridge {
     // seed `sent` from the engine's own state so only real differences are sent
     for (const [id, part] of Object.entries(ep?.byEntity ?? {})) this.sent.set(id, sentKey(JSON.stringify(normPart(part as Part))));
     for (const [id, e] of Object.entries(this.engine.world.entities)) if (e.tags?.includes('entity-world')) this.sent.set(id, sentKey(JSON.stringify(normPart({ ...(ep?.byEntity[id] ?? {}), fixture: fixtureOfEngine(e) } as Part))));
+    // the engine snapshot was written by this build with the bridge in step at the god model's present edit: a derive of
+    // every entity would find nothing to send, so only what it keeps (the door facts) is taken from the record
+    const rec = this.bootRecordMatch(ep);
+    if (rec) {
+      this.doorIds = new Set(rec.doorIds); this.gated = new Set(rec.gated); this.stats.bootSkipped = true;
+      this.log(`boot: snapshot at tick ${rec.tick} written by this build at edit ${rec.editSeq}: nothing to derive`); return;
+    }
     const all = new Set<string>([...this.model.entities.keys(), ...this.sent.keys()]);
     this.send(all, 0, 'boot');
+  }
+  private bootRecord?: { file: string; build: string };
+  /** The boot record, when it is for exactly the snapshot this boot restored, with nothing replayed after it, the same
+   *  build and the god model at the recorded edit (else null: the boot derives everything). */
+  private bootRecordMatch(ep: EntityPhysicsV1 | undefined): BootRecordV1 | null {
+    const r = this.bootRecord, b = this.host.bootStats;
+    if (!r || r.build === 'dev' || !b || !ep || b.from !== 'snapshot' || b.replayEvents || b.replayTicks) return null;
+    let rec: BootRecordV1;
+    try { rec = JSON.parse(readFileSync(r.file, 'utf8')) as BootRecordV1; } catch { return null; }
+    return rec?.contract === 'boot-reconcile/1' && rec.worldId === this.host.worldId && rec.build === r.build && rec.tick === b.fromTick &&
+      rec.stateHash === b.fromStateHash && rec.editSeq === this.model.editSeq && rec.physicsHash === ep.hash &&
+      Array.isArray(rec.doorIds) && Array.isArray(rec.gated) && rec.inputs === this.deriveInputs() ? rec : null;
+  }
+  /** At a snapshot's capture: the facts of this head if the bridge is in step with the engine (everything derived is
+   *  folded, nothing pending), written once the snapshot is saved; otherwise the record is removed. */
+  private recordAtCapture(r: { file: string; build: string }): (at: { tick: number; stateHash: string }) => void {
+    const ep = this.engine.world.entityPhysicsV1;
+    const inStep = r.build !== 'dev' && this.reconciled && !this.pending.size && !this.projectionDrafts.size && !!ep && this.physics?.hash === ep.hash && this.engineAgrees();
+    const rec = inStep ? { contract: 'boot-reconcile/1' as const, worldId: this.host.worldId, build: r.build, editSeq: this.model.editSeq, physicsHash: ep!.hash, doorIds: [...this.doorIds].sort(), gated: [...this.gated].sort(), inputs: this.deriveInputs() } : null;
+    return (at) => {
+      const tmp = `${r.file}.${process.pid}.tmp`;
+      try {
+        if (!rec) { rmSync(r.file, { force: true }); return; }
+        writeFileSync(tmp, JSON.stringify({ ...rec, tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
+      } catch (e) { rmSync(tmp, { force: true }); this.log(`boot record not written: ${(e as Error).message}`); }
+    };
+  }
+  /** What a boot's full derive compares, per entity: the engine's own physics part, with its fixture as the engine holds
+   *  it for a god thing (the same key reconcile seeds `sent` with). */
+  private engineKey(id: string): string | null {
+    const part = this.engine.world.entityPhysicsV1?.byEntity[id] as Part | undefined, e = this.engine.world.entities[id];
+    if (e?.tags?.includes('entity-world')) return sentKey(JSON.stringify(normPart({ ...(part ?? {}), fixture: fixtureOfEngine(e) } as Part)));
+    return part ? sentKey(JSON.stringify(normPart(part))) : null;
+  }
+  /** A boot's full derive would send nothing: every god thing's last derived key is what the engine holds (a thing a Soul
+   *  moved natively, or an engine act the model took without sending, differs until it is sent), and the engine holds
+   *  nothing the model no longer has. One key per god thing; no derive. */
+  private engineAgrees(): boolean {
+    const ents = this.engine.world.entities as Record<string, { tags?: string[] }>;
+    for (const id of Object.keys(this.engine.world.entityPhysicsV1?.byEntity ?? {})) if (!this.model.entities.has(id)) return false;
+    for (const [id, e] of Object.entries(ents)) if (e.tags?.includes('entity-world') && !this.model.entities.has(id)) return false;
+    for (const e of this.model.entities.values()) if (!this.engineOwned(e) && (this.sent.get(e.id) ?? null) !== this.engineKey(e.id)) return false;
+    return true;
+  }
+  /** The derive's inputs besides the build and the god model: the shared-carry flag (fixture specs) and, for each mesh
+   *  thing, whether its asset and footprint are on disk (a late asset pull changes what bakes). */
+  private deriveInputs(): string {
+    const meshes = new Set<string>();
+    for (const e of this.model.entities.values()) {
+      const m = this.model.resolvedDef(e.def)?.make as { kind?: string; asset?: string; footprint?: string } | undefined;
+      if (m?.kind !== 'mesh' || !m.asset) continue;
+      const info = this.model.assets(m.asset), fp = m.footprint ? this.model.assets(m.footprint) : undefined;
+      meshes.add(`${m.asset}:${info ? info.tris : '-'}:${m.footprint ?? ''}:${fp?.baked ? createHash('sha256').update(JSON.stringify(fp.baked)).digest('hex').slice(0, 16) : '-'}`);
+    }
+    return createHash('sha256').update(JSON.stringify({ sharedCarry: !!this.edge?.sharedCarry, meshes: [...meshes].sort() })).digest('hex');
   }
 
   /** Commits between two ticks coalesce into one world-edit (one Spatial re-base per tick at most). */
@@ -736,7 +821,11 @@ export class EngineBridge {
         // YAW: the rail's middle uses a cell-thick padded solid; original end caps keep conservative corner safety.
         const rails = local.tag === 'rail' && hasStraightLandings(baked.links) && local.y0 > 0.5 ? railRaster(obb) : null;
         const pieces = rails ?? [{ obb, ...(rasterOf({ tag: local.tag, half: o.half }) === 'centre' ? { raster: 'centre' as const } : {}) }];
-        return pieces.map((piece, k) => ({ id: `${e.id}#c${i}${k ? `-end${k}` : ''}`, ...piece, y0: r3(o.y0), y1: r3(o.y1), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)}${local.tag ? ' ' + local.tag : ''}`.slice(0, 100) }));
+        const label = `${this.model.pathOf(e.id)}${local.tag ? ' ' + local.tag : ''}`.slice(0, 100);
+        // #2193: a world-frame solid follows the terrain along its length, so on a slope it is cut into pieces that do too
+        const sloped = worldFrame && !(local as { abs?: boolean }).abs && !rails ? slopePieces(obb, local.y0, local.y1, (x, z) => this.model.terrain.sample(x, z)) : null;
+        if (sloped) return sloped.map((piece, k) => ({ id: `${e.id}#c${i}-s${k}`, ...piece, kind: 'fixture' as const, label }));
+        return pieces.map((piece, k) => ({ id: `${e.id}#c${i}${k ? `-end${k}` : ''}`, ...piece, y0: r3(o.y0), y1: r3(o.y1), kind: 'fixture' as const, label }));
       });
     }
     // closed doors block their gap; a free-standing door (no doorway of its own) blocks its own width (doorblock)
@@ -802,11 +891,14 @@ export class EngineBridge {
       const ya = heightAt(l.y0, a), yb = heightAt(l.y1, b);
       const n = Math.max(2, Math.ceil(Math.abs(yb - ya) / 0.18) + 1), path: [number, number, number][] = [];
       for (let k = 0; k < n; k++) { const t = k / (n - 1); path.push([r3(a[0] + (b[0] - a[0]) * t), r3(ya + (yb - ya) * t), r3(a[1] + (b[1] - a[1]) * t)]); }
+      // #2193: a straight flight entered from the side is climbed along the flight, not across its side
+      const along = !helix && l.kind === 'stairs' && l.path.length === 4 && def.make.kind === 'gen' && def.make.gen === 'building/1' ? flightPath(a, toWorld(...l.path[1]), toWorld(...l.path[2]), b, ya, yb) : null;
+      if (along) path.splice(0, path.length, ...along);
       const kind = l.kind === 'float' ? 'climb' : l.kind;
       const linkLevel = l.id.startsWith('mesh-step:') ? plateLevel : levelOn;
       const la = linkLevel(ya, a), lb = linkLevel(yb, b);
       return { id: `${e.id}#${l.id}`, kind: kind as 'stairs' | 'ramp' | 'ladder' | 'climb', from: { level: la, p: a, y: ya }, to: { level: lb, p: b, y: yb }, width: r3(l.width * wp.s), heading: r3(Math.atan2(b[1] - a[1], b[0] - a[0])), path, usable: true,
-        ...(helix ? { approach: { from: toWorld(...helix.stepFrom), to: toWorld(...helix.stepTo) } } : {}) };
+        ...(helix ? { approach: { from: toWorld(...helix.stepFrom), to: toWorld(...helix.stepTo) } } : {}), ...(along ? { faceAlong: true } : {}) };
     });
     // each flight's ends: its under-stair block stops short of the foot (the first tread is stepped onto, not walked
     // under) and a head tread on the upper level bridges the stairwell edge, so both ends have standing room
@@ -2197,7 +2289,11 @@ export class EngineBridge {
   private listCapabilities(soul: EdgeSoul, caps: EdgeCapability[], plans: Map<string, { label: string; steps: { verb: string; params: Record<string, unknown> }[]; seconds?: boolean }>) {
     // L3 item 4: a focused build (EdgeLedger.bindOne) offers only the walks the focus names
     const focus = (this.edge as { menuFocusV1?(): MenuFocus | null } | undefined)?.menuFocusV1?.() ?? null;
-    try { this.nav.capabilities(soul, caps, plans, focus); } catch (e) { this.log(`nav capabilities: ${(e as Error).message}`); }
+    // #1848: an activity spot asked for by its id (the ledger's spot build) that names no walk, seat, hang-out or stroll,
+    // by id or verb, and no target has no walk to offer (nav wantsThing is false for every thing): the ranking is not run
+    const spot = !!(this.edge as { menuSpotOnlyV1?(): boolean } | undefined)?.menuSpotOnlyV1?.();
+    const walks = !spot || !focus || !!focus.targets.size || ['walk', 'sit', 'hang-out', 'stroll'].some((v) => focus.verbs.has(v)) || [...focus.ids].some((id) => /^(?:walk|sit|hang-out|stroll):/.test(id));
+    if (walks) try { this.nav.capabilities(soul, caps, plans, focus); } catch (e) { this.log(`nav capabilities: ${(e as Error).message}`); }
     releaseBigScratch();   // L1: room-reach searches inside a multi-storey house share one ~110 MB workspace; not kept after
     // B-facade item 4 (L3 b4): a focused build (bindOne / words act) runs only the sections whose offers the focus can name:
     // the object scans read every entity of the world (three passes) and perceive/layers scan signs and stalls
@@ -2277,7 +2373,7 @@ export class EngineBridge {
           const block = mine ? { code: 'seat.yours', reason: `You are sitting on ${name(x.id)} already; stand:here to get up.` } : far ? { code: far.code, reason: `${name(x.id)} is out of reach: ${far.message}.` } : full ? { code: 'seat.taken', reason: `${(others.length ? others : [u!.body]).map((b) => this.soulName(b)).join(' and ')} ${others.length > 1 ? 'are' : 'is'} sitting there.` } : inside;
           const label = labelOf(onTop);
           if (block?.code === 'seat.inside' || block?.code === 'seat.out-of-reach') unusable.push(caps.length); else if (!block) usable.push({ id, label, d });
-          caps.push({ id, verb: 'sit', label, target: { id: x.id, kind: 'object' }, available: !block, ...(block ? { blocked: block } : {}), params: { seconds: { type: 'integer', min: 1, max: 600, default: 60 } } });
+          caps.push({ id, verb: 'sit', label, target: { id: x.id, kind: 'object' }, available: !block, ...(block ? { blocked: block } : {}), params: { seconds: { type: 'integer', min: 1, max: 3600, default: 60 } } });   // #2294: an hour on a seat, as every activity in place
           // #1083: seated elsewhere, she stands first (from inside a god-built seat's footprint a bare walk to another seat was refused route.start-blocked)
           plans.set(id, { label, steps: [...stand, { verb: 'sit', params: { on: x.id, seconds: 60 } }], seconds: true });
         }

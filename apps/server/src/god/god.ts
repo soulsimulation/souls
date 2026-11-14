@@ -25,6 +25,7 @@ import { definitionUseClosure } from './unused-defs.ts';
 import { rewindChanges, rewindDependents } from './rewind.ts';
 import { GodTrace } from './trace.ts';
 import { repairBatch, tagPlaces, untagPlaces, type Repair } from './buildsafe.ts';
+import { entitiesWithoutPrivateWords } from './private-words.ts';
 /** #1649: a `world` op's time patch is held to the clock rules wherever it comes from (act, preview, env): on a production
  *  world the clock is real time (no accelerated clock, no set hour, no day length); `clock: 'real'` needs real time on. */
 function worldClockFailure(ops: readonly { op: string; state?: unknown }[]) {
@@ -818,7 +819,9 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     for (const e of diff.upserts) for (let ref: string | undefined = e.def; ref; ref = referenced.get(ref)?.extends) { const d = source.def(ref); if (!d || referenced.has(ref)) break; referenced.set(ref, d); }
     const now = this.now();
     const m: WorldDiffMessage = { type: 'edge', kind: 'world-diff', seq, tick, at: now, now, diff, by, defs: [...referenced.values()].map(publicDef), ...(builds.length ? { builds } : {}), ...(diff.tiles.length || diff.constants ? { ground: source.ground() } : {}) };
-    try { this.opts.emit(m); } catch { /* viewers are best-effort */ }
+    // #1223: viewers get a private notebook without its words; the god's own stream keeps them
+    const upserts = entitiesWithoutPrivateWords(source, diff.upserts);
+    try { this.opts.emit(upserts === diff.upserts ? m : { ...m, diff: { ...diff, upserts } }); } catch { /* viewers are best-effort */ }
     this.push('diff', m);
   }
 

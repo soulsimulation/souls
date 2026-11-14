@@ -29,7 +29,6 @@ test('classes: C0 control, C1 writes, C2 personal reads, C3 public reads; everyt
   assert.equal(c('GET', '/healthz'), 'C0'); assert.equal(c('GET', '/v1/config'), 'C0');
   for (const p of ['/v1/edge/here', '/v1/edge/observe', '/v1/edge/capabilities', '/v1/edge/view', '/v1/edge/objects/abc']) assert.equal(c('GET', p), 'C2', p);
   assert.equal(c('GET', '/v1/edge/around'), 'C1', 'around records what it finds: a write');
-  assert.equal(c('POST', '/v1/edge/resolve'), 'C2');
   for (const p of ['/v1/edge/act', '/v1/edge/say', '/v1/edge/converse', '/v1/edge/plan', '/v1/edge/objects/x1/act']) assert.equal(c('POST', p), 'C1', p);
   assert.equal(c('PATCH', '/v1/edge/plan/p1'), 'C1');
   for (const p of ['/v1/edge/map', '/v1/edge/rides', '/v1/edge/items', '/v1/edge/platforms', '/v1/world/snapshot']) assert.equal(c('GET', p), 'C3', p);
@@ -110,6 +109,21 @@ test('budget: under contention a read over its Soul budget gets soul.slow-down +
   f.advance(61_000); f.adm.setLoadLevel('green');
   const back = f.ask('A', route('GET', '/v1/edge/here')); await tick();
   assert.equal(back.result, 'run');
+  f.adm.close();
+});
+
+test('#2080: one cold act longer than a bucket holds does not block a contended crowd: every cheap act runs before its deadline', async () => {
+  const f = fixture();
+  // the first act of the route is cold: 2.1 s, longer than any bucket can hold (2 s)
+  const cold = f.ask('A', route('POST', '/v1/edge/act'), 2100); await tick(); await tick();
+  assert.equal(cold.result, 'run'); assert.ok(f.adm.estimate('edge:act') > 2000);
+  f.advance(5000);   // the world credit the cold act overdrew is paid back
+  // contention: another Soul in flight, and a crowd of cheap acts
+  f.adm.request({key: 'X', god: false, route: route('GET', '/v1/edge/here')});
+  const start = f.now, acts = ['B', 'C', 'D', 'E', 'F'].map(k => f.ask(k, route('POST', '/v1/edge/act'), 1));
+  for (let i = 0; i < 20 && acts.some(a => a.result === undefined); i++) { await tick(); f.advance(50); await f.adm.drain(); }
+  assert.deepEqual(acts.map(a => a.result), ['run', 'run', 'run', 'run', 'run']);
+  assert.ok(f.now - start < 20_000, 'answered before the act deadline');
   f.adm.close();
 });
 

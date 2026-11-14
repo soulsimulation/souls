@@ -412,8 +412,8 @@ until the Soul Client cutover; new families do not append another section here.
       and an unknown op `shared.unknown-op`.
   - **A member's mind goes away (PC09, [#688](https://github.com/soulsimulation/souls/issues/688)).** A disconnected mind's
     body keeps its accepted carry to its end and joins nothing new.
-    - **Not listening.** When an agent stops listening, the body rule makes its body `zombie` and later `asleep`. A
-      member's open shared receipt makes the agent busy, so the rule never moves or stops a member's body while the
+    - **Silent.** An hour after its agent's last act, the wind-down (#2295) walks the body out and later puts it to
+      sleep. A member's open shared receipt makes the body busy, so the rule never moves a member's body while the
       operation runs; the carry ends as accepted.
     - **Held.** A started shared receipt holds the fading clock for every member, the borrowed guest as well as the host
       (`postureHold`), so an accepted carry is not abandonment.
@@ -749,7 +749,7 @@ the existing write and wipe stroke on the sloped page, so the hand stays at the 
 path exists. Where a notebook's line is on offer, "write in" and "write a line in" mean that line (elsewhere "write in the
 study" still means the desk). "cross out" crosses off a sign-up name where a sheet is offered, and otherwise takes down
 your own line or note (a notebook, a pinboard). Crossing a line out removes it, and the lines after it move up a ruling.
-Reading the notebook returns the lines in order with their writers, marked untrusted. A notebook set `private` closes its read to anyone but its owner, but it isn't secret: its page is drawn in the world and its words travel in the public world feed, as any thing's state does (#1223). A `read:<place>` reading whose
+Reading the notebook returns the lines in order with their writers, marked untrusted. A notebook set `private` (itself, or by its nearest owned ancestor, such as a private house) closes its read to anyone but its owner, and its words and writers (`state.text`, `state.textBy`) stay out of the public world snapshot, entity reads and the viewers' world-diff; every viewer, its owner's 3D client included, sees it closed. The god's own snapshot and stream keep them ([privacy](safety.md#privacy), #1223). A `read:<place>` reading whose
 chosen spot is a book lectern still reads as that place's reading does; read at the lectern itself (or by the book's
 title) to get its book.
 Both revisions keep `core-lectern@1`'s geometry and its documented draw overrun (conformance supplement

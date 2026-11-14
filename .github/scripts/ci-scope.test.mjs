@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -29,7 +29,8 @@ test('launcher and client-cli changes run their own unit tests', () => {
   const launcher = names(['tools/world-launcher/launcher.mjs']);
   assert.ok(launcher.includes('launcher'), launcher.join());
   assert.ok(!launcher.includes('web') && !launcher.includes('client-cli'));
-  for (const f of ['tools/edge-skill/soul.mjs', 'tools/client-eval/eval.mjs']) assert.deepEqual(names([f]), ['client-cli'], f);
+  assert.deepEqual(names(['tools/client-eval/eval.mjs']), ['client-cli']);
+  assert.deepEqual(names(['tools/edge-skill/soul.mjs']), [], '#1754: no job runs the legacy client');
 });
 
 test('every step the scope map can select is run by some job', () => {
@@ -67,12 +68,24 @@ test('the types-web job, which runs the bundle comparison, covers what can move 
   assert.match(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'), /types-web\)[^;]*@souls\/web build\n[^;]*budget\.mjs --check/);
 });
 
-test('the native leg stays hosted whatever CI_HEAVY_RUNNER says, and only it (#1162)', () => {
+test('routing: the server shards and the long legs go to CI_HEAVY_RUNNER; the short legs, native and smoke stay hosted', () => {
+  const heavy = JOBS.filter(j => j.heavy).map(j => j.name).sort();
+  assert.deepEqual(heavy, ['launcher', 'packages', ...JOBS.filter(j => j.kind === 'server').map(j => j.name), 'soul-actions'].sort());
+  for (const job of JOBS) assert.deepEqual(runnerFor(job, '["self-hosted","souls-heavy"]'), job.heavy ? ['self-hosted', 'souls-heavy'] : 'ubuntu-latest', job.name);
+  assert.equal(runnerFor(JOBS.find(j => j.kind === 'native'), '["self-hosted","souls-heavy"]'), 'ubuntu-latest');
+  assert.equal(runnerFor(JOBS.find(j => j.kind === 'server'), 'souls-ci'), 'souls-ci');
+  assert.ok(jobsFor(['package.json']).include.some(j => j.heavy === true), 'the flag reaches the matrix');
+});
+
+test('routing fallback: with CI_HEAVY_RUNNER unset every job is hosted', () => {
+  for (const unset of ['', undefined]) for (const job of JOBS) assert.equal(runnerFor(job, unset), 'ubuntu-latest', job.name);
+});
+
+test('ci.yml: qualify runs-on reads the matrix flag, and smoke stays hosted (#1162)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const runsOn = /^  qualify:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1] ?? '';
-  assert.match(runsOn, /^\$\{\{ matrix\.kind != 'native' && vars\.CI_HEAVY_RUNNER && /);
-  assert.match(runsOn, /\|\| 'ubuntu-latest' \}\}$/);
-  assert.equal(runsOn.match(/matrix\./g)?.length, 1, 'no other leg is pinned');
+  assert.equal(runsOn, "${{ matrix.heavy && vars.CI_HEAVY_RUNNER && (startsWith(vars.CI_HEAVY_RUNNER, '[') && fromJSON(vars.CI_HEAVY_RUNNER) || vars.CI_HEAVY_RUNNER) || 'ubuntu-latest' }}");
+  assert.equal(/^  smoke:[\s\S]*?^    runs-on: (.*)$/m.exec(workflow)?.[1], 'ubuntu-latest');
 });
 
 test('the soul-actions job runs on its own paths, full scope included, and on nothing else (#1061)', () => {
@@ -212,26 +225,31 @@ test('greenAtHead: the newest uncancelled ci run at the head passed, and none ne
   assert.equal(greenAtHead([r(1, 'completed', 'success'), r(2, 'in_progress')], 2), true, 'a run never counts itself');
 });
 
-test('ci.yml: a window label starts a pull_request run, and no other label touches CI', () => {
+test('ci.yml: every label starts a real pull_request run with ci-ok, queued in the PR group (#2018)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const job = name => workflow.slice(workflow.indexOf(`\n  ${name}:\n`) + 1).split(/\n  [a-z-]+:\n/)[0];
-  const asked = WINDOW_LABELS.map(l => `github.event.label.name == '${l}'`).join(' || ').split(' || ').sort();
-  const wanted = text => { const m = /github\.event\.action != 'labeled' \|\| ([^)\n]*?)(?:\)|$)/m.exec(text); assert.ok(m, text.slice(0, 60)); return m[1].split(' || ').sort(); };
-  for (const name of ['scope', 'repo']) assert.deepEqual(wanted(job(name).match(/^    if: (.*)$/m)[1]), asked, name);
-  // qualify and smoke need scope, so they skip with it; ci-ok alone runs always(), and must not on another label
-  for (const name of ['qualify', 'smoke']) assert.match(job(name), /needs: scope|needs: \[scope/, name);
-  const ok = job('ci-ok'), okIf = ok.match(/^    if: (.*)$/m)[1];
-  assert.match(okIf, /^always\(\) && \(/); assert.deepEqual(wanted(okIf), asked);
-  // a skipped required check reads as a pass, so on another label this job must not be `ci-ok`
-  const name = ok.match(/^    name: (.*)$/m)[1]; assert.deepEqual(wanted(name), asked); assert.match(name, /&& 'ci-ok' \|\| 'other-label' \}\}$/);
-  // another label's run has a group of its own, so it can't cancel or displace a running CI; a window label queues, never cancels
-  const group = workflow.match(/^  group: (.*)$/m)[1];
-  assert.equal(group, "ci-${{ github.event.action == 'labeled' && github.event.label.name != 'ci:run' && github.event.label.name != 'merge:ready' && format('other-label-{0}', github.run_id) || github.event.pull_request.number || inputs.pr || github.ref }}");
-  for (const l of WINDOW_LABELS) assert.ok(group.includes(`github.event.label.name != '${l}'`), l);
+  // the queue reads only the newest ci run at a head: no label may leave one without a real ci-ok
+  assert.doesNotMatch(workflow, /github\.event\.label\.name|other-label/);
+  for (const name of ['scope', 'repo']) assert.doesNotMatch(job(name), /^    if: /m, name);
+  const ok = job('ci-ok');
+  assert.doesNotMatch(ok, /^    name: /m, 'the job is always named ci-ok');
+  assert.equal(ok.match(/^    if: (.*)$/m)[1], 'always()');
+  // a label run queues behind the PR's running CI and never cancels it; a push still cancels
+  assert.equal(workflow.match(/^  group: (.*)$/m)[1], 'ci-${{ github.event.pull_request.number || inputs.pr || github.ref }}');
   assert.match(workflow, /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' && github\.event\.action != 'labeled' \}\}/);
-  // a window label on a green head does no heavy work, and the head is the PR's, not the merge commit
+  // a label on a green head does no heavy work, and the head is the PR's, not the merge commit
   assert.match(job('scope'), /if: github\.event\.action == 'labeled' \|\| \(github\.event_name == 'workflow_dispatch'/);
   assert.match(job('scope'), /green --repo "\$GITHUB_REPOSITORY" --sha "\$HEAD_SHA" --self/);
+});
+
+test('#2018: merge:ready then approved:maintainer keeps a passing ci-ok without heavy work', () => {
+  const server = ['--files', 'apps/server/src/world.ts', '--event', 'pull_request', '--draft', 'false'];
+  const ready = run(...server, '--labels', '["merge:ready"]');
+  assert.deepEqual([ready.any, ready.deferred], ['true', 'false'], 'merge:ready runs the heavy jobs');
+  const green = String(greenAtHead([{ id: 1, status: 'completed', conclusion: 'failure' }, { id: 2, status: 'completed', conclusion: 'success' }], 3));
+  assert.equal(green, 'true', 'the merge:ready run passed at this head');
+  const approved = run(...server, '--labels', '["merge:ready","approved:maintainer"]', '--green-at-head', green);
+  assert.deepEqual([approved.any, approved.smoke, approved.deferred], ['false', 'false', 'false'], 'ci-ok passes on scope and repo alone');
 });
 
 test('a window label opens the window on its own pull_request run, and green at the head does no heavy work', () => {

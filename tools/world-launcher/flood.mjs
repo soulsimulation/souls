@@ -69,11 +69,13 @@ export function launcherFlood({ limits = {}, now = Date.now, log = (l) => consol
 // budget is a stop-gap until shedding is load-driven (the world's green/amber/red/black, LOAD-CONTRACT §1).
 export const SOUL_CEILINGS = Object.freeze({
   ipPer10s: 600,            // Soul API requests per address per world per 10 s
-  ipConcurrent: 50,         // API requests in flight + WebSockets per address
-  ipListen: 40,             // listen/wait long-polls per address
+  // #1949: a room of 100 Souls behind one address, or one owner's 100 Souls, each holding one listen and acting every
+  // 10 s (ceilings.test.mjs). The values below are twice what that needs; ipPer10s (it needs ~140) already was.
+  ipConcurrent: 202,        // API requests in flight + WebSockets per address; 2 × (100 listens + 1 act in flight)
+  ipListen: 200,            // listen/wait long-polls per address; 2 × 100 Souls' one listen each
   soulListen: 4,            // listen/wait per Soul token (a Soul needs 1–2; more is a client bug)
-  accountListen: 40,        // listen/wait per account (learned from the world's x-sim-account header, else per Soul)
-  accountHeavyPerMin: 900,  // C1/C2 per account (as above) per minute
+  accountListen: 200,       // listen/wait per account (learned from the world's x-sim-account header, else per Soul); 2 × 100 Souls' one listen each
+  accountHeavyPerMin: 1200, // C1/C2 per account (as above) per minute; 2 × 100 Souls acting 6 times a minute
   worldBudgetRps: 200,      // C1/C2 forwarded to the world's main thread per second, every Soul together (bursts of 2 s); reads its read workers answer are exempt. A safety ceiling only (lane srv-shed): shedding follows the world's level, and the Stage B mix at N=100 is ~30/s
   listenHoldMs: 5000,       // a listen/wait over its listen ceiling is held this long for a slot before it is refused (never at red/black)
   listenHeldMax: 200,       // listens held at once per world (past it, refused at once)
@@ -253,16 +255,22 @@ export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l)
 
 /** C3 public reads (LOAD-CONTRACT §2): one world call per URL per `ttlMs`, concurrent misses share it (single flight). */
 export class MicroCache {
-  constructor({ now = Date.now, maxEntries = 500, maxBytes = 8 * 2 ** 20 } = {}) { this.now = now; this.maxEntries = maxEntries; this.maxBytes = maxBytes; this.m = new Map(); this.flying = new Map(); this.hits = 0; this.misses = 0; }
-  /** fetch() → Promise<{ status, headers, body: Buffer }>; resolves with that response and whether it was shared. */
-  async get(key, ttlMs, fetch) {
+  constructor({ now = Date.now, maxEntries = 500, maxBytes = 8 * 2 ** 20, maxTotalBytes = Infinity } = {}) { this.now = now; this.maxEntries = maxEntries; this.maxBytes = maxBytes; this.maxTotalBytes = maxTotalBytes; this.m = new Map(); this.flying = new Map(); this.bytes = 0; this.hits = 0; this.misses = 0; }
+  /** fetch() → Promise<{ status, headers, body: Buffer }>; resolves with that response and whether it was shared.
+   *  `storable(r)`: whether a 200 may be kept for the next caller (default: every 200 within maxBytes). */
+  async get(key, ttlMs, fetch, storable = () => true) {
     const t = this.now(), e = this.m.get(key);
     if (e && t - e.at < ttlMs) { this.hits++; return { ...e.r, cache: 'hit' }; }
     const f = this.flying.get(key);
     if (f) { this.hits++; return { ...(await f), cache: 'shared' }; }
     this.misses++;
-    const p = fetch().then((r) => { if (r.status === 200 && r.body.length <= this.maxBytes) { this.m.set(key, { at: this.now(), r }); if (this.m.size > this.maxEntries) this.m.delete(this.m.keys().next().value); } return r; }).finally(() => this.flying.delete(key));
+    const p = fetch().then((r) => { if (r.status === 200 && r.body.length <= this.maxBytes && storable(r)) this.keep(key, r); return r; }).finally(() => this.flying.delete(key));
     this.flying.set(key, p);
     return { ...(await p), cache: 'miss' };
   }
+  keep(key, r) {
+    this.drop(key); this.m.set(key, { at: this.now(), r }); this.bytes += r.body.length;
+    while (this.m.size > this.maxEntries || this.bytes > this.maxTotalBytes) this.drop(this.m.keys().next().value);
+  }
+  drop(key) { const e = this.m.get(key); if (e) { this.m.delete(key); this.bytes -= e.r.body.length; } }
 }

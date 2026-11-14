@@ -4,7 +4,7 @@
 // and fronts them all on one origin.
 //
 //   node tools/world-launcher/launcher.mjs [--port 4980] [--data <dir>] [--range 5101-5149]
-//        [--auth-env <clerk.env> --public-origin https://sim.eden.art] [--soul-cli <eden-agent.mjs>] [--soul-skill <skill.md>] [--soul-instructions <instructions.md>]
+//        [--auth-env <clerk.env> --public-origin https://sim.eden.art] [--soul-skill <skill.md>] [--soul-instructions <instructions.md>]
 //
 //   GET  /                       the web app (homepage: worlds + New world)
 //   GET  /changelog              the public changelog: CHANGELOG.md rendered into the web build (apps/web/changelog.html)
@@ -18,6 +18,7 @@
 //   GET  /__sim/healthz          {ok, build, worlds, running, caps, memAvailableMb} (also /healthz); clientErrorsNew = error kinds
 //                                pages first reported since this build went live (client-errors.mjs)
 //   GET  /__sim/glitches         loopback: every world's recoveries and halts by rule and rung; ?world=<slug>[&limit=N] adds its records
+//   GET  /__sim/usage            loopback: the daily usage report from <data>/usage.sqlite, ?days=N (usage.mjs; op.mjs usage)
 //   GET  /__sim/health           the site owner's health page (health-dash.mjs): a data-free shell; ?json=1 = build, host, every
 //                                world, backups, arrivals, new errors, alerts, for loopback or a site owner's Clerk session
 //   POST /__sim/client-errors    a page's error beacon (apps/web/src/client-errors.ts); GET: the operator's summary (direct
@@ -65,7 +66,8 @@
 // worldForPath), with the laptop's public settings (INVITE_REQUIRED=0, SEED_NATIVES=0). The old->new redirect switch is <data>/redirects.json (redirects.mjs), read per request, off by default.
 //
 // Production (lane P3; tools/world-launcher/deploy/): --base /worlds --public-origin https://sim.eden.art
-// --auth-env <path> --max-worlds N --max-running N --min-free-mb N --world-heap-mb N --create-limit N. Children run edge
+// --auth-env <path> --max-worlds N --max-running N --min-free-mb N --world-heap-mb N --create-limit N
+// --worlds-mem-mb N (#2233: the memory all worlds together may use; install.sh capacity sets it). Children run edge
 // minds; dev auth only on an http origin.
 //
 // Sign-in: dev auth (local names) by default. With --auth-env <file> (or SIM_AUTH_ENV_FILE) every world signs in
@@ -74,10 +76,10 @@
 // the new world is claimed for them at birth. The launcher itself learns only the public Clerk settings.
 // --public-origin is the origin people use (it must be one of CLERK_AUTHORIZED_PARTIES).
 //
-// Every world serves ONE skill at /w/<slug>/SKILL.md (God mode + Soul mode). Its Soul mode points at the Soul CLI 1.9
-// and its guides, served as is by every world (/eden-agent.mjs, /skill.md, /instructions.md). By default these are the
-// pinned copies in tools/world-launcher/soul/ (SOURCES.json: shas and provenance); --soul-cli / --soul-skill /
-// --soul-instructions override them.
+// Every world serves ONE skill at /w/<slug>/SKILL.md (God mode + Soul mode). Its Soul mode points at the Soul client
+// and its guides, served as is by every world (/eden.mjs, /skill.md, /instructions.md). By default these are the
+// pinned copies in tools/world-launcher/soul/ (SOURCES.json: shas and provenance); --soul-skill / --soul-instructions
+// override them. The legacy client (/eden-agent.mjs) is not served (#1754).
 //
 // Under the keeper (keeper.mjs; deploy/sim-worlds@.service) the launcher is one *generation*: it does not listen; the
 // keeper passes it each connection, and on a release (systemctl reload) a newer generation adopts this one's running worlds
@@ -95,17 +97,19 @@ import { Agent, createServer, request } from 'node:http';
 const WORLD_AGENT = new Agent({ keepAlive: false });
 const hopless = (h) => { const { connection: _c, 'keep-alive': _k, ...rest } = h; return rest; };
 import { clientErrors } from './client-errors.mjs';
+import { platformFeed } from './feed.mjs';
 import { healthDash } from './health-dash.mjs';
 import { readGlitches } from './glitches.mjs';
+import { usageRollup } from './usage.mjs';
 import { ownerOverview } from './owner-overview.mjs';
 import { connect } from 'node:net';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
+import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
-import { ChildPool, compileCacheDir, defaultCommand, forkCommand } from './children.mjs';
+import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
@@ -115,6 +119,7 @@ import { makeHandoff } from './handoff.mjs';
 import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, short, soulCeilings } from './flood.mjs';
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
 import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
+import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
@@ -135,11 +140,16 @@ export function withHeap(d, heapMb) {
   return d;
 }
 /** How a world the launcher cannot reach right now is reported (children.mjs ensure() error codes; LOAD-CONTRACT §4). */
-const WORLD_CODES = { held: 'world.held', starting: 'world.starting' };
+const WORLD_CODES = { held: 'world.held', starting: 'world.waking', capacity: 'world.capacity' };   // #2233 A2: no room to load it: retriable   // #2304: a load past the hold: retriable
 /** The dark soul.slow-down hint on C2 reads at amber (lane srv-shed; LOAD-CONTRACT §2b "Refusal shapes"). */
 const SLOW_DOWN_HINT = Object.freeze({ header: 'soul.slow-down', retryAfterMs: 5000, message: 'The world is busy and asked you to slow down for 5 s between reads' });
 /** LOAD-CONTRACT §1 levels; at HOT ones the proxy sheds C2 and caches C3 for 2 s. After a restart, C1/C2 ramp up over RAMP_MS. */
 const LEVELS = ['green', 'amber', 'red', 'black'], HOT = new Set(['red', 'black']), RAMP_MS = 60_000;
+/** A viewer's arrival reads (#2308 follow-up): a snapshot part is content-addressed and immutable (kept for the world
+ *  process's life, at most PART_TTL_MS); /v1/config is the world's public settings, kept as briefly as a C3 read. */
+const PART_PATH = /^\/v1\/world\/part\/[0-9a-f]{32}$/, PART_TTL_MS = 3600_000;
+/** Only a public answer is shared between callers: none that sets a cookie or says it is private or not to be kept. */
+const shareable = (r) => !r.headers['set-cookie'] && !/\b(private|no-store)\b/i.test(String(r.headers['cache-control'] ?? ''));
 function hostHealth(dataDir) {
   try { const h = JSON.parse(readFileSync(join(dataDir, 'host-health.json'), 'utf8')); const stale = Date.now() - Date.parse(h.at) > 30 * 60e3; return stale ? { ...h, ok: false, stale: true, codes: ['stale'] } : h; } catch { return null; }
 }
@@ -149,21 +159,48 @@ export const ROOT = resolve(here, '../..');
 /** The Soul CLI and guides every world serves unless overridden (tools/world-launcher/soul/SOURCES.json). */
 /** Keep-alive idle timeout of the public server: longer than Caddy's upstream idle timeout (2 min). */
 export const KEEP_ALIVE_MS = 130_000;
-/** Freeze a world nobody has asked anything for this long (children.mjs freezeIdle; --sleep-ms, 0 = never). Lane P3. */
-export const SLEEP_MS = 10 * 60_000;
+/** Freeze a world nobody has asked anything for this long (children.mjs freezeIdle; --sleep-ms, 0 = never). Lane P3.
+ *  #2235: 0 by default; world time must never stop, and no world yet proves it may (see freezeIdle). */
+export const SLEEP_MS = 0;
 /** A world asleep this long more exits, giving its memory back; its next visit cold-boots it (children.mjs releaseIdle;
- *  SIM_WORLD_IDLE_EXIT_MIN minutes, default 60; 0 = never; SIM_WORLD_IDLE_EXIT_FORKS=1 includes the old-engine forks). Lane SLEEP. */
+ *  SIM_WORLD_IDLE_EXIT_MIN minutes, 0 = never and the default since #2235, which also needs sleep on;
+ *  SIM_WORLD_IDLE_EXIT_FORKS=1 includes the old-engine forks). Lane SLEEP. */
 export function idleExitMs(env = process.env) {
-  const v = Number(env.SIM_WORLD_IDLE_EXIT_MIN ?? 60);
-  return Number.isFinite(v) && v >= 0 ? v * 60_000 : 60 * 60_000;
+  const v = Number(env.SIM_WORLD_IDLE_EXIT_MIN ?? 0);
+  return Number.isFinite(v) && v >= 0 ? v * 60_000 : 0;
 }
 /** Reads that only report on a world (health, config, the homepage's numbers): answered, but not a visit. */
 // the Eyes render worker inside a world (apps/server/src/edge/eyes, user agent tag EdenEyes/1, same test as isEyesAgent in
 // browser-config.mjs) is the world looking at itself: its page and socket neither keep the world awake nor count as use
 const EYES_UA = /EdenEyes\/1/;
 export const eyesAgent = (ua) => typeof ua === 'string' && EYES_UA.test(ua);
+/** #2304 A4: declared crawlers and link-preview fetchers. They get a world's page (or what a loaded world answers) and
+ *  never load a world. EdenEyes/1 (above) is not one: it is the world's own renderer and loads as before. */
+const CRAWLER_UA = /Googlebot|Google-InspectionTool|GoogleOther|AdsBot-Google|Mediapartners-Google|Storebot-Google|bingbot|BingPreview|msnbot|DuckDuckBot|DuckAssistBot|Baiduspider|YandexBot|YandexImages|Yeti\/|Sogou|Exabot|SeznamBot|Applebot|PetalBot|facebookexternalhit|facebookcatalog|meta-externalagent|Facebot|Twitterbot|LinkedInBot|Slackbot|Slack-ImgProxy|Discordbot|TelegramBot|WhatsApp|SkypeUriPreview|Pinterestbot|redditbot|Embedly|Iframely|vkShare|Mastodon\/|Bluesky Cardyb|Snap URL Preview|GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|PerplexityBot|Perplexity-User|CCBot|Bytespider|Amazonbot|AhrefsBot|SemrushBot|MJ12bot|DotBot|DataForSeoBot|BLEXBot|ia_archiver|archive\.org_bot|Qwantbot|MojeekBot|Google-Extended|cohere-ai|Diffbot|YouBot/i;
+export const crawlerAgent = (ua) => typeof ua === 'string' && !EYES_UA.test(ua) && CRAWLER_UA.test(ua);
 const PASSIVE_READ = /\/w\/[a-z][a-z0-9-]{0,31}\/(?:healthz|v1\/config|v1\/god\/status|v1\/world\/souls)\/?$/;
-export const SOUL = { controllerCli: join(here, 'soul/eden.mjs'), cli: join(here, 'soul/eden-agent.mjs'), skill: join(here, 'soul/skill.md'), instructions: join(here, 'soul/instructions.md') };
+/** #1997: a resident client's (`serve`'s) background traffic: its 2 s live poll and its held listen, wait and event stream.
+ *  None of it is a use, keeps the world busy, or wakes or boots a sleeping world. 'live' (the poll) is answered from the
+ *  last live picture while the world sleeps (it cannot change then); 'hold' (a long-poll) waits here until the world wakes. */
+const RESIDENT_READ = /^\/v1\/edge\/(live|inbox\/listen|wait|events)\/?$/;
+export function residentRead(rest, method) {
+  if (method !== 'GET' && method !== 'HEAD') return null;
+  const m = RESIDENT_READ.exec(rest);
+  return m ? (m[1] === 'live' ? 'live' : 'hold') : null;
+}
+/** #2299: a kept live picture (apps/server/src/edge/catalog/live.ts) with its clock moved on to `now` by wall time: the
+ *  world's minutes at its realMsPerWorldMinute (a paused clock stays), sampled at `now`. */
+export function advanceClock(pic, now) {
+  const c = pic?.clock;
+  if (!c || !Number.isFinite(c.at)) return pic;
+  if (!c.paused && c.realMsPerWorldMinute > 0 && typeof c.worldDateTime === 'string') {
+    const t = Date.parse(c.worldDateTime) + (now - c.at) / c.realMsPerWorldMinute * 60_000;
+    if (Number.isFinite(t)) { const d = new Date(t), iso = d.toISOString(); Object.assign(c, { worldDateTime: iso, time: iso.slice(11, 16), minuteOfDay: d.getUTCHours() * 60 + d.getUTCMinutes(), weekdayUTC: d.getUTCDay() }); }
+  }
+  c.at = now; if (Number.isFinite(pic.at)) pic.at = now;
+  return pic;
+}
+export const SOUL = { controllerCli: join(here, 'soul/eden.mjs'), skill: join(here, 'soul/skill.md'), instructions: join(here, 'soul/instructions.md') };
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary', '.bin': 'application/octet-stream', '.wasm': 'application/wasm', '.woff2': 'font/woff2', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8' };
 /** #896: does this Accept header prefer Markdown? text/markdown with q > 0 and above text/html's q (a tie goes to the one
  *  listed first); media types are case-insensitive. Browsers never name text/markdown, so they get HTML. */
@@ -204,7 +241,7 @@ const direct = (req) => !req.headers['x-forwarded-for'] && ['127.0.0.1', '::1', 
  *           templatesDir?: string, marsWebDir?: string, eager?: number, idleMs?: number, sleepMs?: number, exitMs?: number, exitForks?: boolean, command?: Function, log?: (s: string) => void,
  *           publicOrigin?: string, devAuth?: boolean, authEnvFile?: string, clerkSatellite?: string, clerkSignInUrl?: string, clerkLegacySatellites?: string, clerkAuthorizedParties?: string, maxWorlds?: number, maxRunning?: number,
  *           minFreeMb?: number, worldHeapMb?: number, createLimit?: number, base?: string,
- *           soulCli?: string, soulSkill?: string, soulInstructions?: string, maxWorldsPerAccount?: number,
+ *           soulSkill?: string, soulInstructions?: string, maxWorldsPerAccount?: number,
  *           newAccountHours?: number, newAccountWorldLimit?: number, newAccountCreateLimit?: number, newAccountWindowMinutes?: number }} cfg
  * Without the production fields the launcher behaves as it always did locally (dev auth, 200 worlds, origin = bind).
  */
@@ -230,7 +267,10 @@ export async function openLauncher(cfg = {}) {
   // lane L1, LOAD-CONTRACT §2b: exact ceilings on the Soul API per address, Soul, account and world (registry `limits`)
   const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log });
   const c3 = new MicroCache();
+  const partCache = new MicroCache({ maxEntries: 256, maxTotalBytes: 64 * 2 ** 20 });   // snapshot parts: long-lived, so bounded in bytes too
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
+  const feed = platformFeed({ dataDir, log });   // #1876: the platform feed, feed.mjs
+  const usage = usageRollup({ dataDir, log, startMs: cfg.usageStartMs, everyMs: cfg.usageEveryMs });   // #1942: <data>/usage.sqlite, usage.mjs
   const origin = `http://127.0.0.1:${port}`;
   const publicOrigin = (cfg.publicOrigin ?? origin).replace(/\/$/, '');
   const authEnvFile = cfg.authEnvFile ?? process.env.SIM_AUTH_ENV_FILE;
@@ -258,6 +298,43 @@ export async function openLauncher(cfg = {}) {
   const live = new Map();
   /** HTTP requests in flight per world (a god's long-poll listen): such a world is not idle either. */
   const httpLive = new Map();
+  /** #1997: resident long-polls waiting here for their sleeping world to wake (slug -> wake callbacks), and resident
+   *  requests in flight to a world (slug -> responses), ended cleanly when it falls asleep under them. */
+  const parked = new Map(), residents = new Map();
+  /** #2299: a still world leaves memory (--unload-still 1; off by default, and 0 is today's behaviour). The world's
+   *  GET /__sim/still (#2241) is read before every stop and recorded beside the registry (<data>/horizons.json: slug ->
+   *  { still, untilWallMs, moveWallMs, at }); a world stopped while still is *unloaded*: no keep-alive boots it, and the
+   *  alarm loads it at moveWallMs, or at untilWallMs while a resident reads it. Times are cfg-overridable for tests. */
+  const unloadStill = cfg.unloadStill === true;
+  const STILL = { quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
+  const horizonsFile = join(dataDir, 'horizons.json');
+  const horizons = new Map((() => { try { return Object.entries(JSON.parse(readFileSync(horizonsFile, 'utf8'))); } catch { return []; } })());
+  const saveHorizons = () => { try { writeFileSync(`${horizonsFile}.tmp`, JSON.stringify(Object.fromEntries(horizons), null, 1) + '\n'); renameSync(`${horizonsFile}.tmp`, horizonsFile); } catch (e) { log(`horizons: ${e.message}`); } };
+  const unloaded = (slug) => unloadStill && horizons.get(slug)?.still === true;
+  /** #2233: each running world's last still answer ({ ...answer, at }), read at most every 30 s (readStill), and its tick
+   *  counters as seen then (slug -> [{ at, computed, jumped }], the last hour), for the state `still` and the health page. */
+  const stillSeen = new Map(), tickSeen = new Map();
+  /** #2233 A3: one state per world (awake, still, unloaded, starting, failed). */
+  const stateOf = (slug) => worldState(pool.status(slug), pool.status(slug).status === 'running' ? stillSeen.get(slug) : null);
+  /** #2233 A4: ticks computed and jumped in the last hour, from the world's own counters on GET /__sim/still (#2298 A5:
+   *  ticksComputed, ticksJumped); null until the world reports them. */
+  function ticksLastHour(slug, now = Date.now()) {
+    const t = (tickSeen.get(slug) ?? []).filter((x) => now - x.at <= 3_600_000);
+    if (!t.length) return { computed: null, jumped: null };
+    const d = (f) => { let n = 0; for (let i = 1; i < t.length; i++) n += t[i][f] >= t[i - 1][f] ? t[i][f] - t[i - 1][f] : t[i][f]; return n; };   // a restart resets them
+    return { computed: d('computed'), jumped: d('jumped') };
+  }
+  /** Per world: the last request that was neither a resident read nor a passive one (an act, a god call, a page), and the
+   *  last resident read seen (a listener). Unknown before this launcher started: its start counts as the last use. */
+  const usedAt = new Map(), residentAt = new Map(), startedAt = Date.now();
+  /** Per unloaded world: the cursor each resident long-poll (kind and token) held when the world was unloaded under it.
+   *  The same ask again is answered "nothing new" here; any other cursor loads the world (it may have more to give). */
+  const caught = new Map();
+  /** #2231: Soul API calls held here while their world boots (slug -> count). At most bootHoldMax per world (past it,
+   *  503 world.busy); each waits at most its own deadline: a listen's or wait's timeout, any other call bootHoldMs. */
+  // #2304: and as long as it waits for a load slot; a call to a world unloaded, waiting or loading is held up to
+  // loadHoldMs (--load-hold-ms, default 45 s) in all, then answered world.waking with a Retry-After (never a failure)
+  const bootHeld = new Map(), BOOT_HOLD_MAX = cfg.bootHoldMax ?? 200, BOOT_HOLD_MS = cfg.loadHoldMs ?? cfg.bootHoldMs ?? 45_000;
   /** What the launcher sees go past, per world (not persisted beyond the registry's own fields). */
   const seen = new Map();
   const seenOf = (slug) => { let s = seen.get(slug); if (!s) { s = { looks: registry.get(slug)?.looks ?? 0, lastLookAt: registry.get(slug)?.lastLookAt ?? null, agentSeenAt: registry.get(slug)?.agentSeenAt ?? null, previews: [] }; seen.set(slug, s); } return s; };
@@ -266,9 +343,11 @@ export async function openLauncher(cfg = {}) {
   // with a key made fresh for this run and handed to the children in their environment.
   const siteKey = randomBytes(32).toString('hex');
   const siteOk = (req) => { const h = String(req.headers['x-sim-site-key'] ?? ''); return direct(req) && h.length === siteKey.length && timingSafeEqual(Buffer.from(h), Buffer.from(siteKey)); };
-  const pool = new ChildPool({ root, range, site: { url: `${origin}${prod.base}`, key: siteKey }, logDir: join(dataDir, 'logs'), pidFile: join(dataDir, 'children.json'), libraryDir: join(dataDir, 'library'), compileCache: cfg.compileCache === false || process.env.SIM_COMPILE_CACHE === '0' ? null : compileCacheDir(dataDir, BUILD), cobuilders: cfg.cobuilders ?? process.env.SIM_COBUILDERS === '1', idleMs: cfg.idleMs, marsWebDir, publicOrigin, auth: auth?.child, soulCliFile: resolve(cfg.soulCli ?? SOUL.cli), soulControllerCliFile: resolve(cfg.soulControllerCli ?? SOUL.controllerCli), soulSkillFile: resolve(cfg.soulSkill ?? SOUL.skill), soulInstructionsFile: resolve(cfg.soulInstructions ?? SOUL.instructions), command: cfg.command ?? ((w, p, o) => (w.fork ? forkCommand : defaultCommand)(w, p, o)), healthPath: (s) => `${wp(s)}/healthz`,
-    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0, sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
-    /* worlds serve the same web build, with its --base */ onChange: (slug) => { const s = pool.status(slug); if (s.port && registry.get(slug) && registry.get(slug).port !== s.port) registry.update(slug, { port: s.port }); } });
+  const pool = new ChildPool({ root, range, site: { url: `${origin}${prod.base}`, key: siteKey }, logDir: join(dataDir, 'logs'), pidFile: join(dataDir, 'children.json'), libraryDir: join(dataDir, 'library'), compileCache: cfg.compileCache === false || process.env.SIM_COMPILE_CACHE === '0' ? null : compileCacheDir(dataDir, BUILD), cobuilders: cfg.cobuilders ?? process.env.SIM_COBUILDERS === '1', idleMs: cfg.idleMs, marsWebDir, publicOrigin, auth: auth?.child, soulControllerCliFile: resolve(cfg.soulControllerCli ?? SOUL.controllerCli), soulSkillFile: resolve(cfg.soulSkill ?? SOUL.skill), soulInstructionsFile: resolve(cfg.soulInstructions ?? SOUL.instructions), command: cfg.command ?? ((w, p, o) => (w.fork ? forkCommand : defaultCommand)(w, p, o)), healthPath: (s) => `${wp(s)}/healthz`,
+    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0, sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
+    /* worlds serve the same web build, with its --base */ onChange: (slug) => { const s = pool.status(slug); if (s.port && registry.get(slug) && registry.get(slug).port !== s.port) registry.update(slug, { port: s.port }); if (unloadStill && s.status === 'running') loaded(slug); wakeParked(slug); },
+    /* #2304: at most loadParallel worlds load at once, in order of reason */ loadParallel: cfg.loadParallel ?? 4,
+    ...(unloadStill ? { beforeStop: (k) => recordHorizon(k), afterRelease: (slug) => moveOnHandover(slug) } : {}) });
   const worldEnv = (w) => ({ ...w, dataDir: registry.worldDir(w.slug), bodyCollectionPath: join(dataDir, 'body-collections.sqlite'), templateFile: w.template && w.template !== 'empty' ? templateList({ all: true }).find((t) => t.id === w.template)?.file ?? null : null });
 
   // ---------- reads
@@ -293,7 +372,7 @@ export async function openLauncher(cfg = {}) {
     const st = pool.status(w.slug), s = stats.get(w.slug), t = templateList({ all: true }).find((x) => x.id === w.template);
     // two worlds with the same shown name are told apart by their slug (the address people see), e.g. "Mars · my-mars-2"
     const twin = registry.worlds.some((x) => x !== w && sameName(x.name, w.name));
-    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, restarts: st.restarts ?? 0 };
+    return { nameTag: twin ? w.slug : null, claimable: w.claimable !== false, unlisted: isUnlisted(w), key: w.slug, worldKey: w.slug, slug: w.slug, name: w.name, basePath: wp(w.slug), configPath: `${wp(w.slug)}/v1/config`, url: auth ? `${wp(w.slug)}/` : `${wp(w.slug)}/?dev=1`, template: w.template, templateName: t?.name ?? (w.template === 'empty' ? 'Empty plain' : w.template), createdAt: w.createdAt, owner: w.owner ?? null, god: s?.god ?? w.god ?? false, entities: s?.entities ?? w.entities ?? null, seq: s?.seq ?? w.seq ?? null, souls: s?.souls ?? w.souls ?? null, timeZone: w.timeZone ?? null, godName: (s?.god ?? w.god) ? (w.godName ?? null) : null, ...thumbView(w), status: st.status, state: stateOf(w.slug), restarts: st.restarts ?? 0 };   // #2233 A3: state; status kept for old readers
   };
   async function worldsJson() {
     await Promise.all(registry.worlds.map(refreshStats));
@@ -341,7 +420,7 @@ export async function openLauncher(cfg = {}) {
   // Gene 2026-10-16: one god per world; co-builders are off unless asked for (--cobuilders or SIM_COBUILDERS=1).
   const cobuilders = cfg.cobuilders ?? process.env.SIM_COBUILDERS === '1';
   // lane DASH: the site owner's health page (health-dash.mjs)
-  const dash = healthDash({ dataDir, build: BUILD, base: B, registry, pool, live, stats, refreshStats, errors, ceilings, hostHealth: () => hostHealth(dataDir), auth, wp,
+  const dash = healthDash({ dataDir, build: BUILD, base: B, registry, pool, live, stats, refreshStats, errors, ceilings, hostHealth: () => hostHealth(dataDir), auth, wp, stateOf, ticksLastHour, worldsMemMb: prod.worldsMemMb,
     verify: (a) => (auth ? verifiedCreator(a, auth.child, publicOrigin, root) : Promise.resolve(null)), worldOwner: safeOwner });
   const overview = ownerOverview({ dataDir, auth, base: B, allowed: dash.allowed });
   const handoff = makeHandoff({ registry, pool, dataDir, wp, publicOrigin, actorOf, isOwner, closing, log, cobuilders });
@@ -650,6 +729,166 @@ export async function openLauncher(cfg = {}) {
   // the client hung up while we waited (a world booting, a retry, a hand-back): nothing is sent on its behalf, or a
   // long-poll listen would reach the world as a ghost and could supersede the agent's real listener
   const clientGone = (req, res) => res.destroyed || req.socket.destroyed;
+  const c3Key = (req, slug, url) => `${slug} ${url.pathname}${url.search} ${req.headers['accept-encoding'] ?? ''} ${req.headers.authorization ? short(req.headers.authorization) : ''}`;
+  // ---------- #1997: a resident client lets its world sleep (see residentRead). A world sleeps when it is frozen, or stopped
+  // (exited, or never started here), or being stopped (thawed only to save and exit: resident traffic must not boot it again);
+  // one starting, held or failed is not asleep, and its resident requests go on as before.
+  const sleeping = (slug) => { const k = pool.state(slug); return !k || !!k.frozen || k.status === 'stopped' || !!k.stopped || !!k.stopping; };
+  /** The last live picture each caller got (the micro-cache's key), kept to answer the poll while the world sleeps. */
+  const liveKept = new Map();
+  const keepLive = (key, r) => { liveKept.delete(key); liveKept.set(key, r); if (liveKept.size > 512) liveKept.delete(liveKept.keys().next().value); };
+  function asleepLive(req, res, slug, url, cold = false) {
+    const r = liveKept.get(c3Key(req, slug, url));
+    if (!r) { asleepRetry(res, slug); return; }
+    const { 'server-timing': _t, ...headers } = r.headers;
+    // #2299: an unloaded world's picture is as it was (nothing moves in a still world), its clock moved on by wall time
+    let body = r.body; if (cold) { const enc = headers['content-encoding']; try { const raw = enc === 'gzip' ? gunzipSync(body) : enc === 'br' ? brotliDecompressSync(body) : enc ? null : body; if (raw) { const out = Buffer.from(JSON.stringify(advanceClock(JSON.parse(String(raw)), Date.now()))); body = enc === 'gzip' ? gzipSync(out) : enc === 'br' ? brotliCompressSync(out) : out; } } catch { /* the picture as kept */ } }
+    const tag = cold ? 'unloaded' : 'asleep';
+    res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length), 'server-timing': launcherTiming(res, tag), 'x-sim-cache': tag })).end(req.method === 'HEAD' ? undefined : body);
+  }
+  /** Nothing new from a sleeping world: a busy answer the client waits out and asks again (never a world-down error). */
+  function asleepRetry(res, slug) {
+    json(res, 503, { ...refusalBody('world.busy', 'The world is asleep (nobody has acted in it for a while) and has nothing new; ask again. An act wakes it.', 1000, 'asleep'), slug }, { 'retry-after': '1' });
+  }
+  /** How long a resident long-poll waits here for its world: its own deadline (at least 5 s, so a client asking with none
+   *  does not spin); a stream (no deadline) 30 s, under the 45 s a resident waits for a stream's next frame. */
+  const residentHoldMs = (rest, search) => /\/events\/?$/.test(rest) ? 30_000 : Math.max(5000, listenTimeoutMs(rest, search));
+  /** Park a resident long-poll until its world is awake: true once it is, false at `ms` or when the client goes. */
+  function park(req, res, slug, ms) {
+    return new Promise((done) => {
+      let set = parked.get(slug); if (!set) parked.set(slug, set = new Set());
+      const end = (v) => { clearTimeout(timer); parked.get(slug)?.delete(go); res.off('close', gone); done(v); };
+      const go = () => end(true), gone = () => end(false), timer = setTimeout(() => end(false), ms);
+      set.add(go); res.once('close', gone);
+    });
+  }
+  /** A world woke (thawed, or a use is booting it): its parked long-polls go to it. */
+  function wakeParked(slug) {
+    const set = parked.get(slug);
+    if (!set || sleeping(slug)) return;
+    parked.delete(slug); for (const go of set) go();
+  }
+  /** A parked long-poll goes to the world with what is left of its own deadline, so its client's timeout is never reached. */
+  function withDeadlineLeft(reqUrl, rest, search, spentMs) {
+    const q = new URLSearchParams(search), left = Math.max(0, listenTimeoutMs(rest, search) - spentMs);
+    if (/\/wait\/?$/.test(rest)) q.set('timeout', String(Math.floor(left / 1000)));
+    else if (/\/inbox\/listen\/?$/.test(rest)) q.set('timeoutMs', String(left));
+    else return reqUrl;
+    return `${reqUrl.split('?')[0]}?${q}`;
+  }
+  /** The world fell asleep under resident requests (a listen, a wait, a stream it no longer answers): each ends as a retry
+   *  (not yet answered) or a normal end (a stream), and the client's next ask waits here for the world to wake. */
+  function endResidents(slug) {
+    for (const res of residents.get(slug) ?? []) {
+      if (!res.headersSent) asleepRetry(res, slug);
+      else if (res.simStream) { res.on('error', () => {}); res.end(); }   // (a frozen world writes nothing more; its pipe ends at close)
+      else res.destroy();
+    }
+  }
+  /** #2304 A3: a world's page (the web build's, with the world's own title and links) and the build's files, served here
+   *  for a world that is not up. False: not a page or a file of the build (the caller loads the world, or refuses). */
+  function worldPage(req, res, slug, w, rest) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+    const head = { 'x-sim-cache': 'unloaded' };
+    if (rest.startsWith('/assets/')) { const f = inside(webDir, rest); if (f && serveFile(res, f, 'public, max-age=31536000, immutable', req)) return true; return false; }
+    if (rest === '/manifest.webmanifest') return serveFile(res, join(webDir, 'manifest.webmanifest'), 'public, max-age=3600', req);
+    const page = rest === '/' || rest === '/index.html' || (!/^\/(?:v1|mcp|__)(?:\/|$)/.test(rest) && !extname(rest) && String(req.headers.accept ?? '').includes('text/html'));
+    if (!page) return false;
+    let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
+    const body = Buffer.from(withWorldMeta(html, { name: w.name ?? slug, url: `${publicOrigin}${wp(slug)}/` }));
+    res.writeHead(200, robotsOf(slug, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), ...head })).end(req.method === 'HEAD' ? undefined : body);
+    return true;
+  }
+  // ---------- #2299: still worlds leave memory (unloadStill; the contract is #2241's GET /__sim/still)
+  /** The world's own answer to "am I still, and until when", or null (no answer in 2 s, or a world without the route). */
+  async function readStill(port, slug) {
+    let s = null;
+    try { const r = await fetch(`http://127.0.0.1:${port}/__sim/still`, { signal: AbortSignal.timeout(2000) }); s = r.ok ? await r.json() : null; } catch { /* none */ }
+    if (slug) {
+      const at = Date.now();
+      if (s) stillSeen.set(slug, { ...s, at }); else stillSeen.delete(slug);
+      if (Number.isFinite(s?.ticksComputed) && Number.isFinite(s?.ticksJumped)) { const t = (tickSeen.get(slug) ?? []).filter((x) => at - x.at <= 3_600_000); t.push({ at, computed: s.ticksComputed, jumped: s.ticksJumped }); tickSeen.set(slug, t); }
+    }
+    return s;
+  }
+  /** #2233: every 30 s, each running world's still answer and Pss (the memory figure's sum reads it at most this often). */
+  async function lookAtWorlds() {
+    await Promise.all(registry.worlds.map(({ slug }) => { const k = pool.state(slug); return k?.status === 'running' && k.child && k.port && !k.frozen ? readStill(k.port, slug) : (stillSeen.delete(slug), null); }));
+    pool.memUse();
+  }
+  /** Before every stop (pool beforeStop): the world's horizon, recorded; a world that was not still, or did not say, is due at once. */
+  async function recordHorizon(k) {
+    if (!k.port || !registry.get(k.slug)) return;
+    const s = await readStill(k.port, k.slug), at = Date.now(), num = (v) => (Number.isFinite(v) ? v : null);
+    horizons.set(k.slug, s?.still === true ? { still: true, untilWallMs: num(s.untilWallMs), moveWallMs: num(s.moveWallMs), at } : { still: false, dueAt: at, at });
+    saveHorizons();
+  }
+  /** #2304 A5 (the next launcher, in a handover): the previous launcher has stopped `slug` and recorded its horizon. A
+   *  world that was still, with no visitor there or here, is not moved: it stays unloaded (false) and loads on this
+   *  release when next needed. Anything else is moved as before. */
+  function moveOnHandover(slug) {
+    let h = null; try { h = JSON.parse(readFileSync(horizonsFile, 'utf8'))[slug] ?? null; } catch { /* none: moved */ }
+    if (canaryRun?.slug === slug || h?.still !== true || h.visited || (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0 || (bootHeld.get(slug) ?? 0) > 0) return true;
+    horizons.set(slug, h); saveHorizons();
+    log(`${slug} left unloaded on this release: still, with no visitor`);
+    return false;
+  }
+  /** The world runs again: its recorded horizon and what its long-polls held are history. */
+  function loaded(slug) { if (pool.state(slug)?.stopped) return; caught.delete(slug); if (horizons.delete(slug)) saveHorizons(); }
+  /** A resident long-poll's kind, who asks (its token, never kept in the clear) and from which cursor. */
+  function holdAsk(req, rest, url) {
+    const q = url.searchParams, kind = /\/events\/?$/.test(rest) ? 'events' : /\/wait\/?$/.test(rest) ? 'wait' : 'listen';
+    const cursor = kind === 'events' ? req.headers['last-event-id'] ?? q.get('cursor') ?? q.get('after') : q.get('after');
+    return { kind, key: `${kind} ${req.headers.authorization ? short(req.headers.authorization) : '-'} ${kind === 'events' ? q.get('kinds') ?? '' : ''}`, cursor: String(cursor ?? '') };
+  }
+  /** "Nothing new" from an unloaded world, in each long-poll's own shape (never a 503: the world is merely still). */
+  function nothingNew(res, kind, cursor) {
+    if (res.writableEnded || res.destroyed) return;
+    res.on('error', () => {});
+    const h = { 'server-timing': launcherTiming(res, 'unloaded'), 'x-sim-cache': 'unloaded' };
+    if (kind === 'events') { if (!res.headersSent) res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', ...h }); res.on('error', () => {}); res.end(': nothing new (the world is still)\n\n'); return; }
+    if (res.headersSent) { res.destroy(); return; }
+    json(res, 200, kind === 'wait' ? { events: [], cursor } : { inbox: null, backlog: [] }, h);
+  }
+  /** A world still for long enough leaves memory (A1): its ordinary clean stop, its horizon recorded on the way out. */
+  async function unloadSweep() {
+    if (!unloadStill || phase !== 'active' || gate || pool.closing || pool.fenced) return [];
+    const quiet = (slug, k) => k && k.status === 'running' && k.child && !k.frozen && !k.adopted && !k.ready && !k.stopped && !k.stopping && !closing.has(slug)
+      && !(live.get(slug) > 0) && !(httpLive.get(slug) > 0) && !(bootHeld.get(slug) > 0)
+      && Date.now() - (usedAt.get(slug) ?? startedAt) >= STILL.quietMs && Date.now() - (k.upSince ?? 0) >= STILL.servedMs;
+    const out = await Promise.all(registry.worlds.map(async ({ slug }) => {
+      const k = pool.state(slug);
+      if (!quiet(slug, k)) return null;
+      const s = await readStill(k.port, slug);
+      if (s?.still !== true || (Number.isFinite(s.untilWallMs) && s.untilWallMs - Date.now() < STILL.horizonMs) || !quiet(slug, k)) return null;
+      const stopping = pool.stop(slug);   // k.stopped from here: resident reads stay here, an act waits for the stop and loads it
+      // its resident long-polls in flight end as "nothing new"; the same ask again is held here (they held no news)
+      const held = new Map(); caught.set(slug, held);
+      for (const res of residents.get(slug) ?? []) { const a = res.simResident; if (!a) continue; held.set(a.key, a.kind === 'events' ? res.simLastId ?? a.cursor : a.cursor); nothingNew(res, a.kind, a.cursor); }
+      await stopping;
+      log(`${slug} unloaded: still${Number.isFinite(s.untilWallMs) ? ` until ${new Date(s.untilWallMs).toISOString()}` : ''}${Number.isFinite(s.moveWallMs) ? `, a body moves at ${new Date(s.moveWallMs).toISOString()}` : ''}`);
+      return slug;
+    }));
+    return out.filter(Boolean);
+  }
+  /** The alarm (A2): an unloaded world loads when a body is due to move, or at its next event while a resident reads it. */
+  const alarmLoading = new Set();
+  function alarmScan(now = Date.now()) {
+    if (!unloadStill || phase !== 'active' || gate || pool.closing || pool.fenced) return [];
+    const due = [];
+    for (const [slug, h] of horizons) {
+      const w = registry.get(slug);
+      if (!w) { horizons.delete(slug); saveHorizons(); continue; }
+      if (!h.still || !sleeping(slug) || pool.state(slug)?.stopping || alarmLoading.has(slug)) continue;
+      const listener = now - (residentAt.get(slug) ?? -Infinity) < STILL.listenerMs;
+      const why = h.moveWallMs != null && h.moveWallMs <= now ? 'a body is due to move' : listener && h.untilWallMs != null && h.untilWallMs <= now ? 'its next event, with a listener' : null;
+      if (!why) continue;
+      alarmLoading.add(slug); due.push(slug);
+      // #2304: in the load queue behind acts and visitors: a listener's alarm, then a wind-down step
+      pool.ensure(worldEnv(w), { passive: true, reason: why === 'a body is due to move' && !listener ? 'winddown' : 'listener', timeoutMs: 0 }).then((p) => log(`${slug} loaded by its alarm (${why}) on :${p}`), (e) => log(`${slug}: its alarm could not load it: ${e.message}`)).finally(() => alarmLoading.delete(slug));
+    }
+    return due;
+  }
   /** #896: the published docs pages the build lists (docs/pages.json), for the sitemap; re-read when the build changes. */
   let docsList = { at: -1, pages: [] };
   function docsPages() {
@@ -660,13 +899,14 @@ export async function openLauncher(cfg = {}) {
   /** #894: every response of an unlisted world says noindex, whatever the world sent (listing read per response, so
    *  listing or unlisting a world applies at once); a listed world's own headers pass unchanged. */
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
-  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false } = {}) {
+  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData } = {}) {
     if (clientGone(req, res)) return;
     const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
     // the worlds see people, not the proxy; locally it is set to the connecting address as before.
     const xff = behindProxy && req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] : (req.socket.remoteAddress ?? '127.0.0.1');
     const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: targetPort, path: path ?? req.url, method: req.method, headers: { ...hopless(req.headers), 'x-forwarded-for': xff } }, (r) => {
+      if (res.headersSent) { r.resume(); return; }   // #2299: answered here meanwhile ("nothing new" as its world unloaded)
       // hop-by-hop headers stay on their hop: an upstream `connection: keep-alive` would turn this server's own choice
       // back on (forward() closes after its response; Node lets a user connection header override that)
       const { connection: _c, 'keep-alive': _k, 'x-sim-account': account, ...headers } = r.headers;
@@ -678,6 +918,7 @@ export async function openLauncher(cfg = {}) {
       if (slug) sawLoad(slug, r.headers['x-sim-load']);
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
+      if (onData) r.on('data', onData);
       r.pipe(res);
     });
     // A world that was just handed over (or restarted) refused the connection before answering: a GET/HEAD is asked again
@@ -688,6 +929,38 @@ export async function openLauncher(cfg = {}) {
     if (maxBody > 0 && !req.readableEnded) { let n = 0; req.on('data', (c) => { n += c.length; if (n > maxBody) { up.destroy(); req.unpipe(up); if (!res.headersSent) json(res, 413, { ok: false, code: 'request.too-large', message: `a request body may be at most ${Math.round(maxBody / 1024)} KB` }, { connection: 'close' }); } }); }
     if (req.readableEnded) up.end(); else req.pipe(up);   // a retried GET: its (empty) body was already read
   }
+  /** ensure() refused: a world handed over (or going back) is asked through the keeper, any other is answered 503. */
+  async function unreachable(req, res, slug, e) {
+    if (e.code === 'handed-over' && retiredTo) { forward(req, res); return; }
+    // our canary failed and the world is going back to the previous launcher: wait for the keeper to switch back
+    if (await waitHandBack(slug, e)) { forward(req, res); return; }
+    json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'capacity' ? '30' : e.code === 'starting' ? '5' : '3', ...(e.code === 'starting' ? { 'cache-control': 'no-store' } : {}) });
+  }
+  /** #2231: hold a Soul API call until its booting world listens, at most `ms` (the call's own deadline). Resolves with
+   *  the ms it waited, or null once it was answered here (over the world's cap, past its deadline, a refused boot) or its
+   *  client went. The world's boot goes on either way; a held call never starts or stops one. */
+  async function holdForBoot(req, res, slug, w, ms, passive) {
+    const n = bootHeld.get(slug) ?? 0;
+    if (n >= BOOT_HOLD_MAX) {
+      ceilings.note(slug, 'world.busy', 'boot');
+      json(res, 503, { ...refusalBody('world.busy', `The world is starting up and ${n} calls are already waiting for it. It asked you to wait 5 s`, 5000, 'boot'), slug }, { 'retry-after': '5', 'cache-control': 'no-store' });
+      return null;
+    }
+    bootHeld.set(slug, n + 1);
+    const t0 = Date.now();
+    let gone, out;
+    const left = new Promise((r) => { gone = () => r('gone'); res.once('close', gone); });
+    try { out = await Promise.race([pool.ensure(worldEnv(w), { timeoutMs: Math.max(1, ms), passive, reason: passive ? 'listener' : 'act' }).then(() => 'up'), left]); }
+    catch (e) { out = e; }
+    finally { res.off('close', gone); const m = (bootHeld.get(slug) ?? 1) - 1; if (m > 0) bootHeld.set(slug, m); else bootHeld.delete(slug); }
+    if (out === 'gone' || clientGone(req, res)) return null;
+    if (out === 'up') return Date.now() - t0;
+    if (out?.code !== 'starting') { await unreachable(req, res, slug, out); return null; }
+    const b = pool.status(slug).boot, s = (x) => Math.round(x / 1000);
+    ceilings.note(slug, 'world.waking', 'boot');
+    json(res, 503, { ...refusalBody('world.waking', `The world is still loading${b ? ` (for ${s(Date.now() - b.since)} s${b.stage ? `, at ${b.stage}` : ''})` : pool.status(slug).status === 'waiting' ? ' (waiting for its turn to load)' : ''}; this call waited ${s(Date.now() - t0)} s for it, its own limit. It asked you to wait 5 s`, 5000, 'boot'), slug }, { 'retry-after': '5', 'cache-control': 'no-store' });
+    return null;
+  }
   async function toWorld(req, res, slug, url, retried = false) {
     const w = registry.get(slug);
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
@@ -695,10 +968,18 @@ export async function openLauncher(cfg = {}) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
       json(res, 404, { ok: false, code: 'world.not-served', slug }); return;
     }
-    // lane L1 (LOAD-CONTRACT §4): the Soul API of a booting world, a world just restarted, or a world at red/black is
-    // answered here at once (before the ceilings: a boot is not a client's fault), without waiting on the world
+    // lane L1 (LOAD-CONTRACT §4): the Soul API of a world just restarted or at red/black is answered here at once, and
+    // that of a booting world waits here for it (#2231), both before the ceilings: a boot is not a client's fault
     const edgeRest = url.pathname.slice(wp(slug).length) || '/', edgeCls = !retried && edgeRest.startsWith('/v1/edge/') ? requestClass(edgeRest, req.method) : null;
-    let held = edgeCls ? admission(slug, { cls: edgeCls, soul: ceilings.soulOf(req) }) : null;
+    let held = edgeCls ? admission(slug, { cls: edgeCls, soul: ceilings.soulOf(req) }) : null, path;
+    // #2231: a call to a booting world waits here for it (up to its own deadline, bootHoldMax per world) and is then
+    // admitted as any other; a listen or wait goes on with what is left of its deadline
+    if (held?.scope === 'boot') {
+      const waited = await holdForBoot(req, res, slug, w, edgeCls === 'listen' ? listenTimeoutMs(edgeRest, url.search) : BOOT_HOLD_MS, !!residentRead(edgeRest, req.method));
+      if (waited == null) return;
+      if (edgeCls === 'listen') path = withDeadlineLeft(req.url, edgeRest, url.search, waited);
+      held = admission(slug, { cls: edgeCls, soul: ceilings.soulOf(req) });
+    }
     // Stage B (lane B-port): shedding is for a world that cannot answer. At red/black a C2 read its read workers answer
     // (live.json lists them, lag ≤ READ_SHED_LAG_GENS) goes to them instead of being refused here (counted by level)
     if (held?.scope?.startsWith('load:') && readTarget(slug, w, edgeRest, req.method, url.search, { maxLagGens: READ_SHED_LAG_GENS })) held = null;
@@ -723,26 +1004,61 @@ export async function openLauncher(cfg = {}) {
     if (flooded) { refuseSlowly(req, res, flooded); return; }
     // a monitor's or the homepage's read (health, config, status, no token) is answered, waking the world if it sleeps, but
     // is not a visit: it neither keeps the world awake nor counts as its last use (lane P3; sim-watch polls every 5 min)
-    const passive = (PASSIVE_READ.test(url.pathname) && (req.method === 'GET' || req.method === 'HEAD') && !req.headers.authorization) || eyesAgent(req.headers['user-agent']);
-    let p;
-    try { p = await pool.ensure(worldEnv(w), { passive }); }
-    catch (e) {
-      if (e.code === 'handed-over' && retiredTo) { forward(req, res); return; }
-      // our canary failed and the world is going back to the previous launcher: wait for the keeper to switch back
-      if (await waitHandBack(slug, e)) { forward(req, res); return; }
-      json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'starting' ? '5' : '3' }); return;
+    // #2304 A3/A4: a world that is not up serves its page and the web build's files from here, without loading it: to a
+    // declared crawler always (and nothing else: a crawler never loads a world, nor thaws one), to anyone with
+    // --unload-still. The world loads when the page's live connection or its first data request arrives.
+    const crawler = crawlerAgent(req.headers['user-agent']), k0 = pool.state(slug);
+    if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {
+      if (worldPage(req, res, slug, w, edgeRest)) return;
+      if (crawler) { json(res, 503, { ok: false, code: 'world.unloaded', slug, message: 'This world is not loaded; its page is served without it.' }, { 'retry-after': '3600', 'cache-control': 'no-store' }); return; }
     }
+    const resident = residentRead(edgeRest, req.method);
+    const passive = !!resident || (PASSIVE_READ.test(url.pathname) && (req.method === 'GET' || req.method === 'HEAD') && !req.headers.authorization) || eyesAgent(req.headers['user-agent']);
+    const ask = resident === 'hold' ? holdAsk(req, edgeRest, url) : null;
+    if (unloadStill) { if (resident) residentAt.set(slug, Date.now()); else if (!passive) usedAt.set(slug, Date.now()); }
+    // #2299: an unloaded world (still) never answers its residents 503: the poll gets the kept picture, its clock moved on;
+    // a long-poll at the cursor it held when the world unloaded is held here and answered "nothing new" at its deadline.
+    // Anything this launcher cannot answer truly (no picture kept for the caller, another cursor) loads the world.
+    const cold = !!resident && sleeping(slug) && unloaded(slug);
+    const hold = cold ? (resident === 'live' ? liveKept.has(c3Key(req, slug, url)) : caught.get(slug)?.get(ask.key) === ask.cursor) : !!resident && sleeping(slug);
+    // #1997: a resident's poll or long-poll never wakes or boots a sleeping world: the poll gets the last live picture, a
+    // long-poll waits here for the world to wake (then goes on with what is left of its own deadline) or ends as a retry
+    if (hold) {
+      if (resident === 'live') { asleepLive(req, res, slug, url, cold); return; }
+      const t0 = Date.now();
+      if (!(await park(req, res, slug, residentHoldMs(edgeRest, url.search)))) { if (!clientGone(req, res)) { if (unloaded(slug) && sleeping(slug)) nothingNew(res, ask.kind, ask.cursor); else asleepRetry(res, slug); } return; }
+      path = withDeadlineLeft(req.url, edgeRest, url.search, Date.now() - t0);
+    }
+    let p;
+    // #2304: the load's place in the queue (an act or god call first) and the hold, past which the answer is world.waking
+    const reason = resident ? 'listener' : passive ? 'background' : edgeRest.startsWith('/v1/god/') ? 'god' : req.headers.authorization || /^\/(?:v1\/(?:edge|god|agent)\/|mcp\b)/.test(edgeRest) ? 'act' : 'visitor';
+    try { p = await pool.ensure(worldEnv(w), { passive, reason, timeoutMs: BOOT_HOLD_MS }); }
+    catch (e) { await unreachable(req, res, slug, e); return; }
     if (clientGone(req, res)) return;   // before httpLive: a closed response never fires 'close' again to undo it
-    // a request in flight (a god's long-poll listen, a slow upload) keeps the world awake (pool busy), and its end counts as use
-    httpLive.set(slug, (httpLive.get(slug) ?? 0) + 1);
-    res.once('close', () => { const n = (httpLive.get(slug) ?? 1) - 1; if (n > 0) httpLive.set(slug, n); else httpLive.delete(slug); const k = pool.state(slug); if (k && !passive) k.lastUsed = Date.now(); });
+    // a request in flight (a god's long-poll listen, a slow upload) keeps the world awake (pool busy), and its end counts as
+    // use; a resident's does neither (#1997), and is ended cleanly if the world falls asleep under it (endResidents)
+    if (resident) { let s = residents.get(slug); if (!s) residents.set(slug, s = new Set()); s.add(res); res.simStream = /\/events\/?$/.test(edgeRest); res.simResident = ask; res.once('close', () => s.delete(res)); }
+    else {
+      httpLive.set(slug, (httpLive.get(slug) ?? 0) + 1);
+      res.once('close', () => { const n = (httpLive.get(slug) ?? 1) - 1; if (n > 0) httpLive.set(slug, n); else httpLive.delete(slug); const k = pool.state(slug); if (k && !passive) k.lastUsed = Date.now(); });
+    }
     const rest = retried ? url.pathname : observe(slug, req, url);
     if (req.method === 'POST' && CLAIM_PATHS.has(rest) && claimLocked(w)) { json(res, 403, { ok: false, code: 'not-claimable', message: 'this world is not open for claiming' }); return; }
     const tee = req.method === 'POST' && rest === '/v1/god/preview' ? (body) => { if (typeof body?.id !== 'string') return; const s = seenOf(slug); s.previews.unshift({ id: body.id, accepted: !!body.accepted, summary: body.summary ?? null, failures: body.failures ?? null, at: Date.now() }); s.previews.length = Math.min(s.previews.length, 20); } : undefined;
     const again = !retried && (req.method === 'GET' || req.method === 'HEAD') ? () => void toWorld(req, res, slug, url, true).catch(() => { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); }) : undefined;
     const lim = ceilings.limits(slug);
     if (gated?.cls === 'C3' && req.method === 'GET') { void cachedRead(req, res, p, slug, url, HOT.has(levelOf(slug)) ? Math.max(lim.c3CacheMs, 2000) : lim.c3CacheMs); return; }
-    const opts = { tee, retry: again, soul: gated?.soul, slug, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    // #2308 follow-up: a viewer's other arrival reads. Keyed as a C3 read (its token, if any, is part of the key) and by the
+    // world process (a restart may be a new build); config also by the host headers its URLs are made from.
+    if (req.method === 'GET' && (rest === '/v1/config' || PART_PATH.test(rest))) {
+      const st = pool.status(slug), gen = `${st.pid ?? ''}:${st.upSince ?? ''}`, part = rest !== '/v1/config';
+      const key = `${c3Key(req, slug, url)} ${gen}${part ? '' : ` ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`}`;
+      void cachedRead(req, res, p, slug, url, part ? PART_TTL_MS : HOT.has(levelOf(slug)) ? Math.max(lim.c3CacheMs, 2000) : lim.c3CacheMs, { cache: part ? partCache : c3, key, storable: shareable });
+      return;
+    }
+    // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
+    const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
+    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)
     const rp = retried ? null : readTarget(slug, w, rest, req.method, url.search);
     if (rp) { proxyRead(req, res, slug, rp, p, { ...opts, worldDeferred: !!gated?.worldDeferred }); return; }
@@ -824,12 +1140,12 @@ export async function openLauncher(cfg = {}) {
   const loads = new Map();   // slug -> { level, at }
   function sawLoad(slug, level) { if (typeof level === 'string' && LEVELS.includes(level)) loads.set(slug, { level, at: Date.now() }); }
   function levelOf(slug) { const h = loads.get(slug); if (h && Date.now() - h.at < 10_000) return h.level; return pool.status(slug).level ?? 'green'; }
-  /** null (go on), or why this Soul API call is answered 503 now: world.starting while the world boots or waits to
-   *  restart (Retry-After 5); world.busy for C1/C2 during the 60 s ramp after a restart (a share admitted that grows
+  /** null (go on), or why this Soul API call is not sent on now: world.starting (scope boot) while the world boots or
+   *  waits to restart, which toWorld holds (#2231); world.busy for C1/C2 during the 60 s ramp after a restart (a share admitted that grows
    *  25 % -> 100 %, by Soul so one Soul is not admitted and refused in turn) and for C2 at red/black (C3 is micro-cached). */
   function admission(slug, gated) {
     const st = pool.status(slug), now = Date.now();
-    if (st.status === 'starting' || st.status === 'restarting') return { code: 'world.starting', scope: 'boot', s: 5, message: 'The world is starting up. It asked you to wait 5 s' };
+    if (st.status === 'starting' || st.status === 'restarting' || st.status === 'waiting') return { code: 'world.starting', scope: 'boot', s: 5, message: 'The world is starting up. It asked you to wait 5 s' };
     if (st.status !== 'running') return null;
     const heavy = gated.cls === 'C1' || gated.cls === 'C2';
     if (heavy && st.rampFrom && now - st.rampFrom < RAMP_MS) {
@@ -845,12 +1161,11 @@ export async function openLauncher(cfg = {}) {
    *  Public on /__sim/healthz (counts only, no Soul, account or address): sim-watch alerts on their growth. */
   function refusedByWorld() { const out = {}; for (const w of registry.worlds) { const r = ceilings.refused(w.slug); if (Object.keys(r).length) out[w.slug] = r; } return out; }
   /** A C3 public read from the micro-cache (LOAD-CONTRACT §2): one world call per URL per ttl, shared by every caller. */
-  async function cachedRead(req, res, p, slug, url, ttlMs) {
-    const key = `${slug} ${url.pathname}${url.search} ${req.headers['accept-encoding'] ?? ''} ${req.headers.authorization ? short(req.headers.authorization) : ''}`;
+  async function cachedRead(req, res, p, slug, url, ttlMs, { cache = c3, key = c3Key(req, slug, url), storable } = {}) {
     const xff = behindProxy && req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] : (req.socket.remoteAddress ?? '127.0.0.1');
     let r;
     try {
-      r = await c3.get(key, ttlMs, () => new Promise((yes, no) => {
+      r = await cache.get(key, ttlMs, () => new Promise((yes, no) => {
         // One flight serves every caller waiting on it, so it always asks for the whole answer: a world's 304 to one would be the others' empty page.
         const { 'if-none-match': _inm, ...asked } = hopless(req.headers);
         const up = request({ agent: WORLD_AGENT, hostname: '127.0.0.1', port: p, path: req.url, method: 'GET', headers: { ...asked, 'x-forwarded-for': xff } }, (u) => {
@@ -858,8 +1173,9 @@ export async function openLauncher(cfg = {}) {
           u.on('end', () => { sawLoad(slug, u.headers['x-sim-load']); const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers; const body = Buffer.concat(chunks); yes({ status: u.statusCode ?? 502, headers: { ...headers, 'content-length': String(body.length) }, body }); });
         });
         up.setTimeout(30_000, () => up.destroy(new Error('timeout'))); up.on('error', no); up.end();
-      }));
+      }), storable);
     } catch { if (!res.headersSent) json(res, 502, { ok: false, code: 'world.unavailable' }); return; }
+    if (r.status === 200 && residentRead(url.pathname.slice(wp(slug).length), 'GET') === 'live') keepLive(key, r);   // #1997
     if (clientGone(req, res)) return;
     const tag = r.status === 200 ? r.headers.etag : undefined;
     // #1737: a kept answer cost the world nothing this time, so it does not repeat the world's time for it (Server-Timing);
@@ -925,6 +1241,8 @@ export async function openLauncher(cfg = {}) {
         if (req.method === 'GET' && direct(req)) { json(res, 200, errors.summary({ limit: url.searchParams.get('limit'), world: url.searchParams.get('world') || undefined })); return; }
         json(res, 404, { ok: false, code: 'not-found' }); return;
       }
+      if (path === '/v1/feed' && (req.method === 'GET' || req.method === 'HEAD')) { feed.serve(req, res, url); return; }   // #1876: public, no credentials
+      if ((path === '/__sim/op/feed-post' || path === '/__sim/op/feed-stats') && req.method === 'POST') { await feed.op(req, res, path.slice('/__sim/op/'.length), direct(req)); return; }
       if (path === '/__sim/health' && (req.method === 'GET' || req.method === 'HEAD')) {
         // lane DASH: the page shell for anyone (no data in it); ?json=1 for the operator on loopback or a site owner's session
         if (!url.searchParams.has('json')) { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-robots-tag': 'noindex', 'referrer-policy': 'no-referrer' }).end(req.method === 'HEAD' ? undefined : dash.shell()); return; }
@@ -1075,7 +1393,7 @@ export async function openLauncher(cfg = {}) {
       }
       if (path === '/__sim/launcher' && req.method === 'GET') {
         if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
-        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug) })) }); return;
+        json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
       }
       // lane L7: Prometheus text for the worlds and the launcher (LOAD-CONTRACT §5), loopback only
       if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
@@ -1086,13 +1404,14 @@ export async function openLauncher(cfg = {}) {
         for (const w of registry.worlds) { if (one && w.slug !== one) continue; const g = readGlitches(join(registry.worldDir(w.slug), 'sim.db'), { limit: one ? limit : 0 }); if (g?.total) worlds[w.slug] = g; }
         json(res, 200, { ok: true, worlds }); return;
       }
+      if (path === '/__sim/usage' && req.method === 'GET') { json(res, ...(direct(req) ? usage.report(url.searchParams.get('days') ?? undefined, registry.worlds.filter((w) => w.test === true).map((w) => w.slug)) : [404, { ok: false, code: 'not-found' }])); return; }   // #1942, loopback only
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
         const running = registry.worlds.filter((w) => pool.status(w.slug).status === 'running').length;
         const host = hostHealth(dataDir); // deploy/host-health.mjs (timer): `hostOk` (+ short `hostCodes` when not ok) public, the numbers loopback-only
         // lane L1: the guard's findings now, not at the timer's next run: wedged, held, crashloop, bootSlow, halted (codes public, texts loopback)
         const worldProblems = pool.problems(), wcodes = [...new Set(worldProblems.map((x) => x.code))];
         const hostOk = (host ? host.ok : true) && !wcodes.length, hostCodes = [...new Set([...(host && !host.ok ? host.codes ?? [] : []), ...wcodes])];
-        json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, ...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), ...(host ? { host } : {}) } : {}) }); return;
+        json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, ...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), loads: pool.loadStats(), ...(host ? { host } : {}) } : {}) }); return;
       }
       const to = redirects?.target(req, path, url);
       if (to) { res.writeHead(302, { location: to, 'cache-control': 'no-store' }).end(); return; }
@@ -1184,8 +1503,10 @@ export async function openLauncher(cfg = {}) {
     if (!slot) { socket.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\nConnection: close\r\n\r\n'); return; }
     socket.once('close', slot.release);
     const eyes = eyesAgent(req.headers['user-agent']);
+    // #2304 A4: a crawler's socket never loads a world
+    if (crawlerAgent(req.headers['user-agent']) && pool.status(slug).status !== 'running') { socket.end('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nConnection: close\r\n\r\n'); return; }
     const attach = async (again) => {
-      let p; try { p = await pool.ensure(worldEnv(w), { passive: eyes }); }
+      let p; try { p = await pool.ensure(worldEnv(w), { passive: eyes, reason: eyes ? 'background' : 'visitor' }); }
       catch (e) { if ((e.code === 'handed-over' && retiredTo) || (await waitHandBack(slug, e))) pipeUpgrade(req, socket, head, port); else socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n'); return; }
       // a world being handed over may refuse once (its old process just stopped): ask again, which waits for the new one
       pipeUpgrade(req, socket, head, p, again ? () => void attach(false) : undefined);
@@ -1217,24 +1538,56 @@ export async function openLauncher(cfg = {}) {
   const problemsFile = join(dataDir, 'world-problems.json');
   const writeProblems = () => { try { writeFileSync(`${problemsFile}.tmp`, JSON.stringify({ at: new Date().toISOString(), problems: pool.problems() }) + '\n'); renameSync(`${problemsFile}.tmp`, problemsFile); } catch { /* next time */ } };
   writeProblems(); const problemsTimer = setInterval(writeProblems, cfg.problemsEveryMs ?? 10_000); problemsTimer.unref();
-  const wakeRecent = () => { for (const w of [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).slice(0, cfg.eager ?? 4)) if (pool.status(w.slug).status !== 'running') pool.ensure(worldEnv(w)).then((p) => log(`woke ${w.slug} on :${p}`), (e) => log(`could not wake ${w.slug}: ${e.message}`)); };
+  // #2304 A5: with --unload-still nothing loads at start but what an alarm or a request asks for
+  const wakeRecent = () => { if (unloadStill) return; for (const w of [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).slice(0, cfg.eager ?? 4)) if (pool.status(w.slug).status !== 'running') pool.ensure(worldEnv(w), { reason: 'background' }).then((p) => log(`woke ${w.slug} on :${p}`), (e) => log(`could not wake ${w.slug}: ${e.message}`)); };
   if (!adopting) wakeRecent();   // a handover wakes nothing until it has taken over (takeOverAll)
+  // #2235: every registered world keeps living. Every keepAliveMs, one registered world with no process (never booted
+  // since this launcher started, put to sleep to make room, or crashed past its restarts) is booted, most recent first,
+  // and only into free room: a keep-alive boot never puts another world to sleep, so when the registry does not fit, the
+  // oldest worlds wait until room frees, and a visitor's boot still evicts the least recently used idle world. A world
+  // that comes back catches up the time it was away (apps/server/src/clock-catchup.ts). On for real worlds; off with
+  // --eager 0 or a custom command (tests and harnesses that boot what they use) unless keepAlive is set. A held world
+  // (the breaker) stays held.
+  const keepAlive = cfg.keepAlive ?? (!cfg.command && (cfg.eager ?? 4) > 0);
+  let keeping = false, keepAliveFrom = !adopting;   // a handover keeps nothing alive until it has taken over
+  const keepAliveOnce = () => {
+    if (keeping || !keepAliveFrom || phase !== 'active' || gate || pool.closing || pool.fenced) return;
+    // (a failed takeover, still adopted, or a world going back to the previous launcher: ensure refuses those, so they
+    // are passed over rather than picked every round ahead of older worlds)
+    // #2299: a world unloaded as still is not booted here (its alarm or its next use loads it); a crashed one still is
+    const w = [...registry.worlds].sort((a, b) => b.createdAt - a.createdAt).find((x) => ['stopped', 'asleep', 'failed'].includes(pool.status(x.slug).status) && !pool.state(x.slug)?.adopted && !pool.state(x.slug)?.handedBack && !unloaded(x.slug));
+    if (!w || !pool.roomFor(w.slug).ok) return;
+    keeping = true;
+    pool.ensure(worldEnv(w), { passive: true, reason: 'background' }).then((p) => log(`kept ${w.slug} living on :${p}`), (e) => log(`could not keep ${w.slug} living: ${e.message}`)).finally(() => { keeping = false; });
+  };
+  const keepAliveTimer = keepAlive ? setInterval(keepAliveOnce, cfg.keepAliveMs ?? 15_000) : null;
+  keepAliveTimer?.unref();
   // idle worlds sleep (frozen in place) and wake on their next request; see ChildPool.freezeIdle
   const sleepMs = cfg.sleepMs ?? SLEEP_MS;
   // ...and a world asleep for exitMs more exits (its memory given back) and cold-boots on its next request; see ChildPool.releaseIdle
   const exitMs = pool.o.exitMs ?? 0;
   let releasing = false;
   const sweep = sleepMs > 0 ? setInterval(() => {
-    for (const slug of pool.freezeIdle()) log(`${slug} is asleep (nobody for ${sleepMs / 1000} s)`);
+    for (const slug of pool.freezeIdle()) { log(`${slug} is asleep (nobody for ${sleepMs / 1000} s)`); endResidents(slug); }
     if (exitMs > 0 && !releasing) {
       releasing = true;
       pool.releaseIdle().then((slugs) => { for (const slug of slugs) log(`${slug} gave its memory back (asleep for ${exitMs / 60_000} min: process exited; its next visit wakes it)`); }, (e) => log(`releasing idle worlds: ${e.message}`)).finally(() => { releasing = false; });
     }
   }, Math.min(15_000, Math.max(250, Math.min(sleepMs, exitMs || sleepMs) / 4))) : null;
   sweep?.unref();
+  // #2299: still worlds leave memory (unloadSweep) and come back on their alarm (alarmScan); the alarms are the recorded
+  // horizons, read back from <data>/horizons.json at start, so they survive a restart of this launcher
+  let unloading = false;
+  const lookTimer = setInterval(() => { lookAtWorlds().catch(() => {}); }, cfg.lookEveryMs ?? PSS_EVERY_MS); lookTimer.unref?.();   // #2233
+  const stillTimer = unloadStill ? setInterval(() => { if (unloading) return; unloading = true; unloadSweep().catch((e) => log(`unloading still worlds: ${e.message}`)).finally(() => { unloading = false; }); }, STILL.everyMs) : null;
+  const alarmTimer = unloadStill ? setInterval(() => alarmScan(), STILL.alarmMs) : null;
+  stillTimer?.unref(); alarmTimer?.unref();
+  if (unloadStill) log(`still worlds unload after ${STILL.quietMs / 60_000} quiet min; ${[...horizons.values()].filter((h) => h.still).length} unloaded, alarms from ${horizonsFile}`);
 
   return {
     server, url: origin, registry, pool, dataDir, auth: auth?.public ?? { provider: 'dev' }, build: BUILD,
+    /** #2299 (tests): one unload pass and one alarm pass now, and the recorded horizons. */
+    still: { sweep: unloadSweep, alarms: alarmScan, horizons, look: lookAtWorlds, stateOf },
     /** Keeper: a connection accepted on the public port, passed to this launcher. */
     accept(socket) { server.emit('connection', socket); socket.resume(); },
     /** Keeper, step 1: finish creations, hold new boots and writes, report the running worlds for the next launcher. */
@@ -1292,7 +1645,14 @@ export async function openLauncher(cfg = {}) {
       return w ? pool.ensure(worldEnv(w)) : null;
     },
     /** Keeper, step 4 (on the old launcher): stop one world so the next one can boot it on the same data. */
-    async releaseWorld(slug) { if (phase !== 'retired') throw new Error('release before retire'); await pool.stop(slug); return pool.status(slug); },
+    async releaseWorld(slug) {
+      if (phase !== 'retired') throw new Error('release before retire');
+      // #2304 A5: a world with a visitor here is moved by the next launcher even if still (its recorded horizon says so)
+      const visited = (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0 || (bootHeld.get(slug) ?? 0) > 0;
+      await pool.stop(slug);
+      if (unloadStill && visited && horizons.has(slug)) { horizons.get(slug).visited = true; saveHorizons(); }
+      return pool.status(slug);
+    },
     /** Keeper, step 4 (on the new launcher): take every adopted world over, `concurrency` at a time; per-world results. */
     async takeOverAll(release, { concurrency = 1, canary = false } = {}) {
       const todo = [...pool.kids.values()].filter((k) => k.adopted).map((k) => k.slug), out = {};
@@ -1300,6 +1660,7 @@ export async function openLauncher(cfg = {}) {
         const t0 = performance.now();
         try {
           const p = await pool.takeOver(slug, release);
+          if (p === UNLOADED) { out[slug] = { ok: true, unloaded: true, ms: Math.round(performance.now() - t0) }; return; }   // #2304 A5
           const k = pool.state(slug);
           // ms: the world's visible pause (old process stopping + new one opening); totalMs adds the pre-warm before it
           const total = Math.round(performance.now() - t0);
@@ -1322,7 +1683,7 @@ export async function openLauncher(cfg = {}) {
       }
       const lanes = Array.from({ length: Math.max(1, concurrency) }, async () => { while (todo.length) await one(todo.shift()); });
       await Promise.all(lanes);
-      wakeRecent();
+      wakeRecent(); keepAliveFrom = true;
       return { worlds: out };
     },
     /** Open (non-upgraded) requests still being answered here. */
@@ -1334,7 +1695,7 @@ export async function openLauncher(cfg = {}) {
      *  a held port every moment here is refused connections, so it stops at once, as before. After a handover (`gentle`)
      *  the keeper's port is served by the next launcher, so that exit is gentle too. */
     close: async ({ drainMs = 3_000, idleMs = 1_500, gentle = process.env.SIM_PORT_HELD === '1' } = {}) => {
-      if (closed) return; closed = true; clearInterval(sweep); errors.flush();
+      if (closed) return; closed = true; clearInterval(sweep); clearInterval(keepAliveTimer); clearInterval(stillTimer); clearInterval(lookTimer); clearInterval(alarmTimer); errors.flush();
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)
@@ -1402,9 +1763,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const num = (k) => (flag(k) === undefined ? undefined : Number(flag(k)));
     const l = await openLauncher({ port: num('port'), dataDir: flag('data'), range: range?.length === 2 ? range : undefined, eager: num('eager'),
       publicOrigin: flag('public-origin'), clerkSatellite: flag('clerk-satellite'), clerkLegacySatellites: flag('clerk-legacy-satellites'), clerkSignInUrl: flag('clerk-sign-in-url'), authEnvFile: flag('auth-env') ?? flag('auth-env-file'), devAuth: argv.includes('--dev-auth') ? true : undefined,
-      maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'),
+      maxWorlds: num('max-worlds'), maxRunning: num('max-running'), minFreeMb: num('min-free-mb'), worldHeapMb: num('world-heap-mb'), worldsMemMb: num('worlds-mem-mb'), idleMs: num('idle-ms'), sleepMs: num('sleep-ms'), unloadStill: flag('unload-still') === undefined ? undefined : num('unload-still') === 1, loadParallel: num('load-parallel'), loadHoldMs: num('load-hold-ms'), exitMs: flag('idle-exit-min') === undefined ? undefined : num('idle-exit-min') * 60_000, createLimit: num('create-limit'),
       maxWorldsPerAccount: num('max-worlds-per-account'), newAccountHours: num('new-account-hours'), newAccountWorldLimit: num('new-account-world-limit'), newAccountCreateLimit: num('new-account-create-limit'), newAccountWindowMinutes: num('new-account-window-minutes'),
-      marsWebDir: flag('mars-web'), cobuilders: argv.includes('--cobuilders') ? true : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulCli: flag('soul-cli'), soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
+      marsWebDir: flag('mars-web'), cobuilders: argv.includes('--cobuilders') ? true : undefined, webDir: flag('web'), base: flag('base'), oldWorldsRoot: argv.includes('--old-worlds-root') ? true : undefined, soulSkill: flag('soul-skill'), soulInstructions: flag('soul-instructions'),
       ...(underKeeper ? { listen: false, adopt: process.env.SIM_ADOPT ? JSON.parse(process.env.SIM_ADOPT) : null } : {}) });
     let stopping = false;
     const stop = (why, gentle) => { if (stopping) return; stopping = true; console.log(`[launcher] ${why}: stopping worlds…`); void l.close(gentle ? { gentle } : {}).then(() => process.exit(0)); };

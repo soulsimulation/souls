@@ -7,14 +7,16 @@ export const FOLLOW_SOUL_WAIT_MS = 60_000;
 
 export const isSoulId = (id: unknown): id is string => typeof id === 'string' && /^s_[A-Za-z0-9_-]+$/.test(id);
 
-export function requestFollowSoul(soulId: string, target: Pick<EventTarget, 'dispatchEvent'> | null = typeof window === 'undefined' ? null : window): boolean {
+/** `approved`: this window just approved the Soul, so the Shell re-reads Me for it (a reconnect). Every other follow (a
+ *  chip, Explore, the card's Follow) is a camera move only: #2280 measured each one reconnecting the page's socket. */
+export function requestFollowSoul(soulId: string, target: Pick<EventTarget, 'dispatchEvent'> | null = typeof window === 'undefined' ? null : window, approved = false): boolean {
   if (!isSoulId(soulId) || !target) return false;
-  target.dispatchEvent(new CustomEvent(FOLLOW_SOUL_EVENT, { detail: { soulId } }));
+  target.dispatchEvent(new CustomEvent(FOLLOW_SOUL_EVENT, { detail: { soulId, approved } }));
   return true;
 }
 
-export function onFollowSoulRequest(cb: (soulId: string) => void, target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = window): () => void {
-  const listener = (e: Event) => { const id = (e as CustomEvent<{ soulId?: unknown }>).detail?.soulId; if (isSoulId(id)) cb(id); };
+export function onFollowSoulRequest(cb: (soulId: string, approved: boolean) => void, target: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> = window): () => void {
+  const listener = (e: Event) => { const d = (e as CustomEvent<{ soulId?: unknown; approved?: unknown }>).detail; if (isSoulId(d?.soulId)) cb(d.soulId, d.approved === true); };
   target.addEventListener(FOLLOW_SOUL_EVENT, listener);
   return () => target.removeEventListener(FOLLOW_SOUL_EVENT, listener);
 }

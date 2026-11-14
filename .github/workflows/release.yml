@@ -1,13 +1,24 @@
 # One production release of the current main head, by manual dispatch (#1402):
-#   preflight  required secrets/vars exist (fails fast, naming what is missing), the head is main, inputs are sane
+#   preflight  required secrets/vars exist (fails fast, naming what is missing), the head is main, inputs are sane; when the
+#              Soul client changed since the last release and is not stamped, a dry run stamps it, opens the stamp commit
+#              as a pull request (branch release/stamp-<version>, merged through the queue) and stops there (gate the head it
+#              merges as, then dispatch again), a real ship refuses; stamp.mjs --check must pass (#1969)
 #   ship       in the `production` environment: tools/world-launcher/deploy/ship.sh, the committed root-only release:
 #              snapshot, stage, boot rehearsal of every world, backup, probe, activate, healthz, walks, poster, stall,
 #              cdn-walk. With dry_run (the DEFAULT) it runs `ship.sh --no-switch`: every step for real except the
 #              activation, checked against the build that stays live; nothing goes live and publish does not run.
 #              The web build renders the public changelog page from CHANGELOG.md with this release's section already
-#              compiled in (a copy outside the tree, SIM_CHANGELOG_FILE; #393), so the page shows the release it ships
-#   publish    (real ships only) compiles changes/ into CHANGELOG.md (same section, same date), tags v<version> on the
-#              shipped commit, creates the GitHub Release
+#              compiled in (a copy outside the tree, SIM_CHANGELOG_FILE; #393), so the page shows the release it ships.
+#              Once the activation and healthz pass, a real ship posts one `release` item to the site feed (#1969),
+#              whatever the browser checks say; a failed verdict still fails the job and prints the rollback command
+#   eyes       (eyes=gpu-runner, the default) the browser checks (probe, walks, poster, stall) on a `souls-timed` runner
+#              with its GPU: ship/eyes.mjs --gpu hardware, handed over by commit status exactly as on a workstation (#1438).
+#              It refuses SwiftShader: no hardware GL renderer fails the checks. The release-probe god folder comes from
+#              SIM_PROBE_GOD_JSON, so the job runs in the `production` environment (main only), reads only that secret,
+#              keeps it in its per-run directory and removes the directory when it ends
+#   publish   (real ships only) compiles changes/ into CHANGELOG.md (same section, same date), tags v<version> on the
+#              shipped commit, creates the GitHub Release, and opens the changelog commit as a pull request (branch
+#              release/changelog-<version>, as publish.yml); the main ruleset refuses direct pushes (#2028)
 #
 # Receipt (real ships only): the head's publishable release-receipt.json, as the one asset of a prerelease (default tag
 # receipts-v<version>). The release owner derives it from the raw gate and V7 receipts, which carry device paths and
@@ -18,7 +29,15 @@
 #   gh release create receipts-v0.123 --prerelease --title "receipts 0.123" release-receipt.json
 # Dry run:  gh workflow run release.yml --ref main -f version=<next version>            (dry_run defaults to true)
 # Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f date=<the dry run's date>]
-#           [-f accept_host_codes=halted]
+#           [-f accept_host_codes=halted] [-f accept_exceptions=true]
+# Accepted exceptions (#2262): a gate blocked only by blockers the maintainer accepted ships when the receipts release also
+# holds accepted-exceptions.json and the dispatch says accept_exceptions=true; the receipts job and ship.sh's preflight
+# match it exactly against the release receipt (root-release.mjs accepted). Check without touching production first:
+#           gh workflow run release.yml --ref <ref> -f version=<v> -f receipts_only=true [-f accept_exceptions=true]
+# Feed item alone, for a release already live and tagged (idempotent: the item's link is its id; from a checkout of v<v>):
+#           gh workflow run release.yml --ref main -f version=<v> -f feed_only=true
+# The GPU runner's browser checks alone, against the live build (no probe, no handover, no environment, no secret; any ref):
+#           gh workflow run release.yml --ref <ref> -f version=<v> -f eyes_only=true
 # A dry run takes no backup (nothing goes live, so there is nothing to roll back) and runs no install.sh. It leaves the
 # staged release directory with its dependencies on the host, which a later real ship of the same build reuses. The
 # rehearsal's database copies live in a mktemp dir of the run's own, removed when it ends.
@@ -45,13 +64,32 @@ on:
         description: ship.sh --accept-host-codes (comma-separated, such as halted for a release that fixes a halted world)
         required: false
       eyes:
-        description: Where the browser checks (probe, walks, poster, stall) run. laptop (default) = ship/eyes.mjs on a GPU workstation, handed over by commit status (#1438); runner = here, where no GPU holds their bars
+        description: Where the browser checks (probe, walks, poster, stall) run. gpu-runner (default) = ship/eyes.mjs on a souls-timed runner's GPU; laptop = ship/eyes.mjs on a GPU workstation; both handed over by commit status (#1438); runner = here, where no GPU holds their bars
         type: choice
-        options: [laptop, runner]
-        default: laptop
+        options: [gpu-runner, laptop, runner]
+        default: gpu-runner
+      client_version:
+        description: Soul client version stamped when the client changed since the last release (default the last release's client, next patch)
+        required: false
       receipts:
         description: Release tag holding the head's release-receipt.json (ship-receipt.mjs --public); default receipts-v<version>
         required: false
+      accept_exceptions:
+        description: The receipts release also holds accepted-exceptions.json (docs/release.md#accepted-exceptions); the gate may be blocked only by what it accepts, exactly
+        type: boolean
+        default: false
+      receipts_only:
+        description: Check the receipts (and accepted exceptions) for this head and stop. No production environment, no secret, no ssh, nothing staged; any branch
+        type: boolean
+        default: false
+      feed_only:
+        description: Post the feed item of release <version>, already live and tagged v<version>, and stop (idempotent). Production environment, main only; nothing staged
+        type: boolean
+        default: false
+      eyes_only:
+        description: Run the walks, poster and stall on the GPU runner against the live build and stop. No probe, no environment, no secret, nothing staged; any branch
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -63,12 +101,17 @@ jobs:
   preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write        # a dry run pushes the client stamp branch release/stamp-<version> (#1969)
+      pull-requests: write   # and opens its pull request
     outputs:
       sha: ${{ steps.refs.outputs.sha }}
       label: ${{ steps.refs.outputs.label }}
       date: ${{ steps.refs.outputs.date }}
+      stamped: ${{ steps.refs.outputs.stamped }}
     steps:
       - name: Required secrets and variables
+        if: ${{ !inputs.receipts_only && !inputs.eyes_only }}
         env:
           # Environment secrets are not visible outside the production job, so only repo-level presence is checked
           # here for them; the ship job checks again inside the environment.
@@ -95,9 +138,25 @@ jobs:
           ACCEPT: ${{ inputs.accept_host_codes }}
           DRY_RUN: ${{ inputs.dry_run }}
           DATE: ${{ inputs.date }}
+          CLIENT: ${{ inputs.client_version }}
+          RECEIPTS_ONLY: ${{ inputs.receipts_only }}
+          FEED_ONLY: ${{ inputs.feed_only }}
+          EYES_ONLY: ${{ inputs.eyes_only }}
+          PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}   # as publish.yml: CI runs on the stamp pull request
         run: |
-          [ "$REF" = refs/heads/main ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
+          # receipts_only (#2262) and eyes_only touch no host and ship nothing, so a test cut on a branch may use them
+          [ "$REF" = refs/heads/main ] || [ "$RECEIPTS_ONLY" = true ] || [ "$EYES_ONLY" = true ] || { echo "::error::Releases ship main only (got $REF)"; exit 1; }
+          [ "$(echo "$RECEIPTS_ONLY $FEED_ONLY $EYES_ONLY" | grep -o true | wc -l)" -le 1 ] || { echo "::error::receipts_only, feed_only and eyes_only exclude each other"; exit 1; }
           [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || { echo "::error::version must look like 0.123 or 0.123.1 (got '$VERSION')"; exit 1; }
+          if [ "$FEED_ONLY" = true ] || [ "$EYES_ONLY" = true ]; then
+            # feed_only posts the item of a release that shipped and was tagged; the feed job checks out that tag
+            if [ "$FEED_ONLY" = true ]; then
+              git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null || { echo "::error::feed_only: no tag v$VERSION (the release must be live and published)"; exit 1; }
+              SHA=$(git rev-parse "refs/tags/v$VERSION^{commit}")
+            else SHA=$(git rev-parse HEAD); fi
+            { echo "sha=$SHA"; echo "label=$VERSION-$([ "$FEED_ONLY" = true ] && echo feed || echo eyes)"; echo "date=$(date -u +%F)"; } >> "$GITHUB_OUTPUT"
+            echo "$([ "$FEED_ONLY" = true ] && echo "Feed item only for v$VERSION at ${SHA:0:12}" || echo "GPU-runner browser checks only, against the live build"): nothing ships" >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "::error::tag v$VERSION already exists"; exit 1; fi
           [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "::error::accept_host_codes: comma-separated host codes, such as halted"; exit 1; }
           # ship.sh's label (its output folder and backup prefix pre-r<label without dots>) is the version itself
@@ -105,12 +164,85 @@ jobs:
           [ -n "$DATE" ] || DATE=$(date -u +%F)
           [[ "$DATE" =~ ^20[0-9]{2}-[01][0-9]-[0-3][0-9]$ ]] || { echo "::error::date must be YYYY-MM-DD (got '$DATE')"; exit 1; }
           node tools/changelog/compile.mjs --check
+          if [ "$RECEIPTS_ONLY" = true ]; then
+            { echo "sha=$(git rev-parse HEAD)"; echo "label=$LABEL"; echo "date=$DATE"; } >> "$GITHUB_OUTPUT"
+            echo "Receipts only for v$VERSION at $(git rev-parse --short HEAD): nothing ships, no client stamp" >> "$GITHUB_STEP_SUMMARY"; exit 0
+          fi
+          # #1969: the client is stamped once per release, before the gate. A dry run stamps a changed, unstamped client, opens
+          # the stamp commit as a pull request and ends (ship is skipped); the main ruleset requires its checks and the queue,
+          # as for publish.yml's changelog. Once it merges, the gate, the dry run and the real ship run on main's head. A real
+          # ship refuses an unstamped client. --check gates every dispatch.
+          [[ -z "$CLIENT" || "$CLIENT" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]] || { echo "::error::client_version must be digits and dots (got '$CLIENT')"; exit 1; }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          stamp="$RUNNER_TEMP/stamp.txt"
+          node tools/world-launcher/deploy/ship/release-client.mjs stamp --version "$VERSION" ${CLIENT:+--client "$CLIENT"} > "$stamp" \
+            || { cat "$stamp"; echo "::error::client stamp refused or stamp.mjs --check failed (above): the release stops"; exit 1; }
+          cat "$stamp"
+          if [ "$(tail -1 "$stamp" | sed -n 's/.* stamped=//p')" = 1 ]; then
+            [ "$DRY_RUN" != false ] || { echo "::error::the Soul client changed since the last release and is not stamped. Dispatch a dry run of $VERSION first: it opens the stamp pull request. Merge it, gate that head, then ship it"; exit 1; }
+            branch="release/stamp-$VERSION"
+            ! git ls-remote --exit-code origin "refs/heads/$branch" >/dev/null || { echo "::error::$branch already exists: merge or close its pull request, then dispatch again"; exit 1; }
+            git push origin "HEAD:refs/heads/$branch"
+            GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --title "release: stamp the Soul client for $VERSION" \
+              --body "$(tail -1 "$stamp"): the client changed since the last release. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready; once it merges, gate main's head and dispatch the dry run again." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "stamped=1" >> "$GITHUB_OUTPUT"
+            echo "Client stamp opened as a pull request (above); nothing else ran." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "Soul $(tail -1 "$stamp")" >> "$GITHUB_STEP_SUMMARY"
           # One release date for the page the ship job builds and the CHANGELOG.md publish commits.
           { echo "sha=$(git rev-parse HEAD)"; echo "label=$LABEL"; echo "date=$DATE"; } >> "$GITHUB_OUTPUT"
           echo "Release v$VERSION: head $(git rev-parse --short HEAD), label $LABEL, $([ "$DRY_RUN" = true ] && echo 'DRY RUN (ship.sh --no-switch, nothing goes live)' || echo 'REAL SHIP')" >> "$GITHUB_STEP_SUMMARY"
 
-  ship:
+  # #2262: the receipts for this head, checked before anything touches the host: the release receipt (gate and laptop V7
+  # for this cut) and, with accept_exceptions, the maintainer's accepted-exceptions.json from the same release, matched
+  # exactly (root-release.mjs accepted; docs/release.md#accepted-exceptions). Real ships and receipts_only; no secret.
+  receipts:
     needs: preflight
+    if: ${{ needs.preflight.outputs.stamped != '1' && !inputs.feed_only && !inputs.eyes_only && (!inputs.dry_run || inputs.receipts_only) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: '${{ needs.preflight.outputs.sha }}', persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: Receipts and accepted exceptions for this head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.receipts || format('receipts-v{0}', inputs.version) }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+          ACCEPT: ${{ inputs.accept_exceptions }}
+        run: |
+          r="$RUNNER_TEMP/receipts"; x="$RUNNER_TEMP/exceptions"; mkdir -p "$r" "$x"
+          V=tools/world-launcher/deploy/ship/root-release.mjs
+          gh release download "$TAG" -R "$REPO" -p release-receipt.json -D "$r" \
+            || { echo "::error::No release-receipt.json in the release $TAG. Derive it with ship-receipt.mjs --public and upload it there first."; exit 1; }
+          node tools/proof/publication.mjs "$r/release-receipt.json" || { echo "::error::release-receipt.json is not publishable"; exit 1; }
+          set +e
+          if [ "$ACCEPT" = true ]; then
+            gh release download "$TAG" -R "$REPO" -p accepted-exceptions.json -D "$x" \
+              || { echo "::error::accept_exceptions is set but the release $TAG holds no accepted-exceptions.json"; exit 1; }
+            node tools/proof/publication.mjs "$x/accepted-exceptions.json" || { echo "::error::accepted-exceptions.json is not publishable"; exit 1; }
+            node $V accepted "$r" "$x/accepted-exceptions.json" "$SHA" > "$RUNNER_TEMP/verdict.txt"
+          else
+            node $V receipt "$r/release-receipt.json" "$SHA" > "$RUNNER_TEMP/verdict.txt"
+          fi
+          status=$?
+          cat "$RUNNER_TEMP/verdict.txt"
+          { echo "Receipts $TAG for ${SHA:0:12}$([ "$ACCEPT" = true ] && echo ' with accepted exceptions'): $([ $status = 0 ] && echo clean || echo REFUSED)"; echo '```'; cat "$RUNNER_TEMP/verdict.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ $status = 0 ] || echo "::error::the receipts in $TAG are not clean for ${SHA:0:12} (above); nothing was shipped"
+          exit $status
+
+  ship:
+    needs: [preflight, receipts]
+    # a dispatch that stamped the client ends at its pull request (#1969); receipts_only ends at the receipts (#2262); a real
+    # ship needs them clean, a dry run (no-switch) does not check them first
+    if: ${{ !cancelled() && !inputs.receipts_only && !inputs.feed_only && !inputs.eyes_only && needs.preflight.result == 'success' && needs.preflight.outputs.stamped != '1' && (needs.receipts.result == 'success' || (inputs.dry_run && needs.receipts.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 240   # setup + the 20-min eyes wait + ship.sh + the 45-min verdict wait + margin, so the verdict and its rollback line always print
     environment: production
@@ -174,13 +306,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.receipts || format('receipts-v{0}', inputs.version) }}
           REPO: ${{ github.repository }}
+          ACCEPT: ${{ inputs.accept_exceptions }}
         run: |
           r="$RUNNER_TEMP/receipts"; mkdir -p "$r"
           gh release download "$TAG" -R "$REPO" -p release-receipt.json -D "$r" \
             || { echo "::error::No release-receipt.json in the release $TAG. Derive it with ship-receipt.mjs --public and upload it there first."; exit 1; }
           node tools/proof/publication.mjs "$r/release-receipt.json" || { echo "::error::release-receipt.json is not publishable: derive it with ship-receipt.mjs --public"; exit 1; }
-          # ship.sh's preflight checks it for this exact head (root-release.mjs receipt)
+          # ship.sh's preflight checks it for this exact head (root-release.mjs receipt, or accepted with SHIP_EXCEPTIONS)
           echo "SHIP_RECEIPTS=$r" >> "$GITHUB_ENV"
+          if [ "$ACCEPT" = true ]; then
+            x="$RUNNER_TEMP/exceptions"; mkdir -p "$x"
+            gh release download "$TAG" -R "$REPO" -p accepted-exceptions.json -D "$x" || { echo "::error::no accepted-exceptions.json in $TAG"; exit 1; }
+            echo "SHIP_EXCEPTIONS=$x/accepted-exceptions.json" >> "$GITHUB_ENV"
+          fi
       - name: Probe world
         env:
           SIM_PROBE_GOD_JSON: ${{ secrets.SIM_PROBE_GOD_JSON }}
@@ -211,27 +349,31 @@ jobs:
           printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
             "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
           ssh -o BatchMode=yes "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" true 2>&1 | sed -E 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g'; exit "${PIPESTATUS[0]}"
-      - name: Wait for the workstation's eyes
+      - name: Wait for the eyes
         if: ${{ inputs.eyes != 'runner' }}
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ needs.preflight.outputs.sha }}
           RUN: ${{ github.run_id }}.${{ github.run_attempt }}
           DRY_RUN: ${{ inputs.dry_run }}
+          EYES: ${{ inputs.eyes }}
           URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # #1438: the runner has no GPU, so the probe, walks, poster and stall run on the release owner's workstation:
+          # #1438: this runner has no GPU, so the probe, walks, poster and stall run in ship/eyes.mjs on a GPU: the eyes job
+          # on a souls-timed runner (gpu-runner), or the release owner's workstation (laptop):
           #   node tools/world-launcher/deploy/ship/eyes.mjs --sha <this sha> --run <this run>
           # It answers release/eyes "ready" once its probe watches; nothing is staged before that. Fails closed.
           H=tools/world-launcher/deploy/ship/handover.mjs
           mode=no-switch; [ "$DRY_RUN" != false ] || mode=ship
           node $H post "$SHA" release/ship pending "run=$RUN mode=$mode waiting-for-eyes" --url "$URL"
-          eyes="node tools/world-launcher/deploy/ship/eyes.mjs --sha $SHA --run $RUN --label ${{ needs.preflight.outputs.label }}"
-          echo "::notice title=Start the workstation's eyes::$eyes"
-          echo "Eyes: \`$eyes\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$EYES" = laptop ]; then
+            eyes="node tools/world-launcher/deploy/ship/eyes.mjs --sha $SHA --run $RUN --label ${{ needs.preflight.outputs.label }}"
+            echo "::notice title=Start the workstation's eyes::$eyes"
+            echo "Eyes: \`$eyes\`" >> "$GITHUB_STEP_SUMMARY"
+          else echo "Eyes: the eyes job, on a souls-timed GPU runner" >> "$GITHUB_STEP_SUMMARY"; fi
           if ! node $H wait "$SHA" release/eyes --run "$RUN" --want ready --timeout-min 20 --every-s 20; then
             node $H post "$SHA" release/ship failure "run=$RUN stopped: no eyes" --url "$URL" || true
-            echo "::error::No workstation eyes for run $RUN within 20 min: nothing was staged. Start ship/eyes.mjs, then dispatch again."
+            echo "::error::No eyes ($EYES) for run $RUN within 20 min: nothing was staged. $([ "$EYES" = laptop ] && echo 'Start ship/eyes.mjs' || echo 'Read the eyes job (a busy or missing souls-timed runner, or its setup)'). Cancel this run (gh run cancel $GITHUB_RUN_ID) so a queued eyes job frees the release group, then dispatch again."
             exit 1
           fi
       - name: ship.sh
@@ -251,7 +393,7 @@ jobs:
           export SHIP_ORIGIN="$SIM_ORIGIN" SHIP_OUT_ROOT="$RUNNER_TEMP/ship"
           args=(--label "$LABEL" --sha "$SHA")
           if [ "$EYES" != runner ]; then
-            # the workstation runs the browser steps. Right before the activation its probe must still be watching (newest
+            # the eyes (ship/eyes.mjs on a GPU) run the browser steps. Right before the activation its probe must still be watching (newest
             # release/eyes for this attempt is "ready"); right after, it is told. A failed tell is recorded, not a stop.
             args+=(--no-eyes)
             export SHIP_PREACTIVATE_CMD="node tools/world-launcher/deploy/ship/handover.mjs wait $SHA release/eyes --run $RUN --want ready --max-age-s 180 --timeout-min 1 --every-s 20"
@@ -282,12 +424,32 @@ jobs:
               node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship failure "run=$RUN stopped: ship.sh exit $status before the release" --url "$URL" || true
             fi
           fi
-          # activated, but ship.sh could not tell the workstation: tell it once more, so its checks still run
+          # activated, but ship.sh could not tell the eyes: tell them once more, so its checks still run
           if [ "$EYES" != runner ] && grep -q '^released-hook 1$' "$out/POSTLIVE.txt" 2>/dev/null; then
-            node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship success "run=$RUN released" --url "$URL" || echo "::warning::could not tell the workstation the release is done; its verdict will time out (fail closed)"
+            node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/ship success "run=$RUN released" --url "$URL" || echo "::warning::could not tell the eyes the release is done; its verdict will time out (fail closed)"
           fi
           exit $status
-      - name: The workstation's verdict
+      - name: Feed
+        # A2: after the activation and healthz, whatever the browser checks say (they come after, in the verdict below)
+        if: ${{ !cancelled() && !inputs.dry_run }}
+        continue-on-error: true   # the release is live and stays live; a failed post is a warning with the command to retry
+        env:
+          VERSION: ${{ inputs.version }}
+          LABEL: ${{ needs.preflight.outputs.label }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          # #1969: the health checks passed. One `release` item (the client version, the changelog link, minClient when the
+          # minimum was raised) on the site feed, through the operator route on the host, which answers loopback only. A retry
+          # finds the item already posted for this version and posts nothing.
+          steps="$RUNNER_TEMP/ship/$LABEL/STEPS.txt"
+          if ! grep -qE '^activate ok ' "$steps" 2>/dev/null || ! grep -qE '^healthz ok ' "$steps"; then echo "no feed item: the activation or healthz did not pass"; exit 0; fi
+          set +e
+          node tools/world-launcher/deploy/ship/release-client.mjs feed --version "$VERSION" --origin "$SIM_ORIGIN" --ssh "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" 2>&1 | sed -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g'
+          rc=${PIPESTATUS[0]}
+          [ "$rc" = 0 ] || echo "::warning::the release item was not posted to the feed. Retry from a checkout of this head: node tools/world-launcher/deploy/ship/release-client.mjs feed --version $VERSION --origin $SIM_ORIGIN --ssh <deploy target>. Once v$VERSION is tagged: gh workflow run release.yml --ref main -f version=$VERSION -f feed_only=true"
+          exit "$rc"
+      - name: The eyes' verdict
         if: ${{ inputs.eyes != 'runner' && !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -321,9 +483,9 @@ jobs:
           if [ "$DRY_RUN" = false ]; then
             cmd=$(rollback_line)
             { echo "The release IS live and its browser checks failed. Decide; to roll code back (no ssh, no data touched):"; echo; echo "    $cmd"; } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::we-${SHA:0:12} is live and the workstation's checks failed or never reported. Rollback: $cmd"
+            echo "::error::we-${SHA:0:12} is live and its browser checks failed or never reported. Rollback: $cmd"
           else
-            echo "::error::the workstation's checks failed or never reported (dry run: nothing went live)"
+            echo "::error::the browser checks failed or never reported (dry run: nothing went live)"
           fi
           exit 1
       - name: Public evidence
@@ -349,13 +511,175 @@ jobs:
         if: always()
         run: rm -rf ~/.ssh/deploy_key "$RUNNER_TEMP/release-probe" "$RUNNER_TEMP/receipts"
 
+  # eyes=gpu-runner (the default): ship/eyes.mjs on a souls-timed runner's GPU, beside the ship job and handed over by
+  # commit status exactly as from a workstation (#1438). eyes_only: the walks, poster and stall alone, against the live
+  # build, from any ref, with no environment and no secret. A hardware GL renderer or nothing: no SwiftShader.
+  eyes:
+    needs: [preflight, receipts]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (inputs.eyes_only || (inputs.eyes == 'gpu-runner' && !inputs.receipts_only && !inputs.feed_only && needs.preflight.outputs.stamped != '1' && (needs.receipts.result == 'success' || (inputs.dry_run && needs.receipts.result == 'skipped')))) }}
+    runs-on: [self-hosted, souls-timed]
+    timeout-minutes: 150   # setup, up to 45 min for the ship job's handover, the 60-min release window, the checks
+    # SIM_PROBE_GOD_JSON is a production-environment secret, which reaches only a job in that environment (main only).
+    # This job reads that one secret, keeps it in its per-run directory and removes the directory when it ends.
+    environment: ${{ !inputs.eyes_only && 'production' || '' }}
+    permissions:
+      contents: read
+      statuses: write   # release/eyes
+      actions: read     # eyes.mjs reads this run (the Actions runs API) before it answers
+    env:
+      SHA: ${{ needs.preflight.outputs.sha }}
+      RUN: ${{ github.run_id }}.${{ github.run_attempt }}
+      LABEL: ${{ needs.preflight.outputs.label }}
+      EYES_ONLY: ${{ inputs.eyes_only }}
+      URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      # Before anything can print them: the runner's paths, host name and user name never reach the public log.
+      - name: Mask host-identifying values
+        run: |
+          for v in "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_WORKSPACE" "$RUNNER_TEMP" "$RUNNER_TOOL_CACHE" "$(hostname)" "$(id -un)"; do
+            if [ "${#v}" -ge 4 ]; then echo "::add-mask::$v"; fi
+          done
+      # A persistent runner: everything this job installs or writes stays in its own directory, removed at the end.
+      - name: Per-run directory
+        run: |
+          d="$RUNNER_TEMP/eyes-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"; mkdir -p "$d/tmp" "$d/bin" "$d/home"
+          {
+            echo "PER_RUN=$d"
+            echo "TMPDIR=$d/tmp"
+            echo "npm_config_store_dir=$d/pnpm-store"
+            echo "npm_config_cache_dir=$d/pnpm-cache"
+            echo "npm_config_state_dir=$d/pnpm-state"
+            echo "npm_config_cache=$d/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$d/pw-browsers"
+            echo "PYTHONPATH=$d/py"
+          } >> "$GITHUB_ENV"
+          echo "$d/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: '${{ needs.preflight.outputs.sha }}', persist-credentials: false }
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with: { dest: '${{ env.PER_RUN }}/setup-pnpm' }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - run: pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir"
+      - name: Chromium, Pillow and gh
+        run: |
+          # this Playwright no longer names Ubuntu 20.04; its Ubuntu 22.04 build runs there (as timed-run.yml's clips)
+          if grep -q 'VERSION_ID="20.04"' /etc/os-release; then echo "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64" >> "$GITHUB_ENV"; export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64; fi
+          pnpm --filter mars-campus-viewer exec playwright install chromium 2>&1 | grep -v "%" | tail -4
+          # ship/poster-count.py classifies the poster frames with Pillow
+          python3 -c 'import PIL' 2>/dev/null || python3 -m pip install --quiet --target "$PER_RUN/py" pillow
+          python3 -c 'import PIL; print("Pillow", PIL.__version__)'
+          # eyes.mjs and handover.mjs speak to the GitHub API through gh
+          if ! command -v gh >/dev/null; then
+            # pinned: gh 2.63.0's own checksums file lists this sha256 for the tarball
+            curl -fsSL -o "$PER_RUN/gh.tgz" https://github.com/cli/cli/releases/download/v2.63.0/gh_2.63.0_linux_amd64.tar.gz
+            echo "a3a8df5164693e81acf9000b63a2da1a8aca25e4d2c640c466bcedf22c83d5fb  $PER_RUN/gh.tgz" | sha256sum -c --quiet
+            tar -xzf "$PER_RUN/gh.tgz" -C "$PER_RUN" && cp "$PER_RUN/gh_2.63.0_linux_amd64/bin/gh" "$PER_RUN/bin/"
+          fi
+          gh --version | head -1
+          nvidia-smi --query-gpu=name,driver_version --format=csv,noheader || echo "nvidia-smi: not available"
+      - name: Probe world
+        if: ${{ !inputs.eyes_only }}
+        env:
+          SIM_PROBE_GOD_JSON: ${{ secrets.SIM_PROBE_GOD_JSON }}
+        run: |
+          [ -n "$SIM_PROBE_GOD_JSON" ] || { echo "::error::the production environment holds no SIM_PROBE_GOD_JSON"; exit 1; }
+          install -d -m 700 "$PER_RUN/release-probe"
+          printf '%s' "$SIM_PROBE_GOD_JSON" > "$PER_RUN/release-probe/.eden-god.json" && chmod 600 "$PER_RUN/release-probe/.eden-god.json"
+      - name: Eyes
+        id: eyes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          export HOME="$PER_RUN/home"
+          E=tools/world-launcher/deploy/ship/eyes.mjs
+          if [ "$EYES_ONLY" = true ]; then
+            node $E --checks-only --gpu hardware --origin "$SIM_ORIGIN" --out "$PER_RUN/eyes"
+          else
+            node $E --sha "$SHA" --run "$RUN" --label "$LABEL" --gpu hardware --origin "$SIM_ORIGIN" --cli "$PER_RUN/release-probe" --out "$PER_RUN/eyes" --repo "$REPO"
+          fi
+      # setup failed before eyes.mjs could answer: say so at once, so the ship job stops instead of waiting 20 min
+      - name: Tell the ship job
+        if: ${{ failure() && !inputs.eyes_only && steps.eyes.outcome == 'skipped' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/world-launcher/deploy/ship/handover.mjs post "$SHA" release/eyes failure "run=$RUN fail: the eyes job setup failed" --url "$URL" || true
+      - name: Public evidence
+        if: always()
+        run: |
+          [ -n "$PER_RUN" ] || exit 0
+          out="$PER_RUN/eyes" pub="$PER_RUN/public"; mkdir -p "$pub"
+          for f in gl.json eyes-result.json POSTLIVE.txt probe-bar.json walks-check.txt poster-check.txt stall-check.txt; do
+            [ -f "$out/$f" ] || continue
+            if node tools/proof/publication.mjs "$out/$f" > /dev/null 2>&1; then cp "$out/$f" "$pub/"; else echo "kept private: $f (publication check)"; fi
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: eyes-${{ needs.preflight.outputs.label }}
+          path: ${{ env.PER_RUN }}/public
+          if-no-files-found: ignore
+      - name: Remove the per-run directory
+        if: always()
+        run: '[ -z "$PER_RUN" ] || rm -rf "$PER_RUN"'
+
+  # feed_only: the feed item of a release already live and tagged, by itself (A3 of the 0.127 follow-up). The tag's tree
+  # with this workflow's release-client.mjs, which compares with the release before the tag. Idempotent: the item's link
+  # (<origin>/changelog#v<version>) is its id, so a second run finds it and posts nothing.
+  feed:
+    needs: preflight
+    if: ${{ inputs.feed_only && needs.preflight.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { ref: '${{ needs.preflight.outputs.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          [ -z "$SIM_DEPLOY_HOST" ] || echo "::add-mask::$SIM_DEPLOY_HOST"
+          [ -z "$SIM_DEPLOY_USER" ] || echo "::add-mask::$SIM_DEPLOY_USER"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+      - name: Feed
+        env:
+          VERSION: ${{ inputs.version }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          C=tools/world-launcher/deploy/ship/release-client.mjs
+          git show "$GITHUB_SHA:$C" > "$C"
+          set +e
+          node $C feed --version "$VERSION" --origin "$SIM_ORIGIN" --ssh "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" 2>&1 | sed -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's/\[[0-9a-fA-F:]*:[0-9a-fA-F:]+\]/<ip6>/g'
+          rc=${PIPESTATUS[0]}
+          echo "feed item for v$VERSION: $([ "$rc" = 0 ] && echo 'posted or already there' || echo 'NOT posted')" >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: Remove deploy credentials
+        if: always()
+        run: rm -rf ~/.ssh/deploy_key
+
   publish:
     needs: [preflight, ship]
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: write        # the tag and the branch release/changelog-<version>
+      pull-requests: write   # the changelog pull request (#2028)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: main, fetch-depth: 0 }
@@ -364,6 +688,7 @@ jobs:
       - name: Changelog, tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}   # as publish.yml: CI runs on the changelog pull request
           VERSION: ${{ inputs.version }}
           DATE: ${{ needs.preflight.outputs.date }}
           SHA: ${{ needs.preflight.outputs.sha }}
@@ -376,17 +701,18 @@ jobs:
           for f in $shipped; do git show "$SHA:$f" > "$tmp/$f"; done
           if [ -f CHANGELOG.md ]; then cp CHANGELOG.md "$tmp/"; fi
           node tools/changelog/compile.mjs --root "$tmp" --version "$VERSION" --date "$DATE" --notes "$RUNNER_TEMP/notes.md"
-          cp "$tmp/CHANGELOG.md" CHANGELOG.md
-          for f in $shipped; do git rm -q --ignore-unmatch "$f"; done
-          git add CHANGELOG.md
           git tag -a "v$VERSION" "$SHA" -m "Souls $VERSION"
           git push origin "v$VERSION"
           gh release create "v$VERSION" --verify-tag --title "Souls $VERSION" --notes-file "$RUNNER_TEMP/notes.md"
-          git commit -q -m "release: changelog for $VERSION" -m "Folds the shipped changes/ fragments into CHANGELOG.md."
-          # main may have moved during the release; replay the changelog commit on top.
-          for attempt in 1 2 3; do
-            git pull -q --rebase origin main && git push origin HEAD:main && exit 0
-            sleep 5
-          done
-          echo "::error::Released and tagged v$VERSION, but could not push the changelog commit to main (branch protection?). Open a PR from this run's diff."
-          exit 1
+          echo "Tagged v$VERSION and created the GitHub Release" >> "$GITHUB_STEP_SUMMARY"
+          # #2028: the changelog commit, as a pull request against main (the ruleset requires checks and the merge queue).
+          branch="release/changelog-$VERSION"
+          git checkout -q -b "$branch"
+          cp "$tmp/CHANGELOG.md" CHANGELOG.md
+          for f in $shipped; do git rm -q --ignore-unmatch "$f"; done
+          git add CHANGELOG.md
+          git commit -q -m "release: changelog for $VERSION" -m "Folds the shipped changes/ fragments into CHANGELOG.md (v$VERSION at ${SHA:0:12})."
+          git push -u origin "$branch"
+          GH_TOKEN="$PR_TOKEN" gh pr create --base main --head "$branch" --label no-changelog --title "release: changelog for $VERSION" \
+            --body "Folds the fragments shipped in v$VERSION (${SHA:0:12}) into CHANGELOG.md. Created by release.yml run $GITHUB_RUN_ID. Review and give it merge:ready." \
+            | tee -a "$GITHUB_STEP_SUMMARY"

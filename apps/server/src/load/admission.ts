@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
-import {apiRoute, handlerMsOf, recordApi} from './api-times.ts';
+import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, type ActTiming} from './api-times.ts';
 import {noteAnswer} from './stall-log.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
@@ -30,7 +30,6 @@ export function classify(method: string, path: string): RouteClass | null {
     // `around` explores: it records the places found and invalidates menus (around.ts), so it is a write (C1), not a read
     if (method === 'GET' && path === '/v1/edge/around') return {cls: 'C1', id: 'edge:around', god: false, deadlineMs: C1_MS};
     if (method === 'GET' && (m = EDGE_READ.exec(path))) return {cls: 'C2', id: 'edge:' + m[1].replace(/\/.*/, '/:id'), god: false, deadlineMs: C2_MS};
-    if (method === 'POST' && path === '/v1/edge/resolve') return {cls: 'C2', id: 'edge:resolve', god: false, deadlineMs: C2_MS};
     if (method !== 'GET' && (m = EDGE_WRITE.exec(path))) return {cls: 'C1', id: 'edge:' + m[1].replace(/\/[^/]+/, '/:id'), god: false, deadlineMs: C1_MS};
     return null;
   }
@@ -106,6 +105,9 @@ export class Admission {
   /** Principals (Souls + god) with a heavy request in the last minute: the `awake` of the refill formula. */
   active() { const now = this.now(); let n = 0; for (const b of this.buckets.values()) if (now - b.seen < ACTIVE_MS) n++; return Math.max(1, n); }
   estimate(id: string) { return this.est.get(id) ?? DEFAULT_EST_MS; }
+  /** What a principal's bucket must hold to be served under contention: the route estimate, but never more than a
+   *  bucket can hold (#2080: one cold 2.1 s act set the estimate above capacity, and no contended act could run again). */
+  private need(id: string) { return Math.min(CAPACITY_MS, this.estimate(id)); }
   /** Refill of one principal's bucket, ms per s. A Soul: min(200, 20 × frameBudget / awake), so the Souls' buckets together
    *  refill at the frame budget's own throughput (20 frames/s × budget ms) and a crowd never earns more than the dispatcher
    *  can serve (srv-admission-calib: the old 500/awake × {1, .5, .25} was the laptop's green budget at every box). The god:
@@ -142,13 +144,13 @@ export class Admission {
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
     if (read && this.level === 'black') { this.shed.reads++; return this.told(r.key, r.god, now, busyRefusal(this.level)); }
-    if (read && b.tokens < est && this.contended(r.key)) {
+    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key)) {
       // §2b strike only for an impolite request: one that came back before the Retry-After it was last given had
       // elapsed. A Soul that waited and is still over budget is refused again with a Retry-After, but not struck
       // (eden2, 2026-10-31: honest Souls collected 3 strikes and a 60 s cool-down, 45-59 % of all read wall time)
       this.shed.slow++; this.shed.reads++; if (this.impolite(r.key, now)) this.strike(r.key, r.god, 'slow', now);
       const rate = this.refill(r.god);
-      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((est - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
+      return this.told(r.key, r.god, now, {status: 429, code: 'soul.slow-down', retryAfterS: Math.min(COOL_MS / 1000, Math.max(1, Math.ceil((this.need(r.route.id) - b.tokens) / Math.max(rate, 1e-6) / 1000))), message: 'this Soul has asked for a lot in a short time; the world can answer it again shortly'});
     }
     const deadline = now + Math.min(r.route.deadlineMs, r.hintMs && r.hintMs > 0 ? r.hintMs : Infinity);
     // a read that cannot start before its deadline (the time already queued, paid at the frame budget) is answered now,
@@ -224,7 +226,7 @@ export class Admission {
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.estimate(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
       }
       const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
@@ -299,11 +301,20 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   // #1750 A2: and the same two numbers go into the route's histograms (api-times.ts), for /healthz and live.json
   // A serving-warm wait (http.ts servingWait, before this middleware) is part of the world's time and of the wait:
   // `warm;dur`, counted in `world` and in the route's queue time
-  const timed = (c: Context, t0: number, queued = 0) => {
+  // #1944 A1: an act whose handler ran (`act`: its marks, actTiming) also says its parts after admission, which sum with
+  // `queue` to `world` (less `warm`): handler, wait, commit; and inside handler, bind, check and the route searches that
+  // missed the per-epoch memo (`route-miss;desc=<n>`)
+  const timed = (c: Context, t0: number, queued = 0, act?: ActTiming) => {
     const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
-    c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}`);
+    const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
+    c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
     const route = apiRoute(c.req.method, c.req.path);
-    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k))); noteAnswer(route, t0 + queued, t0 + ms); }
+    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, undefined, p); noteAnswer(route, t0 + queued, t0 + ms); }
+  };
+  /** The handler, inside an act's timing scope when it is POST /v1/edge/act (one lookup otherwise). */
+  const run = (c: Context, next: () => Promise<void>): {act?: ActTiming; done: Promise<void>} => {
+    if (c.req.method !== 'POST' || c.req.path !== '/v1/edge/act') return {done: next()};
+    const act = newActTiming(); return {act, done: actTiming.run(act, next)};
   };
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');
@@ -313,8 +324,8 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const r = classify(c.req.method, path), token = bearer(c);
     // admitted already by the MessagePort front end (a read worker's forward, admissionPort below); the env is set
     // only by an in-process app.fetch, never by a client
-    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { await next(); stamp(c, lv, token); timed(c, t0); return; }
-    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { await next(); stamp(c, lv, token); timed(c, t0); return; }
+    if ((c.env as {simAdmitted?: boolean} | undefined)?.simAdmitted === true) { const h = run(c, next); await h.done; stamp(c, lv, token); timed(c, t0, 0, h.act); return; }
+    if (!r || !token || (r.cls !== 'C1' && r.cls !== 'C2')) { const h = run(c, next); await h.done; stamp(c, lv, token); timed(c, t0, 0, h.act); return; }
     // waking limit (dark): a Soul waiting its turn has its acts answered world.crowded; its reads still answer
     const line = r.cls === 'C1' && !r.god ? crowded?.(token) : null;
     if (line) { adm.refused('soul:' + token, false, 'world.crowded', Math.max(1, Math.min(line.eta_s, 60))); stamp(c, lv, token); timed(c, t0); c.header('Cache-Control', 'no-store'); c.header('Retry-After', String(Math.max(1, Math.min(line.eta_s, 60))));
@@ -332,8 +343,9 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (v === 'dropped') return c.body(null, 499 as never);
     if (v !== 'run') return refuse(v);
     const queued = t.waitedMs();
-    try { await next(); } finally { t.done(); }
-    stamp(c, lv, token); timed(c, t0, queued);
+    let act: ActTiming | undefined;
+    try { const h = run(c, next); act = h.act; await h.done; } finally { t.done(); }
+    stamp(c, lv, token); timed(c, t0, queued, act);
   };
 }
 
