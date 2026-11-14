@@ -36,16 +36,19 @@ const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
 const N_SMALL = Number(opt('small', SHORT ? 6 : 100)), N_EDEN = Number(opt('eden', SHORT ? 1 : 4)), SEED = Number(opt('seed', 2301));
 const PORT = Number(opt('port', 4800)), CONTROL = PORT + 1, RANGE = [PORT + 2, PORT + 2 + 2 * (N_SMALL + N_EDEN) + 3];
-const ACTIVE_MS = Number(opt('active-min', SHORT ? 6 : 60)) * 60_000, GAP_MS = Number(opt('gap-min', SHORT ? 3 : 60)) * 60_000;
+const ACTIVE_MS = Number(opt('active-min', SHORT ? 4 : 60)) * 60_000, GAP_MS = Number(opt('gap-min', SHORT ? 3 : 60)) * 60_000;
 const [ACT_LO, ACT_HI] = opt('act-min', SHORT ? '0.5-1.5' : '2-10').split('-').map(Number);
 const QUIET_MS = SHORT ? 60_000 : 600_000, BUILD_PAR = Number(opt('build-parallel', 3));
 // short knobs (dev worlds only, #2295): silent 1 min, the walk out bounded at 2 min; real worlds keep the hour
 const BODY_KNOBS = SHORT ? { wanderTicks: 1200, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 2400 } : null;
-const SETTLE_MS = Number(opt('settle-min', SHORT ? 6 : 80)) * 60_000;   // agents silent → every world unloaded: wind-down + quiet + margin
+// #2367: --short's settle covers its wind-down (a 2 min walk out, 1 min quiet, the sweep) with a margin; the short
+// horizon lets a world with a reminder minutes ahead unload (the launcher's 10 min would keep all of them in memory)
+const SETTLE_MS = Number(opt('settle-min', SHORT ? 7 : 80)) * 60_000;   // agents silent → every world unloaded: wind-down + quiet + margin
+const HORIZON_MS = SHORT ? 60_000 : undefined;
 const OUT = resolve(opt('out', join(ROOT, '.local/bench/hundred', new Date().toISOString().replace(/[:.]/g, '-'))));
 const FIX = join(OUT, 'fixture'), LDATA = join(FIX, 'launcher'), HOME = join(OUT, 'home');
 const ORIGIN = `http://localhost:${PORT}`, MARS_WEB = join(ROOT, 'mars/viewer/dist');
-const MEM_MB = Number(opt('worlds-mem-mb', memFigure(25)));
+const MEM_MB = Number(opt('worlds-mem-mb', memFigure(SHORT ? 10 : 25)));   // #2367: --short under some memory pressure too
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 const sh = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
 const clean = (s) => String(s ?? '').split(ROOT).join('.').split(OUT).join('<out>');
@@ -53,7 +56,7 @@ mkdirSync(HOME, { recursive: true });
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${clean(a.join(' '))}`; console.log(s); appendFileSync(join(OUT, 'hundred.log'), s + '\n'); };
 for (const [p, fix] of [[MARS_WEB, 'pnpm build:viewer'], [join(ROOT, 'apps/web/dist/kit-contract.json'), 'pnpm --filter @souls/web build']]) if (!existsSync(p)) throw new Error(`missing ${relative(ROOT, p)}: run \`${fix}\` in the checkout`);
 const R = { issue: 2301, commit: sh('git', ['-C', ROOT, 'rev-parse', 'HEAD']), node: process.version, platform: process.platform, cpus: cpus().length, memGb: +(totalmem() / 2 ** 30).toFixed(1),
-  loadBefore: loadavg().map((x) => +x.toFixed(2)), short: SHORT, knobs: { small: N_SMALL, eden: N_EDEN, activeMin: ACTIVE_MS / 60_000, gapMin: GAP_MS / 60_000, actMin: [ACT_LO, ACT_HI], quietSec: QUIET_MS / 1000, worldsMemMb: MEM_MB, bodyKnobs: BODY_KNOBS, seed: SEED } };
+  loadBefore: loadavg().map((x) => +x.toFixed(2)), short: SHORT, knobs: { small: N_SMALL, eden: N_EDEN, activeMin: ACTIVE_MS / 60_000, gapMin: GAP_MS / 60_000, actMin: [ACT_LO, ACT_HI], quietSec: QUIET_MS / 1000, horizonSec: HORIZON_MS ? HORIZON_MS / 1000 : null, worldsMemMb: MEM_MB, bodyKnobs: BODY_KNOBS, seed: SEED } };
 const save = () => writeFileSync(join(OUT, 'results.json'), JSON.stringify(R, null, 1) + '\n');
 
 // ------------------------------------------------------------------ what the checkout has (named, never assumed)
@@ -65,7 +68,7 @@ let L = null;
 async function getJ(url, { ms = 10_000, headers = {} } = {}) { try { const r = await fetch(url, { headers, signal: AbortSignal.timeout(ms) }); return { status: r.status, j: await r.json().catch(() => null), h: r.headers }; } catch (e) { return { status: 0, j: null, error: e.name }; } }
 async function startLauncher({ unload }) {
   const cfgFile = join(OUT, `launcher-${unload ? 'run' : 'build'}.json`), memSupported = !R.missing.some((m) => m.key === 'mem');
-  const cfg = { eager: 0, worldHeapMb: 0, unloadStill: unload, ...(unload ? { stillQuietMs: QUIET_MS } : {}),
+  const cfg = { eager: 0, worldHeapMb: 0, unloadStill: unload, ...(unload ? { stillQuietMs: QUIET_MS, ...(HORIZON_MS ? { stillHorizonMs: HORIZON_MS } : {}) } : {}),
     // #2233's one memory figure when the checkout has it; otherwise the port-era cap at the same number of small worlds
     ...(unload && memSupported ? { worldsMemMb: MEM_MB } : { maxRunning: Math.min(RANGE[1] - RANGE[0] + 1, unload ? Math.max(1, Math.floor(MEM_MB / SMALL_MB)) : BUILD_PAR + 1) }), maxWorlds: N_SMALL + N_EDEN + 10 };
   const worldEnv = { SIM_BOOT_HASH: '1', ...(BODY_KNOBS ? { SIM_BODY_KNOBS: JSON.stringify(BODY_KNOBS) } : {}) };

@@ -125,9 +125,9 @@ switch independent. A previously saved master mute migrates to both switches off
     resident reads in flight, and up for at least 30 s. Before every stop the launcher reads `/__sim/still` again and
     records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, is recorded as due at once
     and the keep-alive boots it as before). An unloaded world is never booted by the keep-alive, and loads on an act, a
-    god call, a visitor's connection or a page; at `moveWallMs`, always; at `untilWallMs`, only when a resident read for
-    it was seen in the last 10 minutes. Otherwise it is not loaded by time at all, and catches up its missed events in
-    order when it next loads. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    god call, a visitor's connection or a page, and by its alarm 30 s before `moveWallMs` or `untilWallMs`, listener or
+    not (#2367): the horizon holds every deadline, a personal reminder's (`edge.reminder.*`) and a plan step's among
+    them, so they are met on time by the world running. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
     get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
