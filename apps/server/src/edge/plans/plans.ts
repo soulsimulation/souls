@@ -95,7 +95,7 @@ export class Plans {
   private timer: NodeJS.Timeout | null = null;
   private closed = false;
   private core: PlanCore; private actor: PlanActor; private envelope: (soulId: string, e: StreamEvent) => Envelope;
-  constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number} = {}) {
+  constructor(core: PlanCore, actor: PlanActor, envelope: (soulId: string, e: StreamEvent) => Envelope, options: {tickMs?: number; silent?: () => boolean} = {}) {
     this.core = core; this.actor = actor; this.envelope = envelope;
     core.db.exec(`CREATE TABLE IF NOT EXISTS edge_plans_v1 (world_id TEXT NOT NULL, plan_id TEXT NOT NULL, soul_id TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (world_id, plan_id)) WITHOUT ROWID;
       CREATE INDEX IF NOT EXISTS edge_plans_v1_soul ON edge_plans_v1 (world_id, soul_id, state);
@@ -109,7 +109,9 @@ export class Plans {
     actor.onReceipt(r => { if (this.closed) return; const p = this.planOf(r.soulId); if (p && p.state === 'running' && p.steps[p.current]?.state.receipt === r.id) void this.evaluate(p); });
     core.streams.onEvent((soulId, e) => { if (!this.closed) this.onEvent(soulId, e); });
     const ms = options.tickMs ?? PLAN_TICK_MS;
-    if (ms > 0) { this.timer = setInterval(() => this.tick(), ms); this.timer.unref?.(); }
+    // #2303: while the world is silent the runner returns at once until a running plan's step is due (nextDueMs, a deadline
+    // of the world, so the world lands there); receipts and events wake a plan without the timer
+    if (ms > 0) { this.timer = setInterval(() => { if (options.silent?.()) { const due = this.nextDueMs(); if (due === null || due > this.core.now()) return; } this.tick(); }, ms); this.timer.unref?.(); }
   }
   close() { this.closed = true; if (this.timer) clearInterval(this.timer); this.timer = null; }
 

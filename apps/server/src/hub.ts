@@ -100,6 +100,7 @@ export class Hub {
   /** Take recordings (take_chunks) are a pose-keyframe cache, off by default (TAKES_PERSIST=1 turns them on).
    * The engine's in-memory live buffer still feeds new viewers; the event log rebuilds a world. */
   persistTakes = process.env.TAKES_PERSIST === '1';
+  private silentTakeKept = false;
   host: WorldHost; auth: Auth; db: Db;
   private lifecycleSouls?:Souls;
   private station?:CandidateStationV1;
@@ -142,8 +143,11 @@ export class Hub {
           for(const c of this.clients)if(c.ready)this.sendStation(c); },
       afterTick: tick => {
         const chunks = host.engine.takeChunks?.(this.lastTakeTick) ?? [];
+        // #2303 A3: a silent world (still, nobody watching) keeps the first chunk of its still stretch, which holds the
+        // still poses for a replay, and writes no other until it moves or is watched
+        const silent = !!host.silent?.(), keep = !silent || !this.silentTakeKept; this.silentTakeKept = silent && (this.silentTakeKept || chunks.length > 0);
         if (!chunks.length) return;
-        for (const chunk of chunks) {
+        if (keep) for (const chunk of chunks) {
           const ref=(chunk.take as {renderSceneRef?:{hash:string}}).renderSceneRef;
           const scene=ref&&!db.hasRenderSceneCapture(host.worldId,ref.hash)?host.engine.takeScene?.(ref.hash):undefined;
           if(this.persistTakes)db.saveTake(host.worldId,chunk,scene);
@@ -157,13 +161,13 @@ export class Hub {
       onKernel: (view) => this.broadcast({ t: 'kernel', view }),
       onPlay: (p) => this.broadcast({ t: 'plays', plays: [p] }),
     });
-    setInterval(() => this.sweep(), SWEEP_MS).unref();
+    setInterval(() => { if (!host.silent?.()) this.sweep(); }, SWEEP_MS).unref();   // #2303: silent means no viewer to ping
     // load dial: viewer stats every 2 s at green, 4 s at amber, 8 s at red/black
     let statsN = 0;
-    setInterval(() => { if (++statsN % ({green: 1, amber: 2, red: 4, black: 4} as const)[this.loadLevel] !== 0) return; const full = this.stats(); this.broadcast({ t: 'stats', stats: full }, (c) => c.me?.role === 'admin'); this.broadcast({ t: 'stats', stats: publicStats(full) }, (c) => c.me?.role !== 'admin'); }, 2_000).unref();
+    setInterval(() => { if (host.silent?.()) return; if (++statsN % ({green: 1, amber: 2, red: 4, black: 4} as const)[this.loadLevel] !== 0) return; const full = this.stats(); this.broadcast({ t: 'stats', stats: full }, (c) => c.me?.role === 'admin'); this.broadcast({ t: 'stats', stats: publicStats(full) }, (c) => c.me?.role !== 'admin'); }, 2_000).unref();
     // a socket that never introduces itself is not a viewer
     // judged after the poll phase (setImmediate), so a hello that arrived during a stall is read first
-    setInterval(() => setImmediate(() => { const now = Date.now(); for (const c of this.clients) if (!c.ready && now - c.joinedAt > 15_000 + this.stallMs) { c.ws.close(1008, 'no hello'); this.clients.delete(c); } }), 5_000).unref();
+    setInterval(() => host.silent?.() || setImmediate(() => { const now = Date.now(); for (const c of this.clients) if (!c.ready && now - c.joinedAt > 15_000 + this.stallMs) { c.ws.close(1008, 'no hello'); this.clients.delete(c); } }), 5_000).unref();
   }
 
   private onConnect(ws: WebSocket, req: IncomingMessage) {

@@ -119,7 +119,7 @@ type ClockHost = {
   engine: { world: { tick: number } };
   living?: { origin: number; dayTicks: number; customs?: string[] } | undefined;
   enqueue(kind: 'rules', author: string, payload: unknown): Promise<unknown>;
-  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number;
+  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number; silent?(): boolean;
   /** #2297: the keeper reports the zone's next daylight-saving change as a deadline (WorldHost.stillUntil). */
   listeners?: { stillness?(tick: number): { name: string; tick?: number | null }[] }[];
 };
@@ -198,15 +198,22 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
   };
   const schedule = () => { void sync().catch((e: Error) => o.log?.(`world clock: ${e.message}`)); };
   // #2297: the zone's next daylight-saving change is a deadline: the keeper logs a re-alignment there (cached until it passes)
-  let dst: { zone: string; from: number; at: number | null } | undefined;
+  let dst: { zone: string; from: number; at: number | null } | undefined, dstFell = false;
   host.listeners?.push({ stillness: (tick) => {
     if (o.paused?.()) return [];
     const zone = o.zone(), t = now();
+    if (dst && dst.at !== null && t >= dst.at) dstFell = true;   // #2303: the silent check below runs once for it
     if (!dst || dst.zone !== zone || (dst.at !== null && t >= dst.at) || (dst.at === null && t - dst.from > 86_400_000)) dst = { zone, from: t, at: nextOffsetChangeMs(t, zone) };
     return dst.at === null ? [] : [{ name: 'clock.daylight-saving', tick: tick + Math.max(1, Math.ceil((dst.at - t) / TICK_MS)) }];
   } });
   schedule();
-  const timer = setInterval(() => { if ((host.pace ?? 1) >= 1 && !host.paused && host.running !== false) schedule(); }, o.checkMs ?? 15_000);
+  // #2303: a silent world (still, unwatched) keeps wall pace by jumping, so it does not drift; it is checked only once a
+  // daylight-saving deadline has fallen (the world lands there and the next check re-aligns it)
+  const timer = setInterval(() => {
+    if (host.silent?.() && !(dstFell || (dst?.at != null && now() >= dst.at))) return;
+    dstFell = false;
+    if ((host.pace ?? 1) >= 1 && !host.paused && host.running !== false) schedule();
+  }, o.checkMs ?? 15_000);
   timer.unref?.();
   return { sync, schedule, stop: () => clearInterval(timer) };
 }

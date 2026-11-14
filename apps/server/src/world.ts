@@ -639,6 +639,8 @@ export class WorldHost {
   private jumpFrom = 0;
   /** #2298: while true the world has been still since its last jump (no ordinary tick outside a jump's landing). */
   stillStretch = false;
+  /** #2303: still since its last jump and nobody watching. A wall timer with nothing due then returns at once. */
+  silent(): boolean { return this.skip && this.stillStretch && !this.watched?.(); }
   private landing = false;
   /** #2298 A4: the live clock's ticks owed while still (counted per frame, run as one jump), and until which tick the
    *  last answer said the world stays still (Infinity: no deadline). */

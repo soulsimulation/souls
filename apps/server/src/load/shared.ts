@@ -34,7 +34,8 @@ export const S = {
   tickAt: 31,      // epoch ms of the last completed tick (0 = none yet)
   stallMs: 32,     // the tick age past which the clock counts as stalled; 0 = it owes no ticks (paused, stopped, halted, rate 0)
   clockRate: 33, baseRate: 34,   // the effective clock rate (lower while dilated) and the rate an admin set
-  size: 35,
+  still: 35,       // #2303: 1 while the world is silent (still and unwatched): the watchdog writes live.json less often
+  size: 36,
 } as const;
 
 export type LiveJson = {

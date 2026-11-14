@@ -6,7 +6,7 @@ import { bootPhase, bootTick } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
 import { createServer } from 'node:http';
-import { existsSync, readdirSync, unlinkSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { Auth } from './auth.ts';
@@ -42,7 +42,7 @@ import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
 import { stallConfig, startWatchdog, writeLiveNow } from './load/watchdog.ts';
 import { StallLog } from './load/stall-log.ts';
-import { sharedLoad } from './load/shared.ts';
+import { S, sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
 import { WakingLimit } from './load/waking.ts';
@@ -166,6 +166,7 @@ const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, c
 server.on('upgrade', req => { req.url = stripWorldPath(req.url); });
 hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
 host.watched = () => hub.clients.size > 0;   // #2298 A4b
+host.listeners.push({ afterTick: () => { sharedLoad[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
 hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPersist;
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
@@ -456,11 +457,25 @@ function pruneBackups() {
   }
   for (const f of files) if (!keep.has(f)) { try { unlinkSync(join(config.dataDir, f)); } catch { /* already gone */ } }
 }
+// #2303 A2: no backup of a database nothing has written since the last one: this process has made no change since its last
+// backup (or, before its first, none at all and the newest backup file is newer than the database and its log).
+let backedChanges = 0, backedOnce = false;
+const dbChanges = () => (db.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
+function unchangedSinceBackup(): boolean {
+  if (dbChanges() !== backedChanges) return false;
+  if (backedOnce) return true;
+  const mtime = (f: string) => { try { return statSync(join(config.dataDir, f)).mtimeMs; } catch { return 0; } };
+  const newest = readdirSync(config.dataDir).filter((f) => /^backup-\d{10}\.db$/.test(f)).sort().at(-1);
+  return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
+}
 async function backupNow() {
+  if (unchangedSinceBackup()) return;
   db.pruneBrainCalls(); db.pruneTalk();
+  const changes = dbChanges();
   // (lane L5) no VACUUM here: it rewrote the whole file on the tick thread, stalling a serving world for seconds.
   // SQLite reuses free pages; a bloated file is compacted once at the next boot, before the world serves.
   await db.backupTo(join(config.dataDir, `backup-${new Date().toISOString().slice(0, 13).replace(/[-T:]/g, '')}.db`));
+  backedChanges = changes; backedOnce = true;   // writes during the copy count as changes: the next hour backs up
   pruneBackups();
 }
 const backupWork=new Set<Promise<void>>();

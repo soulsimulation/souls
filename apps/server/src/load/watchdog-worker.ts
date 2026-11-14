@@ -5,14 +5,14 @@
 import {renameSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 import {parentPort, workerData} from 'node:worker_threads';
-import {liveOf} from './shared.ts';
+import {liveOf, S} from './shared.ts';
 import {apiOf} from './api-times.ts';
 import {frameText, startStallStack, type StallReport} from './stall-stack.ts';
 
 const {buffer, api, file, pid, port, everyMs, stall} = workerData as {buffer: SharedArrayBuffer; api?: SharedArrayBuffer; file: string; pid: number; port?: number; everyMs?: number;
   stall?: {dataDir: string; root: string; stallMs: number; gapMs?: number}};
 const a = new Float64Array(buffer), apiA = api ? new Float64Array(api) : null;
-let failed = false;
+let failed = false, writtenAt = 0;
 // #457: the frame the main thread was stuck in, captured from here while it was stuck (stall-stack.ts); in live.json for
 // 10 min, so the launcher's wedge line names it
 let lastStall: StallReport | null = null;
@@ -20,11 +20,14 @@ if (stall) { try { startStallStack({a, dataDir: stall.dataDir, root: stall.root,
 function write() {
   const now = Date.now(), live = apiA ? {...liveOf(a, pid, now), api: apiOf(apiA, now)} : liveOf(a, pid, now);
   const body = JSON.stringify(lastStall && now - lastStall.at < 600_000 ? {...live, stall: {at: lastStall.at, stuckMs: lastStall.stuckMs, top: lastStall.error ?? frameText(lastStall.frames[0]), frames: lastStall.frames.slice(0, 5).map(frameText)}} : live);
-  try { writeFileSync(file + '.tmp', body + '\n'); renameSync(file + '.tmp', file); failed = false; }
+  try { writeFileSync(file + '.tmp', body + '\n'); renameSync(file + '.tmp', file); failed = false; writtenAt = now; }
   catch (e) { if (!failed) parentPort?.postMessage({error: `live.json not written: ${(e as Error).message}`}); failed = true; }
 }
 write();
-setInterval(write, everyMs ?? 2000);
+// #2303: while the world is silent (still, nobody watching) live.json is written every 10 s, a third of the launcher's
+// 30 s staleness limit (guard.mjs liveStaleMs). A main thread whose last turn is over 5 s old is reported at the full pace.
+const SILENT_EVERY_MS = 10_000;
+setInterval(() => { const now = Date.now(); if (a[S.still] === 1 && now - writtenAt < SILENT_EVERY_MS && now - a[S.lastTurnAt] < 5_000) return; write(); }, everyMs ?? 2000);
 if (port !== undefined) {
   const server = createServer((req, res) => {
     if (req.method !== 'GET' || !/^\/(?:[^?]*\/)?healthz(?:\?|$)/.test(req.url ?? '')) { res.writeHead(404).end(); return; }
