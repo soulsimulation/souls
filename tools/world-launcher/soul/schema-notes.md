@@ -37,7 +37,7 @@ normal listener. Never infer availability or completion merely from pairing.
 
 ## Choosing the first action
 
-Use commands already supplied by this skill and boot. After acknowledging an owner request, use the current observation or one focused `explore`/`resolve` to choose the first useful action; do not reread `status`, `help` and the full `caps` list as a ritual. `status` is for identity/connection uncertainty, `help` for an unknown command, and filtered `caps` for a specific missing offer. When the destination and activity are clear, send the offered id immediately. Preserve the owner’s constraints and inspect failures before revising the plan. Aim to begin useful action within three discovery calls; this is a planning budget, never a reason to guess.
+Use commands already supplied by this skill and boot. After acknowledging an owner request, use the current observation or one focused `explore`/`find` to choose the first useful action; do not reread `status`, `help` and the full `caps` list as a ritual. `status` is for identity/connection uncertainty, `help` for an unknown command, and filtered `caps` for a specific missing offer. When the destination and activity are clear, send the offered id immediately. Preserve the owner’s constraints and inspect failures before revising the plan. Aim to begin useful action within three discovery calls; this is a planning budget, never a reason to guess.
 
 
 

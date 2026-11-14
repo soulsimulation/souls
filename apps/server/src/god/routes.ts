@@ -20,6 +20,7 @@ import { SnapshotCache, SNAPSHOT_FILTERED_HEADER } from './snapshot-cache.ts';
 import { SnapshotParts, mountSnapshotParts } from './snapshot-wire.ts';
 import { moderationFor } from '../moderation/store.ts';
 import { withoutHidden } from '../moderation/routes.ts';
+import { entitiesWithoutPrivateWords, withoutPrivateWords } from './private-words.ts';
 import { mountLandRoutes } from './land.ts';
 import { mountLightningRoutes } from './lightning.ts';
 import { mountLayerRoutes, type GodLayers } from './layers.ts';
@@ -157,17 +158,19 @@ export function mountGodRoutes(app: Hono, d: GodDeps): { partRefs: () => { defs:
   // ---- public reads (the renderer's view of the world; Gene: topology and placements are public)
   // lane W1: built once per state of the world and served precompressed (snapshot-cache.ts), hidden entities already out
   const moderation = moderationFor(d.god.db.db, d.god.opts.worldId);
-  const snapshots = new SnapshotCache({ build: () => d.god.publicSnapshot(),
+  // #1223: what anyone may read, so a private notebook's words are out of all three forms
+  const viewerSnapshot = () => { const snap = d.god.publicSnapshot(); return { ...snap, entities: entitiesWithoutPrivateWords(d.god.model, snap.entities) }; };
+  const snapshots = new SnapshotCache({ build: viewerSnapshot,
     key: () => `${d.god.model.editSeq}.${d.god.model.seq}.${d.god.store.buildsRev()}.${moderation.version()}`,
     filter: (snap) => { const hidden = moderation.hidden(); return hidden.length ? withoutHidden(snap as Parameters<typeof withoutHidden>[0], new Set(hidden)) : snap; } });
   // lane W3: `?defs=ref`, the wire form (snapshot-wire.ts): the same picture without defs/ground/default params, which
   // come as immutable content-addressed parts; built and cached per state exactly like the plain one
   const parts = new SnapshotParts();
   const wireSnapshots = new SnapshotCache({ key: () => `${d.god.model.editSeq}.${d.god.model.seq}.${d.god.store.buildsRev()}.${moderation.version()}`,
-    build: () => { const snap = d.god.publicSnapshot(), hidden = moderation.hidden(); return parts.cut((hidden.length ? withoutHidden(snap as Parameters<typeof withoutHidden>[0], new Set(hidden)) : snap) as Record<string, unknown>, moderation.version()); } });
+    build: () => { const snap = viewerSnapshot(), hidden = moderation.hidden(); return parts.cut((hidden.length ? withoutHidden(snap as Parameters<typeof withoutHidden>[0], new Set(hidden)) : snap) as Record<string, unknown>, moderation.version()); } });
   // lane JOINSET: `?defs=ref&cols=1`, the wire form with its entities in the column form (columns/1, packages/protocol)
   const colsSnapshots = new SnapshotCache({ key: () => `${d.god.model.editSeq}.${d.god.model.seq}.${d.god.store.buildsRev()}.${moderation.version()}`,
-    build: () => { const snap = d.god.publicSnapshot(), hidden = moderation.hidden(), body = parts.cut((hidden.length ? withoutHidden(snap as Parameters<typeof withoutHidden>[0], new Set(hidden)) : snap) as Record<string, unknown>, moderation.version());
+    build: () => { const snap = viewerSnapshot(), hidden = moderation.hidden(), body = parts.cut((hidden.length ? withoutHidden(snap as Parameters<typeof withoutHidden>[0], new Set(hidden)) : snap) as Record<string, unknown>, moderation.version());
       return { ...body, entities: packColumnsV1(body.entities, worldEntityOrderV1) ?? body.entities }; } });
   mountSnapshotParts(app, parts, () => wireSnapshots.respond(undefined));
   app.get('/v1/world/snapshot', async (c) => {
@@ -188,7 +191,7 @@ export function mountGodRoutes(app: Hono, d: GodDeps): { partRefs: () => { defs:
     if (c.req.header('if-none-match') === `"${hash}"`) return c.body(null, 304);
     return c.body(new Uint8Array(t.buffer, t.byteOffset, t.byteLength) as never, 200, { 'content-type': 'application/octet-stream', 'x-tile-n': String(TILE_N), etag: `"${hash}"`, 'cache-control': 'public, max-age=60' });
   });
-  app.get('/v1/world/entities/:id{.+}', (c) => { const e = d.god.model.get(c.req.param('id')); if (!e) throw new ApiError(404, 'not-found', 'no such entity'); return c.json({ entity: e, path: d.god.model.pathOf(e.id), pose: d.god.model.worldPose(e) }, 200, noStore); });
+  app.get('/v1/world/entities/:id{.+}', (c) => { const e = d.god.model.get(c.req.param('id')); if (!e) throw new ApiError(404, 'not-found', 'no such entity'); return c.json({ entity: withoutPrivateWords(d.god.model, e), path: d.god.model.pathOf(e.id), pose: d.god.model.worldPose(e) }, 200, noStore); });
 
   // ---- onboarding: who am I here, the welcome text, the skill and CLI files
   const skillDir = resolve(new URL('../../../../tools/god-skill/', import.meta.url).pathname);

@@ -23,6 +23,8 @@ export type Souls = {
   kernel: KernelView | null; plays: PlayView[]; talk: TalkLine[];
   /** Edge spectator feed (speech, conversation.*, fade, steward.*) from the viewer socket; newest last, max 300. */
   edge: EdgeMsg[];
+  /** #2280: no welcome on the current socket yet (page entry, a reconnect, a re-hello): Me is null for now, not "none". */
+  awaitingWelcome: boolean;
 };
 /** One `{type:'edge', …}` viewer message (EDGE-CONTRACT-v1 §7). Open shape: renderers read only what they know. */
 export type EdgeMsg = { type: 'edge'; kind?: string; [k: string]: unknown };
@@ -49,14 +51,14 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
   const authedRef=useRef(authed);authedRef.current=authed;
   const session=JSON.stringify([authed,identity]);const sessionRef=useRef(session);
   const [, force] = useState(0);
-  const s = useRef<Omit<Souls, 'conn'> & { conn: Connection | null; lastBytes: number; lastAt: number; takeEpoch?: string }>({ takes: {serverTick: 0, chunks: [], receivedAt: 0}, conn: null,station:null, privateAuthorityGeneration:0,me: null, log: [], brain: [], camera: null, ticker: [], narratives: {}, stats: null, bytesPerSec: 0, kernel: null, plays: [], talk: [], edge: [], lastBytes: 0, lastAt: Date.now() });
+  const s = useRef<Omit<Souls, 'conn'> & { conn: Connection | null; lastBytes: number; lastAt: number; takeEpoch?: string }>({ takes: {serverTick: 0, chunks: [], receivedAt: 0}, conn: null,station:null, privateAuthorityGeneration:0,me: null, log: [], brain: [], camera: null, ticker: [], narratives: {}, stats: null, bytesPerSec: 0, kernel: null, plays: [], talk: [], edge: [], awaitingWelcome: true, lastBytes: 0, lastAt: Date.now() });
   if(sessionRef.current!==session){sessionRef.current=session;retirePrivateAuthority(s.current);}
   if (!s.current.conn) {
     const st = s.current;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     st.conn = new Connection(`${proto}://${location.host}${worldPath}/ws`, () => tokenRef.current(), {
       onSession: session => {
-        retirePrivateAuthority(st);
+        retirePrivateAuthority(st);if(!session)st.awaitingWelcome=true;
         if(session&&!st.station)st.station=createStationConnection({worldId:worldId??session.worldId,codec:stationCodec});
         st.station?.onSession(session);
       },
@@ -75,7 +77,7 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
         st.takes = {serverTick: stream.serverTick, chunks: [...merged.values()].sort((a,b) => a.toTick-b.toTick).slice(-12), receivedAt: performance.now()};
       },
       onWelcome: (me, w) => {
-        arrivalMark('ws-welcome');
+        arrivalMark('ws-welcome');st.awaitingWelcome=false;
         st.station?.onWelcome(w);
         if (w.epoch !== st.takeEpoch) st.takes.chunks = [];
         st.takeEpoch = w.epoch;
@@ -118,13 +120,13 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
   }, []);
   // signing in or out: reconnect so the server re-reads who we are
   const first = useRef(true);
-  useEffect(() => { if (first.current) { first.current = false; return; } const st=s.current;retirePrivateAuthority(st);st.conn!.rehello(); }, [authed,identity]);
+  useEffect(() => { if (first.current) { first.current = false; return; } const st=s.current;retirePrivateAuthority(st);st.awaitingWelcome=true;st.conn!.rehello(); }, [authed,identity]);
   return s.current as Souls;
 }
 
 /** Re-read who we are (the welcome's Me) without a reload: a reconnect, as signing in does. New worlds' hub never pushes
  *  an updated Me (no live private authority), so a Soul just approved in this window is not "own" until this runs. */
-export function refreshMe(sim: Souls) { retirePrivateAuthority(sim); sim.conn.rehello(); }
+export function refreshMe(sim: Souls) { retirePrivateAuthority(sim); sim.awaitingWelcome = true; sim.conn.rehello(); }
 
 export function makeApi(getToken: () => Promise<string | null>,session?:()=>number) {
   return createApiRequest(getToken,{path:apiPath,session});

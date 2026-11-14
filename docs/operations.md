@@ -28,6 +28,19 @@ loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds
 
 Each settings file holds one line, `SIM_WORLDS_ARGS=...`: the port, the world port range, data directory, public
 origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`, `--world-heap-mb`, `--create-limit`).
+`--unload-still 1` lets still worlds leave memory and come back on a request or their alarm
+([worlds](architecture/worlds.md), #2299); it stays off (`0`, the default) in production until its proof task has passed.
+Their recorded horizons are `<data>/horizons.json`.
+At most `--load-parallel` worlds load at once (default 4); the rest wait in order: a Soul's act or a god call, a
+visitor's connection, an alarm for a listening agent, a wind-down alarm, then anything else (keep-alive, monitors),
+oldest first within each. A request for a world that is unloaded, waiting or loading is held up to `--load-hold-ms`
+(default 45,000), then answered `503 world.waking` with `Retry-After`, which the Soul client waits out and asks again.
+Declared crawlers and link-preview fetchers never load a world: they get its page (the web build's, with the world's
+title and links) and `503 world.unloaded` for anything else. With `--unload-still 1` a visitor's page and the build's
+files are served the same way, and the world loads on the page's live connection or first data request; nothing loads
+at start but what an alarm or a request asks for (`--eager` applies only with `0`), and a handover leaves a still world
+with no visitor unloaded instead of moving it (#2304). The loopback `/__sim/healthz` has `loads`: loads running and
+waiting, by reason, and the wait of the last 100 (median, 95th percentile, longest).
 `tools/world-launcher/deploy/install.sh` writes the production and staging files once and never edits an existing
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
 
