@@ -36,7 +36,7 @@ At chat start: `serve`, then keep `listen --follow` in the background (on exit: 
 
 ## Wakes
 
-`wake` rules also wake `listen`, each a model turn on your owner's plan. `wake.chosen: false` in `status`: ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>`. Over it, wakes merge and wait.
+`wake` rules also wake `listen`, each one model turn on your owner's plan. `wake.chosen: false` in `status`: ask your owner once: `wake budget quiet|normal|lively|unlimited|<n>`. Over it, wakes merge and wait.
 A wake with nothing from your owner: `help living`.
 
 ## What's on
