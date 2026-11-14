@@ -5520,8 +5520,11 @@ export function parseActionArgs(input) {
 const OFFER_ID = /^[a-z][\w-]*(?::\S+)?$/i;
 async function act(...argv) {
   const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
-  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
+  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
+  // #2283: --run is pace "run" on a walk or walk-to (the world refuses it on anything else)
+  const run = args.indexOf("--run"); if (run >= 0) args.splice(run, 1);
   const parsed = parseActionArgs(args);
+  if (run >= 0) parsed.params = { ...(parsed.params ?? {}), pace: "run" };
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
     const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
     const r = soulCatalog.find(ix, parsed.capability, { at: me?.at, states: live?.live?.things }), said = r.note ?? note;

@@ -84,6 +84,9 @@ async function actSpam({ souls, item, t0 }) {
   ];
   const results = [{ soul: flood.spec.id, name: flood.spec.name, soulId: flood.setup.soulId, ok: floodSteps.every((x) => x.ok), steps: floodSteps }];
   const measures = [`Flood: ${p.acts} acts sent in ${sec(sentMs)} s; answers ${JSON.stringify(status)}; the launcher's verdicts ${JSON.stringify(cliOut)}.`];
+  // #459: where the time goes: the world's own time (Server-Timing world, of it queue) and the load level, per code
+  const split = (xs) => { const w = xs.map((r) => r.serverMs).filter(Number.isFinite), q = xs.map((r) => r.queuedMs).filter(Number.isFinite), lv = {}; for (const r of xs) lv[r.load ?? '-'] = (lv[r.load ?? '-'] ?? 0) + 1; return `client p50 ${r1(median(xs.map((r) => r.durationMs)))} ms, world p50 ${r1(median(w))} p99 ${r1(quantile(w, 0.99))} ms, queue p50 ${r1(median(q))} p99 ${r1(quantile(q, 0.99))} ms, levels ${JSON.stringify(lv)}`; };
+  for (const code of new Set(http.map((r) => r.facts?.code ?? (r.status === 200 ? 'ok' : String(r.status))))) measures.push(`Flood answers ${code}: ${split(http.filter((r) => (r.facts?.code ?? (r.status === 200 ? 'ok' : String(r.status))) === code))}.`);
   for (const s of by) {
     const calls = actCalls(s.folders.own, s.setup.soulId, spamStart - p.baselineSec * 1000);
     const before = calls.filter((r) => r.at < spamStart).map((r) => r.durationMs), during = calls.filter((r) => r.at >= spamStart && r.at <= spamEnd).map((r) => r.durationMs);
@@ -92,7 +95,7 @@ async function actSpam({ souls, item, t0 }) {
     const ok = before.length >= 3 && during.length >= 1 && ratio != null && ratio <= p.ratio;
     const why = `median ${r1(mb)} ms over ${before.length} acts before, ${r1(md)} ms over ${during.length} during (×${ratio == null ? '?' : Math.round(ratio * 100) / 100}, bar ×${p.ratio}); max during ${r1(during.length ? Math.max(...during) : null)} ms; ${bad} answered 429 or 5xx during`;
     results.push({ soul: s.spec.id, name: s.spec.name, soulId: s.setup.soulId, ok, steps: [{ at: at(spamStart), cmd: `${p.act.join(' ')} every ${p.everySec} s`, in: null, exit: null, refusal: null, ok, why }] });
-    measures.push(`${s.spec.name}: ${why}.`);
+    measures.push(`${s.spec.name}: ${why}.`, `${s.spec.name} before: ${split(calls.filter((r) => r.at < spamStart))}; during: ${split(calls.filter((r) => r.at >= spamStart && r.at <= spamEnd))}.`);
   }
   return { results, measures };
 }
