@@ -20,5 +20,5 @@ for(const file of ['run.mjs','launch.mjs']){
  const bytes=result.outputFiles[0].contents;writeFileSync(resolve(out,file),bytes,{flag:'wx'});artifacts.push({file,bytes:bytes.length,sha256:sha(bytes)});
 }
 if(git('rev-parse','HEAD')!==source||git('status','--porcelain'))throw Error('Source changed during packaging');
-const manifest={format:'sim-soul-runtime/1',version:'0.1.0',nodeMinimum:'22.20.0',host:'codex app-server (experimental)',source,esbuild:version,artifacts,inputs:[...inputs.values()]};
+const manifest={format:'sim-soul-runtime/1',version:'0.1.1',nodeMinimum:'22.20.0',host:'codex app-server (experimental)',source,esbuild:version,artifacts,inputs:[...inputs.values()]};
 writeFileSync(resolve(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n',{flag:'wx'});console.log(JSON.stringify({source,output:out,artifacts}));

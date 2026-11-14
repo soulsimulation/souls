@@ -2,6 +2,7 @@
 // places, things, and the acts that can be sent by id from anywhere. Pure: no clock, no Soul, no availability. What is
 // free, open or taken right now is live state and is not here; the server still decides every act when it is sent.
 import {hashOf, stableStringify} from '@souls/engine-contract';
+import {interiorShellPolygon} from '../ledger/nav.ts';
 
 export const CATALOG_CONTRACT = 'soul-catalog/1';
 /** Verbs every walkable place takes by its id (`walk:<place>`). Offered on demand by id wherever the Soul stands. */
@@ -19,15 +20,20 @@ export const ANYWHERE: readonly (readonly [string, string])[] = [
   ['walk-to', 'Walk to a point on your level']];
 
 type V2 = readonly [number, number];
-export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: string | null; level: number; polygon: readonly V2[]; aliases?: readonly string[]; description?: string; ref?: string; secret?: boolean; carrier?: unknown};
+export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: string | null; level: number; polygon: readonly V2[]; /** #2261: doors the place data already gives (a god's building) */ doors?: readonly CatalogDoor[]; aliases?: readonly string[]; description?: string; ref?: string; secret?: boolean; carrier?: unknown};
 export type CatalogSpotIn = {id: string; place?: string; activity: string; also?: readonly string[]; at: V2; label?: string; title?: string; together?: {need: number}; requires?: string};
 /** #1751: an act a kind of thing takes by hand, sent as `object:<thing>:<verb>`; `when` is the state it needs. */
 export type CatalogKindAct = {verb: string; label: string; params?: Record<string, unknown>; when?: {field: string; is?: unknown; not?: unknown}[]};
 export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; seat?: boolean; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null};
-export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]};
+/** activity-spots/1 `interiors[]`: a building made enterable through its doors (each door a segment `[x0, z0, x1, z1]` across its wall). */
+export type CatalogInteriorIn = {place: string; doors: readonly (readonly number[])[]; shell?: [number, number, number, number]; wall?: number};
+export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]; interiors?: readonly CatalogInteriorIn[]};
+/** #2261: a door of a building: the middle of its gap `[x, z]`, its level, and the way it faces out (north is -z, east +x). */
+export type CatalogDoor = {at: [number, number]; level: number; facing: string; /** where to stand in front of it, 1 m out */ approach: [number, number]};
 
 export type CatalogPlace = {id: string; ref?: string; name: string; kind: string; parent: string | null; at: [number, number]; level?: number; aliases?: string[]; what?: string; fixed?: true;
-  /** #1915: its polygon, `[x, z]` to 0.1 m. None for a place on a carrier, whose polygon is in the carrier's own frame. */ outline?: [number, number][]};
+  /** #1915: its polygon, `[x, z]` to 0.1 m. None for a place on a carrier, whose polygon is in the carrier's own frame. */ outline?: [number, number][];
+  /** #2261: a building's doors, from its interior's door gaps. None for a building that cannot be entered. */ doors?: CatalogDoor[]};
 /** `seat`: the thing has a seat a body sits on, so `sit:<id>` is an act the world takes from anywhere. */
 export type CatalogThing = {id: string; name: string; kind: string; place: string | null; at: [number, number]; seat?: true; /** false: this one takes none of its kind's acts */ byHand?: false; /** #1751: its revision's own entry in `kinds` */ hands?: string};
 export type CatalogAct = {id: string; verb: string; place: string | null; thing?: string; at: [number, number]; label: string; with?: number; needs?: string};
@@ -46,6 +52,37 @@ const byId = (a: {id: string}, b: {id: string}) => a.id < b.id ? -1 : a.id > b.i
 /** The entity a spot belongs to: spot ids are `<activity>.<entity id>[.<n>]`. */
 export const spotThing = (id: string) => /(?:^|\.)(e_[0-9a-z]+)(?:\.|$)/.exec(id)?.[1];
 
+const COMPASS = ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'];
+/** A direction `[dx, dz]` as one of eight compass words (north is -z, east +x). */
+export const compass = (dx: number, dz: number) => COMPASS[((Math.round(Math.atan2(dz, dx) / (Math.PI / 4)) % 8) + 8) % 8]!;
+/** A door from its middle and its outward direction (any length): `approach` is 1 m out, in front of it. */
+export function doorAt(at: readonly [number, number], out: readonly [number, number], level: number): CatalogDoor {
+  const n = Math.hypot(out[0], out[1]) || 1;
+  return {at: [r1(at[0]), r1(at[1])], level, facing: compass(out[0], out[1]), approach: [r1(at[0] + out[0] / n), r1(at[1] + out[1] / n)]};
+}
+/** The ready move to stand in front of a door. */
+export const doorMove = (d: CatalogDoor) => `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}`;
+/** #2261: a building's doors from its interior: each door's middle, and the compass way out through the wall it is on
+ *  (the outward normal of the nearest wall of the building's shell, the outline its walls are built on). */
+export function placeDoors(place: Pick<CatalogPlaceIn, 'polygon' | 'level'>, interior: CatalogInteriorIn): CatalogDoor[] {
+  // an invalid shell makes the building a solid box (ledger/nav.ts): no door of it can be walked through
+  const shell = interiorShellPolygon({polygon: place.polygon as [number, number][]}, interior); if (!shell) return [];
+  const cx = shell.reduce((s, v) => s + v[0], 0) / shell.length, cz = shell.reduce((s, v) => s + v[1], 0) / shell.length;
+  return interior.doors.flatMap(d => {
+    const m: [number, number] = [(d[0]! + d[2]!) / 2, (d[1]! + d[3]!) / 2];
+    let best = Infinity, out: [number, number] = [m[0] - cx, m[1] - cz];
+    for (let i = 0; i < shell.length; i++) {
+      const a = shell[i]!, b = shell[(i + 1) % shell.length]!, ex = b[0] - a[0], ez = b[1] - a[1], len2 = ex * ex + ez * ez; if (len2 < 1e-12) continue;
+      const t = Math.max(0, Math.min(1, ((m[0] - a[0]) * ex + (m[1] - a[1]) * ez) / len2)), gap = Math.hypot(a[0] + t * ex - m[0], a[1] + t * ez - m[1]);
+      if (gap >= best) continue;
+      best = gap; out = [ez, -ex]; if (out[0] * (cx - a[0]) + out[1] * (cz - a[1]) > 0) out = [-ez, ex];   // away from the middle
+    }
+    // a door not on the shell (shellWalls' reach) is in an inner wall, not a way out
+    if (best > (interior.wall ?? 0.3) + 0.3) return [];
+    return [doorAt(m, out, place.level ?? 0)];
+  });
+}
+
 /** The catalog and its canonical bytes. Same input, same bytes, same tag. Every fact here is `public`: the scope field is
  *  where a later privacy model withholds, entry by entry, without a new contract. */
 export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized: string; etag: string; version: string} {
@@ -53,9 +90,11 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   // a ref is published only when it names one place: a lake and its bank can share one, and `walk:<ref>` would then name
   // neither (the world refuses it), while the id always names its place
   const refs = new Map<string, number>(); for (const p of input.places) if (p.ref) refs.set(p.ref, (refs.get(p.ref) ?? 0) + 1);
+  const interiors = new Map((input.interiors ?? []).filter(i => i.doors.length).map(i => [i.place, i]));
   const places: CatalogPlace[] = input.places.filter(p => p.polygon.length >= 1).map(p => ({
     id: p.id, ...(p.ref && p.ref !== p.id && refs.get(p.ref) === 1 ? {ref: p.ref} : {}), name: p.name, kind: p.kind, parent: p.parent, at: centre(p.polygon), ...(p.level ? {level: p.level} : {}),
-    ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const} : {outline: p.polygon.map(v => [r1(v[0]), r1(v[1])] as [number, number])})})).sort(byId);
+    ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const} : {outline: p.polygon.map(v => [r1(v[0]), r1(v[1])] as [number, number])}),
+    ...(p.carrier ? {} : p.doors?.length ? {doors: p.doors.map(d => ({...d}))} : interiors.has(p.id) ? {doors: placeDoors(p, interiors.get(p.id)!)} : {})})).sort(byId);
   const known = new Set(input.places.map(p => p.id));   // #1262: no place is secret, whatever its data says
   const shown = input.things.filter(t => !t.place || known.has(t.place));
   const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);

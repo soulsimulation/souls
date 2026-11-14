@@ -133,7 +133,7 @@ them; a hit fails the take (exit 4, privacy kind `panel-text`) before anything i
 - Browsers: uses `PLAYWRIGHT_BROWSERS_PATH`, else `/opt/pw-browsers` when present. If Chromium is missing:
   `PLAYWRIGHT_BROWSERS_PATH="$PWD/.e2e/browsers" pnpm --filter mars-campus-viewer exec playwright install chromium`.
 - Playwright is resolved the same way the playtest harness does (`tools/playtest/lib/platform.mjs`: a global
-  `playwright`, else `@playwright/test` from `mars/viewer`). No GPU is needed; WebGL runs on SwiftShader.
+  `playwright`, else `@playwright/test` from `mars/viewer`). No GPU is needed; WebGL runs on SwiftShader. A busy machine drops frames: record on a GPU runner instead (`docs/testing.md#recording-a-proof-clip-on-a-gpu-runner`; `SIM_PROOF_GPU=hardware` makes the recorder use and name a hardware renderer).
 - `--max-seconds` defaults to the policy's `max_seconds`. Exit 3 means the journey ran past it: shorten it.
 - With ffmpeg: an mp4 with a thin progress line along the bottom edge and a small `m:ss.s / total` timecode chip at
   the bottom left. The recorder's Chromium draws the timecode, so it needs no ffmpeg `drawtext` or fonts; the
