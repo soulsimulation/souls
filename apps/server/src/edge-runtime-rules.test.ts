@@ -51,16 +51,19 @@ test('main.ts activates edge startup rules through the shared helper with the wo
  assert.doesNotMatch(main,/enableOccupiedLinkRoutingV1|enableConcurrentLinkEgressV1|enableStairLandingClearanceV1/);
 });
 
-test('#2133 every world adopts stall-release-support/1 at boot after stand-height/2, before climb-spacing/1 and the wait bounds, and the engine has it on',async()=>{
+test('#2133 every world adopts stall-release-support/1 at boot after stand-height/2, then climb-spacing/1, #2294 held-activity/1 and the wait bounds, and the engine has them on',async()=>{
  const db=new Db(':memory:'),host=new WorldHost(db,await marsFactory(GREEN_FIELD_WORLD),'edge-rules',1e9,'boot-1');
  try{
   host.boot();let done=false;const p=adoptBootRuntimePoliciesV1(host,{edge:false,worldKey:'boot'}).finally(()=>{done=true;});
   while(!done){host.drainInputs();await setImmediate();}await p;
   const rules=(db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='rules' ORDER BY seq").all(host.worldId) as {payload:string}[]).map(r=>JSON.parse(r.payload).runtimePolicy??{});
   const first=rules.findIndex(r=>r.stallReleaseSupportV1===true);
-  assert.equal(first,rules.length-4,'adopted four rules events before the end');assert.equal(rules.at(-3)?.climbSpacingV1,true,'then climb-spacing/1');
-  // #1952 wait-bound/1, then #1288 wait-bound/2, last
-  assert.equal(rules.at(-2)?.waitBoundV1,true,'then wait-bound/1');assert.equal(rules.at(-2)?.waitBoundV2,undefined);assert.equal(rules.at(-1)?.waitBoundV2,true,'wait-bound/2 last');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
-  assert.equal((host.engine.snapshot() as unknown as {cfg:{stallReleaseSupportV1?:boolean}}).cfg.stallReleaseSupportV1,true);
+  assert.equal(first,rules.length-5,'adopted four rules events before the last');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
+  assert.equal(rules.findIndex(r=>r.climbSpacingV1===true),rules.length-4,'then climb-spacing/1');
+  assert.equal(rules.findIndex(r=>r.heldActivitiesV1===true),rules.length-3,'then held-activity/1');
+  // #1952 wait-bound/1, then #1288 wait-bound/2, last, each after held-activity/1
+  assert.equal(rules.findIndex(r=>r.waitBoundV1===true),rules.length-2,'then wait-bound/1');assert.equal(rules.findIndex(r=>r.waitBoundV2===true),rules.length-1,'wait-bound/2 last');assert.equal(rules.at(-1)?.heldActivitiesV1,true);
+  const cfg=(host.engine.snapshot() as unknown as {cfg:{stallReleaseSupportV1?:boolean;climbSpacingV1?:boolean;heldActivitiesV1?:boolean;waitBoundV1?:boolean;waitBoundV2?:boolean}}).cfg;
+  assert.equal(cfg.stallReleaseSupportV1,true);assert.equal(cfg.climbSpacingV1,true);assert.equal(cfg.heldActivitiesV1,true);assert.equal(cfg.waitBoundV1,true);assert.equal(cfg.waitBoundV2,true);
  }finally{host.stop();db.close();}
 });
