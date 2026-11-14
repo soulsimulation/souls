@@ -14,7 +14,9 @@ import { mountEdgeRoutes } from './edge/routes.ts';
 import { GodMode } from './god/god.ts';
 import { installEngineBridge } from './god/engine-bridge.ts';
 import { LivingWorld } from './living.ts';
-import { REAL_DAY_TICKS } from './god/real-clock.ts';
+import { REAL_DAY_TICKS, nextOffsetChangeMs } from './god/real-clock.ts';
+import { nextDigestTickAt, MORNING_HOUR, EVENING_HOUR } from './edge/comms/steward.ts';
+import { clockAt } from '@souls/brain';
 
 /** STILL_FULL=1: the A6 runs as accepted, 24 h of ticks each (20 ticks a second) with the real wind-down; about 40 min for
  *  a world with two Souls, so the server shards run 20 minutes of ticks with a short wind-down (400 + 600 ticks) instead. */
@@ -51,7 +53,7 @@ async function world(t: test.TestContext, souls: number) {
   return { f, rule };
 }
 const run = async (w: W, ticks: number) => { const end = w.f.host.engine.world.tick + ticks; for (let i = 0; w.f.host.engine.world.tick < end; i++) { w.f.host.tickOnce(); if (i % 2000 === 0) await setImmediate(); } };
-const check = (w: W) => { w.f.host.stillCheck = { claimed: 0, failures: [], fell: new Map(), every: HASH_EVERY }; return w.f.host.stillCheck; };
+const check = (w: W) => { w.f.host.stillCheck = { claimed: 0, failures: [], fell: new Map(), every: HASH_EVERY, closed: true }; return w.f.host.stillCheck; };
 const report = (t: test.TestContext, name: string, w: W, c: NonNullable<W['f']['host']['stillCheck']>, ticks: number) => {
   const r = { world: name, ticks, claimed: c.claimed, failures: c.failures.length, firstFailures: c.failures.slice(0, 5), fell: Object.fromEntries(c.fell), events: w.f.host.seq };
   t.diagnostic(JSON.stringify(r)); console.log('[still-check]', JSON.stringify(r)); return r;
@@ -88,6 +90,28 @@ for (const [name, souls, settle] of [['empty', 0, 0], ['two Souls asleep after t
     void r;
   });
 }
+
+test('A6: the check catches a part that changes the world before the deadline it reported', async (t) => {
+  const w = await world(t, 0), h = w.f.host; await run(w, 50);
+  const c = check(w), at = h.engine.world.tick + 300;
+  // a listener that logs an event at `at` but says nothing of it (as a deadline missed by its stillness would)
+  h.listeners.push({ afterTick: (tick) => { if (tick === at) void h.enqueue('rules', 'world', { why: 'test: an unreported change' }); } });
+  await run(w, 600);
+  assert.ok(c.failures.some((f) => f.tick === at - 1 && /queued/.test(f.what)), JSON.stringify(c.failures.slice(0, 3)));
+});
+
+test('A2: the steward digest slot and the daylight-saving change are named on the tick they fall', () => {
+  // the digest: the first tick whose (day, slot) differs from the one before, as Steward.schedule keys it
+  const D = 2400, origin = 100, key = (t: number) => { const c = clockAt(t, origin, D); return c.hour < MORNING_HOUR ? null : `${c.day}:${c.hour >= EVENING_HOUR ? 'e' : 'm'}`; };
+  for (let t = origin; t < origin + 2 * D; t += 37) {
+    let u = t + 1; while (key(u) === null || key(u) === key(t)) u++;
+    assert.equal(nextDigestTickAt(t, origin, D), u, `from tick ${t}`);
+  }
+  const at = Date.UTC(2026, 10, 14);
+  assert.equal(new Date(nextOffsetChangeMs(at, 'America/New_York')!).toISOString(), '2027-03-14T07:00:00.000Z');
+  assert.equal(new Date(nextOffsetChangeMs(at, 'Europe/Lisbon')!).toISOString(), '2027-03-28T01:00:00.000Z');
+  assert.equal(nextOffsetChangeMs(at, 'UTC'), null);
+});
 
 test('A4: the overdue quiet is timed from when the engine could last snapshot, never from when a snapshot was taken', () => {
   const at = (lastSnapshotTick: (tick: number) => number) => {

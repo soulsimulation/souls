@@ -377,7 +377,7 @@ export class EngineBridge {
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
       // #2297: a god edit not yet folded keeps the world busy; the gardens dry at the next world day (the stored day, A3)
-      stillness: () => { if (this.projectionDrafts.size) return [{ name: 'god.edit', busy: true }]; const l = this.host.living, d = this.gardenDay ?? this.gardenDayStored(); return l && l.dayTicks > 0 && d !== null ? [{ name: 'garden.drying', tick: l.origin + (d + 1) * l.dayTicks }] : []; },
+      stillness: () => { if (this.projectionDrafts.size) return [{ name: 'god.edit', busy: true }]; const l = this.host.living, d = this.gardenDay ?? this.gardenDayStored(); return l && l.dayTicks > 0 && d !== null && dryingOps(this.god.model, 1).length ? [{ name: 'garden.drying', tick: l.origin + (d + 1) * l.dayTicks }] : []; },   // only when something would dry
     });
     reachProviders.set(this.god.model, (from, to) => this.reach(from, to));
     if (!R) syncProviders.set(this.god.model, () => { this.flush(); return this.physics?.hash === this.engine.world.entityPhysicsV1?.hash; });
@@ -512,8 +512,9 @@ export class EngineBridge {
     if (this.gardenDay !== null && day < this.gardenDay) this.noteFading(day, this.gardenDay);
     if (this.gardenDay === null || day < this.gardenDay) { this.gardenDay = this.gardenDayStored(day); return; }
     if (day === this.gardenDay) return;
-    const days = Math.min(3, day - this.gardenDay), prev = this.gardenDay; this.gardenDay = this.gardenDayStored(day);
-    setImmediate(() => { try { const ops = dryingOps(this.god.model, days); if (ops.length) this.god.engineAct(ops as never, `garden: ${days} day(s) of drying`, () => {}); } catch (e) { this.log(`garden drying: ${(e as Error).message}`); }
+    const days = Math.min(3, day - this.gardenDay), prev = this.gardenDay; this.gardenDay = day;
+    // the day is stored once the drying is applied, so a crash in between dries that day again at the next load, never loses it
+    setImmediate(() => { try { const ops = dryingOps(this.god.model, days); if (ops.length) this.god.engineAct(ops as never, `garden: ${days} day(s) of drying`, () => {}); this.gardenDayStored(day); } catch (e) { this.log(`garden drying: ${(e as Error).message}`); }
       // #430: a fading drawing's perceived line follows the world day (no edit: its age is read from its drawn day)
       this.noteFading(day, prev); });
   }

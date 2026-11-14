@@ -26,7 +26,7 @@ export function mountPersonalReminders(app:Hono,deps:EdgeDeps,comms:CommsRuntime
  // paused. World targets compare only the unchanged authoritative world clock.
  // <=1s polling gives the declared <=2s running-server delivery acceptance.
  // #2297: the next reminder is a deadline of the world (a world minute through its day, a real time at the admin's rate)
- deps.host.listeners.push({stillness:(tick:number)=>{
+ deps.host.listeners?.push({stillness:(tick:number)=>{
   const d=service.nextDue();if(d.now)return [{name:'edge.reminder',busy:true}];
   const c=clock(),l=(deps.host as {living?:{dayTicks:number}}).living,rate=deps.host.baseRate>0?deps.host.baseRate:1,out:{name:string;tick:number}[]=[];
   if(d.realMs!==null)out.push({name:'edge.reminder.real',tick:tick+Math.max(1,Math.ceil((d.realMs-c.sampledAtRealMs)/50*rate))});

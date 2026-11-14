@@ -15,6 +15,13 @@ export type WorkKind = 'digest' | 'render' | 'narration';
 export type WorkItem = {id: string; kind: WorkKind | string; state: 'open' | 'claimed' | 'done'; createdAt: number; claimedAt: number | null; claimedBy: string | null; completedAt: number | null; body: Record<string, unknown>; result: Record<string, unknown> | null};
 export const CLAIM_TTL_MS = 10 * 60_000;
 export const MORNING_HOUR = 7, EVENING_HOUR = 18;
+/** #2297: the first tick after `tick` at which a new digest slot opens (07:00 or 18:00 of the world day; a clockAt day starts
+ *  at 06:00, so hour h is at phase (h - 6) / 24). */
+export function nextDigestTickAt(tick: number, origin: number, dayTicks: number): number {
+  const c = clockAt(tick, origin, dayTicks), at = (h: number) => (h - 6) / 24, slot = (day: number, phase: number) => origin + Math.ceil((day + phase) * dayTicks);
+  const next = c.phase < at(MORNING_HOUR) ? slot(c.day, at(MORNING_HOUR)) : c.phase < at(EVENING_HOUR) ? slot(c.day, at(EVENING_HOUR)) : slot(c.day + 1, at(MORNING_HOUR));
+  return Math.max(tick + 1, next);
+}
 
 type Row = {id: string; kind: string; state: string; created_at: number; claimed_at: number | null; claimed_by: string | null; completed_at: number | null; body: string; result: string | null};
 const toItem = (r: Row): WorkItem => ({id: r.id, kind: r.kind, state: r.state as WorkItem['state'], createdAt: r.created_at, claimedAt: r.claimed_at, claimedBy: r.claimed_by, completedAt: r.completed_at, body: JSON.parse(r.body), result: r.result ? JSON.parse(r.result) : null});
@@ -46,14 +53,13 @@ export class Steward {
     const living = this.core.deps.host.living;
     return clockAt(this.core.tick(), living?.origin ?? 0, living?.dayTicks ?? DAY_TICKS);
   }
-  /** #2297: the first tick of the next digest slot (the world's 07:00 or 18:00), where `schedule` queues new work. */
+  /** #2297: the first tick of the next digest slot (the world's 07:00 or 18:00), where `schedule` queues new work. A world
+   *  day (clockAt) starts at 06:00, so hour h is at phase (h - 6) / 24: 07:00 at 1/24, 18:00 at 12/24. */
   nextDigestTick(): number {
-    const living = this.core.deps.host.living, origin = living?.origin ?? 0, dayTicks = living?.dayTicks ?? DAY_TICKS, c = this.clock(), hourTicks = dayTicks / 24;
-    const slot = (day: number, hour: number) => origin + Math.ceil(day * dayTicks + hour * hourTicks);
-    const next = c.hour < MORNING_HOUR ? slot(c.day, MORNING_HOUR) : c.hour < EVENING_HOUR ? slot(c.day, EVENING_HOUR) : slot(c.day + 1, MORNING_HOUR);
-    return Math.max(this.core.tick() + 1, next);
+    const living = this.core.deps.host.living;
+    return nextDigestTickAt(this.core.tick(), living?.origin ?? 0, living?.dayTicks ?? DAY_TICKS);
   }
-    /** Queue the digest for the current in-world slot (idempotent per day+slot). */
+  /** Queue the digest for the current in-world slot (idempotent per day+slot). */
   schedule(): string | null {
     const c = this.clock();
     if (c.hour < MORNING_HOUR) return null;                 // night belongs to yesterday's evening digest

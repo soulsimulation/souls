@@ -584,18 +584,21 @@ export class WorldHost {
     if (gaze !== null) due.push({ name: 'engine.gaze', tick: gaze });
     for (const l of this.listeners) for (const p of l.stillness?.(tick) ?? []) { if (p.busy) return not(p.name); if (p.tick != null) due.push(p); }
     let untilTick: number | null = null, moveTick: number | null = null;
+    for (const p of due) p.tick = Math.max(tick + 1, p.tick!);   // a deadline already passed is due at the next step
     for (const p of due) { untilTick = untilTick === null ? p.tick! : Math.min(untilTick, p.tick!); if (p.move) moveTick = moveTick === null ? p.tick! : Math.min(moveTick, p.tick!); }
     return { still: true, tick, untilTick, moveTick, due: due.filter((p) => p.tick === untilTick) };
   }
   /** #2297 A6: the still check, off unless SIM_STILL_CHECK=1 (or set by a test). Once the world claims still until a tick,
    *  every step before that tick is checked: it grew no log, drew no world RNG and changed the engine state hash only in its
-   *  clock fields; a breach is recorded in `failures` (and logged). The claim is asked again when it ends, when an input is
-   *  queued or after a breach. `fell` counts the deadlines that fell due, by name. */
-  stillCheck: { claimed: number; failures: { tick: number; what: string; why: string }[]; fell: Map<string, number>; every: number; claim?: { until: number | null; due: string[]; at?: { hash: string; rng: string } } | null } | null =
+   *  clock fields, and left nothing queued (a listener's enqueue is logged only at the next tick's drain). The claim is asked
+   *  again when it ends, when an input is queued or after a breach. `closed`: no input comes from outside (a test), so an
+   *  input queued between two ticks inside a claim (a listener's deferred work) is a breach too. `fell` counts the deadlines that fell due, by name. */
+  stillCheck: { claimed: number; failures: { tick: number; what: string; why: string }[]; fell: Map<string, number>; every: number; closed?: boolean; claim?: { until: number | null; due: string[]; at?: { hash: string; rng: string } } | null } | null =
     process.env.SIM_STILL_CHECK === '1' ? { claimed: 0, failures: [], fell: new Map(), every: 1 } : null;
   private stillCheckBefore() {
     const chk = this.stillCheck!, tick = this.engine.world.tick;
     let c = chk.claim;
+    if (c && this.queue.length && chk.closed && (c.until === null || tick + 1 < c.until)) { chk.failures.push({ tick, what: 'an input was queued between ticks', why: c.due.join(',') || 'none' }); if (chk.failures.length <= 20) console.error(`[still-check] tick ${tick}: an input was queued between ticks inside a claimed horizon`); }
     if (!c || this.queue.length || (c.until !== null && tick + 1 >= c.until)) {
       if (c && c.until !== null && tick + 1 >= c.until) for (const n of c.due) chk.fell.set(n, (chk.fell.get(n) ?? 0) + 1);
       const s = this.stillUntil();
@@ -614,6 +617,7 @@ export class WorldHost {
     if (this.seq !== b.seq) fail('the log grew');
     if (now.rng !== b.at.rng) fail('the world RNG drew');
     if (b.hash && now.hash !== b.at.hash) fail('the state hash changed beyond the clock');
+    if (this.queue.length) fail('an input was queued');
     if (failed) chk.claim = null; else if (chk.claim) chk.claim.at = now;
   }
   /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
