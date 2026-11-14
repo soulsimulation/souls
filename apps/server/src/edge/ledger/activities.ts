@@ -124,8 +124,8 @@ export type ActivityWorld = {
   open(at: V2, min: number, rings: number): V2 | null;
   /** Someone else stands within 0.7 m of the point, or another Soul's open act targets this spot id. */
   taken(at: V2, spotId?: string): boolean;
-  /** #2189: the name of the Soul that makes `taken` true (its body there, or its open act on the spot), or null when none does. */
-  takenBy?(at: V2, spotId?: string): string | null;
+  /** #2189: the name of a Soul whose body is within 0.7 m of the point, or null (none, not a Soul, or a place this Soul does not know). */
+  takenBy?(at: V2): string | null;
   /** Admitted interiors (spots in a closed building are not offered). */
   enterable(place: string | undefined): boolean;
   /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
@@ -222,7 +222,7 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
     else if (w.taken(s.at, s.id) || besideTaken(s)) {
       // #2189: name the Soul using it, as the words path did ("Ana is already singing at the nearest microphone")
-      const at = clearAt(s), by = w.takenBy?.(s.at, s.id) ?? (at && at !== s.at ? w.takenBy?.(at) : null) ?? null;
+      const at = clearAt(s), by = w.takenBy?.(s.at) ?? (at && at !== s.at ? w.takenBy?.(at) : null) ?? null;
       why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now${by ? `: ${by} is using it` : ''}, so nothing was done. ${by ? `Ask again when ${by} has finished, or another` : 'Another'} one of the same kind may be free.`});
     }
     else if (!ok(s)) {
