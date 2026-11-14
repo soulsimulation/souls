@@ -18,6 +18,16 @@ Apply [bounded execution](planning.md#bounded-execution): prefer single-digit-ho
 outcome without routine milestone pauses, and get Gene's approval for substantial scope expansion. Use a supported
 goal for sustained execution or a durable checkpoint when unavailable; neither changes proof or approval requirements.
 
+Under a coordinator's agenda, work is cut into **task issues** ([template](../../.github/ISSUE_TEMPLATE/task.yml)).
+The coordinator writes each one before dispatch: at most five acceptance items, the files it may touch, what is not
+in it, a ceiling of 1 to 4 agent-hours and a stop rule. One lane works one task and stops. The ceiling is a limit,
+not a target. A defect found on the way is fixed in the same pull request, listed under "Also fixed", when the fix is
+small (about 30 minutes or 50 lines), keeps the tier and stays in the area; otherwise it gets its own small pull
+request, with no issue. An issue is filed only for work that will not start today, needs Gene's decision or is larger
+than about 2 hours. With each release the coordinator posts a table of the
+tasks merged since the last one: ceiling, hours taken, and how each ended (done, stopped at the ceiling, stopped on
+scope).
+
 ## 2. Branch
 
 Claim the issue first (assign it and add `agent:claimed`), then work on one branch, `agent/<issue>-<slug>`, in its
@@ -74,7 +84,7 @@ CI runs the checks for the PR's paths. The `main` ruleset requires `ci-ok`, the 
 `path-guard`, `scrub-guard`), `proof-ok` and the changelog `fragment`, and every review thread resolved. PR CI picks
 its jobs from the changed paths with the release gate's `--scope auto` map (`.github/scripts/ci-scope.mjs`): server
 and package tests, typecheck and the web build, the `apps/web` unit suite (`V4-web`), the `tools/world-launcher` unit
-tests (`V3-launcher-unit`) and the `tools/edge-skill` / `tools/client-eval` tests (`V3-client-cli`). Pushes to
+tests (`V3-launcher-unit`) and the `tools/client-eval` tests (`V3-client-cli`). Pushes to
 `main` and manual runs run every job, which is the evidence the merge train needs for non-strict landing. The browser
 walks and the full gate stay with the release. Server and launcher test files take free ports from
 `apps/server/test/test-port.ts`, so they can run beside other jobs and local processes on one host. Server discovery includes every nested `.test.ts` under

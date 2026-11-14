@@ -14,6 +14,7 @@ import {cursorOf, parseCursor, type StreamEvent} from '../comms/stream.ts';
 import {oneLine, parseFilter, passes, relativeBearing, toEnvelope, type Envelope, type Filter} from './envelope.ts';
 import {buildDigest} from './digest.ts';
 import {activityObserver} from './activity-observation.ts';
+import type {LiveHub} from '../catalog/live.ts';
 
 export const HEARTBEAT_MS = 15_000;
 export const MAX_STREAMS_PER_SOUL = 3;
@@ -28,7 +29,11 @@ export type EventsOptions = {
   placeName?: (id: string) => string | null;
   /** Called with the active plan summary for digests (plans module). */
   planSummary?: (soulId: string) => unknown;
+  /** #1755: the live picture's changes, pushed on the SSE stream to a client that asks (`live=1`). */
+  live?: LiveHub | null;
 };
+/** #1755: frames a slow client may have unwritten (more than a full replay, LIVE_REPLAY_MAX) before its changes are dropped (it then gets the whole picture once it drains). */
+export const LIVE_BACKLOG = 160;
 
 type Conn = {soulId: string; since: number; close(reason: string): void};
 const timeLabel = (phase: number) => phase < .2 ? 'morning' : phase < .45 ? 'day' : phase < .55 ? 'evening' : phase < .75 ? 'dusk' : 'night';
@@ -154,7 +159,7 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
       soul = deps.soul(c); limit(soul.soulId, 'events', 30);
       start = startOf(soul.soulId, c.req.header('last-event-id') ?? q('cursor') ?? q('after'));
     } catch (error) { return failure(c, error); }
-    const filter = parseFilter(q), raw = q('format') === 'raw', pad = q('pad') !== '0';
+    const filter = parseFilter(q), raw = q('format') === 'raw', pad = q('pad') !== '0', live = q('live') === '1' && options.live ? options.live : null;
     c.header('Cache-Control', 'no-cache, no-transform'); c.header('X-Accel-Buffering', 'no');
     const response = streamSSE(c, async stream => {
       const ac = new AbortController();
@@ -162,10 +167,32 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
       c.req.raw.signal?.addEventListener('abort', () => ac.abort(), {once: true});
       const conn: Conn = {soulId: soul.soulId, since: Date.now(), close: reason => { void stream.writeSSE({event: 'bye', data: JSON.stringify({reason})}).catch(() => {}).finally(() => { ac.abort(); stream.abort(); }); }};
       admit(conn);
+      let unsubscribe: (() => void) | null = null;
       try {
         // a padding comment defeats proxy buffering (tunnels) so the first events arrive at once
         if (pad) await stream.write(`: ${' '.repeat(2048)}\n\n`);
-        await stream.writeSSE({event: 'hello', retry: 3000, data: JSON.stringify({contract: EDGE_CONTRACT, soulId: soul.soulId, cursor: cursorOf(start), head: streams.headCursor(soul.soulId), filter, format: raw ? 'raw' : 'envelope', heartbeatSeconds: Math.round(heartbeatMs / 1000), digest: `/v1/edge/events/digest?since=${cursorOf(start)}`})});
+        await stream.writeSSE({event: 'hello', retry: 3000, data: JSON.stringify({contract: EDGE_CONTRACT, soulId: soul.soulId, cursor: cursorOf(start), head: streams.headCursor(soul.soulId), filter, format: raw ? 'raw' : 'envelope', heartbeatSeconds: Math.round(heartbeatMs / 1000), digest: `/v1/edge/events/digest?since=${cursorOf(start)}`, ...(live ? {live: true} : {})})});
+        // #1755: the live picture's changes, interleaved with this Soul's own events. A frame carries no SSE id, so the Soul's
+        // cursor is untouched. Every client is handed the same serialised frame; a client too slow to take them is sent
+        // nothing more until it has caught up, then the whole picture once.
+        if (live) {
+          let backlog = 0, behind = false;
+          const write = (sse: Uint8Array) => { backlog++; void stream.write(sse).finally(() => {
+            if (--backlog !== 0 || !behind || ac.signal.aborted) return;
+            // the whole picture is built while this stream is still behind, so a change it fans out is not written ahead of it
+            let body: string; try { body = live.full(); } catch { return; /* the live picture failed: this stream goes on without it */ }
+            behind = false; write(live.sse('live.full', body));
+          }); };
+          // a fault in the live picture drops the push, never the Soul's own stream
+          try {
+            unsubscribe = live.subscribe(c.req.header('x-live-after') ?? q('liveAfter') ?? null, (_event, _data, sse) => {
+              if (ac.signal.aborted) return;
+              if (backlog >= LIVE_BACKLOG) { behind = true; return; }
+              if (!behind) write(sse);
+            });
+          } catch (error) { console.error('[live-push] subscribe fault', error instanceof Error ? error.message : String(error)); }
+          ac.signal.addEventListener('abort', () => unsubscribe?.(), {once: true});
+        }
         await pump(soul.soulId, start, () => filter, raw, {
           event: (env, id) => stream.writeSSE({id, event: raw ? (env as StreamEvent).kind : (env as Envelope).kind, data: JSON.stringify(env)}),
           cursor: cur => stream.writeSSE({id: cur, event: 'cursor', data: JSON.stringify({cursor: cur, tick: core.tick()})}),
@@ -173,7 +200,7 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
           idle: async () => { await stream.write(`: keepalive ${core.tick()}\n\n`); },
         }, ac.signal);
       } catch { /* the client went away */ }
-      finally { release(conn); }
+      finally { unsubscribe?.(); release(conn); }
     });
     // Hono's streamSSE assigns Cache-Control: no-cache after c.header above.
     // Preserve the transport directive on the actual outgoing response.
@@ -329,7 +356,14 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
   }
   const activity = activityObserver({host:deps.host,db:deps.db,deliver:(soulId,tick,body)=>streams.deliver(soulId,'activity.observed',tick,body)});
   const listeners = deps.host.listeners;
-  const tickListener = {afterTick: (tick: number) => { if (tick % 20 === 0) sweep(tick); }};
+  // #2297: the next change of light (morning 0, day .2, evening .45, dusk .55, night .75 of the world day) is a deadline:
+  // every live Soul hears light.changed at the first sweep (every 20 ticks) after it
+  const nextLight = (tick: number) => {
+    const day = deps.host.living; if (!day || !(day.dayTicks > 0)) return [];
+    const c = clockAt(tick, day.origin, day.dayTicks), next = [0.2, 0.45, 0.55, 0.75, 1].find(p => p > c.phase)!;
+    return [{name: 'edge.light', tick: Math.ceil(Math.max(tick + 1, day.origin + Math.ceil((c.day + next) * day.dayTicks)) / 20) * 20}];
+  };
+  const tickListener = {afterTick: (tick: number) => { if (tick % 20 === 0) sweep(tick); }, stillness: nextLight};
   listeners?.push(tickListener,activity.listener);
 
   if (options.bootNotice) { try { notice({text: options.bootNotice, level: 'restart'}); } catch { /* best effort */ } }

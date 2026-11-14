@@ -50,7 +50,7 @@ await short.waitForTimeout(900);
 summary.popup=await short.evaluate(()=>{const tag=id=>document.querySelector(`[data-soul-id="${id}"]`),pop=id=>tag(id).querySelector('[data-speech-popup]');
  return {tamsin:pop('s_t')&&!pop('s_t').hidden?pop('s_t').textContent:null,tamsinCls:tag('s_t').className,lines:pop('s_t')?Math.round(pop('s_t').getBoundingClientRect().height/16.75):0,w:Math.round(tag('s_t').getBoundingClientRect().width),
   moss:pop('s_m')&&!pop('s_m').hidden?pop('s_m').textContent:null,mossDot:!!tag('s_m').querySelector('[data-speaking-dot]:not([hidden])'),tamsinDot:!!tag('s_t').querySelector('[data-speaking-dot]:not([hidden])')};});
-assert.match(summary.popup.tamsin??'',/^🔒 Nine o'clock by the shore\?/,'private pop-up over the near speaker');assert.match(summary.popup.tamsinCls,/dialogue-popping-private/);
+assert.match(summary.popup.tamsin??'',/^Nine o'clock by the shore\?/,'out-loud pop-up over the near speaker (#2269)');assert.doesNotMatch(summary.popup.tamsinCls,/dialogue-popping-private/);
 assert.ok(summary.popup.lines<=2&&summary.popup.w<=232,'compact: at most two lines '+JSON.stringify(summary.popup));
 assert.equal(summary.popup.moss,null,'no pop-up for a distant speaker');assert.ok(summary.popup.mossDot&&!summary.popup.tamsinDot,'distant speaker: dot only');
 // Clicking the pop-up opens just that conversation in a small floating dock (no card on screen); it does not select the Soul.

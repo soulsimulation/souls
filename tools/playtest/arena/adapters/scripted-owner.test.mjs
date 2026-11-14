@@ -15,7 +15,7 @@ import { wakeText, onboardingText } from '../seat.mjs';
 
 const STANDIN = `import { appendFileSync } from 'node:fs';
 const a = process.argv.slice(2); appendFileSync('calls.jsonl', JSON.stringify(a) + '\\n');
-if (a[0] === 'resolve') console.log(JSON.stringify({ candidates: a[1].includes('nothing') ? [] : [{ id: 'give:s_123' }, { id: 'give:s_456' }] }));
+if (a[0] === 'find') console.log(JSON.stringify({ found: a[1].includes('nothing') ? [] : [{ type: 'thing', act: 'give:s_123' }, { type: 'thing', act: 'give:s_456' }] }));
 else if (a[0] === 'act') { if (a[1].includes('swim')) { console.log(JSON.stringify({ accepted: false, code: 'no-offer' })); } else console.log(JSON.stringify({ accepted: true, receipt: { id: 'r1', phase: a.includes('--wait') ? 'completed' : 'running' } })); }
 else if (a[0] === 'status') console.log(JSON.stringify({ paired: true, soul: { id: 's1' } }));
 else console.log(JSON.stringify({ ok: true, cmd: a[0] }));`;
@@ -64,6 +64,8 @@ test('classify reads onboarding, nudges, wakes and typed chat from the harness t
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify(fetchErr) }, { waited: true }).ok, false, 'a receipt-fetch error is not a completion');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify({ accepted: true, waited: '60s', receipt: { error: 'HTTP 503' } }) }, { waited: true }).ok, false, '--json form of the same error');
   const finishedLong = brief({ accepted: true, waited: '20s', receipt: { ...walking, phase: 'completed', done: 'walked to the hall.' }, ownerMessages: owner });
+  delete finishedLong.receipt; // #836 keeps it here; the pre-#832 output (and a failed fetch) did not
+  assert.equal(finishedLong.done, 'walked to the hall.');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify(finishedLong) }, { waited: true }).ok, false, 'even a finished sentence without its receipt is unconfirmed');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify({ accepted: true, waited: '20s', receipt: { ...walking, phase: 'completed' }, ownerMessages: owner }) }, { waited: true }).ok, true, 'output that keeps its receipt (short brief, or --json in a script) counts');
   assert.equal(stepOutcome({ code: 0, stdout: JSON.stringify({ ...cut, events: [{ kind: 'activity.observed', action: { status: 'executing' } }] }) }, { waited: true }).ok, false, 'activity not tied to this receipt does not count');
@@ -293,8 +295,8 @@ else console.log(JSON.stringify({ ok: true }));`);
   assert.deepEqual(keptOutput('abcdef', 4), { content: 'abcd\n[scripted-owner: output truncated: 4 of 6 characters kept]', truncated: true });
 });
 
-test('#1268: a refused resolve names its first id under did_you_mean, a found one under candidates', () => {
-  assert.equal(firstCandidate({ stdout: JSON.stringify({ candidates: [{ id: 'walk:a' }] }) }), 'walk:a');
-  assert.equal(firstCandidate({ stdout: JSON.stringify({ ok: false, did_you_mean: [{ id: 'walk:b', label: 'B' }] }) }), 'walk:b');
+test('#1921: a resolve step names the first find row with an act', () => {
+  assert.equal(firstCandidate({ stdout: JSON.stringify({ found: [{ type: 'place', act: null }, { type: 'act', act: 'walk:a' }] }) }), 'walk:a');
+  assert.equal(firstCandidate({ stdout: JSON.stringify({ found: [] }) }), '');
   assert.equal(firstCandidate({ stdout: '{"ok":false}' }), ''); assert.equal(firstCandidate({ stdout: 'not json' }), '');
 });

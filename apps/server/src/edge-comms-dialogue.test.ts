@@ -97,3 +97,37 @@ test('a newly joined viewer gets the recent dialogue from the durable tables as 
     assert.equal(bounded.at(-1)!.text, 'line 129', 'newest kept');
   } finally { f.destroy(); }
 });
+
+// #2269 (Gene, 13 Nov): out loud by default, private on request. Canaries as in #2259's audit: every spectator
+// message, live (`onSpectator`, which http.ts broadcasts to every viewer socket) and on join (`spectatorJoin`, the
+// socket's join messages with the replay), is serialized and searched for the planted strings.
+test('a private conversation reaches viewers only as a talking cue; an out-loud one stays visible', async () => {
+  const {f, seen} = pair();
+  const PRIVATE = ['CANARY-PRIV-open-7f3a', 'CANARY-PRIV-reply-91c2'], LOUD = ['CANARY-LOUD-open-2b8e', 'CANARY-LOUD-reply-c04d'];
+  try {
+    const priv = (await f.post('Alice', '/v1/edge/converse', {op: 'start', with: [f.id('Bob')], text: PRIVATE[0], private: true})).body.conversation;
+    assert.equal(priv.private, true, 'the start reply says it is private');
+    await f.post('Bob', '/v1/edge/converse', {op: 'accept', conversation: priv.id});
+    await f.post('Bob', '/v1/edge/converse', {op: 'say', conversation: priv.id, text: PRIVATE[1]});
+    const loud = (await f.post('Alice', '/v1/edge/converse', {op: 'start', with: [f.id('Cleo')], text: LOUD[0]})).body.conversation;
+    assert.equal(loud.private, undefined, 'out loud by default');
+    await f.post('Cleo', '/v1/edge/converse', {op: 'accept', conversation: loud.id});
+    await f.post('Cleo', '/v1/edge/converse', {op: 'say', conversation: loud.id, text: LOUD[1]});
+    await f.post('Alice', '/v1/edge/say', {text: 'CANARY-SAY-5e61'});
+    const live = JSON.stringify(seen), join = JSON.stringify(f.runtime.spectatorJoin());
+    for (const c of PRIVATE) { assert.ok(!live.includes(c), `${c} not live`); assert.ok(!join.includes(c), `${c} not replayed`); }
+    for (const c of [...LOUD, 'CANARY-SAY-5e61']) { assert.ok(live.includes(c), `${c} live`); assert.ok(join.includes(c), `${c} replayed`); }
+    // Viewers see that Alice and Bob talk: start, membership and a cue per turn, never a turn record.
+    const ofPriv = seen.filter(m => m.conversation === priv.id);
+    assert.deepEqual(ofPriv.map(m => m.kind), ['conversation.talking', 'conversation.start', 'conversation.member', 'conversation.talking']);
+    assert.ok(ofPriv.every(m => m.turn === undefined && m.text === undefined));
+    assert.deepEqual(ofPriv.filter(m => m.kind === 'conversation.talking').map(m => [m.from.name, m.private]), [['Alice', true], ['Bob', true]]);
+    assert.equal(ofPriv.find(m => m.kind === 'conversation.start').private, true);
+    assert.ok(!JSON.parse(join).some((m: any) => m.conversation === priv.id), 'no private turn in the replay');
+    // Members still get every turn: on their stream and from the turns read.
+    assert.ok((await f.drain('Bob')).events.some(e => e.kind === 'conversation.invite' && e.text === PRIVATE[0] && e.private === true));
+    assert.ok((await f.drain('Alice')).events.some(e => e.kind === 'conversation.turn' && e.turn.text === PRIVATE[1]));
+    assert.deepEqual((await f.get('Alice', `/v1/edge/conversations/${priv.id}/turns?after=0`)).body.turns.map((t: any) => t.text), PRIVATE);
+    assert.equal((await f.post('Alice', '/v1/edge/converse', {op: 'start', with: [f.id('Bob')], private: 'yes'})).status, 400, 'private is a boolean');
+  } finally { f.destroy(); }
+});

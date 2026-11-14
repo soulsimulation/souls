@@ -55,7 +55,8 @@ export type Link = {
   members?: string[];
   /**
    * upper-floors/1: a flight that turns (a dog-leg stair with a landing): the body faces along its own step path while
-   * climbing, instead of keeping `heading` throughout. Absent: unchanged (straight flights face `heading`).
+   * climbing, instead of keeping `heading` throughout. A god building's straight flight entered from the side has it too
+   * (#2193: its path steps onto the flight, climbs it and steps off). Absent: unchanged (other straight flights face `heading`).
    */
   faceAlong?: boolean;
 };

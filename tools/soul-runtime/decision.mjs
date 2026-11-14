@@ -54,7 +54,7 @@ export const DECISION_SCHEMA={type:'object',additionalProperties:false,required:
  call:{type:'object',additionalProperties:false,required:['type','command','arguments'],properties:{type:{type:'string',enum:['read','write','listen','wait']},command:{type:'string'},arguments:{type:'string',description:'A JSON object of arguments. Local type listen, command listen: exactly {listenTo:[observed Soul IDs]}, {listenTo:"nearby"}, or {listenTo:[]} to durably configure attention and immediately continue to the next decision. Wait sleeps: {} for events, {seconds:N} for a relative wake; wait may also configure listenTo before sleeping. Wakeup and listening survive other calls independently. Use wait {cancelWake:true} only to cancel the saved wakeup.'}}},
  wakeAt:{type:['string','null'],description:'ISO8601 wall-clock wakeup with timezone, or null for no new wakeup. A listen configuration preserves the saved wakeup when null and immediately continues; it never sleeps.'},
 }};
-const READS=new Set(['help','response','tasks','task','resync','here','observe','explore','resolve','receipt','conversations','turns','calendar','reminders','object']);
+const READS=new Set(['help','response','tasks','task','resync','here','observe','explore','receipt','conversations','turns','calendar','reminders','object']);
 const WRITES=new Set(['act','say','converse','ack','result','remind','object']);
 export function listeningScope(value){
  if(value==='nearby')return value;
@@ -138,8 +138,11 @@ export async function applyPendingDecision(journal,fence,world,{signal}={}){
  const c=journal.control.checkpoint(),pending=c.value?.pendingDecision;if(!pending)return {applied:false};
  journal.control.assertOwner(fence);
  const {id,decision}=pending,call=decision.call;let response=null,reference=null;
- if(!['read','write','listen','wait'].includes(call?.type)||call.type==='read'&&!READS.has(call.command)||call.type==='write'&&!WRITES.has(call.command)||call.type==='listen'&&call.command!=='listen')throw Object.assign(Error('Retained decision requires a compatible runtime; state preserved'),{code:'UNSUPPORTED_RETAINED_DECISION'});
+ // A read resolve retained by an older runtime (the world's resolve route answers 410 since #2138) is answered locally, never left stuck.
+ const removed=call?.type==='read'&&call.command==='resolve';
+ if(!['read','write','listen','wait'].includes(call?.type)||call.type==='read'&&!removed&&!READS.has(call.command)||call.type==='write'&&!WRITES.has(call.command)||call.type==='listen'&&call.command!=='listen')throw Object.assign(Error('Retained decision requires a compatible runtime; state preserved'),{code:'UNSUPPORTED_RETAINED_DECISION'});
  if(call.type==='listen')response={local:true,listenTo:listeningScope(call.args.listenTo)};
+ else if(removed)response={accepted:false,error:{code:'read.removed',message:'resolve is no longer a read: read here or explore, then act with an offered capability'}};
  else if(call.type==='read'){
   if(call.command==='response')response=journal.control.response(call.args);
   else{

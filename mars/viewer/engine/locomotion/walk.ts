@@ -27,6 +27,7 @@ import { type AgentProfile, MAX_LEVEL_ID } from '../spatial/types.ts';
 import { gapToSleep, SLEEP_BODY_MARGIN } from '../activities/sleep.ts';
 import { G_WADE } from '../spatial/ground.ts';
 import { followHand, handPartnerOf } from '../social/hand-hold.ts';
+import { navTrustChecking, navTrustToken } from '../spatial/nav-trust.ts';
 
 const ACCEL = 1.2; // m/s²
 const BRAKE = 2 * ACCEL; // m/s² ordinary deceleration
@@ -186,9 +187,9 @@ const spatial = bodySpatial;
 
 /**
  * What a `walk_to` step reads about everyone else, read once per step (PLANNING_BUDGET.md §6):
- * - the world's entities in world order: the people scans (encounter, look-ahead, intrusion, vehicles,
- *   stairs) ran `Object.values` 4–6× per walker per tick, and `world.entities` is a V8 dictionary-mode
- *   object, where each call sorts and copies (~2 µs for 30; `entityList` ~0.5 µs);
+ * - the world's people in world order (isPerson; shared by every walker of a tick, peopleNow): the people
+ *   scans (encounter, look-ahead, intrusion, vehicles, stairs) ran `Object.values` 4–6× per walker per tick,
+ *   and `world.entities` is a V8 dictionary-mode object, where each call sorts and copies;
  * - the carried-load discs (`services.loadDiscs`, rebuilt from every carried component on each call),
  *   on first use.
  * A walker's step never adds, removes or replaces an entity (it moves its own pose, read live through
@@ -197,7 +198,30 @@ const spatial = bodySpatial;
  */
 let stepScope: { entities: Entity[]; discs?: LoadDiscView[] } | null = null;
 /** Pure-performance switches (PLANNING_BUDGET.md §6). Each leaves every result bit-identical; tests turn them off to prove it. */
-export const WALK_PERF = { stepSnapshot: true, lazyLinkDiagnostics: true };
+export const WALK_PERF = { stepSnapshot: true, lazyLinkDiagnostics: true, tickPeople: true };
+/** What a walker's scans can see: every scan in a step (encounter, hazardAhead, intrusion, sidestep, occupant, stairs,
+ *  vehicles…) skips any entity that is neither `kind: 'human'` nor carries a `human` record before reading anything else,
+ *  so the step's snapshot holds only these, in world order: the same entities each scan acts on, in the same order. */
+const isPerson = (e: Entity) => e.kind === 'human' || e.human !== undefined;
+/**
+ * #2124: one people list per tick for every walker, not one listing of the whole world per walker (23 % of a 24-Soul
+ * world's busy thread). Kept while the runtime's nav-trust interval that made it is open (spatial/nav-trust.ts): only
+ * nav-pure steps ran since, and a nav-pure step, with all it triggers (a walk's make-way submit, its hand partner's
+ * step), adds, removes or replaces no entity and gives no entity a person's kind or `human` record (ActionDef.navPure),
+ * so the list is exactly what a fresh listing would give. Any other code closes the interval
+ * and the next walker lists afresh; outside an interval (token -1) every step lists afresh. Keyed on the table object,
+ * the tick and the token, never on time. SIM_NAV_TRUST_CHECK lists afresh anyway and throws if they differ.
+ */
+let tickPeople: { entities: object; tick: number; token: number; people: Entity[] } | null = null;
+function peopleNow(rt: Runtime): Entity[] {
+  const entities = rt.world.entities, tick = rt.world.tick, token = WALK_PERF.tickPeople ? navTrustToken() : -1;
+  const kept = token >= 0 && tickPeople && tickPeople.entities === entities && tickPeople.tick === tick && tickPeople.token === token ? tickPeople.people : null;
+  if (kept && !navTrustChecking()) return kept;
+  const people = entityList(rt).filter(isPerson);
+  if (kept && (kept.length !== people.length || kept.some((e, i) => e !== people[i]))) throw new Error(`walk: the tick's people list went stale at tick ${tick} (a navPure step added, removed or replaced an entity)`);
+  if (token >= 0) tickPeople = { entities, tick, token, people };
+  return people;
+}
 /** Entry 35: while a walker steps, the body it walks hand in hand with is beside it by design, not in its way. */
 let handPartner: string | null = null;
 const entitiesOf = (rt: Runtime): Entity[] => stepScope?.entities ?? (handPartner ? entityList(rt).filter((e) => e.id !== handPartner) : entityList(rt));
@@ -293,7 +317,7 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
     const x0 = h.pose.p[0], z0 = h.pose.p[2];
     const outer = stepScope, outerPartner = handPartner;
     handPartner = h.human?.handHold ? handPartnerOf(rt, h) : null;
-    stepScope = WALK_PERF.stepSnapshot ? { entities: handPartner ? entityList(rt).filter((e) => e.id !== handPartner) : entityList(rt) } : null;
+    stepScope = WALK_PERF.stepSnapshot ? { entities: handPartner ? peopleNow(rt).filter((e) => e.id !== handPartner) : peopleNow(rt) } : null;
     let r: StepResult;
     try {
       r = stepWalk(rt, ex, dt);
@@ -1281,8 +1305,22 @@ function sameBodyPlane(me:Entity,other:Entity):boolean {
 
 /** A person that moving from `from` to `to` on a flight would bring `me` within 2r of (and closer). Also used by the carry climb. */
 export function stairBlocker(rt: Runtime, me: Entity, from: number[], to: number[], r: number): string | null {
+  const spacing = rt.services.climbSpacingV1 === true;
   for (const o of entitiesOf(rt)) {
     if (o.id === me.id || o.kind !== 'human') continue;
+    // #1530 climb-spacing/1 (logged policy): also the separation invariant's own read (collision.human-human: the same level id,
+    // within 1 m in height, horizontally closer than both radii less 0.08 m), with a 2 cm margin. The ellipsoid below lets a
+    // follower close under a climber ahead to dy ~0.99 m at 0.22 m across, which that invariant flags. A step the invariant
+    // would flag is refused unless the two are already flagged and it moves them apart by the invariant's measure (the
+    // horizontal gap grows).
+    if (spacing && o.human && me.human && o.human.level === me.human.level) {
+      const sep = r + bodyProfile(o).radius - 0.08 + 0.02, hTo = hypot(o.pose.p[0] - to[0], o.pose.p[2] - to[2]), hFrom = hypot(o.pose.p[0] - from[0], o.pose.p[2] - from[2]);
+      const flagged = (h: number, y: number) => Math.abs(o.pose.p[1] - y) <= 1.0 + 0.02 && h < sep;
+      // the exception for a step apart: only from a pose the invariant itself already flags (its exact read, no margin), and
+      // only when the horizontal gap widens; a step from just outside (|dy| 1.01 m) to inside is refused whatever its gap
+      const exact = Math.abs(o.pose.p[1] - from[1]) <= 1.0 && hFrom < sep - 0.02;
+      if (flagged(hTo, to[1]) && !(exact && hTo > hFrom)) return o.id;
+    }
     const floater=me.body?.family==='floater';
     const dyTo=Math.abs(o.pose.p[1]-to[1]),dyFrom=Math.abs(o.pose.p[1]-from[1]);
     const dTo = floater && dyTo<=1.1?hypot(o.pose.p[0]-to[0],o.pose.p[2]-to[2]):hypot(o.pose.p[0] - to[0], (o.pose.p[1] - to[1]) * 0.5, o.pose.p[2] - to[2]);
@@ -1858,6 +1896,13 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
   const blocker = onStair ?? atLanding;
   // stair-landing-clearance/1: ask an idle body on the landing to step aside, clear of it (spec §17), once a second.
   if (atLanding && a.body?.family !== 'floater' && rt.tick % 20 === 0) makeWay(rt, atLanding, landing.p);
+  // #1530 climb-spacing/1: a cancelled climb backing off to its landing, held by an idle body standing on that landing's floor
+  // (beside the stair foot or head, not on the flight), asks it to step aside too, once a second, so the climber can step off
+  // and walk again instead of waiting there for good
+  if (onStair && rt.services.climbSpacingV1 === true && a.body?.family !== 'floater' && rt.tick % 20 === 0) {
+    const o = rt.world.entities[onStair];
+    if (o?.human && !o.human.task && o.human.level === landing.level && Math.abs(o.pose.p[1] - landing.y) <= 0.05) makeWay(rt, onStair, landing.p);
+  }
   if (blocker) {
     if(a.body?.family==='floater')makeWay(rt,blocker,[next[0],next[2]],{by:a.id,subjects:[a.id],landing:{y:rt.world.entities[blocker].pose.p[1],radius:2*ex.profile.radius+.3}});
     a.human!.activity = 'climb-wait';

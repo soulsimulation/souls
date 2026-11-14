@@ -86,6 +86,10 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
 - Stay within the requested outcome. Prefer independently reviewable, single-digit-hour slices; finish one active
   implementation before starting another. Get Gene's approval before substantial scope expansion or an out-of-scope
   prerequisite; explain the smallest necessary addition. Routine in-scope repairs need no new permission.
+- A task issue is a lane's whole scope: its Acceptance, its Touches (the files it may change) and its ceiling in
+  agent-hours. One lane works one task issue, does what the acceptance asks and stops. The ceiling is a limit, not
+  a target: never add work to use the time. Only the coordinator changes a task's bounds, by editing the issue.
+  [Lane rules](.claude/agents/lane.md)
 - Continue to the authorized endpoint, including checks, proof and review fixes; do not stop at routine milestones
   unless Gene requested review stops. Use an available goal mechanism for sustained work, otherwise a durable issue
   checkpoint. Goals never override budgets, genuine blockers or merge/release approvals. See [bounded execution](docs/process/planning.md#bounded-execution).
@@ -105,12 +109,37 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
   adds a changelog fragment in [`changes/`](changes/README.md) unless it is labelled `no-changelog`.
 - "Done" means walked on the real URL with real input; a scripted e2e alone doesn't count. Visual evidence is uncut,
   real-speed video. [docs/process/](docs/process/agent-lifecycle.md)
-- Bug fixes need no approval. Destructive production deletes need the maintainer's explicit yes.
+- Bug fixes need no approval from Gene. A defect a lane finds on the way is fixed in the same pull request, listed
+  under "Also fixed", when the fix is small (about 30 minutes or 50 lines), keeps the tier and stays in the area;
+  otherwise it gets its own small pull request, no issue. File an issue only for work that will not start today, needs
+  Gene's decision or exceeds about 2 hours. Destructive production deletes need the maintainer's explicit yes.
 - Issues state the problem and acceptance criteria before work starts. The PR is the journal entry: acceptance with
   evidence, proof, self-audit. [docs/process/agent-lifecycle.md](docs/process/agent-lifecycle.md#5-pull-request)
 - Repo skills in `.claude/skills/` (plain Markdown, readable by any agent): `journal`, `epic`, `triage`, `finish`,
   `proof`, `e2e`, `souls-director`, `coordinator-handoff`. Agent definitions in `.claude/agents/`: `coordinator`,
   `lane`, `reviewer`.
+
+## Development coordinator
+
+These rules bind whoever coordinates an agenda. They hold across handoffs and context compactions; after either,
+re-read the agenda issue before dispatching anything.
+
+- The agenda is the pinned coordination issue (#1960 as of November 2026): Gene's decisions, the lanes and their
+  order, and every task. Dispatch only tasks listed there. New work enters by adding a task issue to it.
+- Dispatch one task issue per lane, in the agenda's order. Review each pull request against the issue's Acceptance
+  and Touches, and send back work that goes beyond the acceptance. Never extend a task by message: edit the issue
+  or open a new one. A follow-up dispatched from a finding carries its bounds in the dispatch brief; its PR is the
+  record.
+- Stay thin: dispatch, review, sign, keep the merge queue moving through a steward, and release. Do not do a
+  lane's work. Stop dispatching while more than eight pull requests are ready and unmerged.
+- After each wave of dispatches and each release, post a checkpoint on the agenda issue; with each release, the
+  table of tasks merged since the last one, with ceiling, hours taken and how each ended. A successor starts from
+  that issue, so a handoff packet carries state (pull requests, heads, what is running) and never rules.
+- Nothing stays unfiled or stale: at each release the steward gives every open issue without a milestone, and
+  every pull request untouched for seven days, an outcome (close with a reason, park, backlog, or propose as a
+  task). An issue where a Soul or a world can get stuck goes to the top whatever its age.
+- Gene alone decides scope, priority, spend and production machines. Do not re-ask what the agenda lists as
+  decided. [Coordinator contract](docs/process/development-coordinator.md)
 
 ## Release and operations
 
