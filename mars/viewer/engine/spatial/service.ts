@@ -754,7 +754,9 @@ export class Spatial {
       const { doors: _, ...rest } = opts;
       const r = this.routeNow(world, profile, start, goal, rest);
       if (r.ok || r.diagnostic.code !== 'route.unreachable' || start.level !== 0 || goal.level !== 0) return r;
-      const pass = new Map(this.scene.obstacles.filter((o) => o.door === 'pass').map((o) => [o.id, o]));
+      // only doors on the ground (within 0.6 m of level 0's floor or the terrain), as the connectivity audit counts them
+      const y0 = this.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0;
+      const pass = new Map(this.scene.obstacles.filter((o) => o.door === 'pass' && Math.abs(o.y0 - (y0 ?? this.ground!.standY(o.obb.c[0], o.obb.c[1]))) <= 0.6).map((o) => [o.id, o]));
       if (!pass.size) return r;
       const named = this.routeNow(world, profile, start, goal, { ...rest, nameObstacles: (id) => pass.has(id) });
       const doors = named.ok ? [] : (named.diagnostic.subjects ?? []).map((id) => pass.get(id)).filter((o): o is Obstacle => !!o).slice(0, 4);
