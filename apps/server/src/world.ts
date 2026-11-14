@@ -544,10 +544,9 @@ export class WorldHost {
   /** The world's own clock loop is running (start(); a served world). False while stepped by hand (tests, tools): lane P5
    *  defers some boot-time derived work only in a served world, so a stepped one sees it at the same tick as before. */
   get running(): boolean { return this.timer !== null; }
-  /** Wall pace of the clock (attention.ts): 1 while anyone watches or acts here, lower while nobody does (an unwatched
-   *  world advances fewer ticks per wall second, and wakes its loop less often). The same ticks run in the same order with
-   *  the same inputs, so schedules (in world time) and takes (cut every 20 ticks) are unchanged; only how fast world time
-   *  passes against the wall clock changes, as while asleep. Not logged, not persisted, not part of `clockRate`. */
+  /** Wall pace of the clock: 1. #2235: a served world never runs slower than the wall, watched or not (the unwatched
+   *  quarter pace is gone); lower values remain only for measurement harnesses. Not logged, not persisted, not part of
+   *  `clockRate`. */
   pace = 1;
   setPace(pace: number) {
     if (!(pace > 0 && pace <= 1) || pace === this.pace) return;
@@ -555,6 +554,20 @@ export class WorldHost {
     if (this.timer && !this.paused) this.carry += (Math.min(1000, now - this.last) * this.clockRate * this.pace) / TICK_MS;  // the time so far, at the old pace
     this.last = now; this.pace = pace;
     if (this.timer) { clearInterval(this.timer); this.startFrameTimer(); }
+  }
+  /** #2235: ticks still owed to the wall while `catchUp` runs (the real-time keeper reads the clock as already caught up). */
+  owedTicks = 0;
+  /** #2235: run `ticks` ticks the world missed while it had no process (restart, deploy, eviction), before its clock
+   *  starts: the ordinary tick, listeners and all, yielding a turn between ticks exactly as the frame loop does. What the
+   *  boot itself queued (the bridge's projection, a keeper event) drains at the first of them, as it would have long ago in
+   *  a world that never stopped; outside writes wait at the HTTP edge until the catch-up is done (main.ts). */
+  async catchUp(ticks: number, turn: () => Promise<unknown> = () => new Promise((r) => setImmediate(r))): Promise<number> {
+    if (this.timer) throw new Error('catch-up.clock-running');
+    let done = 0; const generation = this.clockGeneration;   // stop() (a shutdown during the catch-up) ends it
+    this.owedTicks = Math.max(0, Math.floor(ticks));
+    try { while (this.owedTicks > 0 && !this.paused && this.clockAvailable && generation === this.clockGeneration) { this.tickOnce(); this.owedTicks--; done++; await turn(); } }
+    finally { this.owedTicks = 0; }
+    return done;
   }
 
   // ------------------------------------------------------------ the loop
@@ -1355,6 +1368,10 @@ export class WorldHost {
   /** #1428 stair-way/1, one logged rules event (prospective): a walk's way on a link leg (a stair) is the link's exit, so another
    *  walker's make-way test never throws on a climber. History before the event replays as it was. Main adopts it at boot. */
   enableStairWayV1(author='operator:stair-way'){if((this.extra.runtimePolicy as {stairWayV1?:boolean}|undefined)?.stairWayV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,stairWayV1:true},why:'stair-way/1 (#1428): a walk on a stair has the stair exit as its way, so a make-way test reading it never throws; retain historical replay before this event'});}
+  /** #1530 climb-spacing/1, one logged rules event (prospective): a climber's step is refused where collision.human-human would
+   *  flag it against another body on its level (|dy| <= 1 m, closer than both radii), so a follower waits behind on the stair and
+   *  is never settled off it. History before the event replays as it was. Main adopts it at boot. */
+  enableClimbSpacingV1(author='operator:climb-spacing'){if((this.extra.runtimePolicy as {climbSpacingV1?:boolean}|undefined)?.climbSpacingV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,climbSpacingV1:true},why:'climb-spacing/1 (#1530): a climber waits behind a body ahead on the stair rather than stepping where the separation invariant flags them; retain historical replay before this event'});}
   /** #1216 item-approach/1, one logged rules event (prospective): a take_item / put_item approach walk blocked for a minute ends
    *  route.blocked, and a ground take tries wider rings of stands. History before the event replays as it was. Main adopts it at boot. */
   enableItemApproachV1(author='operator:item-approach'){if((this.extra.runtimePolicy as {itemApproachV1?:boolean}|undefined)?.itemApproachV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,itemApproachV1:true},why:'item-approach/1 (#1216): an item step\'s approach walk is limited like a walk, and a ground take tries wider stands; retain historical replay before this event'});}
@@ -1373,6 +1390,10 @@ export class WorldHost {
     return new Promise<LogEvent>((resolve,reject)=>this.queue.push({kind:'rules',author,payload,guard,resolve,reject}));
   }
   enableStandHeightV1(author='operator:stand-height'){if((this.extra.runtimePolicy as {standHeightV1?:boolean}|undefined)?.standHeightV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,standHeightV1:true},why:'stand-height/1 (#1454): a body the engine places upstairs stands at its floor height, never in the air at the height it had; retain historical replay before this event'});}
+  /** #2294 held-activity/1, one logged rules event (prospective): an activity in place started after it (a solo pose, a mat
+   *  sleep) keeps a start and an end tick instead of a running sum; seats, slots and circles once taken are held with no end;
+   *  the engine reads whether the world is still and until which tick. History before the event replays as it was. Main adopts it at boot. */
+  enableHeldActivitiesV1(author='operator:held-activity'){if((this.extra.runtimePolicy as {heldActivitiesV1?:boolean}|undefined)?.heldActivitiesV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,heldActivitiesV1:true},why:'held-activity/1 (#2294): an activity in place has a start and an end tick and costs nothing between them; retain historical replay before this event'});}
   /** #2196 park-away/1, one logged rules event (prospective): an empty ride that landed away from its home parks where it landed and
    *  offers its seats there, never flying itself back with nobody aboard; the next rider flies it home. History before the event
    *  replays as it was. Main adopts it at boot. */

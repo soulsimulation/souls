@@ -787,6 +787,8 @@ const { createHash } = soulRecords$crypto;
 /** W5 local memory preparation. No HTTP, identity, model, CLI or queue runner. */
 
 const VERSION = 'eden-memory-folder/1';
+/** What a Soul said it would come to, and the invitations it heard and made (#1981). */
+const ENGAGEMENTS = ['calendar', 'invited', 'invited-by-me'];
 const ID = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,159}$/;
 const MAX_RECORD = 64 * 1024;
 const source = value => typeof value === 'string' && value.length>0&&value.length<=1000&&!/[\u0000-\u001f\u007f]/.test(value) ? value : fail('invalid source ID');
@@ -829,7 +831,7 @@ function validateContext(e) {
 
 function validateEvent(input) {
   // Reject credentials/raw transport fields instead of retaining arbitrary state.
-  const fields = {gazetteer: ['places'], 'public.references':['references'], 'place.observed':['place'], conversation:['conversationId','personId'], 'idle.sample':['milliseconds'], scorecard:['clock','period','from','to','metrics'], arrival: ['placeId'], 'act.accepted': ['receiptId', 'act'], meet: ['person', 'placeId'], communication:['person','channel','recipientPlace','conversationId'], speech: ['personId', 'text', 'untrusted', 'channel', 'conversationId', 'placeId'], outcome: ['receiptId', 'act', 'phase', 'summary', 'learned', 'produced', 'met', 'placeId', 'untrusted', 'messageId'], refusal: ['act', 'code'], lesson: ['attempt', 'fix', 'refusalId', 'successId'], cost: ['usd', 'modelCalls'], ledger: ['holding', 'marks'], queue: ['steps'], told: ['personIds', 'text', 'channel', 'conversationId'], commitment: ['personId', 'by', 'what'], 'commitment.kept': ['personId', 'commitmentId', 'evidence']};
+  const fields = {gazetteer: ['places'], 'public.references':['references'], 'place.observed':['place'], conversation:['conversationId','personId'], 'idle.sample':['milliseconds'], scorecard:['clock','period','from','to','metrics'], arrival: ['placeId'], 'act.accepted': ['receiptId', 'act'], meet: ['person', 'placeId'], communication:['person','channel','recipientPlace','conversationId'], speech: ['personId', 'text', 'untrusted', 'channel', 'conversationId', 'placeId'], outcome: ['receiptId', 'act', 'phase', 'summary', 'learned', 'produced', 'met', 'placeId', 'untrusted', 'messageId'], refusal: ['act', 'code'], lesson: ['attempt', 'fix', 'refusalId', 'successId'], cost: ['usd', 'modelCalls'], ledger: ['holding', 'marks'], queue: ['steps'], told: ['personIds', 'text', 'channel', 'conversationId'], engagement: ['kind', 'personIds', 'what', 'startsAt', 'placeId', 'source'], commitment: ['personId', 'by', 'what'], 'commitment.kept': ['personId', 'commitmentId', 'evidence']};
   if (!input || !Object.hasOwn(fields, input.type)) fail('unknown public event type');
   keys(input, ['type', 'id', 'at', ...CONTEXT, ...fields[input.type]]);
   id(input.id); instant(input.at); validateContext(input); const e = structuredClone(input);
@@ -857,6 +859,7 @@ function validateEvent(input) {
       list(e.produced, 32).forEach(o => {keys(o, ['id', 'title', 'kind', 'where']); id(o.id); text(o.title, 200); text(o.kind, 1000); if(o.where!==null)id(o.where);});
       list(e.met, 32).forEach(p => {keys(p, ['id', 'name', 'where']); id(p.id); text(p.name, 200); if(p.where!==null)id(p.where);}); break;
     case 'told': list(e.personIds, 16).forEach(id); text(e.text, 500); if (!['private-conversation', 'public-speech'].includes(e.channel)) fail('invalid communication channel'); if (e.conversationId !== undefined) id(e.conversationId); break;
+    case 'engagement': if (!ENGAGEMENTS.includes(e.kind)) fail('invalid engagement kind'); list(e.personIds, 16).forEach(id); text(e.what, 300); if (e.startsAt !== null) instant(e.startsAt); if (e.placeId !== null) id(e.placeId); source(e.source); break;
     case 'commitment': id(e.personId); if (!['me', 'them'].includes(e.by)) fail('invalid commitment party'); text(e.what, 300); break;
     case 'commitment.kept': id(e.personId); id(e.commitmentId); id(e.evidence); break;
     case 'refusal': text(e.act, 160); text(e.code, 100); break;
@@ -899,7 +902,7 @@ function validateRemember(input) {
 /** Byte budgets for the projections that grow with the log, for a caller that opts in (the Souls home does; 1.9 doesn't).
  *  Each keeps the newest entries that fit and says how many older ones are in the log only. */
 const PROJECTION_BUDGETS = Object.freeze({knowledge: 32 * 1024, places: 16 * 1024, ledger: 16 * 1024});
-const COST_DAYS = 31, NOTE_ROOM = 160;
+const COST_DAYS = 31, NOTE_ROOM = 160, PROMISES_MAX = 50, UPCOMING_MAX = 3, INVITE_FRESH_MS = 24 * 3600_000, STARTED_MS = 3600_000;
 const size = value => Buffer.byteLength(value);
 /** The newest entries whose lines fit in `room` bytes, oldest first; `items` is oldest first. */
 const newestFit = (items, line, room) => {let used = 0, i = items.length;while (i > 0 && used + size(line(items[i - 1])) + 1 <= room) used += size(line(items[--i])) + 1;return items.slice(i);};
@@ -924,7 +927,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
   const seen = new Map(), places = new Map(), people = new Map(), references = new Map(), knowledge = new Map(), objects = new Map(), goals = new Map(), impressions = new Map(), refusals = new Map(), successes = new Map(), terminals = new Map(), lessons = [];
   const scoreEvents=[],scorecards=[];
   let self = [], queue = [], holding = [], marks = [], recentOutcomes = [];
-  const journals = new Map(), costs = new Map();
+  const journals = new Map(), costs = new Map(), engagements = new Map();
   const stamp = e => e.world === undefined ? '' : ` (${e.world}${dayOf(e) === null ? '' : `, day ${dayOf(e)}`}${e.when?.time ? ` ${e.when.time}` : ''})`;
   const journal = (at, message) => {const day = at.slice(0, 10); const lines = journals.get(day) ?? []; lines.push(`${at.slice(11, 19)}Z ${message}`); journals.set(day, lines);};
   // A record that names what it saw stands on its own: the name as seen makes the place known, and a later name is a rename.
@@ -959,7 +962,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       return;
     }
     const e = record.value;
-    if (e.type === 'arrival' || e.type === 'meet'&&e.placeId!==null) knownPlace(e.placeId, e);
+    if (e.type === 'arrival' || (e.type === 'meet' || e.type === 'engagement')&&e.placeId!==null) knownPlace(e.placeId, e);
     if(e.type==='communication'&&e.recipientPlace!==null)knownPlace(e.recipientPlace, e);
     if (e.type === 'speech' && !people.has(e.personId) && seenAs(e, e.personId) === undefined) fail('speaker has no observed communication or confirmed meeting');
     if (e.type === 'speech' && e.placeId) knownPlace(e.placeId, e);
@@ -982,6 +985,8 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       if (!refusal || !success || refusal.act !== e.attempt || success.act !== e.fix || success.phase !== 'completed' || refusal.at > success.at || success.at > e.at) fail('lesson needs matching refusal and completed fix evidence');
     }
   };
+  const whoOf = e => e.personIds.map(p => seenAs(e, p) ?? people.get(p)?.name ?? p);
+  const engagementSaid = e => e.kind === 'calendar' ? `Said I will come: ${e.what}${e.placeId ? ` at ${asSeen(e.placeId, e)}` : ''}${e.startsAt ? `, starts ${e.startsAt}` : ''} [${e.source}].` : e.kind === 'invited' ? `${whoOf(e).join(', ') || 'Someone'} invited me: ${e.what} [${e.source}].` : `I invited ${whoOf(e).join(', ') || 'whoever was near'}: ${e.what} [${e.source}].`;
   const terminalValue = e => {const {id: _id, at: _at, ...value} = e; return canonical(value);};
   const apply = record => {
     observe?.(record);
@@ -1000,7 +1005,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
       case 'gazetteer': for (const p of e.places) {const old = places.get(p.id); places.set(p.id, {...p,admittedDestination:p.admittedDestination===true, visits: old?.visits ?? 0, last: old?.last ?? null});} break;
       case 'arrival': {const p = places.get(e.placeId); scoreEvents.push({at:e.at,newPlaces:p.visits===0?1:0});p.visits++; p.last = e.at; journal(e.at, `Arrived at ${p.name} [${p.id}]${stamp(e)}.`); break;}
       case 'act.accepted': break; // Acceptance is neither arrival nor successful outcome.
-      case 'meet':if(/^encounter:[a-f0-9]{64}$/.test(e.id)){communicate(e.person,e.at,e.placeId,'legacy-received-speech',true);journal(e.at,`Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);}else{meet(e.person,e.at,e.placeId,false,e);journal(e.at,`Confirmed physical meeting with ${e.person.name} [${e.person.id}] at ${e.seen?asSeen(e.placeId,e):e.placeId}${stamp(e)}.`);}break;
+      case 'meet':if(/^encounter:[a-f0-9]{64}$/.test(e.id)){communicate(e.person,e.at,e.placeId,'legacy-received-speech',true);journal(e.at,`Legacy communication from ${e.person.name} [${e.person.id}]; recipient place ${e.placeId}; physical co-location unqualified.`);}else{meet(e.person,e.at,e.placeId,false,e);journal(e.at,`Confirmed physical meeting with ${e.person.name} [${e.person.id}]${e.placeId===null?'':` at ${e.seen?asSeen(e.placeId,e):e.placeId}`}${stamp(e)}.`);}break;
       case 'communication':communicate(e.person,e.at,e.recipientPlace,e.channel);journal(e.at,`Received ${e.channel} from ${e.person.name} [${e.person.id}]; recipient place ${e.recipientPlace??'unknown'}; co-location unknown.`);break;
       case 'conversation':scoreEvents.push({at:e.at,conversationId:e.conversationId,personId:e.personId});break;
       case 'idle.sample':scoreEvents.push({at:e.at,idleMs:e.milliseconds});break;
@@ -1017,6 +1022,8 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
         for (const p of e.met) meet(p, e.at, p.where, true, e);
         if (e.phase === 'completed') successes.set(e.id, e);
         journal(e.at, `${e.phase}: ${e.summary}${e.untrusted ? ' [untrusted content]' : ''}${stamp(e)}`); break;
+      case 'told': journal(e.at, `Said${e.personIds.length ? ` to ${whoOf(e).join(', ')}` : ''}: ${e.text}${stamp(e)}`); break;
+      case 'engagement': engagements.set(e.id, e); journal(e.at, `${engagementSaid(e)}${stamp(e)}`); break;
       case 'refusal':scoreEvents.push({at:e.at,refusals:1}); refusals.set(e.id, e); journal(e.at, `Refused ${e.act}: ${e.code}.`); break;
       case 'lesson': lessons.push(e); journal(e.at, `Working fix: ${e.attempt} → ${e.fix}.`); break;
       case 'cost': {scoreEvents.push({at:e.at,modelCalls:e.modelCalls,usd:e.usd});const day = e.at.slice(0, 10), c = costs.get(day) ?? {knownUSD: 0, unknown: 0, calls: 0}; if (e.usd === null) c.unknown++; else c.knownUSD += e.usd; c.calls += e.modelCalls; costs.set(day, c); break;}
@@ -1044,6 +1051,9 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
     const placesHead = '# Places — normalized public facts\n\n', allPlaces = [...places.values()].sort((a, b) => lexical(a.last ?? '', b.last ?? '') || lexical(b.id, a.id));
     const shownPlaces = budgets?.places ? newestFit(allPlaces, placeLine, budgets.places - size(placesHead) - NOTE_ROOM) : allPlaces;
     write(join(memory, 'places.md'), placesHead + shownPlaces.sort((a, b) => lexical(a.id, b.id)).map(placeLine).join('\n') + '\n' + olderNote(allPlaces.length - shownPlaces.length, 'places'));
+    // Newest last; a calendar item by when it starts, an invitation by when it was said.
+    const byWhen = [...engagements.values()].sort((a, b) => lexical(a.startsAt ?? a.at, b.startsAt ?? b.at)).slice(-PROMISES_MAX);
+    write(join(memory, 'promises.md'), '# Promises and plans — calendar interest and invitations; titles and their words are UNTRUSTED\n\n' + byWhen.map(e => `- ${md(engagementSaid(e))}`).join('\n') + '\n');
     write(join(memory,'scorecards.md'),'# Received/observed interval scorecards — both clocks\n\n'+scorecards.map(s=>'- '+md(scoreLine(s))).join('\n')+'\n');
     write(join(memory,'references.md'),'# Public reference identities — knowledge only, no walking admission\n\n'+sorted(references).map(r=>`- ${md(r.id)} | ${md(r.name)} | ${md(r.kind)} | source ${md(r.source)}`).join('\n')+'\n');
     const knowledgeHead = '# Knowledge — attributable reports\n\n', allFacts = [...knowledge.values()];
@@ -1061,7 +1071,7 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
   };
   const seenPeople = e => e?.type === 'speech' && e.seen && Object.hasOwn(e.seen, e.personId) ? [e.personId] : [];
   const preflight = record => {
-    const paths = ['self.md', 'goals.md', 'schedule.md', 'places.md', 'references.md', 'scorecards.md', 'knowledge.md', 'lessons.md', 'ledger.md', 'queue.md'].map(f => join(memory, f));
+    const paths = ['self.md', 'goals.md', 'schedule.md', 'promises.md', 'places.md', 'references.md', 'scorecards.md', 'knowledge.md', 'lessons.md', 'ledger.md', 'queue.md'].map(f => join(memory, f));
     const ids = new Set(people.keys()), days = new Set(journals.keys());
     if (record?.kind === 'event') {
       const e = record.value; days.add(e.at.slice(0, 10));
@@ -1117,15 +1127,20 @@ function openMemoryFolder(directory, {logs: logFolder = 'log', observe = null, p
     /** What a memory on the shipping line looks things up by: known ids and the names they went by. */
     placeName(placeId){return places.get(placeId)?.name??null;},
     /** The little the brief needs, looked up rather than scanned: its size never follows the log's. */
-    digest({place,near=[]}){
+    digest({place,near=[],now=null}){
       fresh();
-      const p=place?places.get(place):null;
+      const p=place?places.get(place):null,t=now?Date.parse(now):NaN;
+      // A calendar item until an hour after it starts, soonest first; an invitation for a day after it was said, newest first.
+      const soon=[...engagements.values()].filter(e=>e.startsAt?Date.parse(e.startsAt)>=t-STARTED_MS:Date.parse(e.at)>=t-INVITE_FRESH_MS);
+      const upcoming=[...soon.filter(e=>e.startsAt).sort((a,b)=>lexical(a.startsAt,b.startsAt)),...soon.filter(e=>!e.startsAt).sort((a,b)=>lexical(b.at,a.at))].slice(0,UPCOMING_MAX)
+        .map(e=>({kind:e.kind,source:e.source,what:e.what,who:whoOf(e),place:e.placeId?asSeen(e.placeId,e):null,inMinutes:e.startsAt?Math.round((Date.parse(e.startsAt)-t)/60000):null}));
       return {
         place:p?{name:p.name,visits:p.visits,note:impressions.get(p.id)??null}:null,
         people:near.flatMap(personId=>{const row=people.get(personId);if(!row)return [];const m=row.meetings.at(-1);return [{id:row.id,name:row.name,met:row.meetings.length,last:m?{world:m.world??null,worldDay:m.day??null,place:m.seenAs??null}:null,note:row.impressions.at(-1)??null}];}),
         goals:sorted(goals).sort((a,b)=>['today','week','month'].indexOf(a.horizon)-['today','week','month'].indexOf(b.horizon)).slice(0,4).map(g=>({id:g.id,note:g.note,next:g.next})),
         recent:recentOutcomes.slice(-2).map(e=>({summary:e.summary,own:e.id.startsWith('owner:')})),
         self:self.slice(0,8),
+        upcoming,
       };
     },
     known(){fresh();return {people:sorted(people).map(p=>({id:p.id,name:p.name,met:p.meetings.length})),places:sorted(places).map(p=>({id:p.id,name:p.name,formerly:(p.formerly??[]).map(f=>f.name)})),self:[...self],goals:sorted(goals).map(g=>({...g}))};},
@@ -1193,13 +1208,18 @@ const quoted = (v, max = WORLD_BYTES) => `"${cut(flat(v).replace(/["\\\p{Pi}\p{P
 const times = (n) => (n === 1 ? "once" : `${n} times`);
 const when = (w) => [w?.world ? quoted(w.world) : null, w?.worldDay === null || w?.worldDay === undefined ? null : `day ${w.worldDay}`].filter(Boolean).join(", ");
 
-/** `facts`: {people, place, promises, goals, schedule, recent, earlier, self}, each maybe empty. An empty memory is an empty brief. An episode is
+/** `facts`: {people, place, promises, goals, schedule, upcoming, recent, earlier, self}, each maybe empty. An empty memory is an empty brief. An episode is
  *  the Soul's own words only with `own`: a world saying nothing about its trust is not a world to be trusted. Room goes first
  *  to what the Soul and its owner wrote, so a world's long names can't push a promise out. */
 function buildBrief(facts, { bytes = BRIEF_BYTES } = {}) {
   const person = (p) => `${quoted(p.name)}: ${p.met ? `met ${times(p.met)}` : "only heard from"}${p.last ? `, last ${[when(p.last), p.last.place ? quoted(p.last.place) : null].filter(Boolean).join(" at ")}` : ""}.${p.note ? ` My note: ${mine(p.note, NOTE_BYTES)}` : ""}${p.open ? ` Open: ${mine(p.open, NOTE_BYTES)}` : ""}${p.claimed ? ` A world says this is ${quoted(p.claimed)}, whom I know elsewhere; I can't check that.` : ""}`;
   const promise = (c) => `[${c.id}] ${c.by === "me" ? "I promised" : "They promised"} ${quoted(c.with)}: ${c.what}`;
   const place = (p) => `${quoted(p.name)}: ${p.visits > 1 ? `been here ${times(p.visits)}` : "first time here"}.${p.note ? ` My note: ${mine(p.note, NOTE_BYTES)}` : ""}`;
+  const minutes = (m) => (m > 0 ? `starts in ${m} min` : m === 0 ? "starts now" : `started ${-m} min ago`);
+  const people = (who) => (who ?? []).slice(0, 3).map((n) => quoted(n)).join(", ");
+  // a source id comes from a world: shown bare only when it is plainly an id
+  const coming = (e) => `[${/^[\w:.-]{1,120}$/.test(e.source) ? e.source : "id withheld"}] ${e.kind === "calendar" ? `I said I'd come: ${quoted(e.what)}${e.place ? ` at ${quoted(e.place)}` : ""}${e.inMinutes === null ? "" : `, ${minutes(e.inMinutes)}`}`
+    : e.kind === "invited" ? `${people(e.who) || "Someone"} invited me: ${quoted(e.what, OPEN_BYTES)}` : `I invited ${people(e.who) || "whoever was near"}: ${mine(e.what, OPEN_BYTES)}`}`;
   const goal = (g) => `${g.id ? `[${g.id}] ` : ""}${g.note}${g.next ? ` Next: ${g.next}` : ""}`;
   // Goals can't take every line: the owner's next schedule entry always has one.
   const later = facts.schedule ?? [], open = [...[...(facts.promises ?? []).map(promise), ...(facts.goals ?? []).map(goal)].slice(0, OPEN_MAX - Math.min(later.length, 1)), ...later].slice(0, OPEN_MAX);
@@ -1207,6 +1227,7 @@ function buildBrief(facts, { bytes = BRIEF_BYTES } = {}) {
     { head: "Known people here", rank: 2, lines: (facts.people ?? []).slice(0, PEOPLE_MAX).map(person) },
     { head: "This place", rank: 3, lines: facts.place ? [place(facts.place)] : [] },
     { head: "Open commitments", rank: 0, lines: open.map((l) => mine(l, OPEN_BYTES)) },
+    { head: "Coming up", rank: 1, lines: (facts.upcoming ?? []).map(coming) },
     { head: "Last episode", rank: 4, lines: (facts.recent ?? []).slice(-EPISODES).map((e) => (e.own ? mine(e.summary, EPISODE_BYTES) : quoted(e.summary, EPISODE_BYTES))) },
     { head: "Earlier", rank: 5, lines: (facts.earlier ?? []).map((l) => quoted(l, EPISODE_BYTES)) },
     { head: "Self", rank: 1, lines: (facts.self ?? []).slice(0, SELF_MAX).map((l) => mine(l, SELF_BYTES)) },
@@ -1246,6 +1267,22 @@ const short = (v, max = LINE_BYTES) => { const t = String(v ?? ""); return Buffe
 const clock = (e) => [e.world, e.when?.worldDay == null ? null : `day ${e.when.worldDay}`, e.when?.time].filter(Boolean).join(", ");
 const own = (o, k) => (o && Object.hasOwn(o, k) ? o[k] : undefined);
 
+/** Words that ask the listener to come or join: an invitation, as a world's text can be read without a model. */
+const INVITING = /\b(?:come|join|see you|invit\w*|would you like|do you want|want to|let'?s|you should|(?:is|are) welcome)\b/i;
+/** A line said to this Soul: it names them (their first name, as a word). A private conversation is always to them. */
+function addressed(text, name) {
+  const first = String(name ?? "").trim().split(/[\s,]+/)[0];
+  return first.length >= 2 && new RegExp(`(?<![\\p{L}\\p{N}])${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(String(text ?? ""));
+}
+/** The lines worth keeping of what someone said: each line once, those said to this Soul first, then questions and
+ *  invitations, then the newest. */
+function quotes(words, n) {
+  const once = new Map();
+  for (const w of words) { const k = w.text.trim().toLowerCase(); once.delete(k); once.set(k, w); }
+  const rank = (w) => (w.toMe ? 2 : 0) + (w.text.includes("?") || INVITING.test(w.text) ? 1 : 0);
+  return [...once.values()].map((w, i) => ({ w, i })).sort((a, b) => rank(b.w) - rank(a.w) || b.i - a.i).slice(0, n).map((x) => x.w);
+}
+
 /** The file for a person: a readable start, and a hash of the whole traveller id so two ids never share a file. */
 const personFile = (traveller) => `${String(traveller).replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+/, "").slice(0, 60)}-${createHash("sha256").update(String(traveller)).digest("hex").slice(0, 12)}.md`;
 
@@ -1253,7 +1290,7 @@ const personFile = (traveller) => `${String(traveller).replace(/[^A-Za-z0-9._-]+
  *  from a world is a claim about that world's own row: it decides which file the row is shown in, marked as a world's word,
  *  and nothing else. What this Soul wrote stays on the row it wrote about, so a stranger who claims to be a friend gets no note,
  *  no promise and no name of theirs. The price: a promise made to someone keeps only on what that same row did. */
-function createPeople({ world = null } = {}) {
+function createPeople({ world = null, me = null } = {}) {
   const rows = new Map(), conversations = new Map(), receipts = new Map(), dirty = new Set();
   let seq = 0;   // place in the log: a world picks its own timestamps, not this
   const at = (home, id) => `${home}/${id}`, groupOf = (row) => row.claims ?? row.key;
@@ -1286,7 +1323,7 @@ function createPeople({ world = null } = {}) {
       case "speech": {
         const row = person(e.personId, named(e, e.personId), e);
         contact(row, e, named(e, e.placeId));
-        row.words.push({ at: e.at, text: e.text });
+        row.words.push({ at: e.at, text: e.text, toMe: e.channel === "private-conversation" || addressed(e.text, me) });
         if (e.conversationId) {
           const key = at(home, e.conversationId);
           conversations.set(key, (conversations.get(key) ?? new Map()).set(e.personId, seq));
@@ -1328,7 +1365,7 @@ function createPeople({ world = null } = {}) {
       ...list("Last contact — place as a world named it, UNTRUSTED", row.last ? [`- ${place(row.last)}`] : []),
       ...list("Episodes — a world's words, UNTRUSTED", last(row.episodes).map((x) => `- ${short(md(x.line))} — ${x.kind} ${short(md(x.ref), NAME_BYTES)}`)),
       ...list("What a world says of them — UNTRUSTED", last(said, Math.min(keep, BELIEFS)).map((b) => `- ${short(md(b.text))} — ${short(md(b.provenance), NAME_BYTES)}`)),
-      ...list("What they said — UNTRUSTED", last(row.words, Math.min(keep, 3)).map((w) => `> ${short(md(w.text))}`)),
+      ...list("What they said — UNTRUSTED", quotes(row.words, Math.min(keep, 3)).map((w) => `> ${short(md(w.text))}`)),
       ...list("What I have told them", last(row.told, Math.min(keep, 6)).map((t) => `- ${short(md(t.text))}`)),
     ];
   }
@@ -1374,6 +1411,8 @@ function createPeople({ world = null } = {}) {
     /** Every open promise, whoever is near. Oldest first: they have waited longest. */
     promises() { return [...rows.values()].flatMap((row) => open(row).map((c) => ({ id: c.id, with: row.name, by: c.by, what: c.what, seq: c.seq }))).sort((a, b) => a.seq - b.seq).slice(0, OPEN_MAX); },
     commitment(id) { for (const row of rows.values()) if (row.commitments.has(id)) return { row, ...row.commitments.get(id) }; return null; },
+    /** Souls of this world met here whose first name the text says, as a word: who a line of this Soul's was for. */
+    named: (text) => [...rows.values()].filter((r) => r.world === world && r.met > 0 && addressed(text, r.name)).map((r) => r.id).slice(0, 16),
     /** Who has spoken in a conversation here. */
     conversation: (id) => [...(conversations.get(local(id))?.keys() ?? [])],
     /** The id that proves this promise kept, or null: since it was made, their own turn, or for a promise of mine a shared act. */
@@ -1385,7 +1424,7 @@ function createPeople({ world = null } = {}) {
     size: () => rows.size,
   };
 }
-return { personFile, createPeople };
+return { INVITING, addressed, personFile, createPeople };
 })();
 // </inline people.mjs>
 
@@ -1627,7 +1666,7 @@ const { join, relative } = soulMemory$path;
 const { PROJECTION_BUDGETS, openMemoryFolder } = soulRecords;
 const { buildBrief } = soulBrief;
 const { SUMMARY } = soulConsolidate;
-const { createPeople } = soulPeople;
+const { INVITING, addressed, createPeople } = soulPeople;
 // memory.mjs: one memory per Soul across worlds. It keeps the record format of memory-folder.mjs and
 // feeds it what the client already received: no HTTP, no model. Design: docs/design/soul-context.md section 2.
 //
@@ -1642,6 +1681,8 @@ const TERMINAL = new Set(["completed", "failed", "replaced"]);
 const MOVES = /^(?:walk|go|run|jog|stroll|hang-out|approach|follow|fly|ride)\b/;
 /** How close a Soul has to be for a first meeting: the distance `here` counts as local. */
 const NEAR_METRES = 8;
+/** How long the live picture has to keep a body in a new place before it counts as there: a walk passes through places. */
+const SETTLE_MS = 15_000;
 const SEARCH_MAX = 20, OPEN_FOR_MAX = 32, RECORD_BYTES = 56 * 1024, LOCK_TRIES = 150, LOCK_WAIT_MS = 20, LOCK_OLD_MS = 10_000, PLACE_ID_MAX = 200;
 /** `memory` fails closed: a line is the Soul's own only where nothing else writes. */
 const OWN_FILES = new Set(["self.md", "goals.md", "schedule.md"]), OWN_SECTION = /^(?:What I believe|What I have told them|Commitments|Judgments|Noted more than once)\b/, OWN_JOURNAL = /^- \S+ (?:completed|failed): /;
@@ -1690,7 +1731,7 @@ function lastSummary(file) {
 function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; } }
 
 /** `world` is this home's key for the world the Soul is in, `role` home or visiting. */
-function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home", now = () => new Date().toISOString(), sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }) {
+function openSoulMemory(soulDir, { world, url = null, soul = null, name: soulName = null, role = "home", now = () => new Date().toISOString(), sleepMs = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) }) {
   const presenceFile = join(soulDir, "worlds", `${world}.json`), lock = join(soulDir, "runtime", ".memory.lock");
   const readPresence = () => { try { return JSON.parse(readFileSync(presenceFile, "utf8")); } catch { return null; } };
   let presence = readPresence() ?? { world, url, role, soul, place: null, placeName: null, posture: null, lastSeen: null, worldDay: null, time: null };
@@ -1706,11 +1747,11 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   // the log moved under it opens it again. A holder that died, or a lock older than any write takes, is passed over, one
   // writer at a time; a live one is waited for, then reported. Everything else stays what memory-folder.mjs says: a torn log
   // fails closed.
-  let records = null, travellers = {};
-  let people = createPeople({ world });
+  let records = null, travellers = {}, settling = null;
+  let people = createPeople({ world, me: soulName });
   // A day consolidation has summarized stays in the log, and its journal page doesn't come back.
   const journalAfter = () => { try { return JSON.parse(readFileSync(join(soulDir, "memory", "consolidation.json"), "utf8")).through ?? null; } catch { return null; } };
-  const openRecords = () => { people = createPeople({ world }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
+  const openRecords = () => { people = createPeople({ world, me: soulName }); const opened = openMemoryFolder(soulDir, { logs: join("memory", "log"), observe: (record) => people.apply(record), personFiles: false, journalAfter: journalAfter(), budgets: PROJECTION_BUDGETS }); flushPeople(); return opened; };
   // No people/ folder until there is someone in it; a record folded into another leaves no file behind.
   function flushPeople() {
     const { write, remove } = people.changes(), dir = join(soulDir, "memory", "people");
@@ -1786,20 +1827,30 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   }
   /** What this place goes by: what the world just said, else what this memory knows, else its id until a name turns up. */
   const nameOf = (r, key, said) => clip(said, 200) || r.placeName(key) || (key === worldKey(world, presence.place) ? presence.placeName : null) || key.slice(world.length + 1);
-  const arrived = (r, when, rawPlace, said) => {
+  // A change of place is an arrival. With `again` (the world's own arrive event, at the end of a walk) so is coming back to
+  // where this memory already has the Soul, unless an arrival there is on record from that tick or later.
+  const arrived = (r, when, rawPlace, said, again = false) => {
     const placeId = typeof rawPlace === "string" ? clip(rawPlace, PLACE_ID_MAX) : "";
-    if (!placeId || placeId === presence.place) return false;
-    const place = worldKey(world, placeId), name = nameOf(r, place, said);
+    if (!placeId) return false;
+    if (placeId === presence.place && !(again && when.tick !== null && count(presence.arrivedTick) !== null && when.tick > presence.arrivedTick)) return false;
+    const place = worldKey(world, placeId), name = nameOf(r, place, typeof said === "function" ? said() : said);
     const wrote = fold(r, `arrival:${world}:${when.tick ?? when.real}:${placeId}`, { type: "arrival", placeId: place, when, seen: seenOf([[place, name]]) });
-    writePresence({ place: placeId, placeName: name, near: [], lastSeen: when, worldDay: when.worldDay, time: when.time });
+    writePresence({ place: placeId, placeName: name, near: [], lastSeen: when, worldDay: when.worldDay, time: when.time ?? presence.time, arrivedTick: when.tick });
     return wrote;
   };
   const here = (r) => { const key = typeof presence.place === "string" && presence.place ? worldKey(world, presence.place) : null; return key ? [key, nameOf(r, key)] : [null, null]; };
-  const met = (r, when, person) => {
+  /** Where a world says an event happened (its `where`: the other Soul's place), else where this memory has this Soul. */
+  const placeOf = (r, where) => {
+    const raw = typeof where?.placeId === "string" ? clip(where.placeId, PLACE_ID_MAX) : "";
+    if (!raw) return here(r);
+    const key = worldKey(world, raw);
+    return [key, nameOf(r, key, where.place)];
+  };
+  const met = (r, when, person, where = null) => {
     const name = clip(person?.name, 100);
     if (!safeId(person?.id) || person.id === soul || !name) return false;
     if (people.view(person.id)?.met > 0) return false;
-    const [place, placeName] = here(r);
+    const [place, placeName] = placeOf(r, where);
     return fold(r, `meet:${world}:${person.id}`, { type: "meet", person: { id: person.id, name }, placeId: place, when, seen: seenOf([[person.id, name], ...(place ? [[place, placeName]] : [])]) });
   };
 
@@ -1834,8 +1885,12 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
   function heard(r, e, when) {
     const from = e.from ?? e.turn?.from, text = clip(e.text ?? e.turn?.text, 1000), person = from?.soulId ?? from?.id, name = clip(from?.name, 100);
     if (!safeId(person) || person === soul || !text || !name) return false;
-    const turn = e.kind === "conversation.turn", [place, placeName] = here(r);
-    return fold(r, `speech:${world}:${soul}:${e.id ?? sha([e.kind, e.conversation, e.turn?.seq, e.tick, person, text])}`, { type: "speech", personId: person, text, untrusted: true, channel: turn ? "private-conversation" : "public-speech", ...(turn && safeId(e.conversation) ? { conversationId: e.conversation } : {}), placeId: place, when, seen: seenOf([[person, name], ...(place ? [[place, placeName]] : [])]) });
+    const turn = e.kind === "conversation.turn", [place, placeName] = placeOf(r, e.where), key = e.id ?? sha([e.kind, e.conversation, e.turn?.seq, e.tick, person, text]);
+    const seen = seenOf([[person, name], ...(place ? [[place, placeName]] : [])]);
+    const wrote = fold(r, `speech:${world}:${soul}:${key}`, { type: "speech", personId: person, text, untrusted: true, channel: turn ? "private-conversation" : "public-speech", ...(turn && safeId(e.conversation) ? { conversationId: e.conversation } : {}), placeId: place, when, seen });
+    // An invitation said to this Soul is kept as one, with who and where; its when is in their words.
+    if ((turn || addressed(text, soulName)) && INVITING.test(text)) fold(r, `invited:${world}:${soul}:${key}`, { type: "engagement", kind: "invited", personIds: [person], what: clip(text, 300), startsAt: null, placeId: place, source: clip(`${world}:${e.saidId ?? e.id ?? key}`, 1000), when, seen });
+    return wrote;
   }
   const noted = (me, when) => { const posture = typeof me.posture === "string" ? clip(me.posture, 40) : null; if (posture !== presence.posture || when.worldDay !== presence.worldDay) writePresence({ posture, lastSeen: when, worldDay: when.worldDay, time: when.time }); };
 
@@ -1856,6 +1911,20 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
       const ids = near.filter((p) => safeId(p.id) && p.id !== soul && clip(p.name, 100)).map((p) => p.id).slice(0, 8);
       if (ids.join() !== (presence.near ?? []).join()) writePresence({ near: ids });
     },
+    /** Where the live picture has this Soul's body (`name` a name or a function giving one). A place it keeps for SETTLE_MS is
+     *  an arrival, however the body got there; one it only passes through on a walk is not. */
+    sawPlace({ place, name = null, tick = null } = {}) {
+      const placeId = typeof place === "string" ? clip(place, PLACE_ID_MAX) : "";
+      if (!placeId) return false;
+      presence = readPresence() ?? presence;   // the serve and a seat both watch the picture
+      if (placeId === presence.place) { settling = null; return false; }
+      const t = Date.parse(now());
+      if (settling?.place !== placeId) { settling = { place: placeId, since: t }; return false; }
+      if (t - settling.since < SETTLE_MS) return false;
+      settling = null;
+      const when = clockAt({ real: now(), tick, time: null });
+      return withRecords((r) => { presence = readPresence() ?? presence; return arrived(r, when, placeId, name); });
+    },
     /** Events off the stream or a `wait`. One the record won't take costs only itself. */
     sawEvents(events) {
       const wanted = rows(events, 1000).filter((e) => (e.kind === "receipt" && TERMINAL.has(e.receipt?.phase) && typeof e.receipt?.id === "string") || ["arrive", "approach", "speech", "conversation.turn"].includes(e.kind));
@@ -1866,8 +1935,8 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
           const when = clockAt({ real: Number.isFinite(e.at) ? realTime(Math.min(e.at, Date.parse(now())), now) : now(), tick: e.tick, time: e.clock });
           try {
             if (e.kind === "receipt") outcome(r, e.receipt, when);
-            else if (e.kind === "arrive") arrived(r, when, e.where?.placeId ?? e.placeId, e.where?.place ?? e.placePath?.[0]);
-            else if (e.kind === "approach") met(r, when, { id: e.from?.soulId, name: e.from?.name });
+            else if (e.kind === "arrive") arrived(r, when, e.where?.placeId ?? e.placeId, e.where?.place ?? e.placePath?.[0], true);
+            else if (e.kind === "approach") met(r, when, { id: e.from?.soulId, name: e.from?.name }, e.where);
             else heard(r, e, when);
           } catch (err) { if (stale(err)) throw err; problem ??= err; }
           if (moved(when)) { last = when; presence = { ...presence, lastSeen: when, worldDay: when.worldDay, time: when.time ?? presence.time }; }
@@ -1894,13 +1963,27 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
       withRecords((r) => fold(r, `${from}:${world}:${messageId}`, { type: "outcome", receiptId: worldKey(world, own ? messageId : `plan-${messageId}`), messageId, act: "owner-message", phase: done ? "completed" : "failed", summary: clip(text, 160), untrusted: !own, learned: [], produced: [], met: [], when, seen: {} }));
     },
     /** What this Soul just said: to the people near, or to a conversation, and then only to those in it. */
-    sawSaid(text, { to, conversationId } = {}) {
+    sawSaid(text, { to, conversationId, id = null } = {}) {
       const said = clip(text, 500); if (!said) return;
       const when = clockAt({ real: now(), tick: null, time: null }), private_ = safeId(conversationId);
       withRecords((r) => {
-        const personIds = [...(to ?? (private_ ? [] : presence.near ?? [])), ...(private_ ? people.conversation(conversationId) : [])].filter((id) => safeId(id) && people.view(id)).slice(0, 16);
-        if (!personIds.length) return;
-        fold(r, `told:${world}:${sha([said, personIds, when.real])}`, { type: "told", personIds, text: said, channel: private_ ? "private-conversation" : "public-speech", ...(private_ ? { conversationId } : {}), when, seen: seenOf(personIds.map((id) => [id, people.view(id)?.name])) });
+        // Those it was for: the conversation, or those near and those it names. Said to no one known, it is still journalled.
+        const personIds = [...new Set([...(to ?? (private_ ? [] : [...(presence.near ?? []), ...people.named(said)])), ...(private_ ? people.conversation(conversationId) : [])])].filter((id) => safeId(id) && people.view(id)).slice(0, 16);
+        const key = `${world}:${typeof id === "string" && id ? clip(id, 200) : sha([said, personIds, when.real]).slice(0, 32)}`, seen = seenOf(personIds.map((p) => [p, people.view(p)?.name]));
+        fold(r, `told:${key}`, { type: "told", personIds, text: said, channel: private_ ? "private-conversation" : "public-speech", ...(private_ ? { conversationId } : {}), when, seen });
+        if (INVITING.test(said)) {
+          const [place, placeName] = here(r);
+          fold(r, `inviting:${key}`, { type: "engagement", kind: "invited-by-me", personIds, what: clip(said, 300), startsAt: null, placeId: place, source: key, when, seen: { ...seen, ...(place ? seenOf([[place, placeName]]) : {}) } });
+        }
+      });
+    },
+    /** A calendar item this Soul said it would come to. Its title and place are a world's words. */
+    sawCalendar({ id, title = null, placeId = null, place = null, startsInMinutes = null, byId = null } = {}) {
+      if (typeof id !== "string" || !clip(id, 200)) return;
+      const at = now(), when = clockAt({ real: at, tick: null, time: null }), start = Number.isFinite(startsInMinutes) ? realTime(Date.parse(at) + startsInMinutes * 60_000, () => null) : null;
+      withRecords((r) => {
+        const where = typeof placeId === "string" && clip(placeId, PLACE_ID_MAX) ? worldKey(world, clip(placeId, PLACE_ID_MAX)) : null, by = safeId(byId) && people.view(byId) ? [byId] : [];
+        fold(r, `calendar:${world}:${clip(id, 200)}`, { type: "engagement", kind: "calendar", personIds: by, what: clip(title, 300) || clip(id, 300), startsAt: start, placeId: where, source: `${world}:${clip(id, 200)}`, when, seen: seenOf([...(where ? [[where, nameOf(r, where, place)]] : []), ...by.map((p) => [p, people.view(p)?.name])]) });
       });
     },
     /** A promise, to or from someone this Soul knows. `by` is me or them. */
@@ -1969,7 +2052,7 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
     brief({ bytes } = {}) {
       if (!existsSync(join(soulDir, "memory", "log", "memory-events.jsonl"))) return "";
       presence = readPresence() ?? presence;   // another process may be the one watching the world
-      const facts = withRecords((r) => ({ ...r.digest({ place: typeof presence.place === "string" && presence.place ? worldKey(world, presence.place) : null }), people: (presence.near ?? []).map((id) => people.view(id)).filter(Boolean), promises: people.promises() }));
+      const facts = withRecords((r) => ({ ...r.digest({ place: typeof presence.place === "string" && presence.place ? worldKey(world, presence.place) : null, now: now() }), people: (presence.near ?? []).map((id) => people.view(id)).filter(Boolean), promises: people.promises() }));
       const pinned = readLines(join(soulDir, "SOUL.md"), /^## Pinned\b/).map((l) => l.replace(/^- /, "")), schedule = readLines(join(soulDir, "memory", "schedule.md"), /^# Schedule\b/).filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
       return buildBrief({ ...facts, schedule, earlier: lastSummary(join(soulDir, "MEMORY.md")), self: pinned.length ? pinned : facts.self }, Number.isSafeInteger(bytes) && bytes >= 0 ? { bytes } : {});
     },
@@ -2022,9 +2105,107 @@ function openSoulMemory(soulDir, { world, url = null, soul = null, role = "home"
     },
   };
 }
-return { NEAR_METRES, worldKey, presences, openSoulMemory };
+return { NEAR_METRES, SETTLE_MS, worldKey, presences, openSoulMemory };
 })();
 // </inline memory.mjs>
+// <inline digest.mjs> generated by inline.mjs: edit digest.mjs, not this block
+import * as soulDigest$fs from "node:fs";
+import * as soulDigest$path from "node:path";
+const soulDigest = (() => {
+const { readFileSync } = soulDigest$fs;
+const { join } = soulDigest$path;
+// digest.mjs: a short update for a Soul's owner, composed from its own memory log on the owner's machine. It reads the log
+// and nothing else: no request, no model call, nothing sent. Every line names the records it came from (`--refs`): a line
+// with no source would be a memory fault. Words other Souls said are quoted and marked as theirs.
+//
+// Edit this file, then run `node tools/world-launcher/soul/inline.mjs`: worlds serve eden.mjs as one file.
+
+
+const DIGEST_WORDS = 200;
+const NAMES = 4, HEARD = 2, SAID_WORDS = 20;
+const flat = (v) => String(v ?? "").replace(/[\u0000-\u001f\u007f\s]+/g, " ").trim();
+const count = (t) => t.split(" ").filter(Boolean).length;
+const clipWords = (t, n) => { const w = flat(t).split(" "); return w.length > n ? `${w.slice(0, n).join(" ")}…` : w.join(" "); };
+/** Their words, inside quotes they cannot close. */
+const quote = (t) => `"${clipWords(t, SAID_WORDS).replace(/["“”]/g, "'")}"`;
+const listed = (names) => {
+  const shown = names.slice(0, NAMES), more = names.length - shown.length;
+  if (more) return `${shown.join(", ")} and ${more} more`;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}` : shown[0];
+};
+const nameOf = (e, id) => flat(e.seen?.[id]) || id;
+
+/** The Soul's memory log, oldest first. A line torn by a writer mid-append is skipped; the rest stands. */
+function readLog(soulDir) {
+  let text = "";
+  try { text = readFileSync(join(soulDir, "memory", "log", "memory-events.jsonl"), "utf8"); } catch { return []; }
+  return text.split("\n").flatMap((line) => {
+    try { const r = JSON.parse(line); return r?.value && typeof r.value.at === "string" ? [r] : []; } catch { return []; }
+  });
+}
+
+/** What happened after `since` (an ISO time, or null for all of memory) up to `until`, as at most DIGEST_WORDS words of
+ *  lines `{text, refs}`. Goals and open promises are standing, so they are read up to `until` whatever `since` says. */
+function digest(records, { since = null, until }) {
+  const inPeriod = (v) => (since === null || v.at > since) && v.at <= until;
+  const met = new Map(), went = new Map(), heard = [], done = new Map(), failed = new Map(), promised = [], kept = [];
+  const goals = new Map(), promises = new Map(), keptIds = new Set();
+  const person = (e, id, name) => {
+    const key = `${e.world ?? "here"}/${id}`;
+    if (!met.has(key)) met.set(key, { name: flat(name) || id, refs: [key] });
+  };
+  for (const { kind, value: e } of records) {
+    if (e.at > until) continue;
+    if (kind === "remember") { if (e.goal) goals.set(e.goal, { ...e, fresh: inPeriod(e) || goals.get(e.goal)?.fresh === true }); continue; }
+    if (e.type === "commitment") promises.set(e.id, e);
+    if (e.type === "commitment.kept") keptIds.add(e.commitmentId);
+    if (!inPeriod(e)) continue;
+    switch (e.type) {
+      case "meet": person(e, e.person.id, e.person.name); break;
+      case "arrival": if (!went.has(e.placeId)) went.set(e.placeId, { name: nameOf(e, e.placeId), refs: [e.id] }); break;
+      case "speech": heard.push({ text: `${nameOf(e, e.personId)} said, in their own words: ${quote(e.text)}`, refs: [e.id] }); break;
+      case "outcome": {
+        if (e.act === "owner-message") break;   // a report to the owner, who has it already
+        for (const p of e.met ?? []) person(e, p.id, p.name);
+        const into = e.phase === "completed" ? done : e.phase === "failed" ? failed : null;
+        if (into) { const row = into.get(e.act) ?? { name: flat(e.act), refs: [] }; row.refs.push(e.receiptId); into.set(e.act, row); }
+        break;
+      }
+      case "commitment": promised.push({ text: e.by === "me" ? `I promised ${nameOf(e, e.personId)}: ${flat(e.what)}.` : `${nameOf(e, e.personId)} promised me: ${flat(e.what)}.`, refs: [e.id] }); break;
+      case "commitment.kept": {
+        const c = promises.get(e.commitmentId);
+        if (c) kept.push({ text: c.by === "me" ? `I kept my promise to ${nameOf(c, c.personId)}.` : `${nameOf(c, c.personId)} kept their promise to me.`, refs: [e.commitmentId, e.evidence] });
+        break;
+      }
+    }
+  }
+  const group = (map, say) => (map.size ? [{ text: say(listed([...map.values()].map((r) => r.name))), refs: [...map.values()].flatMap((r) => r.refs) }] : []);
+  const goalLines = [...goals.values()].map((g) => ({ text: `${g.fresh ? "I worked on my goal" : "Nothing new toward my goal"}: ${flat(g.note)}.`, refs: [g.goal], fresh: g.fresh }));
+  const lines = [...group(met, (n) => `I met ${n}.`), ...group(went, (n) => `I went to ${n}.`), ...heard.slice(-HEARD), ...group(done, (n) => `I did ${n}.`),
+    ...group(failed, (n) => `${n} did not work.`), ...goalLines, ...promised, ...kept];
+  if (!lines.some((l) => l.fresh !== false)) {
+    const text = `Nothing recorded since ${since ?? "my memory began"}.`;
+    return { since, until, words: count(text), lines: [{ text, refs: [] }] };
+  }
+  const open = [...promises.values()].filter((c) => c.by === "me" && !keptIds.has(c.id));
+  const next = [...[...goals.values()].filter((g) => flat(g.next)).map((g) => ({ text: flat(g.next), ref: g.goal })), ...open.map((c) => ({ text: `keep my promise to ${nameOf(c, c.personId)}`, ref: c.id }))];
+  const shown = next.slice(0, NAMES), more = next.length - shown.length;
+  const nextLine = next.length ? { text: `Next: ${shown.map((n) => n.text).join("; ")}${more ? `; and ${more} more` : ""}.`, refs: shown.map((n) => n.ref) } : null, display = [...lines, ...(nextLine ? [nextLine] : [])];
+  // Within the word budget, what is owed and what is next go first, what others said last.
+  const rank = (l) => (l === nextLine ? 0 : promised.includes(l) || kept.includes(l) ? 1 : goalLines.includes(l) ? 2 : heard.includes(l) ? 4 : 3);
+  let words = 0;
+  const keep = new Set();
+  for (const line of [...display].sort((a, b) => rank(a) - rank(b))) { const n = count(line.text); if (words + n <= DIGEST_WORDS) { keep.add(line); words += n; } }
+  return { since, until, words, lines: display.filter((l) => keep.has(l)).map(({ text, refs }) => ({ text, refs })) };
+}
+
+/** Plain lines for the owner's agent to read; with `refs`, each ends with the records it came from. */
+function renderDigest(d, { refs = false } = {}) {
+  return d.lines.map((l) => (refs && l.refs.length ? `${l.text} [${l.refs.join(", ")}]` : l.text)).join("\n") + "\n";
+}
+return { DIGEST_WORDS, readLog, digest, renderDigest };
+})();
+// </inline digest.mjs>
 // <inline client-body-kit.mjs> generated by inline.mjs: edit client-body-kit.mjs, not this block
 import * as soulBodyKit$fs from "node:fs";
 import * as soulBodyKit$path from "node:path";
@@ -2230,6 +2411,17 @@ function score(q, fields) {
   for (const w of q) { if (hit(w, fields.name)) s += 5; else if (hit(w, fields.id) || hit(w, fields.alias ?? [])) s += 4; else if (hit(w, fields.kind ?? [])) s += 2; else if (hit(w, fields.what ?? [])) s += 1; else return 0; }
   return s + (fields.name.join(" ") === q.join(" ") ? 6 : 0);
 }
+/** #2274: does a place's whole name stand in the words, as a run ("north door of eden house 3 kitchen")? Its length, or 0. */
+const nameIn = (q, name) => { const n = name.length; if (n < 2 || n > q.length) return 0; for (let i = 0; i + n <= q.length; i++) if (name.every((w, j) => w === q[i + j])) return n; return 0; };
+const PREFIXES = new WeakMap();
+/** #2274: places in the same place whose names share this one's as a prefix, or it theirs (Eden House 3, Eden House 3 Kitchen). */
+function namesake(ix, p) {
+  let by = PREFIXES.get(ix);
+  if (!by) { by = new Map(); for (const o of ix.cat.places) { const k = o.parent ?? ""; if (!by.has(k)) by.set(k, []); by.get(k).push([placeWords(o).name.join(" "), o.name]); } PREFIXES.set(ix, by); }
+  const me = placeWords(p).name.join(" "), out = new Set();
+  if (me.includes(" ")) for (const [name, shown] of by.get(p.parent ?? "") ?? []) if (name.includes(" ") && (name.startsWith(me + " ") || me.startsWith(name + " "))) out.add(shown);
+  return [...out].slice(0, 6);
+}
 /** The place words name best, or null: the anchor of "near the pond" and "in the library". */
 function bestPlace(ix, words, at) {
   const q = tokensOf(words); if (!q.length) return null;
@@ -2273,10 +2465,15 @@ function thingAt(ix, t) {
   return { at: t.at, ...(level ? { level } : {}) };
 }
 
-/** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
+/** #1965: the acts that reach a Soul, as ids to send. The world still decides. */
+const soulActs = (id) => [`go-near:${id}`, `wave:${id}`, `face:${id}`];
+const soulWords = (x) => wordsOf(x, () => ({ name: tokensOf(x.name), id: tokensOf(x.id) }));
+
+/** find: Souls, places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
  *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
- *  place found, `outlineOf` it. */
-function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline } = {}) {
+ *  place found, `outlineOf` it. `souls` is the live copy's Souls (#1965): only those are found, and a Soul's row comes
+ *  before a place or thing row of the same score. Its name is another Soul's words, so the row is marked untrusted. */
+function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline, souls = [] } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
@@ -2292,11 +2489,19 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
   // words that only say the verb ("play music" with --verb play-music) narrow nothing: what is left must name the place or thing
   const verbWords = new Set([...verbs.keys()].flatMap((v) => v.split("-")));
   const rest = q.filter((w) => !SYNONYMS[w] && !verbWords.has(w) && !verbWords.has(stem(w))), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
+  const soulsOnly = /^souls?$/i.test(kind ?? "");
+  if ((!kind || soulsOnly) && !verbs.size) for (const x of souls) {
+    if (!x?.id || (scope && !scope.has(x.place ?? "")) || (around && !((dist(around.at, x.at) ?? Infinity) <= NEAR_METRES))) continue;
+    const s = q.length ? score(q, soulWords(x)) : soulsOnly ? 1 : 0; if (!s) continue;
+    out.push({ s: s + 3.5, d: dist(ref, x.at), row: { type: "soul", id: x.id, name: x.name, place: x.place ?? null, at: x.at ?? null, doing: x.doing ?? null, metres: dist(ref, x.at), acts: soulActs(x.id), untrusted: true } });
+  }
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
     if (!q.length || !inScope(p.id, p.at)) continue;
-    const s = score(q, placeWords(p)); if (!s) continue;
-    const here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    // #2274: the full name first, then the longest name the words hold whole, then the rest
+    const name = placeWords(p).name, full = name.join(" ") === q.join(" "), inside = nameIn(q, name);
+    const s = full ? 100 + score(q, placeWords(p)) : inside ? 50 + inside : score(q, placeWords(p)); if (!s) continue;
+    const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -2317,7 +2522,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
     const s = verbs.size ? (verbs.get(a.verb) && !rest.length ? verbs.get(a.verb) : 0) : score(q, w);
     if (s) out.push({ s, d: 0, row: { type: "act", act: a.id, verb: a.verb, label: a.label, in: "right here" } });
   }
-  for (const t of ix.cat.things) {
+  for (const t of soulsOnly ? [] : ix.cat.things) {
     const h = ix.handOf(t); if (verbs.size && !h) continue;
     if (!inScope(t.place, t.at)) continue;
     if (kind && !hit(stem(kind.toLowerCase()), thingWords(t, h).kind)) continue;
@@ -2368,17 +2573,17 @@ function fit(answer, budget) {
 }
 
 /** query: several questions in one call. Each is {find, verb?, kind?, in?, near?, limit?} | {place, depth?, verbs?, things?} |
- *  {thing}, with its own `budget` in tokens (default 600). */
-function query(ix, questions, { at, budget = 600, states } = {}) {
+ *  {thing}, with its own `budget` in tokens (default 600). `souls` is the live copy's, for find (#1965). */
+function query(ix, questions, { at, budget = 600, states, souls } = {}) {
   return (Array.isArray(questions) ? questions : [questions]).slice(0, 12).map((qn) => {
     const b = Number.isFinite(qn?.budget) ? qn.budget : budget;
     if (qn?.place !== undefined) return fit(placeView(ix, String(qn.place), { depth: qn.depth ?? 1, verbs: qn.verbs, at, things: qn.things !== false }), b);
     if (qn?.thing !== undefined) { const t = ix.things.get(String(qn.thing)); return t ? { ...t, path: ix.pathOf(t.place), acts: [...(ix.cat.acts ?? []).filter((a) => a.thing === t.id).map((a) => a.id), ...handActs(ix, t, states).map((a) => a.id)], ...(ix.handOf(t) ? { state: thingState(ix, t, states) } : {}) } : { error: `No thing with id "${qn.thing}" in the catalog.` }; }
-    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8, states }), b);
+    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8, states, souls }), b);
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -3113,7 +3318,7 @@ button { font: inherit; margin: 0 6px 6px 0; padding: 2px 8px; border: 1px solid
 button[aria-pressed="true"] { border-color: var(--fg); }
 </style></head>
 <body>
-<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p></header>
+<header><h1 id="name">Soul</h1><p id="state">Reading this machine…</p><p id="ago" class="none"></p></header>
 <main>
 <section><h2>Status</h2><div id="status"></div></section>
 <section><h2>Resident</h2><div id="resident"></div></section>
@@ -3130,7 +3335,9 @@ button[aria-pressed="true"] { border-color: var(--fg); }
 <script>
 // Every value here comes from /data.json and is shown as text, never as markup: worlds and other Souls wrote much of it.
 var el = function (id) { return document.getElementById(id); };
-var day = null, lastDays = "";
+var day = null, lastDays = "", read = 0;
+// #2257: the page reads /data.json again every 5 s in place; this line says how long ago, so a person can see it is live.
+function ago() { if (read) el("ago").textContent = "updated " + Math.round((Date.now() - read) / 1000) + " s ago"; }
 function none(text) { var s = document.createElement("span"); s.className = "none"; s.textContent = text || "not yet"; return s; }
 function show(id, value) {
   var box = el(id); box.replaceChildren();
@@ -3152,7 +3359,8 @@ function pick(d) {
 function render(d) {
   var s = d.status || {}, r = d.resident;
   el("name").textContent = (s.soul && (s.soul.name || s.soul.id)) || "Soul";
-  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world") + " · updated " + new Date(d.at).toLocaleTimeString();
+  el("state").textContent = (r && r.up ? "serve is running here" : "no serve here: showing what is on disk") + " · " + (s.world || "no world");
+  read = Date.now(); ago();
   el("state").className = r && r.up ? "up" : "down";
   show("status", d.status); show("resident", d.resident); show("plan", d.plan); show("wakes", d.wakes);
   var j = d.journal, days = j ? j.days : [];
@@ -3171,17 +3379,229 @@ function tick() {
   fetch("/data.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(render)
     .catch(function () { el("state").textContent = "The dashboard has stopped; start it again with: node eden.mjs dashboard"; el("state").className = "down"; });
 }
-tick(); setInterval(tick, 5000);
+tick(); setInterval(tick, 5000); setInterval(ago, 1000);
 </script>
 </body></html>
 `;
 return { DASHBOARD_DATA, journalDay, dashboardData, scrub, startDashboard, PAGE };
 })();
 // </inline dashboard.mjs>
+// <inline render.mjs> generated by inline.mjs: edit render.mjs, not this block
+import * as soulRender$module from "node:module";
+import * as soulRender$fs from "node:fs";
+import * as soulRender$path from "node:path";
+import * as soulRender$child_process from "node:child_process";
+import * as soulRender$os from "node:os";
+const soulRender = (() => {
+const { createRequire } = soulRender$module;
+const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = soulRender$fs;
+const { join, extname, resolve } = soulRender$path;
+const { execFileSync, spawn } = soulRender$child_process;
+const { tmpdir } = soulRender$os;
+// #2260: `shoot` renders a view of the public world on the owner's machine with the site's own viewer, in a headless
+// browser here (Playwright), never the world's. It opens the world page anonymously (no token, no sign-in, no cookies),
+// so it sees what any visitor sees. The browser profile under the home keeps the CDN's assets cached between shots.
+// `view` stays the Soul's own eyes, rendered by the world; it is the fallback when this machine has no browser.
+
+const SHOOT_KINDS = ["page", "broadcast", "follow", "eyes", "map", "free"];
+const SHOOT_USAGE = "usage: shoot [page|broadcast|follow <soul>|eyes <soul>|map [soul|place]|free] [--at x,y,z --look x,y,z | --from <place|soul|thing>] [--span m] [--clip s] [--size WxH] [--out file.png|.jpg|.mp4]";
+const NO_BROWSER = "No headless browser on this machine, so shoot cannot render here. Install one with `npm i -g playwright && npx playwright install chromium` (or set SOUL_PLAYWRIGHT to a folder whose node_modules has playwright), or use `view`, which the world renders: your Soul's own eyes.";
+const CANVAS = 'canvas[aria-label="Live 3D view of the world"]';
+
+const triple = (s, flag) => {
+  const v = String(s ?? "").split(",").map(Number);
+  if (v.length !== 3 || !v.every(Number.isFinite)) throw new Error(`${flag} needs x,y,z`);
+  return v;
+};
+
+/** Arguments → what to shoot. Throws the usage on anything it does not know. */
+function parseShootArgs(args) {
+  const o = { kind: null, subject: null, at: null, look: null, from: null, span: null, clip: 0, size: [1280, 720], out: null };
+  const need = (i, flag) => { const v = args[i + 1]; if (v === undefined || v.startsWith("--")) throw new Error(`${flag} needs a value. ${SHOOT_USAGE}`); return v; };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--at") o.at = triple(need(i, a), a), i++;
+    else if (a === "--look") o.look = triple(need(i, a), a), i++;
+    else if (a === "--from") o.from = need(i, a), i++;
+    else if (a === "--out") o.out = need(i, a), i++;
+    else if (a === "--span") { o.span = Number(need(i, a)); i++; if (!(o.span >= 2 && o.span <= 500)) throw new Error("--span is metres across, 2 to 500"); }
+    else if (a === "--clip") { o.clip = Number(need(i, a)); i++; if (!(o.clip >= 1 && o.clip <= 30)) throw new Error("--clip is seconds, 1 to 30"); }
+    else if (a === "--size") { const m = /^(\d{2,4})x(\d{2,4})$/.exec(need(i, a)); i++; if (!m || +m[1] < 64 || +m[2] < 64 || +m[1] > 1920 || +m[2] > 1920) throw new Error("--size is WxH, 64 to 1920"); o.size = [+m[1], +m[2]]; }
+    else if (a.startsWith("--")) throw new Error(`Unknown shoot option ${a}. ${SHOOT_USAGE}`);
+    else if (!o.kind && SHOOT_KINDS.includes(a)) o.kind = a;
+    else if (o.subject === null && ["follow", "eyes", "map"].includes(o.kind)) o.subject = a;
+    else throw new Error(SHOOT_USAGE);
+  }
+  o.kind ??= o.at || o.from ? "free" : "page";
+  if ((o.kind === "follow" || o.kind === "eyes") && !o.subject) throw new Error(`shoot ${o.kind} needs a Soul's name`);
+  if (o.kind === "free" && !(o.from || (o.at && o.look))) throw new Error("shoot free needs --at x,y,z --look x,y,z, or --from <place|soul|thing>");
+  if (o.kind !== "free" && (o.at || o.from)) throw new Error("--at and --from place a free camera: shoot free …");
+  if (o.span !== null && o.kind !== "map") throw new Error("--span is for map");
+  o.out ??= `${o.kind}.${o.clip ? "mp4" : "png"}`;
+  const ext = extname(o.out).toLowerCase();
+  if (o.clip ? ext !== ".mp4" : ![".png", ".jpg", ".jpeg"].includes(ext)) throw new Error(o.clip ? "a clip is written as .mp4" : "a still is written as .png or .jpg");
+  return o;
+}
+
+/** Playwright from the first of these folders that has it (SOUL_PLAYWRIGHT, the working folder, the home), else the global npm folder; null when none. */
+function findPlaywright(roots) {
+  for (const root of roots.filter(Boolean)) for (const name of ["playwright", "playwright-core", "@playwright/test"]) {
+    try { return createRequire(join(resolve(root), "noop.js"))(name); } catch { /* not here */ }
+  }
+  return null;
+}
+function globalNodeModules() { try { return execFileSync("npm", ["root", "-g"], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return null; } }
+function hasFfmpeg() { try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore", timeout: 10_000 }); return true; } catch { return false; } }
+
+/** Engine yaw 0 faces +x; forward is (cos yaw, sin yaw) on x/z. */
+function poseLooking(at, look, w, h, hfovDeg = 70) {
+  const dx = look[0] - at[0], dy = look[1] - at[1], dz = look[2] - at[2];
+  return { p: at, yaw: Math.atan2(dz, dx), pitch: Math.atan2(dy, Math.max(1e-6, Math.hypot(dx, dz))), vfov: 2 * Math.atan(Math.tan(hfovDeg * Math.PI / 360) * h / w) };
+}
+const norm = (s) => String(s).trim().toLowerCase();
+/** A name in the page's public replica: a Soul (by name), a place (by label) or a thing (by entity id), in that order. */
+function resolveName(where, name) {
+  const n = norm(name), pick = (list, key) => list.find((x) => norm(x[key]) === n) ?? list.find((x) => norm(x[key]).includes(n));
+  const soul = pick(where.souls, "name"); if (soul) return { kind: "soul", ...soul };
+  const place = pick(where.places, "name"); if (place) return { kind: "place", ...place };
+  const thing = pick(where.things, "id"); if (thing) return { kind: "thing", ...thing };
+  return null;
+}
+/** The eyes-mode job for a free camera, another Soul's eyes or the overhead map (WorldEyes.ts), from the replica now. */
+function eyesJob(o, where) {
+  const [w, h] = o.size, all = where.souls.map((s) => s.entityId);
+  const named = (name) => { const r = resolveName(where, name); if (!r) throw new Error(`No Soul, place or thing called "${name}" in this world's public view`); return r; };
+  if (o.kind === "eyes") {
+    const s = where.souls.find((x) => norm(x.name) === norm(o.subject)) ?? where.souls.find((x) => norm(x.name).includes(norm(o.subject)));
+    if (!s) throw new Error(`No Soul called "${o.subject}" is in the world now`);
+    return { mode: "eyes", w, h, quality: 0.9, pose: { p: [s.p[0], s.p[1] + 1.6, s.p[2]], yaw: s.yaw, pitch: -0.06, vfov: 2 * Math.atan(Math.tan(Math.PI / 4) * h / w) }, self: s.entityId, show: all.filter((id) => id !== s.entityId), subject: s.name };
+  }
+  if (o.kind === "map") {
+    let c, span = o.span, soul = null;
+    if (o.subject) { const r = named(o.subject); c = r.kind === "place" ? r.target : r.p; span ??= 40; if (r.kind === "soul") soul = r; }
+    else {
+      const ps = where.souls.length ? where.souls.map((s) => s.p) : where.things.map((t) => t.p);
+      if (!ps.length) throw new Error("Nothing is drawn yet to centre a map on; name a place");
+      const lo = [0, 1, 2].map((i) => Math.min(...ps.map((p) => p[i]))), hi = [0, 1, 2].map((i) => Math.max(...ps.map((p) => p[i])));
+      c = [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2]; span ??= Math.min(500, Math.max(30, Math.max(hi[0] - lo[0], hi[2] - lo[2]) + 16));
+    }
+    return { mode: "map", w, h, quality: 0.9, pose: { p: [c[0], c[1], c[2]], yaw: soul ? soul.yaw : -Math.PI / 2, pitch: 0, vfov: 1 }, self: "", show: all, span: span / 2, marker: !!soul, subject: o.subject ?? "everyone" };
+  }
+  // free: --at/--look, or --from a named spot (a place's own view; 5 m back and 2.5 m up from a Soul or thing), --look aims it
+  let at = o.at, look = o.look, subject = o.at ? `${o.at.join(",")}` : o.from;
+  if (o.from) {
+    const r = named(o.from); subject = `${r.kind} ${r.name ?? r.id}`;
+    if (r.kind === "place") { at = [...r.p]; look ??= [...r.target]; }
+    else { const t = [r.p[0], r.p[1] + (r.kind === "soul" ? 1.3 : 0.8), r.p[2]], back = r.kind === "soul" ? r.yaw + Math.PI : Math.PI / 4; at = [t[0] + Math.cos(back) * 5, t[1] + 2.5, t[2] + Math.sin(back) * 5]; look ??= t; }
+  }
+  return { mode: "eyes", w, h, quality: 0.9, pose: poseLooking(at, look, w, h), self: "", show: all, subject };
+}
+
+async function launch(pw, profile, o, video) {
+  const tries = [{ channel: "chromium" }, {}, { channel: "chrome" }], gpu = [["--ignore-gpu-blocklist"], ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]];
+  let last = null;
+  for (const t of tries) for (const args of gpu) {
+    let ctx = null;
+    try {
+      ctx = await pw.chromium.launchPersistentContext(profile, { headless: true, ...t, args: [...args, "--mute-audio", "--disable-background-timer-throttling", "--disable-renderer-backgrounding"],
+        viewport: { width: o.size[0], height: o.size[1] }, deviceScaleFactor: 1, reducedMotion: "reduce", ...(video ? { recordVideo: { dir: video, size: { width: o.size[0], height: o.size[1] } } } : {}) });
+      const page = ctx.pages()[0] ?? await ctx.newPage();
+      const gl = await page.evaluate(() => !!document.createElement("canvas").getContext("webgl2"));
+      if (gl) { await ctx.clearCookies(); return { ctx, page }; }
+      last = "no WebGL"; await ctx.close();
+    } catch (e) { last = String(e.message).split("\n")[0]; try { await ctx?.close(); } catch { /* gone */ } if (/Executable doesn't exist|browserType\.launch|Failed to launch/i.test(last) && t.channel) break; }
+  }
+  const err = new Error(`${NO_BROWSER} (${/lock|in use|SingletonLock/i.test(last ?? "") ? "the shoot profile is in use by another shoot" : last})`); err.noBrowser = true; throw err;
+}
+
+function encode(frames, fps, out) {
+  return new Promise((resolve, reject) => {
+    const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(fps), "-c:v", "mjpeg", "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-movflags", "+faststart", out], { stdio: ["pipe", "ignore", "pipe"] });
+    let err = ""; ff.stderr.on("data", (d) => { err += d; });
+    ff.on("error", reject); ff.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg: " + err.trim().slice(0, 300)))));
+    for (const f of frames) ff.stdin.write(f);
+    ff.stdin.end();
+  });
+}
+function trim(src, from, seconds, out) {
+  execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-ss", from.toFixed(2), "-i", src, "-t", String(seconds), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-movflags", "+faststart", out], { stdio: ["ignore", "ignore", "pipe"], timeout: 120_000 });
+}
+
+/** Shoot one view of `world` (its page URL, …/w/<slug>) into `out` (an absolute path). Returns what was written. */
+async function shoot(o, { world, out, profile, roots = [], timeoutMs = 180_000 }) {
+  if (o.clip && !hasFfmpeg()) throw new Error("A clip needs ffmpeg on this machine (a still needs only the browser); or use `view`, which the world renders");
+  const pw = findPlaywright([...roots, globalNodeModules()]);
+  if (!pw) { const e = new Error(NO_BROWSER); e.noBrowser = true; throw e; }
+  mkdirSync(profile, { recursive: true, mode: 0o700 });
+  const page_ = ["page", "broadcast", "follow"].includes(o.kind), video = page_ && o.clip ? mkdtempSync(join(tmpdir(), "soul-shoot-")) : null;
+  const t0 = performance.now(), { ctx, page } = await launch(pw, profile, o, video), opened = performance.now();
+  // bytes over the network (a response from the profile's cache counts nothing): the first shot fetches the assets, later ones reuse them
+  let bytes = 0, requests = 0; const sizing = [];
+  page.on("requestfinished", (r) => { requests++; sizing.push(r.sizes().then((s) => { bytes += (s.responseBodySize || 0) + (s.responseHeadersSize || 0); }, () => {})); });
+  try {
+    const base = world.replace(/\/+$/, "") + "/", url = base + "?" + (page_ ? "render=1" : "eyes=1&render=1");
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    let subject = o.kind === "page" ? "the world page" : o.kind === "broadcast" ? "the broadcast camera" : o.subject;
+    if (page_) {
+      await page.waitForFunction(() => !!document.body && !document.querySelector(".viewer-arrival") && !!document.querySelector('.viewer-history[data-viewer-ready="true"]'), null, { timeout: timeoutMs, polling: 250 });
+      if (o.kind === "follow") {
+        const s = await page.evaluate((name) => { const n = name.toLowerCase(), all = window.edenWhere?.().souls ?? []; return all.find((x) => x.name.toLowerCase() === n) ?? all.find((x) => x.name.toLowerCase().includes(n)) ?? null; }, o.subject);
+        if (!s) throw new Error(`No Soul called "${o.subject}" is in the world now`);
+        subject = s.name;
+        await page.evaluate((id) => window.dispatchEvent(new CustomEvent("sim:follow-soul", { detail: { soulId: id } })), s.id);   // the page's own Follow (follow-soul-request.ts)
+        await page.waitForFunction(() => document.querySelector(".viewer-history")?.dataset.viewerMode === "follow", null, { timeout: 15_000 });
+      }
+      // broadcast and follow show the 3D view alone: the canvas over the page's panels
+      if (o.kind !== "page") await page.addStyleTag({ content: `${CANVAS}{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;z-index:2147483647!important}` });
+      await page.waitForTimeout(o.kind === "page" ? 1500 : 2500);   // the camera settles on its shot
+      const ready = performance.now();
+      if (!o.clip) {
+        const type = /\.png$/i.test(out) ? "png" : "jpeg";
+        const buf = o.kind === "page" ? await page.screenshot({ type, ...(type === "jpeg" ? { quality: 90 } : {}) }) : await page.locator(CANVAS).screenshot({ type, ...(type === "jpeg" ? { quality: 90 } : {}) });
+        writeFileSync(out, buf);
+      } else {
+        await page.waitForTimeout(o.clip * 1000 + 300);
+        const v = page.video(); await ctx.close(); const src = await v.path();
+        trim(src, (ready - opened) / 1000, o.clip, out);
+      }
+    } else {
+      await page.waitForFunction(() => window.edenEyes?.ready?.() === true, null, { timeout: timeoutMs, polling: 250 });
+      const where = () => page.evaluate(() => window.edenEyes.where());
+      const shot = async (job) => { const r = await page.evaluate((j) => window.edenEyes.capture(j), job); if (!r?.ok) throw new Error(`render failed: ${r?.error ?? "no frame"}`); return Buffer.from(r.b64, "base64"); };
+      let job = eyesJob(o, await where()); subject = job.subject; delete job.subject;
+      await shot({ ...job, w: 320, h: 180, quality: 0.5 });   // the first frame compiles the scene's shaders (seconds); a clip starts after it
+      if (!o.clip) {
+        let buf = await shot(job);
+        if (/\.png$/i.test(out)) buf = Buffer.from(await page.evaluate(async (b64) => { const img = new Image(); img.src = "data:image/jpeg;base64," + b64; await img.decode(); const c = document.createElement("canvas"); c.width = img.width; c.height = img.height; c.getContext("2d").drawImage(img, 0, 0); return c.toDataURL("image/png").slice(22); }, buf.toString("base64")), "base64");
+        writeFileSync(out, buf);
+      } else {
+        // frames back to back for --clip seconds, the camera re-placed from the replica each frame (a moving Soul is kept)
+        const frames = [], start = performance.now();
+        while (performance.now() - start < o.clip * 1000) {
+          if (frames.length && o.kind !== "free") { const j = eyesJob(o, await where()); delete j.subject; job = j; }
+          frames.push(await shot(job));
+        }
+        const fps = (frames.length / ((performance.now() - start) / 1000)).toFixed(3);   // real speed: the rate the frames were made at
+        await encode(frames, fps, out);
+      }
+    }
+    return { kind: o.kind, of: subject, saved: out, size: `${o.size[0]}x${o.size[1]}`, ...(o.clip ? { seconds: o.clip } : {}), ms: Math.round(performance.now() - t0),
+      requests, downloadedKB: await Promise.all(sizing).then(() => Math.round(bytes / 1024)), seenAs: "an anonymous visitor (no token, no sign-in)", renderedBy: "this machine's browser, with the site's own viewer" };
+  } finally {
+    try { await ctx.close(); } catch { /* closed */ }
+    if (video) try { rmSync(video, { recursive: true, force: true }); } catch { /* left in tmp */ }
+  }
+}
+
+/** The shoot profile folder (the browser's cache of the site's assets) under a home. */
+const shootProfile = (root) => join(root, "cache", "shoot-browser");
+return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, hasFfmpeg, poseLooking, resolveName, eyesJob, shoot, shootProfile };
+})();
+// </inline render.mjs>
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.33.0";
+const VERSION = "2.34.0";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
@@ -3403,8 +3823,9 @@ function save(patch) {
   const s = { ...load(), ...patch };
   for (const k of Object.keys(s)) if (s[k] === undefined) delete s[k];
   if (HOME) return HOME.save(SEAT, s);
-  writeFileSync(STATE + ".tmp", JSON.stringify(s, null, 1) + "\n", { mode: 0o600 });
-  renameSync(STATE + ".tmp", STATE);
+  const tmp = `${STATE}.${process.pid}.tmp`;   // per process: concurrent runs in one folder never rename each other's file (#2092)
+  writeFileSync(tmp, JSON.stringify(s, null, 1) + "\n", { mode: 0o600 });
+  renameSync(tmp, STATE);
   return s;
 }
 const need = (s, k, hint) => {
@@ -3487,7 +3908,8 @@ export function heldPhase(e, receiptId) {
 // Idempotency-Key (the world returns the first answer to a repeat), are ever retried; `unreachable` gets full-jitter
 // exponential backoff (1 s base, 60 s cap, 6 tries) and then a clear exit 75. Nothing loops forever except listen,
 // which is one held long-poll per Soul (.listen.lock) and backs off the same way.
-export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
+// #2304: world.waking: the launcher held the call while the world loaded, past its hold; asked again after Retry-After
+export const BUSY_CODES = new Set(["world.busy", "soul.busy", "soul.slow-down", "world.starting", "world.waking", "world.crowded", "rate-limited", "client.rate", "account.rate"]);
 export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
@@ -3536,7 +3958,7 @@ export function retryClass(method, path) {
   return KEYED.test(p) ? "keyed" : "none";
 }
 const WAITING = {
-  "world.busy": "the world is busy", "world.crowded": "the world is crowded", "world.starting": "the world is starting",
+  "world.busy": "the world is busy", "world.crowded": "the world is crowded", "world.starting": "the world is starting", "world.waking": "the world is loading",
   "soul.busy": "your previous request is still being answered", "soul.slow-down": "you are asking faster than the world answers",
   "rate-limited": "you are asking faster than the world answers",
   "client.rate": "too many requests are coming from this address", "account.rate": "this account's Souls are asking faster than the world allows",
@@ -3560,7 +3982,7 @@ const REASON = {
   "client.rate": "too many requests at once from this address", "account.rate": "too many requests from this account's Souls",
   "soul.busy": "my previous request was still being answered", "soul.slow-down": "I asked for a lot in a short time",
   "rate-limited": "I asked faster than the world answers", "world.busy": "the world was too busy to answer in time",
-  "world.crowded": "the world is crowded", "world.starting": "the world is still starting up",
+  "world.crowded": "the world is crowded", "world.starting": "the world is still starting up", "world.waking": "the world was still loading",
   "lifecycle-pending": "the world is still finishing my arrival",
   unavailable: "the world could not answer", "world.unavailable": "the world could not answer", "world-unavailable": "the world could not answer", "world.stalled": "the world's clock has stalled",
 };
@@ -3829,7 +4251,7 @@ function memoryHere() {
   if (!HOME || SEAT?.kind !== "soul") return null;
   const s = load(), cfg = HOME.config(), world = soulHome.keyOf(cfg.worlds, s.world);
   if (!world) return null;
-  if (MEMORY?.world !== world) MEMORY = { world, memory: soulMemory.openSoulMemory(soulFolder(), { world, url: s.world, soul: s.soul, role: cfg.souls[SEAT.id]?.world === world ? "home" : "visiting" }) };
+  if (MEMORY?.world !== world) MEMORY = { world, memory: soulMemory.openSoulMemory(soulFolder(), { world, url: s.world, soul: s.soul, name: cfg.souls[SEAT.id]?.name ?? null, role: cfg.souls[SEAT.id]?.world === world ? "home" : "visiting" }) };
   return MEMORY.memory;
 }
 const MEMORY_ROUTE = /\/v1\/edge\/(here|wait|act|say|converse|receipts\/[^/?]+)(?:\?|$)/;
@@ -3845,8 +4267,26 @@ function noteForMemory(url, method, body, data) {
     else if (what === "wait") { if (!data.gap) memory.sawEvents(data.events); }
     else if (what === "act") { if (data.accepted && data.for) memory.sawAct(data.receipt?.id, data.for); }
     else if (what === "receipts") memory.sawReceipt(data.receipt);
-    else if (what === "say") memory.sawSaid(body?.text);
+    else if (what === "say") memory.sawSaid(body?.text, { id: data.said?.id });
     else if (what === "converse") { if (["say", "start"].includes(body?.op)) memory.sawSaid(body.text, { to: body.with, conversationId: body.conversation ?? data.conversation?.id ?? data.conversation }); }
+  } catch (e) { calm(`memory: ${e.message}`); }
+}
+/** #1981: where the live picture has this Soul's body goes to memory, so a place it is in without a walk counts too. */
+function noteLivePlace(copy) {
+  if (!HOME || SEAT?.kind !== "soul") return;
+  try {
+    const s = load(), me = copy?.world === s.world ? copy.live?.souls?.find((x) => x.id === s.soul) : null;
+    if (!me?.place) return;
+    const name = () => { const c = readJsonFile(CATALOG_FILE); return c?.world === s.world ? (c.catalog?.places ?? []).find((p) => p.id === me.place)?.name ?? null : null; };
+    memoryHere()?.sawPlace({ place: me.place, name, tick: Number.isSafeInteger(copy.live.tick) ? copy.live.tick : null });
+  } catch (e) { calm(`memory: ${e.message}`); }
+}
+/** #1981: a calendar item this Soul said it would come to, with its title, place and start from the world's calendar. */
+async function noteCalendar(id) {
+  try {
+    const memory = memoryHere(); if (!memory) return;
+    const r = await call("/v1/edge/calendar?withinMinutes=10080&limit=200").catch(() => null), d = r?.status === 200 ? r.data : null, x = (d?.items ?? []).find((i) => i?.id === id);
+    memory.sawCalendar({ id, title: x?.title, placeId: x?.placeId, place: x?.placeName, startsInMinutes: x && Number.isFinite(x.startsAtTick) && Number.isFinite(d.tick) ? Math.round((x.startsAtTick - d.tick) / TICKS_A_MINUTE) : null, byId: x?.proposedById });
   } catch (e) { calm(`memory: ${e.message}`); }
 }
 /** What this Soul knows about here and now, when it knows anything. Always built here, from this folder's own memory: a `brief`
@@ -3902,6 +4342,21 @@ async function remember(...argv) {
   const selectors = ["person", "place", "goal", "self"].filter((k) => picked[k] !== undefined), note = words.join(" ");
   if (selectors.length !== 1 || !note) throw new Error('usage: remember --person <id|name> "<note>" | --place <id|name> "<note>" | --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."] | --self "<line>"');
   return needMemory().remember(selectors[0], picked[selectors[0]], note, picked);
+}
+// digest [--since <ISO time>] [--refs] [--json]: a short update from this Soul's own memory log, for its owner. It reads the
+// log only: no request, no model call, nothing sent. The agent tells its owner; the last run is kept in the Soul's state.
+async function digestCommand(...argv) {
+  needMemory();
+  let since = load().lastDigest ?? null, refs = false, json = false;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--refs") refs = true;
+    else if (argv[i] === "--json") json = true;
+    else if (argv[i] === "--since" && Number.isFinite(Date.parse(argv[i + 1]))) since = new Date(argv[++i]).toISOString();
+    else throw new Error("usage: digest [--since <ISO time>] [--refs] [--json]");
+  }
+  const until = now(), out = soulDigest.digest(soulDigest.readLog(soulFolder()), { since, until });
+  save({ lastDigest: until });
+  return json ? out : soulDigest.renderDigest(out, { refs });
 }
 async function memoryCommand(...words) {
   if (!words.length) throw new Error('usage: memory <words to find>');
@@ -4034,20 +4489,22 @@ async function startApproval(input, code) {
   if (login) return accountPair(input.soulId, login);
   if (MOVE) input = { ...input, move: true };
   const resumed = s.pendingApproval?.input && JSON.stringify(s.pendingApproval.input) === JSON.stringify({ ...s.pendingApproval.input, ...input });
-  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
+  const pending = resumed ? s.pendingApproval : { worldId: s.worldId, input: { ...input, agentLabel: pairLabel(), idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const fold = (n) => String(n ?? "").trim().normalize("NFC").toLowerCase();
   // #1875 A6: a Soul another folder holds now is not taken over unasked. The world refuses it (soul.held-elsewhere) before
   // any request exists; this read, when there is a code, only lets the refusal name the Soul first.
-  if (!resumed && !MOVE && code && (input.soulId || input.name)) {
+  let from = resumed ? s.pendingApproval.from : undefined;
+  if (!resumed && code && (input.soulId || input.name)) {
     const list = await call("/v1/agent/approval/souls", { as: "none", body: { for: code } });
     const it = list.status === 200 ? (list.data?.souls ?? []).find((x) => (input.soulId ? x.id === input.soulId : fold(x.name) === fold(input.name))) : null;
-    if (it?.control?.held) throw heldElsewhere(it);
+    if (it?.control?.held && !MOVE) throw heldElsewhere(it);
+    if (it?.control?.held) from = holderLabel(it);   // #2257 A6: --move takes it; the answer names where from
   }
   const started = await call("/v1/agent/approval/start", { as: "none", body: { ...pending.input, ...(code ? { for: code } : {}) } });
   if (started.status === 409 && codeOf(started.data) === "soul.held-elsewhere") throw heldElsewhere({ id: input.soulId, name: input.name });
   const r = ok(started, "approval start"), a = r.approval ?? r;
   pending.approvalId = a.id;
-  save({ pendingApproval: pending });
+  save({ pendingApproval: { ...pending, ...(from ? { from } : {}) } });
   const shown = publicApproval(a, s.world), hint = input.soulId || input.existing ? loginHint(s.world) : "";
   return { ...shown, ...(shown.next && hint ? { next: shown.next + hint } : {}), ...(pending.input.move && a.mode === "repair" ? { moves: `Once approved, control of ${a.name} moves here and the folder that holds it now is disconnected.` } : {}) };
 }
@@ -4076,6 +4533,10 @@ async function accountPair(id, a) {
   const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
     : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const { soulId, ...body } = pending.input;
+  if (pending !== was) {   // #2257 A6: who holds it now, so the answer can say where it was taken from
+    const r = await call("/v1/agent/account", { as: "account" }), it = r.status === 200 ? (r.data?.souls ?? []).find((x) => x.id === id) : null;
+    if (it?.control?.held) pending.from = holderLabel(it);
+  }
   const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
@@ -4087,6 +4548,20 @@ async function accountSoulNamed(who, a, what) {
   if (!hits.length) throw new Error(`${what}: your account has no Soul called ${who} in this world. See: ${CLI} list --account`);
   if (hits.length > 1) throw new Error(`${what}: your account has ${hits.length} Souls called ${who}: ${hits.map((x) => x.id).join(", ")}. Say which: ${CLI} ${what} <soulId>`);
   return { id: hits[0].id, name: soulHome.plainName(hits[0].name) || hits[0].id };
+}
+/** #2257 A6: the label an approval leaves on the Soul names this device, so a later move can say where it was taken from (a
+ *  login's pairing gets its device from the grant, world side). */
+const pairLabel = () => (HOME ? `eden ${VERSION} on ${HOME.device().name}` : "eden " + VERSION);
+/** #2257 A6: the device an agent holds a Soul from, as the world labels it. */
+const holderLabel = (it) => String(it.agent?.label ?? "").trim().slice(0, 80) || "another device";
+/** #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person. With no
+ *  memory for it in this home, its memory stayed there: export there, import here. The last device to ask still wins. */
+function takenNotice(id, name, from) {
+  if (!from) return {};
+  const who = soulHome.plainName(name) || id, mem = HOME ? resolvePath(HOME.soul(id).dir, "..", "memory") : null;
+  const hasMemory = (dir) => { try { return readdirSync(dir, { withFileTypes: true }).some((e) => e.isFile() || (e.isDirectory() && hasMemory(joinPath(dir, e.name)))); } catch { return false; } };
+  return { takenFrom: from, tell: `Tell your person: ${who} was taken from ${from}; that device no longer controls it.`,
+    ...(mem && !hasMemory(mem) ? { memory: `${who}'s memory stayed on ${from}: there run ${CLI} export ${who}, bring the folder here, then ${CLI} import <folder>.` } : {}) };
 }
 /** soul.held-elsewhere: the plain sentence, the folder when this machine knows it, and the command that moves control. A
  *  Soul this home keeps without a working token is most likely its own grant, left in an older copy of this folder. */
@@ -4345,7 +4820,7 @@ async function approval(action = "status") {
       save({ soul: a.soulId, token, pendingApproval: undefined, lastReceipt: undefined, cursor: undefined });
       if (HOME && p.account) HOME.tagAccount(a.soulId, p.account);   // #2246: paired through a login, it is that account's Soul here
       writeGuide(a.name);
-      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
+      return { status: "ready", soul: { id: a.soulId, name: a.name }, paired: true, ...(p.input?.move || p.account ? { moved: "Control moved here; the folder or device that held it before is disconnected." } : {}), ...takenNotice(a.soulId, a.name, p.from), next: `${CLI} status, then start listening: ${CLI} listen (in the background)` };
     }
     if (a.status === "ready") { save({ pendingApproval: undefined }); return { ...publicApproval(a, s.world), next: `The Soul exists but no token was granted. Run: ${CLI} pair ${a.soulId} --for <CODE>` }; }
     if (["refused", "cancelled", "expired"].includes(a.status)) { save({ pendingApproval: undefined }); return publicApproval(a, s.world); }
@@ -4427,7 +4902,7 @@ async function login(...argv) {
     if (again && q.status !== "pending" && q.status !== "ready") continue;   // the one kept here lapsed: start a fresh one
     save({ pendingLogin: { ...next, requestId: q.id, interval: d.intervalSeconds } });
     return { login: q.status, requestId: q.id, ...(next.alias ? { alias: next.alias } : {}), device: next.input.device.name, approvalURL: d.approvalURL, confirm: q.confirm, delivery: d.delivery,
-      next: `Ask your person to approve it on the world's open page (or the link) and to check it shows ${q.confirm}. Then: ${CLI} login wait` };
+      next: `Ask your person to approve it on the world's open page (or the link) and to check it shows ${q.confirm}. Don't wait for their reply: start ${CLI} login wait in the background now; once it returns, go on with what they asked (an open dashboard: ${CLI} dashboard, give them its URL).` };
   }
 }
 async function loginWait() {
@@ -4704,7 +5179,7 @@ async function syncLive({ force = false } = {}) {
     if (now?.live?.epoch && got.epoch === now.live.epoch && Number(got.seq) < Number(now.live.seq)) return now;
     const next = soulLive.wholeCopy(world, now, got, Date.now());
     if (now?.push) next.push = now.push;
-    writeJsonFile(LIVE_FILE, next); return next;
+    writeJsonFile(LIVE_FILE, next); noteLivePlace(next); return next;
   } catch { return mine ? { ...mine, stale: true } : null; }
 }
 /** The catalog's lookups, the live picture and this Soul in it. A catalog the world has replaced is fetched first. */
@@ -4757,7 +5232,7 @@ function onLiveFrame(event, data) {
     LIVE_RESYNC_AT = Date.now(); LIVE_RESYNC = r.whole; return r.whole;
   }
   if (!r.copy) return null;
-  writeJsonFile(LIVE_FILE, { ...r.copy, push });
+  writeJsonFile(LIVE_FILE, { ...r.copy, push }); noteLivePlace(r.copy);
   if (frame.catalog !== undefined || event === "live.full") {
     if (catalogOld(readJsonFile(CATALOG_FILE), world, r.copy)) syncCatalog().catch(() => {});
   }
@@ -4768,24 +5243,26 @@ async function catalogCommand(...args) {
   const c = await syncCatalog({ force: args.includes("--refresh") });
   return { world: c.world, version: c.etag, fetchedAt: c.fetchedAt, changed: c.changed, ...c.catalog.counts, ...(c.stale ? { note: c.stale } : {}), next: `${CLI} find "<words>"   ${CLI} look` };
 }
-// find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]: answered from this machine.
+/** #1965: the Souls in the live copy other than this one, for find and query. Only the copy: no call looks a Soul up. */
+const otherSouls = (live) => (live?.live?.souls ?? []).filter((x) => x.id !== load().soul);
+// find "<words>" [--verb v] [--kind k|soul] [--in place] [--near place] [--limit n] [--outline]: answered from this machine.
 async function findCommand(...args) {
   const o = {}, words = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--verb") o.verb = args[++i]; else if (args[i] === "--kind") o.kind = args[++i]; else if (args[i] === "--in") o.inPlace = args[++i];
     else if (args[i] === "--near") o.near = args[++i]; else if (args[i] === "--limit") o.limit = Number(args[++i]); else if (args[i] === "--outline") o.outline = true; else if (args[i] !== "--json") words.push(args[i]);
   }
-  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n] [--outline]');
+  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>|soul] [--in <place>] [--near <place>] [--limit n] [--outline]');
   const { ix, live, me, note } = await worldCopy();
-  const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things });
-  return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act": ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
+  const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things, souls: otherSouls(live) });
+  return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act" (a Soul's row: one of its "acts"): ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
 }
 // query '<json>': several layered questions in one call, each with its own depth, filters and token budget.
 async function queryCommand(...args) {
   const text = args.filter((a) => !a.startsWith("--")).join(" "), b = args.indexOf("--budget");
   let questions; try { questions = JSON.parse(text); } catch { throw new Error('usage: query \'[{"find":"library"},{"place":"<id>","depth":2,"verbs":["read"]},{"verb":"eat","near":"<place>","limit":3}]\' [--budget tokens]'); }
   const { ix, live, me, note } = await worldCopy();
-  return { answers: soulCatalog.query(ix, questions, { at: me?.at, states: live?.live?.things, ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
+  return { answers: soulCatalog.query(ix, questions, { at: me?.at, states: live?.live?.things, souls: otherSouls(live), ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
 }
 // look: where this Soul is, what can be done there, who is near, who is elsewhere, and what was said lately. From disk.
 async function look(copy) {
@@ -4955,6 +5432,14 @@ async function view(...args) {
     } else res.picture = `could not download (HTTP ${img.status})`;
   }
   return res;
+}
+
+// #2260: any view of the public world, rendered by this machine's browser with the site's own viewer (render.mjs)
+async function shootCommand(...args) {
+  const o = soulRender.parseShootArgs(args), world = load().world;
+  if (!world) throw new Error(`shoot renders a world this home knows: ${CLI} create "<Name>" or travel first`);
+  try { return await soulRender.shoot(o, { world, out: userPath(o.out), profile: soulRender.shootProfile(HOME?.root ?? joinPath(homedir(), HOME_NAME)), roots: [process.env.SOUL_PLAYWRIGHT ? userPath(process.env.SOUL_PLAYWRIGHT) : null, INVOKED, HOME?.root] }); }
+  catch (e) { if (e.noBrowser) return { saved: null, problem: e.message, fallback: `${CLI} view (rendered by the world: your Soul's own eyes)` }; throw e; }
 }
 
 // Architectural context is explicit; it never replaces current first-person sight.
@@ -5200,7 +5685,7 @@ export function brief(out) {
     : fin ? rec.done ?? rec.outcome?.summary ?? `${rec.capability} ${rec.phase}.`
     : rec.now ?? `${rec.capability} ${rec.phase}: under way, not finished.`;
   const o = {
-    ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
+    ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}), ...(out.waitCapped ? { waitCapped: out.waitCapped } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
     ...(out.stopped ? { stopped: out.stopped } : {}), ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
@@ -5248,7 +5733,7 @@ function waitOption(argv) {
   return { args, wait, json, for: forId, key };
 }
 
-// wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
+// wait [seconds] [receiptId]: long-poll world events (max WAIT_MAX_S) until the receipt is terminal, its sit or lie holds the
 // pose (held, still `started`), the owner writes, or an invitation/conversation turn arrives. Saves the cursor.
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
@@ -5259,9 +5744,17 @@ async function wait(...argv) {
   forgetLinks(out.receipt);
   return json ? out : brief(out);
 }
-async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
+/** The longest a wait (or `act --wait`) holds: long acts (a climb upstairs, a long walk) run past a minute. The wait
+ *  long-polls in pieces of at most 55 s, so a longer wait costs no more per request. */
+export const WAIT_MAX_S = 300;
+/** A wait's seconds: as asked, from 1 to WAIT_MAX_S (45 when not a number); `capped` when it asked for more (#2292). */
+export function waitSpan(asked) {
+  const n = Number(asked) || 45;
+  return { seconds: Math.min(WAIT_MAX_S, Math.max(1, n)), ...(n > WAIT_MAX_S ? { capped: WAIT_MAX_S } : {}) };
+}
+async function waitRaw(asked = 45, receiptId, { untilHeld = true } = {}) {
   const s = load();
-  seconds = Math.min(60, Math.max(1, Number(seconds) || 45));
+  const { seconds, capped } = waitSpan(asked);
   receiptId = /^r_/.test(String(receiptId ?? "")) ? receiptId : s.lastReceipt;
   const t0 = Date.now(), until = t0 + seconds * 1000;
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
@@ -5296,7 +5789,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, ...(capped ? { waitCapped: `${capped}s, the most a wait holds; wait again while done is false` } : {}), since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
@@ -5452,7 +5945,12 @@ async function calendarCommand(sub, ...args) {
     const d = ok(await call("/v1/edge/calendar?limit=50"), "calendar");
     return { items: (d.items ?? []).map((x) => calendarRow(x, d.tick, load().soul)), calendarNote: CALENDAR_NOTE };
   }
-  if (sub === "interest" || sub === "not-coming") { if (!args[0]) throw new Error(usage); return object(args[0], sub); }
+  if (sub === "interest" || sub === "not-coming") {
+    if (!args[0]) throw new Error(usage);
+    const out = await object(args[0], sub);
+    if (sub === "interest" && out?.accepted === true) await noteCalendar(args[0]);
+    return out;
+  }
   if (sub !== "add") throw new Error(usage);
   const o = {}, words = [];
   for (let i = 0; i < args.length; i++) { const f = /^--(place|in|for)$/.exec(args[i]); if (f) o[f[1]] = args[++i]; else words.push(args[i]); }
@@ -7174,6 +7672,7 @@ const HELP = [
     `remember --goal <id> "<note>" [--horizon today|week|month] [--metric "..."] [--next "..."]`,
     `remember --self "<line>"`,
     `consolidate [on|off|asked|--force]`,
+    `digest [--since <ISO time>] [--refs] [--json]`,
   ],
   ["",
     `remember --person <id|name> --promise "<what>" [--by me|them]`,
@@ -7207,6 +7706,12 @@ const HELP = [
   ["",
     `context [query] [--cursor nextCursor]`,
     `views <ref> [ref…] [--detail] [--original] [--out picture.png]`,
+  ],
+  ["",
+    `shoot [page|broadcast|follow <soul>|eyes <soul>|map [soul|place]|free --at x,y,z --look x,y,z|--from <place|soul|thing>] [--clip s] [--out f.png|.mp4]`,
+  ],
+  ["",
+    `(shoot renders the public world on this machine, in a headless browser with the site's own viewer; view stays your Soul's own eyes)`,
   ],
   ["",
     `receipt [id]`,
@@ -7301,10 +7806,11 @@ Never:
 const DASHBOARD = `The dashboard: one Soul's page on this machine, for your owner
 
 It shows the Soul's status, its resident (serve), its plan, its wakes, its journal, its memory, its costs and the last 200
-lines of serve's log, and reads them again every 5 seconds. It is read-only: nothing on it starts, stops or steers the Soul.
+lines of serve's log, and reads them again every 5 seconds in place, saying how long ago. It is read-only: nothing on it
+starts, stops or steers the Soul. Your owner says "open my Soul's dashboard": step 1.
 
-1. \`${CLI} [name] dashboard\` prints a \`dashboard\` URL on 127.0.0.1 and keeps serving it until Ctrl-C. Give that URL to
-   your owner. It works with \`serve\` running or not, and says which. \`--port <n>\` picks the port (any free one if left out).
+1. \`${CLI} [name] dashboard\` prints a \`dashboard\` URL on 127.0.0.1 and keeps serving it until Ctrl-C: run it in your
+   harness's background process. Give that URL to your owner. It works with \`serve\` running or not, and says which. \`--port <n>\` picks the port (any free one if left out).
 2. It answers only this machine at that address. It asks no world, runs no model and sends nothing anywhere: what the
    Soul thinks stays here. No answer carries a token or anything from \`.souls/credentials.json\`.
 3. The data is one endpoint, \`/data.json\` (\`dashboard-data/1\`): \`status\`, \`resident\`, \`plan\`, \`wakes\`, \`journal\`
@@ -7319,6 +7825,7 @@ each visit. The page may fetch only from this server.
 const ACCOUNT = `Account logins: one login lets this home see what your person's account holds in a world
 
 Log in once per site, not per Soul. The token is kept in \`.souls/credentials.json\`; never read or print that file.
+Your person says "connect my account": steps 1 and 2. "Move my Soul to this computer": steps 3 and 4.
 
 1. \`${CLI} login <world-url>\` (or \`login\` for the current world; \`--for <CODE>\` sends it to your person's open
    page). It prints an \`approvalURL\` and a four-character \`confirm\` code. Ask your person to approve it there and to
@@ -7328,14 +7835,13 @@ Log in once per site, not per Soul. The token is kept in \`.souls/credentials.js
    Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
-4. \`${CLI} adopt <name|id>\` brings one of them here with no code: the device that had it is disconnected, and its
-   \`status\` says where it went. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs. \`retire <name|id>\`
-   asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` finishes on their click. Each needs a login.
+4. \`${CLI} adopt <name|id>\` brings one here, no code; the device that had it is disconnected. Tell your
+   person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
+   \`retire <name|id>\` asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` ends on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
 \`${CLI} accounts\` lists them, with no world call; \`accounts switch <alias>\` changes the active one; \`--as <alias>\`
 picks one for a single command. A Soul paired through a login always uses that login.
-
 \`${CLI} logout [<alias>]\` ends a login, here and in the world, even when the world does not answer. Your Souls stay
 connected: their own tokens keep working. A login's token goes only to worlds of the site that issued it, over https
 or on this machine.
@@ -7368,7 +7874,7 @@ function updateKept(w) {
   return e?.checkedAt ? { url: w.url, version: e.bundle ?? null, skill: e.skillVersion ?? null, at: e.checkedAt } : null;
 }
 function startUpdateCheck(cmd) {
-  if (["upgrade", "help", "serve", "listen", "dashboard"].includes(cmd)) return null;   // the dashboard asks no world (#2248)
+  if (["upgrade", "help", "serve", "listen", "dashboard", "digest"].includes(cmd)) return null;   // the dashboard asks no world (#2248); digest reads only memory (#1979)
   try {
     const w = updateWorld(), kept = w && updateKept(w);
     if (!w) return null;
@@ -7422,7 +7928,7 @@ export function spawnDetached(file, args, opts) {
 }
 const FEED_SPAWN_MS = 5 * 60_000;
 function startFeedCheck(cmd, args) {
-  if (!HOME || ["upgrade", "help", "serve", "listen", "dashboard"].includes(cmd) || (cmd === "news" && args.includes("--fetch"))) return;   // as the update check
+  if (!HOME || ["upgrade", "help", "serve", "listen", "dashboard", "digest"].includes(cmd) || (cmd === "news" && args.includes("--fetch"))) return;   // as the update check
   try {
     if (!soulHome.feedDue(HOME.config(), Date.now()).length || Date.now() - (readServeLock()?.beatAt ?? 0) < SERVE_STALE_MS) return;   // a serve here checks
     // the last start is kept beside the config: a child that never claims a site (it found no home) is not started on every command
@@ -7637,6 +8143,7 @@ const commands = {
   remember,
   memory: memoryCommand,
   consolidate: consolidateCommand,
+  digest: digestCommand,
   register,
   create,
   pair,
@@ -7667,6 +8174,7 @@ const commands = {
   view,
   context,
   views,
+  shoot: shootCommand,
   receipt,
   events,
   conversations,

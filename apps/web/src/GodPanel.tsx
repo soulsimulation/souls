@@ -257,9 +257,9 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     )}
     {note && <p className={'gm-banner gm-note ' + (note.bad ? 'gp-bad' : 'gp-ok')} role="status">{note.text}</p>}
   </>;
-  // until the agent is connected (never paired, or paired and away): the one line to give it, naming this world's skill
+  // until the agent is connected (never paired, paired and away, or its inbox not known yet): the gateway, naming this world's skill
   const connected = !!god.inbox?.connected;
-  const connectUrl = !agentsPaired || (god.inbox && !connected) ? `${status.base || location.origin + apiPath('')}/SKILL.md` : null;
+  const connectUrl = !agentsPaired || !connected ? `${status.base || location.origin + apiPath('')}/SKILL.md` : null;
   const tools = <>
     <div className="gm-tool-group" role="group" aria-label="Undo and redo">
       <button type="button" className="gm-tool" data-undo="1" disabled={!canUndo || !!busy} onClick={() => undoRedo('undo')} title="Undo the newest edit">{UNDO}Undo</button>

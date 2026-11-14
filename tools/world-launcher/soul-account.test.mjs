@@ -68,6 +68,7 @@ async function world(t, { accountLogin = true } = {}) {
         return json(res, 200, { request: shown(q), world: at, approvalURL: `${base}/acct/#approve/${q.id}`, delivery: 'window', intervalSeconds: 3 });
       }
     }
+    if (path === '/v1/agent/approval/souls' && body.for === 'MV7K-R2PA') return json(res, 200, { souls: [...souls].map(([id, x]) => ({ id, name: x.name, control: { held: live.has(id), state: live.has(id) ? 'connected' : 'disconnected', since: null }, ...(live.has(id) && holder.has(id) ? { agent: { label: holder.get(id).label, since: 0 } } : {}) })) });
     if (path === '/v1/agent/approval/start') { const id = `ap_${approvals.size + 1}`; approvals.set(id, { ...body, status: 'pending' }); return json(res, 200, { approval: { id, status: 'pending', name: body.name } }); }
     if (path === '/v1/agent/approval/poll') {
       const a = approvals.get(body.approvalId); if (a.pollSecret !== body.pollSecret) return json(res, 403, {});
@@ -122,7 +123,8 @@ test('A1, A4, A5: login once, run again, list the account, and nothing prints a 
   const a = await run('login', w.url, '--device', 'studio laptop');
   assert.equal(a.code, 0, a.err); assert.ok(existsSync(join(root, 'config.json')), 'the home is made');
   assert.equal(a.d.login, 'pending'); assert.equal(a.d.approvalURL, `${w.url}/#approve/${a.d.requestId}`);
-  assert.equal(a.d.confirm, 'K7QX'); assert.equal(a.d.delivery, 'link'); assert.match(a.d.next, /node eden\.mjs login wait$/);
+  assert.match(a.d.next, /Don't wait for their reply: start node eden\.mjs login wait in the background now; once it returns, go on/);   // #2257
+  assert.equal(a.d.confirm, 'K7QX'); assert.equal(a.d.delivery, 'link'); assert.match(a.d.next, /check it shows K7QX\. /);
   const sent = w.requests.get(a.d.requestId);
   assert.equal(sent.device.name, 'studio laptop');
   // A second login while one waits is the same request.
@@ -157,7 +159,7 @@ test('A1, A4, A5: login once, run again, list the account, and nothing prints a 
   const listed = await run('list', '--account');
   assert.equal(listed.code, 0, listed.err);
   assert.deepEqual(listed.d.account, { alias: 'me', id: 'acct_1' });
-  assert.deepEqual(listed.d.souls.map((s) => [s.name, s.id, s.control.held, s.agent?.label ?? null, s.here]), [['Mira', 's_acct1', true, 'eden', true], ['Ivo', 's_acct9', false, null, false]]);
+  assert.deepEqual(listed.d.souls.map((s) => [s.name, s.id, s.control.held, s.agent?.label?.replace(/^eden [0-9.]+/, 'eden') ?? null, s.here]), [['Mira', 's_acct1', true, 'eden on studio laptop', true], ['Ivo', 's_acct9', false, null, false]]);   // #2257 A6: an approval names its device
   assert.deepEqual((await run('list')).d.souls.map((s) => s.name), ['Mira'], 'list with no flag is as before');
   assert.deepEqual((await run('doctor')).d.orphanCredentials, [], 'a login is not an orphan credential');
   // A5: the guide a fresh chat reads names the commands, and help account is one screen.
@@ -304,6 +306,45 @@ test('#2246 A3, A4: two accounts in one home; a tagged Soul uses its own login; 
   assert.equal(waited.d?.retire, 'cancelled', waited.out + waited.err); assert.equal(waited.d.retired, false);
   assert.equal(read(root, 'config.json').souls.s_kai.state, 'unpaired', 'nothing changed here');
   assert.deepEqual(Object.keys(read(root, 'credentials.json').logins), [], 'the retire poll secret is gone');
+});
+
+// #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person; with no memory
+// for it here, it says the memory stayed there and names export there and import here. The last device to ask still wins.
+test('#2257 A6: adopt and pair --move name the device a Soul was taken from, and warn when its memory stayed there', async (t) => {
+  const w = await world(t), homes = tmp(t), dir = (n) => { const d = join(homes, n); mkdirSync(d); return d; };
+  const one = runIn(dir('one'), homes), two = runIn(dir('two'), homes), three = runIn(dir('three'), homes), rootOne = join(homes, 'one', '.souls');
+  assert.equal((await one('register', w.url)).code, 0);
+  await logIn(w, one, 'acct_1', w.url, '--device', 'old laptop');
+  const mira = await make(w, one, 'Mira', 'acct_1');
+  assert.equal((await one('status')).code, 0);   // home one's agent holds Mira now
+  // With a login: home two adopts her; no memory of her here.
+  await logIn(w, two, 'acct_1', w.url, '--device', 'desk');
+  const moved = await two('adopt', 'Mira');
+  assert.equal(moved.d?.status, 'ready', moved.out + moved.err);
+  assert.match(moved.d.takenFrom, /^eden [0-9.]+ on old laptop$/);
+  assert.equal(moved.d.tell, `Tell your person: Mira was taken from ${moved.d.takenFrom}; that device no longer controls it.`);
+  assert.equal(moved.d.memory, `Mira's memory stayed on ${moved.d.takenFrom}: there run node eden.mjs export Mira, bring the folder here, then node eden.mjs import <folder>.`);
+  assert.equal((await two('status')).code, 0);   // home two holds her now
+  // Home one keeps her memory: taking her back names the device and gives no memory warning.
+  mkdirSync(join(rootOne, 'souls', mira.id, 'memory'), { recursive: true }); writeFileSync(join(rootOne, 'souls', mira.id, 'memory', 'self.md'), '# Self\n');
+  const back = await one('adopt', 'Mira');
+  assert.equal(back.d?.status, 'ready', back.out + back.err);
+  assert.match(back.d.takenFrom, /^eden [0-9.]+ on desk$/); assert.match(back.d.tell, /^Tell your person: Mira was taken from eden [0-9.]+ on desk;/); assert.equal(back.d.memory, undefined);
+  assert.equal((await one('mira', 'status')).code, 0);
+  // With a window code and --move: the same notice, from the code's listing.
+  assert.equal((await three('register', w.url)).code, 0);
+  const held = await three('pair', mira.id, '--for', 'MV7K-R2PA');
+  assert.equal(held.code, 1); assert.match(held.err, /soul\.held-elsewhere/, 'without --move nothing is taken');
+  const asked = await three('pair', mira.id, '--for', 'MV7K-R2PA', '--move');
+  assert.equal(asked.d?.status, 'pending', asked.out + asked.err);
+  Object.assign(w.approvals.get(asked.d.approvalId), { status: 'ready', soulId: mira.id, name: 'Mira' });
+  const taken = await three('approval', 'wait');
+  assert.equal(taken.d?.paired, true, taken.out + taken.err);
+  assert.match(taken.d.takenFrom, /^eden [0-9.]+ on old laptop$/); assert.match(taken.d.memory, /export Mira.*import <folder>/);
+  // A Soul nobody held is no takeover: no notice.
+  w.souls.set('s_acct7', { name: 'Ivo', account: 'acct_1' });
+  const fresh = await two('adopt', 'Ivo');
+  assert.equal(fresh.d?.status, 'ready', fresh.out + fresh.err); assert.equal(fresh.d.takenFrom, undefined); assert.equal(fresh.d.tell, undefined);
 });
 
 test('#2258 A3: login wait and retire wait keep polling while the request is open, and stop cleanly when refused or replaced', async (t) => {

@@ -5,7 +5,7 @@
 //   node .claude/skills/proof/record.mjs --url <url> --out <file.mp4> [--viewport desktop|phone]
 //        [--max-seconds N] [--steps <file.mjs>] [--settle-seconds N] [--from-load] [--time-of-day <h|HH:MM|keep>]
 //        [--preset pr-proof|social-landscape|social-portrait|highlight] [--fps N] [--quality low|high] [--size WxH]
-//        [--aspect landscape|portrait] [--panel on|off] [--panel-log <file.jsonl>]
+//        [--aspect landscape|portrait] [--panel on|off] [--panel-log <file.jsonl>] [--local-storage key=value]
 //
 // --preset (#1644): what the clip is for. pr-proof (the default) is today's output: --viewport desktop (1280x720) or
 //          phone (390x844), the recording's own frame rate. social-landscape 1920x1080 and social-portrait 1080x1920 at
@@ -32,6 +32,12 @@
 //          command and logs it, its reply and its receipt phases for the debug panel; `panel(text)` logs a note. Without --steps the page is loaded and watched for --settle-seconds.
 // --max-seconds: hard cap on the clip. Default: the first `max_seconds:` in docs/process/PROOF-POLICY.yml, else 60.
 //          If the journey runs past it the clip is cut at the cap and the script exits 3: shorten the journey.
+// --local-storage key=value: set in the page's localStorage before any page script runs (repeatable), e.g.
+//          `sim.dev=admin` to arrive signed in as a local dev user, the way the dev sign-in form leaves it.
+// GPU (#2294): SIM_PROOF_GPU=hardware uses a hardware GL renderer: each candidate set of Chromium flags is launched once
+//          and its WebGL renderer read; the first that is not software (SwiftShader, llvmpipe) records the take. None:
+//          exit 5, with every renderer seen. Unset: SwiftShader, as before. Either way the sidecar's `gl` names the
+//          renderer the take used (`software` true/false) and the log prints it.
 // With ffmpeg, a thin progress line along the bottom edge and a small timecode chip (drawn by Chromium) at the bottom
 // left are burned in. Writes <out> (mp4, or .webm when ffmpeg is missing) and <out>.json (url, viewport, duration, marks, console errors,
 // commit). Browsers: PLAYWRIGHT_BROWSERS_PATH when set, else /opt/pw-browsers when present.
@@ -68,6 +74,7 @@ export function parseArgs(argv) {
     else if (k === '--aspect') a.aspect = v();
     else if (k === '--panel') { const x = v(); if (!['on', 'off'].includes(x)) throw Error('--panel must be on or off'); a.panel = x; }
     else if (k === '--panel-log') a.panelLog = v();
+    else if (k === '--local-storage') { const x = v(), i = x.indexOf('='); if (i < 1) throw Error('--local-storage takes key=value'); (a.localStorage ??= {})[x.slice(0, i)] = x.slice(i + 1); }
     else if (k === '-h' || k === '--help') { a.help = true; }
     else throw Error(`unknown arg ${k}`);
   }
@@ -92,6 +99,48 @@ async function clipTools() {
   if (!existsSync(p('tools/playtest/lib/arrival.mjs'))) return null;
   const [arrival, setup] = await Promise.all([import(pathToFileURL(p('tools/playtest/lib/arrival.mjs')).href), import(pathToFileURL(p('tools/playtest/runs/setup.mjs')).href)]);
   return { ...arrival, ...setup };
+}
+
+/** #2294: the Chromium flag sets tried, in order, for a hardware GL renderer on Linux (headless; no display). */
+export const GPU_CANDIDATES = [
+  { label: 'angle-vulkan', args: ['--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface'] },
+  { label: 'angle-gl-egl', args: ['--use-gl=angle', '--use-angle=gl-egl'] },
+  { label: 'egl', args: ['--use-gl=egl'] },
+].flatMap((c) => [c, { ...c, label: `${c.label} (new headless)`, channel: 'chromium' }]);
+const GPU_BASE = ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-gpu-blocklist', '--enable-gpu', '--enable-gpu-rasterization'];
+/** A WebGL renderer string → software (SwiftShader, llvmpipe, softpipe) or not. */
+export const softwareGl = (renderer) => !renderer || /swiftshader|llvmpipe|softpipe|software/i.test(renderer);
+async function readGl(browser) {
+  const page = await browser.newPage();
+  try {
+    return await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2') ?? document.createElement('canvas').getContext('webgl');
+      if (!gl) return { vendor: null, renderer: null };
+      const x = gl.getExtension('WEBGL_debug_renderer_info');
+      return { vendor: gl.getParameter(x ? x.UNMASKED_VENDOR_WEBGL : gl.VENDOR), renderer: gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) };
+    });
+  } finally { await page.close(); }
+}
+/** The browser for the take: SwiftShader by default; with SIM_PROOF_GPU=hardware, the first candidate whose renderer is
+ *  hardware. → {browser, args, channel, gl} */
+async function launchForTake(chromium, args, extra) {
+  if (process.env.SIM_PROOF_GPU !== 'hardware') {
+    const browser = await chromium.launch({ headless: true, args: [...args, ...extra] });
+    return { browser, args, channel: undefined, gl: { ...(await readGl(browser).catch(() => ({}))), mode: 'default' } };
+  }
+  const seen = [];
+  for (const c of GPU_CANDIDATES) {
+    const cargs = [...GPU_BASE, ...c.args];
+    let browser;
+    try { browser = await chromium.launch({ headless: true, args: [...cargs, ...extra], ...(c.channel ? { channel: c.channel } : {}) }); } catch (e) { seen.push({ label: c.label, error: String(e?.message ?? e).split('\n')[0].slice(0, 160) }); continue; }
+    const gl = await readGl(browser).catch((e) => ({ error: String(e?.message ?? e).slice(0, 160) }));
+    seen.push({ label: c.label, renderer: gl.renderer ?? null });
+    if (!softwareGl(gl.renderer)) { console.log(`gl: ${c.label}: ${gl.vendor} / ${gl.renderer} (hardware)`); return { browser, args: cargs, channel: c.channel, gl: { ...gl, mode: 'hardware', flags: c.label, tried: seen } }; }
+    await browser.close();
+  }
+  for (const s of seen) console.error(`gl: ${s.label}: ${s.renderer ?? s.error ?? 'no WebGL'}`);
+  console.error('SIM_PROOF_GPU=hardware: no candidate gave a hardware GL renderer');
+  process.exit(5);
 }
 
 async function loadChromium() {
@@ -246,14 +295,18 @@ async function main() {
   }
   const work = mkdtempSync(join(tmpdir(), 'proof-'));
   const { chromium, args, from } = await loadChromium();
-  const browser = await chromium.launch({ headless: true, args: [...args, ...(clip.forceScale ? [`--force-device-scale-factor=${clip.forceScale}`] : [])] });
+  const taken = await launchForTake(chromium, args, clip.forceScale ? [`--force-device-scale-factor=${clip.forceScale}`] : []), { browser } = taken;
+  const gl = { ...taken.gl, software: softwareGl(taken.gl.renderer) };
+  console.log(`gl renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'})`);
   const { width, height } = clip.world;                // the recorded page, in output pixels
   // Arrival start needs a mid-page recording (page.screencast); without it this Playwright records from page creation.
+  const seed = a.localStorage ? (ctx) => ctx.addInitScript((kv) => { for (const [k, v] of Object.entries(kv)) localStorage.setItem(k, v); }, a.localStorage) : async () => {};
   let context = await browser.newContext({ ...vp, ...(a.fromLoad ? { recordVideo: { dir: work, size: { width, height } } } : {}) });
+  await seed(context);
   let page = await context.newPage(), startFallback = null;
   if (!a.fromLoad && !tools?.canScreencast(page)) {
     await context.close(); startFallback = tools ? 'page.screencast unavailable in this Playwright: recorded from page creation' : 'tools/playtest not in this checkout: recorded from page creation';
-    context = await browser.newContext({ ...vp, recordVideo: { dir: work, size: { width, height } } }); page = await context.newPage();
+    context = await browser.newContext({ ...vp, recordVideo: { dir: work, size: { width, height } } }); await seed(context); page = await context.newPage();
   }
   const screencast = !a.fromLoad && !startFallback ? join(work, 'arrival.webm') : null;
   let t0 = Date.now(), startedAt = new Date(t0).toISOString();
@@ -305,7 +358,7 @@ async function main() {
   const videoSec = (Date.now() - t0) / 1000;           // the recording runs from its start (arrival or page creation) to close
   const raw = screencast ?? await video.path();
   await browser.close();
-  const launch = () => chromium.launch({ headless: true, args }), ffmpeg = has('ffmpeg');
+  const launch = () => chromium.launch({ headless: true, args: taken.args, ...(taken.channel ? { channel: taken.channel } : {}) }), ffmpeg = has('ffmpeg');
   // The debug panel's text: redacted, then the publication check. A hit fails the take before anything is drawn.
   let panelText = null, panel = null;
   if (clip.panel) {
@@ -333,7 +386,7 @@ async function main() {
     preset: clip.preset, plan: { aspect: clip.aspect, out: clip.out, world: clip.world, css: clip.context.viewport, deviceScaleFactor: clip.context.deviceScaleFactor, fps: clip.fps, crf: clip.crf, panel: clip.panel ? { ...clip.panel, drawn: !!panel, entries: panelText?.entries.length ?? 0 } : null }, videoSec: +videoSec.toFixed(2), maxSeconds: cap.value,
     start: screencast ? 'arrival' : 'load', startRequested: a.fromLoad ? 'load' : 'arrival', ...(startFallback ? { startFallback } : {}), startedAt, worldTime,
     maxSecondsFrom: cap.from, truncated, stepsFile: a.steps ?? null, stepError, marks, consoleErrors, privacy,
-    scrubBar: !!burned?.ok, timecode: !!burned?.timecode, playwright: from,
+    scrubBar: !!burned?.ok, timecode: !!burned?.timecode, playwright: from, gl,
     commit: git('rev-parse', 'HEAD'), dirty: (git('status', '--porcelain') ?? '') !== '', recordedAt: new Date().toISOString(),
   };
   writeFileSync(`${file}.json`, JSON.stringify(meta, null, 2) + '\n');

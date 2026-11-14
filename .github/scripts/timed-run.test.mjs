@@ -21,7 +21,9 @@ test('inputs: ref, command and repeats are checked before anything runs', () => 
 test('args: only each command\'s own allowlisted flags, with checked values, once each', () => {
   assert.deepEqual(checkArgs('walk', ' --world fuzz,bench-hamlet '), ['--world', 'fuzz,bench-hamlet']);
   assert.deepEqual(checkArgs('eval-scripted', '--items bench-sit,music --warm-sec 40'), ['--items', 'bench-sit,music', '--warm-sec', '40']);
-  for (const [c, a] of [['walk', '--write'], ['walk', '--from x'], ['walk', '--world nowhere'], ['walk', '--world fuzz,fuzz'], ['walk', '--world fuzz --world fuzz'], ['walk', '--world'],
+  assert.deepEqual(checkArgs('eval-scripted', '--battery hostile-v1 --seat scripted --items act-spam'), ['--battery', 'hostile-v1', '--seat', 'scripted', '--items', 'act-spam']);
+  for (const [c, a] of [['eval-scripted', '--seat claude-sonnet'], ['eval-scripted', '--battery ../x'], ['eval-scripted', '--battery tools/playtest/eval/battery/m4-v1.json'], ['eval-scripted', '--battery'],
+    ['walk', '--write'], ['walk', '--from x'], ['walk', '--world nowhere'], ['walk', '--world fuzz,fuzz'], ['walk', '--world fuzz --world fuzz'], ['walk', '--world'],
     ['walk', '--items a'], ['eval-scripted', '--seat tools/playtest/eval/seats/claude-sonnet.json'], ['eval-scripted', '--max-usd 1'], ['eval-scripted', '--out /x'],
     ['eval-scripted', '--world https://example.org'], ['eval-scripted', '--items A;B'], ['eval-scripted', '--warm-sec 0'], ['eval-scripted', '--warm-sec 900'], ['eval-scripted', 'x --items a']])
     assert.throws(() => checkArgs(c, a), /input args/, `${c} ${a}`);
@@ -152,12 +154,13 @@ test('stage, each capacity command: its own files only, scrubbed; a Soul token a
   }
 });
 
-test('core split: four physical cores of the runner\'s own, two for the world and two for the load generator; else refused', () => {
+test('core split: two physical cores for the world, the rest (two of four, one of three) for the load generator; else refused', () => {
   const smt = (c) => [c % 8, (c % 8) + 8];   // cpu c and c+8 are one physical core
-  assert.deepEqual(splitCores([4, 5, 6, 7, 12, 13, 14, 15], smt), { physicalCores: 4, world: '4,12,5,13', load: '6,14,7,15' });
-  assert.deepEqual(splitCores([0, 1, 2, 3], (c) => [c]), { physicalCores: 4, world: '0,1', load: '2,3' });
-  assert.deepEqual(splitCores([3, 1, 2, 0], () => []), { physicalCores: 4, world: '0,1', load: '2,3' }, 'unreadable topology: one core per CPU');
-  assert.throws(() => splitCores([4, 5, 12, 13], smt), /2 physical core\(s\).*needs 4/);
+  assert.deepEqual(splitCores([4, 5, 6, 7, 12, 13, 14, 15], smt), { physicalCores: 4, layout: '2+2', world: '4,12,5,13', load: '6,14,7,15' });
+  assert.deepEqual(splitCores([0, 1, 2, 3], (c) => [c]), { physicalCores: 4, layout: '2+2', world: '0,1', load: '2,3' });
+  assert.deepEqual(splitCores([3, 1, 2, 0], () => []), { physicalCores: 4, layout: '2+2', world: '0,1', load: '2,3' }, 'unreadable topology: one core per CPU');
+  assert.deepEqual(splitCores([5, 6, 7, 13, 14, 15], smt), { physicalCores: 3, layout: '2+1', world: '5,13,6,14', load: '7,15' }, 'the timed runners: 6 logical CPUs, 3 cores');
+  assert.throws(() => splitCores([4, 5, 12, 13], smt), /2 physical core\(s\).*needs 3 or 4/);
   assert.throws(() => splitCores([0, 1, 2, 3, 4, 5], (c) => [c]), /6 physical core/);
 });
 

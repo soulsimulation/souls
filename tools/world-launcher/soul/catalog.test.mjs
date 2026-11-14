@@ -46,6 +46,12 @@ test("a place's own name finds the place first, with the walk to send", () => {
   assert.ok(r.found.findIndex((x) => x.id === "g-annex") > 0, "the farther library is listed after the nearer one");
 });
 
+test("a building's door row offers the ready move to stand in front of it (#2261)", () => {
+  const door = { at: [70, 5], level: 0, facing: "south", approach: [70, 6] };
+  const one = indexCatalog({ ...cat, places: cat.places.map((p) => (p.id === "g-library" ? { ...p, doors: [door] } : p)) });
+  assert.deepEqual(find(one, "library", { at }).found[0].doors, [{ ...door, act: 'walk-to:here {"at":[70,6]}' }]);
+});
+
 test("two places of one name are both listed, nearest first: the agent chooses", () => {
   const r = find(ix, "windmill", { at });
   assert.deepEqual(r.found.map((x) => x.act), ["walk:windmill-east", "walk:windmill-west"]);
@@ -212,4 +218,28 @@ test("around gives each nearby Soul's position beside its bearing, from the live
   assert.deepEqual(aroundPositions(seen, live).people, ["Moss · 0.9m front-right at [3.1, -2] · idle", "Fern · 4m behind at [0, 4.5] · walking", "Ash · 6m left · idle"], "a Soul the picture does not place is left as it is");
   assert.deepEqual(aroundPositions({ people: [], things: [] }, live), { people: [], things: [] }, "no one near: as before");
   assert.equal(aroundPositions(seen, undefined).people[0], "Moss · 0.9m front-right · idle", "no live picture: as before");
+});
+
+// #1965: Souls from the live copy, found by name, ahead of places and things of the same score
+const souls = [
+  { id: "s_mira", name: "Mira", place: "g-pond", at: [10, 40], doing: "sitting" },
+  { id: "s_mira2", name: "Mira Library", place: "g-library.reading", at: [71, 1], doing: null },
+  { id: "s_oak", name: "Oak", place: "g-annex", at: [300, 4], doing: null },
+];
+test("find names a Soul by exact name, with where it is and the acts that reach it (#1965)", () => {
+  const r = find(ix, "Mira", { at, souls });
+  assert.deepEqual(r.found[0], { type: "soul", id: "s_mira", name: "Mira", place: "g-pond", at: [10, 40], doing: "sitting", metres: 57, acts: ["go-near:s_mira", "wave:s_mira", "face:s_mira"], untrusted: true });
+});
+test("a partial name finds the Soul, ahead of a place or thing of the same score (#1965)", () => {
+  const lib = find(ix, "library", { at, souls }).found;
+  assert.equal(lib[0].type, "soul"); assert.equal(lib[0].id, "s_mira2"); assert.equal(lib[1].id, "g-library");
+  const oak = find(ix, "oak", { at, souls }).found;
+  assert.deepEqual(oak.slice(0, 2).map((x) => x.id), ["s_oak", "e_tree"]);
+});
+test("a Soul not in the live copy is found nowhere; --kind soul lists Souls only, nearest first, in query too (#1965)", () => {
+  assert.deepEqual(find(ix, "Zed", { at, souls }).found, []);
+  assert.deepEqual(find(ix, "Mira", { at }).found, []);
+  assert.deepEqual(find(ix, "", { kind: "soul", at, souls }).found.map((x) => x.id), ["s_mira2", "s_mira", "s_oak"]);
+  assert.deepEqual(find(ix, "oak", { kind: "soul", at, souls }).found.map((x) => x.type), ["soul"]);
+  assert.deepEqual(query(ix, [{ kind: "soul" }, { find: "mira", kind: "soul" }], { at, souls }).map((a) => a.found.map((x) => x.id)), [["s_mira2", "s_mira", "s_oak"], ["s_mira", "s_mira2"]]);
 });

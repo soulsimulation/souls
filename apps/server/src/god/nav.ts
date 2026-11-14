@@ -102,6 +102,8 @@ export type Thing = {
   /** Buildings: just inside the front door, and whether that door is open now. */
   inside?: Vec2;
   doorOpen?: boolean;
+  /** #2261 Buildings: their ground-floor doors to the outside, each the middle of its gap and its outward direction. */
+  doors?: { at: Vec2; out: Vec2 }[];
   /** Has a seat (sit:<id> is offered near it). */
   seat?: boolean;
   /** Piers, decks, bridges: standing points ON the deck, preferred in order (F1). */
@@ -307,6 +309,11 @@ export class GodNav {
         const st = ((e.state?.doors ?? {}) as Record<string, unknown>)[front.id];
         doorOpen = st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def));
       }
+      // #2261: every door to the outside (only the front one when the openings do not say which are), in world terms
+      const exits = (outer.length ? outer : front ? [front] : []).map((o) => {
+        const at = toWorld(o.at[0], o.at[1]), ahead = toWorld(o.at[0] + Math.sin(o.yaw), o.at[1] + Math.cos(o.yaw));
+        return { at, out: [ahead[0] - at[0], ahead[1] - at[1]] as Vec2 };
+      });
       if (frontSlot) stands.push(toWorld(frontSlot.p[0], frontSlot.p[2]));
       // XP5 hook: the footprint's clear lane can be off-centre, or on an open side without a radial front door.
       if (def.make.kind === 'gen' && def.make.gen === 'kit/2' && def.make.args?.footprint && frontSlot) {
@@ -332,7 +339,7 @@ export class GodNav {
       }
       // the room the front door opens into goes first (the entrance)
       if (front) { const fa = toWorld(front.at[0], front.at[1]); roomRefs.sort((a, b) => { const A = out.find((t) => t.ref === a)!, B = out.find((t) => t.ref === b)!; return (A.level - B.level) || (polyDist(A.poly!, fa) - polyDist(B.poly!, fa)); }); }
-      out.unshift({ ...base, ref, kind: 'building', what: article(kind0), at: [wp.x, wp.z], level, stands, ...(inside ? { inside, doorOpen } : {}), rooms: roomRefs, words: [...base.words, 'building', 'house'] });
+      out.unshift({ ...base, ref, kind: 'building', what: article(kind0), at: [wp.x, wp.z], level, stands, ...(inside ? { inside, doorOpen } : {}), ...(exits.length ? { doors: exits } : {}), rooms: roomRefs, words: [...base.words, 'building', 'house'] });
       return out;
     }
     // seats: approach in front of each seat; stand slots (a fountain's rim): those points

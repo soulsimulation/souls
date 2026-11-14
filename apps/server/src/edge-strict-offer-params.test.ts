@@ -1,5 +1,5 @@
 // #2136: with the strict gate on, an offered id is checked against the parameters the offer itself advertises.
-// read:here and lie:here advertise `seconds` 5..1800 (edge/ledger/activities.ts secondsParam): a value inside is accepted,
+// read:here and lie:here advertise `seconds` 5..3600 (edge/ledger/activities.ts secondsParam): a value inside is accepted,
 // one below is refused as capability.params naming `seconds`. A ride join advertises `with` (edge/ledger/ledger.ts
 // `listed`): accepted with or without it. Every act goes through POST /v1/edge/act with `strict: true`.
 import test from 'node:test';
@@ -29,11 +29,11 @@ test('#2136 read:here and lie:here: seconds inside the offer\'s own bounds is ac
   for (const id of ['read:here', 'lie:here']) {
     const offer = w.edge.capabilities(w.soul).find(c => c.id === id);
     const seconds = (offer?.params as {seconds?: {min: number; max: number}} | undefined)?.seconds;
-    assert.deepEqual([seconds?.min, seconds?.max], [5, 1800], `${id} advertises seconds 5..1800: ${JSON.stringify(offer)}`);
+    assert.deepEqual([seconds?.min, seconds?.max], [5, 3600], `${id} advertises seconds 5..3600: ${JSON.stringify(offer)}`);
     const below = await act(id, {seconds: seconds!.min - 1});
     assert.equal(below.accepted, false, JSON.stringify(below));
     assert.equal(below.code, 'capability.params');
-    assert.match(below.reason, /^seconds must be integer, 5\.\.1800\.$/, 'the refusal names the parameter and its advertised bounds');
+    assert.match(below.reason, /^seconds must be integer, 5\.\.3600\.$/, 'the refusal names the parameter and its advertised bounds');
     assert.equal(below.params.seconds.min, 5, 'the refusal carries the offer\'s schema');
     const inside = await act(id, {seconds: seconds!.min});
     assert.equal(inside.accepted, true, JSON.stringify(inside)); assert.equal(inside.receipt.capability, id);

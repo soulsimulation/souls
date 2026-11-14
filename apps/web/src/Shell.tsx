@@ -5,6 +5,7 @@ import {bodiesFromEvents,readSlowed} from './soul-state.ts';
 import {exploreAvailable} from './explore-control.ts';
 import {arrivalOver} from './arrival-marks.ts';
 import {MySouls,useMySouls} from './MySouls.tsx';
+import {readHeldSouls,shownOwnedSouls,writeHeldSouls,type HeldSouls} from './owned-souls-hold.ts';
 import {edenReleaseWorlds,edenExperienceEnabled} from './eden-release.ts';
 import {EdenTour,type EdenTourPlace} from './EdenTour.tsx';
 import {ClassroomPresentation} from './ClassroomPresentation.tsx';
@@ -159,7 +160,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   // camera to the Soul's Follow shot (flyToSoul); a Soul not in the picture yet is followed when it arrives (cardFollow).
   // Re-read Me when it is not ours yet (the owner box needs it for a just-approved Soul).
   const handleRef=useRef<WorldViewerHandle|null>(null);handleRef.current=viewerHandle;
-  useEffect(()=>onFollowSoulRequest(soulId=>{if(!meRef.current?.souls.includes(soulId))refreshMe(sim);setCardFollow(null);if(!handleRef.current?.flyToSoul?.(soulId))setCardFollow({soulId,scope:'card'});}),[]);
+  useEffect(()=>onFollowSoulRequest((soulId,approved)=>{if(approved&&!meRef.current?.souls.includes(soulId))refreshMe(sim);setCardFollow(null);if(!handleRef.current?.flyToSoul?.(soulId))setCardFollow({soulId,scope:'card'});}),[]);
   useEffect(()=>{if(!cardFollow)return;const t=setTimeout(()=>setCardFollow(null),FOLLOW_SOUL_WAIT_MS);return()=>clearTimeout(t);},[cardFollow]);
   useApprovalFollow(cardFollow,'card',true,viewerHandle,viewerState,()=>setCardFollow(null));
   // OWNER-DAY: a "Today" entry moves the camera to where it happened (your own camera, not follow/broadcast).
@@ -187,6 +188,10 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   useMySouls(); // keeps reading #mine= share fragments; the card's Pin button is gone (CARD-TRIM)
   // Local favourites never establish ownership. Navbar comes only from server Me.
   const ownedIds=currentMe?.souls??[];
+  // #2280: the navbar keeps this identity's last list through a reconnect, quietly marked, never an empty list
+  const heldKey='sim.navbar-souls.'+worldKey,heldSouls=useRef<HeldSouls|null>(null);heldSouls.current??=readHeldSouls(heldKey);
+  const shown=shownOwnedSouls(heldSouls.current,auth.authed,authIdentity(auth),currentMe,sim.awaitingWelcome);
+  if(JSON.stringify(shown.held)!==JSON.stringify(heldSouls.current)){heldSouls.current=shown.held;writeHeldSouls(heldKey,shown.held);}
   const signinEnabled=AUTH_UI&&configuredSignIn(cfg,launcherWorld);  // new worlds: local dev sign-in too
   const newSoulAvailable=(!signinEnabled||auth.ready)&&(signinEnabled||cfg.accountAuthRequired!==true);
   const mine = new Set(currentMe?.souls ?? []);
@@ -195,7 +200,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   const [coarse]=useState(()=>{try{return matchMedia('(pointer: coarse)').matches;}catch{return false;}});
   useEffect(()=>{if(!chipNote)return;const t=setTimeout(()=>setChipNote(null),2500);return()=>clearTimeout(t);},[chipNote]);
   const inspect = (id: string | null, how?: 'chip') => { setSelected(id); if(how==='chip'&&id){chipRef.current=id;setChip(id);setPanelOpen(false);return;} chipRef.current=null;setChip(null); if (id) revealPanel(); };
-  const accountSouls=(entry:ReactNode)=><MySouls key={JSON.stringify([worldKey,currentMe?.userId])} recencyKey={JSON.stringify(['sim.soul-recency',worldKey,currentMe?.userId??'public'])} selectedId={selected} newSoul={entry} api={api} bodies={soulBodies} ids={ownedIds} souls={r.souls} present={new Set([...r.souls.values()].filter(s=>r.entities[s.entityId]).map(s=>s.id))} select={inspect} follow={requestFollowSoul}/>;
+  const accountSouls=(entry:ReactNode)=><MySouls key={JSON.stringify([worldKey,shown.owner??undefined])} recencyKey={JSON.stringify(['sim.soul-recency',worldKey,shown.owner??'public'])} reconnecting={shown.reconnecting} selectedId={selected} newSoul={entry} api={api} bodies={soulBodies} ids={shown.ids} souls={r.souls} present={new Set([...r.souls.values()].filter(s=>r.entities[s.entityId]).map(s=>s.id))} select={inspect} follow={requestFollowSoul}/>;
   const edenExpansion=edenExperienceEnabled(location.hostname,worldPath,cfg.worldId,sim.conn.welcome?.worldId,qualifiedEdenWorlds);
   // P1 phones (F12): the page that will show the old Eden town asks for its chunk before the welcome (it came ~1.3 s late)
   const edenExpected=edenExperienceEnabled(location.hostname,worldPath,cfg.worldId,cfg.worldId,qualifiedEdenWorlds);

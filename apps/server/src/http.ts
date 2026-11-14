@@ -78,12 +78,12 @@ import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
  *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
 const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
 
-/** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; resolve; and
+/** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
  *  on the tick thread. World-relative paths, as admission classifies them. */
 export function servingRead(method: string, path: string, view?: string): boolean {
   if (method === 'GET') return (path === '/v1/edge/here' && view !== 'body') || path === '/v1/edge/observe' || path === '/v1/edge/capabilities' || path === '/v1/edge/around';
-  return method === 'POST' && (path === '/v1/edge/resolve' || path === '/v1/edge/act' || path === '/v1/edge/converse');
+  return method === 'POST' && (path === '/v1/edge/act' || path === '/v1/edge/converse');
 }
 /** Continuity (warm after listen): a listing read waits for a running serving warm (EdgeLedger.whenServing, which has a
  *  ceiling) before it goes on. Mounted BEFORE admission, so the wait is never a request in flight (no soul.busy for it)
@@ -299,7 +299,7 @@ export function buildApp(d: Deps) {
     // #1326: the tick's wall age, and `stalled` once the clock owes ticks and none has completed past its threshold
     const clock = mon?.clock();
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
-      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
+      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
       ...(mon ? {load: mon.health()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.

@@ -15,7 +15,7 @@ test('intents: nearest free seat near a Soul, front row, go, swim, approach, tur
   const w = await coreAWorld(4); t.after(() => w.close());
   const [a, b, c, d] = w.souls;
   const act = async (s: typeof a, body: object) => (await w.http(s, 'POST', '/v1/edge/act', body)).body;
-  const dry = async (s: typeof a, body: object) => (await w.http(s, 'POST', '/v1/edge/resolve', body)).body.resolve;
+  const dry = async (s: typeof a, body: object) => w.ledger.intents.dryRun(s, body as never) as any;
   // #1911: an act over HTTP is an offered id. The ledger reads the intent (its choice is `chosen`), the act sends the id it
   // chose, and the receipt is that act's. A refused intent answers the ledger's refusal; the words never reach the route.
   const byIntent = async (s: typeof a, body: object) => {const d = w.ledger.intents.dryRun(s, body as never) as any; if (!d.ok) return {accepted: false, code: d.code};

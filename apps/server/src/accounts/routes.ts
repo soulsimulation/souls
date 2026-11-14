@@ -47,7 +47,7 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
   return {approval,world:world(c),approvalURL:`${deps.baseOf(c)}/#approve/${approval.id}`,delivery:approval.inWindow?'window':'link',intervalSeconds:3};}));
  // #1274: what a person gets back with a new folder: the Souls their open window's account holds here, ids and names only.
  app.post('/v1/agent/approval/souls',c=>wrap(c,async()=>{deps.limit(c,'account-souls',6,60000);const p=parse(codeSchema,await json(c)),ids=accounts.store.codeSouls(p.for);if(!ids)throw new ApiError(404,'code-unknown',UNKNOWN_CODE);
-  return {souls:heldSouls(ids).map(s=>{const control=deps.control?.(s.id);return {id:s.id,name:s.name,...(control?{control}:{})};})};}));
+  return {souls:heldSouls(ids).map(s=>{const control=deps.control?.(s.id),agent=control?.held?deps.agentOf?.(s.id)??null:null;return {id:s.id,name:s.name,...(control?{control}:{}),...(agent?{agent}:{})};})};}));   // #2257 A6: the holder's label, so a --move names the device it takes from
  app.post('/v1/agent/approval/poll',c=>wrap(c,async()=>{deps.limit(c,'account-poll',60,60000);const p=parse(pollSchema,await json(c));return {...accounts.poll(p.approvalId,p.pollSecret),world:world(c)};}));
  app.post('/v1/agent/approval/cancel',c=>wrap(c,async()=>{const p=parse(pollSchema,await json(c));return {approval:accounts.store.cancel(null,p.approvalId,p.pollSecret),world:world(c)};}));
  app.get('/v1/account/approvals/:id',c=>wrap(c,async()=>{const {identity}=await verified(c);return {approval:shown(accounts.view(identity,c.req.param('id'))),world:world(c)};}));
