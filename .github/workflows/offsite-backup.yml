@@ -1,0 +1,309 @@
+# Off-site backups of production and a restore drill (#557), for a maintainer without ssh. Dispatch from main:
+#   gh workflow run offsite-backup.yml --ref main                       configure + copy + drill (the defaults)
+#   gh workflow run offsite-backup.yml --ref main -f configure=false -f copy=false -f drill=true    a drill only
+#   gh workflow run offsite-backup.yml --ref main -f configure=false -f copy=false -f drill=false -f recovery_key=true
+# configure  writes SIM_BACKUP_OFFSITE, AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY into the host's /etc/sim-worlds/backup.env
+#            from the repo secrets BACKUP_OFFSITE_URL, BACKUP_S3_KEY_ID, BACKUP_S3_SECRET (root:simworlds 0640, as
+#            backup.env.example says). Every other line of the file is kept; an unchanged file is not rewritten. From then on
+#            the nightly production backup copies each new snapshot off-site (deploy/backup-restic.mjs).
+# copy       the off-site copy now, without a new local snapshot or any local forget/prune (nothing on the host is
+#            deleted): restic init (first use, same chunker) + copy of the production snapshots, then restic check of the
+#            off-site repository. Prints counts and sizes only.
+# drill      restores the latest off-site snapshot into an empty temporary directory (after a free-disk check, never a
+#            production path), quick_checks every database, boots the smallest world from it with fake minds on a free
+#            loopback port (never 4660-4800) and prints its boot tick and state hash, then deletes the directory.
+# recovery_key adds the repo secret BACKUP_RECOVERY_PASSWORD (the maintainer's own copy, kept in his password manager) as
+#            a second key of the off-site repository, so it opens without the host's restic.pass. Idempotent.
+# Secrets: DEPLOY_SSH_KEY, SIM_DEPLOY_KNOWN_HOSTS (production environment), SIM_DEPLOY_HOST, SIM_DEPLOY_USER (as release.yml).
+# No value, host, path or world name is printed: the host scripts print counts only and the output is filtered.
+name: offsite-backup
+on:
+  workflow_dispatch:
+    inputs:
+      configure:
+        description: Write the off-site lines into the host's backup env file
+        type: boolean
+        default: true
+      copy:
+        description: Copy the production snapshots off-site now and check the off-site repository
+        type: boolean
+        default: true
+      drill:
+        description: Restore the latest off-site snapshot into a temporary directory, check it, boot one world, delete it
+        type: boolean
+        default: true
+      recovery_key:
+        description: Add BACKUP_RECOVERY_PASSWORD as a second key of the off-site repository
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: offsite-backup
+  cancel-in-progress: false
+jobs:
+  offsite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment: production
+    steps:
+      - name: Inputs and secrets
+        env:
+          REF: ${{ github.ref }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          OFFSITE_URL: ${{ secrets.BACKUP_OFFSITE_URL }}
+          KEY_ID: ${{ secrets.BACKUP_S3_KEY_ID }}
+          KEY_SECRET: ${{ secrets.BACKUP_S3_SECRET }}
+          RECOVERY: ${{ secrets.BACKUP_RECOVERY_PASSWORD }}
+          WANT_KEY: ${{ inputs.recovery_key }}
+        run: |
+          for v in SIM_DEPLOY_HOST SIM_DEPLOY_USER OFFSITE_URL KEY_ID; do [ -z "${!v}" ] || echo "::add-mask::${!v}"; done
+          # the parts of the destination restic may print on its own: its host and each path segment
+          if [ -n "$OFFSITE_URL" ]; then
+            rest="${OFFSITE_URL#*://}"
+            for part in ${rest//\// }; do [ ${#part} -ge 4 ] && echo "::add-mask::$part"; done
+          fi
+          [ "$REF" = refs/heads/main ] || { echo "::error::offsite-backup runs from main only (got $REF)"; exit 1; }
+          missing=()
+          for v in SIM_DEPLOY_HOST SIM_DEPLOY_USER DEPLOY_SSH_KEY SIM_DEPLOY_KNOWN_HOSTS OFFSITE_URL KEY_ID KEY_SECRET; do [ -n "${!v}" ] || missing+=("$v"); done
+          [ "$WANT_KEY" != true ] || [ -n "$RECOVERY" ] || missing+=(BACKUP_RECOVERY_PASSWORD)
+          [ ${#missing[@]} = 0 ] || { echo "::error::missing: ${missing[*]}"; exit 1; }
+          # restic's form of the destination: an https endpoint becomes s3:https://...
+          case "$OFFSITE_URL" in
+            s3:*|b2:*|azure:*|gs:*|swift:*|rest:*) ;;
+            https://*) echo "destination given as https://, used as s3:https://" ;;
+            *) echo "::error::BACKUP_OFFSITE_URL is neither a restic repository (s3:..., b2:...) nor an https endpoint"; exit 1 ;;
+          esac
+          for v in OFFSITE_URL KEY_ID KEY_SECRET; do
+            [[ "${!v}" =~ ^[^[:space:]\"\'\\\$\`]+$ ]] || { echo "::error::$v holds whitespace, quotes, a backslash, \$ or a backtick: not a safe env-file value"; exit 1; }
+          done
+      - name: SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SIM_DEPLOY_KNOWN_HOSTS: ${{ secrets.SIM_DEPLOY_KNOWN_HOSTS }}
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$SIM_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+          printf 'Host %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  ServerAliveInterval 30\n' \
+            "$SIM_DEPLOY_HOST" "$SIM_DEPLOY_USER" > ~/.ssh/config && chmod 600 ~/.ssh/config
+          # rhost <script>: runs the script as root on the host (sudo -n when the deploy user is not root), the script on
+          # stdin so no value is ever on a command line; its output is filtered of addresses and paths
+          cat > "$RUNNER_TEMP/rhost.sh" <<'EOF'
+          rhost() {
+            ssh -o BatchMode=yes -o ConnectTimeout=20 "$SIM_DEPLOY_USER@$SIM_DEPLOY_HOST" \
+              'if [ "$(id -u)" = 0 ]; then exec bash -s; else exec sudo -n bash -s; fi' < "$1" 2>&1 \
+              | sed -u -E -e 's/([0-9]{1,3}\.){3}[0-9]{1,3}/<ip>/g' -e 's#[a-z0-9]+:https?://[^ ]*#<repo>#g' -e 's#(^|[ =:(])/[^ ]*#\1<path>#g'
+            local rc=${PIPESTATUS[0]}; rm -f "$1"; return "$rc"
+          }
+          # the prelude every host script starts with: backup.env's settings (the script's defaults otherwise), restic as
+          # simworlds (the user the nightly runs as, so its cache and locks keep their owner), a private scratch dir
+          prelude() {
+            cat <<'HOST'
+          set -euo pipefail
+          umask 077
+          ENVF=/etc/sim-worlds/backup.env
+          if [ -r "$ENVF" ]; then set -a; . "$ENVF"; set +a; fi
+          export RESTIC_REPOSITORY="${RESTIC_REPOSITORY:-/srv/sim-worlds-backups/restic}"
+          export RESTIC_PASSWORD_FILE="${RESTIC_PASSWORD_FILE:-/etc/sim-worlds/restic.pass}"
+          export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-/srv/sim-worlds-backups/.cache}"
+          RBIN="${RESTIC_BIN:-restic}"
+          T=$(mktemp -d /run/soul-offsite.XXXXXX); trap 'rm -rf -- "$T"' EXIT; chmod 755 "$T"
+          asw() { runuser -u simworlds -- "$@"; }
+          rs() { asw "$RBIN" "$@"; }
+          # the last lines of a failed command, without paths or repository addresses
+          why() { tail -n 3 "$1" | sed -E -e 's#[a-z0-9]+:https?://[^ ]*#<repo>#g' -e 's#(^|[ =:(])/[^ ]*#\1<path>#g'; }
+          jcount() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s||"[]").length))'; }
+          jfield() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s.trim().split("\n").pop());console.log(j[process.argv[1]]??0)})' "$1"; }
+          mib() { node -e 'console.log((Number(process.argv[1])/2**20).toFixed(1))' "$1"; }
+          [ -n "${SIM_BACKUP_OFFSITE:-}" ] || { echo "the off-site destination is not configured on the host (run with configure=true)"; exit 3; }
+          $RBIN version >/dev/null 2>&1 || { echo "no restic on the host"; exit 3; }
+          [ -r "$RESTIC_PASSWORD_FILE" ] || { echo "no restic password file on the host"; exit 3; }
+          HOST
+          }
+          EOF
+      - name: Configure the host's backup env file (A1)
+        if: ${{ inputs.configure }}
+        env:
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+          OFFSITE_URL: ${{ secrets.BACKUP_OFFSITE_URL }}
+          KEY_ID: ${{ secrets.BACKUP_S3_KEY_ID }}
+          KEY_SECRET: ${{ secrets.BACKUP_S3_SECRET }}
+        run: |
+          . "$RUNNER_TEMP/rhost.sh"
+          case "$OFFSITE_URL" in https://*) OFFSITE_URL="s3:$OFFSITE_URL" ;; esac
+          s="$RUNNER_TEMP/configure.sh"; umask 077
+          {
+            # the values travel inside the script on ssh's stdin, never on a command line, and are never printed
+            printf 'OFF=%q\nKID=%q\nKSEC=%q\n' "$OFFSITE_URL" "$KEY_ID" "$KEY_SECRET"
+            cat <<'HOST'
+          set -euo pipefail
+          umask 077
+          ENVF=/etc/sim-worlds/backup.env
+          id simworlds >/dev/null 2>&1 || { echo "no simworlds user on the host"; exit 3; }
+          [ -d /etc/sim-worlds ] || { echo "no settings directory on the host"; exit 3; }
+          NEW=$(mktemp /etc/sim-worlds/.backup.env.XXXXXX); trap 'rm -f -- "$NEW"' EXIT
+          # keep every line but the three this writes (and the marker comment of an earlier run)
+          if [ -e "$ENVF" ]; then grep -v -E '^[[:space:]]*(export[[:space:]]+)?(SIM_BACKUP_OFFSITE|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)=|^# off-site copy \(offsite-backup workflow' "$ENVF" > "$NEW" || true; fi
+          {
+            echo '# off-site copy (offsite-backup workflow, #557): written from the repository secrets; do not edit by hand'
+            printf 'SIM_BACKUP_OFFSITE=%s\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$OFF" "$KID" "$KSEC"
+          } >> "$NEW"
+          chown root:simworlds "$NEW"; chmod 0640 "$NEW"
+          if [ -e "$ENVF" ] && cmp -s "$NEW" "$ENVF" && [ "$(stat -c '%U:%G %a' "$ENVF")" = "root:simworlds 640" ]; then
+            echo "backup env file: unchanged (already holds these three lines, root:simworlds 0640)"
+          else
+            had=$([ -e "$ENVF" ] && echo updated || echo created)
+            mv -f -- "$NEW" "$ENVF"; trap - EXIT
+            echo "backup env file: $had, $(grep -c . "$ENVF") lines, $(stat -c '%U:%G %a' "$ENVF")"
+          fi
+          HOST
+          } > "$s"
+          rhost "$s"
+      - name: Copy off-site and check (A2)
+        if: ${{ inputs.copy }}
+        env:
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          . "$RUNNER_TEMP/rhost.sh"
+          s="$RUNNER_TEMP/copy.sh"; umask 077
+          {
+            prelude
+            cat <<'HOST'
+          [ -e "$RESTIC_REPOSITORY/config" ] || { echo "no local restic repository on the host: nothing to copy"; exit 3; }
+          OFF="$SIM_BACKUP_OFFSITE"; FROM=(--from-repo "$RESTIC_REPOSITORY" --from-password-file "$RESTIC_PASSWORD_FILE")
+          t0=$(date +%s)
+          if rs -r "$OFF" cat config >/dev/null 2>"$T/err"; then echo "off-site repository: exists"
+          else
+            rs -r "$OFF" init "${FROM[@]}" --copy-chunker-params >/dev/null 2>"$T/err" || { echo "init FAILED:"; why "$T/err"; exit 1; }
+            echo "off-site repository: initialised (same chunker as the local one)"
+          fi
+          lcount=$(rs snapshots --no-lock --json --tag production 2>/dev/null | jcount)
+          # copy only: no new local snapshot and no forget/prune anywhere, so nothing is deleted
+          rs -r "$OFF" --retry-lock 1h copy "${FROM[@]}" --tag production >"$T/copy" 2>&1 || { echo "copy FAILED:"; why "$T/copy"; exit 1; }
+          copied=$(grep -c -E '^snapshot [0-9a-f]+ saved' "$T/copy" || true)
+          rs -r "$OFF" check >"$T/check" 2>&1 && echo "restic check (off-site): passed" || { echo "restic check (off-site) FAILED:"; why "$T/check"; exit 1; }
+          ocount=$(rs -r "$OFF" snapshots --no-lock --json --tag production | jcount)
+          raw=$(rs -r "$OFF" stats --no-lock --json --mode raw-data | jfield total_size)
+          rsize=$(rs -r "$OFF" stats --no-lock --json --mode restore-size --tag production latest | jfield total_size)
+          rfiles=$(rs -r "$OFF" stats --no-lock --json --mode restore-size --tag production latest | jfield total_file_count)
+          echo "production snapshots: $lcount local, $ocount off-site ($copied copied by this run)"
+          echo "off-site repository: $(mib "$raw") MiB stored; latest snapshot restores $(mib "$rsize") MiB in $rfiles files"
+          echo "took $(( $(date +%s) - t0 )) s"
+          HOST
+          } > "$s"
+          rhost "$s" | tee -a "$GITHUB_STEP_SUMMARY"; exit "${PIPESTATUS[0]}"
+      - name: Restore drill from the off-site copy (A3)
+        if: ${{ inputs.drill }}
+        env:
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+        run: |
+          . "$RUNNER_TEMP/rhost.sh"
+          s="$RUNNER_TEMP/drill.sh"; umask 077
+          {
+            prelude
+            cat <<'HOST'
+          REL=/srv/sim-worlds/production
+          [ -e "$REL/tools/world-launcher/deploy/backup-restic.mjs" ] || { echo "no production release on the host"; exit 3; }
+          OFF="$SIM_BACKUP_OFFSITE"; t0=$(date +%s)
+          # an empty directory of its own, never a production path; deleted on every exit
+          D=$(mktemp -d /var/tmp/soul-offsite-drill.XXXXXX)
+          case "$D" in /var/tmp/soul-offsite-drill.??????) ;; *) echo "unexpected drill directory"; exit 3;; esac
+          stopall() { local p; p=$(cat "$D/child.pid" 2>/dev/null || true); [ -z "$p" ] || kill -TERM "$p" 2>/dev/null || true
+            pkill -TERM -f -- "$D/" 2>/dev/null || true; sleep 3; [ -z "$p" ] || kill -KILL "$p" 2>/dev/null || true; pkill -KILL -f -- "$D/" 2>/dev/null || true; }
+          trap 'stopall; rm -rf -- "$D" "$T"' EXIT
+          chown simworlds:simworlds "$D"; chmod 700 "$D"
+          need=$(rs -r "$OFF" stats --no-lock --json --mode restore-size --tag production latest | jfield total_size)
+          avail=$(df -B1 --output=avail "$D" | tail -n 1 | tr -d ' ')
+          margin=$(( 2 * need + 2 * 1024 * 1024 * 1024 ))
+          echo "free disk check: needs $(mib "$need") MiB (+ margin), $(mib "$avail") MiB free"
+          [ "$avail" -gt "$margin" ] || { echo "REFUSED: not enough free disk for the drill"; exit 1; }
+          # restore with the nightly's own script, pointed at the off-site repository; its per-file lines name worlds, so
+          # they stay in the drill directory and only the counts are printed
+          export RESTIC_REPOSITORY="$OFF"
+          rc=0; asw nice -n 10 node --no-warnings "$REL/tools/world-launcher/deploy/backup-restic.mjs" restore production latest "$D/data" >"$D/restore.log" 2>&1 || rc=$?
+          ok=$(grep -c '^ok  ' "$D/restore.log" || true); bad=$(grep -c '^BAD ' "$D/restore.log" || true)
+          echo "restore: exit $rc; databases quick_check ok $ok, failed $bad"
+          [ "$rc" = 0 ] && [ "$bad" = 0 ] && [ "$ok" -gt 0 ] || { echo "restore FAILED:"; why "$D/restore.log"; exit 1; }
+          # boot the smallest world of the snapshot with fake minds on a free loopback port, read its state hash, stop it
+          cat > "$D/boot.mjs" <<'JS'
+          import { spawn } from 'node:child_process';
+          import { existsSync, openSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+          import { createServer } from 'node:net';
+          import { join } from 'node:path';
+          const [data, rel, log] = process.argv.slice(2);
+          const reg = JSON.parse(readFileSync(join(data, 'worlds.json'), 'utf8'));
+          const all = (reg.worlds ?? []).filter((w) => /^[a-z][a-z0-9-]{0,31}$/.test(w?.slug ?? '') && !w.fork);
+          const have = all.map((w) => ({ w, db: join(data, 'worlds', w.dataSlug ?? w.slug, 'sim.db') })).filter((c) => existsSync(c.db))
+            .sort((a, b) => statSync(a.db).size - statSync(b.db).size);
+          console.log(`registry: ${all.length} worlds, ${have.length} with a database in the snapshot`);
+          if (!have.length) process.exit(4);
+          const { w } = have[0];
+          const LOOP = 'localhost';   // loopback only, never a public interface
+          const free = () => new Promise((ok, no) => { const s = createServer(); s.once('error', no); s.listen(0, LOOP, () => { const p = s.address().port; s.close(() => ok(p)); }); });
+          let port = await free(); while (port >= 4660 && port <= 4800) port = await free();
+          const env = { PATH: process.env.PATH, HOME: data, LANG: process.env.LANG ?? 'C.UTF-8',
+            ANTHROPIC_API_KEY: '', TYPESAFE_API_KEY: '', OPENAI_API_KEY: '', BRAIN_MODE: 'fake',
+            WORLD_KEY: w.worldKey ?? w.slug, WORLD_ID: w.worldId ?? `${w.slug}-1`, WORLD_SLUG: w.slug, WORLD_NAME: '', ENGINE: 'mars',
+            PORT: String(port), HOST: LOOP, DEV_AUTH: '1', SEED_NATIVES: '0', DATA_DIR: join(data, 'worlds', w.dataSlug ?? w.slug),
+            PUBLIC_URL: `http://${LOOP}:${port}`, ENABLE_WORLD_ENGINE: '1', WORLD_PATH: `/w/${w.slug}`, INVITE_REQUIRED: '0',
+            SOUL_LIFECYCLE: '1', EDGE_FADING: '1', SIM_BOOT_HASH: '1',
+            ...(w.bornOwner ? { WORLD_OWNER_ID: w.bornOwner } : {}), ...(w.timeZone ? { WORLD_TIME_ZONE: w.timeZone } : {}),
+            ...(w.templateFile && existsSync(w.templateFile) ? { GENESIS_FILE: w.templateFile } : {}) };
+          const out = openSync(log, 'a');
+          const t0 = Date.now();
+          const child = spawn(process.execPath, ['apps/server/src/main.ts'], { cwd: rel, env, stdio: ['ignore', out, out] });
+          writeFileSync(join(data, '..', 'child.pid'), `${child.pid}\n`);   // the host script stops it on any exit
+          const stop = () => { try { child.kill('SIGTERM'); } catch {} };
+          let healthy = null;
+          while (Date.now() - t0 < 300000 && child.exitCode === null) {
+            try { const r = await fetch(`http://${LOOP}:${port}/w/${w.slug}/healthz`, { signal: AbortSignal.timeout(2000) }); if (r.ok) { healthy = await r.json(); break; } } catch {}
+            await new Promise((r) => setTimeout(r, 500));
+          }
+          const secs = Math.round((Date.now() - t0) / 1000);
+          const m = readFileSync(log, 'utf8').match(/\[boot\] state at tick (\d+): ([0-9a-f]+)/);
+          stop(); await new Promise((r) => setTimeout(r, 3000)); try { child.kill('SIGKILL'); } catch {}
+          if (!healthy || !m) { console.log(`boot FAILED after ${secs} s (${healthy ? 'no state hash logged' : 'healthz never answered'})`); process.exit(1); }
+          console.log(`boot: healthy in ${secs} s on a free loopback port, fake minds; boot tick ${m[1]}, state hash ${m[2].slice(0, 16)}; healthz tick ${healthy.tick}, halted ${healthy.halted}`);
+          process.exit(healthy.halted ? 1 : 0);
+          JS
+          chown simworlds:simworlds "$D/boot.mjs"
+          (cd "$REL" && asw nice -n 10 node --no-warnings "$D/boot.mjs" "$D/data" "$REL" "$D/boot.log")
+          echo "drill directory deleted; took $(( $(date +%s) - t0 )) s"
+          HOST
+          } > "$s"
+          rhost "$s" | tee -a "$GITHUB_STEP_SUMMARY"; rc=${PIPESTATUS[0]}
+          echo "drill finished $(date -u +%F)" >> "$GITHUB_STEP_SUMMARY"; exit "$rc"
+      - name: Recovery key on the off-site repository (A4)
+        if: ${{ inputs.recovery_key }}
+        env:
+          SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
+          SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
+          RECOVERY: ${{ secrets.BACKUP_RECOVERY_PASSWORD }}
+        run: |
+          . "$RUNNER_TEMP/rhost.sh"
+          s="$RUNNER_TEMP/key.sh"; umask 077
+          {
+            printf 'NEWPW=%q\n' "$RECOVERY"
+            prelude
+            cat <<'HOST'
+          OFF="$SIM_BACKUP_OFFSITE"
+          K="$T/recovery.pass"; printf '%s' "$NEWPW" > "$K"; unset NEWPW; chown simworlds "$K"; chmod 400 "$K"
+          if RESTIC_PASSWORD_FILE="$K" rs -r "$OFF" cat config >/dev/null 2>&1; then echo "recovery key: already opens the off-site repository"
+          else
+            rs -r "$OFF" key add --new-password-file "$K" >/dev/null 2>"$T/err" || { echo "key add FAILED:"; why "$T/err"; exit 1; }
+            RESTIC_PASSWORD_FILE="$K" rs -r "$OFF" cat config >/dev/null 2>&1 || { echo "the recovery key was added but does not open the repository"; exit 1; }
+            echo "recovery key: added; it opens the off-site repository on its own"
+          fi
+          echo "keys on the off-site repository: $(rs -r "$OFF" key list --json 2>/dev/null | jcount)"
+          HOST
+          } > "$s"
+          rhost "$s" | tee -a "$GITHUB_STEP_SUMMARY"; exit "${PIPESTATUS[0]}"

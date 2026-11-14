@@ -170,11 +170,39 @@ them for one world, at once (`null` restores a default).
 `sim-worlds-backup@<stage>.timer` runs nightly (`deploy/backup-restic.mjs backup <stage>`). It copies every SQLite
 database of the stage with SQLite's online backup API, checks each copy with `PRAGMA quick_check`, adds the registry,
 audit log, uploaded assets, old-world fork inputs and the stage's non-secret host settings, and takes one deduplicated
-restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`). An off-host copy to an
-S3-compatible bucket runs when `SIM_BACKUP_OFFSITE` is set. Every release also takes its own compact pre-release copy.
-Commands are in the [runbook](operations/runbook.md#backups). Local backup verification does not prove offsite
-recovery; [offsite setup #557](https://github.com/soulsimulation/souls/issues/557) is explicitly deferred and must be
-qualified separately.
+restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`), locally and
+off-site. Every release also takes its own compact pre-release copy. Commands are in the
+[runbook](operations/runbook.md#backups).
+
+### Off-site copy
+
+Production's snapshots are also copied each night to a private S3-compatible bucket the maintainer chose (#557). The
+destination and its key pair are the repository secrets `BACKUP_OFFSITE_URL`, `BACKUP_S3_KEY_ID` and
+`BACKUP_S3_SECRET`; the `offsite-backup` workflow writes them into the host's `/etc/sim-worlds/backup.env` as
+`SIM_BACKUP_OFFSITE`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (root:simworlds 0640), and the nightly backup then
+copies each new snapshot there and applies the same retention. Nobody needs ssh for any of it:
+
+```sh
+gh workflow run offsite-backup.yml --ref main                 # write the settings, copy now, check, restore drill
+gh workflow run offsite-backup.yml --ref main -f configure=false -f copy=false            # a restore drill only
+gh workflow run offsite-backup.yml --ref main -f configure=false -f copy=false -f drill=false -f recovery_key=true
+```
+
+The copy step copies without a new local snapshot and deletes nothing, then runs `restic check` on the off-site
+repository. The drill restores the latest off-site snapshot into an empty temporary directory on the host (after a
+free-disk check, never a production path), quick-checks every database, boots the smallest world from it with fake
+minds on a free loopback port, prints its state hash and deletes the directory. The workflow prints counts and sizes
+only.
+
+**The recovery key.** The restic password (`/etc/sim-worlds/restic.pass`) lives only on the host, and without a
+password the off-site copy cannot be opened. The maintainer keeps his own: a password saved in his password manager
+and also stored as the repository secret `BACKUP_RECOVERY_PASSWORD`; the workflow's `recovery_key` step adds it as a
+second key of the off-site repository and checks that it opens it. GitHub never shows a secret again, so the password
+manager is the copy that counts. To restore after losing the host, put that password in a file and point restic at
+the bucket (`RESTIC_REPOSITORY=<the destination>`, `RESTIC_PASSWORD_FILE=<that file>`, the key pair in the
+environment), then follow [disaster recovery](operations/disaster-recovery.md#4-data).
+
+Restore drills from the off-site copy: none yet (the first runs when this workflow is first dispatched).
 
 ## Logs
 
