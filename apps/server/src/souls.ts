@@ -429,8 +429,8 @@ export class Souls {
     return {
       id: soul.id, name: soul.name, description: soul.description, in_world: true, tick: e.world.tick, time: e.world.env.datetime,
       position: { x: ent.pose.p[0], z: ent.pose.p[2], region: location?.region?.id??s.region }, activity: ent.human!.activity, doing: this.host.doingOfV1(m), body: this.host.bodyOfV1(m),
-      mood: m.mood, energy: energyWord(m.energy), wants_company: m.wantsCompany,
-      ...(m.life ? { needs: m.life.needs, journal: m.life.journal, reflected_day: m.life.reflectedDay, customs: this.host.living?.customs } : {}),
+      mood: m.mood, energy: energyWord(this.host.energyOf(m)), wants_company: m.wantsCompany,
+      ...(m.life ? { needs: this.host.needsOf(m), journal: m.life.journal, reflected_day: m.life.reflectedDay, customs: this.host.living?.customs } : {}),
       mandate:mandateOf(this.host.kernel,soul.id),
       intent: m.intent, intent_text: describeIntent(m.intent, nameOf), agenda: m.agenda.map((a, i) => ({ card: a.card, target: a.target ? this.host.nameOf(a.target) : null, done: i < m.agendaPos })), recent: m.recent, nearby: s.nearby, happening: s.happening,
       storyteller_suggests: m.nudge?.text ?? null,

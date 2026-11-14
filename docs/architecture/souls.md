@@ -398,7 +398,11 @@ withholds. Owner messages and credentials are never in it.
   that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
-- **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, nothing else) walks the Soul to that point on
+- **Running.** A walk or `walk-to:here` takes `pace`, `walk` (the default) or `run` (#2283): the same plan, its `walk_to`
+  steps (the ground `walk_to` and the `mars:walk_to` legs inside and upstairs) at the engine's run gait (4 m/s), so support, admission, walls and crowds hold as for a walk, stairs stay at
+  climbing pace and a wet route walks. `act <id> --run` sends it; a plan step sends it in its params. A pace on any other
+  offer, or any other value, is refused (`capability.params`). Running spends energy at twice the rate of other doing.
+- **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, and an optional `pace`) walks the Soul to that point on
   its own level by the engine's own walk, ending at standing room. Words never read as it: "walk to the pond" is a walk
   (#1916). It does one of three things, and the receipt's `chosen` (`at`, `goal`, `short` in metres) says which (#1964):
   walks to the point, snapped to standing ground within 1 m; within 72 m, what a place walk does with no route (the
@@ -629,7 +633,9 @@ reachable. The step-out happens at most once a minute for each Soul. A Soul cut 
 `route.unreachable`, with a reason that gives the seconds until it can step out again, and `retry_after` on the act,
 the intent and the `here` exit. The step-out never skips a door: when the way out goes through a locked door the Soul may
 not open, or an access refusal, every form is refused `route.unreachable` with a reason that names the door. A Soul that
-isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287).
+isn't cut off, or one whose navigation hasn't warmed yet after boot, is refused as before (#1287). A Soul in deep water is
+not cut off while it can swim to a shore that lands on the main area: it swims out and is never stepped ashore. Only water
+with no such shore leaves the step-out as the last resort.
 
 A Soul a god edit closed in while it walked waits until the walk ends, then is asked again with warm labels. While it
 waits on cold labels the tick loop relabels every tick at 20 ms (#1499), and the Soul is asked in the tick they turn warm.

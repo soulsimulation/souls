@@ -28,9 +28,9 @@ on:
         required: true
         default: main
       command:
-        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, settled, viewers, counted or clip (no model in any)
+        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, settled, hundred, viewers, counted or clip (no model in any)
         type: choice
-        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, settled, viewers, counted, clip]
+        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, settled, hundred, viewers, counted, clip]
         default: walk
       base:
         description: 'counted only: the base arm, main or an agent/<name> branch (the candidate arm is ref)'
@@ -44,7 +44,7 @@ on:
         description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; settled --world --souls --settle-min --short; viewers --viewers --window-sec --short; counted --scenario --loop-sec; clip --kit --viewport'
+        description: 'Allowlisted: walk --world; eval-scripted --battery <name> --seat scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; settled --world --souls --settle-min --short; hundred --small --eden --short --fixture-only --active-min --gap-min --settle-min --build-parallel; viewers --viewers --window-sec --short; counted --scenario --loop-sec; clip --kit --viewport'
         default: ''
 permissions:
   contents: read
@@ -57,7 +57,8 @@ jobs:
       matrix:
         cell: ${{ fromJSON(inputs.command != 'counted' && '["all"]' || inputs.repeats == '3' && '["base-1","cand-1","base-2","cand-2","base-3","cand-3"]' || inputs.repeats == '2' && '["base-1","cand-1","base-2","cand-2"]' || '["base-1","cand-1"]') }}
     runs-on: ${{ inputs.runner == 'hosted' && 'ubuntu-latest' || fromJSON('["self-hosted","souls-timed"]') }}
-    timeout-minutes: 120
+    # hundred's full run takes about 3.5 h (#2301), so it alone gets 270 min (self-hosted runners allow it); every other command keeps 120.
+    timeout-minutes: ${{ inputs.command == 'hundred' && 270 || 120 }}
     env:
       INPUT_REF: ${{ inputs.ref }}
       INPUT_COMMAND: ${{ inputs.command }}
@@ -143,7 +144,7 @@ jobs:
         run: pnpm --filter @souls/web build
       # the capacity benches' worlds refuse genesis without the viewer bundle; a clip's people are drawn from it
       - name: Build the viewer
-        if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile' || env.INPUT_COMMAND == 'settled' || env.INPUT_COMMAND == 'viewers' || env.INPUT_COMMAND == 'clip'
+        if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile' || env.INPUT_COMMAND == 'load' || env.INPUT_COMMAND == 'settled' || env.INPUT_COMMAND == 'hundred' || env.INPUT_COMMAND == 'viewers' || env.INPUT_COMMAND == 'clip'
         working-directory: src
         run: pnpm build:viewer
       # clip: the ref's Playwright version of Chromium, installed in the per-run directory (the shared home stays untouched).

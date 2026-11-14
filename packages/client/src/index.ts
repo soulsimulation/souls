@@ -441,3 +441,22 @@ export class Connection {
     if (res === 'mismatch') this.resync(`view hash mismatch at tick ${hb.tick}`);
   }
 }
+
+/** #2305: a page hidden for `hiddenMs` (5 min) lets go of its world: the socket closes, so the launcher can unload a
+ *  world nobody is looking at. Shown again, it reconnects and resumes (or takes a fresh snapshot of a reloaded world).
+ *  While `keep()` is true (a god's edit panel is open) the connection is held; it is asked again `hiddenMs` later.
+ *  Returns a stop. `doc` is the page's document (a test passes its own). */
+export type VisibilityDoc = { visibilityState: string; addEventListener(t: 'visibilitychange', f: () => void): void; removeEventListener(t: 'visibilitychange', f: () => void): void };
+export function releaseWhenHidden(conn: Pick<Connection, 'connect' | 'close'>, opts: { doc?: VisibilityDoc; hiddenMs?: number; keep?: () => boolean } = {}): () => void {
+  const doc = opts.doc ?? (typeof document === 'undefined' ? null : document as VisibilityDoc); if (!doc) return () => {};
+  const hiddenMs = opts.hiddenMs ?? 300_000;
+  let timer: ReturnType<typeof setTimeout> | undefined, released = false;
+  const release = () => { timer = undefined; if (opts.keep?.()) { timer = setTimeout(release, hiddenMs); return; } released = true; conn.close(); };
+  const check = () => {
+    if (doc.visibilityState === 'hidden') { timer ??= setTimeout(release, hiddenMs); return; }
+    clearTimeout(timer); timer = undefined;
+    if (released) { released = false; conn.connect(); }
+  };
+  doc.addEventListener('visibilitychange', check); check();
+  return () => { clearTimeout(timer); doc.removeEventListener('visibilitychange', check); };
+}

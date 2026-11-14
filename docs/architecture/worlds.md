@@ -12,6 +12,12 @@ it is comes from configuration:
 | `MIND_DRIVER` | `edge` (default) or `central`; see [brain](brain.md) |
 | `GENESIS_FILE` | A template the world is built from on first boot |
 
+**A Soul left alone** (wind-down/1, `apps/server/src/edge/ledger/body-rule.ts`, #2295). A Soul's body moves only when
+its agent acts, until its agent has been silent for an hour (listening, reading and acts marked `reflex: true` are not
+acts). Then the world walks it out of town, a slow walk every few minutes and after half an hour a shuffle to the nearest
+open ground outside the built area, each a logged `edge-body` decision on a tick that follows from the log alone. There it
+lies down and sleeps, at most 50 minutes after the walk began, until its agent acts again.
+
 ## Visitor controls
 
 The world navbar groups controls on the left; the account/sign-in control stays on the right. Explore (magnifier,
@@ -131,6 +137,18 @@ switch independent. A previously saved master mute migrates to both switches off
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
     ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
     ambient-life idle clock and the body rule's timers (#2236).
+  - **A world says whether it is still, and until when (#2297).** `GET /__sim/still` on the world's own port, from
+    loopback and never forwarded (the launcher only), answers the #2241 contract `{ still, tick, wallMs, untilTick,
+    untilWallMs, moveTick, moveWallMs }` from `WorldHost.stillUntil()`. Still means the engine is still (held activities
+    only, #2294), nothing is queued or being written, no catch-up runs and no part of the world is busy. `untilTick` is the
+    earliest deadline any part reports from stored state (`HostListener.stillness`): held ends and programme waits, a held
+    gaze, the body rule's next wind-down step, the day turn and moments, light changes, garden drying, invitations,
+    follows and placed items, standing agreements, calendar items and presentations, conversation timeouts, the steward's
+    digest slot, reminders, plan steps and the zone's next daylight-saving change (wall times at the admin's rate).
+    `moveTick` is the earliest at which the world itself moves a body (a held end or the body rule). Nothing is skipped
+    yet. The still check (`SIM_STILL_CHECK=1`, off in production; `still-until.test.ts`) asserts on every tick inside a
+    claimed horizon that the log did not grow, the world RNG did not draw and the engine state hash changed only in its
+    clock fields.
   - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
     ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
     and are dispatched one at a time after the catch-up, each once the one before it is answered (at most 2 s each). A

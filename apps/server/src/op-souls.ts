@@ -129,7 +129,7 @@ export function mountOperatorSouls(app: Hono, d: Deps) {
       knobs = {};
       for (const [k, v] of Object.entries(b.knobs as Record<string, unknown>)) {
         const max = (BODY_KNOBS as Record<string, number>)[k];
-        if (max === undefined || typeof v !== 'number' || !Number.isFinite(v) || v > max || v < (k === 'reflexRadiusM' || k === 'seatRadiusM' ? 1 : 1000)) refuse('invalid', `${k}: a number no larger than the default ${max ?? '(unknown knob)'}`, 400);
+        if (max === undefined || typeof v !== 'number' || !Number.isFinite(v) || v > max || v < (k.endsWith('M') ? 1 : 20)) refuse('invalid', `${k}: a number no larger than the default ${max ?? '(unknown knob)'}`, 400);
         (knobs as Record<string, number>)[k] = v as number;
       }
     }
