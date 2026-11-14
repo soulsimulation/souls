@@ -101,10 +101,26 @@ switch independent. A previously saved master mute migrates to both switches off
   claims the world for its creator.
 - **Proxying.** `<base>/w/<slug>/*` is proxied to the child (HTTP, SSE and WebSocket). A request to a sleeping world
   starts it.
-- **Sleeping.** Children are restarted after a crash (with backoff), paused after a period without visitors, and may be
-  released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
-  (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
-  (`apps/server/src/clock-catchup.ts`) without simulating the gap.
+- **World time never stops (#2235).** A world's clock keeps wall pace whether anyone watches or not: no slower clock
+  when unwatched, and no idle freeze or idle exit by default (`--sleep-ms`, `SIM_WORLD_IDLE_EXIT_MIN`, both 0), because
+  no world can yet prove that nothing but pure time would pass while it slept.
+  - **Every registered world keeps living.** The launcher boots, every 15 s, one registered world with no process: never
+    booted since the launcher started, put to sleep to make room, or crashed past its restarts. It goes most recent
+    first, and only into free room: under `--max-running`, with the host above `--min-free-mb` and at least 768 MB left
+    under the unit's MemoryHigh (`ChildPool.roomFor`); a keep-alive boot never evicts and is not a use (the least
+    recently used order stays the visitors'). A world whose takeover from the previous launcher failed is passed over. A visitor's boot still evicts the
+    least recently used idle world when the registry does not fit, and that world waits, owing its time, until a round
+    finds room. Crashed worlds restart with backoff, and a world held by the breaker stays held.
+  - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
+    them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
+    `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
+    ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
+    ambient-life idle clock and the body rule's timers (#2236).
+  - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
+    ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
+    and are dispatched one at a time after the catch-up, each once the one before it is answered (at most 2 s each). A
+    write whose client gave up while it waited is dropped, and a stop during the catch-up answers the writes still
+    waiting 503.
 - **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
@@ -183,7 +199,7 @@ switch independent. A previously saved master mute migrates to both switches off
 ### What a child runs with
 
 `children.mjs` builds each child's environment: `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`, `BRAIN_MODE=fake` with empty
-provider keys, `SEED_NATIVES=0`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, `SIM_UNWATCHED_PACE=0.25`, Clerk sign-in
+provider keys, `SEED_NATIVES=0`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, Clerk sign-in
 (`AUTH_PROVIDER=clerk`, `ACCOUNT_AUTH_REQUIRED=1`, `ACCOUNT_REGISTRY_PATH`), the world's identity and paths, the
 served skill and CLI files, the site relay settings (`SIM_SITE_URL`, `SIM_SITE_KEY`), and the Eyes settings when the
 launcher's own environment sets them (see [Souls](souls.md#eyes)).

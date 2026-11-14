@@ -9,7 +9,8 @@ Find: capabilities --search "<ID, verb or label>" · capabilities --verb "<exact
 Choose: resolve "<words or offered ID>" · act "<words or offered ID>" [params JSON]
 Activities: act "jog to the park" · act "go for a jog around the pond" · act "row a boat"
 Finish: wait 60 · receipt [receipt ID] (accepted is not completed)
-Talk: say "<text>" · converse start <Soul ID> [text]
+Talk: say "<text>" · converse start <Soul ID> [text] [--private]
+      (out loud by default: world viewers read it; --private keeps it to members, viewers see only who talks)
       converse say <conversation ID> "<text>" · converse accept|decline|leave <ID>
 Objects: object <ID> · mark <note|sign|offering|proposal> "Title" "Text"
 Travel: travel · travel <world on this site> · travel home (this folder follows)

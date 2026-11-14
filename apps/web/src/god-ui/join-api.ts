@@ -12,8 +12,9 @@ export type Approval = { id: string; worldId: string; agentLabel: string; name: 
   /** Lane PUX: addressed to this account with a window code, so its open world window shows it; the Soul's picture once it exists. */
   inWindow?: boolean; photo?: string | null };
 /** #2245 (`account-grant/1`, #2242): an agent asks to log in to the account, or to retire one of its Souls. */
+// #2258: a request has no expiry (`expired` is only an older world's); `ended` says who ended a cancelled one.
 export type AccountRequest = { id: string; kind: 'login' | 'retire'; status: 'pending' | 'ready' | 'cancelled' | 'expired'; agentLabel: string; device: { name: string };
-  soul: { id: string; name: string } | null; confirm: string; createdAt: number; expiresAt: number; inWindow: boolean };
+  soul: { id: string; name: string } | null; confirm: string; createdAt: number; inWindow: boolean; ended?: 'refused' | 'cancelled' | 'replaced' };
 /** One live account login (grant) of this account. */
 export type ConnectedAgent = { id: string; agentLabel: string; device: { name: string }; createdAt: number; lastUsedAt: number | null };
 /** An error answer: the server's `{ok:false, code, message}`, or the contract's `{error:{code, message}}`. */

@@ -75,9 +75,44 @@ export function bestPlace(ix, words, at) {
   return best?.p ?? null;
 }
 
+/** Whether a point lies inside a polygon or within 1 m of its edge (a goal on the goal line is on the pitch). */
+const inOutline = (pt, poly) => {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [ax, az] = poly[j], [bx, bz] = poly[i], dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((pt[0] - ax) * dx + (pt[1] - az) * dz) / (dx * dx + dz * dz || 1)));
+    if (Math.hypot(pt[0] - ax - t * dx, pt[1] - az - t * dz) <= 1) return true;
+    if ((bz > pt[1]) !== (az > pt[1]) && pt[0] < (ax - bx) * (pt[1] - bz) / (az - bz) + bx) c = !c;
+  }
+  return c;
+};
+/** #1922: a place's outline (`[x, z]`, north is -z, east is +x) and the named spots and things that lie inside it, in it or
+ *  one of its parts or within its outline, each with its position. One row per spot's thing, as `find` gives them. */
+export function outlineOf(ix, id, limit = 24) {
+  const p = ix.place(id); if (!p) return null;
+  const parts = ix.within(p.id), poly = p.outline?.length >= 3 ? p.outline : null;
+  const lies = (place, point) => parts.has(place ?? "") || (!!poly && !!point && inOutline(point, poly));
+  const rows = [], spots = new Set();
+  for (const a of ix.cat.acts) { const key = `${a.verb}|${a.thing ?? a.id}`; if (!spots.has(key) && lies(a.place, a.at)) { spots.add(key); rows.push({ kind: `act ${a.verb}`, row: { name: a.label, act: a.id, at: a.at } }); } }
+  for (const t of ix.cat.things) if (lies(t.place, t.at)) rows.push({ kind: `thing ${t.kind}`, row: { name: t.name, id: t.id, kind: t.kind, ...thingAt(ix, t) } });
+  // #2225: by kind, the fewest of a kind first: a one-of-a-kind thing (the chess table) is the one a person names, and twenty
+  // sleeping mats or eight seats at one podium no longer push it past the cap
+  const many = new Map(); for (const r of rows) many.set(r.kind, (many.get(r.kind) ?? 0) + 1);
+  rows.sort((a, b) => many.get(a.kind) - many.get(b.kind));
+  return { ...(p.outline ? { outline: p.outline } : {}), inside: rows.slice(0, limit).map((r) => r.row), ...(rows.length > limit ? { insideMore: rows.length - limit } : {}) };
+}
+
+/** #2225: where a thing stands, `[x, z]`, and its `level` when that is not the ground (its place's), from the local copy. */
+export function thingAt(ix, t) {
+  if (typeof t === "string") t = ix.things.get(t);
+  if (!t?.at) return null;
+  const level = ix.place(t.place)?.level;
+  return { at: t.at, ...(level ? { level } : {}) };
+}
+
 /** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
- *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. */
-export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states } = {}) {
+ *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
+ *  place found, `outlineOf` it. */
+export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
@@ -97,7 +132,7 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
     if (!q.length || !inScope(p.id, p.at)) continue;
     const s = score(q, placeWords(p)); if (!s) continue;
     const here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -131,11 +166,12 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...can].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
-  return { found: out.slice(0, limit).map((x) => x.row), ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
+  const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
+  return { found, ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 
 /** One place as a small tree: its parts, what can be done in it by verb (with the nearest id), its things by kind. */

@@ -23,7 +23,7 @@ export function ledgerCatalog(L: EdgeLedger) {
   }
   // a spot of a thing the world no longer has (a god removed it; a world's authored spots outlive it) is not an act
   const spots = L.spots.spots.filter(s => !L.spotThingGone(s.id));
-  return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots, things});
+  return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots, things, interiors: L.spots.interiors});
 }
 
 const STARTING_MAX_MS = 30_000;
