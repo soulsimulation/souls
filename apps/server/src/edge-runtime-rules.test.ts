@@ -51,7 +51,7 @@ test('main.ts activates edge startup rules through the shared helper with the wo
  assert.doesNotMatch(main,/enableOccupiedLinkRoutingV1|enableConcurrentLinkEgressV1|enableStairLandingClearanceV1/);
 });
 
-test('#2133 every world adopts stall-release-support/1 at boot, after stand-height/2 and before #1530 climb-spacing/1 (last), and the engine has it on',async()=>{
+test('#2133 every world adopts stall-release-support/1 at boot, last, after stand-height/2, and the engine has it on',async()=>{
  const db=new Db(':memory:'),host=new WorldHost(db,await marsFactory(GREEN_FIELD_WORLD),'edge-rules',1e9,'boot-1');
  try{
   host.boot();let done=false;const p=adoptBootRuntimePoliciesV1(host,{edge:false,worldKey:'boot'}).finally(()=>{done=true;});
