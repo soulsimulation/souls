@@ -121,6 +121,9 @@ test('A2 (cause 2): a step that hangs at the same tick on every boot is quaranti
   }
   assert.ok(line, 'a boot came up with the step quarantined by name');
   assert.equal(Number(line[2]), T, 'at the tick it hangs'); assert.ok(Number(line[3]) >= 2);
+  // (the line can come from a boot after the one `back` returned: a boot that served, then met the step in its catch-up)
+  for (let i = 0; i < 600 && h.pool.status('toy').status !== 'running'; i++) await wait(50);
+  pid = h.pid();
   const served = Date.now() - t0, ended = (h.log().match(/^--- [^\n]* start toy /gm) ?? []).length;
   await wait(2000);
   const a = (await h.health()).tick; await wait(1000); const b = (await h.health()).tick;
