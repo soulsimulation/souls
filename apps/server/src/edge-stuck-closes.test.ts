@@ -12,6 +12,9 @@ import {GroundHost, installGroundCapabilities} from './god/ground-host.ts';
 import {installEngineBridge} from './god/engine-bridge.ts';
 import {adoptBootRuntimePoliciesV1} from './edge-runtime-rules.ts';
 
+// The body rule's reflexes run on the wall clock: past its sleep grace (2 min) a loaded machine sees Bo and Ann as
+// disconnected and shuffles them ashore. They are not under test here, so the body rule is off.
+process.env.SIM_BODY = '0';
 const BOUND = 1200;
 async function pond(t: {after(f: () => void): void}) {
   const w = fixture(':memory:', factory, {durableClockV1: true}); w.brain.quiesce();
