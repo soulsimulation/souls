@@ -611,7 +611,8 @@ test('#1933 A2, A3: through serve: the line goes away and an acting command puts
   w.env = { EDEN_TIME_SCALE: '0.01' };   // away after AWAY_MS × 0.01 = 6 s, looked at every 0.3 s
   w.line = 'rowing to the mill';
   assert.equal((await w.cli('serve')).code, 0);
-  assert.ok(await until(() => /^mind away since \d\d:\d\d UTC$/.test(w.line ?? ''), 15_000), `away: ${w.line}`);
+  // the world holds the new line before serve has its answer and writes its state: wait for both
+  assert.ok(await until(() => /^mind away since \d\d:\d\d UTC$/.test(w.line ?? '') && w.state().wake.mind?.away, 15_000), `away: ${w.line}`);
   assert.equal(w.state().wake.mind.away.stored, 'rowing to the mill');
   let r = await w.cli('ack', 'msg_1', 'on my way');
   assert.equal(r.code, 0, r.err);
