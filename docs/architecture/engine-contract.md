@@ -281,8 +281,9 @@ boot after body-step-guard/1; the engine never reads it, so no snapshot binding 
   invariant that threw and what it was reading is found (#1377, below).
 - An invariant that throws names nobody (`engine.thrown`). Under quarantine/1 the engine takes entities out of its own
   shallow copy of the entity table half at a time, bodies first (`thrownSourcesV1`), to find the one entity whose absence
-  alone stops the throw (#1377). It reads on a view of the live runtime with fresh per-runtime invariant memory, so the
-  live head is left as it was, and a head that won't snapshot or restore is read too (#2168). That entity is quarantined alone, at once, with no rewind, since going
+  alone stops the throw (#1377). It reads on a view of the live runtime with fresh per-runtime invariant memory, so a head
+  that won't snapshot or restore is read too (#2168). The live entity table and invariant memory are untouched. The
+  navigation scene is shared, so it is synced back to the live world afterwards with its epoch kept, as a restore keeps it. That entity is quarantined alone, at once, with no rewind, since going
   back would read it again. Everyone else's programmes go on. The glitch row names it (`thrownReading`), and the
   `quarantineV1` event carries it, so a replay reads the log and never probes. While steps fail, only that body is refused.
   A throw that no single entity explains, or a step that throws outside any action, keeps the stop-all, counted as before.

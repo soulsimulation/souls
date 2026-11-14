@@ -147,7 +147,7 @@ export interface Engine {
   /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
   corruptBodiesV1?(): ContainedKeyV1[];
   /** #1377: the entity an invariant that throws (`engine.thrown`, naming nobody) was reading, if one alone explains it. It
-   *  reads on its own copy of the entity table, so the live head is left as it was (#2168). */
+   *  reads on its own copy of the entity table and puts the navigation scene and its epoch back, so it may run on the live head (#2168). */
   thrownSourcesV1?(): string[];
   /** #1521 stand-height/2's one-time repair: the bodies on level 0 of a world with no ground field standing more than a step above
    *  their floor, and where each can stand (a pure read; the host logs it), and standing them there (as logged). */

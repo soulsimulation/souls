@@ -213,6 +213,14 @@ test('#1377 an invariant that throws reading one body stops that body alone: a b
   await w.tick(20);
   const hash = h.engine.stateHash(), n = Object.keys(h.engine.world.entities).length;   // #2168: the probe reads the live head in place
   assert.deepEqual(h.engine.thrownSourcesV1(), [Ada.entityId]); assert.equal(h.engine.stateHash(), hash, 'the probe leaves the live head as it was'); assert.equal(Object.keys(h.engine.world.entities).length, n);
+  // one that reads the navigation scene and breaks on a bench: taking the bench out moves the scene; the live epoch stays
+  const [ax, , az] = h.engine.world.entities[Ada.entityId].pose.p, before = new Set(Object.keys(h.engine.world.entities));
+  assert.notEqual(w.god.act({ops: [{op: 'place', def: 'core/bench@1', name: 'far-bench', p: [ax, az + 30]}]}).accepted, false); await w.tick(2);
+  const bench = Object.keys(h.engine.world.entities).find((id) => !before.has(id)), sp = h.engine.rt.services.spatial, every = w.control.every;
+  sp.sync(h.engine.world); const epoch = sp.epoch;
+  w.control.every = (r) => { r.services.spatial.sync(r.world); if (r === h.engine.rt && r.world.entities[bench]) return []; if (r.world.entities[bench]) throw new Error('fixture.invariant-bug on a bench'); return []; };
+  assert.deepEqual(h.engine.thrownSourcesV1(), [bench]); w.control.every = every; sp.sync(h.engine.world);
+  assert.equal(sp.epoch, epoch, 'the probe leaves the live navigation epoch as it was');
   const later = ok(await act(w, Cy, {capability: 'walk:shed'}));
   await w.tick(600);
   const events = w.f.db.events(worldId, seq0), report = JSON.stringify({glitches: h.glitches, bo: read(w, Bo, far), rules: events.filter((e) => e.kind === 'rules').map((e) => [e.author, Object.keys(e.payload ?? {})])});
