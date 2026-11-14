@@ -47,6 +47,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
+import { S } from './load/shared.ts';
 import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
@@ -713,6 +714,18 @@ export class WorldHost {
   /** When it answers true the frame is skipped and its wall time carried to the next one (the hub, while a visitor's join set
    *  is still going out: lane P5). Holds stay well under the 1 s elapsed cap, so the same ticks run, only later. */
   holdClock?: () => boolean;
+  /** #2366 A1: a served world's tick that throws past the engine's own fault handling (#1150: a listener, the drain, the
+   *  broadcast) is reported here and the clock goes on with the next frame. Unset (tests, tools): it throws, as before. */
+  onFault?: (name: string, error: unknown) => void;
+  /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in for the watchdog. Unset: none. */
+  stepSlots?: Float64Array;
+  /** #2378 A2: a step (listener `index` at `tick`) that ended the process on two boots in a row (load/restart-loop.ts): skipped
+   *  at that tick, named in the log and the glitch counts (`world.step-quarantined`), so the world comes up and runs on. */
+  quarantinedStep?: { tick: number; index: number; name: string; deaths: number };
+  private skipQuarantinedStep(q: { tick: number; index: number; name: string; deaths: number }) {
+    console.error(`[world] step quarantined: ${q.name} skipped at tick ${q.tick} (it ended the world there on ${q.deaths} boots in a row); the rest of the tick runs`);
+    this.recordGlitch('contained', new Error(`world.step-quarantined: ${q.name}`), { rule: 'world.step-quarantined', tick: q.tick, evidence: { step: q.name, index: q.index, deaths: q.deaths } });
+  }
   private frame() {
     if (!this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); this.last = performance.now(); return; }
@@ -753,7 +766,7 @@ export class WorldHost {
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (this.holdClock?.()) return; // park; the interval polls the hold without an immediate spin
     try { batch.remaining -= this.skip ? Math.max(1, this.advanceStep(this.engine.world.tick + batch.remaining, this.watched?.() ? { inputsAtTarget: true, cap: BATCH_TICKS, align: BATCH_TICKS } : { inputsAtTarget: true, cap: this.jumpCap })) : (this.tickOnce(), 1); }
-    catch (error) { this.cancelFrameBatch(); throw error; }
+    catch (error) { this.cancelFrameBatch(); if (!this.onFault) throw error; this.onFault('world.fault.tick', error); return; }   // #2366 A1: the next frame goes on
     if (this.frameBatch !== batch) return; // a listener may have stopped/restarted or paused the host
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (batch.remaining <= 0) { this.frameBatch = null; return; }
@@ -817,7 +830,14 @@ export class WorldHost {
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
     const tickContext = Object.freeze({ startedAtMs: t0 });
-    for (const l of this.listeners) l.afterTick?.(now, tickContext);
+    // #2378 A2: each listener's afterTick is a named step; the watchdog sees which one a stuck tick is in (S.step), and a step
+    // that ended the process at the same tick on two boots in a row is skipped at that tick (quarantinedStep)
+    const sh = this.stepSlots, q = this.quarantinedStep;
+    for (let i = 0; i < this.listeners.length; i++) { const l = this.listeners[i]; if (!l.afterTick) continue;
+      if (q && q.tick === now && q.index === i) { this.skipQuarantinedStep(q); continue; }
+      if (sh) { sh[S.stepTick] = now; sh[S.step] = i + 1; }
+      l.afterTick(now, tickContext); }
+    if (sh) sh[S.step] = 0;
     if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
     // #2298: a jump's landing sends what the ticks it covered would have (a batch, a heartbeat, the periodic kernel view)
