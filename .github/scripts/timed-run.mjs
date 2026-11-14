@@ -32,7 +32,7 @@ import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
 export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip'];
-/** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, viewport?, localStorage?}) and steps.mjs. */
+/** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, eden?, viewport?, localStorage?}) and steps.mjs. */
 export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
  *  `run.mjs <arm> <tree> <port> <outDir>`, scores it with `score-frozen.mjs <run.json>`, and classifies it with
@@ -370,7 +370,9 @@ async function runClip(inp, rec, out, env) {
   const t0 = Date.now(), saved = { BRAIN_MODE: process.env.BRAIN_MODE, HOME: process.env.HOME };
   let world;
   Object.assign(process.env, { BRAIN_MODE: 'fake', HOME: env.HOME });
-  try { world = await startWorld({ slug: 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.', env: { INVITE_REQUIRED: '0' } }); }
+  // #2302: `eden: true` boots the native Eden core (commons, ground, classroom) as the live Eden runs, with fake minds
+  const eden = k.eden === true ? { ENABLE_LIVING_WORLD: '1', ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_EDEN_NEWCOMER_READER: '1', ENABLE_NATIVE_SLEEP_SNAPSHOT_READER: '1', ENABLE_EDEN_LECTURE_READER: '1', ENABLE_EDEN_EXPANSION_GROUND_READER: '1', APPLY_EDEN_EXPANSION_CHECKPOINT: '1', MIND_DRIVER: 'edge' } : {};
+  try { world = await startWorld({ slug: k.eden === true ? 'eden' : 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.', env: { INVITE_REQUIRED: '0', ...eden } }); }
   finally { for (const [key, v] of Object.entries(saved)) { if (v === undefined) delete process.env[key]; else process.env[key] = v; } }
   console.log(`world up in ${((Date.now() - t0) / 1000).toFixed(1)} s (${k.template})`);
   const clipFile = join(dir, `${kitName}-${viewport}.mp4`), log = createWriteStream(join(out, 'clip.log'));

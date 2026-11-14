@@ -152,6 +152,8 @@ export interface Engine {
   /** #1521 stand-height/2's one-time repair: the bodies on level 0 of a world with no ground field standing more than a step above
    *  their floor, and where each can stand (a pure read; the host logs it), and standing them there (as logged). */
   planAboveFloorV2?(): { id: string; p: [number, number, number] }[];
+  /** #2302 classroom-tv/1: the screens adopting the policy would make TVs (read-only; the adoption itself is configureRuntimePolicy). */
+  classroomTvScreensV1?(): string[];
   standOnFloorV2?(bodies: { id: string; p: [number, number, number] }[]): string[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
   /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick. */
