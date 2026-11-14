@@ -7,6 +7,8 @@
 // the acts whose wait passed three ticks, at the end of the run, and each 10-second tick window that ended during it.
 // #2124: each window also carries the seconds at amber per signal that held it (`amberS`) and the entries into amber per
 // cause (`amberEntries`); LOAD.md sums both over the run.
+// #2124 L4: each act's capability is kept beside the trace's own act calls, so LOAD.md names the slow ones (`slowActs`:
+// server time less the queue, per capability).
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -32,7 +34,26 @@ function actPartsOfLive(live) {
   return { n: a.n, queue: pq(a.queue), handler: pq(a.parts.handler), wait: pq(a.parts.wait), commit: pq(a.parts.commit), waitOver3Ticks: a.parts.waitOver3Ticks };
 }
 
-async function soulLoop({ folder, until, r, counts }) {
+/** The capability of a found row: its verb, else the id's kind (`walk:…` → walk, `object:<thing>:<verb>` → the verb). */
+export const capabilityOf = (row) => row?.verb ?? (String(row?.act ?? '').startsWith('object:') ? String(row.act).split(/[:\s]/)[2] : String(row?.act ?? '').split(/[:\s]/)[0]) ?? 'act';
+
+/** Per capability: the act calls' server time less their queue (handler + wait + commit), slowest first. `acts` are the
+ *  loop's own acts ({cap, t0, t1}, local wall ms) and `http` the same Soul's trace; an act call is the loop's act whose
+ *  span holds it. */
+export function slowActs(pairs) {
+  const by = new Map();
+  for (const { acts, http } of pairs) for (const r of http) {
+    if (r.method !== 'POST' || !/\/v1\/edge\/act(?:\?|$)/.test(r.route ?? '') || !Number.isFinite(r.serverMs)) continue;
+    const a = acts.find((x) => r.at >= x.t0 && r.at <= x.t1 + 100), cap = a?.cap ?? 'unmatched';
+    const e = by.get(cap) ?? []; e.push(Math.max(0, r.serverMs - (r.queuedMs ?? 0))); by.set(cap, e);
+  }
+  return [...by.entries()].map(([capability, ms]) => {
+    ms.sort((x, y) => x - y);
+    return { capability, n: ms.length, p50: ms[Math.floor(0.5 * (ms.length - 1))], max: ms.at(-1), over250: ms.filter((x) => x > 250).length };
+  }).sort((x, y) => y.max - x.max);
+}
+
+async function soulLoop({ folder, until, r, counts, acts = [] }) {
   while (Date.now() < until) {
     const p = await cliJson(folder, ['pending']); counts.cmds++;
     for (const m of p.data?.ownerMessages ?? []) {
@@ -42,7 +63,11 @@ async function soulLoop({ folder, until, r, counts }) {
     await cliJson(folder, ['look']); counts.cmds++;
     const f = await cliJson(folder, ['find', WORDS[Math.floor(r() * WORDS.length)]]); counts.cmds++;
     const rows = (f.data?.found ?? []).filter((x) => x.act);
-    if (rows.length) { const a = await cliJson(folder, ['act', rows[Math.floor(r() * Math.min(3, rows.length))].act]); counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++; }
+    if (rows.length) {
+      const row = rows[Math.floor(r() * Math.min(3, rows.length))], t0 = Date.now();
+      const a = await cliJson(folder, ['act', row.act]); counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++;
+      acts.push({ cap: capabilityOf(row), t0, t1: Date.now() });
+    }
     await sleep(3000 + Math.floor(r() * 3000));
   }
 }
@@ -66,7 +91,7 @@ export async function runLoad(o) {
         const identity = newIdentity(); writeFileSync(join(folder, '.eden-agent.json'), JSON.stringify({ identity }) + '\n', { mode: 0o600 });
         const fake = { folder, base: w.base, info: {}, save() {} };
         const s = await prepareFolder(fake, { name: `Load ${k}` });
-        souls[k] = { folder, identity, soulId: s.soulId };
+        souls[k] = { folder, identity, soulId: s.soulId, acts: [] };
       })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
@@ -74,18 +99,18 @@ export async function runLoad(o) {
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
-      await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts })));
+      await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts })));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
-      const http = [];
+      const http = [], pairs = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
         const f = join(runtimeDir(s.folder, s.soulId), '.eden-report.jsonl');
-        if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); http.push(...httpSince(readJsonl(f), t0)); }
+        if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       await stopWorld({ pid: w.pid });
@@ -118,6 +143,10 @@ export function renderLoad(result) {
       const sum = (key) => { const t = {}; for (const w of tw) for (const [k, v] of Object.entries(w[key] ?? {})) t[k] = Math.round(10 * ((t[k] ?? 0) + v)) / 10; return t; };
       const held = sum('amberS'), entered = sum('amberEntries'), list = (t, u = '') => Object.entries(t).map(([k, v]) => `${k} ${v}${u}`).join(', ') || 'none';
       L.push('', `What held amber, over these windows (a second can count under several signals; \`dwell\` = every signal under the band, the 30 s calm running): ${list(held, ' s')}. Entries into amber by cause (\`red\` = the step down from red): ${list(entered)}.`);
+    }
+    if (a.slowActs?.length) {
+      L.push('', 'Acts by capability, slowest first: server time less the queue (handler + wait + commit), ms.', '', '| capability | acts | p50 | max | over 250 ms |', '|---|---|---|---|---|');
+      for (const x of a.slowActs) L.push(`| ${x.capability} | ${x.n} | ${x.p50} | ${x.max} | ${x.over250} |`);
     }
   }
   return L.join('\n') + '\n';
