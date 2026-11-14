@@ -37,7 +37,8 @@ oldest first within each. A request for a world that is unloaded, waiting or loa
 (default 45,000), then answered `503 world.waking` with `Retry-After`, which the Soul client waits out and asks again.
 Declared crawlers and link-preview fetchers never load a world: they get its page (the web build's, with the world's
 title and links) and `503 world.unloaded` for anything else. With `--unload-still 1` a visitor's page and the build's
-files are served the same way, and the world loads on the page's live connection or first data request; nothing loads
+files are served the same way, and the world loads on the page's live connection or first data request (a page hidden
+for five minutes closes that connection and opens it again when shown, #2305, unless its God modal is open); nothing loads
 at start but what an alarm or a request asks for (`--eager` applies only with `0`), and a handover leaves a still world
 with no visitor unloaded instead of moving it (#2304). The loopback `/__sim/healthz` has `loads`: loads running and
 waiting, by reason, and the wait of the last 100 (median, 95th percentile, longest).
