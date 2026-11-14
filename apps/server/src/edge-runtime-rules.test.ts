@@ -44,7 +44,7 @@ test('a qualifying non-Little-Martians edge world activates the three stair-traf
  }
 });
 
-test('world-main.ts activates edge startup rules through the shared helper with the world key',()=>{
+test('main.ts activates edge startup rules through the shared helper with the world key',()=>{
  const main=readFileSync(new URL('./world-main.ts',import.meta.url),'utf8');
  // #1332: through the boot chain, which applies the edge rules after the courtesy event and before body-step-guard/1
  assert.match(main,/if \(host\.engine\.configureRuntimePolicy\) void adoptBootRuntimePoliciesV1\(host, \{ after: courtesy, edge: !!edge, worldKey: config\.worldKey \}\)/);
