@@ -20,8 +20,8 @@ function target() {
     const r = spawnSync(process.execPath, [EDEN, 'caps', '--search', words, '--verb', 'walk', '--all', '--json'], { cwd: DIR, encoding: 'utf8', timeout: 60_000 });
     const offers = (parse(r.stdout)?.offers ?? []).filter((o) => /^walk:/.test(o.id ?? '')).sort((a, b) => (a.metres ?? 1e9) - (b.metres ?? 1e9));
     console.error(`kit: caps --search ${words}: ${JSON.stringify(offers.slice(0, 6))} ${r.status ? r.stderr.slice(0, 400) : ''}`);
-    // the library annex's upper reading room: about 120 m from the start, a run of some 40 s and then the stair
-    const near = offers.find((o) => o.id === 'walk:region-campus-library-annex/reading-1');
+    // the campus east hall's upper classroom: about 100 m from the start (a run of some 35 s), then its stair
+    const near = offers.find((o) => o.id === 'walk:region-campus-east-hall/classroom-1');
     if (near ?? offers[0]) return (near ?? offers[0]).id;
   }
   throw Error('kit: no walk to an upstairs room is offered');
