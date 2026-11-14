@@ -56,6 +56,13 @@ Owner words, private rules, journals, feedback, prompts and recovery details sta
 ([contracts](contracts.md#privacy)). Feedback and owner inboxes are readable only by the world owner. Eyes pictures hide
 anyone outside the Soul's sightline and use short-lived unguessable URLs.
 
+A thing's `access: private` (its own, or its nearest owned ancestor's) decides who may use it: other Souls are refused its
+actuators, seats and taking. It does not hide the thing: its place, shape, name, owner and access stay in the public
+world feed, which is one body for every viewer. What it hides is a private notebook's written words and their writers
+(`state.text`, `state.textBy`), kept out of `/v1/world/snapshot` (all three forms), `/v1/world/entities/:id`, the viewers'
+world-diff and rendered Soul views; the viewer draws such a notebook closed. Only the god's snapshot and stream carry
+them (`apps/server/src/god/private-words.ts`, #1223). Other things' state stays public.
+
 ## Design: shared invitation sponsorship (not built)
 
 To raise the cost of many accounts, a later step would add a durable invitation record shared by every account registry:

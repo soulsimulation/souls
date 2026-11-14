@@ -5,6 +5,7 @@ import { humanTitle, meaningParts } from './meaning.ts';
 import { withoutHidden } from '../moderation/routes.ts';
 import { inPoly } from './places.ts';
 import { contextOriginal, type ContextOriginal } from './context-original-art.ts';
+import { entitiesWithoutPrivateWords } from './private-words.ts';
 export type ContextTarget = {
     ref: string;
     entity: string;
@@ -167,7 +168,7 @@ export function contextVisibleEntityIds(god: GodMode, hidden: Set<string>): Set<
 }
 /** Snapshot detached synchronously, then rendered without a socket or live clock. */
 export function contextScene(god: GodMode, hidden: Set<string>) {
-    const snapshot = structuredClone(withoutHidden(god.publicSnapshot(), hidden));
+    const pub = god.publicSnapshot(), snapshot = structuredClone(withoutHidden({ ...pub, entities: entitiesWithoutPrivateWords(god.model, pub.entities) }, hidden));   // #1223: a rendered view shows a private notebook closed
     const visible = contextVisibleEntityIds(god, hidden);
     snapshot.entities = snapshot.entities.filter(e => visible.has(e.id)).map(e => ({ ...e, state: { ...e.state, ...(e.state && 'doors' in e.state ? { doors: {} } : {}) } }));
     snapshot.state = { ...snapshot.state, sky: { palette: 'clear-day', sun: .6 }, time: { dayTicks: 72000, startTick: 0, paused: true }, weather: { kind: 'clear', intensity: 1, clouds: 0, wind: 0, rain: 0, fog: 0 } };
