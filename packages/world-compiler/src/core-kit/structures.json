@@ -745,6 +745,154 @@
  },
  {
   "schema": "def/1",
+  "name": "core-hall",
+  "version": 2,
+  "description": "A meeting hall: one big room (and a kitchen at the back when it is deep). An outside door in its plan marked leaf: false is a bare doorway: the hall draws no leaf there, so a door thing set in it (core/door@2) is the door.",
+  "tags": [
+   "structure",
+   "building",
+   "hall"
+  ],
+  "form": "point",
+  "make": {
+   "kind": "gen",
+   "gen": "building/1",
+   "args": {
+    "style": "hall",
+    "bareDoors": true
+   }
+  },
+  "size": {
+   "box": [
+    14,
+    6,
+    12
+   ]
+  },
+  "params": {
+   "w": {
+    "type": "number",
+    "min": 3,
+    "max": 30,
+    "default": 14,
+    "doc": "width (x) in metres"
+   },
+   "d": {
+    "type": "number",
+    "min": 3,
+    "max": 30,
+    "default": 12,
+    "doc": "depth (z) in metres"
+   },
+   "floors": {
+    "type": "int",
+    "min": 1,
+    "max": 3,
+    "default": 1
+   },
+   "floorHeight": {
+    "type": "number",
+    "min": 2.4,
+    "max": 5,
+    "default": 4
+   },
+   "roof": {
+    "type": "enum",
+    "values": [
+     "gable",
+     "hip",
+     "flat",
+     "shed",
+     "dome",
+     "none"
+    ],
+    "default": "hip"
+   },
+   "roofPitch": {
+    "type": "number",
+    "min": 0,
+    "max": 60,
+    "default": 28,
+    "doc": "degrees"
+   },
+   "material": {
+    "type": "enum",
+    "values": [
+     "plaster",
+     "brick",
+     "stone",
+     "wood",
+     "glass",
+     "metal"
+    ],
+    "default": "plaster"
+   },
+   "wall": {
+    "type": "color",
+    "default": "#efe6d4"
+   },
+   "trim": {
+    "type": "color",
+    "default": "#5e412b"
+   },
+   "roofColor": {
+    "type": "color",
+    "default": "#6f4a35"
+   },
+   "front": {
+    "type": "enum",
+    "values": [
+     "s",
+     "n",
+     "e",
+     "w"
+    ],
+    "default": "s",
+    "doc": "side of the main door (s = +z)"
+   },
+   "porch": {
+    "type": "number",
+    "min": 0,
+    "max": 4,
+    "default": 0,
+    "doc": "porch depth in metres (0 = none)"
+   },
+   "balcony": {
+    "type": "bool",
+    "default": false
+   },
+   "windows": {
+    "type": "number",
+    "min": 0,
+    "max": 1,
+    "default": 0.6,
+    "doc": "window density along exterior walls"
+   },
+   "plan": {
+    "type": "json",
+    "doc": "explicit plan (see building/1 in /v1/god/schema): {floors:[{rooms:[{id,name,rect:[x0,z0,x1,z1]}],doors:[{between:[a,b]}],exterior:[{room,wall,kind,leaf}]}],stairs:[{from,to,room,wall}]}; leaf: false on an outside door leaves a bare doorway for a door thing"
+   }
+  },
+  "state": {
+   "paint": {
+    "type": "color",
+    "default": "#efe6d4",
+    "doc": "repaint the walls"
+   }
+  },
+  "components": {
+   "foundation": {
+    "kind": "pad"
+   },
+   "place": {
+    "kind": "building",
+    "enclosed": true
+   }
+  },
+  "material": "plaster"
+ },
+ {
+  "schema": "def/1",
   "name": "core-chapel",
   "version": 1,
   "description": "A small chapel: a tall nave with tall windows, a vestry at the back.",
