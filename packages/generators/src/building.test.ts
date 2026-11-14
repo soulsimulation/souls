@@ -229,3 +229,12 @@ test('two flights facing across a stair hall narrow to keep a landing strip a tu
   const doors = L.openings.filter((o: any) => o.kind === 'door' && o.from === 'landing-1').map((o: any) => o.at.map((x: number) => +x.toFixed(2)));
   assert.deepEqual(doors, [[-1.5, 0.09], [1.5, 0.09], [-0.75, -1.5], [0.75, -1.5]], 'doors stay where the full-width flights put them');
 });
+
+test('a bare doorway (#2282): leaf: false is honoured only where the def opts in (core/hall@2), and the walls are the same', () => {
+  const plan = (leaf?: false) => ({ floors: [{ rooms: [{ id: 'classroom', rect: [0, 0, 16, 19] }], exterior: [{ room: 'classroom', wall: 's', kind: 'door', width: 1.5, ...(leaf === false ? { leaf } : {}) }, { room: 'classroom', wall: 'n', kind: 'window', leaf: false }] }] });
+  const params = (leaf?: false) => ({ w: 16, d: 19, floorHeight: 2.6, roof: 'none', plan: plan(leaf) });
+  const bare = buildingLayout(params(false), { style: 'hall', bareDoors: true });
+  assert.deepEqual(bare.openings.map((o) => [o.kind, o.leaf]), [['door', false], ['window', undefined]], 'a door has no leaf; a window takes no flag');
+  assert.equal(buildingLayout(params(false), { style: 'hall' }).openings.some((o) => 'leaf' in o), false, 'core/hall@1 draws every leaf as before');
+  assert.deepEqual(buildingPhysics(params(false), { style: 'hall', bareDoors: true }), buildingPhysics(params(), { style: 'hall' }), 'same walls, same opening');
+});
