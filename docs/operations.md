@@ -28,6 +28,9 @@ loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds
 
 Each settings file holds one line, `SIM_WORLDS_ARGS=...`: the port, the world port range, data directory, public
 origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`, `--world-heap-mb`, `--create-limit`).
+`--unload-still 1` lets still worlds leave memory and come back on a request or their alarm
+([worlds](architecture/worlds.md), #2299); it stays off (`0`, the default) in production until its proof task has passed.
+Their recorded horizons are `<data>/horizons.json`.
 `tools/world-launcher/deploy/install.sh` writes the production and staging files once and never edits an existing
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
 

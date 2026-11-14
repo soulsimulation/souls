@@ -222,7 +222,9 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from.
+`memory <words>` searches the projections and says where each line came from. `digest [--since <time>]` reads only the
+log, makes no request and no model call, and writes at most 200 words for the owner since the last digest (`lastDigest` in
+the Soul's state); `--refs` ends each line with the records it came from, and `--json` gives the same as data.
 
 The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
 `ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/world-launcher/soul/memory-folder.mjs`). Each keeps its newest

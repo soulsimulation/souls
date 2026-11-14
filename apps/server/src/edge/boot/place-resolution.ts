@@ -24,8 +24,11 @@ function similarity(a:string,b:string){
  return shared*2+2*hit/Math.max(1,A.size+B.size);
 }
 /** Explicit ID inputs never recover by choosing another ID. Automatic mode also
- * retains lower-case composite ID refusals; fuzzy matches are hints only. */
-export function resolveBootPlace(input:unknown,places:readonly KnownBootPlace[],capabilities:readonly DestinationCapability[],inputKind:'auto'|'id'|'name'='auto'):PlaceResolution{
+ * retains lower-case composite ID refusals; fuzzy matches are hints only.
+ * #2124: `hints` false skips the similarity hints (`did_you_mean` of a refusal that is not an ambiguity, []): every place
+ * against every name and alias, about 40 ms a call on Eden 2026. For a caller that reads only `ok` and `chosen`, or asks
+ * again with hints before it returns a refusal; the result is otherwise the same. */
+export function resolveBootPlace(input:unknown,places:readonly KnownBootPlace[],capabilities:readonly DestinationCapability[],inputKind:'auto'|'id'|'name'='auto',hints=true):PlaceResolution{
  const sorted=[...places].sort(ordered),byId=new Map(sorted.map(p=>[p.id,p]));
  if(byId.size!==places.length)throw Error('boot-places.invalid: duplicate id');
  const text=typeof input==='string'?input.trim():'';
@@ -42,7 +45,7 @@ export function resolveBootPlace(input:unknown,places:readonly KnownBootPlace[],
   if(best&&best.score>=.9&&best.score-runnerUp>=.08){found=[best.p];match='fuzzy';confidence={metric:'normalized-edit-distance/1',score:Number(best.score.toFixed(6)),runnerUpScore:Number(runnerUp.toFixed(6))};}
  }
  const hintNames=sorted.filter(p=>normalizedPlaceName(p.name)===hintWords),hintAliases=sorted.filter(p=>p.aliases.some(a=>normalizedPlaceName(a)===hintWords)),hint=hintNames.length?hintNames:hintAliases;
- const suggestions=sorted.map(p=>({p,score:Math.max(similarity(hintWords,normalizedPlaceName(p.name)),...p.aliases.map(a=>similarity(hintWords,normalizedPlaceName(a))))})).filter(x=>x.score>0&&capabilities.some(c=>c.placeId===x.p.id)).sort((a,b)=>b.score-a.score||ordered(a.p,b.p)).slice(0,3).map(({p})=>({id:capabilities.find(c=>c.placeId===p.id)!.id,label:p.name,placeId:p.id}));
+ const suggestions=!hints?[]:sorted.map(p=>({p,score:Math.max(similarity(hintWords,normalizedPlaceName(p.name)),...p.aliases.map(a=>similarity(hintWords,normalizedPlaceName(a))))})).filter(x=>x.score>0&&capabilities.some(c=>c.placeId===x.p.id)).sort((a,b)=>b.score-a.score||ordered(a.p,b.p)).slice(0,3).map(({p})=>({id:capabilities.find(c=>c.placeId===p.id)!.id,label:p.name,placeId:p.id}));
  const refuse=(code:string,reason:string):Extract<PlaceResolution,{ok:false}>=>({ok:false,code,reason,did_you_mean:suggestions,...(idLike&&hint.length===1?{resolvedIfName:{input:hintWords,placeId:hint[0].id,name:hint[0].name}}:{})});
  if(!found.length)return refuse('capability.unknown',idLike?'That place ID is unknown; nothing was chosen. Names in the hints are suggestions only.':'No unique exact name, declared alias or high-confidence fuzzy name matched; nothing was chosen.');
  if(found.length>1)return {...refuse('place.ambiguous','Several places have that name or alias; use an exact ID.'),ambiguous:found.map(p=>p.id),did_you_mean:found.flatMap(p=>{const c=capabilities.find(c=>c.placeId===p.id);return c?[{id:c.id,label:p.name,placeId:p.id}]:[];})};

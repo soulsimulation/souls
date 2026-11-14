@@ -24,22 +24,22 @@
   },
   "schemaNotes": {
     "file": "schema-notes.md",
-    "version": "2.10.5",
-    "sha256": "66469f8532e16d54c61eede4866cf80da7f3a25949378e35ad27d80f17908f74",
+    "version": "2.10.6",
+    "sha256": "5564e68bda73640eeb0152c88aff12fe2e5becd30a4b546851d4c19f599e4f3d",
     "from": "moved out of the 2.8 skill when the core was cut (#1099)",
-    "note": "The hand-written half of /schema.md, served from beside the skill file; the verb parameter table is generated. 2.9.6 (#1256): a section on the reflective pass: what it does, what it costs, what leaves the machine, and to offer it once. 2.9.7 (#832): when an owner message ends a wait, the act may still be going: check the receipt. 2.10.1 (#1328): unavailable and world.stalled: checked, unconfirmed; an act once more as the same command with the same key, speech checked first; --key. 2.10.2 (#1337): a Rides section: steer and land, a building means near it, `adjusted` and `result.landing`, never resend a refused steer, `preflight`, `stalled`. 2.10.3 (#1354): say --to: turn, speak and gesture in one command; the gestures and attention acts the world offers; which keep you seated. 2.10.4 (#1359): listening without restarts: listen --follow under a host that streams each line (Monitor), one line per wake, its last line `ended`. 2.10.5 (#1753): a section on one call per owner message (`found`, `look`, act --for acknowledges); a wait after an unacked message names act --for; ack and result are keyed and retried."
+    "note": "The hand-written half of /schema.md, served from beside the skill file; the verb parameter table is generated. 2.9.6 (#1256): a section on the reflective pass: what it does, what it costs, what leaves the machine, and to offer it once. 2.9.7 (#832): when an owner message ends a wait, the act may still be going: check the receipt. 2.10.1 (#1328): unavailable and world.stalled: checked, unconfirmed; an act once more as the same command with the same key, speech checked first; --key. 2.10.2 (#1337): a Rides section: steer and land, a building means near it, `adjusted` and `result.landing`, never resend a refused steer, `preflight`, `stalled`. 2.10.3 (#1354): say --to: turn, speak and gesture in one command; the gestures and attention acts the world offers; which keep you seated. 2.10.4 (#1359): listening without restarts: listen --follow under a host that streams each line (Monitor), one line per wake, its last line `ended`. 2.10.5 (#1753): a section on one call per owner message (`found`, `look`, act --for acknowledges); a wait after an unacked message names act --for; ack and result are keyed and retried. 2.10.6 (#2033): the first-action advice names `explore`/`find`, not the removed `resolve`."
   },
   "instructions": {
     "file": "instructions.md",
-    "version": "2.4.0",
-    "sha256": "f7a6a56c85d5f54ab90de7061a9a665ca32acde2281230dd2a5c9da5aef999a0",
+    "version": "2.4.1",
+    "sha256": "a848c6ade5ec5654674eb9fe1b519855cbb8922f7eed286079e4bcfc327f747c",
     "from": "the Soul client rewrite handover (private records), INSTRUCTIONS-v2.md",
     "capture": {
       "base": "https://sim.eden.art/worlds/w/eden-2026",
       "world": "Eden 2026",
       "code": "GL7R-YZYJ"
     },
-    "note": "a rendered capture, published byte for byte. The world recognises it by its exact opening lines (apps/server/src/accounts/instructions.ts CAPTURE, which must equal capture above) and per request replaces only those literals: the world URL from server configuration, the world name, and the captured --for code with the requested valid window code (none: the flag is dropped and the open-window sentence becomes the approval-link sentence). Replaces the 1.9 instructions below. 2.0.1 (2026-10-25): step 1 says what to do when .eden-agent.json exists but status shows paired: false. 2.0.2 (L6 polite client): step 4 adds one listen per Soul and no retry loops (busy = slow, not broken). 2.0.3: step 5 names an offered id; strict act refuses words. 2.1.0 (#1134): step 1 knows a `.souls/` home. 2.2.0 (#1136): one client and skill per home, skill folder souls, register's upgrade hint. 2.2.1 (#1328): step 4: an unconfirmed act is run once more as the same command; an unconfirmed say is checked first. 2.2.2 (#1354): step 5: say --to turns to someone and speaks in one command. 2.2.3 (#1753): step 4 does each owner message in one call with act --for; no ack or result. 2.3.0 (#1927): names no harness tool: SKILL.md goes where the harness reads skills; listen --follow in its background process, or serve and pending each turn. 2.4.0 (#2257): a closing list maps plain asks to login, adopt and dashboard, and a taken Soul's notice to the person; login wait starts in the background at once and the agent goes on in the same turn; \"show me\" maps to shoot."
+    "note": "a rendered capture, published byte for byte. The world recognises it by its exact opening lines (apps/server/src/accounts/instructions.ts CAPTURE, which must equal capture above) and per request replaces only those literals: the world URL from server configuration, the world name, and the captured --for code with the requested valid window code (none: the flag is dropped and the open-window sentence becomes the approval-link sentence). Replaces the 1.9 instructions below. 2.0.1 (2026-10-25): step 1 says what to do when .eden-agent.json exists but status shows paired: false. 2.0.2 (L6 polite client): step 4 adds one listen per Soul and no retry loops (busy = slow, not broken). 2.0.3: step 5 names an offered id; strict act refuses words. 2.1.0 (#1134): step 1 knows a `.souls/` home. 2.2.0 (#1136): one client and skill per home, skill folder souls, register's upgrade hint. 2.2.1 (#1328): step 4: an unconfirmed act is run once more as the same command; an unconfirmed say is checked first. 2.2.2 (#1354): step 5: say --to turns to someone and speaks in one command. 2.2.3 (#1753): step 4 does each owner message in one call with act --for; no ack or result. 2.3.0 (#1927): names no harness tool: SKILL.md goes where the harness reads skills; listen --follow in its background process, or serve and pending each turn. 2.4.0 (#2257): a closing list maps plain asks to login, adopt and dashboard, and a taken Soul's notice to the person; login wait starts in the background at once and the agent goes on in the same turn; \"show me\" maps to shoot. 2.4.1: step 1: if the skills folder is not writable (a read-only sandbox), skip the copy and read ./SKILL.md."
   },
   "legacy": {
     "note": "1.9 Soul guides replaced by 2.0.0 (SOUL3); provenance kept as published.",
@@ -59,21 +59,21 @@
   "appendix": "The per-world entry skill (/SKILL.md: God mode + Soul mode) stays tools/world-skill/SKILL.md; its Soul mode points here. It is not changed by SOUL3: uppercase /SKILL.md stays the legacy world skill; the new client uses lowercase /skill.md and /instructions.md.",
   "runtime": {
     "directory": "runtime",
-    "version": "0.1.0",
-    "source": "f9da909ba96de2457cb0b0930137e5759541452f",
-    "manifestSha256": "61f34e76a82ef3ea9c24a85399259e7632c82815e0cfba6e2917a7bad4811965",
+    "version": "0.1.1",
+    "source": "acee6118ee7af950fc5437ec04f1fee863d0c01f",
+    "manifestSha256": "9cfe018d3a8b1115851eb7db134b2e79b3d68285df74515025d400ee4814d78c",
     "artifacts": [
       {
         "file": "run.mjs",
-        "bytes": 179875,
-        "sha256": "569e2070e760594a5fba8b2a523e4e771f2bf1a233139bb2bf2969ec07b126ab"
+        "bytes": 196956,
+        "sha256": "33fe77d33f137b714112b8ec8829f5c2a977b2f6aadcc7af935eb3a5687a6fef"
       },
       {
         "file": "launch.mjs",
-        "bytes": 19589,
-        "sha256": "4bd487efda67f97121fb33b891b0272ea3974ccdd9ae56d85b5d86982196af08"
+        "bytes": 19600,
+        "sha256": "0609b044853ecf92456797572e3e8e1f49da3bc97fc2727e1611d454621209c8"
       }
     ],
-    "note": "Managed runtime publication r16 (404.1 follow-up to continuity on release 403/R4): r15 plus the receiver fix from soak r1 review B: a world event stream the server admitted that lived >= 5 s and then closed (an idle world rotates it every ~65 s) resets the receiver backoff and reconnects within 1 s jitter instead of climbing to a 30 s backoff; a coded error on an open stream (JOURNAL_BACKLOG_FULL) and failed, refused or quickly dropped connects still back off (full jitter over a 1 s base doubling to 30 s) and honour Retry-After as a floor (+0-20 % jitter, capped at 60 s after the jitter, LOAD-CONTRACT v1 §3). Changed inputs vs r15: receiver.mjs, world-client.mjs, sse.mjs. Built from the clean source commit with tools/soul-runtime/build.mjs (two builds byte-identical); manifest pins every bundled input. Qualification and deployment remain pending."
+    "note": "Managed runtime publication r16 (404.1 follow-up to continuity on release 403/R4): r15 plus the receiver fix from soak r1 review B: a world event stream the server admitted that lived >= 5 s and then closed (an idle world rotates it every ~65 s) resets the receiver backoff and reconnects within 1 s jitter instead of climbing to a 30 s backoff; a coded error on an open stream (JOURNAL_BACKLOG_FULL) and failed, refused or quickly dropped connects still back off (full jitter over a 1 s base doubling to 30 s) and honour Retry-After as a floor (+0-20 % jitter, capped at 60 s after the jitter, LOAD-CONTRACT v1 §3). Changed inputs vs r15: receiver.mjs, world-client.mjs, sse.mjs. Built from the clean source commit with tools/soul-runtime/build.mjs (two builds byte-identical); manifest pins every bundled input. Qualification and deployment remain pending. 0.1.1: rebuilt from the current tools/soul-runtime sources; the resolve read is gone (the world closed its resolve route, #2138), and a resolve read an older runtime retained is answered locally as read.removed. Two builds byte-identical."
   }
 }
