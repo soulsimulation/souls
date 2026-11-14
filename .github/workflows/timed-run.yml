@@ -28,9 +28,9 @@ on:
         required: true
         default: main
       command:
-        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, counted or clip (no model in any)
+        description: walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, counted or clip (no model in any)
         type: choice
-        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, counted, clip]
+        options: [walk, eval-scripted, eval-load, bench-client, meetup, slopes-profile, load, counted, clip]
         default: walk
       base:
         description: 'counted only: the base arm, main or an agent/<name> branch (the candidate arm is ref)'
@@ -44,7 +44,7 @@ on:
         description: Repeats, 1 to 3 (counted - cells per arm)
         default: '1'
       args:
-        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; counted --scenario --loop-sec; clip --kit --viewport'
+        description: 'Allowlisted: walk --world; eval-scripted --items --warm-sec; eval-load --souls --duration-sec --card-sec; bench-client --arms --profile --raw-from --short; meetup --profile --active-min --short; slopes-profile none; load --world --boots --souls --profile --short; counted --scenario --loop-sec; clip --kit --viewport'
         default: ''
 permissions:
   contents: read
@@ -143,7 +143,7 @@ jobs:
         run: pnpm --filter @souls/web build
       # the capacity benches' worlds refuse genesis without the viewer bundle; a clip's people are drawn from it
       - name: Build the viewer
-        if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile' || env.INPUT_COMMAND == 'clip'
+        if: env.INPUT_COMMAND == 'bench-client' || env.INPUT_COMMAND == 'meetup' || env.INPUT_COMMAND == 'slopes-profile' || env.INPUT_COMMAND == 'load' || env.INPUT_COMMAND == 'clip'
         working-directory: src
         run: pnpm build:viewer
       # clip: the ref's Playwright version of Chromium, installed in the per-run directory (the shared home stays untouched).
