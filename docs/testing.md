@@ -70,6 +70,32 @@ The comparison runs in two places: the CI job `types-web`, on the build it alrea
 PR that causes it; and V3-bundle in the release gate. A PR that changes only the baseline or the budget tool also selects
 `types-web`.
 
+## Replay corpus
+
+Old history must keep its meaning. `apps/server/test/fixtures/replay-corpus/` holds frozen event logs from fake-mind
+worlds recorded in a temporary database (never production): a toy world, a green-field god world with world-edits that
+adopts the boot runtime-policy chain at its first boot, and a Mars campus world with decisions, a body assignment and a
+retire that adopts the chain mid-history, so it has pins before and after. Each entry is `<name>.log.json` (the world
+row, every event, one snapshot; never rewritten) and `<name>.pins.json` (its reader, the policies its log adopts, and
+the state and kernel hashes at a few ticks and at its head). `apps/server/src/replay-corpus.test.ts` refolds every log
+with the current engine from genesis at each pinned tick, and boots it as a restarting server does, from genesis and from
+its snapshot, to the head. It runs in the server CI shards, which engine, fold, kernel and protocol paths select.
+
+A runtime policy adopted at boot (`adoptBootRuntimePoliciesV1`) is prospective: a log recorded before its adoption has
+no rules event for it and must refold to the same pins. A pin that moves means a change reached history that never
+adopted it: ship it as a logged rules fact or a documented reader instead.
+
+```sh
+node apps/server/test/fixtures/replay-corpus/record.ts <name> --recipe <toy|god-greenfield|mars-campus>   # add a log
+node apps/server/test/fixtures/replay-corpus/record.ts --check            # compare every entry's pins with this tree
+node apps/server/test/fixtures/replay-corpus/record.ts --write <name|all> # re-pin a deliberate change from the frozen logs
+```
+
+When a new boot-adopted policy merges, add an entry recorded after it under a new name (for example
+`mars-campus-2 --recipe mars-campus`); the older entries, recorded before it, and their pins stay as they are. A
+`--write` re-pin is its own reviewed commit with its reason, like the walk and bundle baselines. Logs are never
+re-recorded: the recorder refuses an existing name.
+
 ## Conformance
 
 `packages/conformance` bakes, places and furnishes every core library def revision at its parameter endpoints and
