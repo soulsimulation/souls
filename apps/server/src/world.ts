@@ -118,7 +118,7 @@ export class PersistedIntentAdmissionFault extends Error {
   constructor(decisionSeq:number) { super('decision and admission persisted; physical application requires reconciliation'); this.decisionSeq=decisionSeq; }
 }
 type Pending = { kind: EventKind; author: string; payload: any; resolve?: (e: LogEvent) => void; guard?: AcceptanceGuard; journal?: AcceptanceJournal; reject?: (error: unknown) => void; purpose?: PurposeRef; stationEra?:boolean; atomicObjectDecision?:boolean };
-export type BootStats = { from: 'genesis' | 'snapshot'; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
+export type BootStats = { from: 'genesis' | 'snapshot'; /** the restored snapshot's state hash */ fromStateHash?: string; restoreMs: number; readMs: number; replayMs: number; baselineMs: number; replayTicks: number; replayEvents: number; fromTick: number; toTick: number; minds: number };
 export type SnapshotBody = { runtime: EngineSnapshot; minds: Mind[]; seq: number; extra: Record<string, unknown>; kernel?: KState; counts?: Record<string, number>; faultedHeadV1?: true };
 export type HostListener = {
   onBatch?(b: Batch): void;
@@ -188,6 +188,9 @@ export class WorldHost {
   tickSpans: { file: string; rows: string[] } | null = process.env.SOULS_TICK_SPANS ? { file: process.env.SOULS_TICK_SPANS, rows: [] } : null;
   /** The last boot's phases (lane L5): restore = snapshot read + decode + engine restore; replay = stepping logged history to its head. */
   bootStats: BootStats | null = null;
+  /** Asked at each snapshot's capture (same tick); what it returns runs once that snapshot is saved (the god bridge's boot
+   *  record beside it: engine-bridge.ts bootRecord). */
+  snapshotSidecar: (() => (at: { tick: number; stateHash: string }) => void) | null = null;
   private queue: Pending[] = [];
   private intentControllerFaults = new Set<string>();
   private intentObservations: IntentObservations;
@@ -370,7 +373,7 @@ export class WorldHost {
     if (!this.db.hasVocabulary(this.worldId)) void this.enqueue('rules', 'system', { vocabulary: structuredClone(baseVocabulary(this.kernel)), why: 'the vocabulary this world began with' });
     if (this.pendingBootstrap) { void this.enqueue('rules', 'system', { kernelBootstrap: this.pendingBootstrap, why: 'the kernel begins here for a world that predates it' }); this.pendingBootstrap = null; }
     const end = performance.now();
-    const stats: BootStats = { from, restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
+    const stats: BootStats = { from, ...(snap ? { fromStateHash: snap.stateHash } : {}), restoreMs: Math.round(restoredAt - tBoot), readMs: Math.round(readMs), replayMs: Math.round(replayedAt - restoredAt), baselineMs: Math.round(end - replayedAt),
       replayTicks, replayEvents: later.length, fromTick, toTick: this.engine.world.tick, minds: this.minds.size };
     this.bootStats = stats;
     console.log(`[boot] restore ${stats.restoreMs} ms from ${from} tick ${fromTick} (snapshot read+decode ${stats.readMs} ms, ${stats.minds} minds)`);
@@ -2308,9 +2311,9 @@ export class WorldHost {
   private captureHead() {
     const t0 = performance.now();
     const runtime = this.engine.snapshot();
-    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash() };
+    return { t0, runtime, body: this.captureBody(runtime), physicalHash: this.engine.physicalHash(), sidecar: this.snapshotSidecar?.() };
   }
-  private commitHead({ t0, runtime, body, physicalHash }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
+  private commitHead({ t0, runtime, body, physicalHash, sidecar }: ReturnType<WorldHost['captureHead']>, sync: boolean): { tick: number; stateHash: string } {
     // captureBody owns every field; persistence only reads it, and restoration/
     // recovery recipes clone before mutation. Keep one immutable captured body.
     // #1150: a head captured here during a failing stretch is marked and serves a boot, never a rewind. A sliced capture
@@ -2321,7 +2324,7 @@ export class WorldHost {
     this.snapshotMs.capture = performance.now() - t0;
     this.lastSnapshotTick = runtime.tick; this.snapshotTaken();
     const generation = this.snapshotGeneration;
-    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1;
+    const persist = () => { if (generation !== this.snapshotGeneration) return; const t1 = performance.now(); this.db.saveSnapshot(this.worldId, meta); this.snapshotMs.persist = performance.now() - t1; sidecar?.(meta);
       this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.persist; };
     if (sync) persist(); else setImmediate(persist);
     return { tick: runtime.tick, stateHash: runtime.stateHash };
@@ -2347,11 +2350,12 @@ export class WorldHost {
       const legacy = captured && 'stateHash' in captured ? captured : checkpoint ? undefined : engine.captureSnapshot!();
       const fields = this.captureHostState();
       const physicalHash = checkpoint ? undefined : engine.physicalHash();
+      const sidecar = this.snapshotSidecar?.();
       const legacySteps = legacy?.steps(); // Preserve synchronous iterator-setup errors before publishing ownership.
       const steps = checkpoint ? checkpoint.steps() : (function* (): Generator<void, EngineCheckpoint, void> {
         return { snapshot: yield* legacySteps!, physicalHash: physicalHash! };
       })();
-      return { checkpoint, legacy, fields, steps };
+      return { checkpoint, legacy, fields, steps, sidecar };
     };
     // #1368: a head the engine refuses to capture (a named `snapshot.*` refusal such as `snapshot.unencodable`) is no
     // durability failure and must never take the process or the clock down: name it, skip this snapshot, keep ticking and
@@ -2368,7 +2372,7 @@ export class WorldHost {
       if (code === 'snapshot.non-finite' && this.nonFiniteHoldRule && this.holdNonFinite(error)) this.snapshotSoon ??= 'a non-finite number was put back';
       return;
     }
-    const { checkpoint, legacy, fields, steps } = parts;
+    const { checkpoint, legacy, fields, steps, sidecar } = parts;
     const tick = checkpoint?.tick ?? legacy!.tick;
     const frontier = { tick, seq: fields.seq, rulesVersion: engine.rulesVersion };
     const materialize = (): SnapshotBody => ({ runtime: checkpoint ? checkpoint.finish().snapshot : legacy!.finish(), ...fields });
@@ -2410,7 +2414,7 @@ export class WorldHost {
         const at = performance.now(), json = JSON.stringify(body);
         this.snapshotMs.serialize = performance.now() - at;
         later(() => {
-          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json);
+          const at = performance.now(); this.db.saveSnapshotSerialized(this.worldId, meta, json); sidecar?.(meta);
           this.snapshotMs.persist = performance.now() - at;
           this.lastSnapshotCostMs = this.snapshotMs.capture + this.snapshotMs.finish + this.snapshotMs.serialize + this.snapshotMs.persist;
           this.periodicSnapshot = null;

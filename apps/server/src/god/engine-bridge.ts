@@ -17,6 +17,7 @@ import { deckRaised, railGaps, rasterOf } from '@souls/generators';
 import { applyBatch, containerClaims, containerHidden, containerInside, containerOpen, obbOverlap, type Diff, type Entity, type Failure, type Op, type Result, type StoredDef, type ResidentMove, type WorldModel } from '@souls/world-compiler';
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
 import type { LogEvent } from '@souls/protocol';
@@ -159,7 +160,14 @@ export function helixEnds(path: Vec2[]): { foot: Vec2; head: Vec2; stepFrom: Vec
 }
 
 export type BridgeOptions = { host: WorldHost; god: GodMode; edge?: EdgeLedger; log?: (m: string) => void; /** Highest level id levelFor hands out (default and most: MAX_LEVEL_ID; tests use fewer to reach the reuse path) */ maxLevel?: number; /** F3: new-world lore (default: any world key but eden/mars/littlemartians/toy) */ worldLore?: boolean; /** F3: the world clock from the god's time.dayTicks (default: a god world without ENABLE_LIVING_WORLD) */ worldClock?: boolean; /** B-facade: the read worker's bridge (split/read-bridge.ts): the read side only, over a GodReplica and the
- *  worker's MenuWorld (no engine listeners, no projection, no writes; acts go to main) */ read?: boolean };
+ *  worker's MenuWorld (no engine listeners, no projection, no writes; acts go to main) */ read?: boolean;
+  /** Boot reconcile skip: the file beside the snapshot (in the data directory) that says each snapshot was written by
+   *  `build` with the bridge in step at a god edit sequence; a boot from that snapshot at that edit skips the derive.
+   *  Off when absent (tests, tools) or when `build` is 'dev' (a dev checkout can change code without changing it). */
+  bootRecord?: { file: string; build: string } };
+/** What the boot record says about one snapshot: written by `build`, the engine's physics derived from the god model at
+ *  `editSeq` with nothing pending, and the door facts the derive would have found (the only state a skipped derive keeps). */
+export type BootRecordV1 = { contract: 'boot-reconcile/1'; worldId: string; build: string; tick: number; stateHash: string; editSeq: number; physicsHash: string; doorIds: string[]; gated: string[] };
 
 /** Load lane L4: per-step ms of the bridge's tick work, the tick-ms distribution and the derived-work counters since the
  *  last line. Only built with SIM_L4_STATS=1. */
@@ -269,7 +277,7 @@ export class EngineBridge {
    *  pose: what nav and perceive re-derive on. */
   private version = 0;
   private log: (m: string) => void;
-  stats = { edits: 0, entities: 0, writeBacks: 0, refusals: 0, bodies: 0, lastMs: 0 };
+  stats = { edits: 0, entities: 0, writeBacks: 0, refusals: 0, bodies: 0, lastMs: 0, bootSkipped: false };
   /** P4: Souls walk to god-built named things (nav.ts). */
   readonly nav: GodNav;
   /** F1: god-built things Souls can see, look at and read (perceive.ts). */
@@ -298,6 +306,7 @@ export class EngineBridge {
     this.host = o.host; this.god = o.god; this.edge = o.edge; this.readSide = !!o.read; const R = this.readSide; this.maxLevel = Math.min(o.maxLevel ?? MAX_LEVEL_ID, MAX_LEVEL_ID); this.log = o.log ?? ((m) => console.log(`[bridge] ${m}`));
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
+    if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
     this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
     this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
@@ -545,8 +554,41 @@ export class EngineBridge {
     // seed `sent` from the engine's own state so only real differences are sent
     for (const [id, part] of Object.entries(ep?.byEntity ?? {})) this.sent.set(id, sentKey(JSON.stringify(normPart(part as Part))));
     for (const [id, e] of Object.entries(this.engine.world.entities)) if (e.tags?.includes('entity-world')) this.sent.set(id, sentKey(JSON.stringify(normPart({ ...(ep?.byEntity[id] ?? {}), fixture: fixtureOfEngine(e) } as Part))));
+    // the engine snapshot was written by this build with the bridge in step at the god model's present edit: a derive of
+    // every entity would find nothing to send, so only what it keeps (the door facts) is taken from the record
+    const rec = this.bootRecordMatch(ep);
+    if (rec) {
+      this.doorIds = new Set(rec.doorIds); this.gated = new Set(rec.gated); this.stats.bootSkipped = true;
+      this.log(`boot: snapshot at tick ${rec.tick} written by this build at edit ${rec.editSeq}: nothing to derive`); return;
+    }
     const all = new Set<string>([...this.model.entities.keys(), ...this.sent.keys()]);
     this.send(all, 0, 'boot');
+  }
+  private bootRecord?: { file: string; build: string };
+  /** The boot record, when it is for exactly the snapshot this boot restored, with nothing replayed after it, the same
+   *  build and the god model at the recorded edit (else null: the boot derives everything). */
+  private bootRecordMatch(ep: EntityPhysicsV1 | undefined): BootRecordV1 | null {
+    const r = this.bootRecord, b = this.host.bootStats;
+    if (!r || r.build === 'dev' || !b || !ep || b.from !== 'snapshot' || b.replayEvents || b.replayTicks) return null;
+    let rec: BootRecordV1;
+    try { rec = JSON.parse(readFileSync(r.file, 'utf8')) as BootRecordV1; } catch { return null; }
+    return rec?.contract === 'boot-reconcile/1' && rec.worldId === this.host.worldId && rec.build === r.build && rec.tick === b.fromTick &&
+      rec.stateHash === b.fromStateHash && rec.editSeq === this.model.editSeq && rec.physicsHash === ep.hash &&
+      Array.isArray(rec.doorIds) && Array.isArray(rec.gated) ? rec : null;
+  }
+  /** At a snapshot's capture: the facts of this head if the bridge is in step with the engine (everything derived is
+   *  folded, nothing pending), written once the snapshot is saved; otherwise the record is removed. */
+  private recordAtCapture(r: { file: string; build: string }): (at: { tick: number; stateHash: string }) => void {
+    const ep = this.engine.world.entityPhysicsV1;
+    const inStep = r.build !== 'dev' && this.reconciled && !this.pending.size && !this.projectionDrafts.size && !!ep && this.physics?.hash === ep.hash;
+    const rec = inStep ? { contract: 'boot-reconcile/1' as const, worldId: this.host.worldId, build: r.build, editSeq: this.model.editSeq, physicsHash: ep!.hash, doorIds: [...this.doorIds].sort(), gated: [...this.gated].sort() } : null;
+    return (at) => {
+      try {
+        if (!rec) { rmSync(r.file, { force: true }); return; }
+        const tmp = `${r.file}.${process.pid}.tmp`;
+        writeFileSync(tmp, JSON.stringify({ ...rec, tick: at.tick, stateHash: at.stateHash } satisfies BootRecordV1)); renameSync(tmp, r.file);
+      } catch (e) { this.log(`boot record not written: ${(e as Error).message}`); }
+    };
   }
 
   /** Commits between two ticks coalesce into one world-edit (one Spatial re-base per tick at most). */
