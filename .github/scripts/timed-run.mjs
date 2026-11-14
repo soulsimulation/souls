@@ -5,6 +5,14 @@
 // two of the runner's four physical cores and the load generator on the other two. It runs from the workflow's own commit, never
 // from the ref under measurement. The argument allowlist is not a security boundary (the ref's own scripts run); safety
 // rests on the runner's dedicated, unprivileged account.
+// `counted` runs one cell of a named counted scenario (a kit under tools/playtest/counted/, taken from the workflow's own
+// commit so both arms run the same bytes): `base-k` checks out the `base` input, `cand-k` the ref. The workflow runs every
+// cell as its own job, all at once. The kit scores pass/fail per item, so its starting load is recorded and not gated, and
+// it may run on the GitHub-hosted runners (`runner=hosted`).
+// `clip` (#2294) records a proof clip of the ref with a hardware GL renderer: a clip kit (tools/proof/clips/<kit>/, from the
+// workflow's own commit, like the counted kits) names a template and steps; the ref boots a fake-mind dev world of it, and
+// the proof recorder, also from the workflow's commit, records the kit's steps (SIM_PROOF_GPU=hardware). The clip, its
+// sidecar and its frame timing are the artifact; nothing is uploaded with a token.
 //
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
@@ -14,15 +22,24 @@
 //   node timed-run.mjs strays   --snapshot <file> [--exclude <globs>]   fail on entries new since the snapshot (other jobs': a warning)
 //
 // Pure decisions are exported for timed-run.test.mjs. Nothing here prints a path, host or user name.
-import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { appendFileSync, copyFileSync, cpSync, createWriteStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { hostname, loadavg, userInfo } from 'node:os';
+import { createHash } from 'node:crypto';
+import { availableParallelism, hostname, loadavg, userInfo } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'counted', 'clip'];
+/** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, viewport?, localStorage?}) and steps.mjs. */
+export const CLIP_KITS = 'tools/proof/clips';
+/** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
+ *  `run.mjs <arm> <tree> <port> <outDir>`, scores it with `score-frozen.mjs <run.json>`, and classifies it with
+ *  `classify-frozen.mjs <outDir> <tree> <port>`. The files are the kit as declared on #1367 (sha256s recorded per run). */
+export const COUNTED = { 'stair-foot': { dir: 'tools/playtest/counted/stair-foot', files: ['run.mjs', 'score-frozen.mjs', 'classify-frozen.mjs', 'replay.mjs', 'probe.mjs'] } };
+/** The runner sets: `souls-timed` for everything; the GitHub-hosted runners only for what scores pass/fail per item. */
+export const RUNNERS = ['souls-timed', 'hosted'];
 /** #1970: the commands whose world runs on two of the runner's physical cores and whose load generator on the other two. */
 export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile'];
 export const LOAD_GATE = 0.25;      // mean busy fraction of the runner's own cores above which a run does not start
@@ -40,6 +57,8 @@ export const ARG_ALLOW = {
   'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
+  counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
+  clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
 };
 
 /** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
@@ -67,11 +86,25 @@ export function parseInputs(env) {
   if (!COMMANDS.includes(command)) bad('command', command, COMMANDS.join(' or '));
   const repeats = String(env.INPUT_REPEATS ?? '1');
   if (!/^[1-3]$/.test(repeats)) bad('repeats', repeats, '1, 2 or 3');
-  return { ref, command, repeats: Number(repeats), args: checkArgs(command, env.INPUT_ARGS) };
+  const runner = String(env.INPUT_RUNNER || 'souls-timed');
+  if (!RUNNERS.includes(runner)) bad('runner', runner, RUNNERS.join(' or '));
+  if (runner === 'hosted' && command !== 'counted') bad('runner', runner, `${command} is a timing run and runs on souls-timed only`);
+  const args = checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
+  if (command === 'clip' && !args.includes('--kit')) bad('args', env.INPUT_ARGS, 'clip needs --kit <name> (a folder of tools/proof/clips)');
+  if (command !== 'counted') return { ...inp, runner };
+  // counted: a base ref, a scenario, and the one cell this job runs (base-k or cand-k, k up to repeats)
+  const base = String(env.INPUT_BASE ?? '');
+  if (!REF_ALLOWED.test(base) || base.includes('..') || base.endsWith('.') || base.endsWith('.lock')) bad('base', base, 'main or an agent/<name> branch of this repository');
+  if (!args.includes('--scenario')) bad('args', env.INPUT_ARGS, `counted needs --scenario (${Object.keys(COUNTED).join(', ')})`);
+  const cell = String(env.INPUT_CELL ?? ''), m = /^(base|cand)-([1-3])$/.exec(cell);
+  if (!m || Number(m[2]) > Number(repeats)) bad('cell', cell, `base-k or cand-k, k from 1 to ${repeats}`);
+  return { ...inp, runner, base, cell, arm: m[1], scenario: args[args.indexOf('--scenario') + 1] };
 }
+/** The branch this job checks out: the base for a counted base cell, else the ref. */
+export const target = (inp) => checkoutRef(inp.arm === 'base' ? inp.base : inp.ref);
 
 /** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
-export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51 };
+export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, counted: 1, clip: 1 };
 /** The process to run for one repeat (cwd: the ref). Every command but walk does all its repeats in one invocation. The
  *  eval's load mode keeps its Soul folders (--keep-data) in the per-run directory, so the token refusal can read them. */
 export function commandLine(inp, { out, port }) {
@@ -83,11 +116,29 @@ export function commandLine(inp, { out, port }) {
     case 'bench-client': return ['tools/bench/capacity/bench.mjs', '--load', 'client', '--via-launcher', ...r, '--out', join(out, 'bench'), '--port', p, '--child-range', `${port + 1}-${port + 2}`, ...inp.args];
     case 'meetup': return ['tools/bench/capacity/meetup/meetup.mjs', ...r, '--out', join(out, 'meetup'), '--port', p, '--range', `${port + 1}-${port + 30}`, ...inp.args];
     case 'slopes-profile': return ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', ...r, '--out', join(out, 'slopes'), '--port', p, ...inp.args];
+    case 'counted': throw new Error('counted runs its kit\'s steps: countedSteps');
+    case 'clip': throw new Error('clip runs its kit: runClip');
   }
   throw new Error(`no command line for ${inp.command}`);
 }
+/** counted: the kit's three steps for one cell (cwd: the ref's checkout), with where each step's stdout goes (null: the
+ *  cell's log). The world runs, then the cell is scored, then its frozen walks are classified by a replay of its own log. */
+export function countedSteps(inp, { kit, out, port }) {
+  const p = String(port), dir = join(out, 'counted');
+  return [
+    { step: 'run', argv: [join(kit, 'run.mjs'), inp.arm, '.', p, join(dir, inp.cell)], stdout: null },
+    { step: 'score', argv: [join(kit, 'score-frozen.mjs'), join(dir, inp.cell, 'run.json')], stdout: join(dir, `${inp.cell}.scores.json`) },
+    { step: 'classify', argv: [join(kit, 'classify-frozen.mjs'), join(dir, inp.cell), '.', p], stdout: join(dir, `${inp.cell}.class.json`), stderr: join(dir, `${inp.cell}.class.err`) },
+  ];
+}
 /** The log of repeat k: walk writes one per repeat, the others one in all. */
-export const logName = (command, k) => (command === 'walk' ? `walk-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : `${command}.log`);
+export const logName = (command, k) => (command === 'walk' ? `walk-r${k}.log` : command === 'eval-scripted' ? 'eval.log' : command === 'counted' ? `counted/${k}.log` : `${command}.log`);
+/** A clip's frame timing from its frames' presentation times (seconds) → count, span, mean fps, largest gap. */
+export function frameTiming(pts) {
+  const t = pts.filter(Number.isFinite).sort((a, b) => a - b), gaps = t.slice(1).map((x, i) => x - t[i]), r3 = (x) => +x.toFixed(3);
+  const span = t.length > 1 ? t.at(-1) - t[0] : 0;
+  return { frames: t.length, spanSec: r3(span), meanFps: span > 0 ? +((t.length - 1) / span).toFixed(2) : null, maxGapSec: gaps.length ? r3(Math.max(...gaps)) : null, gapsOver100ms: gaps.filter((g) => g > 0.1).length };
+}
 
 /** #1970 A2: the runner's own logical CPUs grouped into physical cores (`siblingsOf(cpu)`: that CPU's SMT siblings); the
  *  first two cores for the world under test, the other two for the load generator. Exactly four cores, else refused. */
@@ -130,13 +181,15 @@ export function loadFacts(a, b, own, gate = LOAD_GATE) {
   return { ownCores: mine.length, ownBusy: ownMean, ownBusyMax: mine.length ? r3(Math.max(...mine.map(busy))) : null, machineCores: all.length, machineBusy: mean(all), gate, overGate: ownMean == null || ownMean > gate };
 }
 
-/** Soul tokens anywhere under out (each `.eden-agent.json`); none may leave the runner. */
+/** Soul tokens anywhere under out (each `.eden-agent.json`, and every `token` in a Soul home's `credentials.json`); none
+ *  may leave the runner. */
 export function soulTokens(out) {
-  const tokens = [];
+  const tokens = [], all = (o) => { if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) { if (k === 'token' && typeof v === 'string' && v) tokens.push(v); else all(v); } };
   const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) {
     const p = join(d, e.name);
     if (e.isDirectory()) walk(p);
     else if (e.name === '.eden-agent.json') { try { const t = JSON.parse(readFileSync(p, 'utf8')).token; if (t) tokens.push(String(t)); } catch { /* no token */ } }
+    else if (e.name === 'credentials.json') { try { all(JSON.parse(readFileSync(p, 'utf8'))); } catch { /* no token */ } }
   } };
   if (existsSync(out)) walk(out);
   return tokens;
@@ -150,7 +203,13 @@ export const PUBLISH = {
   'bench-client': ['bench/receipt.json', 'bench/REPORT.md', 'bench/*/result.json', 'bench-client.log'],
   meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
+  // the files the workstation session writes per cell: the kit's record, its log, the score, the class and the probe log
+  counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
+  // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
+  clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
 };
+/** Media a timed run publishes byte for byte (never scrubbed as text). */
+export const BINARY = /\.(mp4|webm|png)$/;
 const filesUnder = (d, base = d) => { let es; try { es = readdirSync(d, { withFileTypes: true }); } catch { return []; } return es.flatMap((e) => (e.isDirectory() ? filesUnder(join(d, e.name), base) : e.isFile() ? [join(d, e.name).slice(base.length + 1).split(sep).join('/')] : [])); };
 /** The files a timed run of `command` may publish that exist, relative to out, in PUBLISH order. */
 export function allowlist(out, command) {
@@ -160,10 +219,14 @@ export function allowlist(out, command) {
 
 /** Copy the allowlisted files into dest, scrubbed; refuse if any still holds a Soul token. Returns the copied list. */
 export function stage({ out, dest, command, scrubWith }) {
-  const tokens = soulTokens(out), texts = allowlist(out, command).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
+  const tokens = soulTokens(out), files = allowlist(out, command), media = files.filter((f) => BINARY.test(f));
+  const texts = files.filter((f) => !BINARY.test(f)).map((f) => [f, scrub(readFileSync(join(out, f), 'utf8'), scrubWith)]);
   for (const [f, t] of texts) if (tokens.some((k) => t.includes(k))) throw new Error(`${f} holds a Soul token; nothing is uploaded`);
+  // a clip whose take showed something private (its sidecar's privacy hits), or that has no sidecar, is never published
+  for (const f of media) if (/\.(mp4|webm)$/.test(f) && (readJ(join(out, `${f}.json`)).privacy?.hits?.length ?? 1) > 0) throw new Error(`${f}: its sidecar records a privacy hit or is missing; nothing is uploaded`);
   for (const [f, t] of texts) { mkdirSync(join(dest, f, '..'), { recursive: true }); writeFileSync(join(dest, f), t); }
-  return texts.map(([f]) => f);
+  for (const f of media) { mkdirSync(join(dest, f, '..'), { recursive: true }); copyFileSync(join(out, f), join(dest, f)); }
+  return [...texts.map(([f]) => f), ...media];
 }
 
 /** A whole-path glob where `*` matches within one path segment → a test. */
@@ -229,6 +292,93 @@ function pinWorlds(root, cpus) {
   const iv = setInterval(tick, 250);
   return { stop: () => { clearInterval(iv); return { worldProcesses: pinned.size, worldAllowed: [...new Set(pinned.values())] }; } };
 }
+const la = () => loadavg().slice(0, 2).map((x) => +x.toFixed(2));
+const sh = (cmd, args) => { try { execFileSync(cmd, args, { stdio: 'ignore' }); return true; } catch { return false; } };
+/** One cell of a counted scenario (cwd: the ref's checkout): the kit is copied from this workflow's commit into the
+ *  per-run directory (its replays' work folders stay there), the commit goes to COMMIT as the kit reads it, HOME goes
+ *  inside the per-run directory, and the 1- and 5-minute load averages are recorded at the start and end of the cell,
+ *  as the workstation session records them. */
+async function runCounted(inp, rec, out, env) {
+  const sc = COUNTED[inp.scenario], src = resolve(import.meta.dirname, '../..', sc.dir), kit = join(env.PER_RUN, 'kit', inp.scenario);
+  if (!sh('sqlite3', ['-version'])) throw new Error('the sqlite3 command is not on this runner; the kit\'s classifier needs it');
+  cpSync(src, kit, { recursive: true });
+  const sha256 = Object.fromEntries(sc.files.map((f) => [f, createHash('sha256').update(readFileSync(join(kit, f))).digest('hex')]));
+  writeFileSync('COMMIT', `${env.REF_COMMIT}\n`);
+  env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
+  const loopSec = inp.args.includes('--loop-sec') ? inp.args[inp.args.indexOf('--loop-sec') + 1] : null;
+  if (loopSec) env.LOOP_S = loopSec;
+  mkdirSync(join(out, 'counted'), { recursive: true });
+  const port = await freePorts(1), steps = countedSteps(inp, { kit, out, port }), log = createWriteStream(join(out, logName('counted', inp.cell)));
+  const cell = { cell: inp.cell, arm: inp.arm, scenario: inp.scenario, kit: { sha256 }, commit: env.REF_COMMIT ?? null, cpus: availableParallelism(), load: { start: la() }, steps: [] };
+  const t0 = Date.now();
+  for (const s of steps) {
+    console.log(`${inp.cell} ${s.step}: ${s.argv.map((a) => a.split(sep).at(-1)).join(' ')}`);
+    const t = Date.now(), child = spawn(process.execPath, s.argv, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const so = s.stdout ? createWriteStream(s.stdout) : null, se = s.stderr ? createWriteStream(s.stderr) : null;
+    child.stdout.on('data', (b) => { (so ?? log).write(b); if (!so) process.stdout.write(b); });
+    child.stderr.on('data', (b) => { (se ?? log).write(b); if (!se) process.stdout.write(b); });
+    for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
+    const code = await new Promise((r) => child.on('close', (c) => r(c ?? 1))); so?.end(); se?.end();
+    cell.steps.push({ step: s.step, exitCode: code, wallMs: Date.now() - t });
+    if (s.step === 'run') cell.load.end = la();
+    if (code !== 0) break;
+  }
+  log.end();
+  writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, runs: [{ repeat: 1, exitCode: cell.steps.find((s) => s.exitCode !== 0)?.exitCode ?? 0, wallMs: Date.now() - t0, counted: cell }] }, null, 1));
+  console.log(`${inp.cell}: load ${cell.load.start.join(' ')} / ${cell.load.end?.join(' ') ?? '-'} on ${cell.cpus} cpus; ${cell.steps.map((s) => `${s.step} ${s.exitCode}`).join(', ')}`);
+  const bad = cell.steps.filter((s) => s.exitCode !== 0);
+  if (bad.length || cell.steps.length !== steps.length) throw new Error(`${inp.cell}: the kit's ${bad[0]?.step ?? 'steps'} exited non-zero`);
+}
+/** One proof clip of the ref (cwd: its checkout). The recorder and the kit come from this workflow's commit; the ref boots
+ *  a fake-mind dev world of the kit's template; HOME is inside the per-run directory (the kit's Soul and god folders);
+ *  the recorder must find a hardware GL renderer (SIM_PROOF_GPU=hardware, exit 5 otherwise). */
+async function runClip(inp, rec, out, env) {
+  const kitName = inp.args[inp.args.indexOf('--kit') + 1], ctl = resolve(import.meta.dirname, '../..');
+  const src = join(ctl, CLIP_KITS, kitName), kit = join(env.PER_RUN, 'kit', kitName);
+  if (!existsSync(join(src, 'kit.json')) || !existsSync(join(src, 'steps.mjs'))) throw new Error(`clip kit ${kitName}: no kit.json and steps.mjs in ${CLIP_KITS}/${kitName} at this workflow's commit`);
+  cpSync(join(ctl, CLIP_KITS), join(env.PER_RUN, 'kit'), { recursive: true });
+  const k = readJ(join(kit, 'kit.json')), viewport = inp.args.includes('--viewport') ? inp.args[inp.args.indexOf('--viewport') + 1] : (k.viewport ?? 'desktop');
+  if (!/^[a-z0-9-]{1,60}$/.test(k.template ?? '') || !existsSync(join('worlds/templates', `${k.template}.json`))) throw new Error(`clip kit ${kitName}: template ${JSON.stringify(k.template)} is not in the ref's worlds/templates`);
+  // the recorder from this workflow's commit, so a ref without the GPU switch records with it too
+  copyFileSync(join(ctl, '.claude/skills/proof/record.mjs'), '.claude/skills/proof/record.mjs');
+  env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
+  for (const [cmd, a] of [['nvidia-smi', ['--query-gpu=name,driver_version', '--format=csv,noheader']], ['ffmpeg', ['-version']]]) {
+    const r = spawnSync(cmd, a, { encoding: 'utf8' }); console.log(`${cmd}: ${r.status === 0 ? r.stdout.split('\n')[0] : 'not available'}`);
+  }
+  let renderNodes = []; try { renderNodes = readdirSync('/dev/dri').filter((f) => f.startsWith('renderD')); } catch { /* none */ }
+  console.log(`render nodes: ${renderNodes.length}`);
+  const port = await freePorts(1), dir = join(out, 'clip'); mkdirSync(dir, { recursive: true });
+  const { startWorld } = await import(pathToFileURL(resolve('tools/god-skill/dev-world.mjs')).href);
+  const t0 = Date.now(), saved = { BRAIN_MODE: process.env.BRAIN_MODE, HOME: process.env.HOME };
+  let world;
+  Object.assign(process.env, { BRAIN_MODE: 'fake', HOME: env.HOME });
+  try { world = await startWorld({ slug: 'clip', port, data: join(env.PER_RUN, 'world'), genesis: `worlds/templates/${k.template}.json`, fresh: true, log: join(env.PER_RUN, 'world.log'), checkout: '.', env: { INVITE_REQUIRED: '0' } }); }
+  finally { for (const [key, v] of Object.entries(saved)) { if (v === undefined) delete process.env[key]; else process.env[key] = v; } }
+  console.log(`world up in ${((Date.now() - t0) / 1000).toFixed(1)} s (${k.template})`);
+  const clipFile = join(dir, `${kitName}-${viewport}.mp4`), log = createWriteStream(join(out, 'clip.log'));
+  const argv = ['.claude/skills/proof/record.mjs', '--url', `${world.base}?dev=1`, '--steps', join(kit, 'steps.mjs'), '--out', clipFile, '--viewport', viewport,
+    ...(k.timeOfDay ? ['--time-of-day', String(k.timeOfDay)] : []), ...(k.fromLoad ? ['--from-load'] : []),
+    ...Object.entries(k.localStorage ?? {}).flatMap(([key, v]) => ['--local-storage', `${key}=${v}`])];
+  const renv = { ...env, SIM_PROOF_GPU: 'hardware', CLIP_WORLD: world.base, CLIP_CHECKOUT: resolve('.'), CLIP_WORK: join(env.PER_RUN, 'clip-work') };
+  mkdirSync(renv.CLIP_WORK, { recursive: true });
+  console.log(`clip: record.mjs --steps <kit>/${kitName}/steps.mjs --viewport ${viewport}`);
+  const t1 = Date.now(), child = spawn(process.execPath, argv, { env: renv, stdio: ['ignore', 'pipe', 'pipe'] });
+  for (const st of [child.stdout, child.stderr]) st.on('data', (b) => { log.write(b); process.stdout.write(b); });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
+  const code = await new Promise((r) => child.on('close', (c) => r(c ?? 1))); log.end();
+  try { process.kill(-world.child.pid, 'SIGTERM'); } catch { try { world.child.kill('SIGTERM'); } catch { /* gone */ } }
+  const made = readdirSync(dir).find((f) => /\.(mp4|webm)$/.test(f)) ?? null, side = made ? readJ(join(dir, `${made}.json`)) : {};
+  let timing = null;
+  if (made) {
+    const r = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'csv=p=0', join(dir, made)], { encoding: 'utf8', maxBuffer: 64 << 20 });
+    if (r.status === 0) timing = frameTiming(r.stdout.split('\n').map((x) => Number.parseFloat(x)));
+  }
+  const clip = { kit: kitName, template: k.template, viewport, exitCode: code, wallMs: Date.now() - t1, file: made, gl: side.gl ?? null,
+    durationSec: side.durationSec ?? null, videoSec: side.videoSec ?? null, timing, privacyHits: side.privacy?.hits?.length ?? null, recorder: 'workflow commit' };
+  if (timing) console.log(`frame timing: ${timing.frames} frames over ${timing.spanSec} s, mean ${timing.meanFps} fps, largest gap ${timing.maxGapSec} s, ${timing.gapsOver100ms} gaps over 100 ms; take ${clip.durationSec} s wall clock, video ${clip.videoSec} s`);
+  writeFileSync(join(out, 'timed-run.json'), JSON.stringify({ ...rec, runs: [{ repeat: 1, exitCode: code, wallMs: clip.wallMs, clip }] }, null, 1));
+  if (code !== 0) throw new Error(`the recorder exited ${code}${code === 5 ? ' (no hardware GL renderer)' : code === 4 ? ' (privacy hit: the take is not published)' : ''}`);
+}
 const scrubWith = () => { const env = process.env, u = (() => { try { return userInfo().username; } catch { return env.USER; } })();
   return { paths: [[env.PER_RUN, '<per-run>'], [env.GITHUB_WORKSPACE, '.'], [env.RUNNER_WORKSPACE, '<runner-work>'], [env.RUNNER_TEMP, '<runner-temp>'], [env.HOME, '~']], names: [[hostname(), '<host>'], [u, '<user>']] }; };
 
@@ -248,25 +398,28 @@ async function main(cmd) {
     console.log('no entries written outside the per-run directory'); return;
   }
   const inp = parseInputs(process.env), rf = arg('record');
-  if (cmd === 'inputs') { output('target', checkoutRef(inp.ref)); console.log(`inputs ok: ${inp.ref}, ${inp.command} x${inp.repeats}${inp.args.length ? ` ${inp.args.join(' ')}` : ''}`); return; }
+  if (cmd === 'inputs') { output('target', target(inp)); console.log(`inputs ok: ${inp.ref}, ${inp.command} x${inp.repeats}${inp.args.length ? ` ${inp.args.join(' ')}` : ''}${inp.cell ? `, cell ${inp.cell} of base ${inp.base}` : ''} on ${inp.runner}`); return; }
   if (cmd === 'load') {   // A3: own cores and whole machine; wait a bounded time for own cores to settle, else refuse
-    const own = ownCpus(), stat = () => parseProcStat(readFileSync('/proc/stat', 'utf8'));
+    // counted scores pass/fail per item: its starting load is recorded, never gated
+    const own = ownCpus(), stat = () => parseProcStat(readFileSync('/proc/stat', 'utf8')), gated = inp.command !== 'counted';
     let f;
     for (let t = 0; ; t += 15) {
       const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own);
-      if (!f.overGate || t >= SETTLE_WAIT_S) break;
+      if (!gated || !f.overGate || t >= SETTLE_WAIT_S) break;
       console.log(`own cores busy ${f.ownBusy} above the gate ${LOAD_GATE}; waiting`); await sleep(15_000);
     }
-    const startLoad = { ...f, sampleS: SAMPLE_S, machineLoad1PerCore: +(loadavg()[0] / f.machineCores).toFixed(3) };
+    const startLoad = { ...f, gated, sampleS: SAMPLE_S, machineLoad1PerCore: +(loadavg()[0] / f.machineCores).toFixed(3) };
     writeFileSync(rf, JSON.stringify({ schema: 'timed-run/1', workflowRun: process.env.GITHUB_RUN_ID, ref: inp.ref, commit: process.env.REF_COMMIT ?? null, inputs: inp, startLoad }, null, 1));
     console.log(`start load: own ${f.ownCores} cores busy ${f.ownBusy} (max ${f.ownBusyMax}), machine ${f.machineCores} cores busy ${f.machineBusy}, 1-min load per core ${startLoad.machineLoad1PerCore}`);
-    if (f.overGate) throw new Error(`the runner's own cores stayed above the gate (${f.ownBusy} > ${LOAD_GATE}) for ${SETTLE_WAIT_S} s; the run does not start`);
+    if (gated && f.overGate) throw new Error(`the runner's own cores stayed above the gate (${f.ownBusy} > ${LOAD_GATE}) for ${SETTLE_WAIT_S} s; the run does not start`);
     return;
   }
   if (cmd === 'run') {   // fake minds, no GitHub token
     const rec = readJ(rf), out = resolve(arg('out')), env = { ...process.env, BRAIN_MODE: 'fake' }; delete env.GH_TOKEN; delete env.GITHUB_TOKEN;
-    if (!rec.startLoad || rec.startLoad.overGate) throw new Error('no passing start-load record; the run does not start');
+    if (!rec.startLoad || (rec.startLoad.overGate && rec.startLoad.gated !== false)) throw new Error('no passing start-load record; the run does not start');
     mkdirSync(out, { recursive: true });
+    if (inp.command === 'counted') return runCounted(inp, rec, out, env);
+    if (inp.command === 'clip') return runClip(inp, rec, out, env);
     // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the other
     // two. HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
     const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf) : null;

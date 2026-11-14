@@ -57,12 +57,12 @@ test('with the world down, status answers at once as JSON: who, not reachable, w
 });
 
 test('after control moved, status says so as JSON, with the exact way back', async (t) => {
-  const f = await paired(t); f.w.revoked = 'replaced';
+  const f = await paired(t); f.w.revoked = 'retired';
+  assert.doesNotMatch((await f.run('status')).d.next, /adopt/);
+  f.w.revoked = 'replaced';   // #2246: after this the home unpairs Tess and drops the dead token, so it asks the world no more
   const r = await f.run('status');
   assert.equal(r.code, 0, r.err); assert.equal(r.d.paired, false); assert.equal(r.d.control, 'replaced'); assert.equal(r.d.soul.id, 's_a1');
   assert.match(r.d.why, /moved/); assert.match(r.d.next, /adopt s_a1 --for <CODE>/);
-  f.w.revoked = 'retired';
-  assert.doesNotMatch((await f.run('status')).d.next, /adopt/);
 });
 
 test('listening means something is open here, not that the world remembers a listen', async (t) => {

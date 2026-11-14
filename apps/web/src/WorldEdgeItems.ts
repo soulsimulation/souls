@@ -45,7 +45,8 @@ function lay(o:THREE.Object3D,kind:PropKind){
  o.traverse(m=>{m.castShadow=true;});
  if(kind==='book'||kind==='letter'||kind==='cards'){o.rotation.z=Math.PI/2;o.position.y=0.03;}
  else if(kind==='flower'||kind==='pen'||kind==='brush'||kind==='tool'){o.rotation.x=Math.PI/2;o.position.y=0.02;}
- else if(kind==='plate'||kind==='food'){o.position.y=0.03;}
+ else if(kind==='plate'){o.position.y=0.03;}
+ else if(kind==='food'){o.position.y=-0.018;} // the sandwich stands on its crust (#2197)
  else if(kind==='frisbee'){o.position.y=0.02;}
  else o.position.y=0.0;
  return o;

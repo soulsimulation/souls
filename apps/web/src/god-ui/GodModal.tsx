@@ -9,6 +9,8 @@ import { closeGod, presenceWord, sendCommand, showSection, ticketStatus, useGod,
 import { flyTo } from './camera.ts';
 import { copyText } from '../clipboard.ts';
 import './god-modal.css';
+import { useDraft } from '../input-draft.ts';
+import { worldKey } from '../world-path.ts';
 
 const BOLT = <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M11.5 2 4.5 11.2h4.6L8 18l7.5-9.6h-4.7z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/></svg>;
 const GO = <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" strokeWidth="1.4"/><circle cx="8" cy="8" r="1.6" fill="currentColor"/><path d="M8 .8v2.6M8 12.6v2.6M.8 8h2.6M12.6 8h2.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
@@ -85,7 +87,7 @@ function Connect({ url }: { url: string }) {
 /** The command box (undo/redo and weather under it), prayers waiting, and the ticket log, newest first. */
 function GodConsole({ paired, tools, prayers }: { paired: boolean; tools: ReactNode; prayers?: ReactNode }) {
   const { inbox, inboxError, open } = useGod();
-  const [text, setText] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('');
+  const [text, setText] = useDraft(`god:${worldKey}`), [sending, setSending] = useState(false), [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
   const box = useRef<HTMLTextAreaElement>(null);
   // phones: no focus on open, so the keyboard does not cover the sheet

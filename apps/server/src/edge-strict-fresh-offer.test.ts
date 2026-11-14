@@ -25,7 +25,7 @@ test('let-go:here is accepted by the strict gate straight after the hands join, 
   const ended = (s: any, b: any) => ['completed', 'failed', 'cancelled', 'replaced'].includes(edge.receipt(s.soulId, b.receipt.id)?.phase as string);
   // the catalog is read before the hand-hold, as a client does: a menu without let-go is built and kept
   assert.ok(!edge.capabilities(ana as never).some(c => c.id === 'let-go:here'));
-  const h1 = await act(ben, 'hold hands with Ana'); assert.equal(h1.accepted, true, JSON.stringify(h1));
+  const h1 = await act(ben, 'hold-hands:' + ana.soulId, true); assert.equal(h1.accepted, true, JSON.stringify(h1));
   assert.ok(await until(() => edge.together.invitesFor(ana.soulId).length > 0, 400) >= 0);
   const h2 = await act(ana, 'accept:' + edge.together.invitesFor(ana.soulId)[0]!.id, true); assert.equal(h2.accepted, true, JSON.stringify(h2));
   assert.ok(await until(() => !!edge.together.handsWith(ana.entityId)) >= 0, 'the hands join');
@@ -37,7 +37,7 @@ test('let-go:here is accepted by the strict gate straight after the hands join, 
   assert.ok(!edge.together.handsWith(ana.entityId) && !edge.together.handsWith(ben.entityId), 'they let go');
   // again, with Ana's catalog read every tick until the hands join: a menu kept from before the join is not reused after it
   await tick(60);
-  const h4 = await act(ben, 'hold hands with Ana'); assert.equal(h4.accepted, true, JSON.stringify(h4));
+  const h4 = await act(ben, 'hold-hands:' + ana.soulId, true); assert.equal(h4.accepted, true, JSON.stringify(h4));
   assert.ok(await until(() => edge.together.invitesFor(ana.soulId).length > 0, 400) >= 0);
   const h5 = await act(ana, 'accept:' + edge.together.invitesFor(ana.soulId)[0]!.id, true); assert.equal(h5.accepted, true, JSON.stringify(h5));
   assert.ok(await until(() => {edge.capabilities(ana as never); return !!edge.together.handsWith(ana.entityId);}) >= 0, 'the hands join again');
@@ -47,7 +47,7 @@ test('let-go:here is accepted by the strict gate straight after the hands join, 
   assert.ok(await until(() => ended(ana, lg2)) >= 0); assert.equal(edge.receipt(ana.soulId, lg2.receipt.id)?.phase, 'completed');
   // an offered hand is withdrawn by its id straight after the offer
   await tick(60);
-  const h3 = await act(ana, 'offer Ben my hand'); assert.equal(h3.accepted, true, JSON.stringify(h3));
+  const h3 = await act(ana, 'hold-hands:' + ben.soulId, true); assert.equal(h3.accepted, true, JSON.stringify(h3));
   assert.ok(await until(() => edge.together.invitesFor(ben.soulId).length > 0, 400) >= 0);
   const wd = await act(ana, 'withdraw:' + edge.together.invitesFor(ben.soulId)[0]!.id, true);
   assert.equal(wd.accepted, true, 'withdraw straight after the offer: ' + JSON.stringify(wd).slice(0, 400));

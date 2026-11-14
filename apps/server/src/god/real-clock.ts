@@ -119,7 +119,7 @@ type ClockHost = {
   engine: { world: { tick: number } };
   living?: { origin: number; dayTicks: number; customs?: string[] } | undefined;
   enqueue(kind: 'rules', author: string, payload: unknown): Promise<unknown>;
-  pace?: number; paused?: boolean; running?: boolean;
+  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number;
 };
 export type RealClockOptions = {
   /** The world's zone now. */ zone: () => string;
@@ -156,7 +156,8 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
   const sync = (): Promise<void> => {
     if (!active()) return Promise.resolve();
     if (pending) return pending.then(sync);
-    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick, zone = o.zone();
+    // #2235: during a boot catch-up the clock is read as caught up (the event applies after the owed ticks)
+    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick + (host.owedTicks ?? 0), zone = o.zone();
     mapCut(l?.cutOver);
     let payload: { dayConfig: Record<string, unknown>; why: string };
     if (o.paused?.()) {

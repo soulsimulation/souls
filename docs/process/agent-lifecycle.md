@@ -84,7 +84,7 @@ CI runs the checks for the PR's paths. The `main` ruleset requires `ci-ok`, the 
 `path-guard`, `scrub-guard`), `proof-ok` and the changelog `fragment`, and every review thread resolved. PR CI picks
 its jobs from the changed paths with the release gate's `--scope auto` map (`.github/scripts/ci-scope.mjs`): server
 and package tests, typecheck and the web build, the `apps/web` unit suite (`V4-web`), the `tools/world-launcher` unit
-tests (`V3-launcher-unit`) and the `tools/edge-skill` / `tools/client-eval` tests (`V3-client-cli`). Pushes to
+tests (`V3-launcher-unit`) and the `tools/client-eval` tests (`V3-client-cli`). Pushes to
 `main` and manual runs run every job, which is the evidence the merge train needs for non-strict landing. The browser
 walks and the full gate stay with the release. Server and launcher test files take free ports from
 `apps/server/test/test-port.ts`, so they can run beside other jobs and local processes on one host. Server discovery includes every nested `.test.ts` under

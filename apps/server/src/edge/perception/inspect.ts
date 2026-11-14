@@ -4,11 +4,12 @@ import {TIMELINE_PAGE} from '../ledger/timeline.ts';
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import {EdgeError, type EdgeCapability, type EdgeSoul} from '../contract.ts';
 import {offerParams, type ParamSchema} from '../intents/offer-schema.ts';
+import {doorMove, placeDoors, type CatalogDoor} from '../catalog/catalog.ts';
 
 type Child = {id: string; kind: string; name: string};
 type Member = {soulId: string; name: string; role: string; slot: number | null; accepted: boolean; answer?: string; ready?: boolean; why?: string};
 type Offer = {id: string; verb: string; label: string; available: boolean; why?: string; params?: ParamSchema};
-export type Inspected = {id: string; kind: string; name: string; traveller?: string; state?: Record<string, unknown>; parts?: Child[]; contents?: Child[]; members?: Member[]; offers: Offer[]; more?: {parts?: number; contents?: number; offers?: number; members?: number}};
+export type Inspected = {id: string; kind: string; name: string; traveller?: string; /** #2261: a building's doors, each with its ready move */ doors?: (CatalogDoor & {act: string})[]; state?: Record<string, unknown>; parts?: Child[]; contents?: Child[]; members?: Member[]; offers: Offer[]; more?: {parts?: number; contents?: number; offers?: number; members?: number}};
 
 export const INSPECT_BYTES = 4096;
 /** What a place lists before the byte budget: the nearest; `more` still counts the rest. */
@@ -36,7 +37,9 @@ function identify(L: EdgeLedger, soul: EdgeSoul, id: string, caps: EdgeCapabilit
       .filter(([cid, e]) => e.pose && e.def && !e.human && !e.support?.on && e.support?.kind !== 'in-hand' && !L.concealedThing?.(cid) && (() => {const at = L.places.containing(e.pose!.p[0]!, e.pose!.p[2]!, 0); return at.some(p => p.id === id) && at.every(p => L.knowledge.knows(soul.soulId, p.id));})())
       .sort(([, a], [, b]) => away(a.pose!.p) - away(b.pose!.p));
     const contents = standing.slice(0, PLACE_CONTENTS).map(([cid, e]) => child(cid, e));
-    return {id, kind: 'place', name: place.name, ...(parts.length ? {parts} : {}), ...(contents.length ? {contents} : {}), ...(standing.length > PLACE_CONTENTS ? {cutOff: standing.length - PLACE_CONTENTS} : {})};
+    const given = (place as {doors?: CatalogDoor[]}).doors, interior = place.carrier || given?.length ? undefined : L.spots.interiors.find(i => i.place === id && i.doors.length);
+    const doors = place.carrier ? undefined : given?.length ? given : interior ? placeDoors(place, interior) : undefined;
+    return {id, kind: 'place', name: place.name, ...(doors ? {doors: doors.map(d => ({...d, act: doorMove(d)}))} : {}), ...(parts.length ? {parts} : {}), ...(contents.length ? {contents} : {}), ...(standing.length > PLACE_CONTENTS ? {cutOff: standing.length - PLACE_CONTENTS} : {})};
   }
   const mind = L.host.minds.get(id);
   if (mind) {

@@ -21,7 +21,7 @@ for (const [label, startX] of [['a bystander on the west shelf point', 74], ['a 
     const w = await coreAWorld(4), [a, b, c, d] = w.souls; t.after(w.close);
     const place = 'eden-library-1', beyond = label.startsWith('every');
     for (const s of [a, b, c, d]) {
-      const go = await w.http(s, 'POST', '/v1/edge/act', {verb: 'go', target: {place}});
+      const go = await w.http(s, 'POST', '/v1/edge/act', {capability: `walk:${place}`});
       assert.equal(go.body.accepted, true, JSON.stringify(go.body));
       await w.ticks(2400, () => !w.open(s, go.body.receipt.id));
       assert.equal(w.receipt(s, go.body.receipt.id).phase, 'completed', 'initial library walk completes');
@@ -42,7 +42,7 @@ for (const [label, startX] of [['a bystander on the west shelf point', 74], ['a 
     await w.put(b, [startX, -6.5]); await w.ticks(40);
     // The east case's start lies against a table, so its put lands on the nearest clear point (static geometry).
     assert.ok(Math.hypot(w.pos(b)[0] - startX, w.pos(b)[1] + 6.5) < (label.includes('east') ? 1 : 0.05), `the reader starts where placed: ${w.pos(b)}`);
-    const read = await w.http(b, 'POST', '/v1/edge/act', {verb: 'read', target: {place, seconds: 20}});
+    const read = await w.http(b, 'POST', '/v1/edge/act', {capability: `read:${place}`, params: {seconds: 20}});
     assert.equal(read.body.accepted, true, JSON.stringify(read.body));
     const engine = w.engine as unknown as {programs: Map<string, {steps: {verb: string; params: Record<string, unknown>}[]}>; programOf(actor: string): string | null};
     const prog = engine.programs.get(engine.programOf(b.entityId)!)!;

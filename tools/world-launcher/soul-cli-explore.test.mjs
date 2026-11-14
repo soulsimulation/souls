@@ -26,6 +26,6 @@ test('explore and around preserve query routes, unknown candidates and explicit 
   assert.deepEqual(await cli(command,'live music'),{...around,route:routes['live music']},'purpose choices retain executable IDs and evidence');
   assert.deepEqual(await cli(command,'unknown place'),{...around,route:routes['unknown place']},'unknown routes and ranked candidates must not disappear');
  }
- const missing=await cli('explore','old server query');assert.equal(missing.route.query,'old server query');assert.equal(missing.route.found,false);assert.match(missing.route.reason,/resolve.*caps/);
+ const missing=await cli('explore','old server query');assert.equal(missing.route.query,'old server query');assert.equal(missing.route.found,false);assert.match(missing.route.reason,/find.*caps/);
  assert.deepEqual(seen.map(x=>x.query),[null,'harbour west pier','live music','unknown place','harbour west pier','live music','unknown place','old server query']);assert.ok(seen.every(x=>x.path==='/v1/edge/around'));
 });

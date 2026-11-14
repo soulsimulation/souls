@@ -146,6 +146,9 @@ export interface Engine {
   stopBodiesV1?(bodies: string[], why: { code: string; message: string }, from?: number): { stopped: number; deadlines: number };
   /** #1369 quarantine/1: bodies whose own state is broken, as `entity.corrupt` keys; and holding one where it last stood whole. */
   corruptBodiesV1?(): ContainedKeyV1[];
+  /** #1377: the entity an invariant that throws (`engine.thrown`, naming nobody) was reading, if one alone explains it. It
+   *  takes entities out and puts them back while it reads: call it on a scratch restore of the head, never the live engine. */
+  thrownSourcesV1?(): string[];
   /** #1521 stand-height/2's one-time repair: the bodies on level 0 of a world with no ground field standing more than a step above
    *  their floor, and where each can stand (a pure read; the host logs it), and standing them there (as logged). */
   planAboveFloorV2?(): { id: string; p: [number, number, number] }[];

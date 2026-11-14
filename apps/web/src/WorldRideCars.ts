@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-/** D1: a simple open car drawn at a native ride carrier's pose (a god ferris wheel or carousel: the thing itself stays put
- *  and its decorative gondolas keep their own clock; the rider is carried by this car). Car-local space as the balloon
+/** D1: a simple open car drawn at a native ride carrier's pose (a god carousel, or a ferris wheel without gondolas of its
+ *  own: the thing itself stays put; the rider is carried by this car). A wheel with hanging gondolas gets none (#2198): its
+ *  rider goes round in one of them (gen-mesh/motion.ts rideTurn). Car-local space as the balloon
  *  basket's: origin = floor centre (Core's floorY, where riders stand), +x forward. Presentation only. */
 const L = 1.5, W = 1.2, WALL = 0.8, T = 0.06, BAR = 2.3;
 export class WorldRideCars {
