@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {BASELINE_CAP_MS, LevelState, LoadMonitor, QUIET_TICK_ALPHA, QuietBaseline, QuietTick, STEP_DOWN_MS, type Signals} from './load/monitor.ts';
 import {liveOf, newSharedLoad, S} from './load/shared.ts';
+import {newSharedApi} from './load/api-times.ts';
 import {attachBootSlots, bootPhase, bootSlots, bootTick} from './load/boot-progress.ts';
 
 const calm: Signals = {service: 1, loopP99Ms: 5, heapFrac: 0.2, gcFrac: 0.01, oldestMs: 0};
@@ -65,6 +66,37 @@ test('levels: a genuine overload still enters and holds amber (service < 0.8, or
   for (; t <= 3 * STEP_DOWN_MS; t += 250) between.update(at({loopP99Ms: 150, service: 0.92}), t);
   assert.equal(between.level, 'amber', 'a tick that is not served keeps the 100 ms leave band');
   assert.equal(new LevelState().update(at({loopP99Ms: 1100, service: 1}), 0), 'red', 'red is unchanged');
+});
+
+test('levels: the step down to green disarms queue age only when the queue is past 2 s on that sample (#2124 nit, PR #2191)', () => {
+  const down = (oldestMs: number) => { const l = new LevelState(); let t = 0; l.update(at({oldestMs: 5000}), t); l.update(at({oldestMs}), t += 1000); l.update(at({oldestMs}), t += STEP_DOWN_MS); assert.equal(l.level, 'green'); return {l, t}; };
+  const fresh = down(1900);
+  assert.equal(fresh.l.update(at({oldestMs: 2100}), fresh.t + 250), 'amber', 'a 1.9 s queue on the step-down sample stays armed: a fresh queue past 2 s raises the hint');
+  const old = down(2500);
+  assert.equal(old.l.update(at({oldestMs: 2600}), old.t + 250), 'green', 'a 2.5 s queue on the step-down sample is disarmed');
+});
+
+test('levels: each entry into amber names its signals; what holds amber is the band a signal is not under, else the dwell (#2124)', () => {
+  const l = new LevelState();
+  l.update(at({loopP99Ms: 250, oldestMs: 3000}), 0); assert.deepEqual(l.amberEntry, ['loop', 'queue']);
+  assert.deepEqual(l.amberHolds(at({loopP99Ms: 150, service: 0.93})), ['loop']);
+  assert.deepEqual(l.amberHolds(at({loopP99Ms: 150})), ['dwell'], 'a served tick: loop holds only above its enter band');
+  assert.deepEqual(l.amberHolds(at({service: 0.85, heapFrac: 0.65})), ['service', 'heap']);
+  assert.deepEqual(l.amberHolds(at({oldestMs: 9000})), ['dwell'], 'the queue never holds amber');
+  const r = new LevelState(); let t = 0;
+  r.update(at({service: 0.3}), t); r.update(calm, t += 1000); r.update(calm, t += STEP_DOWN_MS);
+  assert.equal(r.level, 'amber'); assert.deepEqual(r.amberEntry, ['red'], 'the step down from red');
+});
+
+test('the tick window carries the seconds at amber per holding signal and the entries per cause (#2124)', () => {
+  let wall = 1_000_000, oldestMs = 3000;
+  const host = {engine: {world: {tick: 0}}, tickMs: [] as number[], paused: false, pace: 1, baseRate: 1, running: false, clockAvailable: true};
+  const m = new LoadMonitor({host, now: () => wall, shared: newSharedLoad(), api: newSharedApi(), queue: () => ({depth: 1, oldestMs})});
+  assert.equal(m.sample(), 'amber');
+  oldestMs = 0; wall += 4000; m.sample(); wall += 6000; m.sample();
+  assert.deepEqual(m.tickWindow?.amberEntries, {service: 0, loop: 0, heap: 0, queue: 1, red: 0});
+  assert.deepEqual(m.tickWindow?.amberS, {service: 0, loop: 0, heap: 0, dwell: 10});
+  assert.equal(m.tickWindow?.levels.amber, 1);
 });
 
 test('levels: black on tick service < 0.2 only after 30 s of it', () => {
