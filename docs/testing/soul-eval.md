@@ -108,6 +108,11 @@ Every item starts where a new Soul arrives. Its check is one of `place`, `placeK
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.
 
+`tools/playtest/eval/battery/positions-v1.json` (#1975) holds ten places a person might point to (a side, a corner, beside
+or between things, a door, a middle, near a spot, beside another Soul, halfway, farthest from everyone). Its `check` only
+ends the episode when the Soul reports; each item's `position` (a target and `within` metres) is judged by hand from the
+Soul's final position in `GET /v1/edge/live`, which the runner does not read.
+
 ## Hostile cases
 
 `tools/playtest/eval/battery/hostile-v1.json` is a case battery (#1950): each case puts several scripted Souls on one fresh

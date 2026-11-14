@@ -1,5 +1,6 @@
 import {mountSoulRuntimePublication} from './soul-runtime-publication.ts';
 import {mountClientCounter, type EdgeClients} from './client-version.ts';
+import {mountClientMinimum} from './client-minimum.ts';
 import {soulClientManifest} from './soul-client-manifest.ts';
 import {mountContextViews} from './god/context-views.ts';
 import {AutoPortraits} from './portrait/auto-portraits.ts';
@@ -181,6 +182,7 @@ export function buildApp(d: Deps) {
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
     load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
   (app as unknown as {edgeClients?: EdgeClients}).edgeClients = mountClientCounter(app, d.db.db, c => d.souls.soulFromToken(bearer(c))?.id ?? null); // #1936: x-soul-client per Soul and day
+  mountClientMinimum(app, {served: () => soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile), isSoul: c => !!d.souls.soulFromToken(bearer(c))}); // #1937: a too-old client is told the command that fixes it
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
   const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
@@ -297,7 +299,7 @@ export function buildApp(d: Deps) {
     // #1326: the tick's wall age, and `stalled` once the clock owes ticks and none has completed past its threshold
     const clock = mon?.clock();
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
-      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
+      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
       ...(mon ? {load: mon.health()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.

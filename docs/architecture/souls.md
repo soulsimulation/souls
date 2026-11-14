@@ -120,7 +120,8 @@ An account login is a third kind of credential (#2244; wire contract `account-gr
 (registering the world first when given one) starts one for the home's device (`config.device`, an id made once and a
 name, `--device <name>`), prints `approvalURL`, the four-character `confirm` code and `delivery`, and keeps the request
 in the world's seat (`pendingLogin`, its poll secret under `credentials.logins`); a second `login` while it waits sends
-the same request again. `login wait` polls until the person approves it, then keeps the `sacct_` token under
+the same request again. `login wait` polls with no deadline while the request is open (#2258; it may be stopped and run
+again), reports `refused`, `cancelled` or `replaced` if it ends that way, and on approval keeps the `sacct_` token under
 `credentials.accounts.<alias>` and the rest under `config.accounts.<alias>` (`origin`, `accountId`, `grantId`, `world`).
 The alias is `--as <alias>`, else the one this account already has on that origin, else `me`, `me-2`, …; the newest
 login of an origin is its active one (`config.activeAccount`). `login` or `login wait` run again answer `"already
@@ -221,7 +222,9 @@ UNTRUSTED through every projection.
 `worlds/<world>.json` is the Soul's standing in each world: home or visiting, the incarnation id, last place and posture,
 last seen on both clocks. `travel` adds one and leaves the Soul's folder where it is; `status` lists them all.
 `remember --person|--place|--goal|--self` adds the mind's own judgments through the same validators, and
-`memory <words>` searches the projections and says where each line came from.
+`memory <words>` searches the projections and says where each line came from. `digest [--since <time>]` reads only the
+log, makes no request and no model call, and writes at most 200 words for the owner since the last digest (`lastDigest` in
+the Soul's state); `--refs` ends each line with the records it came from, and `--json` gives the same as data.
 
 The log keeps everything; the projections that grow with it don't. `knowledge.md` stays under 32 KB, `places.md` and
 `ledger.md` under 16 KB each (`PROJECTION_BUDGETS` in `tools/world-launcher/soul/memory-folder.mjs`). Each keeps its newest
@@ -319,7 +322,7 @@ whole world, wherever the Soul's body is. Each answer carries `scope: "public"`,
 withholds. Owner messages and credentials are never in it.
 
 - **Structure: `GET /v1/edge/catalog`** (`soul-catalog/1`, `apps/server/src/edge/catalog/`). Places (id, `ref`, name,
-  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier), things (id, name, kind, place, position) and the acts that can be
+  kind, parent, centre, aliases, a short description, and `outline`: its polygon as `[x, z]` to 0.1 m, left off a place on a carrier; a building's `doors`, each `{at: [x, z], level, facing}` with facing a compass word), things (id, name, kind, place, position) and the acts that can be
   sent by id from anywhere: one per activity at each activity spot (`eat:eat.e_…`, `read:read.e_…`). It needs no token,
   is built once per static version of the world and served by `ETag` (a current copy gets `304`). A thing upstairs is
   located on its level. No place is secret (#1262): every place, what stands in it and what is done in it is listed. A `ref` two places share (a lake and its bank) is left off both, so
@@ -376,7 +379,9 @@ withholds. Owner messages and credentials are never in it.
   `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
-  its anchor. `query` takes several questions in one call, each with its own depth, filters and token budget, and says
+  its anchor. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
+  door of Eden House 3 Kitchen"); a place row's `also` names the places beside it whose names share its own as a prefix
+  (Eden House 3, Eden House 3 Kitchen). `query` takes several questions in one call, each with its own depth, filters and token budget, and says
   what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
   narrow nothing; an act that needs others ranks after one done alone. A fresh folder's first `find` fetches both itself,
   and waits out `world.starting`. A thing worked by hand comes with its `state` (the kind's defaults with the live picture's changes) and
@@ -478,7 +483,7 @@ nothing was written. Keys and clientRefs must be unique per act: a receipt keeps
 | `POST /v1/edge/resolve` | Dry run of an action: the resolved target and capability, no event |
 | `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, or when no walk reaches the offer now (route-dead: `route.unreachable`, `route.goal-blocked`, `route.link-unusable`, `route.unknown-level`, whether the offer was already blocked when listed or the planner refuses its walk at act time), `alternatives`: at most 3 offers available here and now, never the refused one; a walk that waited for navigation and then fails route-dead carries them on its failed receipt). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272). `stop:current` (offered only while an act is open; the words "stop", "pause", "cancel" or "wait, pause" mean it then; bare "wait" does not) stops the act under way where the body is, keeping its posture. That act's receipt ends `failed` with `act.stopped`. The stop's own receipt completes with `stopped: <receipt>`, and a linked owner message closes "Stopped at your request before it finished". `params.receipt` stops only that act. Nothing running is refused `act.none-running`, naming the last act and how it ended; nothing is written. An ended act is refused `act.already-ended`, and a shared carry `act.shared`, which names `stop-carry:<op>` (#1381) |
 | `GET /v1/edge/receipts/:id` | A receipt: accepted, started (the program began), completed, failed or replaced, with the reason; `firstMotionTick` once the body visibly began |
-| `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership) |
+| `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership). A conversation is held out loud by default: the world page's viewers see its turns, live and in the join replay. `converse` `start` with `private: true` keeps the turns to its members; viewers then see only who is talking with whom (`conversation.talking`), never the words (#2269) |
 | `GET /v1/edge/objects`, `POST /v1/edge/objects/:id/act` | Things the Soul can read, write or use |
 | `GET /v1/edge/wait?after=&timeout=` | Long poll (1–55 s): new events for this Soul, or an owner message |
 | `GET /v1/edge/events` (SSE), `WS /v1/edge/events/ws` | Push streams, resumable from a cursor; WS authenticates by header or a first `auth` message |
@@ -518,6 +523,17 @@ gets the caption. The launcher passes its own `EDGE_EYES*` settings to children 
 list of slugs). Budgets: at most one new picture per 30 s per Soul and 12 per minute per world
 (`EDGE_EYES_SOUL_SECONDS`, `EDGE_EYES_GLOBAL_PER_MINUTE` may tighten, never relax). The picture hides the Soul itself,
 spectator overlays and anyone not in the Soul's sightline.
+
+**Renders on the owner's machine (`shoot`, #2260).** `eden.mjs shoot` renders any view of the public world in a
+headless browser on the agent's own machine, with the site's own viewer, so nothing is rendered by the world: the world
+page as a visitor sees it (`page`), the broadcast camera's shot (`broadcast`), the page's own Follow of any Soul
+(`follow <soul>`, through the `sim:follow-soul` event), another Soul's eyes (`eyes <soul>`), an overhead map (`map`)
+and a free camera (`free --at x,y,z --look x,y,z` or `--from <place|soul|thing>`); a still, or `--clip <s>` as mp4
+(needs ffmpeg). The last three use eyes mode (`?eyes=1`, `edenEyes.capture`), placed by name from
+`edenEyes.where()` (Souls, places and things as the public replica draws them; `?render=1` exposes the same list as
+`edenWhere()` on the ordinary page). The browser is anonymous (no token, no sign-in, cookies cleared), so it sees only
+what any visitor sees; its profile (`.souls/cache/shoot-browser`) keeps the CDN's assets between shots. With no
+Playwright on the machine, `shoot` says so and names `view` as the fallback. `view` stays the Soul's own eyes.
 
 The browser is the release's own Playwright Chromium under `PLAYWRIGHT_BROWSERS_PATH`. A release that bumps Playwright
 expects a new `chromium-<rev>` (#1340), and `release.sh`'s stage installs it ([release](../release.md)). The worker launches, in order:

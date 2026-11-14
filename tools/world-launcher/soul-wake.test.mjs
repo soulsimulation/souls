@@ -8,8 +8,8 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ACT_ENDED_GRACE_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseBudget, parseRule, speechDue, spokeNow, view } from './soul/wake.mjs';
-import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState } from './soul/eden.mjs';
+import { ACT_ENDED_GRACE_MS, AWAY_MS, BUDGETS, EVERY_MIN, HELD_MS, SPEAKER_MS, awaySince, awayText, back, budgetView, change, confirm, deliver, enqueue, evaluate, expire, fresh, parseAway, parseBudget, parseRule, saw, speechDue, spokeNow, view, wentAway } from './soul/wake.mjs';
+import { FOLLOW_MAX, HEARTBEAT_EVERY_MIN, foldAddressed, foldHeard, followLine, loadServeState, pendingNotes } from './soul/eden.mjs';
 import { indexCatalog } from './soul/catalog.mjs';
 
 const T0 = 1_800_000_000_000;
@@ -147,11 +147,14 @@ test('A5: a rule fires at most once per --every window (default 300 s), queued a
 
 /** A stand-in world: an inbox that hands out what the test posts, an event stream with nothing on it. */
 async function world(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'souls-wake-')), w = { dir, inbox: [], env: {} };
+  const dir = mkdtempSync(join(tmpdir(), 'souls-wake-')), w = { dir, inbox: [], env: {}, line: null };
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://w'), p = url.pathname;
-    for await (const _ of req) { /* drain */ }
+    let body = ''; for await (const c of req) body += c;
     const json = (status, v) => { if (!res.destroyed) { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(v)); } };
+    if (p === '/v1/edge/self/link') return json(200, { link: { state: 'connected' }, now: w.line });   // #1933: the public line
+    if (p === '/v1/edge/self/now') { w.line = JSON.parse(body).text; return json(200, { now: w.line }); }
+    if (/^\/v1\/edge\/inbox\/[^/]+\/ack$/.test(p)) { const b = JSON.parse(body || '{}'); if ('now' in b) w.line = b.now; return json(200, { acked: true }); }
     if (p === '/v1/edge/inbox/listen') { await new Promise((r) => setTimeout(r, Number(url.searchParams.get('timeoutMs')) > 0 ? 200 : 0)); return json(200, { inbox: { connected: true }, backlog: w.inbox }); }
     if (p === '/v1/edge/wait') { await new Promise((r) => setTimeout(r, 200)); return json(200, { events: [], cursor: url.searchParams.get('after') ?? 'c_0' }); }
     return json(404, { error: { code: 'not-found', message: p } });
@@ -186,9 +189,9 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   assert.equal(r.code, 0, r.err); assert.equal(r.json.added, 'w2'); assert.equal(r.json.serving, undefined, 'the running serve made the change');
   assert.ok(await until(() => w.state().wake?.cursor), 'the 2-second timer takes the engine\'s cursor');
   w.inbox.push({ id: 'msg_1', text: 'come to the hall', sentAt: T0 });
-  const queued = await until(() => w.state().wake.queue.find((q) => q.id === 'owner-message'));
-  assert.equal(queued.kind, 'owner-message'); assert.match(queued.why, /msg_1/); assert.ok(Date.parse(queued.at));
-  assert.ok(view(w.state().wake).rules.find((x) => x.id === 'owner-message').lastFired, 'its last firing is kept');
+  assert.ok(await until(() => view(w.state().wake).rules.find((x) => x.id === 'owner-message').lastFired), 'its last firing is kept');
+  // #1981: an always-on kind reaches the mind by its own path, so its firing queues nothing
+  assert.deepEqual(w.state().wake.queue, []);
 
   assert.equal((await w.cli('serve', '--stop')).code, 0);
   await until(async () => (await w.cli('serve', '--status')).json?.serving === false);
@@ -196,7 +199,7 @@ test('A1: wake lists, adds and removes rules, in serve\'s state file, with or wi
   r = await w.cli('wake', 'remove', 'w1');
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(r.json.rules.map((x) => x.id), ['owner-message', 'speech-to-me', 'plan-stopped', 'act-ended', 'plan-finished', 'event-starting', 'w2'], 'kept across the restart');
-  assert.equal(r.json.queued, 1, 'the queue too');
+  assert.equal(r.json.queued, 0, 'nothing waits for a reader that never comes (#1981)');
   assert.ok(r.json.rules.find((x) => x.id === 'owner-message').lastFired);
 });
 
@@ -471,7 +474,7 @@ test('#1932 A2: wake heartbeat prints the prompt and the gated command, keeps th
   // #2119 A4: one paragraph; with a goal and nothing from the owner it goes to help living, with no goal and nothing new it stops at once.
   assert.ok(!prompt.includes('\n'), 'one paragraph');
   assert.match(prompt, /pending\. If it holds owner messages, act on them as the skill says, then stop\./);
-  assert.match(prompt, /If it holds none and its brief lists a goal \(a line with Next:\), run node \S+ help living and take the one step it gives, then stop\./);
+  assert.match(prompt, /If it holds none and its brief lists a goal \(a line with Next:\), run node \S+ help living and do its steps in order, none skipped, then stop\./);
   assert.match(prompt, /If it has no owner message and no goal, and reports nothing new \(no ended acts, events, speech or wakes\), stop now and do nothing else\. Otherwise act on what it reports, as the skill says, then stop\.$/);
   assert.equal((await w.cli('wake', 'heartbeat', '--every', '0')).code, 1);
 
@@ -510,6 +513,116 @@ test('#2076: serve --stop answers after serve exits; the folder is removed right
     rmSync(dir, { recursive: true });
     assert.equal(existsSync(dir), false, `round ${i}: removed`);
   }
+});
+
+// #1981: small client fixes from the eight-hour living run.
+test('#1981 A4: speech-to-me fires (its rule keeps the firing) but queues nothing; pending says speech is under addressed', () => {
+  const st = serveState({ wake: {} });
+  step(fresh().rules, st, T0);
+  const r = step(fresh().rules, { ...st, addressed: [{ seq: 1, from: 'Bo', soulId: 's_bo', text: 'hi' }], addressedSeq: 1 }, T0 + 1_000);
+  assert.deepEqual(r.fired.map((f) => f.kind), ['speech-to-me'], 'the rule still fires');
+  assert.ok(ruleOf(r, 'speech-to-me').lastFired);
+  assert.deepEqual(enqueue([], r.fired), [], 'and leaves no entry for a reader: the speech itself comes as addressed');
+  assert.deepEqual(enqueue([], [{ id: 'owner-message', kind: 'owner-message', why: 'x', at: 'a' }, { id: 'plan-stopped', kind: 'plan-stopped', why: 'y', at: 'a' }, { id: 'w1', kind: 'soul-arrives', why: 'Mira arrived', at: 'a' }]).map((q) => q.id), ['w1'], 'nor do the other always-on kinds');
+  assert.match(pendingNotes({ ownerMessages: [], addressed: [{ text: 'hi' }] }, '').speechNote, /under addressed: that is the speech-to-me wake\. It is never also under wakes\./);
+  assert.equal(pendingNotes({ ownerMessages: [] }, '').speechNote, undefined, 'no speech, no note');
+});
+
+test('#1981 A3: pending on a wake with no owner message and a goal ends with help living\'s steps in order', () => {
+  const brief = 'Open commitments:\n- [friends] make friends Next: talk to Bo';
+  assert.match(pendingNotes({ ownerMessages: [] }, brief).next, /^No owner message: run node eden\.mjs help living and do its steps in order, none skipped \(whatson and look, one plan, remember --next, now\), then stop\.$/);
+  assert.equal(pendingNotes({ ownerMessages: [{ id: 'msg_1' }] }, brief).next, undefined, 'an owner message comes first');
+  assert.equal(pendingNotes({ ownerMessages: [] }, 'Open commitments:\n- a promise').next, undefined, 'no goal, no reminder');
+});
+
+test('#1981 A2: help living names the 1,800 s cap and says to chain or repeat activities; heartbeats over 30 minutes say so too', async (t) => {
+  const w = await world(t);
+  const living = (await w.cli('help', 'living')).out;
+  assert.ok(living.split(/\s+/).filter(Boolean).length <= 600, 'help living stays within 600 words');
+  assert.match(living, /One activity lasts at most 1,800 s .* so for a longer gap chain activities, or\s+repeat one, each within its cap/s);
+  assert.match(living, /do steps 1 to 6 in order and skip none/);
+  const long = (await w.cli('wake', 'heartbeat', '--every', '45')).json;
+  assert.equal(long.gap, '45 minutes is longer than one activity (at most 1800 s): help living has the Soul chain activities, or repeat one, to cover the gap.');
+  for (const every of ['30', '15']) assert.equal((await w.cli('wake', 'heartbeat', '--every', every)).json.gap, undefined, `${every} minutes fits one activity`);
+  assert.match((await w.cli('wake', 'heartbeat')).json.gap, /^60 minutes/, 'the default heartbeat is longer than one activity');
+});
+
+// #1933: the mind is away. A fake clock: T0 is 2027-01-15 08:00 UTC.
+test('#1933 A1, A2: away after 10 minutes of a wake or owner message no acting command answered, or of no command; the line says since when or the next check', () => {
+  let w = saw(fresh(), 'command', T0);
+  assert.equal(awaySince(w, T0 + 9 * MIN, T0), null);
+  assert.equal(awaySince(w, T0 + 10 * MIN, T0), T0, 'no follower and no command for 10 minutes');
+  assert.equal(awaySince(fresh(), T0 + 10 * MIN, T0), T0, 'serve\'s start stands in for a command never seen');
+  w = saw(w, 'owed', T0 + MIN);   // an owner message arrived
+  for (let t = T0 + MIN; t < T0 + 11 * MIN; t += MIN) w = saw(w, 'command', t);   // listen --follow polls, and pending, but nothing acts
+  assert.equal(awaySince(w, T0 + 11 * MIN, T0), T0 + MIN, 'a follower keeps polling: still away, from the message');
+  assert.equal(saw(w, 'owed', T0 + 5 * MIN).mind.owed, T0 + MIN, 'the first unanswered one counts');
+  w = saw(w, 'acting', T0 + 11 * MIN);
+  assert.equal(awaySince(w, T0 + 20 * MIN, T0), null, 'an acting command answered it');
+  assert.equal(AWAY_MS, 10 * MIN);
+
+  assert.equal(awayText(T0 + MIN, undefined, T0 + 11 * MIN), 'mind away since 08:01 UTC');
+  const hb = { every: 60, at: new Date(T0 - 30 * MIN).toISOString() };   // kept at 07:30, every hour
+  assert.equal(awayText(T0 + MIN, hb, T0 + 11 * MIN), 'mind away, next check about 08:30 UTC');
+  assert.equal(awayText(T0 + MIN, hb, T0 + 31 * MIN), 'mind away, next check about 09:30 UTC', 'past 08:30: the next one');
+});
+
+test('#1933 A2, A3: going away keeps the line; the next acting command restores it, only while it still says away', () => {
+  const text = awayText(T0, undefined, T0 + 10 * MIN);
+  const away = wentAway(saw(fresh(), 'command', T0), T0, text, 'rowing to the mill');
+  assert.deepEqual(away.mind.away, { since: T0, text, stored: 'rowing to the mill' });
+  let b = back(away, text);
+  assert.equal(b.restore, 'rowing to the mill', 'restored');
+  assert.equal(b.wake.mind.away, undefined); assert.equal(b.wake.mind.last, T0, 'the rest of the mind state stays');
+  assert.equal(back(wentAway(fresh(), T0, text, null), text).restore, null, 'no line before: the line is cleared');
+  b = back(away, 'gone fishing');
+  assert.equal(b.restore, undefined, 'someone changed the line since: it stays'); assert.equal(b.wake.mind.away, undefined);
+  assert.equal(back(fresh(), text).restore, undefined, 'not away: nothing to restore');
+});
+
+test('#1933 review: while away, a next check that has passed is renewed to a future time, and the kept line still comes back', () => {
+  const hb = { every: 60, at: new Date(T0 - 30 * MIN).toISOString() };   // kept at 07:30, every hour
+  const first = awayText(T0, hb, T0 + 10 * MIN), away = wentAway(fresh(), T0, first, 'rowing to the mill');
+  assert.equal(first, 'mind away, next check about 08:30 UTC');
+  const later = T0 + 95 * MIN, again = awayText(away.mind.away.since, hb, later);   // 09:35: 08:30 has passed
+  assert.equal(again, 'mind away, next check about 10:30 UTC');
+  assert.ok(Date.parse(`2027-01-15T${again.match(/\d\d:\d\d/)[0]}:00Z`) > later, 'a future time');
+  const renewed = wentAway(away, away.mind.away.since, again, away.mind.away.stored);
+  assert.equal(back(renewed, again).restore, 'rowing to the mill');
+});
+
+test('#1933 A3: an acting command that sets its own line wins; the kept one is dropped', () => {
+  const text = awayText(T0, undefined, T0 + 10 * MIN), b = back(wentAway(fresh(), T0, text, 'rowing to the mill'), text, true);
+  assert.equal(b.restore, undefined); assert.equal(b.wake.mind.away, undefined);
+});
+
+test('#1933 A4: wake away off turns it off, and on again', () => {
+  assert.deepEqual(parseAway(['off']), { away: 'off' });
+  assert.throws(() => parseAway(['maybe']), /wake away <on\|off>/);
+  const off = change(saw(fresh(), 'command', T0), parseAway(['off'])).wake;
+  assert.equal(awaySince(off, T0 + 60 * MIN, T0), null, 'off: never away');
+  assert.equal(view(off).away, 'off');
+  const on = change(off, parseAway(['on'])).wake;
+  assert.equal(awaySince(on, T0 + 60 * MIN, T0), T0); assert.equal(view(on).away, 'on');
+});
+
+test('#1933 A2, A3: through serve: the line goes away and an acting command puts it back; one with its own line wins', async (t) => {
+  const w = await world(t);
+  w.env = { EDEN_TIME_SCALE: '0.01' };   // away after AWAY_MS × 0.01 = 6 s, looked at every 0.3 s
+  w.line = 'rowing to the mill';
+  assert.equal((await w.cli('serve')).code, 0);
+  assert.ok(await until(() => /^mind away since \d\d:\d\d UTC$/.test(w.line ?? ''), 15_000), `away: ${w.line}`);
+  assert.equal(w.state().wake.mind.away.stored, 'rowing to the mill');
+  let r = await w.cli('ack', 'msg_1', 'on my way');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(w.line, 'rowing to the mill', 'restored');
+  assert.equal(w.state().wake.mind.away, undefined);
+
+  assert.ok(await until(() => /^mind away/.test(w.line ?? ''), 15_000), 'away again');
+  r = await w.cli('ack', 'msg_2', 'coming', '--now', 'walking over');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(w.line, 'walking over', 'the command\'s own line wins');
+  assert.equal(w.state().wake.mind.away, undefined, 'the kept line is dropped');
 });
 
 // #1931: three more kinds, on recorded state. Envelopes as the world's classified stream sends them (envelope.ts).

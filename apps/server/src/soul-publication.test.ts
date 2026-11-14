@@ -34,7 +34,7 @@ test('the capture gets the world URL, name and a valid window code; no code or a
     const out = fillInstructions(capture, 'https://spoofed.test/w/x', world, code, base);
     assert.ok(out.startsWith(`# Create a Soul in ${world}\n\nWorld: ${base} (the world's name is **${world}**;`));
     assert.equal(out.split(`${base}/eden.mjs`).length - 1, 1); assert.equal(out.split(`register ${base}\n`).length - 1, 1);
-    assert.equal(out.split(` --for ${code}`).length - 1, 2); assert.match(out, /open Sim window/);
+    assert.equal(out.split(` --for ${code}`).length - 1, 3);   // create, a renamed create, login (#2257) assert.match(out, /open Sim window/);
     for (const gone of [CAPTURE.code, 'eden-2026', 'Eden 2026', 'spoofed.test']) assert.ok(!out.includes(gone), gone);
     assert.ok(out.includes('`pair <soulId> --for <CODE>`'), 'the generic pairing placeholder is not a captured code');
   }

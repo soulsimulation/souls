@@ -36,7 +36,7 @@ export function edgeSchema() {
       {method: 'POST', path: '/v1/edge/act', body: '{capability: <id | plain words>, params?, clientRef?, strict?: true (offered ids only; words are refused with candidates)}', idempotent: true, limit: '60/min'},
       {method: 'GET', path: '/v1/edge/receipts/:id'},
       {method: 'POST', path: '/v1/edge/say', body: '{text ≤500}', idempotent: true},
-      {method: 'POST', path: '/v1/edge/converse', body: '{op: start|accept|decline|say|leave|ask, with?, conversation?, text?}', idempotent: true},
+      {method: 'POST', path: '/v1/edge/converse', body: '{op: start|accept|decline|say|leave|ask, with?, conversation?, text?, private?}; out loud by default (viewers see turns); start with private:true and viewers see only who is talking', idempotent: true},
       {method: 'GET', path: '/v1/edge/events', produces: 'text/event-stream', query: {cursor: 'resume id or Last-Event-ID', kinds: 'comma list; prefix.*', minSalience: '0..3; also salience>=N', format: 'envelope (default) | raw', pad: '0: no 2KB padding comment'}, limit: '30 connects/min'},
       {method: 'GET', path: '/v1/edge/events/ws', protocol: 'WebSocket', query: {cursor: 'resume', kinds: '…', minSalience: '…', format: '…'}, messages: {server: ['hello', 'event', 'cursor', 'gap', 'heartbeat', 'bye', 'error'], client: ['{"type":"auth","token"} (first message, when no Authorization header)', '{"type":"filter","kinds":[…],"minSalience":N}']}},
       {method: 'GET', path: '/v1/edge/events/digest', query: {since: 'cursor'}, note: 'backlog summary ≤~400 tokens'},

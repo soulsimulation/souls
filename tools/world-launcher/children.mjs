@@ -48,6 +48,7 @@ export class ChildPool {
    * sleepMs (lane P3): freezeIdle() freezes a world nobody asked anything for that long (see there); 0/absent: never.
    * exitMs (lane SLEEP): releaseIdle() lets a world frozen that long more exit, giving its memory back (see there).
    * guard (lane L1): overrides of guard.mjs GUARD (tests); random: the backoff's jitter source (tests).
+   * beforeStop(k) (#2299): awaited by stop() before SIGTERM, while the world still answers (its errors are ignored).
    */
   constructor(o) {
     this.o = o;
@@ -205,9 +206,11 @@ export class ChildPool {
   }
   /** Freeze idle worlds (lane P3, 2026-10-19): a running world nobody has asked anything for `sleepMs`, with no viewer
    *  and nothing in flight (busy), is stopped in place (SIGSTOP): no CPU at all, its memory and port kept, its clock
-   *  stopped (world time does not pass while it sleeps, as across a restart). The next request thaws it at once
-   *  (ensure), so waking costs nothing like a boot (Eden 2026 boots in ~8 s). Memory still comes back the old way:
-   *  makeRoom() evicts the least recently used idle world, frozen or not, when a boot needs room. */
+   *  stopped. #2235: world time must never stop, and a frozen world loses the time it is frozen (on SIGCONT the tick
+   *  loop drops all but a second of it). Freezing is allowed only for a world that proves nothing but pure time passes
+   *  before it would wake, and no world proves that yet (the audit on #2235: idle Souls' needs and reflexes change the
+   *  world every tick), so the launcher's default is off (launcher.mjs SLEEP_MS 0); this stays for explicit --sleep-ms
+   *  use only. The next request thaws it at once (ensure). */
   freezeIdle(now = Date.now()) {
     const ms = this.o.sleepMs ?? 0;
     if (!(ms > 0) || this.closing || this.fenced || this.gate) return [];
@@ -219,7 +222,8 @@ export class ChildPool {
     }
     return frozen;
   }
-  /** Give memory back (lane SLEEP, 2026-10-21): a world asleep (frozen) for `exitMs` more after it fell asleep (nobody
+  /** Give memory back (lane SLEEP, 2026-10-21; #2235: off by default with freezing, see freezeIdle; a cold boot catches
+   *  up the time it was away by ticking, apps/server/src/clock-catchup.ts): a world asleep (frozen) for `exitMs` more after it fell asleep (nobody
    *  asked anything for sleepMs + exitMs), still with no viewer and nothing in flight, is stopped: it saves its snapshot
    *  and its process exits, so its memory and its slot under maxRunning are free. Its next request cold-boots it from that
    *  snapshot (the same state), as for a world evicted under memory pressure. A world booted only for a passive read
@@ -343,15 +347,21 @@ export class ChildPool {
 
   /** Live (or booting) children other than `except`. */
   running(except) { return [...this.kids.values()].filter((k) => k.slug !== except && (k.child || k.adopted || k.status === 'starting' || k.status === 'restarting' || k.status === 'handover')).length; }
+  /** Is there room for one more world under the running cap and the free-memory floor, as things stand? */
+  roomFor(slug) {
+    const { maxRunning = Infinity, minFreeMb = 0 } = this.o;
+    // low: the host under its floor, or (lane P3) the unit within one world of its own MemoryHigh/Max: the worlds share
+    // the unit's cgroup (production 8G/9G), which fills long before the host does, and over MemoryMax a world is killed
+    const room = minFreeMb > 0 ? (this.o.unitRoom ?? cgroupHeadroomMb)() : null;
+    const full = this.running(slug) >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
+    return { full, low, room, ok: !full && !low };
+  }
   /** Make room for one more world under the running cap and the free-memory floor, sleeping idle worlds if needed. */
   async makeRoom(slug) {
     const { maxRunning = Infinity, minFreeMb = 0 } = this.o;
     for (;;) {
-      // low: the host under its floor, or (lane P3) the unit within one world of its own MemoryHigh/Max: the worlds share
-      // the unit's cgroup (production 8G/9G), which fills long before the host does, and over MemoryMax a world is killed
-      const room = minFreeMb > 0 ? (this.o.unitRoom ?? cgroupHeadroomMb)() : null;
-      const full = this.running(slug) >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
-      if (!full && !low) return;
+      const { full, room, ok } = this.roomFor(slug);
+      if (ok) return;
       if (!(await this.evictIdle(slug))) {
         const e = new Error(full ? `all ${maxRunning} world slots are in use; try again in a minute` : `the server is low on memory (under ${minFreeMb} MB free, or ${room ?? '?'} MB under the unit's limit); try again in a minute`);
         e.code = 'capacity'; throw e;
@@ -617,7 +627,8 @@ export class ChildPool {
     k.stopped = true; if (k.timer) { clearTimeout(k.timer); k.timer = null; }
     this.settlePending(k, Object.assign(new Error(`world ${slug} was stopped`), { code: 'stopping' }));
     const c = k.child; if (!c) { if (!k.held) k.status = 'stopped'; return; }
-    k.stopping = this.stopChild(k, c).finally(() => { k.stopping = null; });
+    // #2299: beforeStop(k) (the launcher, with --unload-still) records the world's horizon while it still answers; bounded there
+    k.stopping = (async () => { if (this.o.beforeStop) await this.o.beforeStop(k).catch(() => {}); await this.stopChild(k, c); })().finally(() => { k.stopping = null; });
     return k.stopping;
   }
   async stopChild(k, c) {
@@ -677,8 +688,6 @@ export function defaultCommand(world, port, o) {
     SOUL_LIFECYCLE: '1',
     // Souls fade and are lifted up after an hour without an action (green → yellow → red → beam-up), as on /w/eden (R4-LIVE)
     EDGE_FADING: '1',
-    // Nobody watching or acting here for 30 s: the clock runs at a quarter of its wall pace (apps/server/src/attention.ts)
-    SIM_UNWATCHED_PACE: process.env.SIM_UNWATCHED_PACE ?? '0.25',
     // Eyes (apps/server/src/edge/eyes): a Soul's first-person picture. Off unless the launcher's own environment sets EDGE_EYES
     // (`world` = each world renders its own public page), optionally scoped by EDGE_EYES_WORLDS. The browser path,
     // GPU mode, budgets and nice level come with it; the allowlist itself is not a server setting.
