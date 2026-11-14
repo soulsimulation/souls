@@ -195,3 +195,30 @@ test('B1: while it waits for the release, eyes re-posts ready every heartbeat', 
   const p = posted(f); assert.ok(p.filter((x) => x === 'pending release/eyes run=77.1 ready').length >= 3, p.join(' | '));
   assert.equal(p.at(-1), 'success release/eyes run=77.1 pass');
 });
+
+test('GPU runner: launch options are real Chrome by default; SHIP_GPU names a hardware flag set and SwiftShader is off', async () => {
+  const { launchOptions, softwareGl, GPU_CANDIDATES } = await import('./deploy/ship/browser.mjs');
+  assert.deepEqual(launchOptions(['--ignore-gpu-blocklist'], {}), { channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist'] });
+  const o = launchOptions(['--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'], { SHIP_GPU: 'angle-vulkan' });
+  assert.equal(o.channel, undefined, "Playwright's own Chromium");
+  assert.ok(o.args.includes('--disable-software-rasterizer') && o.args.includes('--use-angle=vulkan'));
+  assert.ok(!o.args.includes('--enable-unsafe-swiftshader'));
+  assert.throws(() => launchOptions([], { SHIP_GPU: 'swiftshader' }), /not one of/);
+  assert.deepEqual(GPU_CANDIDATES.map((c) => c.label), ['angle-vulkan', 'angle-gl-egl', 'egl']);
+  for (const r of ['ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)', 'llvmpipe (LLVM 15.0.7, 256 bits)', null]) assert.ok(softwareGl(r), String(r));
+  assert.ok(!softwareGl('ANGLE (NVIDIA, Vulkan 1.3.277 (NVIDIA NVIDIA RTX A5000 (0x00002231)), NVIDIA)'));
+});
+
+test('eyes --checks-only: the walks, poster and stall with their verdicts; no run, no probe, nothing posted; --gpu takes hardware', () => {
+  let r = spawnSync(process.execPath, [EYES, '--checks-only', '--gpu', 'software'], { encoding: 'utf8' });
+  assert.equal(r.status, 2); assert.match(r.stderr, /--gpu takes hardware/);
+  const f = fakeGh([], {}), d = fakeDeploy(f.t);
+  const go = (out, env = {}) => spawnSync(process.execPath, [EYES, '--checks-only', '--out', join(f.t, out)], { env: { ...process.env, PATH: `${join(f.t, 'bin')}:${process.env.PATH}`, EYES_DEPLOY_DIR: d.EYES_DEPLOY_DIR, ...env }, encoding: 'utf8', timeout: 60_000 });
+  r = go('out');
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /PASS: walks, poster and stall/);
+  assert.deepEqual(d.tools().trim().split('\n'), ['walk.mjs', 'walk.mjs', 'checks walks', 'poster.mjs', 'checks poster', 'stall.mjs', 'checks stall']);
+  assert.equal(f.posts(), '');
+  assert.equal(JSON.parse(readFileSync(join(f.t, 'out/eyes-result.json'), 'utf8')).status, 'pass');
+  r = go('out2', { FAKE_FAIL_CHECK: 'poster' });
+  assert.equal(r.status, 1); assert.match(r.stdout, /FAIL: poster-verdict/); assert.equal(f.posts(), '');
+});
