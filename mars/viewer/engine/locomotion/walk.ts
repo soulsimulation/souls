@@ -168,7 +168,9 @@ type Exec = {
   watch?: { at: Vec2; level: number; n: number; replanned: boolean };
   /** link-lease/1 (#2264): the single-file link this walk asked for, its direction, whether it is admitted, the tick it last
    *  looked for a holding spot, whether it is backing down after a stall, and stepping off the entry to a holding spot after. */
-  lease?: { link: string; dir: LeaseDir; admitted?: true; tried?: number; timedOut?: true; stepOff?: true; cancelled?: true };
+  lease?: { link: string; dir: LeaseDir; admitted?: true; tried?: number; timedOut?: true; stepOff?: true; cancelled?: true;
+    /** An admitted holder: the tick it last looked for a step-aside spot for a waiter in its way (leaseGiveWay). */
+    gaveWay?: number };
 };
 
 const walkSchemaWithin = (reach: number) => z.strictObject({
@@ -1113,6 +1115,7 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
     const y = yieldsOf(rt)[personBlock];
     if (ex.held.size && y && y.to === ex.actor && rt.tick - y.tick <= 1 && rt.tick - y.since >= RELEASE_AFTER && (ex.still ?? 0) >= RELEASE_AFTER) releaseAll(rt, ex);
     if (rt.world.entityPhysicsV1) resolveFaceoff(rt, ex, personBlock);
+    leaseGiveWay(rt, ex, personBlock);   // link-lease/1: a waiter of this holder's link steps out of its way
     makeWay(rt, personBlock, pointAt(ex, ex.total));
     if (!ex.cancelTo && occupant(rt, a, ex.goal.p, ex.profile.radius, true, ex.goal.level) === personBlock)
       return blockedWait(rt, ex.id, ex.actor, [personBlock], { code: 'walk.goal-occupied', message: `${ex.actor}'s destination overlaps ${personBlock}'s supported sleep space`, subjects: [ex.actor, personBlock] });
@@ -1763,7 +1766,8 @@ function leaseStep(rt: Runtime, ex: Exec, a: Entity): StepResult | null {
     return { status: 'running', phase: 'replan' };
   }
   const leg = routeLink(ex);
-  if (ex.lease && leg?.link.id !== ex.lease.link) leaseDrop(rt, ex);   // the route no longer takes it
+  // the route no longer takes it; a waiter stepping aside for a holder (leaseGiveWay) keeps its place in the queue
+  if (ex.lease && !(ex.detour && !ex.lease.admitted) && leg?.link.id !== ex.lease.link) leaseDrop(rt, ex);
   if (ex.lease?.admitted) {
     const link = ex.lease.link;
     if (!leaseHolds(rt, link, ex.actor)) delete ex.lease.admitted;   // a timeout took the admission back: wait off the end
@@ -1810,6 +1814,42 @@ function leaseStep(rt: Runtime, ex: Exec, a: Entity): StepResult | null {
     } else if (held) return leaseTimeoutEnd(rt, ex, link, held);
   } else if (held) return leaseTimeoutEnd(rt, ex, link, held);
   return leaseWait(rt, ex, a, link, holder);
+}
+
+/**
+ * An admitted holder has right of way over its link's waiters. Blocked by one that stands in its way (queued, at a holding
+ * spot or on its way to one), the holder sends it aside by its own walk: the nearest free spot clear of what is left of the
+ * holder's way (the `way` clear-of test), reached going round the holder. The waiter waits there, `traffic.stepped-aside`,
+ * until the holder has passed, then walks on with its place in the queue kept. Looked for at most every DECIDE_TICKS.
+ * Without it a waiter yielding a single-file passage to the holder and the holder waiting for that waiter held each other
+ * until the 60 s stall ended every waiting walk (#2264 counted run, cand-1).
+ */
+function leaseGiveWay(rt: Runtime, ex: Exec, who: string) {
+  const l = ex.lease;
+  if (rt.services.linkLeaseV1 !== true || !l?.admitted || ex.detour || ex.cancelTo) return;
+  if (l.gaveWay !== undefined && rt.tick - l.gaveWay < DECIDE_TICKS) return;
+  const m = rt.world.entities[who], task = m?.human?.task, w = task ? walkExecs(rt).get(task) : undefined;
+  if (!m?.human || m.human.grip || m.human.on || m.human.riding || m.human.sleepPose || !w || !rt.isActive(w.id)) return;
+  if (w.lease?.link !== l.link || w.lease.admitted || w.cancelTo || (w.detour && !w.detour.lease) || w.phase !== 'walk' || w.route.legs[w.leg]?.kind !== 'walk' || w.v >= 0.02) return;
+  l.gaveWay = rt.tick;
+  if (!takeReplan(rt, false)) return;
+  const a = rt.world.entities[ex.actor], sp = spatial(rt, who), level = m.human.level, g = sp.level(level);
+  if (!g) return;
+  const r = w.profile.radius, test: ClearOfRef = { kind: 'way', action: ex.id, r };
+  const from: Vec2 = [m.pose.p[0], m.pose.p[2]], away = norm2(sub2(from, [a.pose.p[0], a.pose.p[2]])), base = len2(away) > 0 ? away : [1, 0] as Vec2;
+  const spots: { q: Vec2; d: number }[] = [];
+  for (const d of [0.6, 0.8, 1.2, 1.6, 2.2, 3.0]) for (let k = 0; k < 16; k++) {
+    const q = add2(from, scale2(rot2(base, (k * Math.PI) / 8), d));
+    if (clearanceAt(g, q) < r + PLAN_MARGIN || occupant(rt, m, q, r + 0.1) || !clearOfAt(rt, test, q)) continue;
+    spots.push({ q, d });
+  }
+  const around = [{ id: a.id, p: [a.pose.p[0], a.pose.p[2]] as Vec2 }];
+  for (const { q } of spots.slice(0, 12)) {
+    const rr = sp.routeAround(rt.world, w.profile, { level, p: from }, { level, p: q }, around);
+    if (!rr.ok || rr.route.length > 6 || rr.route.legs.some((x) => x.kind !== 'walk' || x.level !== level)) continue;
+    w.detour = { spot: q, level, by: ex.actor, blockers: [ex.actor], clearOf: test, stage: 'pending', planned: { epoch: sp.epoch, route: rr.route, around } };
+    return;
+  }
 }
 
 function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'link' }>, dt: number): StepResult {
@@ -1908,6 +1948,7 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
   if (blocker) {
     if(rt.services.concurrentLinkEgressV1===true)yieldLinkLanding(rt,ex,a,leg,blocker);
     if(a.body?.family==='floater')makeWay(rt,blocker,[next[0],next[2]],{by:a.id,subjects:[a.id],landing:{y:rt.world.entities[blocker].pose.p[1],radius:2*ex.profile.radius+.3}});
+    leaseGiveWay(rt, ex, blocker);   // link-lease/1: a waiter of this flight standing at its exit steps out of the holder's way
     ex.climbT = Math.max(0, ex.climbT - CLIMB_SPEED * dt);
     a.human!.activity = 'climb-wait'; // still on the stair: stair geometry, not the floor grid, applies
     return blockedWait(rt, ex.id, ex.actor, [blocker], { code: 'traffic.person', message: `${ex.actor} waits on ${link.id} for ${blocker} to move`, subjects: [ex.actor, blocker, link.id] });

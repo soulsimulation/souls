@@ -127,7 +127,10 @@ to it, on their way to its entry or on the flight) and a queue at each end. A wa
 3 m before its entry. Admitted, it walks on and climbs; otherwise it walks to a free holding spot off that end
 (`Spatial.holdingSpots`) and waits there, blocked `traffic.lease-wait` naming the flight and its holder, so nobody waits
 in the doorway. Requests are served by tick, then entity id. When the flight empties and the other end has a request,
-the lease turns once the current direction has admitted three walkers, or run 10 s, since that request. A holder that
+the lease turns once the current direction has admitted three walkers, or run 10 s, since that request. A holder has
+right of way over its flight's waiters: blocked by one (on the floor or at the flight's exit), it sends that waiter, by
+its own walk, to the nearest free spot clear of the holder's remaining way, where it waits `traffic.stepped-aside` until
+the holder has passed and then walks on, keeping its place in the queue. A holder that
 makes no progress (0.1 m) for 60 s backs down to its entry through the stair cancel and steps off to a holding spot;
 it and every walk then waiting end `route.blocked`, the message naming `traffic.lease-timeout` and the holder. Flights
 joined by a roomless landing are leased separately (task 3 of the design). Edge worlds log it at startup

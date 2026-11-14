@@ -9,6 +9,8 @@ import {nextEntityPhysics, type WorldEditV1} from './entity-physics.ts';
 import {CLIMB_SPEED} from '../../../mars/viewer/engine/locomotion/walk.ts';
 import {LEASE_TURN_ADMITS} from '../../../mars/viewer/engine/runtime/lease.ts';
 import {HUMAN_PROFILE} from '../../../mars/viewer/engine/spatial/types.ts';
+import {spatialOf} from '../../../mars/viewer/engine/construction/access.ts';
+import {linkApproach} from '../../../mars/viewer/engine/spatial/path.ts';
 
 const factory = await marsFactory(GREEN_FIELD_WORLD);
 const X = 1, FOOT: [number, number] = [X, -4], HEAD: [number, number] = [X, -1], RISE = 1.2;
@@ -179,4 +181,35 @@ test('#2264 a holder whose walk is force-ended (stall release, repair) no longer
   for (let i = 0; i < 5 * 20 && !down; i++) { step(run); down = !!leases(e)?.get('flight')?.holders.some(h => h.id === DOWN[0][0]); }
   assert.ok(!leases(e)?.get('flight')?.holders.some(h => h.id === UP[0][0]), 'the force-ended walk no longer holds the flight');
   assert.ok(down, 'the walker at the other end is admitted');
+});
+
+test('#2264 a waiter standing in an admitted holder\'s way steps aside for it: no lease timeout (counted run cand-1)', () => {
+  // cand-1: Ben, admitted, waits for Ida to move; Ida, queued, waits for Ben's turn; nothing moved a waiter that has a walk,
+  // so the two held each other until the 60 s stall ended every waiting walk. Here a descender holds the flight; the three
+  // holding spots at the foot are taken by bodies standing there, so the climber queued behind it waits where it asked, at
+  // the foot, on the descender's way off the flight.
+  const e = world('link-lease-give-way'), run: Run = {e, ended: [], log: []};
+  const rt = internals(e).rt as unknown as Parameters<typeof spatialOf>[0];
+  const link = spatialOf(rt).scene.links.find(l => l.id === 'flight')!, spots = spatialOf(rt).holdingSpots(link, true);
+  assert.equal(spots.length, 3, 'three holding spots at the foot');
+  const approach = linkApproach(link, true).approach;
+  const dn: Walker = ['h_dn', [X, 3, 1], [X, -8, 0]], up: Walker = ['h_up', [approach[0], approach[1] + .25, 0], [X + 1.5, 3.5, 1]];
+  const idle = spots.map((s, k): Walker => [`h_idle_${k}`, [s[0], s[1], 0], [s[0], s[1], 0]]);
+  start(e, [dn, up, ...idle]);
+  e.configureRuntimePolicy({sleepBlockTicks: 1200, stairWayV1: true, stairLandingClearanceV1: true, linkLeaseV1: true});
+  send(run, [dn]);
+  for (let i = 0; i < 600 && !leases(e)?.get('flight')?.holders.some(h => h.id === dn[0]); i++) step(run);
+  send(run, [up]);
+  const cast = [dn[0], up[0]];
+  let queued = false;
+  for (let i = 0; i < 90 * 20 && cast.some(id => e.programOf(id)); i++) {
+    step(run);
+    if (leases(e)?.get('flight')?.queue.up.some(r => (r as {id: string}).id === up[0]) && leases(e)?.get('flight')?.holders.some(h => h.id === dn[0])) queued = true;
+  }
+  assert.ok(queued, 'the climber queued while the descender held the flight');
+  assert.deepEqual(run.ended.filter(x => x.reason === 'traffic.lease-timeout'), [], 'no lease timeout');
+  assert.deepEqual(cast.filter(id => e.programOf(id)), [], 'both walks end');
+  assert.deepEqual(run.ended.filter(x => x.kind !== 'completed'), [], 'and both arrive');
+  for (const [id, , [, , level]] of [dn, up]) assert.equal(e.world.entities[id].human!.level, level, id);
+  assert.deepEqual(e.runtime.violations, []);
 });
