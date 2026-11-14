@@ -222,6 +222,16 @@ export class Conversations {
     return {accepted: true, conversation: this.view(b, soul.soulId)};
   }
 
+  /** #2297: the wall time (ms) at which `sweep` next drops a silent member or lapses an invitation or a request, or null. */
+  nextDueMs(): number | null {
+    let t: number | null = null; const at = (ms: number) => {t = t === null ? ms : Math.min(t, ms);};
+    for (const {id} of this.core.db.prepare("SELECT id FROM edge_comms_conversations WHERE world_id = ? AND state = 'open'").all(this.core.worldId) as {id: string}[]) {
+      const b = this.load(id); if (!b || b.state !== 'open') continue;
+      for (const m of b.members) at(m.lastAt + this.timeoutMs);
+      for (const m of [...b.invited, ...b.asks]) at(m.at + this.inviteTimeoutMs);
+    }
+    return t;
+  }
   /** Drops silent members and expired requests; closes conversations by the rule. */
   sweep(): number {
     const now = this.core.now(), cutoff = now - this.timeoutMs, inviteCutoff = now - this.inviteTimeoutMs;

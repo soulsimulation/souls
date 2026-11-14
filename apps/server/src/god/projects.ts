@@ -198,6 +198,12 @@ export class Projects {
     const hosts = (s.beam ? [s.beam.a, s.beam.b] : (s.seat?.params.beams ?? s.seat?.params.joists ?? [s.seat?.params.beam])) as string[], same = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
     return offer && (offer.seats === undefined || JSON.stringify(offer.seats) === JSON.stringify(seats)) && (!offer.hosts || same(offer.hosts, hosts)) ? m : null;
   }
+  /** #2297: the next tick at which `sweep` (every 10 ticks) lapses a standing agreement, or null. */
+  nextDueTick(): number | null {
+    let t: number | null = null;
+    for (const row of this.rows.values()) for (const c of Object.values(row.consents)) { const d = Math.ceil(c.expiresTick / 10) * 10; t = t === null ? d : Math.min(t, d); }
+    return t;
+  }
   /** Lapse what expired, and answer the invitations a standing agreement covers. Nothing here moves a body: `accept` is the
    *  Soul's own act, and one who is busy or far off is left with an open invitation. */
   sweep() {

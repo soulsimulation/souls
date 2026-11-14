@@ -67,6 +67,7 @@ async function world(t) {
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
     await sleep(p === '/v1/edge/act' && w.actMs ? w.actMs : 10); w.heavyNow--;
     if (w.busyNext > 0) { w.busyNext--; return json(429, { error: { code: 'soul.busy', message: 'one at a time' } }, { 'retry-after': '0' }); }
+    if (p === '/v1/edge/act' && w.overLimit) return json(429, { error: { code: 'rate-limited', message: 'more than 60 acts a minute: this act was not taken', limit: 60, window_s: 60 } });   // as edge/routes.ts answers
     if (p === '/v1/edge/act') {
       const b = body ? JSON.parse(body) : {}, cap = b.capability ?? 'walk:x';
       w.bodies.push(b);
@@ -539,6 +540,17 @@ test('a keyed write repeated for soul.busy keeps its one key, so the world acts 
   assert.equal(r.json.accepted, true, r.err);
   assert.equal(w.keys.length, 1, 'the refused try did not reach the act handler');
   assert.ok(w.keys[0]);
+});
+
+test('#2107 A1: an act refused rate-limited is told to the agent at once, with its code and limit, and never resent', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.overLimit = true;
+  const r = await w.cli('act', 'walk:mill');
+  assert.equal(r.code, 75, r.err);
+  assert.equal(r.json.accepted, false); assert.equal(r.json.code, 'rate-limited'); assert.equal(r.json.limit, 60); assert.equal(r.json.window_s, 60);
+  assert.equal(w.calls.filter(([m, p]) => m === 'POST' && p === '/v1/edge/act').length, 1, 'neither serve nor the CLI sent it again');
+  assert.equal(w.acts, 0);
 });
 
 test('pure state: an event is read once across a cut, a long tail hands over in pieces, messages fold once', () => {

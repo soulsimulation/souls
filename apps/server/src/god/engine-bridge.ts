@@ -376,6 +376,8 @@ export class EngineBridge {
       afterTickComplete: () => { this.completedTicks++; this.completedEdits = this.projectedEdits; this.checkProjectionSoon(); },
       onClockUnavailable: () => this.failProjection(new Error('bridge.readiness.clock-unavailable')),
       onStop: () => this.failProjection(new Error('bridge.readiness.stopped')),
+      // #2297: a god edit not yet folded keeps the world busy; the gardens dry at the next world day (the stored day, A3)
+      stillness: () => { if (this.projectionDrafts.size) return [{ name: 'god.edit', busy: true }]; const l = this.host.living, d = this.gardenDay ?? this.gardenDayStored(); return l && l.dayTicks > 0 && d !== null && dryingOps(this.god.model, 1).length ? [{ name: 'garden.drying', tick: l.origin + (d + 1) * l.dayTicks }] : []; },   // only when something would dry
     });
     reachProviders.set(this.god.model, (from, to) => this.reach(from, to));
     if (!R) syncProviders.set(this.god.model, () => { this.flush(); return this.physics?.hash === this.engine.world.entityPhysicsV1?.hash; });
@@ -493,15 +495,26 @@ export class EngineBridge {
   harvest?: HarvestFaculty;
   /** Entry 18: when the world day changes, gardens dry by the days passed (capped at 3; time set backwards restarts the count). */
   private gardenDay: number | null = null;
+  /** #2297 A3: the last world day the gardens were dried to is stored (garden_day_v1), never only in memory, so a world loaded
+   *  after days away dries exactly as one that ran (a boot used to start the count again from the day it booted on). */
+  private gardenDayStored(day?: number): number | null {
+    const db = this.host.db.db;
+    if (!this.gardenTable) { db.exec('CREATE TABLE IF NOT EXISTS garden_day_v1 (world_id TEXT PRIMARY KEY, day INTEGER NOT NULL) WITHOUT ROWID'); this.gardenTable = true; }
+    if (day !== undefined) { db.prepare('INSERT INTO garden_day_v1 (world_id, day) VALUES (?, ?) ON CONFLICT(world_id) DO UPDATE SET day=excluded.day').run(this.host.worldId, day); return day; }
+    return (db.prepare('SELECT day FROM garden_day_v1 WHERE world_id=?').get(this.host.worldId) as { day: number } | undefined)?.day ?? null;
+  }
+  private gardenTable = false;
   private gardenTick(tick: number) {
     const l = this.host.living; if (!l || !(l.dayTicks > 0)) return;
     const day = Math.floor(Math.max(0, tick - l.origin) / l.dayTicks);
+    if (this.gardenDay === null) this.gardenDay = this.gardenDayStored();
     // #430: the clock set back also changes how far a drawing has faded
     if (this.gardenDay !== null && day < this.gardenDay) this.noteFading(day, this.gardenDay);
-    if (this.gardenDay === null || day < this.gardenDay) { this.gardenDay = day; return; }
+    if (this.gardenDay === null || day < this.gardenDay) { this.gardenDay = this.gardenDayStored(day); return; }
     if (day === this.gardenDay) return;
     const days = Math.min(3, day - this.gardenDay), prev = this.gardenDay; this.gardenDay = day;
-    setImmediate(() => { try { const ops = dryingOps(this.god.model, days); if (ops.length) this.god.engineAct(ops as never, `garden: ${days} day(s) of drying`, () => {}); } catch (e) { this.log(`garden drying: ${(e as Error).message}`); }
+    // the day is stored once the drying is applied, so a crash in between dries that day again at the next load, never loses it
+    setImmediate(() => { try { const ops = dryingOps(this.god.model, days); if (ops.length) this.god.engineAct(ops as never, `garden: ${days} day(s) of drying`, () => {}); this.gardenDayStored(day); } catch (e) { this.log(`garden drying: ${(e as Error).message}`); }
       // #430: a fading drawing's perceived line follows the world day (no edit: its age is read from its drawn day)
       this.noteFading(day, prev); });
   }
