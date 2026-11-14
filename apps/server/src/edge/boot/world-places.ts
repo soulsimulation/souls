@@ -24,13 +24,16 @@ export function destinationOffers(caps:readonly EdgeCapability[],verb:string):De
 export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,verb='walk'){
  const caps=L.coreA.binds(soul).caps,offers=destinationOffers(caps,verb);
  const places=knownBootPlaces(L,soul.soulId);
- let resolved=resolveBootPlace(input,places,offers);
+ // #2124: the tries below read only `ok` and `chosen`, so they skip the refusal's similarity hints (most of an act on a far
+ // place's id at 24 Souls: three tries, the on-demand one succeeding); a refusal returned is asked again in full, as before
+ let resolved=resolveBootPlace(input,places,offers,'auto',false);
  // F6 (SOULSIM-H): a known place the listing leaves out for distance only (a far building's room: rooms are listed within
  // 80 m) gets its one walk on demand, as words do: the capability it names is then acted as offered (see explicitPlaceCapability)
  if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable'&&L.walkOnDemand){
-  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true}))),more=[...caps];
-  if(named.ok&&places.find(p=>p.id===named.chosen.place)?.access==='admitted'&&L.walkOnDemand(soul,named.chosen.place,more,new Map())){const again=resolveBootPlace(input,places,destinationOffers(more,verb));if(again.ok)resolved=again;}
+  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),more=[...caps];
+  if(named.ok&&places.find(p=>p.id===named.chosen.place)?.access==='admitted'&&L.walkOnDemand(soul,named.chosen.place,more,new Map())){const again=resolveBootPlace(input,places,destinationOffers(more,verb),'auto',false);if(again.ok)resolved=again;}
  }
+ if(!resolved.ok)resolved=resolveBootPlace(input,places,offers);
  if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable')return {...resolved,reason:resolved.reason+' no walk reaches it in the current offered destinations.'};
  return resolved;
 }

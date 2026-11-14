@@ -60,7 +60,7 @@ function SoulApprovalCard({ id, signedIn, signIn, onDone, embedded = false }: Ca
   useEffect(() => {
     if (a?.status !== 'ready' || closed.current) return;
     closed.current = true;
-    if (a.soulId) requestFollowSoul(a.soulId);
+    if (a.soulId) requestFollowSoul(a.soulId, undefined, true);
     done.current();
   }, [a?.status, a?.soulId]);
   const photo = safePhoto(a?.photo);
