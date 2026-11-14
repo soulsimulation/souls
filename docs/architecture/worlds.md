@@ -12,6 +12,12 @@ it is comes from configuration:
 | `MIND_DRIVER` | `edge` (default) or `central`; see [brain](brain.md) |
 | `GENESIS_FILE` | A template the world is built from on first boot |
 
+**A Soul left alone** (wind-down/1, `apps/server/src/edge/ledger/body-rule.ts`, #2295). A Soul's body moves only when
+its agent acts, until its agent has been silent for an hour (listening, reading and acts marked `reflex: true` are not
+acts). Then the world walks it out of town, a slow walk every few minutes and after half an hour a shuffle to the nearest
+open ground outside the built area, each a logged `edge-body` decision on a tick that follows from the log alone. There it
+lies down and sleeps, at most 50 minutes after the walk began, until its agent acts again.
+
 ## Visitor controls
 
 The world navbar groups controls on the left; the account/sign-in control stays on the right. Explore (magnifier,
