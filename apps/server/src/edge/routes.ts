@@ -1,7 +1,6 @@
 // Mounts the EDGE-CONTRACT-v1 surface under /v1/edge. Ledger verbs here; Comms registers its own.
 import {createHash} from 'node:crypto';
 import {inspectFrame} from './perception/inspect.ts';
-import {freeTextAct} from './intents/strict.ts';
 import type {Context, Hono} from 'hono';
 import {ActPending, actCommitScope, EDGE_CONTRACT, EdgeError, edgeBody, type EdgeDeps, type EdgeReceipt, type EdgeSoul, edgeErrorOf} from './contract.ts';
 import type {EdgeLedger} from './ledger/ledger.ts';
@@ -84,11 +83,11 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // #1329 part 4 follow-up: a search builds the whole menu and up to 12 walks on main (up to ~0.5 s), so it has its own
   // budget, as around does; a plain listing keeps the capabilities budget
   app.get('/v1/edge/capabilities', wrap(c => {const s = deps.soul(c), search = c.req.query('search')?.trim(); if (search) limit(s, 'capabilities-search', 30); else limit(s, 'capabilities', 240); return {tick: deps.host.engine.world.tick, ...L.capabilitiesPage(s, {all: c.req.query('all') === '1', ...(search ? {search: search.slice(0, 200)} : {})})};}));
-  app.post('/v1/edge/act', wrap(async c => {const s = deps.soul(c); limit(s, 'act', 60); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {capability, params?, clientRef?} or {verb, target, …}'); }); const {for: forMessage, forDefault, strict, ...input} = (body ?? {}) as Record<string, unknown>;
+  app.post('/v1/edge/act', wrap(async c => {const s = deps.soul(c); limit(s, 'act', 60); const body = await c.req.json().catch(() => { throw new EdgeError(400, 'invalid', 'body must be JSON {capability, params?, clientRef?} or {verb, target, …}'); }); const {for: forMessage, forDefault, strict: _strict, ...input} = (body ?? {}) as Record<string, unknown>;
     // #1327: a key without a clientRef names the act too, so a retry of an act handed over and not yet recorded is that act
     {const key = c.req.header('idempotency-key'); if (input.clientRef === undefined && key && key.length <= 100) input.clientRef = key;}
-    // CTRL-1 (#1093): a strict client (eden 2.9+) acts on offered ids only; words are found by the client
-    if (strict === true && !freeTextAct()) {const no = L.offerGate(s, input); if (no) return no;}
+    // CTRL-1 (#1093), #1911: an act is an offered id, whatever client sends it; words are refused by the strict gate
+    {const no = L.offerGate(s, input); if (no) return no;}
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
     // #1327: once this request commits a receipt, that receipt is its answer: a fault after the commit point answers
     // accepted with it, never a 503 (or a refusal) that reads as "not done". Faults before it keep their own answer.

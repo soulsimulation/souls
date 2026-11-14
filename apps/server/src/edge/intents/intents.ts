@@ -12,6 +12,9 @@ import {dist2, durationWord, headingOfYaw, round1, walkSeconds, yawOfHeading, ya
 import {resolvedParts} from './resolved-parts.ts';
 import {strictCheck} from './strict.ts';
 import {resolvePlaceForVerb,lookupPlaceIdentity,explicitPlaceCapability,knownBootPlaces,offeredWalkObject} from '../boot/world-places.ts';
+import {HUMAN_RADIUS} from '../../../../../mars/viewer/engine/world/catalog.ts';
+import {PLAN_MARGIN} from '../../../../../mars/viewer/engine/spatial/path.ts';
+import {PAGED_DIRECT_M} from '../../../../../mars/viewer/engine/spatial/tiled.ts';
 
 type V2 = [number, number];
 type Steps = Program['steps'];
@@ -34,6 +37,9 @@ const SPEC_KEYS = ['near', 'nearest', 'free', 'in', 'row', 'place', 'seconds', '
 /** How long (s) a look holds the head by default, and at most; a turn's or face's gaze lasts this long. */
 export const LOOK_SECONDS = 10, LOOK_SECONDS_MAX = 300, FACE_SECONDS = 30, AUTO_FACE_SECONDS = 8;
 const SEAT_REACH = 30, NEAR_SEAT_REACH = 20, APPROACH_MIN = 0.5, APPROACH_MAX = 10;
+/** #1964 walk-to: standing room is the engine's goal check (body radius 0.28 m + planning margin 0.06 m), looked for within
+ *  WALK_TO_SNAP_M (rings of 0.25 m); the connectivity labels are warmed for at most WALK_TO_WARM_MS (as an act's warm-up). */
+const WALK_TO_ROOM = HUMAN_RADIUS + PLAN_MARGIN, WALK_TO_SNAP_M = 1, WALK_TO_SNAP_RINGS = 4, WALK_TO_WARM_MS = 150;
 const FOCUS = /lectern|display|screen|stage|podium|board|projector|easel-wall|pulpit/;
 const PRESENTER_SEAT = /presenter|speaker|host|reserved|lectern/;
 
@@ -64,9 +70,9 @@ export class Intents {
   private onTerminal(r: EdgeReceipt) {
     if (r.phase !== 'completed' && r.phase !== 'failed') return;
     const verb = r.capability.split(':')[0], deliver = (kind: string, body: Record<string, unknown>) => (this.L.comms as unknown as {streams?: {deliver?(s: string, k: string, t: number, b: object): void}} | undefined)?.streams?.deliver?.(r.soulId, kind, this.L.mw.world.tick, body);
-    if (!['walk', 'stroll', 'hang-out', 'approach', 'go-near', 'sit', 'swim', 'gather', 'warm-by-fire'].includes(verb) || (r.channel && r.channel !== 'body')) return;
+    if (!['walk', 'stroll', 'hang-out', 'approach', 'go-near', 'walk-to', 'sit', 'swim', 'gather', 'warm-by-fire'].includes(verb) || (r.channel && r.channel !== 'body')) return;
     const end = r.endedAt as {place?: string | null; placePath?: string[]} | undefined;
-    if (r.phase === 'completed' && ['walk', 'stroll', 'hang-out', 'approach', 'go-near'].includes(verb)) {deliver('arrive', {receipt: {id: r.id, capability: r.capability, phase: r.phase}, placeId: end?.place ?? null, placePath: end?.placePath ?? [], ...(r.chosen ? {chosen: r.chosen} : {}), endedAt: r.endedAt ?? null}); return;}
+    if (r.phase === 'completed' && ['walk', 'stroll', 'hang-out', 'approach', 'go-near', 'walk-to'].includes(verb)) {deliver('arrive', {receipt: {id: r.id, capability: r.capability, phase: r.phase}, placeId: end?.place ?? null, placePath: end?.placePath ?? [], ...(r.chosen ? {chosen: r.chosen} : {}), endedAt: r.endedAt ?? null}); return;}
     if (r.phase === 'failed' && r.code && /^(?:route\.|slot\.|seat\.|walk\.goal|reservation\.|pose\.occupied|pose\.no-room)/.test(r.code)) {
       // blocked: Core-B's envelope derives `blocked` from this receipt; Core-A adds `alternatives` = a fresh dry run of the
       // same intent, on the receipt itself (this listener runs before Comms delivers the receipt event)
@@ -89,6 +95,7 @@ export class Intents {
       case 'go': case 'walk': case 'glide': return this.go(P, s, verb);
       case 'swim': return this.swim(P, s);
       case 'approach': return this.approach(P, s);
+      case 'walk-to': return this.walkTo(P, s);
       case 'follow': case 'walk-with': return this.follow(P, s);
       case 'turn': case 'face': return this.turn(P, verb === 'face' && s.face === undefined && s.target !== undefined ? {...s, face: s.target, target: undefined} : s);
       case 'look': return this.look(P, s);
@@ -238,6 +245,33 @@ export class Intents {
     return {ok: true, kind: 'plan', capability: `approach:${t.id}`, label: `Approach ${t.name}`, steps, chosen: {target: t.id, name: t.name, kind: t.kind, standoff: distance, distFromYou: t.distance, ...this.eta(P, t.at)}};
   }
 
+  /** #1916 walk-to:here {at: [x, z]}: the engine's own walk to that point on the body's level (standing room, no stand-off).
+   *  #1964: it does one of three things, and `chosen` says which: walks to the point (`goal`, snapped to standing ground
+   *  within 1 m, `short` the metres it moved), walks as near as a walk gets (launch's closest approach: `goal` the point
+   *  used, `short` the shortfall, the receipt's note), or refuses (no standing room on this level, or, past the distance
+   *  the paged planner proves only its first hop, no walk joins the point to where the body stands). */
+  private walkTo(P: Perception, s: Record<string, unknown>): Resolution {
+    const at = s.at; if (!Array.isArray(at) || at.length !== 2 || !at.every(n => typeof n === 'number' && Number.isFinite(n))) return no('capability.params', 'walk-to needs at: [x, z], two finite numbers.');
+    const asked: V2 = [at[0] as number, at[1] as number], name = `[${asked[0]}, ${asked[1]}]`, level = P.w.entities[P.soul.entityId]?.human?.level ?? 0, mw = this.L.mw;
+    // standing ground on the body's own level within 1 m (the engine's goal check: body radius + planning margin)
+    const to = mw.standableNearV1 ? mw.standableNearV1(asked, level, P.soul.entityId, WALK_TO_ROOM, WALK_TO_SNAP_RINGS) : asked;
+    if (!to) return no('route.goal-blocked', level ? `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on level ${level}, the floor you are on: walk-to stays on your own level, so for a point outdoors or on another floor, walk down or to a place there first.` : `There is no standing room within ${WALK_TO_SNAP_M} m of ${name} on the ground (level 0): it is inside something solid or off the walkable ground.`);
+    const steps: Steps = [{verb: 'walk_to', params: {to, standoff: 0, stand: 'clear/1'}}];
+    // a point inside a site under construction is refused as approach's target is
+    const blocked = this.planRefusal?.(P.soul, steps); if (blocked) return no(blocked.code, blocked.reason);
+    // and a point inside someone else's private building as the walk to that building is (object.private)
+    for (const p of this.L.places.containing(to[0], to[1], this.L.placeLevel(level))) {const c = p.ref ? this.L.bindOne(P.soul, 'walk:' + p.ref)?.cap : undefined; if (c?.blocked?.code === 'object.private') return no(c.blocked.code, c.blocked.reason);}
+    // far on paged ground the planner proves only the first hop: a point no walk joins to where the body stands is refused
+    // here (nearer, or on unpaged ground, the planner's whole answer stands: door passage, step-out, closest approach)
+    const paged = (this.L.host.engine as {rt?: {services?: {spatial?: {ground?: {paged?: boolean}}}}}).rt?.services?.spatial?.ground?.paged === true;
+    if (paged && level === 0 && P.pos && dist2(P.pos, to) > PAGED_DIRECT_M && mw.navCheckV1 && mw.navWarmV1?.(WALK_TO_WARM_MS)) {
+      const [me, goal] = mw.navCheckV1([{id: 'start', p: P.pos, level: 0, tol: 0.6}, {id: 'goal', p: to, level: 0, tol: 0.6}]);
+      // (a body where the labels see no room, seated or in a tight spot, has no area to compare: the planner decides)
+      if (goal?.code === 'nav.disconnected' && (me?.ok || (me?.area !== undefined && me.area !== goal.area))) return no('route.unreachable', `No walkable route joins ${name} to where you stand: it lies in a separate area${goal.pocket ? ` of ${Math.round(goal.pocket)} m²` : ''} (behind a cliff, water, a wall or a closed door), so walk-to refuses it rather than walking part way.`);
+    }
+    return {ok: true, kind: 'plan', capability: 'walk-to:here', label: `Walk to ${name}`, steps, chosen: {at: asked, goal: to, short: round1(dist2(asked, to))}};
+  }
+
   private follow(P: Perception, s: Record<string, unknown>): Resolution {
     const asked = str(s.target); if (!asked) return no('capability.params', 'follow needs a Soul.');
     if(s.place!==undefined)return this.go(P,{place:s.place,with:[asked],...(s.via!==undefined?{via:s.via}:{})},'go');
@@ -304,9 +338,12 @@ export class Intents {
     if (r.kind === 'plan') {
       const out = await this.L.coreA.launchPlan(soul, r.capability, r.label, r.steps, clientRef,input.params&&typeof input.params==='object'&&!Array.isArray(input.params)?input.params as Record<string,unknown>:{});
       if (!out.accepted) return out as Refused;
-      const receipt = this.L.coreA.setDetail(out.receipt.id, {chosen: r.chosen, intent: intentOf(input)}) ?? out.receipt;
+      // #1964: a walk-to launch took the closest approach: the goal it walks to and its shortfall from the asked point
+      const ap = r.capability === 'walk-to:here' ? (this.L.coreA.detail(out.receipt.id) as {approach?: {to: V2}} | null)?.approach : undefined;
+      const chosen = ap ? {...r.chosen, goal: ap.to, short: round1(dist2(r.chosen.at as V2, ap.to))} : r.chosen;
+      const receipt = this.L.coreA.setDetail(out.receipt.id, {chosen, intent: intentOf(input)}) ?? out.receipt;
       this.L.comms?.fading.touch?.(soul.soulId);
-      return {accepted: true, receipt, chosen: r.chosen, channel: 'body'};
+      return {accepted: true, receipt, chosen, channel: 'body'};
     }
     if (r.kind === 'setting') {r.apply(); const receipt = this.L.coreA.insertDone(soul, r.capability, clientRef, {channel: 'none', chosen: r.chosen}); return {accepted: true, receipt, chosen: r.chosen, channel: 'none'};}
     return this.attend(soul, r.capability, r.gaze, r.yaw, r.chosen, clientRef);

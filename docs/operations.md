@@ -28,6 +28,9 @@ loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds
 
 Each settings file holds one line, `SIM_WORLDS_ARGS=...`: the port, the world port range, data directory, public
 origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`, `--world-heap-mb`, `--create-limit`).
+`--unload-still 1` lets still worlds leave memory and come back on a request or their alarm
+([worlds](architecture/worlds.md), #2299); it stays off (`0`, the default) in production until its proof task has passed.
+Their recorded horizons are `<data>/horizons.json`.
 `tools/world-launcher/deploy/install.sh` writes the production and staging files once and never edits an existing
 one. Memory limits are per-stage systemd drop-ins (`sim-worlds@<stage>.service.d/10-memory.conf`).
 
@@ -64,8 +67,8 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   `rewound` problem code, held for two checks so one always sees it: several in a window show as one line with the latest
   count, and it clears on its own. A world with half its ticks faulted over 10 s of world time counts as `halted` too, though
   its clock runs: it refuses acts with `world.step-failing` until the faults fall away, and the glitch rule is `engine.step-failing`.
-  The launcher restarts a halted world once per breaker window (30 min), since a restart boots from the log; a second halt
-  in the same window stays halted for an operator ([#1326](https://github.com/soulsimulation/souls/issues/1326)).
+  The launcher restarts a halted world every time, since a restart boots from its last snapshot and the log; each restart
+  counts toward the breaker ([#1326](https://github.com/soulsimulation/souls/issues/1326), [#2133](https://github.com/soulsimulation/souls/issues/2133)).
 - **What each halt becomes** ([#1511](https://github.com/soulsimulation/souls/issues/1511); each path is tested in
   `apps/server/src/halt-paths.test.ts`). Every one stops the clock (or, for step-failing, refuses acts) and sets
   `live.json` `halted`, which the launcher's guard acts on. None is silent.
@@ -73,13 +76,13 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   | Halt (glitch rule) | Where | In the process | Then |
   |---|---|---|---|
   | `durability.clock-frontier`, `engine.unhashable` | `persistClockFrontier` on the tick | the tick throws: the process exits | the launcher restarts it from the log (backoff; 5 failures in 30 min: `held`) |
-  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s), once per 30 min |
+  | `durability.clock-frontier` | `snapshotFaultedHead` (the throw is not rethrown) | clock stopped, process up, `halted` | the guard restarts it within about a poll (10 s); each restart counts toward the breaker |
   | `durability.repair`, `durability.checkpoint` | `failCheckpoint` | clock stopped, process up, `halted` | as above |
   | `engine.halted` | `haltOnFault` (edge worlds) | clock stopped, process up, `halted` | as above |
   | `engine.step-failing` | steps faulting | clock runs, acts refused, `halted` | as above |
 
-  **Still a frozen world:** a second halt inside the same 30-minute window is not restarted. The world stays halted
-  (visitors get 503) until an operator acts or a fix ships. The alert is the only exit, so it has to be loud:
+  **A halt that repeats at once:** after 5 restarts in 30 min the breaker holds the world (`held`, last reason `halted`),
+  down until an operator resumes it, never a silent loop. The alert is then the only exit, so it has to be loud:
   - the world's `halted` problem code makes `hostOk` false;
   - `host-health.log` gets an ALERT line, and the health page shows the world as `halted`;
   - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).

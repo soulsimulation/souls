@@ -40,7 +40,9 @@ why: per changed frame the mode, target, the pose asked for and the pose drawn, 
 it (`held`, `user`, `collision`, `opening`, `search`, `glide`, `speed-cap`) with its parameters, plus the viewer's
 wheel, drag, touch and movement keys. Times are `performance.now()` ms. A small panel lists each automatic move that
 overrode the viewer's input in the last 2 s (more than 0.25 m or 3° off what they asked) and downloads the trace as
-JSONL. Nothing leaves the page unless the viewer downloads it.
+JSONL. It also meters the follow camera (#2201): the milliseconds and sightline rays of each frame's `follow.resolve`,
+with their median and p95 in the panel and as the download's closing `cost` record. Nothing leaves the page unless the
+viewer downloads it.
 Free has no wall near the map's edge: a lost-camera guard (`WorldRtsCamera.keepPivotInBounds`) keeps the eye within one
 far-zoom limit (320–1,400 m) of the world's ground rectangle, far beyond the map; where the pivot sits does not matter.
 On a touch screen in Free (`apps/web/src/touch/WorldTouchFree.ts`), a touch that starts in the lower-left 45 % of the
@@ -58,6 +60,10 @@ or previous (right) Soul here; slower drags still orbit. The order is a ring mad
 then the others by the director's interest score, then by distance. A tap on the ground while following hands you the
 camera (Free) and glides it to that point (`WorldRtsCamera.flyToGround`). In Broadcast a touch screen's chip reads
 "Now showing <name>" with a Follow button. Mouse clicks keep the card-and-button flow.
+Name plates show selectively (#2195, `WorldCardSight.ts`) and fade in and out. Your own Souls show whenever they are in
+view and not behind scenery; from a high or far camera they show anyway, emphasised. Other Souls are quieter, much
+quieter when asleep, idle or a zombie, and hide behind scenery, well behind the camera's focus, or beyond a reach that
+grows with the camera's height. A hovered, selected or grouped Soul's plate always shows.
 A press, long-press, double-tap or drag anywhere on a world page never selects text or shows a tap highlight. The
 selection, callout and highlight are off on the page, its menus, its modal dialogs and the boot arrival (#1386). Fields,
 code and the copyable start prompt keep their text. The first touch of a page on a touch screen shows three glyphs
@@ -95,10 +101,41 @@ switch independent. A previously saved master mute migrates to both switches off
   claims the world for its creator.
 - **Proxying.** `<base>/w/<slug>/*` is proxied to the child (HTTP, SSE and WebSocket). A request to a sleeping world
   starts it.
-- **Sleeping.** Children are restarted after a crash (with backoff), paused after a period without visitors, and may be
-  released to exit later; the next visit wakes them. Unwatched worlds run at a slower clock
-  (`SIM_UNWATCHED_PACE`, 0.25 by default for children); on return, the time of day jumps to the present
-  (`apps/server/src/clock-catchup.ts`) without simulating the gap.
+- **World time never stops (#2235).** A world's clock keeps wall pace whether anyone watches or not: no slower clock
+  when unwatched, and no idle freeze or idle exit by default (`--sleep-ms`, `SIM_WORLD_IDLE_EXIT_MIN`, both 0), because
+  no world can yet prove that nothing but pure time would pass while it slept.
+  - **Every registered world keeps living.** The launcher boots, every 15 s, one registered world with no process: never
+    booted since the launcher started, put to sleep to make room, or crashed past its restarts. It goes most recent
+    first, and only into free room: under `--max-running`, with the host above `--min-free-mb` and at least 768 MB left
+    under the unit's MemoryHigh (`ChildPool.roomFor`); a keep-alive boot never evicts and is not a use (the least
+    recently used order stays the visitors'). A world whose takeover from the previous launcher failed is passed over. A visitor's boot still evicts the
+    least recently used idle world when the registry does not fit, and that world waits, owing its time, until a round
+    finds room. Crashed worlds restart with backoff, and a world held by the breaker stays held.
+  - **A still world leaves memory (#2299; `--unload-still 1`, off by default and in production until the tranche's
+    proof task has passed; `--unload-still 0` is the behaviour above).** Every 15 s the launcher reads each running
+    world's `GET /__sim/still` (the contract in #2241) and unloads, by its ordinary clean stop, a world that is still,
+    whose horizon (`untilWallMs`) is at least 10 minutes away or `null`, that no request other than a resident read or a
+    passive one (an act, a god call, a page) reached for 10 minutes, with no visitor or god connection open, nothing but
+    resident reads in flight, and up for at least 30 s. Before every stop the launcher reads `/__sim/still` again and
+    records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, is recorded as due at once
+    and the keep-alive boots it as before). An unloaded world is never booted by the keep-alive, and loads on an act, a
+    god call, a visitor's connection or a page; at `moveWallMs`, always; at `untilWallMs`, only when a resident read for
+    it was seen in the last 10 minutes. Otherwise it is not loaded by time at all, and catches up its missed events in
+    order when it next loads. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
+    long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
+    answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
+    with no picture kept, loads the world. Not yet: memory admission (#2233) and the load queue (#2304).
+  - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
+    them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
+    `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
+    ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
+    ambient-life idle clock and the body rule's timers (#2236).
+  - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
+    ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
+    and are dispatched one at a time after the catch-up, each once the one before it is answered (at most 2 s each). A
+    write whose client gave up while it waited is dropped, and a stop during the catch-up answers the writes still
+    waiting 503.
 - **Real time (#1649; on by default, `SIM_REAL_TIME=0`, `false` or `off` turns it off as the rollback switch).** A god world's clock is the real time in the world's
   own time zone (`time.timeZone`, an IANA name): one world hour is one real hour, and the date and time of day are the
   local wall time there. The engine never reads a wall clock: the server logs the day clock as a `dayConfig` rules event
@@ -177,7 +214,7 @@ switch independent. A previously saved master mute migrates to both switches off
 ### What a child runs with
 
 `children.mjs` builds each child's environment: `ENGINE=mars`, `ENABLE_WORLD_ENGINE=1`, `BRAIN_MODE=fake` with empty
-provider keys, `SEED_NATIVES=0`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, `SIM_UNWATCHED_PACE=0.25`, Clerk sign-in
+provider keys, `SEED_NATIVES=0`, `SOUL_LIFECYCLE=1`, `EDGE_FADING=1`, Clerk sign-in
 (`AUTH_PROVIDER=clerk`, `ACCOUNT_AUTH_REQUIRED=1`, `ACCOUNT_REGISTRY_PATH`), the world's identity and paths, the
 served skill and CLI files, the site relay settings (`SIM_SITE_URL`, `SIM_SITE_KEY`), and the Eyes settings when the
 launcher's own environment sets them (see [Souls](souls.md#eyes)).

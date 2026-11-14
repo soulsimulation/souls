@@ -52,18 +52,32 @@ export async function prepareFolder(seat, { name }) {
   if (!sv.data?.serving) throw new Error(`setup: serve did not start: ${sv.stdout.slice(0, 300)}`);
   // The world copy (a client before 2.25 has no look). #2047: a world still laying out its places answers the catalog with
   // 503 world.starting for up to 30 s after the first ask, longer than look's own retries on a slower machine: ask again.
+  // #2157: past those 30 s the world serves its catalog as it is, and on a busy host that is before its activity spots are
+  // laid out: a copy with no acts, where `find` finds nothing to eat. Such a copy is a world still starting: ask again.
   let lookFailed = null;
-  for (const until = Date.now() + 90_000; !existsSync(join(runtimeDir(f, soulId), 'world-catalog.json')) && Date.now() < until; await sleep(500)) {
+  for (const until = Date.now() + 90_000; !catalogHasActs(f, soulId) && Date.now() < until; await sleep(500)) {
     const l = await cli(f, ['look']);
     if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503/.test(lookFailed)) break; }
   }
   return { soulId, createdAt, lookFailed, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
 
+/** #1924: an item's calendar entry, announced before the instruction by a second Soul in its own folder (local dev worlds). */
+async function seedCalendar(dir, base, cal) {
+  const f = join(dir, 'calendar-host'); mkdirSync(f, { recursive: true });
+  await fetchServed(base, 'eden.mjs', join(f, 'eden.mjs'));
+  for (const s of [['register', base], ['create', cal.by ?? 'Moss'], ['calendar', 'add', cal.title, '--place', cal.place, '--in', String(cal.inMinutes), '--for', String(cal.forMinutes)]]) {
+    const r = await cli(f, s); if (r.code !== 0) throw new Error(`calendar seed ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`);
+  }
+}
+const calendarNow = (base, minutes = 600) => fetch(`${base}/v1/edge/calendar?withinMinutes=${minutes}`, { signal: AbortSignal.timeout(10000) }).then((r) => r.json()).then((d) => d.items ?? null).catch(() => null);
+
 /** Read the client's world copy (soul-catalog/1) from the Soul's runtime folder, or null. */
 export function readCatalog(folder, soulId) {
   try { return JSON.parse(readFileSync(join(runtimeDir(folder, soulId), 'world-catalog.json'), 'utf8')).catalog ?? null; } catch { return null; }
 }
+/** #2157: the client's world copy names at least one act (a world whose structure is laid out), else false. */
+export const catalogHasActs = (folder, soulId) => (readCatalog(folder, soulId)?.acts?.length ?? 0) > 0;
 
 /** A fresh seat (new agent session, own records) on a folder an owner already paired, e.g. a production test Soul.
  *  The harness never registers, creates or pairs here: it reads `status`, turns the client's trace on and starts `serve`. */
@@ -122,10 +136,12 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     const before = observe(pub0), seen = new Set(before.receipts.map((r) => `${r.id}|${r.phase}`));
     if (item.start && !before.placeIds.includes(item.start)) throw new Error(`${item.id}: the Soul starts at ${before.place}, not ${item.start}`);
 
+    if (item.calendar) await seedCalendar(dir, base, item.calendar);
     const kick = await seat.chat(kickoffText(name, setup.skillFile), { reason: 'kickoff' });
     seat.wakeLoop();
     // --warm-sec: the instruction waits until the Soul is this old, so a run can show the steady state beside the cold start
     if (warmSec > 0 && setup.createdAt) { const wait = setup.createdAt + warmSec * 1000 - Date.now(); if (wait > 0) await sleep(wait); }
+    const calendarFirst = item.calendar ? (await calendarNow(base, 60))?.[0]?.id ?? null : null;   // "the first thing" when it was asked
     const sentLocal = Date.now();
     const chatMode = deliver === 'chat';
     const sent = chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
@@ -145,7 +161,8 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
       const newReceipts = obs.receipts.filter((r) => !priorIds.has(r.id) || !seen.has(`${r.id}|${r.phase}`));
       const moved = obs.place !== before.place || obs.posture !== before.posture || newReceipts.some((r) => r.firstMotionTick != null);
       if (firstMotionMs == null && moved) firstMotionMs = t;
-      verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog, noCard: chatMode });
+      const calendar = item.calendar ? await calendarNow(base) : null;
+      verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog, noCard: chatMode, calendar, calendarFirst, soulId });
       samples.push({ t, place: obs.place, posture: obs.posture, activity: obs.activity, card: card.state, ok: verdict.ok });
       const closed = !chatMode && !card.other && cardClosed(card);
       if (closed && closedAt == null) closedAt = t;

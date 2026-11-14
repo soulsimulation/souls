@@ -57,6 +57,15 @@ test('edge feed: conversation members tracked; enclosure and audience channels k
   assert.deepEqual(out[1].channel,{kind:'enclosure',placeId:'eden-library-1'});assert.equal(out[1].within,'eden-library-1');
   assert.equal(out[2].channel.kind,'audience');assert.equal(out[2].within,'eden-classroom-1');
 });
+test('edge feed: a private conversation shows a talking cue between its members, never words (#2269)', () => {
+  const A={soulId:'s_a',name:'Alice'},B={soulId:'s_b',name:'Bob'};
+  const out=speechFromEdge([
+    {type:'edge',kind:'conversation.start',tick:1,at:1000,conversation:'cv2',from:A,invited:[B],private:true},
+    {type:'edge',kind:'conversation.member',tick:2,at:1100,conversation:'cv2',soul:B,change:'joined'},
+    {type:'edge',kind:'conversation.talking',tick:3,at:1200,conversation:'cv2',from:B,private:true},
+  ] as any[],()=>[0,0,0]);
+  assert.deepEqual(out.map(s=>[s.speakerName,s.text,s.channel]),[['Bob','…',{kind:'conversation',conversationId:'cv2',members:['s_a','s_b'],private:true}]]);
+});
 test('edge feed: fade colours map to ring phases; removed beams, reclaimed falls, green clears', () => {
   const m=fadingFromEdge([
     {kind:'fade',at:10,soulId:'s_a',colour:'yellow',change:'warn'},{kind:'fade',at:20,soulId:'s_b',colour:'red',change:'warn'},

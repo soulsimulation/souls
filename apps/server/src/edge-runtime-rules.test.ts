@@ -7,7 +7,7 @@ import {setImmediate} from 'node:timers/promises';
 import {Db} from './db.ts';
 import {WorldHost} from './world.ts';
 import {marsFactory,GREEN_FIELD_WORLD,LITTLE_MARTIANS_WORLD} from '@souls/engine-mars';
-import {enableEdgeRuntimeRules,LITTLE_MARTIANS_WORLD_KEYS} from './edge-runtime-rules.ts';
+import {enableEdgeRuntimeRules,adoptBootRuntimePoliciesV1,LITTLE_MARTIANS_WORLD_KEYS} from './edge-runtime-rules.ts';
 
 type Policy = {quietStallReleaseV1?:boolean;yieldTimeoutV1?:boolean;spreadV2?:boolean;routeReachV1?:boolean;occupiedLinkRoutingV1?:boolean;concurrentLinkEgressV1?:boolean;stairLandingClearanceV1?:boolean};
 async function startup(worldKey:string,config:typeof GREEN_FIELD_WORLD){
@@ -49,4 +49,16 @@ test('main.ts activates edge startup rules through the shared helper with the wo
  assert.match(main,/if \(host\.engine\.configureRuntimePolicy\) void adoptBootRuntimePoliciesV1\(host, \{ after: courtesy, edge: !!edge, worldKey: config\.worldKey \}\)/);
  assert.match(readFileSync(new URL('./edge-runtime-rules.ts',import.meta.url),'utf8'),/if \(opts\.edge\) await enableEdgeRuntimeRules\(host, opts\.worldKey\)/);
  assert.doesNotMatch(main,/enableOccupiedLinkRoutingV1|enableConcurrentLinkEgressV1|enableStairLandingClearanceV1/);
+});
+
+test('#2133 every world adopts stall-release-support/1 at boot, last, after stand-height/2, and the engine has it on',async()=>{
+ const db=new Db(':memory:'),host=new WorldHost(db,await marsFactory(GREEN_FIELD_WORLD),'edge-rules',1e9,'boot-1');
+ try{
+  host.boot();let done=false;const p=adoptBootRuntimePoliciesV1(host,{edge:false,worldKey:'boot'}).finally(()=>{done=true;});
+  while(!done){host.drainInputs();await setImmediate();}await p;
+  const rules=(db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='rules' ORDER BY seq").all(host.worldId) as {payload:string}[]).map(r=>JSON.parse(r.payload).runtimePolicy??{});
+  const first=rules.findIndex(r=>r.stallReleaseSupportV1===true);
+  assert.equal(first,rules.length-1,'adopted by the last rules event');assert.equal(rules[first].standHeightV2,true,'after stand-height/2');
+  assert.equal((host.engine.snapshot() as unknown as {cfg:{stallReleaseSupportV1?:boolean}}).cfg.stallReleaseSupportV1,true);
+ }finally{host.stop();db.close();}
 });

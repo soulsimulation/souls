@@ -225,10 +225,24 @@ load, the meetup workload, the slopes tick profile) go to the `souls-timed` self
 `timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk`, `eval-scripted`, `eval-load`,
 `bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
 own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
-put the world on two of the runner's four physical cores and the load generator on the other two, recorded in
-`timed-run.json`. The runners use a dedicated, unprivileged account: the
+put the world on two of the runner's physical cores and the load generator on the rest (one on a three-core runner, two
+on a four-core one), the split recorded in `timed-run.json`. The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
+
+A counted scenario playtest (a T3 change's two repeats per arm) runs on runners in parallel instead of the workstation
+lock. Declare the bar on the issue first, as for a workstation run: the scenario, `base` and candidate branches, the
+items, the pass rule per cell and the load rule. Then dispatch `command=counted`, `ref` = the candidate branch,
+`base` = the base branch (`main` or an `agent/<name>` branch), `repeats` = cells per arm and
+`args=--scenario stair-foot`, with `runner=hosted` (the GitHub-hosted runners) or `souls-timed`:
+`gh workflow run timed-run.yml -f command=counted -f ref=agent/<n>-x -f base=main -f repeats=2 -f args='--scenario stair-foot' -f runner=hosted`.
+Each cell (`base-1`, `cand-1`, `base-2`, …) is its own job on its own runner, all at once. Its artifact
+`timed-run-counted-<run>-<cell>` holds the files the workstation session writes: `counted/<cell>/run.json`, its log,
+`<cell>.scores.json`, `<cell>.class.json` and the replay's `probe.log`. `timed-run.json` records the commit, the kit's
+sha256s, and the 1- and 5-minute load at the start and end of the cell with the runner's CPU count. The kit comes from
+`tools/playtest/counted/<scenario>/` at the workflow's commit, so both arms run the same bytes. The stair kit is #1367's
+declared kit byte for byte. Its starting load is recorded, not gated, since the items pass or fail. Pair `base-k` with
+`cand-k` and score them by the declared rule.
 
 ## Request ceilings on local test worlds
 

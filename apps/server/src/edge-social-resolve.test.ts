@@ -13,12 +13,12 @@ test('activity intents preserve companions through place and target resolution, 
     assert.deepEqual(dry.would.params,{seconds:60,with:spec.with});
     assert.equal(w.ledger.together.invitesFor(b.soulId).length,0,'dry run never invites');
   }
-  const bad=await w.http(a,'POST','/v1/edge/act',{verb:'read',target:{place:target,with:false}});
+  const bad=await w.http(a,'POST','/v1/edge/act',{capability:'read:'+target,params:{with:false}});
   assert.equal(bad.body.accepted,false);assert.equal(bad.body.code,'capability.params');
   const prior=w.f.host.soulNameRefusal;w.f.host.soulNameRefusal=ref=>ref===b.name?'soul.name-ambiguous':prior.call(w.f.host,ref);
-  const stale=await w.http(a,'POST','/v1/edge/act',{verb:'read',target:{place:target,with:b.name}});
+  const stale=await w.http(a,'POST','/v1/edge/act',{capability:'read:'+target,params:{with:b.name}});
   assert.equal(stale.body.accepted,false);assert.equal(stale.body.code,'soul.name-ambiguous');w.f.host.soulNameRefusal=prior;
-  const started=await w.http(a,'POST','/v1/edge/act',{verb:'read',target:{place:target,seconds:60,with:b.name}});
+  const started=await w.http(a,'POST','/v1/edge/act',{capability:'read:'+target,params:{seconds:60,with:b.name}});
   assert.equal(started.body.accepted,true,JSON.stringify(started));
   const inv=w.ledger.together.invitesFor(b.soulId)[0];assert.ok(inv,'same requested read creates an invitation, never silently solo');
   assert.equal(inv.seconds,60);

@@ -117,7 +117,7 @@ async function waitStatus(page, status, timeout = 60_000) { await page.waitForFu
 async function newAgent(base, name) { const folder = mkdtempSync(join(tmpdir(), `soul-${name}-`)); await agent(folder, ['register', base]); return folder; }
 /** Move a pending request's expiry into the past in whichever of this world's DBs holds it (sim.db or accounts.sqlite). */
 function expire(id) {
-  const found = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); const st = statSync(p); if (st.isDirectory()) walk(p); else if (/\.(db|sqlite)$/.test(f)) found.push(p); } };
+  const found = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); const st = statSync(p); if (st.isDirectory()) walk(p); else if (f === 'sim.db') found.push(p); } };   // the live world DB only, never the hourly backup-*.db
   walk(dataDir); let changed = 0;
   for (const p of found) { try { const db = new DatabaseSync(p); db.exec('PRAGMA busy_timeout=5000'); if (db.prepare("SELECT name FROM sqlite_master WHERE name='account_approvals_v1'").get()) changed += db.prepare("UPDATE account_approvals_v1 SET expires_at=? WHERE id=? AND status='pending'").run(Date.now() - 1000, id).changes; db.close(); } catch { /* not ours */ } }
   return changed;
