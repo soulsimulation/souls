@@ -230,20 +230,26 @@ export class GodPerceive {
       // SOULFIX: where to stand to operate it: a clear spot within reach (1.5 m) on its level that the body can walk to,
       // nearest its front first, else nearest the thing (bars across a cell work from either side); deterministic order
       approach: (id: string, soul: EdgeSoul, front: Vec2 | null, radius = 1.5) => {
-        const E = this.h.engine as unknown as { clearanceAtV1?: (x: number, z: number, level?: number) => number; reachV1?: (a: { p: Vec2; level?: number }, b: { p: Vec2; level?: number }) => { ok: boolean } };
+        const E = this.h.engine as unknown as { clearanceAtV1?: (x: number, z: number, level?: number) => number; reachV1?: (a: { p: Vec2; level?: number }, b: { p: Vec2; level?: number }) => { ok: boolean }; readPassV1?: <T>(f: () => T) => T };
         const e = this.h.model.entities.get(id), b = this.h.engine.world.entities[soul.entityId];
         if (!e || !b?.pose?.p || !E.clearanceAtV1 || !E.reachV1) return null;
-        const wp = this.h.model.worldPose(e), at: Vec2 = [wp.x, wp.z], level = this.h.levelAt ? this.h.levelAt(wp.x, wp.z, wp.y) : 0;
-        const me = { p: [b.pose.p[0], b.pose.p[2]] as Vec2, level: b.human?.level ?? 0 };
-        const cands: { p: Vec2; d: number }[] = [];
-        for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
-          const p: Vec2 = [Math.round((at[0] + i * 0.25) * 100) / 100, Math.round((at[1] + j * 0.25) * 100) / 100], r = Math.hypot(p[0] - at[0], p[1] - at[1]);
-          if (r < 0.3 || r > radius || E.clearanceAtV1(p[0], p[1], level) < 0.4) continue;
-          cands.push({ p, d: front ? Math.hypot(p[0] - front[0], p[1] - front[1]) : r });
-        }
-        cands.sort((x, y) => x.d - y.d || x.p[0] - y.p[0] || x.p[1] - y.p[1]);
-        for (const c of cands.slice(0, 16)) if (E.reachV1(me, { p: c.p, level }).ok) return { p: c.p, level };
-        return null;
+        const clearAt = E.clearanceAtV1, reach = E.reachV1;
+        const find = (): { p: Vec2; level: number } | null => {
+          const wp = this.h.model.worldPose(e), at: Vec2 = [wp.x, wp.z], level = this.h.levelAt ? this.h.levelAt(wp.x, wp.z, wp.y) : 0;
+          const me = { p: [b.pose.p[0], b.pose.p[2]] as Vec2, level: b.human?.level ?? 0 };
+          const cands: { p: Vec2; d: number }[] = [];
+          for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
+            const p: Vec2 = [Math.round((at[0] + i * 0.25) * 100) / 100, Math.round((at[1] + j * 0.25) * 100) / 100], r = Math.hypot(p[0] - at[0], p[1] - at[1]);
+            if (r < 0.3 || r > radius || clearAt.call(E, p[0], p[1], level) < 0.4) continue;
+            cands.push({ p, d: front ? Math.hypot(p[0] - front[0], p[1] - front[1]) : r });
+          }
+          cands.sort((x, y) => x.d - y.d || x.p[0] - y.p[0] || x.p[1] - y.p[1]);
+          for (const c of cands.slice(0, 16)) if (reach.call(E, me, { p: c.p, level }).ok) return { p: c.p, level };
+          return null;
+        };
+        // #2354: these reads change nothing the planner sees, so the planner is synced once for all of them (each of up to
+        // 169 clearance reads re-scanned every static entity on its own: ~0.9 s a put-out at 24 Souls). Same answers.
+        return E.readPassV1 ? E.readPassV1(find) : find();
       },
     };
   }

@@ -2649,7 +2649,7 @@ export class EngineBridge {
     // every focused build as on the whole menu; only the economy's buy/pay listing waits for a focus that names it. A words
     // walk to a closed site was offered available on its focused build.)
     if (this.layers.active()) try { this.layers.capabilities(soul, caps, plans as never, here, named('buy', 'pay', 'sell')); } catch (e) { this.log(`layers capabilities: ${(e as Error).message}`); }
-    if (wants(focus, 'sit:here')) this.sitHere(caps, plans, here, soul.entityId);
+    if (wants(focus, 'sit:here', 'sit')) this.sitHere(caps, plans, here, soul.entityId);
     this.fireLit(caps);
     try { this.meals?.capabilities(caps); } catch (e) { this.log(`meals capabilities: ${(e as Error).message}`); }
   }
