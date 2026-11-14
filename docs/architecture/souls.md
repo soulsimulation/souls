@@ -394,7 +394,11 @@ withholds. Owner messages and credentials are never in it.
   that point, so a spot main offered can now answer `spot.taken`. `spot.no-room` is left for a spot with no clear ground
   anywhere that near: it says that waiting will not help and names the nearest other spot of the same activity. Such an id is
   built afresh each time it is asked for: a far spot is never answered from a kept menu.
-- **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, nothing else) walks the Soul to that point on
+- **Running.** A walk or `walk-to:here` takes `pace`, `walk` (the default) or `run` (#2283): the same plan, its `walk_to`
+  steps at the engine's run gait (4 m/s), so support, admission, walls and crowds hold as for a walk, stairs stay at
+  climbing pace and a wet route walks. `act <id> --run` sends it; a plan step sends it in its params. A pace on any other
+  offer, or any other value, is refused (`capability.params`). Running spends energy at twice the rate of other doing.
+- **A point.** `walk-to:here` with `{"at": [x, z]}` (two finite numbers, and an optional `pace`) walks the Soul to that point on
   its own level by the engine's own walk, ending at standing room. Words never read as it: "walk to the pond" is a walk
   (#1916). It does one of three things, and the receipt's `chosen` (`at`, `goal`, `short` in metres) says which (#1964):
   walks to the point, snapped to standing ground within 1 m; within 72 m, what a place walk does with no route (the
