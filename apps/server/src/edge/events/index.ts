@@ -356,7 +356,14 @@ export function registerEdgeEvents(app: Hono, deps: EdgeDeps, comms: CommsRuntim
   }
   const activity = activityObserver({host:deps.host,db:deps.db,deliver:(soulId,tick,body)=>streams.deliver(soulId,'activity.observed',tick,body)});
   const listeners = deps.host.listeners;
-  const tickListener = {afterTick: (tick: number) => { if (tick % 20 === 0) sweep(tick); }};
+  // #2297: the next change of light (morning 0, day .2, evening .45, dusk .55, night .75 of the world day) is a deadline:
+  // every live Soul hears light.changed at the first sweep (every 20 ticks) after it
+  const nextLight = (tick: number) => {
+    const day = deps.host.living; if (!day || !(day.dayTicks > 0)) return [];
+    const c = clockAt(tick, day.origin, day.dayTicks), next = [0.2, 0.45, 0.55, 0.75, 1].find(p => p > c.phase)!;
+    return [{name: 'edge.light', tick: Math.ceil(Math.max(tick + 1, day.origin + Math.ceil((c.day + next) * day.dayTicks)) / 20) * 20}];
+  };
+  const tickListener = {afterTick: (tick: number) => { if (tick % 20 === 0) sweep(tick); }, stillness: nextLight};
   listeners?.push(tickListener,activity.listener);
 
   if (options.bootNotice) { try { notice({text: options.bootNotice, level: 'restart'}); } catch { /* best effort */ } }

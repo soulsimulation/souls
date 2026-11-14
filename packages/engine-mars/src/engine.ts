@@ -510,6 +510,19 @@ export class MarsEngine implements Engine {
     for (const e of listEntities(this.ents) as any[]) if (e.carrier && e.carrier.phase !== 'parked') return no;
     return { still: true, untilTick: until };
   }
+  /** #2297 (read only): the tick at which a held gaze lapses (updateAttention, every 10 ticks, drops a gaze from its
+   *  `until`; the head turns back), or null. The world changes there although no body moves. */
+  attentionDueV1(): number | null {
+    let t: number | null = null;
+    for (const e of listEntities(this.ents) as any[]) { const u = e.kind === 'human' ? e.human?.gaze?.until : undefined; if (Number.isInteger(u)) { const d = Math.ceil(Math.max(u, this.rt.tick + 1) / 10) * 10; t = t === null ? d : Math.min(t, d); } }
+    return t;
+  }
+  /** #2297 still check (read only, for the host's check mode): the state hash with the clock fields left out (the tick and
+   *  the time of day, which a still world changes on every tick as a pure function of the tick), and the world RNG's state. */
+  stillCheckV1(): { hash: string; rng: string } {
+    const w = this.rt.world;
+    return { hash: hashOf(this.stateHashInputs(hashOf({ ...w, tick: 0, env: { ...w.env, datetime: '' } }))), rng: String(w.rng) };
+  }
 
   private guardedV1?: unknown[];
   /** #1150: where each body an action can move stands before this tick, with the load it holds. Never stored. */
