@@ -783,7 +783,7 @@ export class WorldHost {
       const t = this.engine.world.tick + this.lag + due;
       if (this.stillClaim !== null && !this.queue.length && t < this.stillClaim) {
         // #2384 A1: unwatched and still since its last jump, the world sleeps to its horizon: no frame timer, no landing
-        if (this.stillStretch && !this.watched?.()) { this.lag += due; this.sleep(now); return; }
+        if (this.stillStretch && !this.watched?.() && this.clockRate >= this.baseRate) { this.lag += due; this.sleep(now); return; }   // (a slowed clock recovers in frames)
         if (this.lag + due < (this.watched?.() ? BATCH_TICKS : this.jumpCap)) { this.lag += due; return; }
       } else if (this.stillClaim !== null && !this.queue.length && this.stillStretch && !this.watched?.() && Number.isFinite(this.stillClaim) && this.stillClaim > this.engine.world.tick) {
         // #2384 A1: woken at its horizon, the world lands there exactly; what the wall owes past it stays owed, and the next
