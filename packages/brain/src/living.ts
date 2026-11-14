@@ -18,7 +18,9 @@ export function advanceNeeds(life: Life, tick: number, activity: string, company
   const asleep = /sleep/.test(activity), resting = /rest|sit/.test(activity), eating = /eat/.test(activity);
   const social = companyNear && (/talk|converse|listen|warm|gather|watch/.test(activity) || (floater && resting));
   const occupied = !/idle|stand|wait|rest|sleep/.test(activity);
-  n.energy = clamp(n.energy + d * (asleep ? 360 : resting ? (floater?360:50) : occupied ? -105 : -65));
+  // #2283: running or jogging spends energy at twice the rate of other doing (the body's gait is the activity)
+  const running = activity === 'run' || activity === 'jog';
+  n.energy = clamp(n.energy + d * (asleep ? 360 : resting ? (floater?360:50) : running ? -210 : occupied ? -105 : -65));
   n.hunger = clamp(n.hunger + d * (eating ? -26000 : nourished ? -4200 : asleep ? 35 : 70));
   n.company = clamp(n.company + d * (social ? -2200 : 75));
   n.restlessness = clamp(n.restlessness + d * (occupied ? -220 : asleep ? -50 : 95));

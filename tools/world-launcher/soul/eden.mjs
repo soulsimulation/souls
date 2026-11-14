@@ -3823,8 +3823,9 @@ function save(patch) {
   const s = { ...load(), ...patch };
   for (const k of Object.keys(s)) if (s[k] === undefined) delete s[k];
   if (HOME) return HOME.save(SEAT, s);
-  writeFileSync(STATE + ".tmp", JSON.stringify(s, null, 1) + "\n", { mode: 0o600 });
-  renameSync(STATE + ".tmp", STATE);
+  const tmp = `${STATE}.${process.pid}.tmp`;   // per process: concurrent runs in one folder never rename each other's file (#2092)
+  writeFileSync(tmp, JSON.stringify(s, null, 1) + "\n", { mode: 0o600 });
+  renameSync(tmp, STATE);
   return s;
 }
 const need = (s, k, hint) => {
@@ -5496,8 +5497,11 @@ export function parseActionArgs(input) {
 const OFFER_ID = /^[a-z][\w-]*(?::\S+)?$/i;
 async function act(...argv) {
   const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
-  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
+  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
+  // #2283: --run is pace "run" on a walk or walk-to (the world refuses it on anything else)
+  const run = args.indexOf("--run"); if (run >= 0) args.splice(run, 1);
   const parsed = parseActionArgs(args);
+  if (run >= 0) parsed.params = { ...(parsed.params ?? {}), pace: "run" };
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
     const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
     const r = soulCatalog.find(ix, parsed.capability, { at: me?.at, states: live?.live?.things }), said = r.note ?? note;
@@ -5684,7 +5688,7 @@ export function brief(out) {
     : fin ? rec.done ?? rec.outcome?.summary ?? `${rec.capability} ${rec.phase}.`
     : rec.now ?? `${rec.capability} ${rec.phase}: under way, not finished.`;
   const o = {
-    ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}),
+    ...(out.accepted !== undefined ? { accepted: out.accepted } : {}), ...(out.waited ? { waited: out.waited } : {}), ...(out.waitCapped ? { waitCapped: out.waitCapped } : {}),
     ...(sentence ? (fin ? { [key]: sentence } : { now: sentence, done: false }) : {}),
     ...(rec ? { receipt: { id: rec.id, capability: rec.capability, phase: rec.phase, ...(rec.code ? { code: rec.code } : {}), ...(!fin && out.held ? { observed: out.held } : {}) } } : {}),
     ...(out.stopped ? { stopped: out.stopped } : {}), ...(out.for ? { for: out.for } : {}), ...(out.repeat ? { repeat: true } : {}), ...(out.checked ? { checked: true } : {}), ...(out.resent ? { resent: true } : {}), ...(out.closed ? { closed: true } : out.open ? { open: true } : {}), ...(out.ownerMessages ? { ownerMessages: out.ownerMessages } : {}), ...(out.addressed ? { addressed: out.addressed } : {}),
@@ -5732,7 +5736,7 @@ function waitOption(argv) {
   return { args, wait, json, for: forId, key };
 }
 
-// wait [seconds] [receiptId]: long-poll world events (max 60 s) until the receipt is terminal, its sit or lie holds the
+// wait [seconds] [receiptId]: long-poll world events (max WAIT_MAX_S) until the receipt is terminal, its sit or lie holds the
 // pose (held, still `started`), the owner writes, or an invitation/conversation turn arrives. Saves the cursor.
 async function wait(...argv) {
   const json = argv.includes("--json"), [secArg, idArg] = argv.filter((a) => a !== "--json");
@@ -5743,9 +5747,17 @@ async function wait(...argv) {
   forgetLinks(out.receipt);
   return json ? out : brief(out);
 }
-async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
+/** The longest a wait (or `act --wait`) holds: long acts (a climb upstairs, a long walk) run past a minute. The wait
+ *  long-polls in pieces of at most 55 s, so a longer wait costs no more per request. */
+export const WAIT_MAX_S = 300;
+/** A wait's seconds: as asked, from 1 to WAIT_MAX_S (45 when not a number); `capped` when it asked for more (#2292). */
+export function waitSpan(asked) {
+  const n = Number(asked) || 45;
+  return { seconds: Math.min(WAIT_MAX_S, Math.max(1, n)), ...(n > WAIT_MAX_S ? { capped: WAIT_MAX_S } : {}) };
+}
+async function waitRaw(asked = 45, receiptId, { untilHeld = true } = {}) {
   const s = load();
-  seconds = Math.min(60, Math.max(1, Number(seconds) || 45));
+  const { seconds, capped } = waitSpan(asked);
   receiptId = /^r_/.test(String(receiptId ?? "")) ? receiptId : s.lastReceipt;
   const t0 = Date.now(), until = t0 + seconds * 1000;
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
@@ -5780,7 +5792,7 @@ async function waitRaw(seconds = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, ...(capped ? { waitCapped: `${capped}s, the most a wait holds; wait again while done is false` } : {}), since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
