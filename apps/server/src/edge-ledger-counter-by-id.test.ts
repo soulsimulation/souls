@@ -1,7 +1,8 @@
 // #628 on the real Eden 2026 template (fake minds, in memory): every act the catalog publishes is offered when asked for by id
-// cold, apart from one easel whose clear ground is too far from it (it still says why). Before, 31 were refused spot.no-room:
-// 29 kitchen counters, each with its own chair on its standing point, a fishing spot and that easel. A counter's craft act by
-// id now walks to clear floor beside the counter and crafts there.
+// cold. Before, 31 were refused spot.no-room: 29 kitchen counters, each with its own chair on its standing point, a fishing
+// spot and the Eden House 4 easel. A counter's craft act by id now walks to clear floor beside the counter and crafts there.
+// #1871: the easel was authored facing the living room's south wall, so its standing point was inside the wall; it now faces
+// the room, and its paint act by id is painted at.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';
@@ -21,10 +22,7 @@ test('Eden 2026: catalog acts by id are offered cold; a kitchen counter is craft
   await run(120);
   const refused = new Map<string, {code: string; reason: string}>();
   for (const a of ledgerCatalog(L).payload.acts) { L.invalidateBodies(); const g = L.offerGate(w.soul, {capability: a.id}); if (g) refused.set(a.id, g); }
-  assert.deepEqual([...refused.keys()], ['paint:paint.e_9ae05996'], 'only the one easel with no clear ground beside it is refused');
-  const easel = refused.get('paint:paint.e_9ae05996')!;
-  assert.equal(easel.code, 'spot.no-room');
-  assert.match(easel.reason, /waiting will not change that.*The nearest other one is .*\(paint:paint\.e_[0-9a-f]+\)/);
+  assert.deepEqual([...refused.entries()], [], 'no act the catalog publishes is refused by id');
 
   // review of #1832: the side search runs only where main refused. Every spot main used keeps main's point: in particular a standing
   // spot with a little room where it is (0.05 m or more, less than the 0.28 m standing room) and nothing clear straight back, which
@@ -63,4 +61,14 @@ test('Eden 2026: catalog acts by id are offered cold; a kitchen counter is craft
   assert.equal(body().human?.activity, 'craft', `crafting (receipt ${JSON.stringify(L.receipt(w.soul.soulId, out.receipt!.id))})`);
   const p = body().pose.p, c = counter.pose!.p;
   assert.ok(Math.hypot(p[0] - c[0], p[2] - c[2]) <= 0.85 + 0.5 + 0.05, `at the counter (${p.map(v => v.toFixed(2))} vs ${c.map(v => v.toFixed(2))})`);
+
+  // #1871: the Eden House 4 easel's paint act by id walks into the living room and paints there
+  const easelId = 'paint:paint.e_9ae05996', easel = host.engine.world.entities.e_9ae05996!;
+  const painted = await accept(host, Promise.resolve(L.act(w.soul, {capability: easelId, clientRef: 'easel-1'}))) as Act;
+  assert.equal(painted.accepted, true, JSON.stringify(painted));
+  const t1 = host.engine.world.tick;
+  while (body().human?.activity !== 'paint' && host.engine.world.tick - t1 < 600 * 20) await run(20);
+  assert.equal(body().human?.activity, 'paint', `painting (receipt ${JSON.stringify(L.receipt(w.soul.soulId, painted.receipt!.id))})`);
+  const q = body().pose.p, e = easel.pose!.p;
+  assert.ok(Math.hypot(q[0] - e[0], q[2] - e[2]) <= 0.85 + 0.5, `at the easel (${q.map(v => v.toFixed(2))} vs ${e.map(v => v.toFixed(2))})`);
 });
