@@ -59,7 +59,8 @@ export class Souls {
       },
     });
     this.carryOverDirections();
-    setInterval(() => { const now = Date.now(); for (const [k, p] of this.pairings) if (p.expires < now) this.pairings.delete(k); }, 60_000).unref();
+    setInterval(() => { if (host.silent?.()) return;   // #2303: memory only, and every use checks `expires`
+      const now = Date.now(); for (const [k, p] of this.pairings) if (p.expires < now) this.pairings.delete(k); }, 60_000).unref();
   }
 
   // ------------------------------------------------------------ access

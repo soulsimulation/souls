@@ -212,6 +212,26 @@ test('the periodic check re-aligns a watched, running world and leaves slowed, p
   keeper.stop();
 });
 
+test('#2303: a silent world is not checked until its daylight-saving deadline falls; then it is re-aligned', async () => {
+  let wall = Date.UTC(2026, 10, 1, 5, 58), tick = 0, silent = false;   // two minutes before New York leaves daylight saving
+  const events: any[] = [], listeners: any[] = [];
+  const host: any = { engine: { world: { get tick() { return tick; } } }, living: undefined, pace: 1, paused: false, running: true, listeners, silent: () => silent,
+    enqueue(_k: string, _a: string, p: any) { events.push(p); host.living = { ...p.dayConfig }; return Promise.resolve(); } };
+  const keeper = installRealClock(host, { zone: () => 'America/New_York', now: () => wall, checkMs: 20 });
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  await wait(60);
+  assert.equal(events.length, 1, 'started once');
+  const due = listeners[0].stillness(tick);
+  assert.equal(due[0].name, 'clock.daylight-saving');
+  silent = true; wall += 60_000; tick += 3_600; host.living = { ...host.living, origin: host.living.origin - 1_200 };   // a minute of drift
+  await wait(80);
+  assert.equal(events.length, 1, 'silent: the check returns at once');
+  wall = Date.UTC(2026, 10, 1, 6, 0, 1); tick = due[0].tick; listeners[0].stillness(tick);   // the world lands on the deadline
+  await wait(80);
+  assert.equal(events.length, 2, 'the deadline fell: re-aligned while still silent'); assert.equal(events[1].realign, true);
+  keeper.stop();
+});
+
 test('needs move over the clock day: a real day is 24 times slower than the accelerated one', () => {
   const a = newLife(0), b = newLife(0);
   advanceNeeds(a, 72000, 'idle', false);                       // one accelerated day

@@ -46,5 +46,14 @@ test('row a pond loop with a companion: ordinary commands, held seat, water refu
   assert.equal(receipt(0,first.receipt.id).phase,'started');
   assert.ok(await run(4000,()=>receipt(0,first.receipt.id).phase==='completed'&&receipt(1,second.receipt.id).phase==='completed'),JSON.stringify([receipt(0,first.receipt.id),receipt(1,second.receipt.id)]));
   for(const i of [0,1]){assert.equal(body(i).human.carrier,undefined);assert.ok(body(i).pose.p[0]>-46);assert.equal(body(i).human.shore?.depthMetres,0);}
+  // #2303: a carrier changed since its last frame is a deadline on the 10-tick grid, so a silent world lands there and the
+  // ride object's events (the ashore line) go out on the same tick as in a world ticked straight through
+  while(f.host.engine.world.tick%10!==3)f.host.tickOnce();
+  assert.equal(ledger.rideFrameDue(f.host.engine.world.tick),null,'every carrier framed');
+  (ledger as any).rideKey.set('eden-punt','stale');
+  const now=f.host.engine.world.tick,due={tick:ledger.rideFrameDue(now)!};   // (stillParts reports it as edge.ride-frame; this ledger is ambient, so busy)
+  assert.equal(due.tick,now+7,'due at the next frame tick');
+  while(f.host.engine.world.tick<due.tick)f.host.tickOnce();
+  assert.equal(ledger.rideFrameDue(f.host.engine.world.tick),null,'framed at that tick');
   assert.deepEqual(f.host.engine.runtime.violations,[]);assert.equal(f.db.paidCost(),0);
 });

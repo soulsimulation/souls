@@ -120,7 +120,8 @@ export class Brain {
     const t = db.brainToday(this.capSince); this.spentToday = t.cost; this.callsToday = t.calls; this.jevMsAvg = t.jevMs;
     host.listeners.push({ afterTick: (tick) => this.afterTick(tick), stillness: () => (this.cfg.mindDriver === 'edge' || this.quiescing || !host.minds.size ? [] : [{ name: 'brain.central', busy: true }]),   // #2298: central minds decide every tick
       onApplied: (e) => this.onApplied(e), onPlay: (v) => { for (const c of v.changes) if (c.op === 'say' && host.kernel.things[c.to]?.kind === 'soul') void this.speak(c.from, c.to, c.act, typeof c.about === 'string' ? c.about : undefined, c.manner); } });
-    this.maintenance=setInterval(() => { const t = this.db.brainToday(this.capSince); this.spentToday = t.cost; this.callsToday = t.calls; this.db.pruneBrainCalls(); }, 60_000);this.maintenance.unref();
+    this.maintenance=setInterval(() => { if (host.silent?.()) return;   // #2303: no thought while silent; the budget gate reads the database itself
+      const t = this.db.brainToday(this.capSince); this.spentToday = t.cost; this.callsToday = t.calls; this.db.pruneBrainCalls(); }, 60_000);this.maintenance.unref();
   }
 
   setMode(m: 'live' | 'fake') { this.mode = m; this.jev.mode = this.cfg.typesafeKey ? m : 'fake'; }

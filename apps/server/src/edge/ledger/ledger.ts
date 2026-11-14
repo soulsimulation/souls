@@ -960,8 +960,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const cm = (this.comms as {nextDueTick?(): number | null} | undefined)?.nextDueTick?.() ?? null;
     // #2298: the stall guard's release (stall-guard/1) and the step out of a solid footprint (CN5) are deadlines too
     const now = this.host.engine.world.tick, sg = this.stallGuard.nextDue(now); if (sg.busy) return [{name: 'edge.stall-guard', busy: true}];
-    const us = this.unstickDue(now);
-    return [...(sg.tick !== null ? [{name: 'edge.stall-guard', tick: sg.tick}] : []), ...(us !== null ? [{name: 'edge.step-out', tick: us, move: true}] : []), ...(tg.tick !== null ? [{name: 'edge.invite-follow-item', tick: tg.tick}] : []), ...(pj !== null ? [{name: 'god.project-consent', tick: pj}] : []), ...(cm !== null ? [{name: 'edge.comms', tick: cm}] : [])];
+    const us = this.unstickDue(now), rf = this.rideFrameDue(now);
+    return [...(rf !== null ? [{name: 'edge.ride-frame', tick: rf}] : []), ...(sg.tick !== null ? [{name: 'edge.stall-guard', tick: sg.tick}] : []), ...(us !== null ? [{name: 'edge.step-out', tick: us, move: true}] : []), ...(tg.tick !== null ? [{name: 'edge.invite-follow-item', tick: tg.tick}] : []), ...(pj !== null ? [{name: 'god.project-consent', tick: pj}] : []), ...(cm !== null ? [{name: 'edge.comms', tick: cm}] : [])];
   }
   private afterTick(tick: number) {
     if(this.contactPending.size)this.contactTicks(tick);
@@ -3110,6 +3110,10 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   rides() {return this.carriersNative().map(c => this.carrierView(c.id)!);}
   private rideKey = new Map<string, string>();
+  private rideKeyOf(c: ReturnType<EdgeLedger['carriersNative']>[number]) {return JSON.stringify([c.state.phase, c.state.seats, c.state.holding, Object.values(c.state.seats).map(a => a ? this.aboard(a)?.riderPhase : null), c.state.hold ?? null]);}
+  /** #2303: a carrier changed since its last frame: its frame (and the ride object's events, the ashore line) falls due at
+   *  the next tick on the 10-tick grid, a deadline, so a silent world lands there. */
+  rideFrameDue(now: number): number | null {for (const c of this.carriersNative()) if (this.rideKey.get(c.id) !== this.rideKeyOf(c)) return now - (now % 10) + 10; return null;}
   /** Spectator frames (EDGE-CONTRACT §7, kind `ride`): every 0.5 s while aloft, and at once on any phase or rider change. */
   private rideFrames(tick: number) {
     if (tick % 200 === 0) this.syncCarrierPlaces();
@@ -3117,7 +3121,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (all.length !== this.carrierCount) this.syncCarrierPlaces();
     let changed = false;
     for (const c of all) {
-      const key = JSON.stringify([c.state.phase, c.state.seats, c.state.holding, Object.values(c.state.seats).map(a => a ? this.aboard(a)?.riderPhase : null), c.state.hold ?? null]);
+      const key = this.rideKeyOf(c);
       const moved = c.state.phase === 'aloft', fresh = this.rideKey.get(c.id) !== key;
       if (fresh) {this.rideKey.set(c.id, key); changed = true;}
       if (moved || fresh) try {(this.comms as unknown as {core?: {spectate(m: object): void}} | undefined)?.core?.spectate({kind: 'ride', tick, ride: (() => {const v = this.carrierView(c.id)!; return fresh ? v : {...v, route: {...v.route, keys: undefined}};})()});} catch {/* spectators never break the ledger */}

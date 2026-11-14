@@ -354,7 +354,10 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     pendingSweep = sweepSteps(true);
     advanceSweep(pendingSweep);
   };
-  const timer = (options.sweepMs ?? 30_000) > 0 ? setInterval(scheduleSweep, options.sweepMs ?? 30_000) : null;
+  // #2303: while the world is silent the sweep returns at once until the world reaches the tick nextDueTick last named
+  let dueTick: number | null = 0;
+  const silent = () => !!deps.host.silent?.() && (dueTick === null || core.tick() < dueTick);
+  const timer = (options.sweepMs ?? 30_000) > 0 ? setInterval(() => { if (!silent()) scheduleSweep(); }, options.sweepMs ?? 30_000) : null;
   timer?.unref?.();
   for (const r of db.prepare('SELECT soul_id FROM edge_comms_subscriptions WHERE world_id = ?').all(worldId) as {soul_id: string}[]) void webhooks.push(r.soul_id);
 
@@ -377,7 +380,8 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
       for (const o of objects.ofKind('calendar-item')) { const s = o.state as CalendarState; at(calendarNextTick(s) ?? (s.proposedById ? s.endsAtTick + CALENDAR_EXPIRE_MINUTES * ticksPerRealMinute() + 1 : null)); }
       for (const o of objects.ofKind('presentation')) at(presentationNextTick(o.state as PresentationState));
       at(wall(conversations.nextDueMs())); at(wall(fading.nextDueMs())); at(steward.nextDigestTick());
-      return t === null ? null : Math.max(tick + 1, t);
+      dueTick = t === null ? null : Math.max(tick + 1, t);
+      return dueTick;
     },
     close() { closed = true; if (timer) clearInterval(timer); cancelSweep(); webhooks.close(); streams.wakeAll(); },
   };
