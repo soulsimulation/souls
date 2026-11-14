@@ -10,7 +10,7 @@ import { passRelevant } from '../world/relevant.ts';
 import { buildStaticGrids, buildGrids, clearanceAt, gridsWithObstacles, StaticRaster, updateGrids, type GridSet, type LevelGrid } from './grid.ts';
 import { findRoute, linkApproach, prepareCorridor, type Place, type RouteOpts, type RouteResult } from './path.ts';
 import { holdingSpots, singleFile } from './holding.ts';
-import type { AgentProfile, Link, Obstacle, SpatialScene, Surface } from './types.ts';
+import { doorSides, type AgentProfile, type Link, type Obstacle, type SpatialScene, type Surface } from './types.ts';
 import type { Profiler } from '../runtime/profile.ts';
 import { sleepEnvelope, SLEEP_BODY_MARGIN } from '../activities/sleep.ts';
 import { sceneForWorld, worldBaseId } from './edits.ts';
@@ -745,36 +745,27 @@ export class Spatial {
     if (this.epoch === epoch) { m.map.set(key, structuredClone(r)); if (m.map.size > m.cap) m.map.delete(m.map.keys().next().value!); }
     return r;
   }
-  private passMemo?: { scene: SpatialScene; open: SpatialScene; grids?: GridSet };
-  /** doors-pass/1 (#2365): the synced scene with every closed, unlocked, hand-operated door gap (`door: 'pass'`) left
-   *  out, as a walk through it sees it (it opens the door, passes and closes it); the synced scene itself when it has none.
-   *  Memoised per synced scene. Call after sync(world). */
-  passScene(): SpatialScene {
-    const scene = this.scene, m = this.passMemo;
-    if (m?.scene === scene) return m.open;
-    const obstacles = scene.obstacles.filter((o) => o.door !== 'pass');
-    const open = obstacles.length === scene.obstacles.length ? scene : { ...scene, obstacles };
-    this.passMemo = { scene, open };
-    return open;
-  }
-  /** doors-pass/1: the grids of passScene() (the synced grids when it has no such door). Flat worlds; on ground worlds level
-   *  0 is composed from tiles (GroundNav.compose over passScene().obstacles), so only its other levels come from here. */
-  passGrids(): GridSet {
-    const open = this.passScene(), m = this.passMemo!;
-    if (open === this.scene) return this.grids;
-    return (m.grids ??= this.ground ? this.grids : this.gridsFor(open));
-  }
   private routeNow(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
+    // doors-pass/1 (#2365): what one walk act reaches, as entry 31's passage executes it: a route with every door shut, else
+    // a route through ONE closed, unlocked hand door on the ground (level 0): a route to one face of a door the failed search
+    // names and one from its other face to the goal, both with doors shut. Two doors in series, or a door upstairs, do not
+    // count (the passage opens one door on level 0), so reach, offers and the walk agree.
     if (opts?.doors === 'pass') {
       const { doors: _, ...rest } = opts;
-      this.sync(world);
-      const open = this.passScene();
-      if (open !== this.scene) {
-        const o = { ...(this.planner === 'exact' ? {} : { planner: this.planner }), ...rest, ...(this.routeReachV1 ? { routeReachV1: true } : {}) };
-        if (this.ground) return groundRoute(this.ground, open, profile, start, goal, o, (r) => this.groundInclude(world, r), () => this.grids);
-        return findRoute(this.passGrids(), open, profile, start, goal, o);
+      const r = this.routeNow(world, profile, start, goal, rest);
+      if (r.ok || r.diagnostic.code !== 'route.unreachable' || start.level !== 0 || goal.level !== 0) return r;
+      // only doors on the ground (within 0.6 m of level 0's floor or the terrain), as the connectivity audit counts them
+      const y0 = this.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0;
+      const pass = new Map(this.scene.obstacles.filter((o) => o.door === 'pass' && Math.abs(o.y0 - (y0 ?? this.ground!.standY(o.obb.c[0], o.obb.c[1]))) <= 0.6).map((o) => [o.id, o]));
+      if (!pass.size) return r;
+      const named = this.routeNow(world, profile, start, goal, { ...rest, nameObstacles: (id) => pass.has(id) });
+      const doors = named.ok ? [] : (named.diagnostic.subjects ?? []).map((id) => pass.get(id)).filter((o): o is Obstacle => !!o).slice(0, 4);
+      for (const o of doors) for (const [a, b] of [doorSides(o), doorSides(o).reverse() as [Vec2, Vec2]]) {
+        const r1 = this.routeNow(world, profile, start, { level: 0, p: a }, rest); if (!r1.ok) continue;
+        const r2 = this.routeNow(world, profile, { level: 0, p: b }, goal, rest); if (!r2.ok) continue;
+        return { ok: true, route: { legs: [...r1.route.legs, ...r2.route.legs], length: r1.route.length + hypot(b[0] - a[0], b[1] - a[1]) + r2.route.length, expanded: r1.route.expanded + r2.route.expanded } };
       }
-      return this.routeNow(world, profile, start, goal, rest);
+      return r;
     }
     const o0 = this.planner === 'exact' ? opts : { planner: this.planner, ...opts }, o = this.routeReachV1 ? { ...o0, routeReachV1: true } : o0;
     if (this.ground) {
