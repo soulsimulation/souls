@@ -4,8 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
 import {Hono} from 'hono';
-import {edenNavWorld} from '../test/eden-nav-fixture.ts';
-import {accept} from '../test/native-owner-fixture.ts';
+import {readFileSync} from 'node:fs';
+import {edenNavWorld, factory as edenFactory} from '../test/eden-nav-fixture.ts';
+import {accept, fixture} from '../test/native-owner-fixture.ts';
 import {WorldHost} from './world.ts';
 import {mountEdgeRoutes} from './edge/routes.ts';
 import {installClassroomTv} from './classroom-tv.ts';
@@ -66,4 +67,19 @@ test('classroom-tv/1: the Eden classroom screen becomes a TV once, logged and re
   assert.equal(st?.on, true, JSON.stringify(read)); assert.equal(st?.picture, 'sea');
   assert.equal(await done(await act(`object:${SCREEN}:switch-off`)), 'completed', 'the other Soul switches it off'); assert.equal(cfg().mode, 'off');
   assert.deepEqual(host.engine.runtime.violations, []);
+});
+
+test('classroom-tv/1: a lecture installed after the policy (a new Eden) gets its TV at once', {timeout: 300000}, async t => {
+  const f = fixture(':memory:', await edenFactory(), {durableClockV1: true}), host = f.host; f.brain.quiesce();
+  t.after(() => {host.stop(); f.db.close();});
+  await accept(host, host.installCommonsProvisionsV1()); await accept(host, host.installCommonsKitchenV1()); await accept(host, host.installRetainedCommonsShoreV1());
+  const layout = JSON.parse(readFileSync(new URL('../../../packages/engine-mars/src/fixtures/newcomer-layout.world-alternative.v2.json', import.meta.url), 'utf8'));
+  await accept(host, host.installCommonsNewcomerResourcesV1(layout.placements)); await accept(host, host.installNativeSleepSnapshotV1()); await accept(host, host.installEdenGroundV1());
+  const fact = await accept<unknown>(host, host.enableClassroomTvV1()) as {payload: {classroomTvV1: {screens: string[]}}};
+  assert.deepEqual(fact.payload.classroomTvV1.screens, [], 'no lecture yet: nothing to mark');
+  await accept(host, host.installEdenLectureV1({worldEast: 'world-v2', id: 'eden-classroom-1', origin: [42, -6], yaw: 0, audienceSeats: 20, lesson: 'A lesson.'}));
+  assert.deepEqual((host.engine.world.entities as Record<string, any>)[SCREEN].equipment.config, {available: true, mode: 'on', content: 'A lesson.', tv: true, picture: 'lesson'});
+  host.saveSnapshot(true); const hash = host.engine.stateHash();
+  const again = new WorldHost(f.db, await edenFactory(), host.seed, 1e9, host.worldId, {durableClockV1: true});
+  assert.equal(again.boot().from, 'snapshot'); assert.equal(again.engine.stateHash(), hash); again.stop();
 });
