@@ -179,8 +179,7 @@ test('wind-down/1: a world stopped and cold-booted twice between the last agent 
 // once ticked straight through and once brought forward by the boot catch-up, which jumps where the world is still, reaches
 // the same state hash and the same log; again when the jumping run is stopped and cold-booted halfway. JUMP_FULL=1: three
 // real days (1,728,000 ticks each, about an hour of ticking per case); otherwise three 24,000-tick days (the same deadlines
-// and day turns at a smaller scale). The Souls here have no needs (a Soul whose needs add up every tick keeps the world
-// ticking until #2296's need-anchor/1 is adopted).
+// and day turns at a smaller scale).
 const JUMP_FULL = process.env.JUMP_FULL === '1';
 const JUMP_DAY = JUMP_FULL ? 1_728_000 : 24_000;
 const KNOBS = { wanderTicks: 400, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 1500 };
@@ -194,7 +193,9 @@ async function godWorld(t: test.TestContext, path: string, souls: number | null)
   installEngineBridge({ host: f.host, god, edge: ledger, log: () => {}, worldLore: false, worldClock: false });
   new LivingWorld(f.host);
   if (souls !== null) {   // a fresh world: a day, held activities, the Souls and each one's last act (a ten-second read)
-    await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: JUMP_DAY, customs: [], zone: 'UTC' }, why: 'test: a day' }));
+    // a day gives every Soul needs, which add up every tick until need-anchor/1 (#2296) and so keep the world ticking: the
+    // worlds with Souls here have no day until it lands (the empty world has the day turns and moments)
+    if (!souls) await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: JUMP_DAY, customs: [], zone: 'UTC' }, why: 'test: a day' }));
     for (const p of [f.host.enableContinuousDayV1(), f.host.enableHeldActivitiesV1()]) await accept<unknown>(f.host, p);
     for (const n of ['ana', 'ben'].slice(0, souls)) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
     for (const m of f.host.minds.values()) await accept(f.host, f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
