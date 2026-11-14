@@ -6,8 +6,10 @@
 // starts when the snapshot is in (early-entry.ts calls window.__soulsPhase2), after at most PHASE2_FALLBACK_MS, or at once
 // if the early entry fails to load; its socket opens after at most SOCKET_FALLBACK_MS (PF2). P7d: `__soulsPhase2(true)` starts only its downloads and the socket; the main entry
 // itself runs at the next call (early-entry.ts: once the early renderer's poster is up), so it never competes with it. Pages that are not two-phase (the head script's phasedEntryWanted: desktops, old
-// worlds, pictures, ?phased=0) load both at once, main first, as before.
-// No imports: vite.config.ts loads this file in node.
+// worlds, pictures, ?phased=0) load both at once, main first, as before. The home page (the world list, page-route.ts
+// 'list') is neither: it loads its own entry (launcher-entry.tsx) and that entry's chunks only, never a world's.
+// vite.config.ts loads this file in node: its one import is self-contained (serialised into the loader).
+import { pageRoute } from './page-route.ts';
 
 /** The window function that starts phase two (idempotent; `(true)`: its downloads, not yet its entry; `('fill')`: its
  *  downloads, its entry's download and the socket; `()`: everything, the entry run). */
@@ -34,6 +36,8 @@ export const SOCKET_FALLBACK_MS = 2_500;
 export const PHASE2_FILL = 'fill';
 
 export type Phase = { entry: string; preloads: readonly string[] };
+/** The home page's entry and every chunk it needs at once; `base` is the app's path prefix ('' at the root). */
+export type Home = Phase & { base: string };
 
 /** Call the page's phase-two function (the loader below defines it; the loader's own fallbacks run it if this fails). */
 export function callPhase2(mode?: true | typeof PHASE2_FILL): void {
@@ -42,7 +46,7 @@ export function callPhase2(mode?: true | typeof PHASE2_FILL): void {
 
 /** The inline loader that replaces Vite's module script and modulepreload tags. Reads window.__soulsPhased (snapshot-prefetch.ts
  *  head script) and opens the deferred entry socket (window.__soulsOpenSocket) with phase two. */
-export function phasedLoaderScript(early: Phase, main: Phase): string {
+export function phasedLoaderScript(early: Phase, main: Phase, home?: Home): string {
   return `(function(){var d=document,W=window,E=${JSON.stringify(early)},M=${JSON.stringify(main)},done=false,pre=false,sock=false,`
     + `add=function(u,entry){var l=d.createElement(entry?'script':'link');if(entry){l.type='module';l.src=u;}else{l.rel='modulepreload';l.href=u;}l.crossOrigin='';d.head.appendChild(l);return l;},`
     + `so=function(){if(!sock){sock=true;try{var o=W.__soulsOpenSocket;if(typeof o==='function')o();}catch(e){}}},`
@@ -53,7 +57,10 @@ export function phasedLoaderScript(early: Phase, main: Phase): string {
     + `fill=function(){if(!done&&!fe){fe=true;var l=add(M.entry);l.onload=l.onerror=function(){ml=true;so();};}},`
     + `two=function(hold){if(!pre){pre=true;var left=M.preloads.length,got=function(){if(--left===0&&hold===true)near();};M.preloads.forEach(function(u){var l=add(u);l.onload=l.onerror=got;});if(!left&&hold===true)near();}`
     + `if(hold===${JSON.stringify(PHASE2_FILL)})fill();if(hold!==true&&hold!==${JSON.stringify(PHASE2_FILL)}&&!done){done=true;var e=add(M.entry,true);if(!fe||ml)so();else e.onload=e.onerror=so;}};`
-    + `W[${JSON.stringify(PHASE2_GLOBAL)}]=two;var ph=W.__soulsPhased===true;if(!ph)two();`
+    + `W[${JSON.stringify(PHASE2_GLOBAL)}]=two;`
+    // the home page: its own entry and chunks, nothing of a world's (no early entry, no main, no socket)
+    + (home ? `var H=${JSON.stringify({ entry: home.entry, preloads: home.preloads })};if((${pageRoute.toString()})(location.pathname,${JSON.stringify(home.base)},location.hash)==='list'){H.preloads.forEach(function(u){add(u);});add(H.entry,true);return;}` : '')
+    + `var ph=W.__soulsPhased===true;if(!ph)two();`
     + `try{W.__soulsSnapshotPrefetch.response.then(function(){si=true;},function(){});}catch(e){}`
     + `E.preloads.forEach(function(u){add(u);});var ee=add(E.entry,true);ee.onerror=two;if(ph){ee.onload=function(){setTimeout(function(){if(!si)so();},${SOCKET_FALLBACK_MS});};setTimeout(two,${PHASE2_FALLBACK_MS});}})();`;
 }
@@ -63,13 +70,15 @@ const MODULE_PRELOAD = /[ \t]*<link rel="modulepreload" crossorigin href="([^"]+
 
 /** Vite's built index.html with its module script and modulepreload tags replaced by the two-phase loader. `mainFile` /
  *  `earlyFile` are the two entry chunks' file names, `earlyImports` every chunk the early entry imports (statically, at
- *  any depth). Phase one preloads those; phase two preloads what main needs beyond them. */
-export function rewritePhasedHtml(html: string, mainFile: string, earlyFile: string, earlyImports: readonly string[]): string {
+ *  any depth). Phase one preloads those; phase two preloads what main needs beyond them. `home`: the home page's entry
+ *  chunk and the chunks it needs at once (file names), loaded instead on the world list. */
+export function rewritePhasedHtml(html: string, mainFile: string, earlyFile: string, earlyImports: readonly string[], home?: { file: string; imports: readonly string[]; base: string }): string {
   const scripts = [...html.matchAll(MODULE_SCRIPT)].map((m) => m[1]);
   if (scripts.length !== 1 || !scripts[0].endsWith(mainFile)) throw Error(`index.html: expected one module script for ${mainFile}, found ${scripts.join(', ') || 'none'}`);
   const prefix = scripts[0].slice(0, -mainFile.length);
   const early = new Set([earlyFile, ...earlyImports].map((f) => prefix + f));
   const main: Phase = { entry: scripts[0], preloads: [...html.matchAll(MODULE_PRELOAD)].map((m) => m[1]).filter((u) => !early.has(u)) };
-  const loader = `    <script>${phasedLoaderScript({ entry: prefix + earlyFile, preloads: earlyImports.map((f) => prefix + f) }, main)}</script>\n`;
+  const homePhase = home ? { entry: prefix + home.file, preloads: home.imports.map((f) => prefix + f), base: home.base } : undefined;
+  const loader = `    <script>${phasedLoaderScript({ entry: prefix + earlyFile, preloads: earlyImports.map((f) => prefix + f) }, main, homePhase)}</script>\n`;
   return html.replace(MODULE_PRELOAD, '').replace(MODULE_SCRIPT, () => loader);
 }

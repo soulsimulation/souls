@@ -21,6 +21,17 @@ export function satelliteReturnUrl(value, domain, legacyDomains = []) {
   return url.href;
 }
 const literal = value => JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e').replaceAll('&', '\\u0026');
+
+/** The home page (index.html at `/`) with the public satellite settings set first in <head>, as a world page's inline
+ *  config carries them, so its Clerk presync (apps/web/index.html `clerk-presync`) syncs before anything loads: the
+ *  home page then loads once, not again when Clerk syncs after it (window.__soulsHomeAuth; public values only). */
+export function homePageHtml(html, satellite) {
+  if (!satellite?.domain || !satellite.signInUrl) return html;
+  const at = html.search(/<head[^>]*>/i);
+  if (at < 0) return html;
+  const end = html.indexOf('>', at) + 1;
+  return html.slice(0, end) + `<script>window.__soulsHomeAuth=${literal({ authProvider: 'clerk', clerkSatellite: { domain: satellite.domain, signInUrl: satellite.signInUrl } })}</script>` + html.slice(end);
+}
 const attribute = value => '"' + value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') + '"';
 
 /** Clerk SDKs can carry redirect options in the query or the hash router. Validate both before Clerk loads. */

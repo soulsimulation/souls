@@ -49,10 +49,14 @@ function cdnPreconnect(): Plugin {
 
 // P7b: index.html loads a world page in two phases where that helps (src/phased-entry.ts): early-entry.ts is its own entry
 // (rollupOptions.input `early`); this replaces Vite's module script and modulepreload tags with the loader. Build only.
+// The home page (the world list) runs neither: the loader runs its own entry, launcher-entry.ts (rollupOptions.input
+// `launcher`), with its static imports and the list's own lazy chunk (LauncherRoot.tsx) preloaded beside it.
 function phasedEntry(): Plugin {
+  let base = '';
   return {
     name: 'souls-phased-entry',
     apply: 'build',
+    configResolved(c) { base = c.base.replace(/\/+$/, ''); },
     transformIndexHtml: { order: 'post', handler(html, ctx) {
       if (!/(^|\/)index\.html$/.test(ctx.path)) return;
       const chunks = Object.values(ctx.bundle ?? {}).flatMap((c) => (c.type === 'chunk' ? [c] : []));
@@ -60,10 +64,14 @@ function phasedEntry(): Plugin {
       const early = chunks.find((c) => c.isEntry && (c.facadeModuleId ?? '').replace(/\\/g, '/').endsWith('/src/early-entry.ts'));
       if (!ctx.chunk || !early) throw Error('index.html: the main or the early entry chunk is missing');
       const imports: string[] = [], seen = new Set<string>();
-      const walk = (f: string) => { for (const i of byFile.get(f)?.imports ?? []) if (!seen.has(i)) { seen.add(i); walk(i); imports.push(i); } };
+      const walk = (f: string, into = imports) => { for (const i of byFile.get(f)?.imports ?? []) if (!seen.has(i)) { seen.add(i); walk(i, into); into.push(i); } };
       walk(early.fileName);
+      const home = chunks.find((c) => c.isEntry && c.name === 'launcher'), list = chunks.find((c) => !c.isEntry && (c.facadeModuleId ?? '').replace(/\\/g, '/').endsWith('/src/LauncherRoot.tsx'));
+      if (!home || !list) throw Error('index.html: the home page entry or its list chunk is missing');
+      const homeImports: string[] = [];
+      seen.clear(); walk(home.fileName, homeImports); if (!seen.has(list.fileName)) { seen.add(list.fileName); walk(list.fileName, homeImports); homeImports.push(list.fileName); }
       // #1266: the bytes of every file the page names (its code and style), for the boot light's first share of the bar
-      const out = rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports), sizes: Record<string, number> = {};
+      const out = rewritePhasedHtml(html, ctx.chunk.fileName, early.fileName, imports, { file: home.fileName, imports: homeImports, base }), sizes: Record<string, number> = {};
       for (const [, url, file] of out.matchAll(/["'(]((?:[^"'()]*\/)?(assets\/[\w.-]+\.(?:js|css)))["')]/g)) {
         const item = ctx.bundle?.[file]; if (!item) continue;
         sizes[url.startsWith('/') ? url : '/' + url] = Buffer.byteLength(item.type === 'chunk' ? item.code : typeof item.source === 'string' ? item.source : Buffer.from(item.source));
@@ -168,8 +176,19 @@ function checkChunks(): Plugin {
       walk(early.fileName);
       const late = [...seen].filter((f) => ['main', 'app-shared'].includes(byFile.get(f)?.name ?? ''));
       if (late.length) throw Error(`vendor chunks: phase one would load ${late.join(', ')}`);
+      // the home page loads only what it uses: every module in the chunks its entry and its list (LauncherRoot.tsx) load
+      // statically is one they import (bundler runtime aside), so none of a world's (main's Shell, the early layer, the
+      // world engine) comes along
+      const home = chunks.find((c) => c.isEntry && c.name === 'launcher'), list = chunks.find((c) => (c.facadeModuleId ?? '').replace(/\\/g, '/').endsWith('/src/LauncherRoot.tsx'));
+      if (home && list) {
+        const uses = new Set<string>(), stack = [home.facadeModuleId!, list.facadeModuleId!];
+        while (stack.length) { const m = stack.pop()!; if (uses.has(m)) continue; uses.add(m); stack.push(...(this.getModuleInfo(m)?.importedIds ?? [])); }
+        seen.clear(); walk(home.fileName); walk(list.fileName);
+        const extra = [...seen, home.fileName, list.fileName].flatMap((f) => Object.keys(byFile.get(f)?.modules ?? {}).filter((m) => /^(?:\/|[A-Za-z]:)/.test(m) && !uses.has(m)).map((m) => `${f}: ${m.replace(/^.*\/(apps|node_modules|packages|mars)\//, '$1/')}`));
+        if (extra.length) throw Error(`home page: it would load modules it does not use (${extra.length}): ${extra.slice(0, 8).join('; ')}`);
+      }
       const inMain = new Set(Object.keys(main.modules));
-      for (const c of chunks) if (['vendor', 'app-shared'].includes(c.name) && c.imports.includes(main.fileName)) {
+      for (const c of chunks) if (['vendor', 'app-shared', 'home-shared'].includes(c.name) && c.imports.includes(main.fileName)) {
         const edges = Object.keys(c.modules).flatMap((m) => (this.getModuleInfo(m)?.importedIds ?? []).filter((i) => inMain.has(i)).map((i) => `${m} -> ${i}`));
         throw Error(`vendor chunks: ${c.fileName} imports main, so its hash would change with every app change (${edges.slice(0, 5).join('; ')})`);
       }
@@ -191,7 +210,7 @@ function vendorGroups() {
   const pkg = (id: string) => id.match(/\/node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?((?:@[^/]+\/)?[^/]+)\//)?.[1];
   const isReact = (id: string) => ['react', 'react-dom', 'scheduler'].includes(pkg(id) ?? '');
   const src = (f: string) => fileURLToPath(new URL(`./src/${f}`, import.meta.url));
-  let graph: { vendor: (id: string) => boolean; shared: Set<string> } | undefined;
+  let graph: { vendor: (id: string) => boolean; shared: Set<string>; home: Set<string> } | undefined;
   const sets = (ctx: ModuleGraph) => {
     if (graph) return graph;
     // static closure from `roots`; `follow(id)` lists dynamic imports to follow as well
@@ -231,13 +250,20 @@ function vendorGroups() {
     const shared = new Set([...lazy].filter((m) => main.has(m) && !phaseOne.has(m)));
     // app-shared must not import main: a candidate that imports a module whose chunk is unsure (not app-shared, not surely
     // phase one, not a vendor chunk) stays in main, and so do the candidates that import it.
+    // `home-shared`: what the home page (launcher-entry.tsx and its list, LauncherRoot.tsx) shares with main, React among
+    // it, outside phase one. Its own chunk, so the home page imports it without app-shared, which imports the world
+    // engine. A static closure: everything such a module imports is the home page's too, so it never imports main.
+    const home = closure([src('launcher-entry.tsx'), src('LauncherRoot.tsx')]);
+    const homeShared = new Set([...home].filter((m) => main.has(m) && !phaseOne.has(m)));
+    for (const m of homeShared) shared.delete(m);
     const vendorPkg = (m: string) => isReact(m) || inVendor(m);
-    const out = [...shared].filter((m) => ctx.getModuleInfo(m)!.importedIds.some((i) => !shared.has(i) && !surely.has(i) && !vendorPkg(i)));
+    const out = [...shared].filter((m) => ctx.getModuleInfo(m)!.importedIds.some((i) => !shared.has(i) && !homeShared.has(i) && !surely.has(i) && !vendorPkg(i)));
     while (out.length) { const m = out.pop()!; if (shared.delete(m)) out.push(...ctx.getModuleInfo(m)!.importers.filter((i) => shared.has(i))); }
-    return (graph = { vendor: inVendor, shared });
+    return (graph = { vendor: inVendor, shared, home: homeShared });
   };
   return [
     { name: (id: string, ctx: ModuleGraph) => (sets(ctx).vendor(id) ? 'vendor' : null), priority: 3 },
+    { name: (id: string, ctx: ModuleGraph) => (sets(ctx).home.has(id) ? 'home-shared' : null), priority: 2, includeDependenciesRecursively: false },
     { name: (id: string, ctx: ModuleGraph) => (sets(ctx).shared.has(id) || isReact(id) ? 'app-shared' : null), priority: 1, includeDependenciesRecursively: false },
   ];
 }
@@ -294,6 +320,6 @@ export default defineConfig({
   // chunkSizeWarningLimit (kB, lane BUDGET 2026-10-22): just above the largest legitimate chunk, core-kit (1,491 kB raw /
   // 221 kB gzip on 3.62: the shared three.js + catalogue kit every world loads), so any chunk past it warns at build time.
   // The hard limit is the release gate's V3-bundle step (tools/test-harness/bundle-budget): +10% per chunk or total fails.
-  build: { manifest: true, chunkSizeWarningLimit: 1600, rollupOptions: { input: { main: 'index.html', workbench: 'workbench.html', contextView: 'context-view.html', changelog: 'changelog.html', early: 'src/early-entry.ts' },
+  build: { manifest: true, chunkSizeWarningLimit: 1600, rollupOptions: { input: { main: 'index.html', workbench: 'workbench.html', contextView: 'context-view.html', changelog: 'changelog.html', early: 'src/early-entry.ts', launcher: 'src/launcher-entry.tsx' },
     output: { codeSplitting: { groups: vendorGroups() } } } },
 });

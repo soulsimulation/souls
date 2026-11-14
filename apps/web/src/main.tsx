@@ -15,11 +15,11 @@ import type { ClerkSatellite } from './clerk-satellite.ts';
 import {clerkNow,clerkOriginRoute,unsignedPreviewAuth} from './auth-ui.ts';
 // New worlds (world launcher, world engine): the launcher homepage and its sign-in. Old worlds never reach these.
 // P1 phones: the homepage (LauncherHome) and Clerk are lazy chunks, off a world page's critical path; a world's Clerk
-// loads once its arrival is over (ClerkWorld below).
-import type { LauncherList } from './god-ui/LauncherHome.tsx';
+// loads once its arrival is over (ClerkWorld below). A built home page never runs this file: index.html's loader runs
+// launcher-entry.tsx there (no world engine); `vite` dev serves this file for every page, so it renders the list too.
+import {WorldList} from './launcher-page.tsx';
 import {whenArrivalCardGone} from './arrival-marks.ts';
 import {countPage} from './visitor-counts.ts';
-const LauncherRoot=lazy(()=>import('./LauncherRoot.tsx'));
 const ClerkBridge=lazy(()=>import('./ClerkBridge.tsx'));
 // The arrival card's bar counts bytes: meter every asset fetch from the start; old worlds know their total up front.
 // (old worlds: initial-assets.json, made at release time by apps/web/scripts/initial-assets.mjs; a world without an
@@ -104,16 +104,3 @@ createRoot(document.getElementById('root')!).render(<StrictMode>{route==='list'?
 
 /** lane QA: an unknown path (sim.eden.art/nope, a retired lab link) says so and links home, instead of a world error. */
 function NoPage(){return <main className="world-list"><h1>No page here</h1><p>There is nothing at <code>{location.pathname}</code>.</p><p><a href={BASE+'/'}>See the worlds</a></p></main>;}
-
-function WorldList(){
- const [launcher,setLauncher]=useState<LauncherList|null>(null);
- const [checking,setChecking]=useState(true);
- // The public launcher manifest is the sole discovery source; retired cards never appear during loading/failure.
- useEffect(()=>{let active=true;void (async()=>{
-  try{const r=await fetch(BASE+'/__sim/worlds.json',{signal:AbortSignal.timeout(5000)});const data=r.ok&&r.headers.get('content-type')?.includes('application/json')?await r.json():null;if(data?.contract==='local-worlds/1'&&typeof data.launcher==='string'&&Array.isArray(data.worlds)){if(active)setLauncher(data);return;}}catch{/* show the home-page retry state */}
-  if(active)setChecking(false);
- })();return()=>{active=false;};},[]);
- if(checking&&!launcher)return <main className="world-list lh"><h1>Worlds</h1><p role="status">Loading worlds…</p></main>;
- if(!launcher)return <main className="world-list lh"><h1>Worlds</h1><p role="status">The world list could not load.</p><button type="button" onClick={()=>location.reload()}>Try again</button></main>;
- return <Suspense fallback={<main className="world-list lh"><h1>Worlds</h1><p role="status">Loading worlds…</p></main>}><LauncherRoot list={launcher}/></Suspense>;
-}

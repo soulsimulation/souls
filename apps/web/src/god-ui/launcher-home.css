@@ -1,15 +1,8 @@
-/* Homepage under the world launcher (LauncherHome.tsx); extends .world-list in styles.css.
+/* Homepage under the world launcher (LauncherHome.tsx); extends .world-list in styles.css, which also has the page's
+   frame and top bar (.world-list.lh, .lh-bar: the loading state draws them before this file arrives).
    The page speaks in the same system font as the bar inside a world (.human-world); monospace is kept for the prompt line. */
-.world-list.lh { max-width: 1400px; margin: 0 auto; padding: max(20px, var(--sa-t)) max(32px, var(--sa-r)) max(32px, var(--sa-b)) max(32px, var(--sa-l)); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
 .lh button { font-family: inherit; }
 
-/* The top bar: the mark and the name on the left, New world and the account on the right */
-.lh-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; padding: 0; border: 0; position: static; background: none; }
-.lh-title { display: flex; align-items: center; gap: 10px; }
-.lh-wordmark { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
-/* Same black circle as in a world (#1034), so the mark shows on the light page. */
-.lh-title .eden-mark { display: flex; flex: none; width: 38px; height: 38px; border-radius: 50%; background: #000; overflow: hidden; }
-.lh-title .eden-mark img { display: block; width: 38px; height: 38px; }
 .lh-bar .lh-actions { display: flex; align-items: center; gap: 8px; margin: 0; }
 .lh-new { font: 600 14px/1 system-ui, -apple-system, sans-serif; height: 38px; padding: 0 18px; border-radius: 19px; border: 0; background: var(--fg); color: var(--bg); cursor: pointer; white-space: nowrap; }
 .lh-new:hover { opacity: .88; }
@@ -91,8 +84,6 @@
 
 @media (max-width: 960px) { .lh-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) {
-  .world-list.lh { padding: max(12px, var(--sa-t)) 16px 24px; }
-  .lh-bar { margin-bottom: 24px; }
   .lh-new { padding: 0 14px; }
   .lh-cards { grid-template-columns: 1fr; gap: 12px; }
   .lh-agents { grid-template-columns: 1fr; padding: 20px; }

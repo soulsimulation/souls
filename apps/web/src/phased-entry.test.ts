@@ -17,11 +17,11 @@ const HTML = `<head>
   </head>`;
 
 /** Run the loader against a recording document; returns the tags it added, in order, and the window. */
-function runLoader(js: string, phased: boolean) {
+function runLoader(js: string, phased: boolean, location = { pathname: '/worlds/w/eden/', hash: '' }) {
   const added: { tag: string; url: string; el: Record<string, unknown> }[] = [], timers: (() => void)[] = [];
   const win: Record<string, unknown> = { __soulsPhased: phased, __soulsOpenSocket: () => { added.push({ tag: 'socket', url: '', el: {} }); } };
   const document = { createElement: (tag: string) => ({ tag }), head: { appendChild: (el: Record<string, unknown>) => { added.push({ tag: el.type === 'module' ? 'entry' : String(el.rel), url: String(el.src ?? el.href), el }); } } };
-  vm.runInNewContext(js, { window: win, document, setTimeout: (f: () => void) => timers.push(f) });
+  vm.runInNewContext(js, { window: win, document, location, setTimeout: (f: () => void) => timers.push(f) });
   return { added, win, timers };
 }
 
@@ -124,5 +124,21 @@ test('phasedEntryWanted = the early layer\'s gate (lever D on the page\'s tier) 
     const tier = pickQualityTier({ search, coarsePointer: coarse, screen, deviceMemory: mem }).tier, q = new URLSearchParams(search);
     const want = q.get('earlyLayer') !== '0' && q.get('phased') !== '0' && earlyArrivalWanted(tier, true, search, q.has('shot'));
     assert.equal(phasedEntryWanted(search, coarse, screen[0], screen[1], mem), want, `${search} ${coarse} ${screen} ${mem}`);
+  }
+});
+
+test('the home page (the world list) loads its own entry and chunks, never a world\'s', () => {
+  const out = rewritePhasedHtml(HTML, 'assets/main-A.js', 'assets/early-E.js', ['assets/three-B.js'], { file: 'assets/launcher-L.js', imports: ['assets/react-C.js', 'assets/LauncherRoot-R.js'], base: '/worlds' });
+  const js = /<script>(\(function\(\)\{var d=document[\s\S]*?)<\/script>/.exec(out)![1];
+  for (const phased of [false, true]) for (const pathname of ['/worlds/', '/worlds/index.html']) {
+    const home = runLoader(js, phased, { pathname, hash: '' });
+    home.timers.forEach((f) => f());
+    assert.deepEqual(home.added.map((a) => `${a.tag} ${a.url}`), ['modulepreload /worlds/assets/react-C.js', 'modulepreload /worlds/assets/LauncherRoot-R.js', 'entry /worlds/assets/launcher-L.js'], `${pathname} phased=${phased}`);
+  }
+  // a world, a single-world view (`/` with a hash) and an unknown page still load main
+  for (const location of [{ pathname: '/worlds/w/eden/', hash: '' }, { pathname: '/worlds/', hash: '#watch' }, { pathname: '/worlds/nope', hash: '' }]) {
+    const page = runLoader(js, false, location);
+    assert.ok(page.added.some((a) => a.tag === 'entry' && a.url === '/worlds/assets/main-A.js'), JSON.stringify(location));
+    assert.ok(!page.added.some((a) => a.url.includes('launcher-L')), JSON.stringify(location));
   }
 });

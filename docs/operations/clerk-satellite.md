@@ -56,8 +56,11 @@ script hosts, Clerk's blob workers and the primary edge's Cloudflare analytics s
 Clerk JS 5 sends a satellite to the primary on load whenever its `__client_uat` cookie is missing or not above 0
 (signed out) and the address has no `__clerk_synced`. The world page does this itself, in an inline `<head>` script
 in `apps/web/index.html`, before the snapshot prefetch, so a visit boots the world once. If it left it to Clerk, the
-page would leave and boot again once Clerk mounted after the arrival card (#1385). The script runs only on the
-configured satellite origin's world pages. It never runs for a signed-in cookie, a picture page or a return from the
+page would leave and boot again once Clerk mounted after the arrival card (#1385). The home page (`/`, the world list)
+does the same: the launcher writes the public satellite settings (domain and primary sign-in URL only) into its
+`<head>` as `window.__soulsHomeAuth` (`homePageHtml` in `tools/world-launcher/clerk-satellite.mjs`), as a world page's
+inline config carries them. Without them the list loaded in full, then Clerk synced and it all loaded again. The
+script runs only on the configured satellite origin's home and world pages. It never runs for a signed-in cookie, a picture page or a return from the
 sync. After a sync that did not come back, it waits a minute before trying again, so a blocked cookie never loops.
 The page's referrer is kept in `sessionStorage` across the round trip, so the visitor count still credits the site a
 visitor came from (`presyncReferrer` in `visitor-counts.ts`, origin only as for any referrer).
