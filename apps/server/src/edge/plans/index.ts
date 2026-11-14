@@ -25,7 +25,7 @@ export function registerEdgePlans(app: Hono, deps: EdgeDeps, comms: CommsRuntime
   const plans = new Plans({db: core.db, worldId: core.worldId, now: core.now, tick: core.tick, streams: comms.streams}, actor, events.envelope, options);
   comms.fading.addHold(id => plans.holding(id));
   // #2297: a plan step that moves on by time is a deadline of the world (its wall time at the admin's rate)
-  deps.host.listeners.push({stillness: (tick: number) => { const ms = plans.nextDueMs(); return ms === null ? [] : [{name: 'edge.plan-step', tick: tick + Math.max(1, Math.ceil((ms - core.now()) / 50 * (deps.host.baseRate > 0 ? deps.host.baseRate : 1)))}]; }});
+  deps.host.listeners?.push({stillness: (tick: number) => { const ms = plans.nextDueMs(); return ms === null ? [] : [{name: 'edge.plan-step', tick: tick + Math.max(1, Math.ceil((ms - core.now()) / 50 * (deps.host.baseRate > 0 ? deps.host.baseRate : 1)))}]; }});
 
   const failure = (c: Context, error: unknown) => {
     if (error instanceof EdgeError) return c.json(edgeBody({error: edgeErrorOf(error)}), error.status as ContentfulStatusCode);

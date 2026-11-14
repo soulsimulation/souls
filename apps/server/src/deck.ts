@@ -3,6 +3,7 @@
 // meaning (kernel things) meets the engine (bodies, fixtures, points).
 import {menuWorldOf,withRead} from './split/menu-world.ts';
 import type { ActivityOption } from '@souls/engine-contract';
+import { needsAt } from '@souls/brain';
 import { SPEECH_LINKS, bind, enablers, linked, linksFrom, linksTo, playable, samePlace, whyNot, type KState, type MintedCard, type Thing } from '@souls/kernel';
 import type { Mind, WorldHost } from './world.ts';
 
@@ -140,7 +141,7 @@ function readOptionsFor(host: WorldHost, m: Mind, cap = 12,ordinaryRetainedCards
     if (!t) score += 10;
     if (p.card.name === 'wait') score += m.life ? 5 : 200;                                                 // always on offer
     if (m.life) {
-      const text = `${p.card.name} ${p.card.summary} ${p.card.good_when ?? ''}`.toLowerCase(), n = m.life.needs;
+      const text = `${p.card.name} ${p.card.summary} ${p.card.good_when ?? ''}`.toLowerCase(), n = needsAt(m.life, k.tick);
       if (p.card.by === 'world' && p.card.origin !== 'base') score += 45;
       if (/sleep/.test(text)) score += (100-n.energy)/2 - (n.energy > 60 ? 80 : 0);
       if (/eat a bowl|share a meal|finish the bowl|join .*supper/.test(text)) score += n.hunger/2;

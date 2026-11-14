@@ -1,4 +1,4 @@
-// The world closed /v1/edge/resolve (410, #2138), so the managed runtime no longer offers the model a resolve read. A resolve
+// The world closed its resolve route (410, #2138), so the managed runtime no longer offers the model a resolve read. A resolve
 // read an older runtime retained is answered locally as a refusal, so the Soul replans instead of failing closed.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';

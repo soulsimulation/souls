@@ -4,7 +4,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { marsFactory } from '@souls/engine-mars';
-import { clockAt, newLife, advanceNeeds, livingChoice } from '@souls/brain';
+import { clockAt, newLife, advanceNeeds, advanceNeedAnchor, needRates, needsAt, livingChoice, type Life } from '@souls/brain';
 import { WorldHost } from './world.ts';
 import { LivingWorld } from './living.ts';
 import { Db } from './db.ts';
@@ -18,6 +18,46 @@ test('model reservations retain costs across concurrent admission, restarts, bud
   assert.throws(() => db.reserveCost(0.2, 'test', 1), /budget/);
   assert.throws(() => db.reserveCost(0.01, 'test', 0.5), /budget/);
   assert.equal(db.paidCost(Date.now() + 86400_001), 0); db.close();
+});
+
+// #2296 A3: need-anchor/1 is ticked and read through one expression, so a day of single ticks and one read at its end
+// give the same bits, for every activity, across a clamp at either bound (sleep fills energy, eating empties hunger).
+const ACTS: [string, boolean, boolean, boolean][] = [['idle', false, false, false], ['walk', false, false, false], ['sleep', false, false, false], ['sit', false, false, false],
+  ['eat', false, false, false], ['talk', true, false, false], ['rest', true, true, true], ['rest', false, false, true]];
+test('need-anchor/1 A3: 72,000 single ticks and one read at the end give bit-identical needs, across both clamps', () => {
+  const bounds = new Set<string>();
+  for (const [act, near, nourished, floater] of ACTS) {
+    const ticked = newLife(0), once = newLife(0), rate = needRates(act, near, nourished, floater);
+    for (let t = 1; t <= 72_000; t++) advanceNeedAnchor(ticked, t, rate);
+    advanceNeedAnchor(once, 1, rate);
+    const a = needsAt(ticked, 72_000), b = needsAt(once, 72_000);
+    for (const k of ['energy', 'hunger', 'company', 'restlessness'] as const) { assert.ok(Object.is(a[k], b[k]), `${act} ${k}: ${a[k]} vs ${b[k]}`); if (a[k] === 0 || a[k] === 100) bounds.add(a[k] + ''); }
+    assert.equal(ticked.lastTick, 0, `${act}: nothing is written while no rate changes`);
+  }
+  assert.deepEqual([...bounds].sort(), ['0', '100'], 'both clamps were crossed');
+});
+// #2296 A4: readers get what the old per-tick reader gave, to within float rounding, also across rate changes
+test('need-anchor/1 A4: needs read from the anchor equal the old per-tick sums to within float rounding', () => {
+  const old = newLife(0), anchored = newLife(0);
+  let t = 0;
+  for (const [act, near, nourished, floater] of [...ACTS, ...ACTS.slice().reverse()]) for (let i = 0; i < 4_000; i++) {
+    t++; advanceNeeds(old, t, act, near, nourished, floater); advanceNeedAnchor(anchored, t, needRates(act, near, nourished, floater));
+    const a = needsAt(anchored, t);
+    for (const k of ['energy', 'hunger', 'company', 'restlessness'] as const) assert.ok(Math.abs(a[k] - old.needs[k]) < 1e-6, `${act} tick ${t} ${k}: ${a[k]} vs ${old.needs[k]}`);
+  }
+  const before: Life = structuredClone(anchored); advanceNeedAnchor(anchored, t + 1, needRates('idle', false), 1_728_000);
+  assert.notDeepEqual(anchored.anchor, before.anchor, 'a day length change rewrites the anchor');
+});
+// #2296 x #2283: running's cost is part of the anchor's rate; a change into or out of a run rewrites the anchor
+test('need-anchor/1: a Soul that runs for N ticks ends with the energy the old reader gives over the same history', () => {
+  const old = newLife(0), anchored = newLife(0), N = 7_200;
+  assert.equal(needRates('run', false).energy, -210); assert.equal(needRates('jog', false).energy, -210);
+  let t = 0;
+  for (const [act, ticks] of [['idle', 500], ['run', N], ['walk', 500], ['jog', 300], ['idle', 200]] as const) for (let i = 0; i < ticks; i++) {
+    t++; advanceNeeds(old, t, act, false); advanceNeedAnchor(anchored, t, needRates(act, false));
+  }
+  assert.ok(Math.abs(needsAt(anchored, t).energy - old.needs.energy) < 1e-6, `anchor ${needsAt(anchored, t).energy}, old reader ${old.needs.energy}`);
+  assert.ok(old.needs.energy < 80 - 210 * N / 72_000 + 1e-9, 'the run spent energy at the running rate');
 });
 
 test('one hour of world ticks is a day; enacted rest/eating/company change slow needs', () => {
