@@ -31,7 +31,7 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'counted', 'clip'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'settled', 'counted', 'clip'];
 /** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, viewport?, localStorage?}) and steps.mjs. */
 export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
@@ -57,6 +57,7 @@ export const ARG_ALLOW = {
   'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
+  settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': (v) => ['0', '10', '0,10'].includes(v), '--settle-min': int(1, 20), '--short': FLAG },
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
   clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
 };
@@ -104,7 +105,7 @@ export function parseInputs(env) {
 export const target = (inp) => checkoutRef(inp.arm === 'base' ? inp.base : inp.ref);
 
 /** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
-export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, counted: 1, clip: 1 };
+export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, settled: 2, counted: 1, clip: 1 };
 /** The process to run for one repeat (cwd: the ref). Every command but walk does all its repeats in one invocation. The
  *  eval's load mode keeps its Soul folders (--keep-data) in the per-run directory, so the token refusal can read them. */
 export function commandLine(inp, { out, port }) {
@@ -116,6 +117,7 @@ export function commandLine(inp, { out, port }) {
     case 'bench-client': return ['tools/bench/capacity/bench.mjs', '--load', 'client', '--via-launcher', ...r, '--out', join(out, 'bench'), '--port', p, '--child-range', `${port + 1}-${port + 2}`, ...inp.args];
     case 'meetup': return ['tools/bench/capacity/meetup/meetup.mjs', ...r, '--out', join(out, 'meetup'), '--port', p, '--range', `${port + 1}-${port + 30}`, ...inp.args];
     case 'slopes-profile': return ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', ...r, '--out', join(out, 'slopes'), '--port', p, ...inp.args];
+    case 'settled': return ['tools/bench/capacity/settled/settled.mjs', '--out', join(out, 'settled'), '--port', p, ...inp.args];   // #2240: no repeats
     case 'counted': throw new Error('counted runs its kit\'s steps: countedSteps');
     case 'clip': throw new Error('clip runs its kit: runClip');
   }
@@ -205,6 +207,7 @@ export const PUBLISH = {
   'bench-client': ['bench/receipt.json', 'bench/REPORT.md', 'bench/*/result.json', 'bench-client.log'],
   meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
+  settled: ['settled/results.json', 'settled/REPORT.md', 'settled.log'],
   // the files the workstation session writes per cell: the kit's record, its log, the score, the class and the probe log
   counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
