@@ -7,7 +7,7 @@ export const LITTLE_MARTIANS_WORLD_KEYS: readonly string[] = Object.freeze(['lit
 
 /** The prospective runtime rules an edge world turns on at startup, in order. Each enable is idempotent (a world that
  *  already logged the rule queues nothing). The stair-traffic rules (occupiedLinkRoutingV1, concurrentLinkEgressV1,
- *  stairLandingClearanceV1) are not activated on the Little Martians worlds; every other world gets them in order.
+ *  stairLandingClearanceV1, #2264 linkLeaseV1) are not activated on the Little Martians worlds; every other world gets them in order.
  *  route-reach/1 (#872) is activated on every world: it only plans walks that were refused. */
 export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string): Promise<void> {
   await host.enableQuietStallReleaseV1();
@@ -18,6 +18,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
   await host.enableOccupiedLinkRoutingV1?.();
   await host.enableConcurrentLinkEgressV1?.();
   await host.enableStairLandingClearanceV1?.();
+  await host.enableLinkLeaseV1?.();   // #2264, after the stair-traffic rules it builds on
 }
 
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued

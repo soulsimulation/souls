@@ -28,6 +28,8 @@ import { gapToSleep, SLEEP_BODY_MARGIN } from '../activities/sleep.ts';
 import { G_WADE } from '../spatial/ground.ts';
 import { followHand, handPartnerOf } from '../social/hand-hold.ts';
 import { navTrustChecking, navTrustToken } from '../spatial/nav-trust.ts';
+import { singleFile } from '../spatial/holding.ts';
+import { LEASE_REQUEST_M, leaseClaimSpot, leaseRelease, leaseRequest, leaseHolds, leaseStalled, leaseTimedOutFor, leaseTimeout, type LeaseDir } from '../runtime/lease.ts';
 
 const ACCEL = 1.2; // m/s²
 const BRAKE = 2 * ACCEL; // m/s² ordinary deceleration
@@ -157,11 +159,16 @@ type Exec = {
    */
   detour?: { spot: Vec2; level: number; by: string; blockers?: string[]; clearOf?: ClearOfRef; landing?: {y:number;radius:number}; stage: 'pending' | 'going' | 'waiting'; faceoff?: boolean;
     /** A validated short courtesy route; avoids repeating its budgeted search. */
-    planned?:{epoch:number;route:Route;around:AroundPerson[]};egress?:true};
+    planned?:{epoch:number;route:Route;around:AroundPerson[]};egress?:true;
+    /** link-lease/1: a holding spot off this link's end, where the walker waits for its turn. */
+    lease?: string};
   /** Entity worlds: the walker this one has stood face to face with (each blocked by the other) since `since`, as of `tick`. */
   faceoff?: { id: string; since: number; tick: number };
   /** BS3 watchdog: where (and on which level) the walk last made progress, its own ticks since, and whether it replanned. */
   watch?: { at: Vec2; level: number; n: number; replanned: boolean };
+  /** link-lease/1 (#2264): the single-file link this walk asked for, its direction, whether it is admitted, the tick it last
+   *  looked for a holding spot, whether it is backing down after a stall, and stepping off the entry to a holding spot after. */
+  lease?: { link: string; dir: LeaseDir; admitted?: true; tried?: number; timedOut?: true; stepOff?: true };
 };
 
 const walkSchemaWithin = (reach: number) => z.strictObject({
@@ -325,7 +332,10 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
       stepScope = outer; handPartner = outerPartner;
     }
     r = watchdog(rt, ex, h, r);
+    // link-lease/1: a stalled holder that backed down and stepped off its entry ends there; it did not arrive
+    if (r.status === 'completed' && ex.lease?.stepOff) r = leaseTimeoutEnd(rt, ex, ex.lease.link, ex.actor);
     if (r.status === 'completed' || r.status === 'failed') {
+      leaseDrop(rt, ex);
       walkExecs(rt).delete(ex.id);
       delete h.human!.speed;
     } else h.human!.speed = Math.round((dist2([x0, z0], [h.pose.p[0], h.pose.p[2]]) / dt) * 1000) / 1000;
@@ -352,6 +362,7 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
       return { ok: true, deferred: true };
     }
     releaseAll(rt, ex);
+    leaseDrop(rt, ex);
     walkExecs(rt).delete(ex.id);
     const a = rt.world.entities[ex.actor];
     a.human!.activity = 'idle';
@@ -367,7 +378,7 @@ export const WATCH_REPLAN_TICKS = 300, WATCH_FAIL_TICKS = 600;
 const WATCH_M = 0.5;
 /** Waits that name someone moving (or an occupied goal): they have their own decisions and deadlock recovery, and the
  *  watchdog's clock pauses while they last. A walker stopped by geometry (walk.obstacle) or walking on the spot counts. */
-const WATCH_PAUSE = new Set(['traffic.person', 'traffic.load', 'traffic.yield', 'traffic.stepped-aside', 'walk.goal-occupied']);
+const WATCH_PAUSE = new Set(['traffic.person', 'traffic.load', 'traffic.yield', 'traffic.stepped-aside', 'walk.goal-occupied', 'traffic.lease-wait']);
 /**
  * BS3 (Souls never stuck): driven only by the walk's own ticks (its exec state, so a snapshot or replay resumes it exactly).
  * Progress is the body leaving a 0.5 m disc round where it last made progress (or changing level). Climbing a flight,
@@ -651,7 +662,12 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
       return { status: 'failed', diagnostic };
     }
   }
-  if (ex.cancelTo) return stepLinkCancel(rt, ex, a, ex.route.legs[ex.leg] as LinkLeg, dt);
+  if (ex.cancelTo) {
+    const r = stepLinkCancel(rt, ex, a, ex.route.legs[ex.leg] as LinkLeg, dt);
+    // link-lease/1: a stalled holder that backed down to its entry ends its walk, it did not arrive
+    return r.status === 'completed' && ex.lease?.timedOut ? leaseStepOff(rt, ex, a) : r;
+  }
+  if (rt.services.linkLeaseV1 === true && !ex.lease?.stepOff) { const r = leaseStep(rt, ex, a); if (r) return r; }
   if (activeLeg?.kind === 'link' && ex.phase === 'climb') {
     // Replanning from a between-level pose would project it onto a floor. Hold until the
     // remaining route is valid; only replan after reaching a supported landing.
@@ -1660,6 +1676,139 @@ function encounter(rt: Runtime, ex: Exec, a: Entity, track: () => Track): Encoun
   return best;
 }
 
+// ── link-lease/1 (#2264; docs/design/stair-traffic.md §2) ──────────────────────────────────────────────────────────
+// A single-file flight is leased one direction at a time (runtime/lease.ts). A walker whose next leg is the flight asks
+// for it LEASE_REQUEST_M before the entry; admitted, it walks on and climbs; otherwise it walks to a free holding spot off
+// that end (Spatial.holdingSpots) through the ordinary detour, and waits there (`traffic.lease-wait`) until admitted, then
+// plans on from where it stands. Nobody is moved but by its own walk: no teleport, and admission to the flight itself
+// (the traffic hold, the stair and landing blockers) still applies.
+
+/** The link this walk is on, or the one its next leg takes. */
+function routeLink(ex: Exec): LinkLeg | undefined {
+  const cur = ex.route.legs[ex.leg], next = ex.route.legs[ex.leg + 1];
+  return cur?.kind === 'link' ? cur : cur?.kind === 'walk' && next?.kind === 'link' ? next : undefined;
+}
+
+/** That walker still leases `link` (a live walk of its own names it). */
+const leaseAlive = (rt: Runtime, link: string) => (id: string) => {
+  for (const e of walkExecs(rt).values()) if (e.actor === id && e.lease?.link === link) return true;
+  return false;
+};
+
+/** This walk no longer holds or waits for its link. */
+function leaseDrop(rt: Runtime, ex: Exec) {
+  if (!ex.lease) return;
+  leaseRelease(rt, ex.lease.link, ex.actor);
+  ex.lease = undefined;
+  if (ex.detour?.lease) ex.detour = undefined;
+}
+
+function leaseWait(rt: Runtime, ex: Exec, a: Entity, link: string, holder: string): StepResult {
+  ex.v = 0;
+  a.human!.activity = 'wait';
+  return blockedWait(rt, ex.id, ex.actor, [holder], { code: 'traffic.lease-wait', message: `${ex.actor} waits off ${link} for its turn: ${holder} has it`, subjects: [ex.actor, holder, link] });
+}
+
+/** A walk that ends because `holder` stalled on `link` for 60 s (it may be this walker itself). */
+function leaseTimeoutEnd(rt: Runtime, ex: Exec, link: string, holder: string): StepResult {
+  leaseDrop(rt, ex);
+  releaseAll(rt, ex);
+  return { status: 'failed', diagnostic: { code: 'route.blocked', message: `${ex.actor}'s walk ends: ${holder} made no progress on ${link} for 60 s and backs down (traffic.lease-timeout)`,
+    subjects: [ex.actor, ...(holder === ex.actor ? [] : [holder]), link], details: { reason: 'traffic.lease-timeout', link, holder } } };
+}
+
+/** A stalled holder backed down to its entry: it walks to a free holding spot off that end (so the next one down has its
+ *  exit) and its walk ends there, `traffic.lease-timeout`; with no spot free, it ends at the entry. */
+function leaseStepOff(rt: Runtime, ex: Exec, a: Entity): StepResult {
+  const leg = ex.route.legs[ex.leg] as LinkLeg, link = ex.lease!.link, end = leg.ascending ? leg.link.from : leg.link.to;
+  ex.cancelTo = undefined;
+  for (const s of spatial(rt, ex.actor).holdingSpots(leg.link, leg.ascending)) {
+    if (occupant(rt, a, s, ex.profile.radius + 0.1, false, end.level)) continue;
+    const r = planWalk(rt, a, { level: end.level, p: s }, ex.profile);
+    if (!r.ok || r.route.legs.some((x) => x.kind !== 'walk')) continue;
+    a.human!.task = ex.id;   // the cancel's landing let the body go; this walk still owns it
+    a.human!.activity = leg.ascending ? 'climb-down' : 'climb-up';   // this tick's last step was back along the flight
+    ex.route = r.route; ex.around = undefined; ex.leg = 0; ex.replans++; ex.stuck = 0; ex.v = 0;
+    ex.lease!.stepOff = true;
+    enterLeg(rt, ex);
+    return { status: 'running', phase: 'step-off' };
+  }
+  return leaseTimeoutEnd(rt, ex, link, ex.actor);
+}
+
+/** A walker on the flight itself (climbing, or backing down), not on its way to it. */
+const onFlight = (rt: Runtime) => (id: string) => {
+  for (const e of walkExecs(rt).values()) if (e.actor === id) return e.route.legs[e.leg]?.kind === 'link' && (e.phase === 'climb' || !!e.cancelTo) && e.climbT > 1e-9;
+  return false;
+};
+
+/** link-lease/1, each step before the walk moves: null to walk on as planned, else this step's result. */
+function leaseStep(rt: Runtime, ex: Exec, a: Entity): StepResult | null {
+  const at = [...a.pose.p];
+  // walking to, or waiting at, a holding spot
+  if (ex.detour?.lease && ex.lease) {
+    const l = ex.lease, held = leaseTimedOutFor(rt, l.link, ex.actor);
+    if (ex.detour.stage !== 'waiting') return null;
+    if (held) return leaseTimeoutEnd(rt, ex, l.link, held);   // off the flight's ends: the walk ends here
+    const ans = leaseRequest(rt, l.link, l.dir, ex.actor, at, leaseAlive(rt, l.link));
+    if (!ans.admitted) return leaseWait(rt, ex, a, l.link, ans.holder);
+    const r = planWalk(rt, a, ex.goal, ex.profile);
+    if (!r.ok) { leaseDrop(rt, ex); releaseAll(rt, ex); return { status: 'failed', diagnostic: { ...r.diagnostic, code: 'route.invalidated', message: `${ex.actor} cannot walk on from its holding spot: ${r.diagnostic.message}` } }; }
+    l.admitted = true;
+    ex.detour = undefined;
+    releaseAll(rt, ex);
+    ex.route = r.route; ex.around = undefined; ex.leg = 0; ex.replans++; ex.stuck = 0;
+    enterLeg(rt, ex);
+    return { status: 'running', phase: 'replan' };
+  }
+  const leg = routeLink(ex);
+  if (ex.lease && leg?.link.id !== ex.lease.link) leaseDrop(rt, ex);   // the route no longer takes it
+  if (ex.lease?.admitted) {
+    const link = ex.lease.link;
+    if (!leaseHolds(rt, link, ex.actor)) delete ex.lease.admitted;   // a timeout took the admission back: wait off the end
+    else if (!leaseStalled(rt, link, ex.actor, at)) return null;
+    else {
+      leaseTimeout(rt, link, ex.actor, onFlight(rt));
+      // on the flight: back down to its entry through the existing cancel; before it: the walk ends where it stands
+      if (onFlight(rt)(ex.actor)) {
+        ex.cancelTo = 'entry';
+        ex.lease.timedOut = true;
+        return { status: 'running', phase: 'cancel-climb' };
+      }
+      return leaseTimeoutEnd(rt, ex, link, ex.actor);
+    }
+  }
+  if (!leg || !singleFile(leg.link) || ex.detour || ex.cancelTo) return null;
+  const onIt = ex.route.legs[ex.leg] === leg;
+  const link = leg.link.id, dir: LeaseDir = leg.ascending ? 'up' : 'down';
+  const held = ex.lease ? leaseTimedOutFor(rt, link, ex.actor) : undefined;
+  if (!held && (onIt ? ex.phase !== 'align' || ex.climbT > 1e-9 : ex.total - ex.s > LEASE_REQUEST_M)) return null;
+  ex.lease ??= { link, dir };
+  const ans = held ? undefined : leaseRequest(rt, link, dir, ex.actor, at, leaseAlive(rt, link));
+  if (ans?.admitted) { ex.lease.admitted = true; return null; }
+  const holder = held ?? (ans as { holder: string }).holder;
+  // queued: walk to a free holding spot off this end (looked for at most every DECIDE_TICKS, under the replan budget);
+  // after a timeout, the walk ends once it stands clear of the flight's ends, or where it is when no spot is free
+  const end = leg.ascending ? leg.link.from : leg.link.to;
+  if (a.human!.level === end.level && (held || ex.lease.tried === undefined || rt.tick - ex.lease.tried >= DECIDE_TICKS)) {
+    if (!takeReplan(rt, false)) return leaseWait(rt, ex, a, link, holder);
+    ex.lease.tried = rt.tick;
+    const sp = spatial(rt, ex.actor), spots = sp.holdingSpots(leg.link, leg.ascending);
+    let route: Route | undefined;
+    const i = leaseClaimSpot(rt, link, dir, ex.actor, spots.length, (k) => {
+      if (occupant(rt, a, spots[k], ex.profile.radius + 0.1, false, end.level)) return false;
+      const r = planWalk(rt, a, { level: end.level, p: spots[k] }, ex.profile);
+      route = r.ok && r.route.legs.every((x) => x.kind === 'walk') ? r.route : undefined;
+      return !!route;
+    });
+    if (i !== undefined && route) {
+      releaseAll(rt, ex);
+      ex.detour = { spot: spots[i], level: end.level, by: holder, blockers: [holder], stage: 'pending', lease: link, planned: { epoch: sp.epoch, route, around: [] } };
+    } else if (held) return leaseTimeoutEnd(rt, ex, link, held);
+  } else if (held) return leaseTimeoutEnd(rt, ex, link, held);
+  return leaseWait(rt, ex, a, link, holder);
+}
+
 function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'link' }>, dt: number): StepResult {
   const link = leg.link;
   // a turning flight (Link.faceAlong, upper-floors/1) is entered and climbed facing along its steps
@@ -1772,6 +1921,7 @@ function stepLink(rt: Runtime, ex: Exec, a: Entity, leg: Extract<Leg, { kind: 'l
     e?.actors.delete(ex.actor);
     if (e && !e.actors.size) traffic(rt).delete(res);
     ex.held.delete(res);
+    if (ex.lease?.link === link.id) leaseDrop(rt, ex);   // link-lease/1: off the flight, the lease is free for the next
     ex.leg++;
     enterLeg(rt, ex);
     return { status: 'running', phase: ex.phase };

@@ -592,15 +592,19 @@ export class Spatial {
   /**
    * Stair lease (#2263): the holding spots at one end of a single-file link (holding.ts), on that end's grid (levelAt, so
    * a paged world faces that end's window), clear of every single-file flight with an end on that floor. Kept per
-   * navigation epoch. [] for a link that is not single-file or an end with no grid. Nothing in the engine reads it yet.
+   * navigation epoch; the engine's window focus is left as it was. [] for a link that is not single-file or an end with no grid. link-lease/1 (#2264) reads it.
    */
   holdingSpots(link: Link, ascending: boolean): Vec2[] {
     const key = `${this.epoch}|${link.id}|${ascending}`, hit = this.holding.get(key);
     if (hit) return hit;
-    if (this.holding.size && ![...this.holding.keys()][0].startsWith(`${this.epoch}|`)) this.holding.clear();
+    const first = this.holding.keys().next();
+    if (!first.done && !first.value.startsWith(`${this.epoch}|`)) this.holding.clear();
+    // levelAt may face another paged window; a memo miss must not move the engine's focus (#2277 review)
+    const prev = this.pages ? this.focusIdx : -1;
     const { entry, approach } = linkApproach(link, ascending), g = singleFile(link) ? this.levelAt(entry.level, approach) : undefined;
     const flights = (this.pages?.all ?? this.scene).links.filter((f) => f.id === link.id || (singleFile(f) && (f.from.level === entry.level || f.to.level === entry.level)));
     const spots = g ? holdingSpots(link, ascending, g, { flights }) : [];
+    if (prev >= 0 && this.focusIdx !== prev) this.focusPage(prev);
     this.holding.set(key, spots);
     return spots;
   }
