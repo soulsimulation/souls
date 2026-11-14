@@ -83,8 +83,8 @@ export type RouteOpts = {
    */
   routeReachV1?: boolean;
   /**
-   * doors-pass/1 (#2365, read by Spatial.route only): plan as if every closed, unlocked, hand-operated door (an obstacle
-   * with `door: 'pass'`) stood open. For reach checks: a walk through such a door opens and closes it (entry 31).
+   * doors-pass/1 (#2365, read by Spatial.route only): with every door shut, else through ONE closed, unlocked, hand-operated
+   * door (`door: 'pass'`) on level 0, as entry 31's passage executes a walk. For reach checks.
    */
   doors?: 'pass';
 };

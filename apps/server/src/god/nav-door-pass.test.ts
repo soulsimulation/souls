@@ -121,3 +121,48 @@ for (const kind of ['ground-unpaged', 'flat'] as Kind[]) {
     assert.equal((w.god.model.get('door') as any).state.open, false, 'closed behind');
   });
 }
+
+// Review of #2370: entry 31's passage opens ONE door on the ground, so reach, the audit, the offer and the walk count only
+// that. An inner room behind two closed doors in series is out of reach in one walk and cut off for the audit, so a Soul
+// shut in there is stepped out (nav-connect/1) and walks on; she is never left stuck. The yard between, one door from the
+// world, stays joined. Upper floors: doors there stay walls for reach and the audit (not covered yet).
+const Z2 = Z + 5;
+const OUTER = {op: 'place', def: 'core/garden-wall@1', name: 'outer-walls', shape: {path: [[X - 0.6, Z], [X - 8, Z], [X - 8, Z + 10], [X + 8, Z + 10], [X + 8, Z], [X + 0.6, Z]]}};
+const INNER = {op: 'place', def: 'core/garden-wall@1', name: 'inner-walls', shape: {path: [[X - 0.6, Z2], [X - 4, Z2], [X - 4, Z + 9], [X + 4, Z + 9], [X + 4, Z2], [X + 0.6, Z2]]}};
+for (const kind of ['ground-unpaged', 'flat'] as Kind[]) {
+  test(`two closed doors in series: reach, audit, offer and walk agree; shut in, she gets out (${kind})`, {timeout: 300_000}, async t => {
+    const w = world(t, kind); await w.tick(2);
+    w.act([OUTER, INNER, {op: 'place', def: 'core/door@2', name: 'door-a', p: [X, Z], r: Math.PI}, {op: 'place', def: 'core/door@2', name: 'door-b', p: [X, Z2], r: Math.PI},
+      {op: 'place', def: 'core/bench@1', name: 'inner-bench', p: [X + 1.5, Z + 7.5]}, {op: 'place', def: 'core/bench@1', name: 'yard-bench', p: [X - 6, Z + 2]}, {op: 'place', def: 'core/floor-lamp@2', name: 'outside-lamp', p: OUTSIDE}]);
+    await w.tick(20);
+    const inRoom: Vec2 = [X - 1.5, Z + 7.5], yardP: Vec2 = [X - 3, Z + 2], out: Vec2 = [X - 1.5, Z - 3];
+    const reach = (a: Vec2, b: Vec2) => w.E.reachV1({p: a, level: 0}, {p: b, level: 0}).ok;
+    const conn = (p: Vec2) => w.E.navCheckV1([{id: 'p', p, level: 0, tol: 0.6}])[0];
+    assert.equal(reach(out, yardP), true, 'one door: reached');
+    assert.equal(reach(yardP, inRoom), true, 'one door from the yard: reached');
+    assert.equal(reach(out, inRoom), false, 'two doors in series: not one walk');
+    assert.equal(reach(inRoom, out), false, 'nor back out');
+    assert.equal(conn(yardP).ok, true, 'the yard is one door from the world');
+    assert.equal(conn(inRoom).code, 'nav.disconnected', 'the inner room is two doors away');
+    await invite(w, 'ana');
+    const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+    const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+    const body = () => w.E.world.entities[ana.entityId];
+    const inInner = () => {const p = body().pose.p; return p[0] > X - 4 && p[0] < X + 4 && p[2] > Z2 && p[2] < Z + 9;};
+    const finish = async (r: any) => {for (let n = 0; n < 2400; n++) {const e: any = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) return e; await w.tick(1);} return w.edge.receipt(ana.soulId, r.receipt.id);};
+    // from outside, the inner bench is not one walk: the act never ends inside the inner room, and it ends
+    const r1: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inner-bench'}));
+    if (r1.accepted) {const e = await finish(r1); assert.ok(['failed', 'completed'].includes(e.phase), JSON.stringify(e).slice(0, 400));}
+    assert.equal(inInner(), false, 'not through two doors in one walk');
+    // shut in the inner room (put there, both doors closed): stepped out, then walks out; never stuck
+    await accept(w.host, w.host.enqueue('edge-relocate', 'test:start', {soulId: ana.soulId, entityId: ana.entityId, to: inRoom, why: 'shut in behind two doors'}));
+    await w.tick(6); delete body().human.speed;
+    assert.ok(inInner(), 'in the inner room');
+    assert.ok(w.E.navRescueV1(ana.entityId, Infinity), 'a Soul two doors in is stepped out');
+    const r2: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:outside-lamp'}));
+    assert.equal(r2.accepted, true, JSON.stringify(r2).slice(0, 600));
+    const e2 = await finish(r2);
+    assert.equal(e2.phase, 'completed', JSON.stringify(e2).slice(0, 600));
+    assert.ok(body().pose.p[2] < Z, 'she ends outside');
+  });
+}

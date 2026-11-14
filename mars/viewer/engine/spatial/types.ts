@@ -3,6 +3,13 @@
 // automatically change what is walkable and what blocks (spec §10).
 import type { OBB2, Vec2 } from '../core/math.ts';
 
+/** doors-pass/1: the two standing points 0.5 m out from a closed door gap's faces (the gap box's thin axis). */
+export function doorSides(o: Obstacle): [Vec2, Vec2] {
+  const c = Math.cos(o.obb.yaw), s = Math.sin(o.obb.yaw), thinX = o.obb.half[0] <= o.obb.half[1];
+  const n: Vec2 = thinX ? [c, s] : [-s, c], d = (thinX ? o.obb.half[0] : o.obb.half[1]) + 0.5, [x, z] = o.obb.c;
+  return [[x + n[0] * d, z + n[1] * d], [x - n[0] * d, z - n[1] * d]];
+}
+
 /** A solid prism: ground footprint + vertical extent (world y). */
 /**
  * `raster: 'centre'` (door-raster/1, lane RT 2026-10-20): the walk raster blocks only the cells whose centre lies inside the
@@ -13,8 +20,9 @@ import type { OBB2, Vec2 } from '../core/math.ts';
  */
 /**
  * `door: 'pass'` (doors-pass/1, #2365): the closed gap of an unlocked, hand-operated door. The walk raster blocks it like any
- * solid (a body never walks through a shut leaf), but reach checks and the connectivity audit treat it as a way through:
- * a walk that needs it opens it by hand, passes and closes it behind (Soul Actions entry 31). Absent: an ordinary solid.
+ * solid (a body never walks through a shut leaf). Reach checks (`RouteOpts.doors`) and the connectivity audit count ONE such
+ * door on the ground as a way through, as entry 31's passage executes it: a walk opens it by hand, passes and closes it
+ * behind. Absent: an ordinary solid.
  */
 export type Obstacle = { id: string; obb: OBB2; y0: number; y1: number; label?: string; kind?: 'wall' | 'solid' | 'glass' | 'component' | 'vehicle' | 'fixture'; raster?: 'centre'; door?: 'pass' };
 

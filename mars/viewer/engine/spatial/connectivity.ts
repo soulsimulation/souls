@@ -28,7 +28,7 @@ import { GROUND_TILE_M, G_OUTSIDE, G_STEEP, G_WALK, type GroundField } from './g
 import { linkApproach, linkEdgeTest, PLAN_MARGIN, snap as snapCell } from './path.ts';
 import type { Spatial } from './service.ts';
 import { boxesOf, type GroundNav } from './tiled.ts';
-import { HUMAN_PROFILE, type Link, type Obstacle, type Surface, type SpatialScene } from './types.ts';
+import { doorSides, HUMAN_PROFILE, type Link, type Obstacle, type Surface, type SpatialScene } from './types.ts';
 
 /** Policy id of the audit's rules (what counts as connected, what a rescue picks): bump when they change. */
 export const NAV_CONNECT_POLICY = 'nav-connect/1';
@@ -165,8 +165,7 @@ export class NavConnectivity {
     return `${sp.baseId}|${sp.epoch}|${g ? `${g.field.id}|${g.cell}|${g.extentTiles()}` : sp.cell}|${this.t}`;
   }
   get ready(): boolean { return !this.pending && this.publishedKey === this.currentKey() && this.publishedGround === this.spatial.ground; }
-  /** doors-pass/1 (#2365): the audit sees a closed, unlocked, hand-operated door as a way through (a walk opens it). */
-  private get scene(): SpatialScene { return this.buildScene ?? this.spatial.passScene(); }
+  private get scene(): SpatialScene { return this.buildScene ?? this.spatial.scene; }
   stats = { updates: 0, relabelled: 0, reused: 0, uniform: 0, lastMs: 0, lastRelabelled: 0, graphMs: 0, clusterMs: 0, links: 0, edges: 0, clusters: 0, clusterBuilds: 0, linkHits: 0, maxStepMs: 0, maxStepPhase: '' as string };
 
   constructor(spatial: Spatial, opts: { anchors: () => Vec2[]; clear?: number }) {
@@ -183,7 +182,7 @@ export class NavConnectivity {
     if (!this.pending) {
       const anchors = this.anchors().map(p => [...p] as Vec2);
       const work = new NavConnectivity(this.spatial, { anchors: () => anchors, clear: this.t });
-      work.building = true; work.buildScene = this.spatial.passScene(); work.stats = this.stats;
+      work.building = true; work.buildScene = this.spatial.scene; work.stats = this.stats;
       // Cache values are immutable. Union-find path compression, maps and graph sets belong to the builder alone.
       work.tiles = new Map(this.tiles); work.lru = new Map(this.lru); work.mediaMemo = new Map(this.mediaMemo);
       work.clusterMemo = new Map(this.clusterMemo); work.linkMemo = new Map(this.linkMemo);
@@ -258,7 +257,7 @@ export class NavConnectivity {
     const sp = this.spatial, g = sp.ground;
     let relabelled = 0;
     if (!g) {
-      const lv = sp.passGrids().levels.get(0);
+      const lv = sp.grids.levels.get(0);
       const key = `${sp.baseId}|${sp.epoch}|${lv ? `${lv.ox},${lv.oz},${lv.nx},${lv.nz}` : ''}`;
       if (this.flat?.key !== key || this.version !== key) {
         this.tiles.clear(); this.lru.clear();
@@ -474,7 +473,7 @@ export class NavConnectivity {
   private upperAt(level: number, p: Vec2, tol: number): { g: LevelGrid; node: (c: number) => string | null; floor?: string; ck: string } | null {
     const sp = this.spatial;
     if (!sp.ground) {
-      const g = sp.passGrids().levels.get(level); if (!g) return null;
+      const g = sp.grids.levels.get(level); if (!g) return null;
       let labels = this.flatUpper.get(g);
       if (!labels) { labels = labelComponents(g.clearance, g.nx, g.nz, this.t).labels; this.flatUpper.set(g, labels); }
       const L = labels;
@@ -605,6 +604,18 @@ export class NavConnectivity {
       const m = `0:${this.main}`;
       this.fwd = reach(fwdAdj, m); this.bwd = reach(bwdAdj, m);
       for (const n of this.fwd) if (this.bwd.has(n)) this.good.add(n);
+      // doors-pass/1 (#2365): a ground area ONE closed, unlocked hand door away from the main area is joined to it (a walk
+      // opens that door, passes and closes it: entry 31). Not transitive: an area two doors away, or behind a door upstairs,
+      // stays cut off, since the passage opens one door on the ground; there the step-out stays the way out.
+      const y0 = sp.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0, extra: string[] = [];
+      for (const o of this.scene.obstacles) {
+        if (o.door !== 'pass' || Math.abs(o.y0 - (y0 ?? sp.ground!.standY(o.obb.c[0], o.obb.c[1]))) > 0.6) continue;
+        const [a, b] = doorSides(o), ra = this.snap(a, 0.6)?.root, rb = this.snap(b, 0.6)?.root;
+        if (ra === undefined || rb === undefined || ra === rb) continue;
+        const na = `0:${ra}`, nb = `0:${rb}`;
+        if (this.good.has(na) && !this.good.has(nb)) extra.push(nb); else if (this.good.has(nb) && !this.good.has(na)) extra.push(na);
+      }
+      for (const n of extra) { this.good.add(n); this.fwd.add(n); this.bwd.add(n); }
     } else { this.fwd = new Set(); this.bwd = new Set(); }
     this.linkMemo = memo;
     this.stats.links = tasks.length / 2; this.stats.edges = edges;

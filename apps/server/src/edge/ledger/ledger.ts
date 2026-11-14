@@ -2582,10 +2582,12 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // naming it, rather than walking round to the nearest point behind the wall. Before nav-connect/1: a Soul in a
     // closed room is not cut off when its door opens.
     let passage: DoorPassage | undefined;
-    if (issue?.code === 'route.unreachable' && this.doorPassage && steps.every(s => s.verb === 'walk_to' || s.verb === 'stand') && !isVerificationProbe(soul.soulId)) {
+    if (issue?.code === 'route.unreachable' && this.doorPassage && steps.every(s => s.verb === 'walk_to' || s.verb === 'stand')) {
       const what = label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there';
       const p = this.doorPassage(soul, steps, what);
       if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
+      // doors-pass/1 (#2365): a verification probe opens no door; it is told which door the walk would go through
+      if (p && isVerificationProbe(soul.soulId)) return {...refuse('route.unreachable', `The way to ${what} goes through ${p.name}, closed; a verification probe does not open doors.`), ...resolved};
       if (p) for (const legs of [p.steps, p.direct]) {const again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
     }
     // nav-connect/1 (lane NAV): no walk from where it stands, because it stands cut off from the walkable world (an edit

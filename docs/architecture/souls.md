@@ -626,9 +626,12 @@ is checked beyond the first chunk only on the coarse ground grid, so a goal seal
 walk reaches it, and the walk then fails `route.unreachable` there.
 
 A closed, unlocked door a hand opens is a way through in every world, flat or ground (`doors-pass/1`, #2365). Reach
-checks, room goals and the connectivity audit treat its gap as open, so a room behind it is never `nav.disconnected` and a
-Soul inside is never stepped out. The walk graph still treats the shut leaf as solid: one plain walk act goes to the
-door, opens it by hand, passes and closes it behind (entry 31). A locked door stays a wall.
+checks, room goals and the connectivity audit count ONE such door on the ground as a way through, exactly what one walk
+act does: it goes to the door, opens it by hand, passes and closes it behind (entry 31). The walk graph still treats the
+shut leaf as solid. A room one closed door from the world is never `nav.disconnected` and a Soul inside is never stepped
+out. A room behind two closed doors in series, or behind a door upstairs, is not reached in one walk and counts as cut
+off, so a Soul shut in there is stepped out as below. A locked door stays a wall. A verification probe opens no door: it
+is refused `route.unreachable` naming the door.
 
 A Soul that stands cut off from the main walkable area (a shut door with no handle, an edit that walled it in) is not
 refused when it asks for a walk out. The act first steps it to the nearest open ground, a logged `edge-relocate` under
