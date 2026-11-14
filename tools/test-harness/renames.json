@@ -583,6 +583,7 @@
       "to": "the exit time: SIM_WORLD_IDLE_EXIT_MIN minutes, default 0 = never (#2235: world time never stops)",
       "reason": "Intended behaviour change: idle exit is off by default because world time never stops (#2235 A3); the same test now asserts the new default",
       "pr": "#2238"
-    }
+    },
+    {"step": "V5-server-full", "from": "resolve advises: ranked candidates with schemas and availability, and it never executes", "to": ["candidates for words: ranked, with schemas and availability, and nothing executes", "\\#1910: the resolve route is gone: 410 naming the client's find, and nothing happens"], "reason": "#1910: the resolve route answers 410; the same candidates assertions call resolveCandidates directly", "pr": "#2138"}
   ]
 }
