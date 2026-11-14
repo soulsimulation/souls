@@ -66,6 +66,9 @@ export async function runLoad(o) {
         const s = await prepareFolder(fake, { name: `Load ${k}` });
         souls[k] = { folder, identity, soulId: s.soulId };
       })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
+      // #2307 arm (c), throwaway: the load starts only once the world reads green again (at most 180 s)
+      const greenFrom = Date.now(); while (readLive(join(dir, 'server', 'data', 'live.json'))?.level !== 'green' && Date.now() - greenFrom < 180000) await sleep(1000);
+      const greenWaitMs = Date.now() - greenFrom; log(`n${n} r${rep}: waited ${greenWaitMs} ms for green`);
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
@@ -83,7 +86,7 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); http.push(...httpSince(readJsonl(f), t0)); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push({ greenWaitMs, souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       await stopWorld({ pid: w.pid });
