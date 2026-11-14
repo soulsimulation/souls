@@ -2371,10 +2371,15 @@ function thingAt(ix, t) {
   return { at: t.at, ...(level ? { level } : {}) };
 }
 
-/** find: places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
+/** #1965: the acts that reach a Soul, as ids to send. The world still decides. */
+const soulActs = (id) => [`go-near:${id}`, `wave:${id}`, `face:${id}`];
+const soulWords = (x) => wordsOf(x, () => ({ name: tokensOf(x.name), id: tokensOf(x.id) }));
+
+/** find: Souls, places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
  *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
- *  place found, `outlineOf` it. */
-function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline } = {}) {
+ *  place found, `outlineOf` it. `souls` is the live copy's Souls (#1965): only those are found, and a Soul's row comes
+ *  before a place or thing row of the same score. Its name is another Soul's words, so the row is marked untrusted. */
+function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline, souls = [] } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
@@ -2390,6 +2395,12 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
   // words that only say the verb ("play music" with --verb play-music) narrow nothing: what is left must name the place or thing
   const verbWords = new Set([...verbs.keys()].flatMap((v) => v.split("-")));
   const rest = q.filter((w) => !SYNONYMS[w] && !verbWords.has(w) && !verbWords.has(stem(w))), out = [], metres = (point) => (ref ? { metres: dist(ref, point) } : {});
+  const soulsOnly = /^souls?$/i.test(kind ?? "");
+  if ((!kind || soulsOnly) && !verbs.size) for (const x of souls) {
+    if (!x?.id || (scope && !scope.has(x.place ?? "")) || (around && !((dist(around.at, x.at) ?? Infinity) <= NEAR_METRES))) continue;
+    const s = q.length ? score(q, soulWords(x)) : soulsOnly ? 1 : 0; if (!s) continue;
+    out.push({ s: s + 3.5, d: dist(ref, x.at), row: { type: "soul", id: x.id, name: x.name, place: x.place ?? null, at: x.at ?? null, doing: x.doing ?? null, metres: dist(ref, x.at), acts: soulActs(x.id), untrusted: true } });
+  }
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
     if (!q.length || !inScope(p.id, p.at)) continue;
     const s = score(q, placeWords(p)); if (!s) continue;
@@ -2415,7 +2426,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
     const s = verbs.size ? (verbs.get(a.verb) && !rest.length ? verbs.get(a.verb) : 0) : score(q, w);
     if (s) out.push({ s, d: 0, row: { type: "act", act: a.id, verb: a.verb, label: a.label, in: "right here" } });
   }
-  for (const t of ix.cat.things) {
+  for (const t of soulsOnly ? [] : ix.cat.things) {
     const h = ix.handOf(t); if (verbs.size && !h) continue;
     if (!inScope(t.place, t.at)) continue;
     if (kind && !hit(stem(kind.toLowerCase()), thingWords(t, h).kind)) continue;
@@ -2466,17 +2477,17 @@ function fit(answer, budget) {
 }
 
 /** query: several questions in one call. Each is {find, verb?, kind?, in?, near?, limit?} | {place, depth?, verbs?, things?} |
- *  {thing}, with its own `budget` in tokens (default 600). */
-function query(ix, questions, { at, budget = 600, states } = {}) {
+ *  {thing}, with its own `budget` in tokens (default 600). `souls` is the live copy's, for find (#1965). */
+function query(ix, questions, { at, budget = 600, states, souls } = {}) {
   return (Array.isArray(questions) ? questions : [questions]).slice(0, 12).map((qn) => {
     const b = Number.isFinite(qn?.budget) ? qn.budget : budget;
     if (qn?.place !== undefined) return fit(placeView(ix, String(qn.place), { depth: qn.depth ?? 1, verbs: qn.verbs, at, things: qn.things !== false }), b);
     if (qn?.thing !== undefined) { const t = ix.things.get(String(qn.thing)); return t ? { ...t, path: ix.pathOf(t.place), acts: [...(ix.cat.acts ?? []).filter((a) => a.thing === t.id).map((a) => a.id), ...handActs(ix, t, states).map((a) => a.id)], ...(ix.handOf(t) ? { state: thingState(ix, t, states) } : {}) } : { error: `No thing with id "${qn.thing}" in the catalog.` }; }
-    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8, states }), b);
+    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8, states, souls }), b);
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -5116,24 +5127,26 @@ async function catalogCommand(...args) {
   const c = await syncCatalog({ force: args.includes("--refresh") });
   return { world: c.world, version: c.etag, fetchedAt: c.fetchedAt, changed: c.changed, ...c.catalog.counts, ...(c.stale ? { note: c.stale } : {}), next: `${CLI} find "<words>"   ${CLI} look` };
 }
-// find "<words>" [--verb v] [--kind k] [--in place] [--near place] [--limit n] [--outline]: answered from this machine.
+/** #1965: the Souls in the live copy other than this one, for find and query. Only the copy: no call looks a Soul up. */
+const otherSouls = (live) => (live?.live?.souls ?? []).filter((x) => x.id !== load().soul);
+// find "<words>" [--verb v] [--kind k|soul] [--in place] [--near place] [--limit n] [--outline]: answered from this machine.
 async function findCommand(...args) {
   const o = {}, words = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--verb") o.verb = args[++i]; else if (args[i] === "--kind") o.kind = args[++i]; else if (args[i] === "--in") o.inPlace = args[++i];
     else if (args[i] === "--near") o.near = args[++i]; else if (args[i] === "--limit") o.limit = Number(args[++i]); else if (args[i] === "--outline") o.outline = true; else if (args[i] !== "--json") words.push(args[i]);
   }
-  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>] [--in <place>] [--near <place>] [--limit n] [--outline]');
+  if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>|soul] [--in <place>] [--near <place>] [--limit n] [--outline]');
   const { ix, live, me, note } = await worldCopy();
-  const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things });
-  return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act": ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
+  const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things, souls: otherSouls(live) });
+  return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act" (a Soul's row: one of its "acts"): ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
 }
 // query '<json>': several layered questions in one call, each with its own depth, filters and token budget.
 async function queryCommand(...args) {
   const text = args.filter((a) => !a.startsWith("--")).join(" "), b = args.indexOf("--budget");
   let questions; try { questions = JSON.parse(text); } catch { throw new Error('usage: query \'[{"find":"library"},{"place":"<id>","depth":2,"verbs":["read"]},{"verb":"eat","near":"<place>","limit":3}]\' [--budget tokens]'); }
   const { ix, live, me, note } = await worldCopy();
-  return { answers: soulCatalog.query(ix, questions, { at: me?.at, states: live?.live?.things, ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
+  return { answers: soulCatalog.query(ix, questions, { at: me?.at, states: live?.live?.things, souls: otherSouls(live), ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
 }
 // look: where this Soul is, what can be done there, who is near, who is elsewhere, and what was said lately. From disk.
 async function look(copy) {
