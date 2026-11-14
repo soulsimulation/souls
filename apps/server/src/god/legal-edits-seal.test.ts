@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { performance } from 'node:perf_hooks';
-import { coreRef } from '@souls/world-compiler';
+import { applyBatch, coreRef } from '@souls/world-compiler';
 import { GREEN_FIELD_WORLD } from '@souls/engine-mars';
 import { fixture, invite, accept, factory } from '../../test/native-owner-fixture.ts';
 import { EdgeLedger } from '../edge/ledger/ledger.ts';
@@ -123,27 +123,33 @@ test('legal-edits/2: a construction closure still walks a resident off its site 
   assert.equal(ev.length, 1, 'one walk-out'); assert.equal(ev[0].kind, 'edge-god-walkout');
 });
 
-test('legal-edits/2: the seal check per commit, a burst of 40 walls round a Soul (S6 bar p95 < 250 ms per commit)', { timeout: 600000 }, async t => {
+test('legal-edits/2, the check alone: 40 single walls among 12 Souls (S6 bar p95 < 250 ms a commit); a pen closed before the edit is not refused', { timeout: 600000 }, async t => {
   const w = await world(); t.after(cleanup(w));
   await w.settle(2);
   const bo = await w.soul('bo', 'Bo');
   const [x, z] = w.at(bo.entityId);
-  // 40 single walls 8 to 40 m from Bo, none closing anything: each is rastered (a Soul within SEAL_R), none refused
-  const ms: number[] = [];
-  const before = w.god.model.fork();
+  const apply = (m: any, ops: any[]) => { const after = m.fork(), r: any = applyBatch(after, { ops } as any, 'god', 0); assert.equal(r.result.accepted, true, JSON.stringify(r.result).slice(0, 300)); return { after, diff: r.diff }; };
+  // twelve Souls in a plaza 30 m across; 40 single walls 8 to 40 m from its centre, none closing anything
+  const crowd = Array.from({ length: 12 }, (_, i) => ({ body: `b-${i}`, soulId: `s-${i}`, name: `S${i}`, p: [x + Math.cos(i) * (3 + i), z + Math.sin(i) * (3 + i)] as [number, number] }));
+  const base = w.god.model.fork(), ms: number[] = [];
   for (let i = 0; i < 40; i++) {
     const a = i * 0.7, d = 8 + (i % 9) * 4;
-    const after = before.fork();
-    const ops = [{ op: 'place', def: coreRef('wall'), params: { w: 3, h: 2.6, d: 0.5 }, name: `b-${i}`, p: [x + Math.cos(a) * d, z + Math.sin(a) * d], r: a }];
-    const r: any = (await import('@souls/world-compiler')).applyBatch(after, { ops } as any, 'god', 0);
-    assert.equal(r.result.accepted, true, JSON.stringify(r.result).slice(0, 300));
+    const { after, diff } = apply(base, [{ op: 'place', def: coreRef('wall'), params: { w: 3, h: 2.6, d: 0.5 }, name: `b-${i}`, p: [x + Math.cos(a) * d, z + Math.sin(a) * d], r: a }]);
     const t0 = performance.now();
-    const out = seal.sealedBy(before, after, r.diff, [{ body: bo.entityId, soulId: bo.soulId, name: 'Bo', p: [x, z] }]);
+    assert.deepEqual(seal.sealedBy(base, after, diff, crowd), []);
     ms.push(performance.now() - t0);
-    assert.deepEqual(out, []);
   }
   ms.sort((a, b) => a - b);
   const p50 = ms[20], p95 = ms[38], max = ms[39];
-  t.diagnostic(`seal check per commit, a Soul within reach: p50 ${p50.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms, max ${max.toFixed(1)} ms`);
+  t.diagnostic(`seal check per commit, 12 Souls within reach: p50 ${p50.toFixed(1)} ms, p95 ${p95.toFixed(1)} ms, max ${max.toFixed(1)} ms`);
   assert.ok(p95 < 100, `p95 ${p95.toFixed(1)} ms: well under the S6 bar of 250 ms a commit`);
+
+  // the ring closed round the plaza: every Soul in it is named; a wall added inside the closed ring seals no one anew
+  const open = apply(base, openRing(x, z).ops), closed = apply(open.after, [seg('n-2', [x, z - R], 0)]);
+  const inRing = crowd.filter(c => Math.max(Math.abs(c.p[0] - x), Math.abs(c.p[1] - z)) < R - 1);
+  const sealed = seal.sealedBy(open.after, closed.after, closed.diff, inRing);
+  assert.equal(sealed.length, inRing.length, `the plaza's Souls named: ${sealed.length} of ${inRing.length}`); assert.ok(sealed.every(s => s.by.includes(closed.after.get('n-2')!.id)));
+  const inside = apply(closed.after, [{ op: 'place', def: coreRef('wall'), params: { w: 2, h: 2.6, d: 0.5 }, name: 'inner', p: [x + 8, z + 8] }]);
+  assert.deepEqual(seal.sealedBy(closed.after, inside.after, inside.diff, crowd), [], 'already closed before this edit: not its doing');
 });
+

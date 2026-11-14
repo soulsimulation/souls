@@ -6,26 +6,31 @@
 //
 // Model-only and local, on BUILDSAFE's raster (buildsafe.ts: the ways rule's body radius on a 0.1 m grid, ground level):
 //  - only an edit that adds or moves blocking geometry at ground level is looked at; a removal never seals anyone in;
-//  - only Souls on the ground within SEAL_R of that geometry are looked at (none near: nothing is rastered at all);
-//  - for each, the free cells joined to where she stands are flooded in a window SEAL_R round her, after the edit; the flood
-//    stops as soon as it reaches the window's edge or more than the pocket's area (she has a walk out);
-//  - sealed after: the same flood before the edit; if she had a walk out then, this edit takes it away, and is refused.
-// Not seen (known limits, nav-connect/1's step-out stays as the safety net for them): bodies on upper floors, and a pocket
-// no larger than the rule's area that reaches more than SEAL_R from her (a long thin pen).
+//  - a pocket the edit seals is bounded by what it added, so the check looks in windows SEAL_R round the added pieces
+//    (nearby pieces share one window), and only at Souls on the ground inside one (none: nothing is rastered at all);
+//  - one grid per window, after the edit; the free cells joined to each Soul are flooded, and Souls in one region share
+//    one flood. A flood that reaches the window's edge, or more than the pocket's area, is a walk out;
+//  - a Soul sealed after: the same flood on the window before the edit (rastered once, only then); if she had a walk out
+//    then, this edit takes it away, and is refused. No standing room before or after is the preview's to judge.
+// Not seen (known limits, nav-connect/1's step-out stays as the safety net for them): bodies on upper floors, a pocket that
+// reaches more than SEAL_R from the pieces that close it (a long thin pen), and a single piece longer than MAX_PIECE.
 import type { Diff, WorldModel } from '@souls/world-compiler';
 import { NAV_RESCUE_MAX_POCKET } from '../../../../mars/viewer/engine/spatial/connectivity.ts';
 import { CELL } from './buildsafe-rule.ts';
 import { Grid, blocking, withRooms } from './buildsafe.ts';
 
-/** How far round a Soul (m) the check looks: a window 2·SEAL_R a side, which holds any square pocket of the rule's area
- *  wherever she stands in it (50 m a side) with room to spare. */
+/** How far round the edit's pieces (m) the check looks: holds a square pocket of the rule's area (50 m a side) that the
+ *  pieces border, with room to spare. */
 export const SEAL_R = 56;
 /** The free ground (m²) at most of a pocket that seals a Soul in: nav-connect/1's rescue bound. */
 export const SEAL_MAX_POCKET = NAV_RESCUE_MAX_POCKET;
+/** Pieces whose windows merge into one while it stays at most this wide (m), and the longest piece looked at. */
+const MAX_WINDOW = 2 * SEAL_R + 16, MAX_PIECE = 64;
 
 export type SealResident = { body: string; soulId: string; name: string; p: [number, number]; level?: number };
 export type Sealed = { body: string; soulId: string; name: string; at: [number, number]; pocket: number; by: string[] };
 type Box = ReturnType<typeof blocking>[number];
+type Rect = [number, number, number, number];
 
 /** The edit's blocking boxes at ground level, by entity: what it added or moved (a footprint unchanged is not looked at). */
 function added(before: WorldModel, after: WorldModel, diff: Diff): Map<string, Box[]> {
@@ -38,14 +43,18 @@ function added(before: WorldModel, after: WorldModel, diff: Diff): Map<string, B
   }
   return out;
 }
-const reachOf = (b: Box) => { const c = Math.abs(Math.cos(b.yaw)), s = Math.abs(Math.sin(b.yaw)); return [c * b.half[0] + s * b.half[1], s * b.half[0] + c * b.half[1]]; };
-/** Distance (m) from p to the box's axis-aligned bounds. */
-function distTo(b: Box, p: [number, number]): number {
-  const [rx, rz] = reachOf(b);
-  return Math.hypot(Math.max(0, Math.abs(p[0] - b.c[0]) - rx), Math.max(0, Math.abs(p[1] - b.c[1]) - rz));
+function boundsOf(boxes: Box[]): Rect {
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const b of boxes) {
+    const c = Math.abs(Math.cos(b.yaw)), s = Math.abs(Math.sin(b.yaw)), rx = c * b.half[0] + s * b.half[1], rz = s * b.half[0] + c * b.half[1];
+    x0 = Math.min(x0, b.c[0] - rx); z0 = Math.min(z0, b.c[1] - rz); x1 = Math.max(x1, b.c[0] + rx); z1 = Math.max(z1, b.c[1] + rz);
+  }
+  return [x0, z0, x1, z1];
 }
+const union = (a: Rect, b: Rect): Rect => [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+const near = (r: Rect, p: [number, number], d: number) => Math.hypot(Math.max(0, r[0] - p[0], p[0] - r[2]), Math.max(0, r[1] - p[1], p[1] - r[3])) <= d;
 /** The window's ground blockers in `m`. */
-function gridIn(m: WorldModel, rect: [number, number, number, number]): Grid {
+function gridIn(m: WorldModel, rect: Rect): Grid {
   const win = { c: [(rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2], half: [(rect[2] - rect[0]) / 2, (rect[3] - rect[1]) / 2], yaw: 0, y0: -1e4, y1: 1e4 };
   const g = new Grid(rect);
   for (const id of m.near([win as never])) { let b: Box[]; try { b = blocking(m, id); } catch { continue; } if (b.length) g.mark(b, 1); }
@@ -62,37 +71,59 @@ function standCell(g: Grid, p: [number, number], r = 1): number {
   }
   return best;
 }
-/** Flood the free cells joined to `from`: the pocket's area (m²), or null when it reaches the window's edge or more than the
- *  rule's area (a walk out). */
-function pocketOf(g: Grid, from: number): number | null {
-  // the grid is this check's own: a visited cell is marked blocked
-  const { nx, nz, cnt } = g, cap = Math.ceil(SEAL_MAX_POCKET / (CELL * CELL)), st = new Int32Array(Math.min(nx * nz, 3 * cap + 8));   // each cell popped pushes at most 3 new ones
-  let top = 0, n = 0; st[top++] = from; cnt[from] = 1;
-  while (top) {
-    const q = st[--top], i = (q / nz) | 0, j = q - i * nz;
-    if (++n > cap || i === 0 || j === 0 || i === nx - 1 || j === nz - 1) return null;
-    if (!cnt[q - nz]) { cnt[q - nz] = 1; st[top++] = q - nz; }
-    if (!cnt[q + nz]) { cnt[q + nz] = 1; st[top++] = q + nz; }
-    if (!cnt[q - 1]) { cnt[q - 1] = 1; st[top++] = q - 1; }
-    if (!cnt[q + 1]) { cnt[q + 1] = 1; st[top++] = q + 1; }
+/** Floods of one grid, shared by the Souls standing in it: each region is flooded once. */
+class Floods {
+  private g: Grid; private lab: Uint16Array; private area: (number | null)[] = [0]; private st: Int32Array;
+  private readonly cap = Math.ceil(SEAL_MAX_POCKET / (CELL * CELL));
+  constructor(g: Grid) { this.g = g; this.lab = new Uint16Array(g.nx * g.nz); this.st = new Int32Array(Math.min(g.nx * g.nz, 3 * this.cap + 8)); }
+  /** The pocket's area (m²) of the region joined to `from`, or null: a walk out (the window's edge, more than the rule's
+   *  area, or a region an earlier flood found open). */
+  pocketOf(from: number): number | null {
+    if (this.lab[from]) return this.area[this.lab[from]];
+    const { nx, nz, cnt } = this.g, lab = this.lab, st = this.st, id = this.area.length;
+    if (id > 0xfffe) return null;
+    this.area.push(null);
+    let top = 0, n = 0; st[top++] = from; lab[from] = id;
+    while (top) {
+      const q = st[--top], i = (q / nz) | 0, j = q - i * nz;
+      if (++n > this.cap || i === 0 || j === 0 || i === nx - 1 || j === nz - 1) return null;
+      // a cell an earlier flood labelled is in a region it left open (a sealed one is labelled whole, so never met)
+      let k = q - nz; if (!cnt[k] && lab[k] !== id) { if (lab[k]) return null; lab[k] = id; st[top++] = k; }
+      k = q + nz; if (!cnt[k] && lab[k] !== id) { if (lab[k]) return null; lab[k] = id; st[top++] = k; }
+      k = q - 1; if (!cnt[k] && lab[k] !== id) { if (lab[k]) return null; lab[k] = id; st[top++] = k; }
+      k = q + 1; if (!cnt[k] && lab[k] !== id) { if (lab[k]) return null; lab[k] = id; st[top++] = k; }
+    }
+    return (this.area[id] = Math.round(n * CELL * CELL));
   }
-  return Math.round(n * CELL * CELL);
 }
 
 /** The ground residents `after` seals in that `before` did not (empty: none). Pure; reads only the two models. */
 export function sealedBy(before: WorldModel, after: WorldModel, diff: Diff, residents: Iterable<SealResident>): Sealed[] {
   const boxes = added(before, after, diff); if (!boxes.size) return [];
-  const out: Sealed[] = [];
-  for (const r of residents) {
-    if (r.level) continue;
-    const by = [...boxes].filter(([, b]) => b.some((x) => distTo(x, r.p) <= SEAL_R)).map(([id]) => id);
-    if (!by.length) continue;
-    const rect = withRooms([before, after], [r.p[0] - SEAL_R, r.p[1] - SEAL_R, r.p[0] + SEAL_R, r.p[1] + SEAL_R]);
-    const ga = gridIn(after, rect), qa = standCell(ga, r.p); if (qa < 0) continue;   // no standing room: the preview's to judge
-    const pocket = pocketOf(ga, qa); if (pocket === null) continue;
-    const gb = gridIn(before, rect), qb = standCell(gb, r.p);
-    if (qb >= 0 && pocketOf(gb, qb) !== null) continue;   // sealed in before this edit too: not this edit's doing
-    out.push({ body: r.body, soulId: r.soulId, name: r.name, at: r.p, pocket, by });
+  const ground = [...residents].filter((r) => !r.level); if (!ground.length) return [];
+  // windows: each piece's bounds SEAL_R round, merged with a neighbour's while the window stays at most MAX_WINDOW wide
+  const wins: { pieces: Rect; ids: string[] }[] = [];
+  for (const [id, b] of boxes) {
+    const r = boundsOf(b); if (r[2] - r[0] > MAX_PIECE || r[3] - r[1] > MAX_PIECE) continue;
+    const w = wins.find((x) => { const u = union(x.pieces, r); return u[2] - u[0] + 2 * SEAL_R <= MAX_WINDOW && u[3] - u[1] + 2 * SEAL_R <= MAX_WINDOW; });
+    if (w) { w.pieces = union(w.pieces, r); w.ids.push(id); } else wins.push({ pieces: r, ids: [id] });
+  }
+  const out: Sealed[] = [], done = new Set<string>();
+  for (const w of wins) {
+    const who = ground.filter((r) => !done.has(r.body) && near(w.pieces, r.p, SEAL_R - 1)); if (!who.length) continue;
+    const rect = withRooms([before, after], [w.pieces[0] - SEAL_R, w.pieces[1] - SEAL_R, w.pieces[2] + SEAL_R, w.pieces[3] + SEAL_R]);
+    const ga = gridIn(after, rect), fa = new Floods(ga);
+    let fb: { g: Grid; f: Floods } | null = null;
+    for (const r of who) {
+      const qa = standCell(ga, r.p); if (qa < 0) continue;   // no standing room: the preview's to judge
+      const pocket = fa.pocketOf(qa); if (pocket === null) continue;
+      if (!fb) { const g = gridIn(before, rect); fb = { g, f: new Floods(g) }; }
+      const qb = standCell(fb.g, r.p);
+      if (qb < 0 || fb.f.pocketOf(qb) !== null) continue;   // no standing room, or sealed in before this edit too: not this edit's doing
+      done.add(r.body);
+      const by = w.ids.filter((id) => boxes.get(id)!.some((b) => near(boundsOf([b]), r.p, SEAL_R)));
+      out.push({ body: r.body, soulId: r.soulId, name: r.name, at: r.p, pocket, by: by.length ? by : w.ids });
+    }
   }
   return out;
 }
