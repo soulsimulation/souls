@@ -2246,6 +2246,19 @@ export class MarsEngine implements Engine {
     const { g, at } = this.arrivalGroundV1(), q: [number, number] = [at[0], at[1]];
     return !(g.clear(q) >= g.radius && g.medium(q) <= 1) || !arrivalPocket(g, q).open;
   }
+  /** The arrival point when bodies leave fewer than `free` of the native placer's 91 ring spots (spawnHuman: 6 rings of 0.9 m)
+   *  clear of everyone (0.8 m), else null. A birth without birth-near/1 throws once all are taken (about the 92nd body
+   *  standing there), so a direct create then carries `near` and lands on the nearest free standing ground. Read-only. */
+  arrivalCrowdV1(free = 24): [number, number] | null {
+    const [ax, az] = this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival;
+    const people = listEntities(this.ents).filter((e: any) => e.kind === 'human').map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]);
+    let open = 0;
+    for (let ring = 0; ring < 6; ring++) for (let k = 0; k < Math.max(1, ring * 6); k++) {
+      const ang = (k / Math.max(1, ring * 6)) * Math.PI * 2 + ring * 0.5, x = ax + dcos(ang) * ring * 0.9, z = az + dsin(ang) * ring * 0.9;
+      if (!people.some(([px, pz]) => hypot(px - x, pz - z) < 0.8) && ++open >= free) return null;
+    }
+    return [ax, az];
+  }
   /** birth-near/1: the nearest ground point (rings of 0.25 m out to 12 m) with a clear standing disc, nobody within
    * 0.8 m and no deep water. Walkability from there is proved by the caller's own physical walk, never assumed. */
   /** `opts` (#1521): `skip` a body's own place without taking it out of the table (a plan must not reorder it), and keep clear of

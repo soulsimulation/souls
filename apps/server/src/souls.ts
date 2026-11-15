@@ -4,7 +4,7 @@ import type {WorldAccounts} from './accounts/service.ts';
 import { randomBytes } from 'node:crypto';
 import {PROBE_PREFIX, PROBE_OWNER, isVerificationProbe} from './verification-probe.ts';
 import { createSoulSchema, describeIntent, intentSchema, proposeCardsSchema, steerSchema, type EventKind, type MandateRule, type AgendaStep, type BirthPayload, type DeckPayload, type IntentPayload, type LogEvent, type WireIntent } from '@souls/protocol';
-import { blockedArrivalNear } from './arrival-placement.ts';
+import { blockedArrivalNear, crowdedArrivalNear } from './arrival-placement.ts';
 import {mandateOf,explicitTrigger} from './mandate.ts';
 import {clockAt} from '@souls/brain';
 import { deckView } from './deck.ts';
@@ -209,9 +209,9 @@ export class Souls {
     const id = newId('s'); const entityId = `h_${id.slice(2)}`;
     this.db.createSoul({ id, worldId: this.host.worldId, owner, entityId, name: p.data.name, description: p.data.description, native });
     // arrival-search/1: a direct (non-lifecycle) birth also moves off an arrival point the world blocks (cheap check
-    // only, no birth probe); otherwise the default stays as it was.
-    let near: { at: [number, number]; first: true } | undefined;
-    if (!native) try { near = blockedArrivalNear(this.host); } catch { near = undefined; }
+    // only, no birth probe), or off one bodies have nearly filled; otherwise the default stays as it was.
+    let near: BirthPayload['near'];
+    if (!native) try { near = blockedArrivalNear(this.host) ?? crowdedArrivalNear(this.host); } catch { near = undefined; }
     await this.host.enqueue('birth', native ? 'world' : `soul:${id}`, { soulId: id, entityId, name: p.data.name, description: p.data.description, owner, ...(near ? { near } : {}) } satisfies BirthPayload);
     return this.db.soul(id)!;
   }

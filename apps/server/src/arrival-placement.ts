@@ -41,6 +41,14 @@ export function planNativeBirth(host: WorldHost, who: BirthIdentity): BirthPlan 
   return { probe: probeNativeHumanBirth(host.engine, host.factory, { ...who, near: near satisfies BirthNearV1 }), near };
 }
 
+/** A direct create onto a crowded arrival point (fewer than 24 of the placer's ring spots free of bodies): birth-near/1 at
+ *  the arrival point itself, without `first`, so the rings are tried first as before and, once bodies fill them, the birth
+ *  lands on the nearest free standing ground instead of throwing (no free standing room: a fault and a rewind of the world). */
+export function crowdedArrivalNear(host: WorldHost): { at: [number, number] } | undefined {
+  const at = (host.engine as unknown as { arrivalCrowdV1?(): [number, number] | null }).arrivalCrowdV1?.();
+  return at ? { at: [at[0], at[1]] } : undefined;
+}
+
 /** The cheap form for a direct (non-lifecycle) Soul create: the search's spot only when the world itself blocks the
  *  arrival point (built over, deep water, walled off), else nothing. No detached birth probe, so a create stays as cheap
  *  as it was; a crowd on a clear arrival point is left to the birth's own rings, as before. */
