@@ -2597,6 +2597,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // doors-pass/1 (#2365): a verification probe opens no door; it is told which door the walk would go through
       if (p && isVerificationProbe(soul.soulId)) return {...refuse('route.unreachable', `The way to ${what} goes through ${p.name}, closed; a verification probe does not open doors.`), ...resolved};
       if (p) for (const legs of [p.steps, p.direct]) {const again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
+    } else if (!plain && this.doorPassage && issue?.code === 'route.unreachable' && typeof chosen?.target === 'string' && !isVerificationProbe(soul.soulId)) {
+      // (#2383) a sit, a craft or a use at a thing behind a closed door: the passage walks to the thing through the door
+      // (as a walk to it would), and the plan itself runs from the door's far side in place of the passage's last leg
+      const what = label.replace(/^\S+ (at |on |in |to )?/i, '') || 'there', rest = steps[0]?.verb === 'stand' ? steps.slice(1) : steps;
+      const p = this.doorPassage(soul, [{verb: 'walk_to', params: {to: chosen.target, standoff: 0.9}}], what);
+      if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
+      if (p) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
     }
     // nav-connect/1 (lane NAV): no walk from where it stands, because it stands cut off from the walkable world (an edit
     // closed a pocket round it, a floor lost its stairs): it steps to the nearest open ground of the main area first (a
