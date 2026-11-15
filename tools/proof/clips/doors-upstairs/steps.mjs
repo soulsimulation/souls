@@ -1,7 +1,8 @@
 // Clip kit (#2434): in Eden 2026, one walk from far away into an upstairs room behind two closed doors. The townhouse
 // canal-west-home-3 (core/townhouse@3) has a real door in every doorway: its front door (closed) and, on the first floor,
 // the bedroom's door (canal-west-home-3-door-3). Before the take, admin's Soul Clara goes up to the landing, shuts the
-// bedroom door by hand, and runs out to the bakery's front, about 45 m away (the front door shut behind her). On camera
+// bedroom door by hand, goes out to the front step and shuts the front door by hand, and runs to the bakery's front,
+// about 45 m away. On camera
 // (Ctrl+K, Enter follows Clara) one walk takes her from there through the front door, up the stairs and through the
 // bedroom door, opening each by hand and closing it behind her.
 import { execFile, spawnSync } from 'node:child_process';
@@ -27,6 +28,11 @@ run(['act', 'walk:canal-west-home-3/landing', '--run', '--wait', '150', '--json'
 const caps = run(['caps', '--search', 'canal-west-home-3-door-3'], 90_000), out = caps.stdout + caps.stderr;
 const door = /object:([^:\s"']+):close[^}]*canal-west-home-3-door-3"/s.exec(out)?.[1];
 if (door) run(['act', `object:${door}:close`, '--wait', '60', '--json'], 90_000);   // else it is shut already (only "open" offered)
+// fitted doors start open (the coordinator's call): out to the front step, and the front door shut by hand behind her
+run(['act', 'walk:canal-west-home-3', '--run', '--wait', '150', '--json']);
+const caps1 = run(['caps', '--search', 'canal-west-home-3-door-1'], 90_000), out1 = caps1.stdout + caps1.stderr;
+const front = /object:([^:\s"']+):close[^}]*canal-west-home-3-door-1"/s.exec(out1)?.[1];
+if (front) run(['act', `object:${front}:close`, '--wait', '60', '--json'], 90_000);
 run(['act', 'walk:int-bakery', '--run', '--wait', '150', '--json']);
 
 const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
