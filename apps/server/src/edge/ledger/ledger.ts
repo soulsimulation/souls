@@ -2602,14 +2602,18 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // doors-pass/1 (#2365): a verification probe opens no door; it is told which door the walk would go through
       if (p && isVerificationProbe(soul.soulId)) return {...refuse('route.unreachable', `The way to ${what} goes through ${p.name}, closed; a verification probe does not open doors.`), ...resolved};
       if (p) for (const legs of [p.steps, p.direct]) {const again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
-    } else if (!plain && this.doorPassage && issue?.code === 'route.unreachable' && !isVerificationProbe(soul.soulId)) {
+    } else if (!plain && this.doorPassage && (!issue || issue.code === 'route.unreachable') && !isVerificationProbe(soul.soulId)) {
       // (#2383) a walk upstairs, a sit, a craft or a use at a thing behind a closed ground door: the passage walks through
       // the door towards it (to the ground under an upstairs point), and the plan itself runs from the door's far side in
       // place of the passage's last leg
       const up = steps.find(s => s.verb === 'mars:walk_to' && typeof s.params.x === 'number' && typeof s.params.z === 'number');
       const to = up ? [up.params.x, up.params.z] : typeof chosen?.target === 'string' ? chosen.target : null;
       const what = label.replace(/\s*\(.*$/, '') || 'there', rest = steps[0]?.verb === 'stand' ? steps.slice(1) : steps;
-      const p = to ? this.doorPassage(soul, [{verb: 'walk_to', params: {to, standoff: up ? 0 : 0.9}}], what) : null;
+      const probe = to ? [{verb: 'walk_to', params: {to, standoff: up ? 0 : 0.9}}] : [];
+      // accepted by a coarse plan of far ground, a long way to a thing behind a door meets the shut leaf only at the end: when
+      // the labels say the door is on the way (never when they are cold), the passage is planned from the start, as for a walk
+      const behindNP = !issue && to ? (this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean | null}).walkThroughDoorV1?.(soul.entityId, probe) === true : false;
+      const p = to && (issue || behindNP) ? this.doorPassage(soul, probe, what, behindNP) : null;
       if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
       if (p) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
     }
