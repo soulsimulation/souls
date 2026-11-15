@@ -6,8 +6,8 @@
 // It refuses nothing and moves nobody: a door whose spot a body stands near is placed open, so nobody is pushed; a
 // building with a resident's body inside its subtree (seated in it) is left as it is and fitted at a later boot; a
 // building whose door the world refuses (a tower's stair crowding its doorway) keeps its old revision and drawn leaf.
-// A door that would open into another building's ground-floor room (a second door in series) is not placed until a walk
-// passes several closed doors in a row (#2370); its doorway stays an open gap.
+// A door that would open into another building's ground-floor room, or into a yard buildings close in all round (a second
+// door in series) is not placed until a walk passes several closed doors in a row (#2370); its doorway stays an open gap.
 import { buildingDoorFits, buildingGroundRooms } from '@souls/generators';
 import { DOOR_FIT_FROM, type Entity, type Op } from '@souls/world-compiler';
 import type { GodMode } from './god.ts';
@@ -46,11 +46,45 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
 
 const inside = (q: Vec2[], x: number, z: number) => { let c = false; for (let i = 0, j = q.length - 1; i < q.length; j = i++) { const [xi, zi] = q[i]!, [xj, zj] = q[j]!; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
 const BUILDING_REFS: ReadonlyMap<string, Record<string, unknown>> = new Map([...DOOR_FIT_FROM].flatMap(([from, to]) => [[from, { ...to.args, doorThings: false }], [to.ref, to.args]] as [string, Record<string, unknown>][]));
-/** Is (x, z) inside the ground-floor room of a core building in `god`'s world other than `self`? */
+/** Distance from (x, z) to polygon q's edges. */
+const edgeDist = (q: Vec2[], x: number, z: number) => {
+  let d = Infinity;
+  for (let i = 0, j = q.length - 1; i < q.length; j = i++) {
+    const [ax, az] = q[j]!, [bx, bz] = q[i]!, ex = bx - ax, ez = bz - az, l = ex * ex + ez * ez;
+    const t = l ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / l)) : 0;
+    d = Math.min(d, Math.hypot(x - ax - t * ex, z - az - t * ez));
+  }
+  return d;
+};
+/** Flood-fill cell (m), how far it must reach to be open ground (m), and how far a room's outline is grown to close its walls. */
+const YARD_CELL = 0.5, YARD_OPEN_R = 20, WALL_GROW = 0.4;
+/** Is (x, z) inside the ground-floor room of a core building in `god`'s world other than `self`, or in a yard the core
+ *  buildings' ground floors close in all round (a courtyard reached only through another building's door: a second door
+ *  in series, #2383)? The yard test floods 0.5 m cells from the point, stopped by the rooms (grown to close their walls),
+ *  and calls it open when the flood gets 20 m away. */
 function indoorsOf(god: GodMode): (self: string) => (x: number, z: number) => boolean {
   const rooms = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && BUILDING_REFS.has(opRef(e.def)))
     .map((e) => ({ id: e.id, polys: buildingGroundRooms((e.params ?? {}) as Record<string, unknown>, BUILDING_REFS.get(opRef(e.def))!, { p: xz(e.p), r: yaw(e.r) }) }));
-  return (self) => (x, z) => rooms.some((b) => b.id !== self && b.polys.some((q) => inside(q, x, z)));
+  const boxes = rooms.flatMap((b) => b.polys.map((q) => {
+    const xs = q.map((v) => v[0]), zs = q.map((v) => v[1]);
+    return { q, box: [Math.min(...xs) - WALL_GROW, Math.min(...zs) - WALL_GROW, Math.max(...xs) + WALL_GROW, Math.max(...zs) + WALL_GROW] };
+  }));
+  const blocked = (x: number, z: number) => boxes.some(({ q, box }) => x >= box[0] && x <= box[2] && z >= box[1] && z <= box[3] && (inside(q, x, z) || edgeDist(q, x, z) < WALL_GROW));
+  const yard = (x: number, z: number) => {
+    if (blocked(x, z)) return false;
+    const seen = new Set<string>(['0,0']), q: [number, number][] = [[0, 0]], n = Math.ceil(YARD_OPEN_R / YARD_CELL);
+    while (q.length) {
+      const [i, j] = q.pop()!;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const a = i + di, b = j + dj, k = `${a},${b}`;
+        if (seen.has(k) || blocked(x + a * YARD_CELL, z + b * YARD_CELL)) continue;
+        if (Math.hypot(a, b) >= n) return false;
+        seen.add(k); q.push([a, b]);
+      }
+    }
+    return true;
+  };
+  return (self) => (x, z) => rooms.some((b) => b.id !== self && b.polys.some((q) => inside(q, x, z))) || yard(x, z);
 }
 
 /** The ops that fit one world-root building `e` in `god`'s model: remove it with its contents, restore it on the fitted

@@ -307,7 +307,10 @@ export class GodNav {
         stands.push(toWorld(front.at[0] + ux * 1.2, front.at[1] + uz * 1.2));
         inside = toWorld(front.at[0] - ux * 1.0, front.at[1] - uz * 1.0);
         const st = ((e.state?.doors ?? {}) as Record<string, unknown>)[front.id];
-        doorOpen = st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def));
+        // #2383: a door-fitted revision's outside doorway holds a real door thing of its own (closed in an enclosed building), so
+        // the building is arrived at outside it: a goal just inside would end at the shut leaf, and the walk does not pass it
+        doorOpen = !(def.make.kind === 'gen' && def.make.args?.doorThings === true && front.exterior !== false)
+          && (st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def)));
       }
       // #2261: every door to the outside (only the front one when the openings do not say which are), in world terms
       const exits = (outer.length ? outer : front ? [front] : []).map((o) => {

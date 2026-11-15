@@ -1867,24 +1867,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-1-door-2",
-          "p": [
-            34,
-            0,
-            17.11
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "eden-house-1-kitchen",
           "p": [
@@ -1938,24 +1920,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-1-kitchen-door-1",
-          "p": [
-            34,
-            0,
-            12.89
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -2028,24 +1992,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-1-bedroom-door-1",
-          "p": [
-            31.59,
-            0,
-            15
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "eden-house-1-study",
           "p": [
@@ -2092,24 +2038,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-1-study-door-1",
-          "p": [
-            36.41,
-            0,
-            15
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -2179,24 +2107,6 @@
             20.09
           ],
           "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-2-door-2",
-          "p": [
-            52,
-            0,
-            17.11
-          ],
-          "r": -3.141,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -2288,24 +2198,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "eden-house-2-kitchen-door-1",
-          "p": [
-            52,
-            0,
-            12.89
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "eden-house-2-kitchen-door-2",
           "p": [
             52,
@@ -2373,24 +2265,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-2-bedroom-door-1",
-          "p": [
-            49.59,
-            0,
-            15
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "eden-house-2-study",
           "p": [
@@ -2437,24 +2311,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-2-study-door-1",
-          "p": [
-            54.41,
-            0,
-            15
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         }
       ]
@@ -2530,24 +2386,6 @@
             35.39
           ],
           "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-3-door-2",
-          "p": [
-            34,
-            0,
-            32.41
-          ],
-          "r": -3.141,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -2639,24 +2477,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "eden-house-3-kitchen-door-1",
-          "p": [
-            34,
-            0,
-            27.59
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "eden-house-3-kitchen-door-2",
           "p": [
             37.633,
@@ -2724,24 +2544,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-3-bedroom-door-1",
-          "p": [
-            31.09,
-            0,
-            30
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "eden-house-3-study",
           "p": [
@@ -2788,24 +2590,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-3-study-door-1",
-          "p": [
-            36.91,
-            0,
-            30
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -2901,24 +2685,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-4-door-2",
-          "p": [
-            54,
-            0,
-            32.41
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "eden-house-4-kitchen",
           "p": [
@@ -3000,24 +2766,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "eden-house-4-kitchen-door-1",
-          "p": [
-            54,
-            0,
-            27.59
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "eden-house-4-kitchen-door-2",
           "p": [
             57.633,
@@ -3082,24 +2830,6 @@
               "stairs": []
             }
           }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-4-bedroom-door-1",
-          "p": [
-            51.09,
-            0,
-            30
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
         }
       ]
     },
@@ -3155,24 +2885,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-4-study-door-1",
-          "p": [
-            56.91,
-            0,
-            30
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -3268,24 +2980,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-1-door-2",
-          "p": [
-            -116,
-            0,
-            63.41
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-1-kitchen",
           "p": [
@@ -3339,24 +3033,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-1-kitchen-door-1",
-          "p": [
-            -116,
-            0,
-            56.59
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -3429,24 +3105,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-1-bedroom-door-1",
-          "p": [
-            -120.91,
-            0,
-            60
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-1-study",
           "p": [
@@ -3493,24 +3151,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-1-study-door-1",
-          "p": [
-            -111.09,
-            0,
-            60
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -3580,24 +3220,6 @@
             66.39
           ],
           "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-2-door-2",
-          "p": [
-            -136,
-            0,
-            63.41
-          ],
-          "r": -3.141,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -3689,24 +3311,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-2-kitchen-door-1",
-          "p": [
-            -136,
-            0,
-            56.59
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "region-courtyard-quarter-house-2-kitchen-door-2",
           "p": [
             -136,
@@ -3780,24 +3384,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-2-bedroom-door-1",
-          "p": [
-            -139.91,
-            0,
-            60
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-2-study",
           "p": [
@@ -3844,24 +3430,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-2-study-door-1",
-          "p": [
-            -132.09,
-            0,
-            60
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -3932,24 +3500,6 @@
             73.61
           ],
           "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-3-door-2",
-          "p": [
-            -115.999,
-            0,
-            76.59
-          ],
-          "r": 0.001,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -4042,24 +3592,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-3-kitchen-door-1",
-          "p": [
-            -116.001,
-            0,
-            83.41
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "region-courtyard-quarter-house-3-kitchen-door-2",
           "p": [
             -115.999,
@@ -4128,24 +3660,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-3-bedroom-door-1",
-          "p": [
-            -111.09,
-            0,
-            80.001
-          ],
-          "r": -1.57,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-3-study",
           "p": [
@@ -4193,24 +3707,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-3-study-door-1",
-          "p": [
-            -120.91,
-            0,
-            79.999
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -4281,24 +3777,6 @@
             73.61
           ],
           "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-4-door-2",
-          "p": [
-            -137.999,
-            0,
-            76.59
-          ],
-          "r": 0.001,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -4391,24 +3869,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-4-kitchen-door-1",
-          "p": [
-            -138.001,
-            0.022,
-            83.41
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "region-courtyard-quarter-house-4-kitchen-door-2",
           "p": [
             -137.999,
@@ -4483,24 +3943,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-4-bedroom-door-1",
-          "p": [
-            -132.09,
-            0.003,
-            80.001
-          ],
-          "r": -1.57,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-4-study",
           "p": [
@@ -4548,24 +3990,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-courtyard-quarter-house-4-study-door-1",
-          "p": [
-            -143.91,
-            0.067,
-            79.999
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -4635,24 +4059,6 @@
             125.39
           ],
           "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-abbey-cloister-door-2",
-          "p": [
-            -162,
-            0.655,
-            122.41
-          ],
-          "r": -3.141,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -4744,24 +4150,6 @@
         {
           "op": "place",
           "def": "core/door@2",
-          "name": "region-abbey-cloister-kitchen-door-1",
-          "p": [
-            -162,
-            0.724,
-            112.59
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
           "name": "region-abbey-cloister-kitchen-door-2",
           "p": [
             -162,
@@ -4829,24 +4217,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "region-abbey-cloister-bedroom-door-1",
-          "p": [
-            -167.91,
-            0.686,
-            117.5
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "region-abbey-cloister-study",
           "p": [
@@ -4893,24 +4263,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-abbey-cloister-study-door-1",
-          "p": [
-            -156.09,
-            0.686,
-            117.5
-          ],
-          "r": -1.571,
-          "params": {
-            "sx": 1.09,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
