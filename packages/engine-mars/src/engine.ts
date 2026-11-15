@@ -3125,12 +3125,15 @@ export class MarsEngine implements Engine {
   }
   /** Soul Actions entry 31 (pure; review of #2397): does this plan's first walk_to go through a closed ground hand door, by
    *  the connectivity labels as they stand (one end in an area joined to the world only by such a door, the other not)? Read before the
-   *  walk is planned, so a long walk is planned as the passage's legs from the start. False when either end is not joined. */
-  walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean{
+   *  walk is planned, so a long walk is planned as the passage's legs from the start. False when either end is not joined.
+   *  Null when the labels are not ready at this static epoch: they are only polled, never built here (#2383: on a fresh
+   *  Eden boot, after door-fit/1's edit, a check here drained the whole world's relabel inside one act, ~25 s on a runner);
+   *  the caller then asks the destination's side itself (closedDoorsOnWalkV1 with `behind`). */
+  walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean|null{
     const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
+    if(!this.navWarmV1(0))return null;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
-    // the labels as they stand (never a full relabel here: a stale answer only costs the old way, the walk then the passage)
-    const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return false;
+    const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return null;
     const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
     return !!a?.ok&&!!b?.ok&&!!a.door!==!!b.door;
   }

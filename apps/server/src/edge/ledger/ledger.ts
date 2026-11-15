@@ -2587,7 +2587,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
     // the start: a long walk plans its far ground coarsely and would meet the shut leaf only at the end, short of it
     const plain = !!this.doorPassage && plainWalk.every(s => s.verb === 'walk_to' || s.verb === 'stand');
-    const behind = plain && !issue && !!(this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean}).walkThroughDoorV1?.(soul.entityId, plainWalk);
+    // (#2383) labels not ready (null): the destination's side is asked directly, which names its door only when one walls it
+    const through = plain && !issue ? (this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean | null}).walkThroughDoorV1?.(soul.entityId, plainWalk) : false;
+    const behind = through === true || through === null;
     if (plain && (issue?.code === 'route.unreachable' || behind)) {
       const what = label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there';
       const p = this.doorPassage!(soul, plainWalk, what, behind);
