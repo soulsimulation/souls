@@ -1569,24 +1569,6 @@
     },
     {
      "op": "place",
-     "def": "core/door@2",
-     "name": "living-room-door-1",
-     "p": [
-      5.02,
-      0,
-      -8.11
-     ],
-     "r": 0,
-     "params": {
-      "sx": 1.35,
-      "sy": 0.9
-     },
-     "state": {
-      "open": false
-     }
-    },
-    {
-     "op": "place",
      "def": "core/hall@3",
      "name": "bunkhouse",
      "p": [

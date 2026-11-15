@@ -1849,24 +1849,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-1-door-1",
-          "p": [
-            34,
-            0,
-            20.09
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "eden-house-1-kitchen",
           "p": [
@@ -2193,24 +2175,6 @@
                 }
               ]
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-house-2-kitchen-door-2",
-          "p": [
-            52,
-            0,
-            9.91
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -5134,24 +5098,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "int-clinic-door-2",
-          "p": [
-            64.5,
-            0,
-            -11.09
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/hall@3",
           "name": "int-bathhouse",
           "p": [
@@ -5497,24 +5443,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "eden-a-frame-door-1",
-          "p": [
-            76.5,
-            0,
-            -22.61
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/roundhouse@2",
           "name": "eden-yurt",
           "p": [
@@ -5567,24 +5495,6 @@
               ],
               "stairs": []
             }
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "eden-yurt-door-1",
-          "p": [
-            67.5,
-            0,
-            -15.61
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -6520,24 +6430,6 @@
           "state": {
             "open": false
           }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-railway-station-station-building-door-2",
-          "p": [
-            142.001,
-            0,
-            -37.61
-          ],
-          "r": 0.001,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
         }
       ]
     },
@@ -7089,24 +6981,6 @@
             -14.001
           ],
           "r": 1.571,
-          "params": {
-            "sx": 1.27,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "region-east-crossroads-pub-door-2",
-          "p": [
-            288.11,
-            0.347,
-            -13.999
-          ],
-          "r": -1.57,
           "params": {
             "sx": 1.27,
             "sy": 0.9
@@ -11827,24 +11701,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "lake-cabin-1-door-1",
-          "p": [
-            -121.012,
-            0,
-            -55.835
-          ],
-          "r": -0.437,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/cabin@2",
           "name": "lake-cabin-2",
           "p": [
@@ -11855,24 +11711,6 @@
           "params": {
             "wall": "#5a6a3a",
             "roofColor": "#3f4448"
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "lake-cabin-2-door-1",
-          "p": [
-            -155.683,
-            0,
-            -55.631
-          ],
-          "r": 0.133,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -11891,24 +11729,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "lake-cabin-3-door-1",
-          "p": [
-            -167.21,
-            0,
-            -52.744
-          ],
-          "r": 0.337,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/cabin@2",
           "name": "lake-cabin-4",
           "p": [
@@ -11919,24 +11739,6 @@
           "params": {
             "wall": "#8a5a36",
             "roofColor": "#3f4448"
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "lake-cabin-4-door-1",
-          "p": [
-            -178.747,
-            0,
-            -47.965
-          ],
-          "r": 0.552,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         },
         {
@@ -11955,24 +11757,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "lake-cabin-5-door-1",
-          "p": [
-            -190.271,
-            0,
-            -38.35
-          ],
-          "r": 0.809,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
-          }
-        },
-        {
-          "op": "place",
           "def": "core/cabin@2",
           "name": "lake-cabin-6",
           "p": [
@@ -11983,24 +11767,6 @@
           "params": {
             "wall": "#d9a85e",
             "roofColor": "#3f4448"
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "lake-cabin-6-door-1",
-          "p": [
-            -195.915,
-            0,
-            -24.832
-          ],
-          "r": 1.06,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": false
           }
         }
       ]

@@ -13,18 +13,24 @@ import { accept } from '../../test/native-owner-fixture.ts';
 import { enableDoorFitV1 } from '../edge-runtime-rules.ts';
 import { doorFit, doorFitted, DOOR_FIT_DOOR } from './door-fit.ts';
 
-const fitted = JSON.parse(readFileSync(new URL('../../../../worlds/templates/hello-hamlet.json', import.meta.url), 'utf8'));
+const template = (name: string) => JSON.parse(readFileSync(new URL(`../../../../worlds/templates/${name}.json`, import.meta.url), 'utf8'));
+const fitted = template('hello-hamlet');
 const back = new Map([...DOOR_FIT_FROM].map(([from, to]) => [to.ref, from]));
 type PlaceOp = { op: string; def: string; name?: string; p?: number[]; r?: number; params?: Record<string, unknown>; state?: Record<string, unknown> };
 const places = (tpl: { batches: { ops: PlaceOp[] }[] }) => tpl.batches.flatMap((b) => b.ops).filter((o) => o.op === 'place');
 
-test('door-fit/1: a template world from before is fitted once, like the fitted template, and nobody moves', { timeout: 300000 }, async (t) => {
+/** A template as it was before door-fit (the fitted revisions mapped back, their doors left out), booted. */
+async function before(t: { after: (f: () => void) => void }, fitted: { batches: { ops: PlaceOp[] }[] }) {
   const before = structuredClone(fitted) as { batches: { ops: PlaceOp[] }[] };
   for (const b of before.batches) b.ops = b.ops.filter((o) => !(o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? ''))).map((o) => back.has(o.def) ? { ...o, def: back.get(o.def)! } : o);
-  const old = places(before).filter((o) => DOOR_FIT_FROM.has(o.def));
-  assert.equal(old.length, 3, 'a cottage and two halls on their old revisions');
-  const file = join(mkdtempSync(join(tmpdir(), 'door-fit-')), 'hamlet-before.json'); writeFileSync(file, JSON.stringify(before));
+  const file = join(mkdtempSync(join(tmpdir(), 'door-fit-')), 'before.json'); writeFileSync(file, JSON.stringify(before));
   const w = await bootEden(() => {}, pathToFileURL(file)); t.after(w.close);
+  return { w, old: places(before).filter((o) => DOOR_FIT_FROM.has(o.def)) };
+}
+
+test('door-fit/1: a template world from before is fitted once, like the fitted template, and nobody moves', { timeout: 300000 }, async (t) => {
+  const { w, old } = await before(t, fitted);
+  assert.equal(old.length, 3, 'a cottage and two halls on their old revisions');
   const { god, host, soul } = w;
   const ents = () => host.engine.world.entities as Record<string, { pose: { p: number[] } }>;
   const pose0 = structuredClone(ents()[soul.entityId]!.pose);
@@ -32,7 +38,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   const seq0 = god.model.editSeq;
 
   const fact = await accept<unknown>(host, enableDoorFitV1(host, god) as Promise<never>) as { payload: { doorFitV1: unknown; runtimePolicy: { doorFitV1: boolean } } };
-  assert.deepEqual(fact.payload.doorFitV1, { buildings: 3, doors: 3, series: 0, kept: [] }, 'logged with what it fitted');
+  assert.deepEqual(fact.payload.doorFitV1, { buildings: 3, doors: 3, series: 0, held: 0 }, 'logged with what it fitted');
   assert.equal(fact.payload.runtimePolicy.doorFitV1, true);
   assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
   await w.settle(10);
@@ -60,4 +66,33 @@ test('door-fit/1: a door whose doorway a body stands in is placed open', () => {
   assert.equal(busy.doors[0]!.state!.open, true, 'occupied: open');
   assert.deepEqual(busy.doors.slice(1).map((d) => d.state!.open), fit.doors.slice(1).map(() => false), 'the rest closed');
   assert.equal(doorFit('core/hall@2', {}, [0, 0], 0, 'x'), null, 'core/hall@2 already has its doors');
+});
+
+// Review of #2397: a door a hand cannot work is held back as an open gap. Mars Camp's living room has a bench where the body
+// steps while closing its door from inside (contact.step-blocked): door-fit/1 places its other doors and leaves that
+// doorway bare, as the fitted template does.
+test('door-fit/1: a door a hand cannot work is held back; the rest are placed, as in the template', { timeout: 300000 }, async (t) => {
+  const camp = template('mars-camp');
+  const { w } = await before(t, camp);
+  const fact = await accept<unknown>(w.host, enableDoorFitV1(w.host, w.god) as Promise<never>) as { payload: { doorFitV1: { held: number; doors: number } } };
+  assert.equal(fact.payload.doorFitV1.held, 1, 'one held back');
+  const names = [...w.god.model.entities.values()].filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR).map((e) => e.name).sort();
+  const want = places(camp).filter((o) => o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? '')).map((o) => o.name).sort();
+  assert.deepEqual(names, want, 'the doors the fitted template has');
+  assert.ok(!names.includes('living-room-door-1'), 'the living room doorway stays an open gap');
+  assert.equal(fact.payload.doorFitV1.doors, want.length);
+});
+
+// Review of #2397: no refusal is final. A building the world refuses (a code other than body.protected) keeps its old
+// revision this boot, the rules event waits, and the next boot fits it.
+test('door-fit/1: a refused building is tried again at the next boot', { timeout: 300000 }, async (t) => {
+  const { w } = await before(t, fitted);
+  const real = w.god.engineAct.bind(w.god);
+  w.god.engineAct = (() => ({ accepted: false, failures: [{ op: 0, code: 'overlap.solid', detail: 'test: refused' }] })) as never;
+  assert.equal(await enableDoorFitV1(w.host, w.god), undefined, 'refused: no event');
+  assert.equal([...w.god.model.entities.values()].filter((e) => doorFitted(e.def)).length, 3, 'kept on the old revisions');
+  w.god.engineAct = real;
+  const fact = await accept<unknown>(w.host, enableDoorFitV1(w.host, w.god) as Promise<never>) as { payload: { doorFitV1: { buildings: number } } };
+  assert.equal(fact.payload.doorFitV1.buildings, 3, 'the next boot fits them');
+  assert.equal([...w.god.model.entities.values()].filter((e) => doorFitted(e.def)).length, 0);
 });

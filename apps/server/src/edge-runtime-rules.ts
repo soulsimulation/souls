@@ -1,7 +1,7 @@
 import type {WorldHost} from './world.ts';
 import { factoryDescriptorV1 } from './world-factory.ts';
 import type { GodMode } from './god/god.ts';
-import { fitWorldDoorsV1 } from './god/door-fit.ts';
+import { fitWorldDoorsV1, type HandObstacle } from './god/door-fit.ts';
 
 /** Little Martians scene worlds: the old world (WORLD_KEY `littlemartians`, also its launcher fork) and the launcher's
  *  arium (slug `little-martians-arium`, as tools/world-launcher/op-souls.mjs names it). They are excluded from Soul
@@ -58,16 +58,21 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
 
 /** #2383 door-fit/1, once per world: its buildings on a revision that draws fixed door leaves move to their door-fitted
  *  revision with a real hand-operated door in each ground-floor doorway (god/door-fit.ts; one recorded engine edit),
- *  then one logged rules event marks it done. A building left (a resident seated in it) keeps the event back, so the
- *  next boot fits what is left. A world without a god (no entity world) has nothing to fit and logs nothing. */
+ *  then one logged rules event marks it done. A building left (a resident seated in it) or refused keeps the event back,
+ *  so the next boot fits what is left. A world without a god (no entity world) has nothing to fit and logs nothing. */
 export function doorFitV1(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { doorFitV1?: boolean } | undefined)?.doorFitV1 === true; }
 export async function enableDoorFitV1(host: WorldHost, god: GodMode | undefined, author = 'operator:door-fit'): Promise<unknown> {
   if (doorFitV1(host) || !god) return;
-  const bodies = Object.values((host.engine.world as unknown as { entities: Record<string, { pose?: { p?: number[] } }> }).entities)
-    .flatMap((e): [number, number][] => e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
-  const r = fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`));
-  if (r.left.length) return;
-  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors, series: r.series.length, kept: r.kept },
+  // the bodies standing about (a Soul's or a resident's), not every posed thing: a bench by a door does not hold it open
+  const bodies = Object.values((host.engine.world as unknown as { entities: Record<string, { human?: unknown; pose?: { p?: number[] } }> }).entities)
+    .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
+  // the walk graph's solids as they stand: a door a hand cannot work for one of them is held back (door-fit.ts)
+  const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
+  spatial?.sync(host.engine.world);
+  const r = fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
+  // a building left (seated in) or refused this boot is tried again at the next: the event waits for both
+  if (r.left.length || r.kept.length) return;
+  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors, series: r.series.length, held: r.held.length },
     why: 'door-fit/1 (#2383): every building doorway holds a real door a Soul opens by hand; the buildings and doors were fitted by a recorded engine edit just before this event' });
 }
 
