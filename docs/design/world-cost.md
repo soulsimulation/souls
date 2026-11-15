@@ -115,7 +115,7 @@ exactly:
 | B3 | World state out of module scope: walk reach per engine, world day, the ground middles, context views, the read pool | 3 h | T3 | `mars/viewer/engine/locomotion/walk.ts`, `packages/engine-mars/src/ground-bridge.ts`, `apps/server/src/god/{poster-boards,engine-bridge,ground-host,context-views}.ts`, `world-main.ts` |
 | B4 | Env reads after boot become world config fields | 2 h | T2 | the `process.env` readers in the table above |
 | B5 | The shard program and the launcher's use of it: load and stop one world by message, one watchdog per shard, a fault ends the shard and its worlds reload, render locks by world, off by default | 4 h | T3 | new `tools/world-launcher/shard.mjs` (from `tools/bench/capacity/colocate/host.mjs`), `tools/world-launcher/{children,registry,production}.mjs`, `apps/server/src/load/watchdog.ts`, `apps/server/src/god/host-render-slot.ts` |
-| B6 | Measure the built shard: the `colocate` bench with `--forms shard`, 50 small worlds | 2 h | T0 | `tools/bench/capacity/colocate/` |
+| B6 | Measure the built shard: the `colocate` bench with `--forms shard`, 50 small worlds. **Done (#2451):** [measured](#the-built-shard-measured-b6-2451) | 2 h | T0 | `tools/bench/capacity/colocate/` |
 
 ### The shard program (B5, #2444)
 
@@ -178,6 +178,74 @@ today's unit or 12.5 GB with the whole host, and shards of 8. Form 2's shard cos
 
 Joined Souls add memory in every form. The first walking Soul in a small world and one in an Eden world added 210 to
 260 MB here. Moving bodies are what the host's memory limits once still worlds unload (#2241).
+
+### The built shard, measured (B6, #2451)
+
+The `colocate` bench with `--forms shard --small 50` runs the shard program (`tools/world-launcher/shard.mjs`) through
+the launcher's own `ShardSet`, beside 50 programs of one world each. The bench's settings: commit `7c589c47f`, on
+`souls-timed` runners (Linux, Node 22, 48 CPUs, 125.6 GB). It loads 50 fresh `hello-hamlet` worlds with fake minds and
+Eyes off, using the launcher's own command and production decoration. Shards hold 8 worlds, so 50 worlds take 7
+programs. Every world ticks (`SIM_SKIP=0`), as in #2300; a still world now jumps its clock instead (#2298). That is
+the worst case for a shared thread. Every memory reading follows a full GC of every program's heap. Runs: timed-run
+43742744860 (both forms), 43742742507 (shard; its baseline arm stopped at world 48, exit 1 at boot) and 43744144947
+(the baseline again).
+
+| Form | Programs | Pss of 50 quiet worlds | Per world | Tick p50 / p99, 60,000 ticks pooled | CPU while quiet | Load, median (max) |
+|---|---|---|---|---|---|---|
+| One program per world | 50 | 11,150 and 11,136 MB | **223 MB** | 0.5 / 2.0 ms | 1.06 cores | 3.6 s (3.9) |
+| Shards of 8 | 7 | 5,338 and 5,438 MB | **107 and 109 MB** | 0.3 / 1.6 to 1.7 ms | 0.52 to 0.54 cores | 1.2 s (4.1) |
+
+- A shard holds a small world in about half the memory of a program of its own, including its share of the shard's
+  program: 107 MB against 223 MB. #2300 estimated 98 MB per further small world plus about 170 MB per program, which
+  comes to 122 MB per world at this size. It also used half the CPU.
+- Ticks are not slower in a shard. The worst p99 was 1.7 ms. With a mean tick of 0.3 ms, eight ticking small worlds
+  keep their thread busy for about 2.4 ms in every 50.
+- A world's first load in a shard is the program's own cold start (4 s). Every further load takes about 1.2 s, against
+  3.6 s for a program of its own.
+
+**One more world** (a 51st):
+
+| Form | Load to first `/healthz` | Longest gap the other worlds saw | Pss added |
+|---|---|---|---|
+| One program per world | 3.5 s | 0.27 s | 324 and 331 MB (15 s after its first answer) |
+| Shards of 8 | 0.6 s | 0.38 s, the 2 worlds of its own shard | 83 and 91 MB |
+
+**One world fails** (each fault watched 60 s). In the shard form, every world that exits loads again at once, as the
+pool restarts a planned exit. The crash backoff of the world that ended the shard is left out.
+
+| Fault | One program per world | Shards of 8: the 7 other worlds of its shard | Shards of 8: the 43 worlds of the other shards |
+|---|---|---|---|
+| A step that throws every tick (`storm`, exit 70 at 2.5 s) | The others did not notice (0.40 s) | Down until reloaded: longest gap 4.2 to 4.4 s (81 to 84 failed polls); all serving at the end | Longest gap 2.4 s |
+| A 60 s hang (the watchdog's kill at 10.8 s) | The others did not notice (0.39 s) | Longest gap 14.2 to 14.3 s; all serving at the end | Longest gap 2.6 to 3.0 s |
+
+- A shard fails as a whole and comes back in about 4 s after a storm, or about 14 s after a hang, as #2300 expected.
+- The worlds of the other shards are not untouched. The 8 reloaded worlds go into programs that still have room, and
+  each load holds that program's thread for its boot, which stops its worlds for up to 3 s. Reloading them into a
+  fresh program instead would keep the other shards clear. The design already sends an Eden-class load to a fresh
+  shard; a fault's reload is not yet treated that way.
+- The world that hung was not the one blamed. In every run it exited as a planned restart (75), and a neighbour was
+  counted as the crash: the hang ran outside a tick (a timer), where the watchdog names the first world it judged.
+
+**Writing the running world on every callback** (#2445 review item 5, measured, not built): an async hook writes the
+running world's number (its `renderWorld` context) into a shared slot before every callback of the program, so a
+watchdog could blame the world that holds the thread. With it on (`--callback-slot`, runs 43742801627 and
+43742803800), shards of 8 measured 5,334 and 5,360 MB, ticks 0.3 / 1.7 ms (mean 0.4 ms) and 0.53 to 0.55 cores.
+Without it: 5,338 to 5,438 MB, 0.3 / 1.6 to 1.7 ms (mean 0.3 ms) and 0.52 to 0.54 cores. Memory, p50 and p99 are
+within the spread between runs. The mean tick and the CPU may be up to about 0.1 ms and 0.03 cores higher: at most a
+few percent of a quiet shard, and near what different runners of the same kind can tell apart.
+
+### Capacity on the production host: measured for small worlds
+
+These are the same assumptions as the estimates above: quiet fresh worlds, 7.4 GB under today's unit or 12.5 GB with
+the whole host. Small worlds use the Pss measured here; Eden worlds were not measured by B6 and keep #2300's estimate.
+
+| Form | Small worlds at 7.4 GB | Small at 12.5 GB | Eden worlds at 7.4 GB (estimate) | Eden at 12.5 GB (estimate) |
+|---|---|---|---|---|
+| One program per world | about 33 | about 56 | about 14 | about 24 |
+| Shards of 8 | **about 69** | **about 117** | about 25 | about 43 |
+
+Shards fit about 2.1 times as many small worlds as programs of their own, slightly more than #2300 estimated (61 and
+104).
 
 ## A world that does not crash (#2366)
 
