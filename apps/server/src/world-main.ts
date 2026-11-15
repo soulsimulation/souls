@@ -1,6 +1,6 @@
 import {closeContextViews} from './god/context-views.ts';
 import { WallClock } from './clock-catchup.ts';
-import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
+import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled, stopRealClock } from './god/real-clock.ts';
 import { cutOverReminders } from './god/clock-cutover.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
@@ -63,7 +63,7 @@ const NATIVES: { name: string; description: string }[] = [
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
  *  guard, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
-export async function startWorld(config: Config) {
+export async function startWorld(config: Config, o: { exit?: (code: number) => void; signals?: boolean; mine?: () => boolean } = {}) {   // #2444: a shard passes exit (the world ends, not the program), signals: false and mine (an uncaught error is this world's)
   // Lane P5: when the boot's phases end (ms since the process started; the first is this release's code load)
   const bootAt: Record<string, number> = { code: performance.now() };
   // Release pre-warm (SIM_STANDBY=1, launcher handover): all code is loaded here; the database and port open only after SIGUSR2.
@@ -249,6 +249,9 @@ export async function startWorld(config: Config) {
   // Stage B (lane B-port): the read-worker pool, DARK unless SIM_READ_WORKER=1 (split/read-pool.ts; nothing is imported
   // otherwise). SIM_READ_WORKERS = pool size (registry `readWorkers`, 1–4, default 1); SIM_READ_PORTS = the launcher's ports.
   let readPool: { status(): unknown } | undefined;
+  // #2444: what a world started in a shard (`o.exit`) leaves running in the program unless it is cleared when the world
+  // ends, by its stop or by a boot that fails (world-stop-timers.test.ts)
+  const stopWorldTimers = () => { hub.stopTimers(); souls.stopTimers(); brain.quiesce(); stopRealClock(host); (app as unknown as { portraits?: { dispose(): void } }).portraits?.dispose(); void (readPool as { close?(): Promise<void> } | undefined)?.close?.(); };
   if (config.env.SIM_READ_WORKER === '1' && edge) {
     const { ReadPool, readPorts, deltaSource } = await import('./split/read-pool.ts');
     const { accountTag } = await import('./load/admission.ts');
@@ -314,6 +317,7 @@ export async function startWorld(config: Config) {
   // the step that threw most of them recorded for the next boot. A tick fault that leaves the clock stopped for good (its timer
   // gone, or unavailable with no named halt) exits the same way: nothing else would notice. The process handlers go in once
   // the world serves. Program-level: faultExit ends the process (one world per program until #2389's later steps).
+  let uninstallFaults: (() => void) | undefined;
   const faults = faultGuard({ onStorm: (n, step) => { if (!closing) faultExit(config.dataDir, `world.fault.storm: ${n} faults in a minute`, step); } });
   host.onFault = (name, error, step) => {
     faults.note(name, error, step);
@@ -393,9 +397,11 @@ export async function startWorld(config: Config) {
     if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
     if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
   }
-  const startClock = () => { wallClock.start(); host.start(); };
+  // a Soul whose birth threw at boot replay or that a rewind left out is born again (WorldHost.unbornV1), once the clock runs
+  const startClock = () => { wallClock.start(); host.start(); souls.rebirthUnborn(); };
   if (host.owedTicks > 0 && !host.paused) catchingUp = catchUpBoot().catch((e) => console.error('[clock] catch-up failed:', e)).finally(() => { catchingUp = null; if (!closing) startClock(); });
   else startClock();
+  host.listeners.push({ onApplied: (e) => { if (e.kind === 'rules' && e.payload?.recovery && host.unbornV1.size) queueMicrotask(() => souls.rebirthUnborn()); } });
   if (config.seedNatives && db.liveSouls(host.worldId).length === 0) {
     if (config.worldKey === 'toy') {
       for (const n of NATIVES) await souls.create('system', n, true);
@@ -448,7 +454,9 @@ export async function startWorld(config: Config) {
         }
       } finally {
         process.off('SIGTERM', term); process.off('SIGINT', interrupt);
-        process.exit(abort.signal.aborted ? 0 : 1);
+        // (a world process exits here; in a shard what shutdown would end must end too)
+        if (o.exit) { try { stopWorldTimers(); wallClock.stop(); (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); void closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews); } catch (e) { console.error('[boot] cleanup failed', e); } }
+        (o.exit ?? process.exit)(abort.signal.aborted ? 0 : 1); throw new Error('world.boot.ended');   // (a shard's exit returns: this world goes no further)
       }
     } finally {
       process.off('SIGTERM', term); process.off('SIGINT', interrupt);
@@ -456,7 +464,7 @@ export async function startWorld(config: Config) {
   }
   const listening = new Promise<void>((r) => server.once('listening', () => r()));
   server.listen(config.port, config.host, () => {
-    load.boot.phase('serving', host.engine.world.tick); installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
+    load.boot.phase('serving', host.engine.world.tick); uninstallFaults = installFaultGuard(faults, process, o.mine); monitor.start(); stallLog?.start(); servingWarm('boot');
     console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
     const s = (ms: number) => (ms / 1000).toFixed(2);
     console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);
@@ -496,12 +504,17 @@ export async function startWorld(config: Config) {
     server.close(); void hub.closeClients('server restarting');
     await closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews);
     (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
-    auth.close();db.close(); process.exit(exitCode);
+    if (o.exit) {   // #2444: nothing of a stopped world runs on in its shard (world-stop-timers.test.ts)
+      clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); stopWorldTimers();
+    }
+    auth.close();db.close(); (o.exit ?? process.exit)(exitCode);
   };
   // The launcher's wedge path sends SIGUSR2 before SIGTERM (LOAD-CONTRACT §4): a diagnostic report, if this thread can still run.
+  if (o.signals !== false) {
   process.on('SIGUSR2', () => { try { console.log(`[load] SIGUSR2: diagnostic report ${process.report?.writeReport(join(config.dataDir, `report-${Date.now()}.json`))}`); } catch (e) { console.error('[load] report failed', e); } });
   process.on('SIGTERM', () => void shutdown('SIGTERM').catch(()=>console.error('[world] shutdown is incomplete; retain database and inspect')));
   process.on('SIGINT', () => void shutdown('SIGINT').catch(()=>console.error('[world] shutdown is incomplete; retain database and inspect')));
+  }
 
   // Hourly on-box backup with retention: the last 6 hourly files plus one per day (the 00:00 UTC file) for 7 days.
   function pruneBackups() {
@@ -538,7 +551,7 @@ export async function startWorld(config: Config) {
   const backupWork=new Set<Promise<void>>();
   function trackedBackup(){const work=backupNow();backupWork.add(work);void work.finally(()=>backupWork.delete(work)).catch(()=>{});return work;}
   pruneBackups();
-  const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(config.env), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); disk.start();   // #2378
+  const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(config.env), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); const diskTimer = disk.start();   // #2378
   const firstBackup=setTimeout(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 60_000);firstBackup.unref();
   const backupTimer=setInterval(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 3600_000);backupTimer.unref();
   return { config, host, db, server, listening, shutdown, load, readPool: () => readPool };

@@ -127,7 +127,11 @@ export async function runLoad(o) {
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
+    // a world that exits on its own says how (code, signal) and its resident memory every 30 s, in this log (Linux /proc)
+    let stopping = false;
+    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log'),
+      onSpawn: (c) => c.on('exit', (code, signal) => { if (!stopping) log(`n${n} r${rep}: the world exited on its own (code ${code}, signal ${signal}); see n${n}-r${rep}/server/world.log`); }) });
+    const rss = setInterval(() => { try { const kb = /^VmRSS:\s+(\d+)/m.exec(readFileSync(`/proc/${w.pid}/status`, 'utf8'))?.[1]; if (kb) log(`n${n} r${rep}: world rss ${Math.round(kb / 1024)} MB`); } catch { /* not Linux, or gone */ } }, 30000);
     const souls = [];
     try {
       // setup is paced at 6 Souls per 30 s: all Souls share one address, and a world pairs at most 20 in any 60 s from one
@@ -160,6 +164,7 @@ export async function runLoad(o) {
       arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
+      clearInterval(rss); stopping = true;
       await stopWorld({ pid: w.pid });
       if (!o['keep-data']) { rmSync(join(dir, 'server', 'data'), { recursive: true, force: true }); rmSync(join(dir, 'souls'), { recursive: true, force: true }); }
     }

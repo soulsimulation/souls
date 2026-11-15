@@ -262,8 +262,9 @@ for (const [name, souls, settle, span] of [
 // #2298 A4a, #2384 A1: on the live clock a still, unwatched world sleeps to its horizon: no frame timer and no landing in
 // between. While it sleeps the load monitor counts it as owing nothing (not stalled, service whole), so /healthz, live.json and
 // the launcher's stall test read it healthy; an hour away is caught up in a few ordinary ticks, and an input wakes it and is
-// accepted at the tick the wall has reached.
-test('#2298 A4a, #2384 A1: a still world sleeps to its horizon, never reads as stalled, and an input wakes it', { timeout: 120_000 }, async (t) => {
+// accepted at the tick the wall has reached. Once more on a busy host: the turn that starts the clock runs 60 ms late, so its
+// first frame owes no tick and the world sleeps at its second, unticked, where the monitor's sample can catch it just started.
+for (const busyMs of [0, 60]) test(`#2298 A4a, #2384 A1: a still world sleeps to its horizon, never reads as stalled, and an input wakes it${busyMs ? ` (a busy host: the clock starts ${busyMs} ms into its turn)` : ''}`, { timeout: 120_000 }, async (t) => {
   const { STALL_MIN_MS, LoadMonitor } = await import('./load/monitor.ts'), { S, clockOf } = await import('./load/shared.ts');
   const dir = mkdtempSync(join(tmpdir(), 'jump-a4-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const { f } = await godWorld(t, join(dir, 'world.db'), 0, 1_728_000), h = f.host;   // a real-time day
@@ -278,6 +279,7 @@ test('#2298 A4a, #2384 A1: a still world sleeps to its horizon, never reads as s
   // After an ordinary tick the world first jumps once (within 1.5 s, the cap), so the timers that read `silent()` agree.
   const deadline = h.engine.world.tick + 100; h.listeners.push({ stillness: (tick: number) => (tick < deadline ? [{ name: 'test.deadline', tick: deadline }] : []) });
   const t0 = performance.now(), tick0 = h.engine.world.tick, wait = async (ok: () => boolean, ms: number) => { for (const end = performance.now() + ms; !ok() && performance.now() < end;) await new Promise((r) => setTimeout(r, 20)); };
+  for (const end = performance.now() + busyMs; performance.now() < end;);   // the busy host: synchronous work before the start
   h.start(); await wait(() => h.sleeping, 2500);
   assert.ok(h.sleeping, 'asleep after its first jump'); const f0 = frames, d0 = done.length, slept = performance.now();
   await new Promise((r) => setTimeout(r, Math.max(0, t0 + 4600 - slept)));

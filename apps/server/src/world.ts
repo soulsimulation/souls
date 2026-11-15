@@ -388,7 +388,7 @@ export class WorldHost {
     for (const e of later) {
       if(clock&&!checkedClock&&e.seq>clock.throughSeq)verifyClock();
       while (this.engine.world.tick < e.tick) stepReplay();
-      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); }
+      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); if (e.kind === 'birth' && !this.minds.has(e.payload?.soulId)) this.unbornV1.add(e.payload.soulId); }
       this.seq = e.seq;
     }
     verifyClock();
@@ -1090,6 +1090,11 @@ export class WorldHost {
   }
 
   // ------------------------------------------------------------ inputs
+  /** Souls whose birth was logged and threw (at boot under repair rules) or was left out by a rewind: a row with no body and
+   *  no mind. Souls.rebirthUnborn() gives each a new birth; until then the Soul cannot act and its owner sees no body. */
+  readonly unbornV1 = new Set<string>();
+  /** Births queued and not yet applied (a direct create counts them against the arrival point's free spots). */
+  queuedBirthsV1(): number { let n = 0; for (const p of this.queue) if (p.kind === 'birth') n++; return n; }
   /** Queue an input; it is logged and applied at the next tick. Resolves with the logged event. */
   enqueue(kind: EventKind, author: string, payload: unknown): Promise<LogEvent> {
     this.assertClockReady();
@@ -2205,6 +2210,7 @@ export class WorldHost {
       const e: LogEvent = {seq: ++this.seq, tick: untilTick, kind: 'rules', author: 'world:recovery', payload: {recovery: recipe}, at: Date.now()};
       let at = performance.now(); if (!this.writeRepair(e)) return; this.notePhase('write', at);
       for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);
+      for (const b of all) if (b.kind === 'birth' && !this.minds.has(b.payload?.soulId)) this.unbornV1.add(b.payload.soulId);   // a birth the rewind left out
       this.resetAcc(); this.acc.log.push(e); this.ring = [];
       this.recordGlitch('rewind', error, {tick: untilTick, evidence: {seq: e.seq, kept: events.length, dropped: all.length - events.length, contained: recipe.lastRung!.contained, relocated: recipe.lastRung!.relocated, skipped: recipe.lastRung!.skipped}});
       if (this.durableClockV1) this.persistClockFrontier();

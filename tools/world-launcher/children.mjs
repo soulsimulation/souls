@@ -8,7 +8,9 @@ import { createServer } from 'node:net';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cgroupHeadroomMb, memAvailableMb, PREWARM_MB, prewarmBlocked, pssMb, rotateLog } from './production.mjs';
-import { SLUG_RE, isTimeZone, worldIdOf } from './registry.mjs';
+import { SLUG_RE, isTimeZone, shardable, worldIdOf } from './registry.mjs';
+import { SHARD_SCRIPT, ShardSet } from './shard.mjs';
+import { shardSize } from './production.mjs';
 import { GUARD, bootMark, jitterMs, liveWedge, readLive } from './guard.mjs';
 const STRIP_HOOK = 'apps/server/src/strip-cache.mjs'; // lane BOOT2 (defaultCommand)
 
@@ -80,6 +82,8 @@ export class ChildPool {
    * maxRunning / minFreeMb: before a world boots, idle worlds are put to sleep until it fits; when none can sleep the
    * boot is refused (error.code 'capacity'). busy(slug): a world with live viewers is never put to sleep.
    * stopGraceMs: how long stop() waits after SIGTERM before SIGKILL (10 s; tests shorten it).
+   * shards / shardDropGraceMs (#2444): worlds per shard program (else SIM_SHARDS; off by default); how long a world dropped
+   * while it loads may take to stop before its program is ended (shard.mjs DROP_GRACE_MS; tests lengthen it).
    * sleepMs (lane P3): freezeIdle() freezes a world nobody asked anything for that long (see there); 0/absent: never.
    * exitMs (lane SLEEP): releaseIdle() lets a world frozen that long more exit, giving its memory back (see there).
    * guard (lane L1): overrides of guard.mjs GUARD (tests); random: the backoff's jitter source (tests).
@@ -109,6 +113,9 @@ export class ChildPool {
     this.g = { ...GUARD, ...(o.guard ?? {}) }; this.random = o.random ?? Math.random; this.guardTimer = null;
     this.log = o.log ?? (() => {});
     mkdirSync(o.logDir, { recursive: true });
+    /** #2444: worlds share programs (tools/world-launcher/shard.mjs) only when SIM_SHARDS (or o.shards) sets a shard's size. */
+    const shards = shardSize(o.shards ?? process.env.SIM_SHARDS);
+    this.shards = shards ? new ShardSet({ root: o.root, size: shards, logDir: o.logDir, log: this.log, dropGraceMs: o.shardDropGraceMs }) : null;
   }
 
   // ---------- handover between launcher generations (keeper.mjs; lane C4 downtime)
@@ -137,7 +144,9 @@ export class ChildPool {
       k.pauseStart = Date.now();   // from here the world does not answer until the new process does
       // the previous process must be gone, not only released: while its pid lives it holds the data dir (edge-server.lock)
       // and the next one refuses to open it (3.53: a release SIGKILLed after 10 s and answered before the exit)
-      try { await release(slug); await this.gone(slug, prev, goneMs); k.releaseMs = Date.now() - k.pauseStart; }
+      // #2444: a world in a shard shares its pid with worlds that run on; its release answers only once that world's own
+      // exit came (stopChild), which is what this waits for instead
+      try { await release(slug); if (k.adopted.script !== SHARD_SCRIPT) await this.gone(slug, prev, goneMs); k.releaseMs = Date.now() - k.pauseStart; }
       catch (e) { warm?.child.kill('SIGTERM'); k.status = 'failed'; k.lastError = `handover: ${e.message}`; this.o.onChange?.(slug); throw e; }
       k.adopted = null; this.savePids();
       if (this.closing || this.fenced) { warm?.child.kill('SIGTERM'); k.status = 'stopped'; throw new Error(`world ${slug}: this launcher is closing`); }
@@ -273,7 +282,7 @@ export class ChildPool {
       if (k.slug === except) continue;
       const pid = k.child?.pid ?? k.adopted?.pid;
       if (k.status === 'running' && pid) {
-        if (k.pssPid !== pid || now - (k.pssAt ?? 0) >= PSS_EVERY_MS) { k.pssMb = (this.o.pss ?? pssMb)(pid); k.pssAt = now; k.pssPid = pid; }
+        if (k.pssPid !== pid || now - (k.pssAt ?? 0) >= PSS_EVERY_MS) { k.pssMb = (this.o.pss ?? pssMb)(pid); k.pssAt = now; k.pssPid = pid; if (k.pssMb != null && k.child?.share) k.pssMb = Math.round(k.pssMb / k.child.share()); }   // #2444: a shard's Pss, split between its worlds
         running += k.pssMb ?? this.loadMb(k);
       } else if (k.status === 'waiting') waiting += this.loadMb(k);
       else if (['starting', 'restarting', 'handover'].includes(k.status)) loading += this.loadMb(k);
@@ -534,8 +543,10 @@ export class ChildPool {
     if (rotate) rotateLog(logFile);
     const log = createWriteStream(logFile, { flags: 'a' });
     log.write(`\n--- ${new Date().toISOString()} start ${k.slug} on :${port} (restart ${k.restarts})${extraEnv.SIM_STANDBY ? ' standby' : ''}\n`);
-    const child = spawn(cmd, args, { cwd: this.o.root, env: { ...env, ...(k.healthPort ? { SIM_HEALTH_PORT: String(k.healthPort) } : {}), ...this.readEnv(k), ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
-    const run = { child, port, script: args.find((a) => !a.startsWith('-')) ?? args[0], exited: false };
+    const childEnv = { ...env, ...(k.healthPort ? { SIM_HEALTH_PORT: String(k.healthPort) } : {}), ...this.readEnv(k), ...extraEnv };
+    // #2444: with shards on, a world the shard can hold loads into one (null: its own process, as before)
+    const child = (this.shards && shardable(k.world) && this.shards.spawn(k.slug, { cmd, args, env: childEnv })) || spawn(cmd, args, { cwd: this.o.root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    const run = { child, port, script: child.script ?? args.find((a) => !a.startsWith('-')) ?? args[0], exited: false };
     child.stdout.pipe(log, { end: false }); child.stderr.pipe(log, { end: false });
     // a boot's progress, when the world writes no live.json: its output (healthy())
     const out = () => { run.lastOutputAt = Date.now(); }; child.stdout.on('data', out); child.stderr.on('data', out);
@@ -794,6 +805,8 @@ export class ChildPool {
     await within(exit, this.o.stopGraceMs ?? 10_000);
     // ...and the stop is over only once the process is gone (a handover's next process waits for it: the data-dir lock)
     if (!exited()) { c.kill('SIGKILL'); await within(exit, 5_000); }
+    // #2444: a world in a shard has no pid of its own for a handover to watch: its stop is over only with its exit
+    if (!exited() && c.script === SHARD_SCRIPT) { k.status = 'failed'; throw new Error(`world ${k.slug} has not exited from its shard ${Math.round(((this.o.stopGraceMs ?? 10_000) + 5_000) / 1000)} s after its stop`); }
     k.status = 'stopped';
   }
   async closeAll() { this.closing = true; this.stopGuard(); await Promise.all([...this.kids.keys()].map((s) => this.stop(s))); }
