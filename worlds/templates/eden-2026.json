@@ -14447,27 +14447,6 @@
             "parent": "$df110"
           },
           "def": "core/door@2",
-          "name": "old-town-north-arcade-1-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df110"
-          },
-          "def": "core/door@2",
           "name": "old-town-north-arcade-1-door-2",
           "p": [
             -2.195,
@@ -14548,27 +14527,6 @@
             "parent": "$df175"
           },
           "def": "core/door@2",
-          "name": "old-town-north-arcade-2-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df175"
-          },
-          "def": "core/door@2",
           "name": "old-town-north-arcade-2-door-2",
           "p": [
             -2.195,
@@ -14622,27 +14580,6 @@
             "balcony": true
           },
           "tmp": "$df176"
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df176"
-          },
-          "def": "core/door@2",
-          "name": "old-town-north-arcade-3-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
         },
         {
           "op": "place",
@@ -14730,27 +14667,6 @@
             "parent": "$df177"
           },
           "def": "core/door@2",
-          "name": "old-town-north-arcade-4-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df177"
-          },
-          "def": "core/door@2",
           "name": "old-town-north-arcade-4-door-2",
           "p": [
             -2.195,
@@ -14805,27 +14721,6 @@
             "balcony": true
           },
           "tmp": "$df111"
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df111"
-          },
-          "def": "core/door@2",
-          "name": "old-town-south-arcade-1-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
         },
         {
           "op": "place",
@@ -14914,27 +14809,6 @@
             "parent": "$df112"
           },
           "def": "core/door@2",
-          "name": "old-town-south-arcade-2-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df112"
-          },
-          "def": "core/door@2",
           "name": "old-town-south-arcade-2-door-2",
           "p": [
             -2.195,
@@ -14989,27 +14863,6 @@
             "balcony": true
           },
           "tmp": "$df113"
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df113"
-          },
-          "def": "core/door@2",
-          "name": "old-town-south-arcade-3-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
         },
         {
           "op": "place",
@@ -15097,27 +14950,6 @@
             "porch": 1.6
           },
           "tmp": "$df114"
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df114"
-          },
-          "def": "core/door@2",
-          "name": "old-town-south-arcade-4-door-1-0",
-          "p": [
-            -2.195,
-            0,
-            -0.462
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
         },
         {
           "op": "place",
@@ -21147,27 +20979,6 @@
           },
           "r": -1.571,
           "tmp": "$df170"
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df170"
-          },
-          "def": "core/door@2",
-          "name": "cliff-house-18-door-1-0",
-          "p": [
-            -0.315,
-            0,
-            0
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
         },
         {
           "op": "place",
@@ -49489,7 +49300,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -49833,7 +49644,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -50177,7 +49988,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -50521,7 +50332,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -50865,7 +50676,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -51209,7 +51020,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -51553,7 +51364,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -51897,7 +51708,7 @@
             "slot": "storeroom"
           },
           "p": [
-            -0.8999999999999999,
+            -1.9,
             0,
             -0.65
           ],
@@ -59439,9 +59250,9 @@
             "slot": "living"
           },
           "p": [
-            -0.707,
             0,
-            0.99
+            0,
+            0.283
           ],
           "r": 0
         },

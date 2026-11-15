@@ -656,7 +656,9 @@ recorded edit, with the world serving between them; a restart part way through g
 world refuses to fit is tried again at the next boot. A prop moves only where it touches no body, no other solid and no
 doorway, and leaves every door of its building workable by hand. Door-fit/2 then walks from outside each building's
 front door to both sides of each new door: a door whose frame cuts off a side that was reached before its fit is taken
-out again, its doorway left bare. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
+out again, its doorway left bare. When a fit moves a prop, it also walks to each thing of the building, on every floor: a move that cuts off
+anything reached before (a prop moved onto a stair's foot cuts off the floor above) is undone, and the door it was moved
+for is held back. Each fit edit is sent on to the engine as it is made, so the walk checks judge the world as fitted. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
 room when it has one.
 
 A walk through such a door is planned from the Soul's own floor: from upstairs, the first leg walks down the stairs to

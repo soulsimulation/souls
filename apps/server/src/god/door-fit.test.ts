@@ -167,10 +167,17 @@ async function cottageWithBench(t: { after: (f: () => void) => void }) {
 const rectGapTo = (o: HandObstacle, x: number, z: number) => { const c = Math.cos(o.obb.yaw), s = Math.sin(o.obb.yaw), dx = x - o.obb.c[0], dz = z - o.obb.c[1]; return Math.hypot(Math.max(0, Math.abs(dx * c + dz * s) - o.obb.half[0]), Math.max(0, Math.abs(-dx * s + dz * c) - o.obb.half[1])); };
 
 test('door-fit/2: a prop between two doors moves clear of one and leaves the other workable and its doorway clear', { timeout: 300000 }, async (t) => {
-  const { god, house, tick, solidsNow } = await cottageWithBench(t);
+  const { w, god, house, tick, solidsNow } = await cottageWithBench(t);
   const before = solidsNow(), prop = [...god.model.entities.values()].find((e) => e.name === 'prop')!, p0 = god.model.worldPose(prop);
   const rep = await fitWorldDoorsV2(god, [], () => {}, before, { pause: () => tick(1) });
   assert.deepEqual(rep.moved, ['prop moved 0.75 m clear of house-door-2']);
+  // #2438: the move reaches the engine, so the walk graph has the bench where the model has it
+  await tick(4);
+  const E = w.host.engine.world.entities as Record<string, { def: string; pose: { p: number[] } }>;
+  assert.ok(god.model.subtree(house.id).filter((id) => god.model.entities.get(id)!.def.replace('core-', 'core/') === DOOR_FIT_DOOR).every((id) => E[id]), 'its doors are in the engine');
+  assert.match(E[house.id]!.def, new RegExp(`:${god.model.entities.get(house.id)!.def}:`), 'and its every-doorway revision');
+  const eng = E[prop.id]!.pose.p, mp = god.model.worldPose(god.model.entities.get(prop.id)!);
+  assert.ok(Math.hypot(eng[0]! - mp.x, eng[2]! - mp.z) < 1e-3, `engine ${eng} vs model ${[mp.x, mp.z]}`);
   // the walk graph's solids with the bench where the model now has it (as the fit judged it)
   const p1 = god.model.worldPose(god.model.entities.get(prop.id)!), mine = (o: HandObstacle) => o.id === prop.id || o.id.startsWith(prop.id + '#');
   const after = before.filter((o) => !o.id.startsWith(house.id + '#')).map((o) => mine(o) ? { ...o, obb: { ...o.obb, c: [o.obb.c[0] + p1.x - p0.x, o.obb.c[1] + p1.z - p0.z] as [number, number] } } : o);
