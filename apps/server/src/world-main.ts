@@ -2,7 +2,6 @@ import {closeContextViews} from './god/context-views.ts';
 import { WallClock } from './clock-catchup.ts';
 import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
 import { cutOverReminders } from './god/clock-cutover.ts';
-import { bootPhase, bootTick } from './load/boot-progress.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
 import { createServer } from 'node:http';
@@ -45,7 +44,7 @@ import { coreLibrary } from '@souls/world-compiler';
 import { faultExit, faultGuard, installFaultGuard, killRule, stallConfig, startWatchdog, stoppedByFault, writeLiveNow } from './load/watchdog.ts';
 import { StallLog } from './load/stall-log.ts';
 import { noteLastExit } from './load/restart-loop.ts'; import { diskHeadroom, diskMinFreeMb } from './load/disk-headroom.ts'; import { installFaultInject } from './load/fault-inject.ts';
-import { S, sharedLoad } from './load/shared.ts';
+import { S, newWorldLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
 import { WakingLimit } from './load/waking.ts';
@@ -63,7 +62,7 @@ const NATIVES: { name: string; description: string }[] = [
 /** Shards (#2389): one world, booted from its own config. A world is a value, not the program: what it reads after boot
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
- *  guard, the read pool's global, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
+ *  guard, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
 export async function startWorld(config: Config) {
   // Lane P5: when the boot's phases end (ms since the process started; the first is this release's code load)
   const bootAt: Record<string, number> = { code: performance.now() };
@@ -81,8 +80,9 @@ export async function startWorld(config: Config) {
   // srv-load (LOAD-CONTRACT §4): the watchdog thread first, before the database opens, so <DATA_DIR>/live.json reports the
   // whole boot. Not during a standby wait (the serving process still owns the file then). SIM_HEALTH_PORT: its own /healthz.
   const lastExit = config.env.SIM_WATCHDOG !== '0' ? noteLastExit(config.dataDir) : null;   // #2378 A2: before the watchdog rewrites live.json
-  if (config.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(config.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir, config.env), kill: killRule(config.env) });
-  bootPhase('boot:restore');
+  const load = newWorldLoad();   // #2416: this world's own load gauges and boot progress
+  if (config.env.SIM_WATCHDOG !== '0') startWatchdog({ shared: load.shared, api: load.api, dataDir: config.dataDir, port: Number(config.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir, config.env), kill: killRule(config.env) });
+  load.boot.phase('boot:restore');
 
   // K1 / NT5: new kit fields are admitted only with the viewer that can draw them.
   try { setKitViewerContract(JSON.parse(readFileSync(join(config.webDir, 'kit-contract.json'), 'utf8'))); }
@@ -116,6 +116,7 @@ export async function startWorld(config: Config) {
   // ground/1 (lane L8): every terrain recipe this entity world logged resolves by hash before the engine replays
   if (config.worldEngine) loadGroundRecipes(db, config.worldId);
   const host = new WorldHost(db, factory, config.worldSeed, config.snapshotEveryTicks, config.worldId,edenCore?{durableClockV1:true}:undefined);
+  host.bootProgress = load.boot; host.stepSlots = load.shared;   // #2416: the world's own boot progress and step slots
   host.config = config;   // #2389: what this world reads after boot (worldConfig(host)) is its own config
   { const at = performance.now(); if (db.vacuumIfBloated()) console.log(`[db] vacuumed at boot in ${Math.round(performance.now() - at)} ms (free pages over 30 %)`); }
   host.snapshotDebtMs = config.snapshotDebtMs; host.snapshotMinGapMs = config.snapshotMinGapMs; host.snapshotAfterReplayTicks = config.snapshotAfterReplayTicks;
@@ -177,9 +178,9 @@ export async function startWorld(config: Config) {
   server.on('upgrade', req => { req.url = stripWorldPath(req.url); host.wake(); });   // #2384: a viewer wakes a sleeping still world
   hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
   host.watched = () => hub.clients.size > 0;   // #2298 A4b
-  host.listeners.push({ afterTick: () => { sharedLoad[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
+  host.listeners.push({ afterTick: () => { load.shared[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
   const faultInject = config.env.SIM_FAULT_INJECT === '1' ? installFaultInject(host, config.dataDir) : null;
-  host.stepSlots = sharedLoad; if (lastExit?.quarantine) host.quarantinedStep = lastExit.quarantine;   // #2378 A2: a step that ended two boots in a row
+  if (lastExit?.quarantine) host.quarantinedStep = lastExit.quarantine;   // #2378 A2: a step that ended two boots in a row
   hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPersist;
   const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(config.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
   // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
@@ -209,21 +210,22 @@ export async function startWorld(config: Config) {
   const plannedSnapshot = (reason: string) => { try { const req = (host as unknown as { requestSnapshot?: SnapshotRequest }).requestSnapshot; if (req) req.call(host, reason, { now: true }); else host.saveSnapshot(true); } catch (e) { console.error('[load] planned snapshot failed', e); } };
   // srv-load: the load sensor (load/monitor.ts) and in-world admission (load/admission.ts; SIM_ADMISSION=0 turns it off).
   // Black for 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once, no backoff penalty).
-  const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission();
+  const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission({ api: load.api, quietTickMs: () => load.shared[S.quietTickMs] });
   const drill = config.env.SIM_LOAD_DRILL_LEVEL as 'amber' | 'red' | 'black' | undefined;   // drill: hold a level (L1 tests 'planned' restarts with black)
-  const monitor = new LoadMonitor({ host, drill: drill && ['amber', 'red', 'black'].includes(drill) ? drill : undefined, blackLimitMs: Number(config.env.SIM_LOAD_BLACK_MS) || 60_000, queue: () => admission?.queueStats() ?? { depth: 0, oldestMs: 0 }, shed: () => ({ reads: admission?.shed.reads ?? 0, acts: admission?.shed.acts ?? 0 }),
+  const monitor = new LoadMonitor({ host, shared: load.shared, api: load.api, drill: drill && ['amber', 'red', 'black'].includes(drill) ? drill : undefined, blackLimitMs: Number(config.env.SIM_LOAD_BLACK_MS) || 60_000, queue: () => admission?.queueStats() ?? { depth: 0, oldestMs: 0 }, shed: () => ({ reads: admission?.shed.reads ?? 0, acts: admission?.shed.acts ?? 0 }),
     requestMs: () => admission?.spentMs ?? 0, baselineMs: config.env.SIM_LOAD_BASELINE_MS !== undefined && config.env.SIM_LOAD_BASELINE_MS !== '' ? Number(config.env.SIM_LOAD_BASELINE_MS) : undefined,
     souls: () => { let awake = 0, connected = 0; for (const id of host.minds.keys()) { const st = host.publicBodyOf?.(id)?.state; if (st === 'awake') awake++; if (st && st !== 'asleep') connected++; } return { awake, waiting: waking?.waiting() ?? 0, connected }; },
     onBlackTooLong: () => { console.log(`[load] black for ${Math.round((Number(config.env.SIM_LOAD_BLACK_MS) || 60_000) / 1000)} s: planned restart (snapshot, exit 75)`); plannedSnapshot('load:black: planned restart'); void shutdown('load:black', 75).catch(() => process.exit(75)); } });
   // #1750 A3: a main-thread stall over 1 s is logged with its time, length and what ran in it (SIM_STALL_LOG=0 turns it off)
   const stallLog = config.env.SIM_STALL_LOG === '0' ? undefined : new StallLog({ ticks: () => ({ tick: host.engine.world.tick, tickMs: host.tickMs }) });
+  if (admission && stallLog) admission.onAnswer = (route, t0, t1) => stallLog.answer(route, t0, t1);
   if (admission) monitor.register('admission', (l) => admission.setLoadLevel(l));
   monitor.register('hub', (l) => hub.setLoadLevel(l));
   // L4's perception dial (lane srv-spatial, god/engine-bridge.ts PERCEIVE_DIAL); guarded until that lane merges
   { const b = engineBridge as unknown as { setLoadLevel?: (l: 'green' | 'amber' | 'red' | 'black') => void } | undefined; if (b?.setLoadLevel) monitor.register('perception', (l) => b.setLoadLevel!(l)); }
   // Waking limit: DARK unless SIM_WAKING_LIMIT=1 (tranche §5.1); bound below, once the edge body rule exists.
   let waking: WakingLimit | undefined;
-  const app = buildApp({ load: { admission, monitor, faults: () => faults.counts, crowded: (soulId) => waking?.position(soulId) ?? null }, cfg: config, db, host, auth, hub, brain, souls, takes, intentV2, edge, god, contextReady: engineBridge ? ()=>engineBridge.contextReady() : undefined, contextWait: engineBridge ? signal=>engineBridge.waitForContext({signal}) : undefined, contextLevelAt: engineBridge ? (x,z,y)=>engineBridge.levelAt(x,z,y) : undefined });
+  const app = buildApp({ load: { admission, monitor, api: load.api, faults: () => faults.counts, crowded: (soulId) => waking?.position(soulId) ?? null }, cfg: config, db, host, auth, hub, brain, souls, takes, intentV2, edge, god, contextReady: engineBridge ? ()=>engineBridge.contextReady() : undefined, contextWait: engineBridge ? signal=>engineBridge.waitForContext({signal}) : undefined, contextLevelAt: engineBridge ? (x,z,y)=>engineBridge.levelAt(x,z,y) : undefined });
   if (config.env.SIM_WAKING_LIMIT === '1' && edge?.bodyRule) {
     const rule = edge.bodyRule;
     waking = new WakingLimit({ maxAwake: Number(config.env.SIM_MAX_AWAKE) || 12, owner: () => god?.owner ?? config.ownerId ?? null,
@@ -246,6 +248,7 @@ export async function startWorld(config: Config) {
   if(edge)installPuntActivities(host,edge,m=>console.log(`[activities] ${m}`),engineBridge?()=>{setTimeout(()=>servingWarm('activities'),1000).unref();}:undefined);
   // Stage B (lane B-port): the read-worker pool, DARK unless SIM_READ_WORKER=1 (split/read-pool.ts; nothing is imported
   // otherwise). SIM_READ_WORKERS = pool size (registry `readWorkers`, 1–4, default 1); SIM_READ_PORTS = the launcher's ports.
+  let readPool: { status(): unknown } | undefined;
   if (config.env.SIM_READ_WORKER === '1' && edge) {
     const { ReadPool, readPorts, deltaSource } = await import('./split/read-pool.ts');
     const { accountTag } = await import('./load/admission.ts');
@@ -253,14 +256,14 @@ export async function startWorld(config: Config) {
     // SIM_READ_MODE=2 (B-facade): the worker runs the read code itself over a replica + a read-only view of the database
     const readMode = config.env.SIM_READ_MODE === '2' ? 2 : 1;
     const pool = new ReadPool({ workers: Number(config.env.SIM_READ_WORKERS) || 1, ports: readPorts(config.env.SIM_READ_PORTS), mode: readMode, worldPath: config.worldPath,
-      ...(readMode === 2 ? { world: { dbPath: db.path, worldId: host.worldId } } : {}), shared: sharedLoad, admission, init: source.init, ask: source.ask, writes: source.writes,
+      ...(readMode === 2 ? { world: { dbPath: db.path, worldId: host.worldId } } : {}), shared: load.shared, admission, init: source.init, ask: source.ask, writes: source.writes,
       inbox: (soulId) => { const ib = (app as unknown as { agentInbox?: { touch(s: object): void; view(s: object): unknown } }).agentInbox, m = host.minds.get(soulId); if (!ib || !m) return null; const scope = { scope: `soul:${soulId}`, owner: m.owner }; ib.touch(scope); return ib.view(scope); },
       auth: (token) => { const s = souls.soulFromToken(token); return s && !s.retired_at && s.world_id === host.worldId ? { soulId: s.id, account: accountTag(s.owner) } : { soulId: null }; },
       run: async (f) => { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); }   // #2384: a read handed to main brings a sleeping world to now, as any request does
         const r = await app.fetch(new Request('http://127.0.0.1' + f.url, { method: f.method, headers: f.headers, ...(f.body && f.method !== 'GET' && f.method !== 'HEAD' ? { body: f.body } : {}) }), { simAdmitted: true });
         return { status: r.status, headers: [...r.headers], body: await r.arrayBuffer() }; } }).start();
     source.onDelta((d) => pool.delta(d), () => pool.reinit());
-    (globalThis as { __soulsReadPool?: unknown }).__soulsReadPool = pool;   // tests and the harness read pool.status()
+    readPool = pool;   // #2416: the world's own (startWorld returns it; tests read pool.status())
     // SIM_READ_ORACLE=1 (B-facade item 5, lane only): the five reads answered by main and by a replica ledger, compared
     if (config.env.SIM_READ_ORACLE === '1') { const { installReadOracle } = await import('./split/read-oracle.ts'); await installReadOracle(host, edge, source as never, db.path); console.log('[read-oracle] on'); }
     console.log(`[read] ${pool.size} read worker(s), mode ${readMode === 2 ? 'read code (here)' : 'subset (here, capabilities)'}`);
@@ -378,9 +381,9 @@ export async function startWorld(config: Config) {
   // stall guard sees a long catch-up as progress.
   async function catchUpBoot() {
     const at = performance.now(), first = host.owedTicks; let ran = 0, owed = host.paused ? 0 : wallClock.owed();
-    const turn = () => { bootTick(host.engine.world.tick); return new Promise<void>((r) => setImmediate(r)); };
+    const turn = () => { load.boot.tick(host.engine.world.tick); return new Promise<void>((r) => setImmediate(r)); };
     for (let rounds = 0; owed > 0 && rounds < 32; rounds++) {
-      if (rounds === 0) bootPhase('boot:replay', host.engine.world.tick, host.engine.world.tick + owed);
+      if (rounds === 0) load.boot.phase('boot:replay', host.engine.world.tick, host.engine.world.tick + owed);
       const r = await host.catchUp(owed, turn); ran += r;
       if (r < owed) break;   // paused or halted: a paused clock is owed nothing more, a halted one waits for its fault
       owed = host.paused ? 0 : wallClock.owed();
@@ -418,7 +421,7 @@ export async function startWorld(config: Config) {
   // Keep start, maintenance and input ordering above unchanged; this is a readiness boundary, not a CPU saving.
   if (engineBridge) {
     const waitAt = performance.now(), abort = new AbortController();
-    bootPhase('boot:projection', host.engine.world.tick);
+    load.boot.phase('boot:projection', host.engine.world.tick);
     const stopped = (signal: string) => abort.abort(new Error(`boot interrupted: ${signal}`));
     const term = () => stopped('SIGTERM'), interrupt = () => stopped('SIGINT');
     process.on('SIGTERM', term); process.on('SIGINT', interrupt);
@@ -432,7 +435,7 @@ export async function startWorld(config: Config) {
       while (!engineBridge.initialProjectionReady());
       console.log(`[boot] projection ${Math.round(performance.now() - waitAt)} ms initial physics coherent at tick ${host.engine.world.tick}`);
       const prepareAt = performance.now();
-      bootPhase('boot:prepare', host.engine.world.tick);
+      load.boot.phase('boot:prepare', host.engine.world.tick);
       host.engine.prepareForServing?.();
       console.log(`[boot] prepare ${Math.round(performance.now() - prepareAt)} ms serving caches at tick ${host.engine.world.tick}`);
       // The edge capability caches (the first rich `here`'s ~1.5-4 s on Eden 2026) are warmed right after listen, sliced:
@@ -453,7 +456,7 @@ export async function startWorld(config: Config) {
   }
   const listening = new Promise<void>((r) => server.once('listening', () => r()));
   server.listen(config.port, config.host, () => {
-    bootPhase('serving', host.engine.world.tick); installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
+    load.boot.phase('serving', host.engine.world.tick); installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
     console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
     const s = (ms: number) => (ms / 1000).toFixed(2);
     console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);
@@ -463,7 +466,7 @@ export async function startWorld(config: Config) {
   });
 
   const shutdown = async (sig: string, exitCode = 0) => {
-    if (closing) return; closing = true; bootPhase('stopping', host.engine.world.tick); writeLiveNow(config.dataDir);
+    if (closing) return; closing = true; load.boot.phase('stopping', host.engine.world.tick); writeLiveNow(config.dataDir, load.shared, load.api);
     // Lane L5: a durable head first, before any draining that could outlast the launcher's stop grace (then SIGKILL).
     if (host.snapshotAgeMs() > 10_000) { try { host.requestSnapshot(`${sig}: before draining`, { now: true }); } catch (e) { console.error('[world] early snapshot failed', e); } }
     // #2235 A8: a stop during the boot catch-up ends it first (its clock never started), so the writes it held are
@@ -491,7 +494,7 @@ export async function startWorld(config: Config) {
     if (config.env.SIM_BOOT_HASH === '1') console.log(`[world] ${sig}: state at tick ${host.engine.world.tick}: ${host.engine.stateHash()}`);
     console.log(`[world] ${sig}: snapshot saved in ${Math.round(performance.now() - saveAt)} ms (capture ${Math.round(host.snapshotMs.capture)}, write ${Math.round(host.snapshotMs.persist)})`);
     server.close(); void hub.closeClients('server restarting');
-    await closeContextViews();
+    await closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews);
     (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
     auth.close();db.close(); process.exit(exitCode);
   };
@@ -538,5 +541,5 @@ export async function startWorld(config: Config) {
   const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(config.env), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); disk.start();   // #2378
   const firstBackup=setTimeout(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 60_000);firstBackup.unref();
   const backupTimer=setInterval(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 3600_000);backupTimer.unref();
-  return { config, host, db, server, listening, shutdown };
+  return { config, host, db, server, listening, shutdown, load, readPool: () => readPool };
 }

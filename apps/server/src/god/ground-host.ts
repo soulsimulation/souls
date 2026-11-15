@@ -95,11 +95,11 @@ export function namedFlagsV1(god: GodMode): NamedFlagV1[] {
 }
 
 /** Offer `walk:flag-<name>` and `swim:<water>` capabilities from the god world (chains any profile already installed). */
-const DEEP_MIDDLE = new Map<string, boolean>();
 /** B-facade (read worker): what main's swim offers read besides the god model, shipped with the delta: the ground recipe
  *  and the deep-middle answers main's engine gave (static per recipe and outline). */
 export type GroundEnvV1 = { recipe: string | null; middles: Record<string, boolean> };
 export function installGroundCapabilities(ledger: Ledger, god: GodMode, host: WorldHost, read?: () => GroundEnvV1 | undefined) {
+  const DEEP_MIDDLE = new Map<string, boolean>();   // #2416: this world's answers only (groundEnvV1 ships them to its read worker)
   const offerFlags=(soul:Parameters<NonNullable<EdgeLedger['worldProfile']>>[0],caps:Parameters<NonNullable<EdgeLedger['worldProfile']>>[1],plans:Parameters<NonNullable<EdgeLedger['worldProfile']>>[2],only?:string)=>{
     const me=host.engine.world.entities[soul.entityId];if(!me)return;
     for (const e of god.model.entities.values()) {

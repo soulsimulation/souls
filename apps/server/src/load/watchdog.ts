@@ -7,9 +7,9 @@ import {liveOf, sharedLoad} from './shared.ts';
 import {apiOf, sharedApi} from './api-times.ts';
 
 /** live.json from this thread, now (the stop path: the process may exit before the watchdog's next write). */
-export function writeLiveNow(dataDir: string, a: Float64Array = sharedLoad) {
+export function writeLiveNow(dataDir: string, a: Float64Array = sharedLoad, api: Float64Array = sharedApi) {
   const file = join(dataDir, 'live.json');
-  try { const now = Date.now(); writeFileSync(file + '.main.tmp', JSON.stringify({...liveOf(a, process.pid, now), api: apiOf(sharedApi, now)}) + '\n'); renameSync(file + '.main.tmp', file); } catch { /* best effort */ }
+  try { const now = Date.now(); writeFileSync(file + '.main.tmp', JSON.stringify({...liveOf(a, process.pid, now), api: apiOf(api, now)}) + '\n'); renameSync(file + '.main.tmp', file); } catch { /* best effort */ }
 }
 
 /** #457: name the stalled frame (stall-stack.ts) unless SIM_STALL_STACK=0; after SIM_STALL_STACK_MS (default 2000) stuck. */

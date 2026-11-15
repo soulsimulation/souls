@@ -69,7 +69,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     c.header('Cache-Control', 'no-store');
     // LOAD-CONTRACT §3: at amber and above a frame says so in world words (admission sets the level it was admitted at)
     // #1326: a dilated clock says so (`slowed`, its speed; `load: slowed` when nothing else is said); a stall is added by http.ts
-    try {const out = edgeBody(await fn(c) as object), lv = loadOf(c), clk = clockBlockOf(clockNow()), slowed = clk && 'slowed' in clk ? clk : null;
+    try {const out = edgeBody(await fn(c) as object), lv = loadOf(c), clk = clockBlockOf(clockNow(c)), slowed = clk && 'slowed' in clk ? clk : null;
       if (slowed) return c.json({...out, world: {...('world' in out && out.world && typeof out.world === 'object' ? out.world as object : lv && lv !== 'green' ? worldBlock(lv) : {load: 'slowed'}), ...slowed}});
       return c.json(lv && lv !== 'green' && !('world' in out) ? {...out, world: worldBlock(lv)} : out);}
     catch (error) {
