@@ -6,7 +6,7 @@ import type { Context, Hono } from 'hono';
 import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import type { GodMode } from './god.ts';
 import { ApiError } from '../souls.ts';
-import { moderationFor } from '../moderation/store.ts';
+import { defaultSiteLog, moderationFor } from '../moderation/store.ts';
 import { ContextViewCache, CONTEXT_LIMITS, contextHash, type ContextInput } from './context-view-cache.ts';
 import { contextScene, contextTargets, contextEnclosed, contextRoom, contextVisibleEntityIds, contextFront, type ContextTarget } from './context-view-scene.ts';
 import { renderContextSheet } from './context-sheet-job.ts';
@@ -64,7 +64,7 @@ const sheetRef = (refs: Selection[]) => 'sheet:' + JSON.stringify(refs.map(({ re
 const sheetKey = (refs: Tile[]) => contextHash(['context-sheet/2', refs.map(({ ref, detail, key }) => ({ ref, detail: detail === true, key }))]);
 export function mountContextViews(app: Hono, d: Deps) {
     checkArtOriginals(d.artOriginals);
-    const { god, edge } = d, moderation = moderationFor(god.db.db, god.opts.worldId);
+    const { god, edge } = d, moderation = moderationFor(god.db.db, god.opts.worldId, defaultSiteLog(god.opts.env));
     let committedRevision = god.model.editSeq, stamp = '';
     let scene: ReturnType<typeof contextScene> | undefined;
     let targets: ContextTarget[] = [];

@@ -37,6 +37,7 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
+import type { Config } from './config.ts';
 import { advanceNeedAnchor, advanceNeeds, DAY_TICKS, needRates, needsAt, newLife, type Life, type Needs } from '@souls/brain';
 import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
@@ -179,6 +180,8 @@ const RING_BATCHES = 600;
 
 export class WorldHost {
   engine!: Engine;
+  /** Shards (#2389): the world's own config, set by startWorld (world-main.ts). Read it through worldConfig(host). */
+  config?: Config;
   /** Meaning: things, links, vocabulary, decks. Replays from the log without the engine. */
   kernel!: KState;
   counts: Record<string, number> = {};       // successful plays per card

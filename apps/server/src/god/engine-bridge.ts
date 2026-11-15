@@ -57,7 +57,7 @@ import { installWorldLore } from './world-lore.ts';
 import { installLecternBooks } from './lectern-books.ts';
 import { installHeld } from './held.ts';
 import { installWorldClock } from './world-clock.ts';
-import { config, KNOWN_WORLD_KEYS } from '../config.ts';
+import { KNOWN_WORLD_KEYS, worldConfig } from '../config.ts';
 import { floorPlatesOf, plateIsStep } from './floor-plates.ts';
 import { isVerificationProbe } from '../verification-probe.ts';
 import { planWalkouts, dropReleased, unhand, stuckWarning, type StuckResident } from './walkout.ts';
@@ -318,7 +318,7 @@ export class EngineBridge {
     engineBridges.set(this.god.model, this);
     if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
     this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
-    this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
+    this.layers = new GodLayers({ env: worldConfig(o.host).env, model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
       return typeof ref==='string'&&this.places.forRef(ref)?.id===id?ref:undefined;
@@ -441,9 +441,9 @@ export class EngineBridge {
     // F3: a god thing in a Soul's hand shows as held (observe, receipts) and can be put down (held.ts)
     if (this.edge) installHeld(this.edge, { get engine() { return o.host.engine as never; }, model: this.model, minds: this.host.minds });
     // F3: a god's world keeps time like the live worlds (a logged dayConfig; world-clock.ts)
-    if (!R && (o.worldClock ?? (!config.livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey)))) installWorldClock(this.host, this.god, this.log);
+    if (!R && (o.worldClock ?? (!worldConfig(this.host).livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(this.host).worldKey)))) installWorldClock(this.host, this.god, this.log);
     // F3: a god's new world serves its constitution (or a neutral line) as lore, never Eden's (world-lore.ts)
-    if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey))) installWorldLore(this.edge, this.god);
+    if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(this.host).worldKey))) installWorldLore(this.edge, this.god);
     // #428: a lectern holding a catalogue book reads that book, in every world (lectern-books.ts; after world lore)
     if (this.edge) installLecternBooks(this.edge, this.god);
   }

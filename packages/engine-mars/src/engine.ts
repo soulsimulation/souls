@@ -3613,16 +3613,17 @@ export const SHARED_STAIRS_POLICY = 'shared-stairs/1';
 export const SHARED_BAY_POLICY = 'shared-bay/1';
 
 /** The factory is made once the Mars engine has been loaded (an async import); after that everything is synchronous. */
-export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promise<EngineFactory> {
+/** `env`: the world's own environment (shards, #2389: the server passes its world config's); unset reads the process's. */
+export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND, env: Record<string, string | undefined> = process.env): Promise<EngineFactory> {
   const loaded = cfg.map===MARS_2026_MAP?withMars2026Map(await loadMars()):await loadMars();if(cfg.map&&cfg.map!==MARS_2026_MAP)throw new Error('mars.unknown-map');
   // PC13 (#692): the shared raise's verb and its invariant exist only behind SIM_SHARED_CARRY (the shared-carry ledger
   // flag, the same default); without it the registry and the invariants are exactly what they were before PC13.
-  const sharedCarry = cfg.sharedCarryV1 ?? process.env.SIM_SHARED_CARRY === '1';
+  const sharedCarry = cfg.sharedCarryV1 ?? env.SIM_SHARED_CARRY === '1';
   // resolved once here, so the engine's own rules version (this.cfg) says what the factory registered; off adds no key
   if (sharedCarry && cfg.sharedCarryV1 !== true) cfg = {...cfg, sharedCarryV1: true};
   // a world that can build what can stop standing has the ladder, unless it is switched off: `SIM_SOULS_REPAIR=0` is the
   // operator's way back, and how a shared world made before the ladder still boots under its own rules
-  const repairEnv = process.env.SIM_SOULS_REPAIR;
+  const repairEnv = env.SIM_SOULS_REPAIR;
   if ((cfg.soulsRepairV1 ?? (repairEnv !== '0' && (sharedCarry || repairEnv === '1'))) && cfg.soulsRepairV1 !== true) cfg = {...cfg, soulsRepairV1: true};
   const m = sharedCarry ? {...loaded, invariants: [...loaded.invariants, looseFramesHeld, framesStand, decksBear, stairsBear]} : loaded;
   // disassembly/1 adds its reverse verbs to this engine's registry only; the default registry is unchanged.
