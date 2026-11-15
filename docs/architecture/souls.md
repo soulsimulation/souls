@@ -634,10 +634,11 @@ out. A locked door stays a wall: a room only past it counts as cut off, so a Sou
 A verification probe opens no door: it is refused `route.unreachable` naming the door.
 
 Every core building's doorways hold such doors. Door-fit/1 (#2383) moved each building to a door-fitted revision
-(`make.args.doorThings`) with a `core/door@2` in each outside ground-floor doorway, closed for an enclosed room.
+(`make.args.doorThings`) with a `core/door@2` in each outside ground-floor doorway.
 Door-fit/2 (#2434) moves each to its every-doorway revision (`doorThings: 2`): every doorway is bare, inside and upstairs
 too, an inside doorway is 1.2 m wide where its wall has room, and a `core/door@2` stands in each one that has none yet.
-An inside or upstairs door starts open; an upstairs door is the building's child. A door a hand cannot work (something
+Every fitted door starts open for now (the coordinator's call until the multi-door passage is proven); a walk leaves
+each door it passes as it found it. An upstairs door is the building's child. A door a hand cannot work (something
 stands where the body steps to open it from one side or close it from the other) is swung the other way; if both ways are
 blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result; a live world
 gets it once at boot (`door-fit/1`, then `door-fit/2`, the last boot rules). A building the world refuses to fit is
