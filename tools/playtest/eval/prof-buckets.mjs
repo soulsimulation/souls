@@ -68,15 +68,18 @@ export function bucketProfile(file, repo, marks = null) {
   const close = () => { if (!cur) return; turns++; for (const [g, ms] of cur.by) { const L = longest.get(g); if (!L || ms > L.ms) longest.set(g, { ms, turnMs: cur.ms }); } cur = null; };
   for (let i = 0; i < p.samples.length; i++) {
     const dt = (p.timeDeltas[i + 1] ?? p.timeDeltas[i] ?? 0) / 1000; total += dt;
-    t += p.timeDeltas[i] ?? 0; let crossed = false; while (bi < bounds.length && bounds[bi] <= t) { bi++; crossed = true; }
-    if (crossed) hclose();
+    t += p.timeDeltas[i] ?? 0;
     const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); hclose(); continue; }
     busy += dt; const c = classify(node.id);
     tot.set(c.g, (tot.get(c.g) ?? 0) + dt);
     if (['audit', 'scan', 'gc', 'snapshot'].includes(c.g)) { const m = ctxOf.get(c.g) ?? new Map(); m.set(c.ctx, (m.get(c.ctx) ?? 0) + dt); ctxOf.set(c.g, m); }
     if (c.routeSearch) routeSearchBy.set(c.ctx, (routeSearchBy.get(c.ctx) ?? 0) + dt);
     if (!cur) cur = { ms: 0, by: new Map() }; cur.ms += dt; cur.by.set(c.g, (cur.by.get(c.g) ?? 0) + dt);
-    if (!hcur) hcur = { ms: 0, at: t, by: new Map() }; hcur.ms += dt; hcur.by.set(c.g, (hcur.by.get(c.g) ?? 0) + dt);
+    // a sample spans [t, t + dt): a mark inside it splits its time between the two holds (sparse samples stay exact)
+    let s0 = t; const s1 = t + dt * 1000;
+    const addH = (us) => { if (!hcur) hcur = { ms: 0, at: s0, by: new Map() }; hcur.ms += us / 1000; hcur.by.set(c.g, (hcur.by.get(c.g) ?? 0) + us / 1000); };
+    while (bi < bounds.length && bounds[bi] < s1) { if (bounds[bi] > s0) { addH(bounds[bi] - s0); s0 = bounds[bi]; } hclose(); bi++; }
+    addH(s1 - s0);
   }
   close(); hclose();
   holds.sort((a, b) => b.ms - a.ms);
