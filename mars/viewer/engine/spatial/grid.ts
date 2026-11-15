@@ -226,6 +226,12 @@ export function levelLattice(scene: SpatialScene, lv: Level, cell: number, lat =
  * static generation), so per-grid memos (path.ts, a failed search's side) survive a rebuild of the same content.
  */
 export const gridContentKeys = new WeakMap<LevelGrid, string>();
+/**
+ * The terrain height under a ground world's composed level-0 grid (tiled.ts compose), whose own `y` is a nominal 0: what a
+ * failed search's obstacle naming (path.ts) compares an obstacle's height with, as the ground raster does (#2383: a closed
+ * door on a slope, its foot at the terrain 0.8 m up, was never named, so a walk through it was refused).
+ */
+export const groundHeights = new WeakMap<LevelGrid, (x: number, z: number) => number>();
 
 /**
  * `buildGrids(scene, cell)` (no prefix, no columns), each level rasterised and transformed only over the cells its own
@@ -255,6 +261,17 @@ export function buildGridsOverFloors(scene: SpatialScene, cell = 0.1): GridSet {
     levels.set(lv.id, { level: lv.id, y: lv.y, cell, nx: cw, nz: ch, ox: sub.ox, oz: sub.oz, x0: sub.ox * cell, z0: sub.oz * cell, free, clearance, blockers });
   }
   return { cell, levels };
+}
+
+/**
+ * #2433: one level's raster and transform over the lattice rect `lat` exactly as `buildGridsOverFloors` stamps it (its
+ * surfaces, then the obstacles in the level's body band, in list order), out of `lat` = blocked. A piece of a floor
+ * crop: GroundNav.floorOver assembles a crop from pieces that cannot see each other (spatial/tiled.ts floorPieces).
+ */
+export function floorPieceRaster(scene: Pick<SpatialScene, 'surfaces' | 'obstacles'>, lv: Level, cell: number, lat: Lattice): { free: Uint8Array; clearance: Float32Array; blockers: BlockerMap } {
+  const free = new Uint8Array(lat.nx * lat.nz), blockers = new BlockerMap(lat.nx * lat.nz);
+  stampLevel(scene as SpatialScene, lv, cell, lat, undefined, free, blockers);
+  return { free, clearance: edt(free, lat.nx, lat.nz, cell), blockers };
 }
 
 // Only immutable raster/EDT products are retained, never a Spatial, world, route,

@@ -2,7 +2,8 @@
 // One small Float64Array over a SharedArrayBuffer. The main thread writes it every 250 ms (monitor.ts), on boot
 // milestones (boot-progress.ts) and, through the monitor, after ticks; the worker only reads it. A torn read of one
 // float is harmless here (each slot is an independent gauge), so there is no lock.
-import {attachBootSlots, BOOT_SLOT, readBootProgress} from './boot-progress.ts';
+import {attachBootSlots, BOOT_SLOT, BootProgress, readBootProgress} from './boot-progress.ts';
+import {newSharedApi} from './api-times.ts';
 export const LEVELS = ['green', 'amber', 'red', 'black'] as const;
 export type Level = typeof LEVELS[number];
 export type Phase = 'boot:restore' | 'boot:replay' | 'boot:projection' | 'boot:prepare' | 'serving' | 'stopping';
@@ -92,10 +93,18 @@ export function clockBlockOf(c: ClockState | null | undefined): {stalled: true; 
 export const READ_ROUTES: Record<number, string[]> = {1: ['here', 'capabilities'], 2: ['here', 'observe', 'capabilities', 'view']};
 
 export const newSharedLoad = () => new Float64Array(new SharedArrayBuffer(S.size * Float64Array.BYTES_PER_ELEMENT));
-/** The process's one shared array (the watchdog gets this buffer). Tests make their own with newSharedLoad(). */
+/** The program's default array, for tests and tools. A started world has its own (newWorldLoad, #2416). */
 export const sharedLoad = newSharedLoad();
 sharedLoad[S.lastTurnAt] = Date.now();
 attachBootSlots(sharedLoad, S.boot);   // boot-progress.ts writes phase + replay progress straight into this buffer
+
+/** #2416: one world's load gauges: its shared numbers (live.json, the health checks and the watchdog read them), its
+ *  API times and its boot progress. Every world makes its own; two worlds in one program never share a gauge. */
+export type WorldLoad = {shared: Float64Array; api: Float64Array; boot: BootProgress};
+export function newWorldLoad(now = Date.now()): WorldLoad {
+  const shared = newSharedLoad(); shared[S.lastTurnAt] = now;
+  return {shared, api: newSharedApi(), boot: new BootProgress(shared, S.boot)};
+}
 
 function r1(x: number) { return Math.round(x * 10) / 10; }
 function r2(x: number) { return Math.round(x * 100) / 100; }

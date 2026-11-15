@@ -9,7 +9,6 @@ import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
 import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, type ActTiming} from './api-times.ts';
-import {noteAnswer} from './stall-log.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
@@ -89,7 +88,9 @@ export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>
   /** #2440: the ticks are on time right now: the 1 s tick service is at least SPARE_SERVICE_1S and the last tick is under
    *  SPARE_TICK_AGE_MS old while the clock owes ticks (default: the monitor's S.service1s, S.tickAt, S.stallMs; with an
    *  injected clock, true). */
-  ticksOnTime?: () => boolean};
+  ticksOnTime?: () => boolean;
+  /** #2416: this world's API times (default: the program's, for tests). */
+  api?: Float64Array};
 /** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
  *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
  *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
@@ -154,6 +155,9 @@ export class Admission {
    *  time now) and the heap is below red's (SPARE_HEAP): queued requests are not held for budget. Never at amber, red or
    *  black: with spare time at amber and red, 100 Souls on a 2-core world served 4-15 % fewer ticks than without. */
   spare() { return this.level === 'green' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.ticksOnTime() && this.idleShare() >= SPARE_IDLE; }
+  /** #2416: this world's stall log hears each answer (set by startWorld when the log runs). */
+  onAnswer?: (route: string, t0: number, t1: number) => void;
+  get api(): Float64Array | undefined { return this.o.api; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 
@@ -381,7 +385,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
     c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
     const route = apiRoute(c.req.method, c.req.path);
-    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, undefined, p); noteAnswer(route, t0 + queued, t0 + ms); }
+    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, adm.api, p); adm.onAnswer?.(route, t0 + queued, t0 + ms); }
   };
   /** The handler, inside an act's timing scope when it is POST /v1/edge/act (one lookup otherwise). */
   const run = (c: Context, next: () => Promise<void>): {act?: ActTiming; done: Promise<void>} => {

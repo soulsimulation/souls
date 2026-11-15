@@ -35,7 +35,7 @@ import {applyUpperFloorsV1,placeLevelOf,previewUpperFloorsV1,type UpperFloorsFac
 import {registerAssets} from './catalog-adapter.ts';
 import {socialEdenTransitionV1Schema,type SocialEdenTransitionV1} from '@souls/engine-contract';
 import {searchArrival,arrivalPocket,type ArrivalGround,type ArrivalPocket,type ArrivalSpot} from './arrival-search.ts';
-import {attachGround,groundRegistry,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
+import {attachGround,groundRegistry,groundReach,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
 // The Mars engine behind Sim's engine contract.
 //
 // The shell speaks a small BODY LANGUAGE (walk_to, sit, stand, rest, wave,
@@ -992,7 +992,7 @@ export class MarsEngine implements Engine {
   }
   /** #1150: the take ends and the next begins, even if closing this one throws: a recorder left finished would throw every tick after. */
   private recutV1(between?: () => void) {
-    let hash: string | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
+    let hash: (() => string) | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
     between?.(); this.startRecorder(between ? undefined : hash);
   }
   /** #1150 rung 3: the clock moves to the fault's tick without stepping the world, so ticks stay monotonic for the log. */
@@ -1260,10 +1260,11 @@ export class MarsEngine implements Engine {
     const r = def.plan(this.rt, parsed.data); return r.ok ? structuredClone((r.program as { landing?: any }).landing ?? null) : null;
   }
   /** A reachable standing point `standoff` metres from a target, on the side the actor comes from if possible. 'here' if already there. */
-  private goalNear(actor: string, to: unknown, standoff: number, stand?: unknown): { x: number; z: number; level: number } | 'here' | Diag {
+  /** `atLevel`: the floor a point goal is on (entry 31's passage legs, on the ground under a Soul upstairs); else the actor's own. */
+  private goalNear(actor: string, to: unknown, standoff: number, stand?: unknown, atLevel?: unknown): { x: number; z: number; level: number } | 'here' | Diag {
     const me = this.pos(actor)!, t = this.pointOf(to);
     if (!t) return { code: 'target.unknown', message: `nothing to walk to: ${JSON.stringify(to)}` };
-    const level = typeof to === 'string' ? (this.rt.world.regions[to]?.level ?? this.ents[to]?.human?.level ?? (this.cfg.fixtureGroundGoalsV1&&this.ents[to]?.support?.kind==='ground'?0:this.ents[actor].human.level)) : this.ents[actor].human.level;
+    const level = typeof to === 'string' ? (this.rt.world.regions[to]?.level ?? this.ents[to]?.human?.level ?? (this.cfg.fixtureGroundGoalsV1&&this.ents[to]?.support?.kind==='ground'?0:this.ents[actor].human.level)) : typeof atLevel === 'number' ? atLevel : this.ents[actor].human.level;
     const dx = me[0] - t[0], dz = me[1] - t[1], d = Math.hypot(dx, dz);
     const isBody = typeof to === 'string' && !!this.ents[to];
     const room=this.cfg.scene==='littlemartians'&&typeof to==='string'&&this.rt.world.regions[to]?.kind==='place';
@@ -1534,7 +1535,7 @@ export class MarsEngine implements Engine {
       case 'control_classroom_v1': return [{verb:'classroom_control',params:{session:a.session,intent:{kind:a.kind}},settle:'done',raw:true}];
       case 'walk_to': {
         const gaitIssue = this.gaitIssue(me, a); if (gaitIssue) return gaitIssue;
-        let g = (a.spread === 'pond/1' || a.spread === 'region/1' || a.spread === 'pond-lap/1') && typeof a.to === 'string' && this.rt.world.regions[a.to] ? this.spreadGoalV1(me, a.to, a.spread,this.sharedWaterStep(step),a.regionOutside) : this.goalNear(me, a.doorQueueV1 ? this.doorQueueGoalV1(p, a) : a.to, typeof a.standoff === 'number' ? a.standoff : 0, a.stand);
+        let g = (a.spread === 'pond/1' || a.spread === 'region/1' || a.spread === 'pond-lap/1') && typeof a.to === 'string' && this.rt.world.regions[a.to] ? this.spreadGoalV1(me, a.to, a.spread,this.sharedWaterStep(step),a.regionOutside) : this.goalNear(me, a.doorQueueV1 ? this.doorQueueGoalV1(p, a) : a.to, typeof a.standoff === 'number' ? a.standoff : 0, a.stand, a.level);
         if (g === 'here') return [];
         if ('code' in g) return g;
         if (a.free === FREE_GOAL_V1) { const f = this.freeGoalV1(me, g, a.freeWithin); if (!f) return []; g = f; }
@@ -2246,6 +2247,27 @@ export class MarsEngine implements Engine {
     const { g, at } = this.arrivalGroundV1(), q: [number, number] = [at[0], at[1]];
     return !(g.clear(q) >= g.radius && g.medium(q) <= 1) || !arrivalPocket(g, q).open;
   }
+  /** Where a direct create's birth-near/1 hint (no `first`) goes, or null for none. The hint keeps spawnHuman's rings first
+   *  (6 rings of 0.9 m, 91 spots), so placement is unchanged while they have room, and once they are full lands the body on
+   *  the nearest free standing ground instead of throwing (no free standing room: a fault and a rewind of the world).
+   *  - arrival-clearance/1 (`safeArrivalV1`): the rings already check the standing disc, so every birth carries it.
+   *  - otherwise only when fewer than `free` spots stand clear of bodies (0.8 m) and of solids (the standing disc), less the
+   *    `queued` births not yet applied, so the default placement stays bit-identical on an arrival point with room. Read-only. */
+  arrivalCrowdV1(queued = 0, free = 24): [number, number] | null {
+    const [ax, az] = this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival;
+    if (this.cfg.safeArrivalV1) return [ax, az];
+    const people = listEntities(this.ents).filter((e: any) => e.kind === 'human').map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]);
+    const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
+    let open = 0;
+    for (let ring = 0; ring < 6; ring++) for (let k = 0; k < Math.max(1, ring * 6); k++) {
+      const ang = (k / Math.max(1, ring * 6)) * Math.PI * 2 + ring * 0.5, x = r3(ax + dcos(ang) * ring * 0.9), z = r3(az + dsin(ang) * ring * 0.9);
+      if (people.some(([px, pz]) => hypot(px - x, pz - z) < 0.8)) continue;
+      const grid = spatial.levelAt(0, [x, z]);
+      if (!grid || clearanceAt(grid, [x, z]) < HUMAN_RADIUS) continue;
+      if (++open >= free + queued) return null;
+    }
+    return [ax, az];
+  }
   /** birth-near/1: the nearest ground point (rings of 0.25 m out to 12 m) with a clear standing disc, nobody within
    * 0.8 m and no deep water. Walkability from there is proved by the caller's own physical walk, never assumed. */
   /** `opts` (#1521): `skip` a body's own place without taking it out of the table (a plan must not reorder it), and keep clear of
@@ -2425,8 +2447,9 @@ export class MarsEngine implements Engine {
   // dayTicks from the scene; the time itself travels in each take's env.datetime)
   private renderContextKeyV1(){return JSON.stringify([this.rt.world.base.campus,this.cfg.scene,this.cfg.clock?.dayTicks??null,this.rulesVersion]);}
   /** `stateHashNow`: rt.stateHash() at this tick when the caller has it (the take it just finished); used only when no
-   *  render base is captured in between (lane L1: one world serialisation per 20-tick take boundary, not two). */
-  private startRecorder(stateHashNow?:string) {
+   *  render base is captured in between (lane L1: one world serialisation per 20-tick take boundary, not two). #2422: it
+   *  is that take's lazy hash, computed only when the new take's baseline is read. */
+  private startRecorder(stateHashNow?:string|(()=>string)) {
     if(this.readerRecordingDepth)return;
     // Authored render bases are immutable for this engine instance. Supported
     // campus/clock/config boundaries change this key; actor/object motion is in
@@ -2441,14 +2464,15 @@ export class MarsEngine implements Engine {
     const retained=new Set([this.recorderScene.ref.hash,...this.chunks.map(c=>(c.take as {renderSceneRef:{hash:string}}).renderSceneRef.hash)]);
     for(const hash of this.takeScenes.keys())if(!retained.has(hash))this.takeScenes.delete(hash);
   }
-  /** Finishes the current take; returns its final state hash (= rt.stateHash() now), or undefined inside a reader setup. */
-  private finishRecorder():string|undefined {
+  /** Finishes the current take; returns its final state hash (= rt.stateHash() now) as a function, computed when first
+   *  called (#2422: the take's hashes are not computed in the tick that cuts it), or undefined inside a reader setup. */
+  private finishRecorder():(()=>string)|undefined {
     if(this.readerRecordingDepth)return undefined;
-    const take=this.recorder.finish();
-    if(this.rt.tick<=take.startTick)return take.finalStateHash;
+    const {take,finalStateHash}=this.recorder.finishLazy() as {take:{startTick:number};finalStateHash:()=>string};
+    if(this.rt.tick<=take.startTick)return finalStateHash;
     this.chunks.push({fromTick:take.startTick,toTick:this.rt.tick,take});
     if(this.chunks.length>12)this.chunks.shift();
-    return take.finalStateHash;
+    return finalStateHash;
   }
   takeScene(hash:string) { const captured=this.takeScenes.get(hash);return captured?structuredClone(captured):undefined; }
   actorBorrowed(actor: string) {
@@ -2898,11 +2922,12 @@ export class MarsEngine implements Engine {
       .map(slot=>{const approach=seatApproach(this.rt,slot);return {id:slot.id,p:[...slot.p] as [number,number],level:slot.level,...(Array.isArray(approach)?{approach:[...approach] as [number,number]}:{})};}));
   }
   /** world-edit/1 read: whether a body of the default human profile can walk from one standing point to another
-   *  (levels included, stairs and doors as the planner sees them), and how far. Pure read. A failing search is proved early
+   *  (levels included, stairs and doors as the planner sees them; a door a walk opens by hand is a way through), and how far. Pure read. A failing search is proved early
    *  (identical results; path.ts proveUnreachable): a Soul's look into a house tries up to 14 points per closed-off room. */
   reachV1(from:{p:[number,number];level?:number},to:{p:[number,number];level?:number}):{ok:true;length:number;legs:number;levels:number[]}|{ok:false;code:string;message:string}{
     const spatial=this.rt.services.spatial as Spatial;
-    const r=spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:from.level??0,p:from.p},{level:to.level??0,p:to.p},{proveUnreachable:true});
+    // doors-pass/1 (#2365): a closed, unlocked, hand-operated door is a way through (the walk opens, passes and closes it)
+    const r=spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:from.level??0,p:from.p},{level:to.level??0,p:to.p},{proveUnreachable:true,doors:'pass'});
     if(!r.ok)return {ok:false,code:r.diagnostic.code,message:r.diagnostic.message};
     const levels=[...new Set(r.route.legs.map((l:any)=>l.kind==='walk'?l.level:l.link.to.level))] as number[];
     return {ok:true,length:Math.round(r.route.length*100)/100,legs:r.route.legs.length,levels};
@@ -3104,19 +3129,23 @@ export class MarsEngine implements Engine {
     const me=this.ents[p.actor]?.pose.p,taken=(q2:[number,number])=>listEntities(this.ents).some((o:any)=>!!o.human&&o.id!==p.actor&&hypot(o.pose.p[0]-q2[0],o.pose.p[2]-q2[1])<.7);
     // the first row (latch side, hinge side) before the row behind it; nearest first within a row
     const d=(x:[number,number])=>me?hypot(x[0]-me[0],x[1]-me[2]):0,spots=q.queue.map((x,i)=>({x,row:i>>1})).sort((a2,b2)=>a2.row-b2.row||d(a2.x)-d(b2.x)).map(e=>e.x);
-    for(const spot of spots)if(!taken(spot)&&!this.plan(this.movementVerb(p.actor,spot[0],spot[1]),{actor:p.actor,x:spot[0],z:spot[1],level:this.ents[p.actor]?.human?.level??0}))return spot;
+    for(const spot of spots)if(!taken(spot)&&!this.plan(this.movementVerb(p.actor,spot[0],spot[1]),{actor:p.actor,x:spot[0],z:spot[1],level:typeof a.level==='number'?a.level:this.ents[p.actor]?.human?.level??0}))return spot;
     return a.to;
   }
   /** Soul Actions entry 31 (pure): the closed doors walling this body off from its plan's first walk_to destination. Null
-   * when a walk reaches it (or it names nothing). Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
+   * when a walk reaches it (or it names nothing). From the body's own floor (review of #2397): a Soul upstairs behind the
+   * ground door plans the same passage, its first leg walking down the stairs to the door. Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
    * god engine-bridge) bordering the region the failed route exhausted; nearest to the way there first, at most `max`. */
-  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
-    const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human||(e.human.level??0)!==0)return null;
+  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
+    const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
     const t=this.pointOf(step.params?.to);if(!t)return null;
     const start=this.godWalkoutStartV1(actor);if(!start)return null;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8);if(!goal)return null;
     const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);
-    const r=spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
+    // `behind` (walkThroughDoorV1 said so): a long walk's far ground is planned coarsely and may not meet the shut leaf, so
+    // the doors are named from the destination's side, whose search the door closes in at once (review of #2397)
+    const back=()=>spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},start,{nameObstacles:id=>id.includes('#door:')});
+    const r=behind?back():spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
     if(r.ok||r.diagnostic.code!=='route.unreachable')return null;
     const pos=(id:string)=>{const o=spatial.scene.obstacles.find(x=>x.id.startsWith(id+'#door:'));return o?o.obb.c:null;};
     const along=(c:[number,number])=>hypot(c[0]-start.p[0],c[1]-start.p[1])+hypot(c[0]-goal[0],c[1]-goal[1]);
@@ -3125,8 +3154,22 @@ export class MarsEngine implements Engine {
     const ids=named(r.diagnostic);
     // asked only when no door on this side opens the way: the doors walling the destination's own side (the same search
     // from the destination, which floods that side once), so a locked door there refuses instead of a closest approach
-    const goalDoors=()=>{const back=spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},{level:0,p:start.p},{nameObstacles:id=>id.includes('#door:')});return back.ok?[]:named(back.diagnostic);};
+    const goalDoors=()=>{const b=back();return b.ok?[]:named(b.diagnostic);};
     return {goal,doors:ids,goalDoors};
+  }
+  /** Soul Actions entry 31 (pure; review of #2397): does this plan's first walk_to go through a closed ground hand door, by
+   *  the connectivity labels as they stand (one end in an area joined to the world only by such a door, the other not)? Read before the
+   *  walk is planned, so a long walk is planned as the passage's legs from the start. False when either end is not joined.
+   *  Null when the labels are not ready at this static epoch: they are only polled, never built here (#2383: on a fresh
+   *  Eden boot, after door-fit/1's edit, a check here drained the whole world's relabel inside one act, ~25 s on a runner);
+   *  the caller then asks the destination's side itself (closedDoorsOnWalkV1 with `behind`). */
+  walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean|null{
+    const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
+    if(!this.navWarmV1(0))return null;
+    const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
+    const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return null;
+    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
+    return !!a?.ok&&!!b?.ok&&!!a.door!==!!b.door;
   }
   /** Soul Actions entry 31 (pure): does a walk from `from` (level 0) reach this plan's first walk_to destination, a
    * standing point at its standoff as the walk itself would choose (goalNear's turns), with the world as it is now? */
@@ -3568,16 +3611,17 @@ export const SHARED_STAIRS_POLICY = 'shared-stairs/1';
 export const SHARED_BAY_POLICY = 'shared-bay/1';
 
 /** The factory is made once the Mars engine has been loaded (an async import); after that everything is synchronous. */
-export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promise<EngineFactory> {
+/** `env`: the world's own environment (shards, #2389: the server passes its world config's); unset reads the process's. */
+export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND, env: Record<string, string | undefined> = process.env): Promise<EngineFactory> {
   const loaded = cfg.map===MARS_2026_MAP?withMars2026Map(await loadMars()):await loadMars();if(cfg.map&&cfg.map!==MARS_2026_MAP)throw new Error('mars.unknown-map');
   // PC13 (#692): the shared raise's verb and its invariant exist only behind SIM_SHARED_CARRY (the shared-carry ledger
   // flag, the same default); without it the registry and the invariants are exactly what they were before PC13.
-  const sharedCarry = cfg.sharedCarryV1 ?? process.env.SIM_SHARED_CARRY === '1';
+  const sharedCarry = cfg.sharedCarryV1 ?? env.SIM_SHARED_CARRY === '1';
   // resolved once here, so the engine's own rules version (this.cfg) says what the factory registered; off adds no key
   if (sharedCarry && cfg.sharedCarryV1 !== true) cfg = {...cfg, sharedCarryV1: true};
   // a world that can build what can stop standing has the ladder, unless it is switched off: `SIM_SOULS_REPAIR=0` is the
   // operator's way back, and how a shared world made before the ladder still boots under its own rules
-  const repairEnv = process.env.SIM_SOULS_REPAIR;
+  const repairEnv = env.SIM_SOULS_REPAIR;
   if ((cfg.soulsRepairV1 ?? (repairEnv !== '0' && (sharedCarry || repairEnv === '1'))) && cfg.soulsRepairV1 !== true) cfg = {...cfg, soulsRepairV1: true};
   const m = sharedCarry ? {...loaded, invariants: [...loaded.invariants, looseFramesHeld, framesStand, decksBear, stairsBear]} : loaded;
   // disassembly/1 adds its reverse verbs to this engine's registry only; the default registry is unchanged.
@@ -3643,7 +3687,7 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promis
       // (decoded once: registerAssets clones what it keeps, so the graph goes on to Runtime.restore unshared)
       const decoded=decodeSnapshot(s.mars);
       {const ep=(decoded as any).world?.entityPhysicsV1;if(ep)registerAssets(ep.assets);}
-      const rt = m.Runtime.restore(s.mars, (s as {groundV1?:boolean}).groundV1 ? groundRegistry(registry) : registry, services(base), m.invariants, decoded);
+      const rt = m.Runtime.restore(s.mars, (s as {groundV1?:boolean}).groundV1 ? groundRegistry(registry, groundReach((decoded as any).world?.groundV1)) : registry, services(base), m.invariants, decoded);
       if(cfg.scene==='eden-commons'&&(rt.world.base.campus!=='eden-commons'||rt.world.base.staticHash!==base.base.staticHash))throw new Error('snapshot commons physical base differs from the native factory');
       const engine = new MarsEngine(m, rt, s.cfg ?? cfg, { programs: s.programs, nextProg: s.nextProg, leaving: s.leaving,renderPlatformsV1:s.renderPlatformsV1 });
       if (s.quiet) engine.beginQuiet();
@@ -3655,11 +3699,11 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promis
 /** Explicit reader for a logged Greenfield -> commons physical checkpoint.
  * Genesis stays Greenfield. A newly constructed commons world is not a replay
  * substitute; only its validated checkpoint can enter this history reader. */
-export async function marsCommonsTransitionFactory(cfg:MarsWorldConfig=GREEN_FIELD_WORLD,options?:{safeArrivalV1?:boolean}):Promise<EngineFactory> {
+export async function marsCommonsTransitionFactory(cfg:MarsWorldConfig=GREEN_FIELD_WORLD,options?:{safeArrivalV1?:boolean;env?:Record<string,string|undefined>}):Promise<EngineFactory> {
   if(cfg.scene!=='greenfield')throw new Error('commons-transition.factory-origin');
   const target=options?.safeArrivalV1?{commonsArrivalV1:true,safeArrivalV1:true}:{};
-  const old=await marsFactory({...cfg,commonsTransitionV1:true,...(options?.safeArrivalV1?{commonsArrivalV1:true}:{})}),
-    next=await marsFactory({...cfg,...EDEN_COMMONS_WORLD,commonsTransitionV1:true,...target});
+  const old=await marsFactory({...cfg,commonsTransitionV1:true,...(options?.safeArrivalV1?{commonsArrivalV1:true}:{})},options?.env),
+    next=await marsFactory({...cfg,...EDEN_COMMONS_WORLD,commonsTransitionV1:true,...target},options?.env);   // #2416: the world's env
   const allowed=(v:string)=>v===old.rulesVersion||v===next.rulesVersion;
   return {rulesVersion:old.rulesVersion,canReplayHistory:allowed,canRestoreSnapshot:allowed,
     genesis:old.genesis,

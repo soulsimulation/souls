@@ -14,7 +14,7 @@ import { EdgeLedger } from './edge/ledger/ledger.ts';
 import { mountEdgeRoutes } from './edge/routes.ts';
 import { GodMode } from './god/god.ts';
 import { installEngineBridge } from './god/engine-bridge.ts';
-import { worldDay } from './god/poster-boards.ts';
+import { worldDayOf } from './god/poster-boards.ts';
 import { createPaintingService } from './art/painting-completion.ts';
 import { planHang } from './art/art.ts';
 import { resolveCapability } from './edge/ledger/vocabulary.ts';
@@ -30,13 +30,13 @@ test('chalk: draw on a chalk square by plain words, credited at completion, fadi
   t.after(() => { comms.close(); f.host.stop(); f.db.close(); rmSync(dir, { recursive: true, force: true }); });
   const god = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {}, assetDir: dir });
   installEngineBridge({ host: f.host, god, edge, log: () => {}, worldLore: false, worldClock: false });
-  edge.painting = createPaintingService({ model: () => god.model, dir, basePath: '/w/fixture', worldId: f.host.worldId, commit: (ops, note, done, durable) => god.engineAct(ops, note, done, durable) });
+  edge.painting = createPaintingService({ model: () => god.model, worldDay: () => worldDayOf(f.host), dir, basePath: '/w/fixture', worldId: f.host.worldId, commit: (ops, note, done, durable) => god.engineAct(ops, note, done, durable) });
   const tick = async (n = 5) => { for (let i = 0; i < n; i++) { f.host.tickOnce(); await setImmediate(); f.host.drainInputs(); } };
   await tick();
   // a short world day (1500 ticks; the drying test uses 200), starting on day 10; days pass by ticking, never by setting the day
   const DAY = 1500, living0 = (f.host as unknown as { living?: object }).living ?? {};
   Object.defineProperty(f.host, 'living', { configurable: true, value: { ...living0, origin: f.host.engine.world.tick - 10 * DAY - 20, dayTicks: DAY } });
-  const toDay = async (d: number) => { while (worldDay() < d) { for (let i = 0; i < 100; i++) f.host.tickOnce(); await tick(1); } await tick(10); assert.equal(worldDay(), d); };
+  const toDay = async (d: number) => { while (worldDayOf(f.host) < d) { for (let i = 0; i < 100; i++) f.host.tickOnce(); await tick(1); } await tick(10); assert.equal(worldDayOf(f.host), d); };
   const join_ = async (id: string, name: string) => { await invite(f, id); const row = await accept(f.host, f.souls.create('dev:' + id, { name, description: 'Chalk test' })); await tick(); return { soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner }; };
   const ana = await join_('ana', 'Ana'), ben = await join_('ben', 'Ben'); soul = ana;
   const here = async (s: typeof ana) => { soul = s; const r = await app.request('/v1/edge/here?include=doHere'); assert.equal(r.status, 200); return (await r.json()).here; };
@@ -92,7 +92,7 @@ test('chalk: draw on a chalk square by plain words, credited at completion, fadi
   // Ana steps away from the square first (her body stands on its only drawing spot)
   { const w = await act(ana, 'walk:easel'); assert.equal(w.accepted, true, JSON.stringify(w)); assert.equal((await wait(ana, w.receipt.id)).phase, 'completed'); }
   const b = await act(ben, chalk.id, { seconds: 5, painting: boat }); assert.equal(b.accepted, true, JSON.stringify(b)); const bd = await wait(ben, b.receipt.id); assert.equal(bd.phase, 'completed', JSON.stringify(bd));
-  const s2 = state(); assert.equal(s2.title, 'Boat'); assert.equal(s2.maker, `soul:${encodeURIComponent(ben.soulId)}:Ben`); assert.equal(s2.day, worldDay()); assert.notEqual(s2.media, s1.media);
+  const s2 = state(); assert.equal(s2.title, 'Boat'); assert.equal(s2.maker, `soul:${encodeURIComponent(ben.soulId)}:Ben`); assert.equal(s2.day, worldDayOf(f.host)); assert.notEqual(s2.media, s1.media);
   const note = (f.db.db.prepare("SELECT note FROM world_edits_v1 WHERE note LIKE 'painting/1 %' ORDER BY seq DESC LIMIT 1").get() as { note: string } | undefined)?.note ?? '';
   assert.match(note, /"previous":\{"media":"[^"]+","title":"Sun","maker":"soul:[^"]+:Ana","day":10\}/); results.ben = s2;
   const drawn = s2.day as number; await tick(10);
@@ -101,8 +101,8 @@ test('chalk: draw on a chalk square by plain words, credited at completion, fadi
   await toDay(drawn + 3); lines.boat3 = await lineOf(ana); is(lines.boat3, 'Ben’s chalk drawing “Boat” on the pavement, nearly washed away');
   // a clock that jumps (a catch-up after nobody was in the world) and one set back: the line follows the world day either way
   const living = (f.host as unknown as { living: { origin: number; dayTicks: number } }).living, shift = (days: number) => Object.defineProperty(f.host, 'living', { configurable: true, value: { ...living, origin: (f.host as unknown as { living: { origin: number } }).living.origin - days * DAY } });
-  shift(3); await tick(30); assert.equal(worldDay(), drawn + 6); lines.jump6 = await lineOf(ana); assert.equal(lines.jump6, null, 'a three-day jump past the fade: washed away');
-  shift(-4); await tick(30); assert.equal(worldDay(), drawn + 2); lines.back2 = await lineOf(ana); is(lines.back2, 'Ben’s chalk drawing “Boat” on the pavement, fading');
+  shift(3); await tick(30); assert.equal(worldDayOf(f.host), drawn + 6); lines.jump6 = await lineOf(ana); assert.equal(lines.jump6, null, 'a three-day jump past the fade: washed away');
+  shift(-4); await tick(30); assert.equal(worldDayOf(f.host), drawn + 2); lines.back2 = await lineOf(ana); is(lines.back2, 'Ben’s chalk drawing “Boat” on the pavement, fading');
   await toDay(drawn + 4); lines.boat4 = await lineOf(ana); assert.equal(lines.boat4, null, 'washed away: no drawing line, the square still there');
   assert.equal(state().media, s2.media, 'washing away writes nothing: the state keeps the drawing and its day'); results.lines = lines;
   // C5: out of reach publishes nothing; the drawing param elsewhere is refused

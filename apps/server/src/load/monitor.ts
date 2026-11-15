@@ -160,6 +160,8 @@ export class QuietTick {
 }
 
 const TICK_MS = 50, MIN_WINDOW_SAMPLES = 100, DROWSY_SAMPLE_MS = 1000;
+/** A clock just started owes no tick until its first frame decides (it ticks, or a still world sleeps), for at most this long. */
+const START_GRACE_MS = 1000;
 /** #1944 A3: the tick window (10 s), and how late past its due time a tick's start counts as late. */
 export const TICK_WINDOW_MS = 10_000, LATE_TICK_MS = 25;
 /** What the monitor reads from the world (WorldHost satisfies it). */
@@ -225,6 +227,8 @@ export class LoadMonitor {
   private tickHook: {afterTickComplete(): void} | null = null;
   /** #2384: the histogram is off because the world sleeps; when the last full sample was taken. */
   private drowsy = false; private sampledAt = 0;
+  /** A clock seen starting (running after a sample that saw it stopped, or the first sample): when and at which tick. */
+  private starting: {at: number; tick: number} | null = null; private wasRunning = false;
   private seenTick = -1;
   /** #2124: what held amber on the last sample (the tick window counts the time to the next sample against it). */
   private holds: AmberHold[] = [];
@@ -289,10 +293,18 @@ export class LoadMonitor {
     a[S.stallMs] = stallMs; a[S.clockRate] = h.clockRate ?? h.baseRate; a[S.baseRate] = h.baseRate;
     // tick service over 5 s: ticks run / ticks owed at the admin rate and the attention pace (dilation counts as missed)
     // #2384: a sleeping world owes nothing, nor does one just woken until it lands (its frame runs within 50 ms)
-    const prev = this.ticks.at(-1), asleep = !!h.sleeping || (!!prev?.asleep && prev.tick === h.engine.world.tick), owing = h.running && !h.paused && h.clockAvailable && !asleep;
+    // a clock just started owes nothing until its first frame decides, as one just woken owes nothing until it lands: on a busy
+    // host the first frame can owe no tick and a still world sleeps at the second (~100 ms in), unticked; a sample between
+    // read it as 2 ticks missed of 2 owed, service 0 and red for 35 s. Bounded: a clock that has not ticked a second on owes.
+    if (h.running && !this.wasRunning) this.starting = {at: now, tick: this.ticks.at(-1)?.tick ?? h.engine.world.tick};   // (a tick since the last sample: it has decided)
+    this.wasRunning = h.running;
+    if (this.starting && (h.engine.world.tick !== this.starting.tick || h.sleeping || now - this.starting.at >= START_GRACE_MS)) this.starting = null;
+    const prev = this.ticks.at(-1), asleep = !!h.sleeping || (!!prev?.asleep && prev.tick === h.engine.world.tick), owing = h.running && !h.paused && h.clockAvailable && !asleep && !this.starting;
     this.tickWindowSample(now, owing);
     const due = prev && owing ? (Math.min(1000, now - prev.at) * h.baseRate * h.pace) / TICK_MS : 0;
     this.ticks.push({at: now, tick: h.engine.world.tick, due, asleep});
+    // the ticks a world owed awake and put into its lag as it went to sleep, unticked, are paid when it lands: not missed
+    if (h.sleeping) for (let i = this.ticks.length - 1; i >= 0 && this.ticks[i].tick === h.engine.world.tick; i--) this.ticks[i].due = 0;
     while (this.ticks.length > 2 && now - this.ticks[1].at > 5000) this.ticks.shift();
     let owed = 0; for (let i = 1; i < this.ticks.length; i++) owed += this.ticks[i].due;
     const ran = this.ticks.at(-1)!.tick - this.ticks[0].tick;

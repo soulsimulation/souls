@@ -11,6 +11,9 @@
 // server time less the queue, per capability) and their queue (`actQueueMs`, p50/p95/max).
 // #2437: `--act-sec <s>` paces each Soul like a real agent (one act every s seconds on average) instead of the nonstop
 // loop; every run also reports the act calls' whole server time and queue at p50/p95/p99 (`actLatency`).
+// #2458: `--fault-every-sec <s>` runs the world with SIM_FAULT_INJECT=1 and throws an engine error inside a tick at the end
+// of setup and every s seconds of the load (fault-inject `throw`); each arm reports the world's recovery hold lines
+// (`recoveries`: hold ms, replays and their ticks) and its watchdog kills. `--hang-kill-sec <s>` sets the world's hang kill (SIM_HANG_KILL_MS).
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -116,13 +119,19 @@ async function soulLoop({ folder, until, r, counts, acts = [] }) {
 export async function runLoad(o) {
   const sizes = String(o.souls ?? '12,24').split(',').map(Number).filter((n) => n > 0);
   const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), actSec = o['act-sec'] != null ? Number(o['act-sec']) : null, port = Number(o.port ?? 18780);
-  const serverRoot = resolve(o['server-root'] ?? REPO);
+  const serverRoot = resolve(o['server-root'] ?? REPO), faultSec = o['fault-every-sec'] != null ? Number(o['fault-every-sec']) : null;
+  if (faultSec) process.env.SIM_FAULT_INJECT = '1';
+  if (o['hang-kill-sec'] != null) process.env.SIM_HANG_KILL_MS = String(1000 * Number(o['hang-kill-sec']));
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
+    // a world that exits on its own says how (code, signal) and its resident memory every 30 s, in this log (Linux /proc)
+    let stopping = false;
+    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log'),
+      onSpawn: (c) => c.on('exit', (code, signal) => { if (!stopping) log(`n${n} r${rep}: the world exited on its own (code ${code}, signal ${signal}); see n${n}-r${rep}/server/world.log`); }) });
+    const rss = setInterval(() => { try { const kb = /^VmRSS:\s+(\d+)/m.exec(readFileSync(`/proc/${w.pid}/status`, 'utf8'))?.[1]; if (kb) log(`n${n} r${rep}: world rss ${Math.round(kb / 1024)} MB`); } catch { /* not Linux, or gone */ } }, 30000);
     const souls = [];
     try {
       // setup is paced at 6 Souls per 30 s: all Souls share one address, and a world pairs at most 20 in any 60 s from one
@@ -139,9 +148,10 @@ export async function runLoad(o) {
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
+      const faults = faultSec ? (async () => { for (let at = t0; at < until; at += faultSec * 1000) { await sleep(Math.max(0, at - Date.now())); await injectThrow(port); } })() : null;
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
-      await cards;
+      await cards; await faults;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
       const http = [], pairs = [];
@@ -151,9 +161,10 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
+      clearInterval(rss); stopping = true;
       await stopWorld({ pid: w.pid });
       if (!o['keep-data']) { rmSync(join(dir, 'server', 'data'), { recursive: true, force: true }); rmSync(join(dir, 'souls'), { recursive: true, force: true }); }
     }
@@ -165,6 +176,16 @@ export async function runLoad(o) {
   return result;
 }
 
+/** #2458: POST the loopback fault endpoint: the next tick's engine step throws. */
+async function injectThrow(port) {
+  try { const r = await fetch(`http://127.0.0.1:${port}/__sim/fault?kind=throw`, { method: 'POST' }); log(`fault-inject throw: ${r.status}`); } catch (e) { log(`fault-inject throw failed: ${String(e).slice(0, 120)}`); }
+}
+/** #2458: the world log's recovery hold lines (world.ts recoverFault) and watchdog kills. */
+export function recoveryLines(file) {
+  let text = ''; try { text = readFileSync(file, 'utf8'); } catch { /* no log */ }
+  const recoveries = [...text.matchAll(/\[world\] recovery hold (\d+) ms at tick (\d+): (\d+) replays \(([^)]*) ticks\)[^;\n]*(?:; since the last snapshot (\d+) ticks, (\d+) ms of wall, (\d+) ms of steps \(its cost (\d+) ms\))?/g)].map((m) => ({ holdMs: Number(m[1]), tick: Number(m[2]), replays: Number(m[3]), replayTicks: m[4] === 'none' ? [] : m[4].split(', ').map(Number), ...(m[5] ? { sinceSnapshot: { ticks: Number(m[5]), wallMs: Number(m[6]), stepMs: Number(m[7]), snapshotCostMs: Number(m[8]) } } : {}) }));
+  return { recoveries, kills: [...text.matchAll(/watchdog: (world\.killed\.[a-z]+)/g)].map((m) => m[1]) };
+}
 export function renderLoad(result) {
   const L = ['# Soul Client eval: load', '', 'Server time per call from `Server-Timing`. #1750 levels at p99.9: bookkeeping 50 ms, reads 100 ms, an act\'s acknowledgment 150 ms. Long polls have no level.'];
   for (const a of result.arms) {
@@ -192,6 +213,7 @@ export function renderLoad(result) {
       L.push('', 'Acts by capability, slowest first: server time less the queue (handler + wait + commit), ms.', '', '| capability | acts | p50 | max | over 250 ms |', '|---|---|---|---|---|');
       for (const x of a.slowActs) L.push(`| ${x.capability} | ${x.n} | ${x.p50} | ${x.max} | ${x.over250} |`);
     }
+    if (a.recoveries) L.push('', `Injected engine errors (#2458): ${a.recoveries.length} recoveries, holds ${a.recoveries.map((r) => `${r.holdMs} ms (${r.replayTicks.join('+') || 0} ticks replayed)`).join(', ') || 'none'}; watchdog kills: ${a.kills.join(', ') || 'none'}.`);
   }
   return L.join('\n') + '\n';
 }

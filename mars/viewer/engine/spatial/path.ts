@@ -5,7 +5,7 @@
 // can smooth inside them and never needs collision sliding to make progress.
 import { add2, dist2, pointInObb, rot2, sub2, type Vec2, hypot } from '../core/math.ts';
 import type { Diagnostic } from '../actions/types.ts';
-import { cellOf, centreOf, gridContentKeys, latticeCentre, nearestBlocker, segmentClearance, type GridSet, type LevelGrid } from './grid.ts';
+import { cellOf, centreOf, gridContentKeys, groundHeights, latticeCentre, nearestBlocker, segmentClearance, type GridSet, type LevelGrid } from './grid.ts';
 import type { AgentProfile, Link, SpatialScene } from './types.ts';
 
 export type Place = { level: number; p: Vec2 };
@@ -82,6 +82,11 @@ export type RouteOpts = {
    * walk from an upper floor down to the ground a chunk at a time instead of refusing it `ground.too-far`.
    */
   routeReachV1?: boolean;
+  /**
+   * doors-pass/1 (#2365, read by Spatial.route only): with every door shut, else through ONE closed, unlocked, hand-operated
+   * door (`door: 'pass'`) on level 0, as entry 31's passage executes a walk. For reach checks.
+   */
+  doors?: 'pass';
 };
 
 /** Corridor planner: coarse cell size (m) and fine-search halo around the coarse path (m). */
@@ -392,7 +397,12 @@ function obstaclesNear(scene: SpatialScene, g: LevelGrid, p: Vec2, grow: number,
   for (const o of scene.obstacles) if (want(o.id) && atHeight(o, g) && pointInObb(p, o.obb, grow)) out.add(o.id);
   return out.size ? [...out].sort() : undefined;
 }
-const atHeight = (o: { y0: number; y1: number }, g: LevelGrid) => g.y >= o.y0 - 0.3 && g.y < o.y1;
+/** At the grid's floor; a hand door's gap (`door: 'pass'`) on a composed ground grid at the terrain under its centre
+ *  (groundHeights, #2383). Only those: every other obstacle is named as before, so a logged fold reads the same. */
+const atHeight = (o: { obb: { c: Vec2 }; y0: number; y1: number; door?: 'pass' }, g: LevelGrid) => {
+  const y = (o.door === 'pass' ? groundHeights.get(g)?.(o.obb.c[0], o.obb.c[1]) : undefined) ?? g.y;
+  return y >= o.y0 - 0.3 && y < o.y1;
+};
 
 /**
  * `nameObstacles` for a failed search (see RouteOpts). An obstacle is named when it separates the

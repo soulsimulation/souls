@@ -11,7 +11,6 @@ import {testPort} from '../test/test-port.ts';
 import {LoadMonitor, STALL_MIN_MS, stallMsOf} from './load/monitor.ts';
 import {clockOf, liveOf, newSharedLoad, S} from './load/shared.ts';
 import {attachBootSlots, bootPhase, bootSlots} from './load/boot-progress.ts';
-import {setClockSource} from './load/clock-source.ts';
 const TEST_PORT = await testPort();
 
 test('S6: the threshold: 2 s at full speed, 10 expected ticks at a reduced pace or a dilated rate; none while paused, stopped, halted or at rate 0', () => {
@@ -59,7 +58,7 @@ test('S1, S4, S5: /healthz says stalled; edge reads carry world.stalled; an act 
   let stalled = false, slowed = false;
   const clock = () => ({tickAgeMs: stalled ? 7000 : 10, stalled, clockRate: slowed ? 0.5 : 1, baseRate: 1, slowed});
   const monitor = {clock, health: () => ({}), tickStats: {avg: 1, max: 1, n: 1, p99: 1}, level: 'green', register() {}};
-  t.after(() => { setClockSource(null); f.host.stop(); f.db.close(); });
+  t.after(() => { f.host.stop(); f.db.close(); });
   await invite(f, 'alice');
   const a = await accept(f.host, f.souls.create('dev:alice', {name: 'Avery', description: 'Stall fixture'}));
   const token = f.souls.pairExchange(f.souls.pairCode(a, `http://127.0.0.1:${TEST_PORT}`).code, 'scripted').token;

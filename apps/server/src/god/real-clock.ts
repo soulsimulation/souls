@@ -135,9 +135,11 @@ export type RealClockOptions = {
    *  or a restart, so it must be idempotent; a failure is logged and never stops the clock. */
   onCutOver?: (c: { tick: number; from: { origin: number; dayTicks: number }; to: { origin: number; dayTicks: number } }) => void;
 };
-const kept = new WeakSet<object>();
+const kept = new WeakMap<object, () => void>();
 /** Whether a real-time keeper already runs this host's clock. */
 export function hasRealClock(host: object): boolean { return kept.has(host); }
+/** #2444: a stopped world's keeper stops checking its clock (in a shard, the program runs on). */
+export function stopRealClock(host: object): void { kept.get(host)?.(); }
 
 /** #2297: the next instant (UTC ms, to the minute) after `utcMs` at which `timeZone`'s offset changes (a daylight-saving
  *  change), within `horizonDays`; null when none (UTC, or a zone without one). */
@@ -157,7 +159,7 @@ export function nextOffsetChangeMs(utcMs: number, timeZone: string, horizonDays 
  *  REALIGN_MS from the wall (checked every `checkMs`, default 15 s). A world nobody watches (pace < 1) or an
  *  admin-paused one is left alone until it runs at full pace again. Customs carry over. */
 export function installRealClock(host: ClockHost, o: RealClockOptions) {
-  kept.add(host);
+  kept.set(host, () => clearInterval(timer));
   const now = o.now ?? Date.now, active = o.active ?? (() => true);
   let pending: Promise<void> | undefined;
   type Cut = { tick: number; from: { origin: number; dayTicks: number }; to: { origin: number; dayTicks: number } };

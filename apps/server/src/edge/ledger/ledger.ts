@@ -20,7 +20,7 @@ import type {Program} from '@souls/engine-contract';
 import {clockAt} from '@souls/brain';
 import {REBUILD_MAX,SoulTimeline,TIMELINE_MAX,timelineView,type TimelineEntry} from './timeline.ts';
 import type {WorldState as NativeWorld} from '../../../../../mars/viewer/engine/world/types.ts';
-import {config} from '../../config.ts';
+import {worldConfig} from '../../config.ts';
 import type {WorldHost, Mind} from '../../world.ts';
 import type {Db} from '../../db.ts';
 import {readHumanCapabilitiesV1, type HumanBindingV1} from '../../human-capabilities.ts';
@@ -110,7 +110,7 @@ const WALK_VERBS = new Set(['walk_to', 'mars:walk_to']);
 const MOTION_M = 0.05;   // #790: a root displacement (m, ground plane) larger than this is first motion
 /** #1327: how long an act waits for the world to record what it handed over before it answers `pending` (HTTP 202). A
  *  slowed clock still drains every tick; only a clock that stopped after the hand-off reaches this. */
-const actCommitWaitMs = () => Number(process.env.SIM_ACT_COMMIT_WAIT_MS) > 0 ? Number(process.env.SIM_ACT_COMMIT_WAIT_MS) : 10_000;
+const actCommitWaitMs = (env: NodeJS.ProcessEnv) => Number(env.SIM_ACT_COMMIT_WAIT_MS) > 0 ? Number(env.SIM_ACT_COMMIT_WAIT_MS) : 10_000;
 const NEAR_RADIUS = 20, GO_NEAR_RADIUS = 60;
 /** srv-act-words (C): the destination words of a focus-shaped walk (vocabulary WORDS_FOCUS_SHAPE's walk arm). */
 const WALK_DEST = /^(?:please )?(?:go|walk|head)(?: over| back)? (?:to|into|inside|towards?) ([a-z0-9' -]+?)[.!]?$/;
@@ -258,7 +258,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #442 (mending.ts): what a completed repair did, read when its receipt ends, before the state changes. */
   repairEffects?: (r: EdgeReceipt) => ConfirmedEffects;
   /** Soul Actions entry 31 (god worlds, god/door-passage.ts): a plain walk a closed, permitted door walls off goes through it. */
-  doorPassage?: (soul: EdgeSoul, steps: Program['steps'], what: string) => DoorPassage | DoorPassageRefusal | null;
+  doorPassage?: (soul: EdgeSoul, steps: Program['steps'], what: string, behind?: boolean) => DoorPassage | DoorPassageRefusal | null;
   /** World-engine worlds only (god/places.ts): places walkable without being native engine regions (a god's plaza, a
    *  room of a god's house). Unset on Eden/Mars/LM, where walkability stays `id in regions` exactly. */
   placeWalkable?: (placeId: string) => boolean;
@@ -347,10 +347,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private bodyMigrated = false;
   attachPresence(_inbox?: {soulPresence(soulId: string): {listening: boolean; at: number | null}; onSoulListen?(l: (soulId: string) => void): void; onSoulSend?(l: (soulId: string) => void): void}, knobs?: Partial<BodyKnobs>) {return this.startBodyRule(knobs);}
   startBodyRule(knobs?: Partial<BodyKnobs>) {
-    if (process.env.SIM_BODY === '0' || this.bodyRule) return this.bodyRule;
+    const worldEnv = worldConfig(this.host).env;
+    if (worldEnv.SIM_BODY === '0' || this.bodyRule) return this.bodyRule;
     // a dev/test world may shorten the clocks (SIM_BODY_KNOBS JSON, DEV_AUTH worlds only); real worlds never
     let env: Partial<BodyKnobs> = {};
-    if (process.env.SIM_BODY_KNOBS && process.env.DEV_AUTH === '1') try {env = JSON.parse(process.env.SIM_BODY_KNOBS) as Partial<BodyKnobs>;} catch {/* ignored */}
+    if (worldEnv.SIM_BODY_KNOBS && worldEnv.DEV_AUTH === '1') try {env = JSON.parse(worldEnv.SIM_BODY_KNOBS) as Partial<BodyKnobs>;} catch {/* ignored */}
     const live = (m: Mind) => {const row = this.db.soul(m.soulId); return !!row && row.retired_at === null && row.owner === m.owner && row.entity_id === m.entityId && row.world_id === this.host.worldId;};
     const soulOf = (m: Mind): BodySoul => ({soulId: m.soulId, entityId: m.entityId, name: m.name, owner: m.owner});
     const engine = this.host.engine as unknown as {dryGroundAtV1?: (x: number, z: number) => boolean; clearanceUpToV1?: (x: number, z: number, cap?: number, level?: number) => number; lyingRoomAtV1?: (x: number, z: number, level: number, sampleMargin: number) => boolean};
@@ -408,7 +409,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  took (`gone`, not away) come back as sleeping bodies: where they were if that is dry, clear ground in a place, else at
    *  a starting place. SIM_BODY_MIGRATE=dry reports without changing anything. */
   private migrateGone() {
-    const fading = (this.comms as unknown as {fading?: {restoreGone?(dry?: boolean): string[]}} | undefined)?.fading, dry = process.env.SIM_BODY_MIGRATE === 'dry';
+    const fading = (this.comms as unknown as {fading?: {restoreGone?(dry?: boolean): string[]}} | undefined)?.fading, dry = worldConfig(this.host).env.SIM_BODY_MIGRATE === 'dry';
     let ids: string[] = [];
     try {ids = fading?.restoreGone?.(dry) ?? [];} catch (e) {console.error('[body] migration', e instanceof Error ? e.message : e); return;}
     if (!ids.length) return;
@@ -500,7 +501,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   readonly sharedCarry: boolean;
   constructor(host: WorldHost, db: Db, placeData?: unknown, options: {ambient?: boolean; spots?: unknown;now?:()=>number; readOnly?: boolean; sharedCarry?: boolean} = {}) {
     this.host = host; this.db = db; this.ambient = options.ambient === true; this.readOnly = options.readOnly === true;
-    this.sharedCarry = options.sharedCarry ?? process.env.SIM_SHARED_CARRY === '1';
+    this.sharedCarry = options.sharedCarry ?? worldConfig(host).env.SIM_SHARED_CARRY === '1';
     this.controlNow=options.now??Date.now;
     const spots = loadSpots(options.spots); this.baseSpots = spots.data; this.spotsRefused = spots.refused;
     db.db.exec(`CREATE TABLE IF NOT EXISTS edge_receipts_v1 (world_id TEXT NOT NULL, receipt_id TEXT NOT NULL, soul_id TEXT NOT NULL, capability TEXT NOT NULL, phase TEXT NOT NULL,
@@ -1133,7 +1134,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const mw = this.mw, tick = mw.world.tick;   // B-facade: a replica has no navRescueV1 (not cut off)
     // (memoised per Soul a tick: a `here` frame asks for every exit; the body and the labels do not change within the tick)
     let cut = this.stepOutSeen.get(soul.soulId);
-    if (cut?.tick !== tick) {cut = {tick, cut: !!mw.navRescueV1?.(soul.entityId, 0)}; this.stepOutSeen.set(soul.soulId, cut);}
+    if (cut?.tick !== tick) {const r = mw.navRescueV1?.(soul.entityId, 0) as {to?: [number, number]} | null | undefined; cut = {tick, cut: !!r, ...(r?.to ? {to: r.to} : {})}; this.stepOutSeen.set(soul.soulId, cut);}
     if (!cut.cut) return null;
     const left = (this.navRescuedAt.get(soul.soulId) ?? -1e9) + NAV_STEP_OUT_TICKS - tick;
     return left <= 0 ? 0 : Math.max(1, Math.ceil(left * 60 / NAV_STEP_OUT_TICKS));
@@ -1143,13 +1144,18 @@ export class EdgeLedger implements EdgeLedgerHooks {
   stepOutReady(soul: EdgeSoul): boolean {return this.stepOutWait(soul) === 0;}
   /** #1287 (#1501 review): access is never bypassed: the door refusal (a locked door not hers to open, an access denial) on
    *  the walk part of a plan, which door passage gives for the way out. A step-out never skips it. */
-  private stepOutDoor(soul: EdgeSoul, steps: Program['steps'], label: string): {code: string; reason: string} | null {
+  private stepOutDoor(soul: EdgeSoul, steps: Program['steps'], label: string, to = this.stepOutSeen.get(soul.soulId)?.to): {code: string; reason: string} | null {
     const walk = steps.filter(s => s.verb === 'walk_to' || s.verb === 'stand');
     if (!this.doorPassage || !walk.some(s => s.verb === 'walk_to') || isVerificationProbe(soul.soulId)) return null;
-    const p = this.doorPassage(soul, walk, label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there');
-    return p && 'refuse' in p ? {code: p.code, reason: p.reason} : null;
+    const what = label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there';
+    const p = this.doorPassage(soul, walk, what);
+    if (p && 'refuse' in p) return {code: p.code, reason: p.reason};
+    // (#2383) a destination behind a second door (a room of a door-fitted house) names neither door on the way out: the
+    // walk to the open ground the step-out would move her to asks the door that walls her in
+    const out = to ? this.doorPassage(soul, [{verb: 'walk_to', params: {to, standoff: 0}}], what) : null;
+    return out && 'refuse' in out ? {code: out.code, reason: out.reason} : null;
   }
-  private stepOutSeen = new Map<string, {tick: number; cut: boolean}>();
+  private stepOutSeen = new Map<string, {tick: number; cut: boolean; to?: [number, number]}>();
   private routeMemo = new Map<string, {code: string; reason: string} | null>();
   private arm(p: Pending) {
     this.pending.set(p.soul.soulId, p);
@@ -1279,7 +1285,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     void done.then(() => {this.handed.delete(id); if (ref && this.handedRefs.get(ref) === id) this.handedRefs.delete(ref);});
     let timer: ReturnType<typeof setTimeout> | undefined;
     // not unref'd: the wait itself is what keeps this request alive (a test process has nothing else to)
-    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs());});
+    const late = new Promise<'late'>(r => {timer = setTimeout(() => r('late'), actCommitWaitMs(worldConfig(this.host).env));});
     const out = await Promise.race([done, late]).finally(() => clearTimeout(timer));
     if (this.rows('receipt_id=?', id)[0]) {
       if (out !== 'late' && out.error) console.error('[edge] act committed, then its hand-off failed; answered with its receipt', id, out.error instanceof Error ? out.error.message : String(out.error));
@@ -1307,7 +1313,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     try {queued = this.host.enqueue('edge-stop', `edge:${soulId}`, payload).then(() => then?.());}
     catch (error) {console.error('[edge] stop after an accepted act could not be queued', soulId, error instanceof Error ? error.message : String(error)); return;}
     let timer: ReturnType<typeof setTimeout> | undefined;
-    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs());})]).finally(() => clearTimeout(timer));
+    await Promise.race([queued.catch(() => {}), new Promise<void>(r => {timer = setTimeout(r, actCommitWaitMs(worldConfig(this.host).env));})]).finally(() => clearTimeout(timer));
   }
 
   // ---------------------------------------------------------------- capabilities
@@ -2586,12 +2592,44 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // Soul may open it (opened by hand on the way, closed behind); a locked or private door on the only way refuses here,
     // naming it, rather than walking round to the nearest point behind the wall. Before nav-connect/1: a Soul in a
     // closed room is not cut off when its door opens.
-    let passage: DoorPassage | undefined;
-    if (issue?.code === 'route.unreachable' && this.doorPassage && steps.every(s => s.verb === 'walk_to' || s.verb === 'stand') && !isVerificationProbe(soul.soulId)) {
+    let passage: DoorPassage | undefined, doorRefusal: DoorPassageRefusal | undefined;
+    // (review of #2397) a walk bound from upstairs to a ground place is a point walk (`mars:walk_to`, level 0): the same walk
+    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
+    // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
+    // the start: a long walk plans its far ground coarsely and would meet the shut leaf only at the end, short of it
+    const plain = !!this.doorPassage && plainWalk.every(s => s.verb === 'walk_to' || s.verb === 'stand');
+    // (#2383) labels not ready (null): the destination's side is asked directly, which names its door only when one walls it
+    const through = plain && !issue ? (this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean | null}).walkThroughDoorV1?.(soul.entityId, plainWalk) : false;
+    const behind = through === true || through === null;
+    if (plain && (issue?.code === 'route.unreachable' || behind)) {
       const what = label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there';
-      const p = this.doorPassage(soul, steps, what);
+      const p = this.doorPassage!(soul, plainWalk, what, behind);
       if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
+      // doors-pass/1 (#2365): a verification probe opens no door; it is told which door the walk would go through
+      if (p && isVerificationProbe(soul.soulId)) return {...refuse('route.unreachable', `The way to ${what} goes through ${p.name}, closed; a verification probe does not open doors.`), ...resolved};
       if (p) for (const legs of [p.steps, p.direct]) {const again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
+    } else if (!plain && this.doorPassage && (!issue || issue.code === 'route.unreachable') && !isVerificationProbe(soul.soulId)) {
+      // (#2383) a walk upstairs, a sit, a craft or a use at a thing behind a closed ground door: the passage walks through
+      // the door towards it (to the ground under an upstairs point), and the plan itself runs from the door's far side in
+      // place of the passage's last leg
+      const up = steps.find(s => s.verb === 'mars:walk_to' && typeof s.params.x === 'number' && typeof s.params.z === 'number');
+      // a plan that walks the ground first (to the foot of the stairs, a craft spot's standing point) is probed by that walk:
+      // the ground under an upstairs point can be a room the stairs do not open onto, and a spot's id is no point
+      const lead = steps.find(s => s.verb === 'walk_to' && Array.isArray(s.params.to) && (s.params.level ?? 0) === 0);
+      const to = lead ? lead.params.to : up ? [up.params.x, up.params.z] : typeof chosen?.target === 'string' ? chosen.target : null;
+      const what = label.replace(/\s*\(.*$/, '') || 'there', rest = steps[0]?.verb === 'stand' ? steps.slice(1) : steps;
+      const probe = to ? [{verb: 'walk_to', params: {to, standoff: lead ? (typeof lead.params.standoff === 'number' ? lead.params.standoff : 0) : up ? 0 : 0.9}}] : [];
+      // accepted by a coarse plan of far ground, a long way to a thing behind a door meets the shut leaf only at the end: when
+      // the labels say the door is on the way, or are not ready (null: the destination's side is asked directly, as for a
+      // walk), the passage is planned from the start
+      const through = !issue && to ? (this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean | null}).walkThroughDoorV1?.(soul.entityId, probe) : false;
+      const behindNP = through === true || through === null;
+      const p = to && (issue || behindNP) ? this.doorPassage(soul, probe, what, behindNP) : null;
+      // asked only because the labels are cold, a refusal is not proof the plan needs that door (#1508: the reachable shelf)
+      // a pick-up's nearest source behind a locked door gives way to a reachable one first (#1508); the door refuses only
+      // when none does
+      if (p && 'refuse' in p && (issue || through === true)) {if (!/^pick-up:[a-z]+$/.test(capability)) return {...refuse(p.code, p.reason), ...resolved}; doorRefusal = p;}
+      if (p && !('refuse' in p)) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
     }
     // nav-connect/1 (lane NAV): no walk from where it stands, because it stands cut off from the walkable world (an edit
     // closed a pocket round it, a floor lost its stairs): it steps to the nearest open ground of the main area first (a
@@ -2603,7 +2641,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if (r) {
         // (#1501 review) cut off, but never stepped past a door she may not open: the way stays shut, the refusal names it
         // (asked only once she is cut off, as admission asks: a Soul on open ground goes on to the checks below)
-        const door = this.stepOutDoor(soul, steps, label);
+        const door = this.stepOutDoor(soul, steps, label, r.to);
         if (door) return {...refuse('route.unreachable', door.reason), ...resolved};
         this.navRescuedAt.set(soul.soulId, this.host.engine.world.tick);
         // A seated Soul rises first (a god walk-out: a plain relocate refuses a body its seat holds).
@@ -2627,6 +2665,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         if (!again || WAIT_CODES.has(again.code)) {steps = alt; issue = again; break;}
       }
     }
+    if (doorRefusal && issue && !WAIT_CODES.has(issue.code)) return {...refuse(doorRefusal.code, doorRefusal.reason), ...resolved};
     // GEST-LIVE: a standing spot whose exact point no walk reaches (the barn table's cook-together places sat 0.45 m into the
     // table's solid) is taken from the nearest standable point within 1 m of it; seats and berths keep their exact slot
     if (issue?.code === 'route.goal-blocked' && !/^(?:sit|sit-ground|lie|nap|read|rest):/.test(capability)) {
@@ -3499,7 +3538,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   travellerOf(soulId: string): string {
     this.travelTable ||= !!this.db.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='travel_incarnations_v1'").get();
     const row = this.travelTable ? this.db.db.prepare('SELECT traveller FROM travel_incarnations_v1 WHERE world_id=? AND soul_id=?').get(this.host.worldId, soulId) as {traveller: string} | undefined : undefined;
-    return row?.traveller ?? `${config.worldKey}/${soulId}`;
+    return row?.traveller ?? `${worldConfig(this.host).worldKey}/${soulId}`;
   }
   private travelTable = false;
   /** Set by the travel module where a world has one: this Soul's own journeys. */

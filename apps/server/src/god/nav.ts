@@ -110,6 +110,8 @@ export type Thing = {
   deck?: Vec2[];
   /** Rooms: where the building is entered from outside (its front door's approach), for the reachability check. */
   entry?: { p: Vec2; level: number };
+  /** Rooms of a door-fitted building (#2383): its front doorway holds a real door (closed). */
+  fitted?: true;
 };
 
 const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
@@ -299,7 +301,7 @@ export class GodNav {
       const front = pool.find(named) ?? [...pool].sort((a, b) => Math.hypot(b.at[0], b.at[1]) - Math.hypot(a.at[0], a.at[1]))[0];
       const stands: Vec2[] = [];
       const frontSlot = baked.slots.find((x) => x.kind === 'stand' && /front|door|entr/.test(x.id));
-      let inside: Vec2 | undefined, doorOpen = false;
+      let inside: Vec2 | undefined, doorOpen = false, fitted = false;
       if (front) {
         // An off-centre door need not face away from the building's centre. Its opening yaw is the outward normal
         // in the building frame; the same transform as the walls/slots then handles any enclosing world yaw.
@@ -307,7 +309,11 @@ export class GodNav {
         stands.push(toWorld(front.at[0] + ux * 1.2, front.at[1] + uz * 1.2));
         inside = toWorld(front.at[0] - ux * 1.0, front.at[1] - uz * 1.0);
         const st = ((e.state?.doors ?? {}) as Record<string, unknown>)[front.id];
-        doorOpen = st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def));
+        // #2383: a door-fitted revision's outside doorway holds a real door thing of its own (closed in an enclosed building), so
+        // the building is arrived at outside it: a goal just inside would end at the shut leaf, and the walk does not pass it
+        fitted = def.make.kind === 'gen' && def.make.args?.doorThings === true && front.exterior !== false;
+        doorOpen = !fitted
+          && (st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def)));
       }
       // #2261: every door to the outside (only the front one when the openings do not say which are), in world terms
       const exits = (outer.length ? outer : front ? [front] : []).map((o) => {
@@ -319,7 +325,7 @@ export class GodNav {
       if (def.make.kind === 'gen' && def.make.gen === 'kit/2' && def.make.args?.footprint && frontSlot) {
         const n: Vec2 = [Math.sin(frontSlot.yaw), Math.cos(frontSlot.yaw)];
         stands.unshift(toWorld(frontSlot.p[0], frontSlot.p[2]));
-        inside = toWorld(frontSlot.p[0] + n[0] * 2.2, frontSlot.p[2] + n[1] * 2.2); doorOpen = true;
+        inside = toWorld(frontSlot.p[0] + n[0] * 2.2, frontSlot.p[2] + n[1] * 2.2); doorOpen = true; fitted = false;
       }
       const roomRefs: string[] = [];
       for (const r of rooms) {
@@ -335,7 +341,7 @@ export class GodNav {
         const rname = r.name ?? r.id, floor = r.floor ?? 0;
         roomRefs.push(rref);
         out.push({ id: e.id, room: r.id, ref: rref, name: `${base.name} / ${humanTitle(r.id)}`, kind: 'room', what: `${rname} of ${base.name}${floor ? `, floor ${floor}` : ''}`,
-          words: [...new Set([...words(r.id), ...words(rname), ...base.words, 'room', 'inside'])], at, level: this.h.levelAt(at[0], at[1], ry), rise: r3((r.y ?? 0) * wp.s), floor, poly, roomFrame, ...(stands[0] ? { entry: { p: stands[0], level } } : {}) });
+          words: [...new Set([...words(r.id), ...words(rname), ...base.words, 'room', 'inside'])], at, level: this.h.levelAt(at[0], at[1], ry), rise: r3((r.y ?? 0) * wp.s), floor, poly, roomFrame, ...(stands[0] ? { entry: { p: stands[0], level } } : {}), ...(fitted ? { fitted: true as const } : {}) });
       }
       // the room the front door opens into goes first (the entrance)
       if (front) { const fa = toWorld(front.at[0], front.at[1]); roomRefs.sort((a, b) => { const A = out.find((t) => t.ref === a)!, B = out.find((t) => t.ref === b)!; return (A.level - B.level) || (polyDist(A.poly!, fa) - polyDist(B.poly!, fa)); }); }
@@ -511,7 +517,11 @@ export class GodNav {
       const rooms = this.things().filter((x) => x.kind === 'room' && t.rooms?.includes(x.ref));
       const room = t.rooms?.length === 1 ? rooms[0] : rooms.filter((x) => x.rise !== undefined && x.rise >= 0 && x.rise < LOW_RISE_M && x.poly?.length)
         .sort((a, b) => (a.rise! - b.rise!) || polyDist(a.poly!, entrance!) - polyDist(b.poly!, entrance!) || a.ref.localeCompare(b.ref))[0];
-      const inner = room ? this.goal(room, me, except) : null;
+      // #2383: a door-fitted building's room is entered as an open doorway's was (no interior search from the door: the
+      // listing offers buildings ~130 m out, and a route search per building there kept ~16 more ground tiles per sweep);
+      // its centre's standing room when that lies in the room, else the room's own reach-checked goal
+      const c = room?.fitted && t.rooms?.length === 1 ? near(room.at, room.level, 40) : null;
+      const inner = room ? (c && room.poly && inPoly(c.p[0], c.p[1], room.poly) ? c : this.goal(room, me, except)) : null;
       goal = inner;
       if (!inner) this.blocked.set(t.ref, `The interior of ${t.ref} is not reachable right now; its entrance or the route inside is blocked.`);
       else this.blocked.delete(t.ref);

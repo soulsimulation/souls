@@ -2347,7 +2347,7 @@ const soulCatalog = (() => {
 // local copy, with no call to the world. Pure functions over the catalog the world publishes at /v1/edge/catalog. What
 // the agent loads into its context is what a question asks for and no more; every answer says what it left out.
 
-const STOP = new Set(["the", "a", "an", "to", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
+const STOP = new Set(["the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
 const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"] };
 const tokensOf = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => (w.length > 4 && w.endsWith("ies") ? w.slice(0, -3) + "y" : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
@@ -2423,6 +2423,12 @@ function namesake(ix, p) {
   const me = placeWords(p).name.join(" "), out = new Set();
   if (me.includes(" ")) for (const [name, shown] of by.get(p.parent ?? "") ?? []) if (name.includes(" ") && (name.startsWith(me + " ") || me.startsWith(name + " "))) out.add(shown);
   return [...out].slice(0, 6);
+}
+/** #2452: water no walk reaches (the world's paths go round it); its bank does: the shore it lies in, or the one inside it. */
+function waterEdge(ix, p) {
+  if (p.kind !== "water") return null;
+  const parent = p.parent ? ix.places.get(p.parent) : null;
+  return parent?.kind === "shore" ? parent : (ix.kids.get(p.id) ?? []).find((k) => k.kind === "shore") ?? null;
 }
 /** The place words name best, or null: the anchor of "near the pond" and "in the library". */
 function bestPlace(ix, words, at) {
@@ -2504,7 +2510,9 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
     const name = placeWords(p).name, full = name.join(" ") === q.join(" "), inside = nameIn(q, name);
     const s = full ? 100 + score(q, placeWords(p)) : inside ? 50 + inside : score(q, placeWords(p)); if (!s) continue;
     const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    // #2452: water's row walks to its bank, and says so: the world refuses a walk into the water itself
+    const edge = waterEdge(ix, p), act = p.fixed ? null : ix.walkId(edge ?? p);
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -3637,7 +3645,7 @@ return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, h
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.35.0";
+const VERSION = "2.36.0";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
@@ -4414,9 +4422,18 @@ async function memoryCommand(...words) {
 
 // Every authenticated response carries `inbox`: whether a listen is open and how many
 // owner messages wait. Surface waiting messages on stderr so no command hides them.
+// #2452: not the ones the agent already holds: those `listen` handed over (`heard`) and the one this command's --for names.
+// A world that lists no ids (`waiting`) is judged by its one waiting message.
+export function waitingCount(inbox, held) {
+  const n = inbox?.queued; if (!Number.isInteger(n) || n <= 0) return 0;
+  if (Array.isArray(inbox.waiting)) return inbox.waiting.filter((id) => !held.has(id)).length;
+  return n === 1 && held.has(inbox.latest?.id) ? 0 : n;
+}
+const FOR_ARG = (() => { const i = process.argv.indexOf("--for"); return i > 0 ? process.argv[i + 1] : undefined; })();
 function noticeInbox(data) {
-  const n = data?.inbox?.queued;
-  if (Number.isInteger(n) && n > 0) process.stderr.write(`OWNER: ${n} message(s) waiting. Run: ${CLI} listen\n`);
+  if (!(data?.inbox?.queued > 0)) return;
+  const n = waitingCount(data.inbox, new Set([...(load().heard ?? []).map((h) => h.id), ...(FOR_ARG ? [FOR_ARG] : [])]));
+  if (n > 0) process.stderr.write(`OWNER: ${n} message(s) waiting. Run: ${CLI} listen\n`);
 }
 
 // #1937: a world refuses a client older than its minimum (docs/architecture/api.md, frozen), and a home caches that minimum
@@ -5390,6 +5407,12 @@ export function findNext(id, { code, did_you_mean, candidates } = {}) {
   const words = id.split(/[:._/-]+/).filter((w) => w && w !== "here").join(" ");
   return words ? { next: `${CLI} find "${words}"` } : {};
 }
+/** #2452: a walk the world refuses as place.unwalkable: the nearest place a walk reaches (the world's `next`), and a refresh
+ *  only when this machine's copy of the catalog is older than the world's (the local files; no call). */
+export function unwalkableNext(d, stale = () => catalogOld(readJsonFile(CATALOG_FILE), load().world, readJsonFile(LIVE_FILE))) {
+  if (d?.code !== "place.unwalkable") return {};
+  return { ...(typeof d.next === "string" ? { nearest: d.next } : {}), ...(stale() ? { refresh: `${CLI} catalog --refresh: this copy of the catalog is older than the world's` } : {}) };
+}
 const shortAlternatives = (list) => list.slice(0, 3).map((a) => ({ ...a, label: shortLabel(a.id, a.label) }));
 
 async function caps(...args) {
@@ -5621,7 +5644,7 @@ async function act(...argv) {
     noteSteerRefusal(parsed, d);
     const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
     if (json) return { ...d, ...card };
-    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d), ...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -6237,7 +6260,9 @@ export function wakeFound(find, tokensOf, text) {
     for (const r of found) {
       if (!r.act || seen.has(r.act) || n >= each) continue;
       seen.add(r.act); n++;
-      rows.push({ act: r.act, ...(r.label ?? r.name ? { what: String(r.label ?? r.name).slice(0, 80) } : {}), ...(r.in ? { in: r.in } : {}), ...(r.metres !== undefined ? { metres: r.metres } : {}) });
+      // #2452: a row whose act goes beside the place it names (water's bank) says where it goes
+      const what = r.actTo ? `${r.actTo} (no walk goes into ${r.name})` : r.label ?? r.name;
+      rows.push({ act: r.act, ...(what ? { what: String(what).slice(0, 80) } : {}), ...(r.in ? { in: r.in } : {}), ...(r.metres !== undefined ? { metres: r.metres } : {}) });
     }
   }
   return rows.slice(0, WAKE_FOUND + 2);
