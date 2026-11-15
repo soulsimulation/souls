@@ -3950,6 +3950,15 @@ export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
 const WAKE_HELD_MS = soulWake.HELD_MS * TIME_SCALE;   // #1968
+// #2380: an agent's harness kills a shell command after about 2 minutes (Claude Code: 120 s). So every command but the
+// background ones (serve, listen, dashboard) answers within COMMAND_MS, its retries and waits included: a wait that would
+// end past it is not begun, a request gets only what is left (at least 3 s), and the command answers what it has. A rerun
+// keeps the same key, so nothing runs twice.
+export const COMMAND_MS = Number(process.env.EDEN_COMMAND_MS) > 0 ? Number(process.env.EDEN_COMMAND_MS) : 75_000;   // tests set less
+export const BACKGROUND = new Set(["serve", "listen", "dashboard"]);
+let COMMAND_END = Infinity;
+/** Whether a pause of `ms` (scaled as pause scales it) would end past this command's time. */
+const pastEnd = (ms) => Date.now() + ms * TIME_SCALE > COMMAND_END;
 // How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
 const SERVE_START_MS = 60_000;
 // #2084: the longest a command's request waits in serve's queue behind this Soul's other requests before serve refuses it itself
@@ -4157,6 +4166,7 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
   method ??= body ? "POST" : "GET";
   const cls = retry ? retryClass(method, path) : "none";
   timeoutMs ??= cls === "read" ? 25_000 : cls === "keyed" ? 40_000 : 90_000;
+  timeoutMs = Math.min(timeoutMs, Math.max(3_000, COMMAND_END - Date.now()));   // #2380
   const headers = { "content-type": "application/json" };
   if ((as === "soul" || as === "owner") && s.token) headers.authorization = `Bearer ${s.token}`;
   if (as === "dev" && s.identity) headers.authorization = `Bearer dev:${s.identity}`;
@@ -4167,14 +4177,14 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     const r = await callOnce(url, { method, headers, body, timeoutMs, recoverRead });
     if (r.load && r.load !== "green") calm(`the world is under load (${r.load}); answers may be slow`);
     worldNote(r.data);
-    const refused = r.status === 429 || r.status === 503, waitOut = (isBusy(r.status, r.data) || (isStalled(r.status, r.data) && stallRetries(cls, r.data, once))) && cls !== "none" && busy < RETRY.busyWaits && !actOverLimit(path, r.data);
-    const waitMs = waitOut ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null;
+    const refused = r.status === 429 || r.status === 503, canWait = (isBusy(r.status, r.data) || (isStalled(r.status, r.data) && stallRetries(cls, r.data, once))) && cls !== "none" && busy < RETRY.busyWaits && !actOverLimit(path, r.data);
+    const waitMs = canWait ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null, waitOut = canWait && !pastEnd(waitMs);
     if (keepSlowed) { /* a lookup about an earlier refusal neither adds one nor clears it */ }
     else if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? (cls !== "keyed" ? "none" : once ? "check" : "verify"), waitMs ?? r.retryAfterMs);
     else if (r.status >= 200 && r.status < 500) clearSlowed(path);
     if (r.status === 0 && cls !== "none") {
-      if (++failed < RETRY.tries && !r.data.error.proxy) {
-        const ms = fullJitter(failed - 1);
+      const ms = fullJitter(failed);
+      if (++failed < RETRY.tries && !r.data.error.proxy && !pastEnd(ms)) {
         process.stderr.write(`the world did not answer (${r.data.error.message.slice(0, 80)}); trying again in ${secs(ms)} (try ${failed + 1} of ${RETRY.tries})\n`);
         if (RECORD) recordWrite("wait", { why: "unanswered", path, waitMs: ms, try: failed + 1 });
         await pause(ms); continue;
@@ -4719,7 +4729,9 @@ async function ownCreate(name) {
 }
 /** Poll GET /v1/lifecycle/<requestId> (every 2 s, or the world's Retry-After) until the arrival is ready, then pair. */
 async function finishCreate(p, firstWaitMs) {
-  const path = `/v1/lifecycle/${p.requestId}`, t0 = Date.now(), deadline = t0 + LIFECYCLE_WAIT.totalMs * TIME_SCALE;
+  // #2380: the wait is the configured one, or what is left of the command's time when that is shorter; the words name it
+  const path = `/v1/lifecycle/${p.requestId}`, t0 = Date.now(), whole = LIFECYCLE_WAIT.totalMs * TIME_SCALE, span = Math.min(whole, COMMAND_END - t0);
+  const deadline = t0 + span, stated = secs(span < whole ? span : LIFECYCLE_WAIT.totalMs);
   let waitMs = Math.max(LIFECYCLE_WAIT.everyMs, firstWaitMs ?? 0), first = firstWaitMs !== undefined;
   for (;;) {
     if (!first) {
@@ -4740,9 +4752,9 @@ async function finishCreate(p, firstWaitMs) {
     first = false;
     if (Date.now() + waitMs * TIME_SCALE > deadline) {
       noteRefusal("/v1/souls", { status: 503, data: { code: "lifecycle-pending" } }, "none", null);
-      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${secs(LIFECYCLE_WAIT.totalMs)}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
+      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${stated}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
     }
-    calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${secs(LIFECYCLE_WAIT.totalMs)})`);
+    calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${stated})`);
     await pause(waitMs);
   }
 }
@@ -4849,10 +4861,10 @@ async function approval(action = "status") {
     save({ pendingApproval: undefined });
     return publicApproval(r.approval ?? r, s.world);
   }
-  const deadline = Date.now() + (action === "wait" ? 15 * 60_000 : 0);
+  const deadline = Math.min(Date.now() + (action === "wait" ? 15 * 60_000 : 0), COMMAND_END - 3_000);   // #2380: `approval wait` again resumes
   for (;;) {
     const r = await call("/v1/agent/approval/poll", { as: "none", body, timeoutMs: 30_000 });
-    if (r.status === 0 || r.status === 429 || r.status >= 500) { await sleep(3000); continue; }
+    if ((r.status === 0 || r.status === 429 || r.status >= 500) && Date.now() + 3000 < deadline) { await sleep(3000); continue; }
     const d = ok(r, "approval"), a = d.approval ?? d, token = d.token ?? a.token;
     if (a.status === "ready" && token) {
       if (!token.startsWith(`sim_${a.soulId}_`)) throw new Error("Approval returned a credential for a different Soul; nothing saved.");
@@ -4965,6 +4977,7 @@ async function loginWait() {
     }
     if (q.status === "ready") { clear(); return { login: "ended", requestId: q.id, why: "The login was approved, but it has already ended.", next: `${CLI} login` }; }
     if (q.status && q.status !== "pending") { clear(); const end = requestEnd(q); return { login: end, requestId: q.id, ...(REQUEST_ENDED[end] ? { why: REQUEST_ENDED[end] } : {}), next: end === "replaced" ? `${CLI} login wait` : `${CLI} login` }; }
+    if (pastEnd((d ? p.interval ?? 3 : 3) * 1000)) return { login: "pending", requestId: p.requestId, next: `${CLI} login wait` };   // #2380
     await pause((d ? p.interval ?? 3 : 3) * 1000);
   }
 }
@@ -5095,6 +5108,7 @@ async function retireWait() {
       return { retire: "ready", soul, retired: true, ...(here ? { here: "marked retired in this home; its memory stays here" } : {}) };
     }
     if (q.status && q.status !== "pending") { clear(); const end = requestEnd(q); return { retire: end, soul, retired: false, why: `${REQUEST_ENDED[end] ? REQUEST_ENDED[end] + " " : ""}Nothing was retired, and nothing changed here.`, ...(end === "replaced" ? { next: `${CLI} retire wait` } : {}) }; }
+    if (pastEnd((d ? p.interval ?? 3 : 3) * 1000)) return { retire: "pending", soul, next: `${CLI} retire wait` };   // #2380
     await pause((d ? p.interval ?? 3 : 3) * 1000);
   }
 }
@@ -5535,6 +5549,15 @@ export function parseActionArgs(input) {
 // id is an id, as a plan step is: an offer with no target (`pray`) has no colon, and the world refuses an id it does not
 // offer. With --wait it then long-polls until the receipt ends or an owner/social notification interrupts.
 const OFFER_ID = /^[a-z][\w-]*(?::\S+)?$/i;
+/** #2380 A1: the owner's card after an act made for it failed without the world closing it. A rerun that failed again
+ *  (`final`) is given up: the card closes `failed` with why, so the owner sees it. Otherwise the agent may still serve it
+ *  (another id, a rerun), and an agent's close is final, so the answer carries the exact close to run if it doesn't. */
+async function cardAfter(message, why, final) {
+  const line = clipped(why.replace(/\s+/g, " ").trim()).text, step = { close: `${CLI} ack ${message} ${JSON.stringify(line)} --close failed` };
+  if (!final) return step;
+  const shut = await closing(message, "failed", line).catch(() => ({}));
+  return shut.closed ? { closed: "failed", card: line } : shut.already ? {} : step;
+}
 async function act(...argv) {
   const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
   if (!args.length) throw new Error('usage: act <offered id> [params-json] [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
@@ -5565,7 +5588,7 @@ async function act(...argv) {
   let w = await keyedWrite("/v1/edge/act", forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body, { key, once: true });
   // without the default link: a key of its own (the first one's answer is kept), the same clientRef, so it is still one act
   if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { key: sideKey(w.key), ref: w.ref, once: true }); }
-  if (w.unconfirmed) return unconfirmed("act", w);
+  if (w.unconfirmed) { const u = unconfirmed("act", w); return { ...u, ...(forId ? await cardAfter(forId, `Couldn't do it: ${REASON[u.code] ?? "the world did not answer"}.`, w.resent) : {}) }; }
   if (actOverLimit("/v1/edge/act", w.r.data)) {   // #2107: not taken and not resent; exit 75, try later
     const e = w.r.data?.error ?? w.r.data ?? {};
     process.exitCode = 75;
@@ -5582,8 +5605,9 @@ async function act(...argv) {
   }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
-    if (json) return d;
-    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
+    if (json) return { ...d, ...card };
+    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -5804,7 +5828,8 @@ async function waitRaw(asked = 45, receiptId, { untilHeld = true } = {}) {
   const s = load();
   const { seconds, capped } = waitSpan(asked);
   receiptId = /^r_/.test(String(receiptId ?? "")) ? receiptId : s.lastReceipt;
-  const t0 = Date.now(), until = t0 + seconds * 1000;
+  // #2380: within the command's time, keeping 5 s for the last long-poll's answer and the receipt read
+  const t0 = Date.now(), want = t0 + seconds * 1000, until = Math.min(want, COMMAND_END - 5_000), cut = until < want;
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
   const since = cursor;
   const seen = [];
@@ -5837,7 +5862,7 @@ async function waitRaw(asked = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, ...(capped ? { waitCapped: `${capped}s, the most a wait holds; wait again while done is false` } : {}), since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, ...(capped || cut ? { waitCapped: cut ? `${Math.round((until - t0) / 1000)}s, the most one command waits; still going: \`wait\` again while done is false` : `${capped}s, the most a wait holds; wait again while done is false` } : {}), since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
@@ -8297,6 +8322,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (old?.warn) process.stderr.write(`warning: ${old.warn}\n`);
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null, pendingUpdate = startUpdateCheck(cmd);
   startFeedCheck(cmd, argv);
+  if (!BACKGROUND.has(cmd)) COMMAND_END = Date.now() + COMMAND_MS;   // #2380
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
     if (out && typeof out === "object" && !Array.isArray(out)) {
