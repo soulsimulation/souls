@@ -738,7 +738,10 @@ export class Spatial {
     if (o.door !== 'pass') return null;
     const [x, z] = o.obb.c, y0 = this.ground ? this.ground.standY(x, z) : this.scene.levels.find((l) => l.id === 0)?.y ?? 0;
     if (Math.abs(o.y0 - y0) <= 0.6) return 0;
-    const l = this.scene.levels.find((v) => v.id !== 0 && Math.abs(o.y0 - v.y) <= 0.6 && (!v.crop || (x >= v.crop[0] && x <= v.crop[2] && z >= v.crop[1] && z <= v.crop[3])));
+    // levels are shared by height across buildings: the one with standing room at the door's faces, nearest in height first
+    const sides = doorSides(o), room = (id: number) => sides.some((q) => { const read = this.clearanceCapped(id, q, 1); return !!read && read(q) >= 0.3; });
+    const l = this.scene.levels.filter((v) => v.id !== 0 && Math.abs(o.y0 - v.y) <= 0.6 && (!v.crop || (x >= v.crop[0] && x <= v.crop[2] && z >= v.crop[1] && z <= v.crop[3])))
+      .sort((a, b) => Math.abs(o.y0 - a.y) - Math.abs(o.y0 - b.y) || a.id - b.id).find((v) => room(v.id));
     return l ? l.id : null;
   }
   /**
@@ -774,6 +777,8 @@ export class Spatial {
             used.add(id);
             // a door with both faces on this side (one standing in the open) separates nothing: never a way on
             if (this.routeNow(world, profile, n.at, { level, p: b }, { ...rest, proveUnreachable: true }).ok) break;
+            // nor one that leads back out to where the walk started (in through one door of a building, out of another)
+            if (depth > 0 && this.routeNow(world, profile, start, { level, p: b }, { ...rest, proveUnreachable: true }).ok) break;
             next.push({ at: { level, p: b }, doors: [...n.doors, { id, level, from: a, to: b }], legs: [...n.legs, ...r1.route.legs], length: n.length + r1.route.length + hypot(b[0] - a[0], b[1] - a[1]), expanded: n.expanded + r1.route.expanded });
             break;
           }
