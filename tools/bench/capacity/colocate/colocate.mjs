@@ -141,7 +141,7 @@ function program(form) {
       P.host.send({ op: 'load', id: w.id, dir: w.dir, env, heapMb: w.heapMb });
     }
     while (!(await getJ(`${w.origin}/healthz`)).j?.ok) {
-      if (!P.alive(w) || w.failed) throw new Error(`${w.id} ended at boot: ${scrub(w.failed ?? JSON.stringify(w.ended ?? P.hostExit))}`);
+      if (!P.alive(w) || w.failed) throw new Error(`${w.id} ended at boot: ${scrub(w.failed ?? JSON.stringify(w.ended ?? P.hostExit))}${logTail(w)}`);
       if (Date.now() - t0 > 600_000) throw new Error(`${w.id} did not answer /healthz in 10 min`);
       await sleep(250);
     }
@@ -181,7 +181,7 @@ function shardProgram() {
   P.load = async (w) => {
     P.worlds.set(w.id, w); const t0 = Date.now(); spawnIn(w);
     while (!(await getJ(`${w.origin}/healthz`)).j?.ok) {
-      if (w.ended && !P.reload) throw new Error(`${w.id} ended at boot (${w.ended.code ?? w.ended.sig}): see shard/${w.id}/world.log`);
+      if (w.ended && !P.reload) throw new Error(`${w.id} ended at boot (${w.ended.code ?? w.ended.sig})${logTail(w)}`);
       if (Date.now() - t0 > 600_000) throw new Error(`${w.id} did not answer /healthz in 10 min`);
       await sleep(250);
     }
@@ -191,6 +191,8 @@ function shardProgram() {
   P.stop = async () => { P.reload = false; for (const w of P.worlds.values()) TAKEN.delete(w.port); for (const s of [...set.shards]) s.child.kill('SIGKILL'); await sleep(1000); };
   return P;
 }
+/** The last lines of a world's log, for a boot that ended (the run's artifact keeps only the report and results). */
+const logTail = (w) => { try { return ` — ${readFileSync(join(w.dir, 'world.log'), 'utf8').trim().split('\n').slice(-6).join(' | ').slice(-900)}`; } catch { return ''; } };
 const PROGRAMS = new Set();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { log(`interrupted (${sig})`); await Promise.all([...PROGRAMS].map((p) => p.stop())); process.exit(130); });
 
