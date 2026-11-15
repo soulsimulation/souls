@@ -9,7 +9,7 @@
 //
 //   node tools/worlds/fit-doors.mjs [--from <git rev>] [--check] <template>...
 //
-// --from: the commit holding the door-fit/1 templates (default: #2383's head below). --check: write nothing, exit 1 when
+// --from: the commit holding the door-fit/1 templates (default: #2397's squash commit on main, below). --check: write nothing, exit 1 when
 // a template differs from what the fit gives. Fake minds, in memory; Eden takes many minutes on a loaded machine.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -24,9 +24,9 @@ import { engineDoorReach } from '../../apps/server/src/edge-runtime-rules.ts';
 /** Doors left out of the templates: the rule's own list (door-fit.ts DOOR_FIT_HELD), which the rule already holds back;
  *  kept here as a guard so a template never carries one. */
 const CUT_OFF = DOOR_FIT_HELD;
-/** #2383's head (door-fit/1 templates from tools/worlds/fit-doors-v1.mjs: its doors in a final batch at their buildings'
- *  heights, on main with #2448). */
-const DOOR_FIT1_REV = '6684fd987';
+/** #2397's squash commit on main (door-fit/1 templates from tools/worlds/fit-doors-v1.mjs: its doors in a final batch at
+ *  their buildings' heights, with #2448), so the default and --check work from main. */
+const DOOR_FIT1_REV = 'c24bf911d';
 /** How far (m) a door may stand from its building's settled height before the sweep names it. */
 const OFF_MAX = 0.05;
 const boot = (tpl, name) => { const f = join(mkdtempSync(join(tmpdir(), 'fit-doors-')), `${name}.json`); writeFileSync(f, JSON.stringify(tpl)); return bootEden(() => {}, pathToFileURL(f)); };
