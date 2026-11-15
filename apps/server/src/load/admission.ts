@@ -310,6 +310,10 @@ export class Admission {
         // #2440: the turn waited on spans the next loop pass, whose timers phase runs the tick (and its long holds): those
         // are the tick's, not this job's (charged, they cost the requests ~20 s of credit after a 3 s hold)
         this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free);
+        // #2440: on spare time no credit spaces the jobs, and a job that finished inside its turn resumes this loop in the
+        // same check phase: without a turn of the loop between them, a queue of acts ran back to back and held the C0
+        // bookkeeping routes (#1750 A4: receipt p95 265 ms against 50). Let the poll phase in before the next one.
+        if (free && this.queue.length && !this.o.yieldTurn) await new Promise<void>(r => setImmediate(r));
       }
     } finally { this.draining = false; }
   }
