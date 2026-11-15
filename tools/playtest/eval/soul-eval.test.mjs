@@ -24,3 +24,15 @@ test('#2446: m4-hamlet-v1 names hello-hamlet, which the eval can boot; every m4-
   assert.deepEqual([...battery.items.map((i) => i.from), ...battery.notPorted.map((n) => n.id)].sort(), m4);
   assert.ok(battery.notPorted.every((n) => n.why));
 });
+
+test('#2468: harder-hamlet-v1 names hello-hamlet; every harder-v1 item is ported or listed as not; the scripted seat covers each instruction', () => {
+  const { battery, seatCfg } = resolveInputs({ battery: 'harder-hamlet-v1', seat: 'scripted' });
+  assert.equal(battery.world, 'hello-hamlet');
+  assert.ok(GENESIS[battery.world]);
+  assert.deepEqual(validateBattery(battery), []);
+  assert.deepEqual(validateScript(seatCfg.script), []);
+  for (const it of battery.items.filter((i) => i.instruction !== null)) assert.ok(seatCfg.script.rules.some((r) => new RegExp(r.match, 'i').test(it.instruction)), `no scripted rule for ${it.id}`);
+  const harder = resolveInputs({ battery: 'harder-v1', seat: 'scripted' }).battery.items.map((i) => i.id).sort();
+  assert.deepEqual([...battery.items.map((i) => i.from), ...battery.notPorted.map((n) => n.id)].sort(), harder);
+  assert.ok(battery.notPorted.every((n) => n.why));
+});

@@ -1,0 +1,16 @@
+{
+ "adapter": "scripted-owner",
+ "note": "$0 dry run of battery harder-hamlet-v1 (#2468) through the client's look/find/act/say, one rule per instruction, as scripted-m4-hamlet-v1 does. It proves the measuring, not an agent. wake-nothing has no owner message, so no rule: the heartbeat's text matches none and the seat does nothing.",
+ "script": {
+  "rules": [
+   { "match": "^Sit on the bench in the cottage, then sit on the chair", "do": [
+     ["resolve", "cottage bench"], ["act", "{resolved}", "{\"seconds\":5}", "--wait", "60"],
+     ["resolve", "presenter chair"], ["act", "{resolved}", "{\"seconds\":5}", "--wait", "60"],
+     ["act", "walk:lab-pond-hall", "--wait", "60"] ] },
+   { "match": "^Moss is at the presentation hall", "do": [ ["act", "walk:lab-presentation-hall", "--wait", "60"], ["say", "Hello Moss!", "--to", "Moss"] ] },
+   { "match": "^Sit on a bench for one minute", "do": [ ["resolve", "bench"], ["act", "{resolved}", "{\"seconds\":60}", "--wait", "60"], ["wait", "30", "{{prev.receipt.id}}"] ] },
+   { "match": "^Sit on a bench for two hours", "do": [ ["resolve", "bench"], ["act", "{resolved}", "{\"seconds\":7200}", { "onRefused": "continue" }], ["act", "{resolved}", "{\"seconds\":1800}"] ] }
+  ],
+  "unmatched": "No scripted response."
+ }
+}
