@@ -649,7 +649,11 @@ too, an inside doorway is 1.2 m wide where its wall has room, and a `core/door@2
 Every fitted door starts open for now (the coordinator's call until the multi-door passage is proven); a walk leaves
 each door it passes as it found it. An upstairs door is the building's child. A door a hand cannot work (something
 stands where the body steps to open it from one side or close it from the other) is swung the other way; if both ways are
-blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result, so new worlds have it. A live world keeps its drawn doorways: live-world door migration
+blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result, so new worlds
+have it: `tools/worlds/fit-doors-v1.mjs` and then `tools/worlds/fit-doors.mjs` run the live rules on each template and
+write the outside doors in one batch after everything else, each at its building's settled height (an inside or upstairs
+door is its building's child). A door stands at that height and never cuts a foundation pad into the slope (it would
+re-settle its building away from it). A live world keeps its drawn doorways: live-world door migration
 (`door-fit/1`, then `door-fit/2`, the last boot rules) is off until a fit can run in slices under 1 s, and runs only with
 `DOOR_FIT_BOOT=1`. With it on, a world gets it once at boot, one building at a time, each its own
 recorded edit, with the world serving between them; a restart part way through goes on where it stopped. A building the

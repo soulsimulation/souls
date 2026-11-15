@@ -80,6 +80,8 @@ export function thenPatch(a: Action, state: Record<string, unknown>, params: Rec
 export type ActuatorHost = {
   /** The Soul's body position (x, z), or null. */
   bodyAt(soul: EdgeSoul): Vec2 | null;
+  /** #2416: this world's day (posters date and age by it); absent: day 0. */
+  worldDay?(): number;
   /** #1751: true while a whole menu is built (no object named): far things stay out of it, as before. */
   wholeMenu?(): boolean;
   /** #1751: where a thing stands (x, z), or null. */
@@ -252,8 +254,8 @@ export function pollVotes(state: Record<string, unknown>): { by: string; i: numb
 }
 export const pollLines = (state: Record<string, unknown>, votes = pollVotes(state)) => pollOptions(state).map((o, i) => { const n = votes.filter(v => v.i === i).length; return `${o} — ${n} vote${n === 1 ? '' : 's'}`; }).join('\n');
 /** Why this Soul cannot do this list action here now (null = it can). `params` undefined = availability only. */
-export function listProblem(def: StoredDef, a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params?: Record<string, unknown>): Refusal | null {
-  if (isPosterAction(def, a)) return posterProblem(a, state, soul, params);   // entry 38
+export function listProblem(def: StoredDef, a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params?: Record<string, unknown>, today = 0): Refusal | null {
+  if (isPosterAction(def, a)) return posterProblem(a, state, soul, params, today);   // entry 38
   if (isWantedAction(def, a)) return wantedProblem(a, state, soul, params);
   if (isPinAction(def, a)) return pinProblem(a, state, soul, a.name === 'pin' ? params?.text : undefined, def);
   if (isSignupAction(def, a)) {
@@ -280,8 +282,8 @@ export function listProblem(def: StoredDef, a: { name: string }, state: Record<s
   return null;
 }
 /** The list board's next `text`/`textBy` after this Soul's action. */
-export function listPatch(def: StoredDef, a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params: Record<string, unknown>): Record<string, unknown> {
-  if (isPosterAction(def, a)) return posterPatch(a, state, soul, params);   // entry 38
+export function listPatch(def: StoredDef, a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params: Record<string, unknown>, today = 0): Record<string, unknown> {
+  if (isPosterAction(def, a)) return posterPatch(a, state, soul, params, today);   // entry 38
   if (isWantedAction(def, a)) return wantedPatch(a, state, soul, params);
   if (isPinAction(def, a)) return pinPatch(a, state, soul, params.text);
   if (isSignupAction(def, a)) {
@@ -331,8 +333,8 @@ function canonicalParams(def: StoredDef, a: Action, params: Record<string, unkno
   return out;
 }
 /** A def action's state patch: the `then` ops, or a pinboard's composed list. */
-export function actionPatch(def: StoredDef, a: Action, state: Record<string, unknown>, params: Record<string, unknown>, soul: EdgeSoul): Record<string, unknown> {
-  return isListAction(def, a) ? listPatch(def, a, state, soul, params) : thenPatch(a, state, canonicalParams(def, a, params));
+export function actionPatch(def: StoredDef, a: Action, state: Record<string, unknown>, params: Record<string, unknown>, soul: EdgeSoul, today = 0): Record<string, unknown> {
+  return isListAction(def, a) ? listPatch(def, a, state, soul, params, today) : thenPatch(a, state, canonicalParams(def, a, params));
 }
 /** The Soul-facing params of a def action: its declared string params (board text). */
 function actionParams(a: Action): Record<string, { type: 'string'; maxLength: number; description?: string; optional?: true }> {
@@ -413,7 +415,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
       const pick = s.key ? host.harvest?.(ctx.soul, s.key, a.name, params) : null; if (pick) return 'code' in pick ? pick : null;
       const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null; if (water) return isRefusal(water) ? water : null;
       const state = (s.key && host.stateOf?.(s.key)) || s.state || {};
-      return whenRefusal(a, state, nameOf(s)) ?? (isListAction(def, a) ? listProblem(def, a, state, ctx.soul) : isGameAction(def, a) ? gameProblem(def, a, state, ctx.soul) : null);
+      return whenRefusal(a, state, nameOf(s)) ?? (isListAction(def, a) ? listProblem(def, a, state, ctx.soul, undefined, host.worldDay?.() ?? 0) : isGameAction(def, a) ? gameProblem(def, a, state, ctx.soul) : null);
     };
     // #1084: a checkers board's move says when the game on it is this Soul's own, so her words reach the game she is playing
     // (a second game on another board is hers to start; no refusal stands in for that)
@@ -423,7 +425,7 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
     out[a.name] = {
       label: a.label, ...(mineLabel ? { labelFor: mineLabel } : {}), roles: 'anyone', reach: 'anywhere', params: actionParams(a), movesBody: true,
       available: (s: BuiltLike, ctx: any) => check(s, ctx),
-      validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
+      validate: (s: BuiltLike, p: Record<string, unknown>, ctx: any) => check(s, ctx, p) ?? (isListAction(def, a) ? listProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}, host.worldDay?.() ?? 0) : null) ?? (isGameAction(def, a) && a.name !== 'erase' ? gameProblem(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, ctx.soul, p ?? {}) : null) ?? (a.name === 'write' && 'text' in actionParams(a) ? boardTextProblem(p?.text, actionParams(a).text.maxLength) : null) ?? enumParamProblem(def, a, p ?? {}, nameOf(s)),
       apply: (s: BuiltLike, params: Record<string, unknown>, ctx: any) => {
         const fix = s.key && a.name === 'repair' ? host.repair?.(ctx.soul, s.key) : null;
         if (fix && !('code' in fix)) return { state: s, result: { action: a.name, summary: fix.summary }, bodies: [{ label: a.label, steps: fix.steps }] };
@@ -436,13 +438,13 @@ export function kindActions(def: StoredDef, host: ActuatorHost, nameOf: (s: Buil
         const contact = host.deferContacts && isContactActuator(def, a);
         const motion=contact&&s.key?host.contactPlan?.(ctx.soul,s.key,a.name,params):null;
         if(motion){const me=host.bodyAt(ctx.soul)!,far=(motion.level??0)>0||Math.hypot(me[0]-motion.root[0],me[1]-motion.root[2])>.1;
-          return {state:s,result:{action:a.name,...(def.tags?.includes('notebook')?{}:{set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul)}),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
+          return {state:s,result:{action:a.name,...(def.tags?.includes('notebook')?{}:{set:actionPatch(def,a,(s.key&&host.stateOf?.(s.key))||s.state||{},params,ctx.soul,host.worldDay?.()??0)}),...(def.tags?.includes('checkers')&&a.name==='move'?{summary:checkersSummary((s.key&&host.stateOf?.(s.key))||s.state||{},params,nameOf(s))}:{})},bodies:[{label:a.label,steps:[{verb:'stand',params:{}},...(far?[(motion.level??0)>0||motion.params.stroke?{verb:'mars:walk_to',params:{x:motion.root[0],z:motion.root[2],level:motion.level}}:{verb:'walk_to',params:{to:[motion.root[0],motion.root[2]],standoff:0}}]:[]),...(motion.face?[{verb:'mars:face',params:{target:{point:motion.face}}}]:[]),{verb:'mars:hand_actuator_v1',params:motion.params},...stepBack(def,a,motion),...gameStepBack(def,a,motion),...(motion.after?[{verb:'walk_to',params:{to:motion.after,standoff:0}}]:[])]}]};}
 
         // Solo flute is an access-checked object action, not an unguarded global activity spot.
         const flute=def.name==='core-flute-stand'&&def.version===1&&a.name==='play-flute';
         const me = host.bodyAt(ctx.soul)!, to = s.front ?? s.at!, far = flute ? Math.hypot(to[0]-me[0],to[1]-me[1])>.15 : Math.hypot(s.at![0] - me[0], s.at![1] - me[1]) > (contact ? CONTACT_REACH : ACT_REACH);
         const water = s.key ? waterPlan(a, s.key, ctx.soul, host) : null;
-        const patch = water && !isRefusal(water) ? { litres: water.litres } : actionPatch(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, params, ctx.soul);
+        const patch = water && !isRefusal(water) ? { litres: water.litres } : actionPatch(def, a, (s.key && host.stateOf?.(s.key)) || s.state || {}, params, ctx.soul, host.worldDay?.() ?? 0);
         // A door works from either side. Prefer the side the Soul already occupies,
         // so "close behind me" cannot silently walk it back out of the room.
         const front=contact&&def.components.opening&&s.front&&s.at
@@ -474,7 +476,7 @@ export function farOutcome(far: FarAct, finished: boolean, soul: EdgeSoul, find:
   const busy = host.busy?.(far.id, a.name); if (busy) return busy;
   const policy = host.policy?.(far.id, soul, a.name); if (policy) return policy;
   const no = whenRefusal(a, t.state, t.name); if (no) return no;
-  const patch = actionPatch(t.def, a, t.state, far.params, soul);
+  const patch = actionPatch(t.def, a, t.state, far.params, soul, host.worldDay?.() ?? 0);
   if (Object.keys(patch).length && !host.commit(far.id, patch, `${soul.soulId} ${a.name} ${t.name}`).accepted) return { code: 'object.refused', reason: `The world refused that change to ${t.name}.` };
   return 'done';
 }
@@ -515,7 +517,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // at the thing (farOutcome), never from across the world at the moment it is accepted
     const me = host.bodyAt(soul), at = host.thingAt?.(id);
     if (host.deferFar && me && at && Math.hypot(at[0] - me[0], at[1] - me[1]) > ACT_SIGHT) { const far = { id, action: a.name, params: (input.params ?? {}) as Record<string, unknown>, capability: `object:${id}:${a.name}` }; committed(() => host.deferFar!(soul, far)); return out; }
-    const patch = actionPatch(t.def, a, t.state, (input.params ?? {}) as Record<string, unknown>, soul);
+    const patch = actionPatch(t.def, a, t.state, (input.params ?? {}) as Record<string, unknown>, soul, host.worldDay?.() ?? 0);
     if (!Object.keys(patch).length) return out;
     // the object act runs inside the ledger's transaction (and may still roll back with the body's admission): change the
     // world only once that transaction has committed, never inside it (the world store has its own transaction)

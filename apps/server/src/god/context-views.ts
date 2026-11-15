@@ -18,13 +18,12 @@ import { contextRegionsOverlap } from './context-view-access.ts';
 import { PlaceIndex, type Place } from '../edge/ledger/places.ts';
 import { checkArtOriginals, readArtOriginal, type ArtOriginals } from './context-original-art.ts';
 export const CONTEXT_PRESENTATION = { source: 'architectural-context', lighting: 'fixed clear late morning (2026-06-21 10:30)', doors: 'definition default', omitted: ['Souls', 'carried and carryable items', 'live wildlife', 'live simulation clock'], live: false } as const;
-const live = new Map<ContextViewCache, () => Promise<void>>();
 /** #2192: a picture URL names its content key, so its bytes never change; private, because access is checked per viewer. */
 export const PICTURE_CACHE = 'private, max-age=31536000, immutable';
-/** Pending rows already live in SQLite. Bound cleanup even if a renderer fails to honor abort. */
-export async function closeContextViews(timeoutMs = 3000) {
-    const closing = Promise.allSettled([...live.values()].map(close => close()));
-    live.clear();
+/** Pending rows already live in SQLite. Bound cleanup even if a renderer fails to honor abort.
+ *  #2416: closes one world's context views (what its mountContextViews returned), never another world's. */
+export async function closeContextViews(views: { close(): Promise<void> } | undefined, timeoutMs = 3000) {
+    const closing = Promise.allSettled(views ? [views.close()] : []);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
         await Promise.race([closing, new Promise<void>(r => { timer = setTimeout(r, timeoutMs); })]);
@@ -217,8 +216,8 @@ export function mountContextViews(app: Hono, d: Deps) {
         if (!d.contextReady()) throw new Error('context frontier changed');
         current();
     });
-    const close = async () => { unsub(); lifetime.abort(new Error('world closed')); live.delete(cache); await cache.close(); await preparing?.catch(() => {}); };
-    live.set(cache, close);
+    let closed: Promise<void> | null = null;
+    const close = () => closed ??= (async () => { unsub(); lifetime.abort(new Error('world closed')); await cache.close(); await preparing?.catch(() => {}); })();
     const pixels = (entity: typeof god.model.entities extends Map<string, infer E> ? E : never) => {
         const { about, name, v, by, born, ...physical } = entity;
         return JSON.stringify(physical);

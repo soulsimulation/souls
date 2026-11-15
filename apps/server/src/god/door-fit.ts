@@ -66,9 +66,12 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
     if (!all && indoors(f.p[0] + SERIES_PROBE * Math.sin(f.r), f.p[1] + SERIES_PROBE * Math.cos(f.r))) { series.push(n ?? f.opening); return []; }
     const fy = y === undefined ? undefined : Math.round((y + (f.y ?? 0)) * 1000) / 1000;
     at.push(f.p); placed.push(ways[k]!);
-    return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: fy === undefined ? f.p : [f.p[0], fy, f.p[1]], r: f.r, params: { sx: f.sx, sy: f.sy },
-      // placed open (coordinator, until the multi-door passage #2434 is proven): the passage leaves a door as it found it
-      state: { open: true }, mode: 'strict' } as PlaceOp];
+    // placed open (coordinator, until the multi-door passage #2434 is proven): the passage leaves a door as it found it.
+    // Anchored 'center' at that height (#2397): a base-anchored door on a slope cut its own foundation pad at its y into the
+    // ground under its building's wall, which re-settled the building away from its door (#2448; the vineyard villa's door
+    // pad 1.17 m under the villa cut off its rooms). A door never reshapes the ground or re-settles.
+    return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: fy === undefined ? f.p : [f.p[0], fy, f.p[1]], r: f.r,
+      ...(fy === undefined ? {} : { anchor: 'center' }), params: { sx: f.sx, sy: f.sy }, state: { open: true }, mode: 'strict' } as PlaceOp];
   });
   return { ref: to.ref, doors, series, at, ways, placed };
 }

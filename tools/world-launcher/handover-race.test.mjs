@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChildPool } from './children.mjs';
+import { SHARD_SCRIPT } from './shard.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 const P0 = await testPort(4);
 
@@ -68,6 +69,21 @@ test('a released process that never exits fails the takeover clearly and the sta
   assert.equal(alive(standby), false, 'the standby process was stopped');
   process.kill(pid, 'SIGKILL'); await stopping;
   assert.equal(alive(pid), false);
+});
+
+test('#2444: a world from a shard is taken over once its release answers, though its program runs on with other worlds', async () => {
+  const w = world('sharded');
+  const a = pool([P0, P0 + 1]);
+  await a.ensure(w);
+  const { port } = a.state('sharded');
+  const b = pool([P0 + 2, P0 + 3]);
+  // its program's pid outlives it (the other worlds of the shard): here this test's own, which never exits
+  b.adopt(w, { port, pid: process.pid, script: SHARD_SCRIPT });
+  const p = await b.takeOver('sharded', () => a.stop('sharded'), { goneMs: 500 });
+  assert.ok(Number.isInteger(p), 'taken over: it did not wait for the program to end');
+  assert.equal(b.state('sharded').status, 'running');
+  const r = await fetch(`http://127.0.0.1:${p}/w/sharded/healthz`).then((x) => x.json());
+  assert.equal(r.pid, b.state('sharded').child.pid, 'it serves from the next launcher');
 });
 
 // R389/R390: a world stuck booting held prepareHandover (pool.settled) for its whole 90 s boot timeout, past the keeper's

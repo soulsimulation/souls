@@ -11,7 +11,7 @@ import type {Brain} from './brain.ts';
 import type {IntentControlV2} from './intent-control.ts';
 
 export function edenCoreRequested(cfg:Config,env:NodeJS.ProcessEnv){return cfg.worldKey==='eden'&&cfg.engine==='mars'&&env.ENABLE_EDEN_CORE==='1';}
-export async function edenHistoryFactory(db:Db,worldId:string,options?:{lifeV1?:boolean;newcomerResourcesV1?:boolean;sleepSnapshotV1?:boolean;lectureV1?:boolean;groundV1?:boolean}):Promise<EngineFactory>{
+export async function edenHistoryFactory(db:Db,worldId:string,options?:{lifeV1?:boolean;newcomerResourcesV1?:boolean;sleepSnapshotV1?:boolean;lectureV1?:boolean;groundV1?:boolean;env?:Record<string,string|undefined>}):Promise<EngineFactory>{
   const header=db.world(worldId);
   if(header?.rules_version.includes('+eg/1')&&!options?.groundV1)throw Error('eden-bootstrap.explicit-ground-extension-reader-required');
   if(options?.groundV1&&!options.lifeV1)throw Error('eden-bootstrap.ground-extension-reader-requires-life');
@@ -22,18 +22,19 @@ export async function edenHistoryFactory(db:Db,worldId:string,options?:{lifeV1?:
   if(options?.newcomerResourcesV1&&!options.lifeV1)throw Error('eden-bootstrap.newcomer-reader-requires-life');
   if(header?.rules_version.includes('+cp/2')&&!options?.newcomerResourcesV1)throw Error('eden-bootstrap.explicit-newcomer-reader-required');
   if(options?.lifeV1){const origin=header?.rules_version.includes('retained-shore/1')?await retainedCommonsShoreFactory({foodDeliveryV1:header.rules_version.includes('+fd/1'),socialEdenV1:header.rules_version.includes('+social-eden/1'),greenLandmarkV1:header.rules_version.includes('+g/1')}):await retainedCommonsShoreFactory({origin:commonsLifeReaderFactory(await edenOriginHistoryFactory(db,worldId)),foodDeliveryV1:true,socialEdenV1:true});const physical=options.groundV1?await edenGroundFactoryV1(origin):origin,resources=options.newcomerResourcesV1?commonsNewcomerResourcesFactory(physical):physical,lecture=options.lectureV1?edenLectureFactoryV1(resources):resources;return options.sleepSnapshotV1?nativeSleepSnapshotFactoryV1(lecture):lecture;}
-  return edenOriginHistoryFactory(db,worldId);
+  return edenOriginHistoryFactory(db,worldId,options?.env);
 }
-async function edenOriginHistoryFactory(db:Db,worldId:string):Promise<EngineFactory>{
+/** `env`: the world's own environment (#2416); the factories read SIM_SHARED_CARRY and SIM_SOULS_REPAIR from it. */
+async function edenOriginHistoryFactory(db:Db,worldId:string,env?:Record<string,string|undefined>):Promise<EngineFactory>{
   const header=db.world(worldId);
-  if(!header)return marsFactory({...EDEN_SAFE_COMMONS_WORLD,safeCrewRemoval:true});
+  if(!header)return marsFactory({...EDEN_SAFE_COMMONS_WORLD,safeCrewRemoval:true},env);
   const policy=db.db.prepare("SELECT seq FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.crewRemovalTransition.contract')='crew-removal-transition/1' ORDER BY seq LIMIT 1").get(worldId);
-  if(policy)return marsCrewRemovalTransitionFactory();
+  if(policy)return marsCrewRemovalTransitionFactory(env);
   const physical=db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.commonsTransition.contract')='commons-transition/1' ORDER BY seq LIMIT 1").get(worldId) as {payload:string}|undefined;
   const originalRules=physical?JSON.parse(physical.payload).commonsTransition.fromRulesVersion:header.rules_version;
-  if(!physical&&header.rules_version.includes('+commons/1'))return marsFactory({...EDEN_SAFE_COMMONS_WORLD,safeCrewRemoval:true});
-  if(originalRules.includes('+crew-removal/1'))return marsCommonsTransitionFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true},{safeArrivalV1:true});
-  return marsCrewRemovalTransitionFactory();
+  if(!physical&&header.rules_version.includes('+commons/1'))return marsFactory({...EDEN_SAFE_COMMONS_WORLD,safeCrewRemoval:true},env);
+  if(originalRules.includes('+crew-removal/1'))return marsCommonsTransitionFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true},{safeArrivalV1:true,env});
+  return marsCrewRemovalTransitionFactory(env);
 }
 
 export async function installEdenCore(host:WorldHost,options:{applyCrew:boolean;applyCommons:boolean;retainReader?:boolean}){

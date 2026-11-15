@@ -42,5 +42,5 @@ export function edenReaderOptions(env: NodeJS.ProcessEnv = process.env) {
 }
 /** The factory for this world: Eden core reads its history from the database; every other world uses its plain factory. */
 export async function worldFactory(db: Db, cfg: Cfg, env: NodeJS.ProcessEnv = process.env): Promise<EngineFactory> {
-  return edenCoreRequested(cfg, env) ? repairReader(cfg, await edenHistoryFactory(db, cfg.worldId, edenReaderOptions(env)), env) : plainWorldFactory(cfg, env);
+  return edenCoreRequested(cfg, env) ? repairReader(cfg, await edenHistoryFactory(db, cfg.worldId, {...edenReaderOptions(env), env}), env) : plainWorldFactory(cfg, env);
 }
