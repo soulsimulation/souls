@@ -24,7 +24,7 @@ import { heldGodThing } from './held.ts';
 import { waterRole, wordOf } from './water.ts';
 import { economyOn } from './layers.ts';
 import { supportY } from './nav.ts';
-import { posterStale, worldDay } from './poster-boards.ts';
+import { posterStale } from './poster-boards.ts';
 import { posterList, signupNoun, wantedList } from '@souls/world-compiler';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -89,6 +89,8 @@ export function signText(e: Entity, def: StoredDef): string | null {
 
 export type PerceiveHost = {
   model: WorldModel;
+  /** #2416: this world's day (posters, fading paintings); absent: day 0. */
+  worldDay?: () => number;
   version?: () => number;
   edge?: EdgeLedger;
   engine: { world: { entities: Record<string, any> } };
@@ -208,6 +210,7 @@ export class GodPerceive {
       thingAt: (id: string) => this.entries.get(id)?.at ?? null,
       deferFar: (soul: EdgeSoul, far: FarAct | null) => { if (far) this.farActs.set(soul.entityId, { soul, far }); else this.farActs.delete(soul.entityId); },
       hidden: (soul: EdgeSoul, at: Vec2) => !!this.h.edge?.knowledge?.hidesPoint(soul.soulId, at),
+      worldDay: () => this.h.worldDay?.() ?? 0,
       bodyAt: (soul: EdgeSoul): Vec2 | null => { const b = this.h.engine.world.entities[soul.entityId]; return b?.pose?.p ? [b.pose.p[0], b.pose.p[2]] : null; },
       commit: (id: string, patch: Record<string, unknown>, note: string) => this.h.commit!([{ op: 'set', id, state: patch }], note),
       stateOf: (id: string) => { const e = this.h.model.entities.get(id), def = e && this.h.model.resolvedDef(e.def); return e && def ? actuatedState(e, def) : null; },
@@ -290,7 +293,7 @@ export class GodPerceive {
     const near = this.h.namesNear(at, e.id).filter((n) => n !== name).slice(0, 2);
     const prefix = article(kind);
     const suffix = `${parent?.name ? ` in ${m.pathOf(parent.id)}` : ''}${near.length ? `, by ${near.join(' and ')}` : ''}${lay ? `; ${lay}` : ''}`;
-    const painting = paintingLine(e, def, worldDay());
+    const painting = paintingLine(e, def, this.h.worldDay?.() ?? 0);
     // Keep the complete bounded painting credit plus exactly the suffix visible before it was painted.
     // Unpainted input is unchanged; only painted initialization opts into the 230-character bound.
     const what = painting ? painting + clip(prefix + suffix, 120).slice(prefix.length) : prefix + suffix;
@@ -533,7 +536,7 @@ export class GodPerceive {
       const names = s.list === 'signup' ? s.text.split('\n').filter(Boolean).length : 0;
       // entry 25: counts only, never the names or the question (they come with the read)
       // entry 38: counts only (posters, out-of-date ones, wanted / offered / taken notes), never a title, a note or a name
-      const listLabel = s.list === 'posters' ? (() => { const ps = posterList(s.state ?? {}), old = ps.filter(p => posterStale(p)).length; return `Read ${s.name} (a poster wall, ${ps.length} poster${ps.length === 1 ? '' : 's'}${old ? `, ${old} out of date` : ''}, ${Math.round(d)} m)`; })()
+      const listLabel = s.list === 'posters' ? (() => { const ps = posterList(s.state ?? {}), old = ps.filter(p => posterStale(p, this.h.worldDay?.() ?? 0)).length; return `Read ${s.name} (a poster wall, ${ps.length} poster${ps.length === 1 ? '' : 's'}${old ? `, ${old} out of date` : ''}, ${Math.round(d)} m)`; })()
         : s.list === 'wanted' ? (() => { const ns = wantedList(s.state ?? {}), w = ns.filter(n => n.c === 'w').length, tk = ns.filter(n => n.tk).length; return `Read ${s.name} (a wanted/offered board, ${w} wanted, ${ns.length - w} offered${tk ? `, ${tk} taken` : ''}, ${Math.round(d)} m)`; })() : null;
       const label = listLabel ?? (s.game ? `Read ${s.name} (${s.game}, ${Math.round(d)} m)` : s.list === 'poll' ? `Read ${s.name} (a poll, ${s.votes ?? 0} vote${s.votes === 1 ? '' : 's'}, ${Math.round(d)} m)` : names ? `Read ${s.name} (a ${s.noun ?? 'sign-up sheet'}, ${names} name${names > 1 ? 's' : ''}, ${Math.round(d)} m)` : pinned && s.notebook ? `Read ${s.name} (a notebook, ${pinned} line${pinned > 1 ? 's' : ''} written, ${Math.round(d)} m)` : pinned ? `Read ${s.name} (${pinned} pinned note${pinned > 1 ? 's' : ''}, ${Math.round(d)} m)` : s.writable ? `Read ${s.name} (a board with writing on it, ${Math.round(d)} m)` : `Read ${s.name} (a sign, ${Math.round(d)} m): "${words.length > 160 ? words.slice(0, 157) + '…' : words}"`);
       caps.push({ id, verb: 'read', label, target: { id: s.id, kind: 'object' }, available: true });

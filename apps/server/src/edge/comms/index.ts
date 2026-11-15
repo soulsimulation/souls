@@ -152,8 +152,8 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     const box = deps.ownerInbox;
     // #1326: a clock that stalls during the wait ends it early (the frame then carries world.stalled), never an empty answer
     // at the timeout. One already stalled holds the wait at most 5 s, so a client polling in a loop doesn't spin.
-    const stalledAtStart = stalledNow(), ms = (stalledAtStart ? Math.min(seconds, 5) : seconds) * 1000, stalling = () => !stalledAtStart && stalledNow();
-    const unstall = stalledAtStart ? () => {} : whenStalled(() => streams.poke(soul.soulId));
+    const stalledAtStart = stalledNow(c), ms = (stalledAtStart ? Math.min(seconds, 5) : seconds) * 1000, stalling = () => !stalledAtStart && stalledNow(c);
+    const unstall = stalledAtStart ? () => {} : whenStalled(c, () => streams.poke(soul.soulId));
     try {
       if (!box) return await streams.wait(soul.soulId, after, ms, c.req.raw.signal, stalling);
       // SOULSIM-H F1: a wait also ends when the owner writes (a message no listen has handed over, or one sent after

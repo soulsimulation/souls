@@ -35,7 +35,7 @@ import {applyUpperFloorsV1,placeLevelOf,previewUpperFloorsV1,type UpperFloorsFac
 import {registerAssets} from './catalog-adapter.ts';
 import {socialEdenTransitionV1Schema,type SocialEdenTransitionV1} from '@souls/engine-contract';
 import {searchArrival,arrivalPocket,type ArrivalGround,type ArrivalPocket,type ArrivalSpot} from './arrival-search.ts';
-import {attachGround,groundRegistry,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
+import {attachGround,groundRegistry,groundReach,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
 // The Mars engine behind Sim's engine contract.
 //
 // The shell speaks a small BODY LANGUAGE (walk_to, sit, stand, rest, wave,
@@ -3629,7 +3629,7 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND, env: Re
       // (decoded once: registerAssets clones what it keeps, so the graph goes on to Runtime.restore unshared)
       const decoded=decodeSnapshot(s.mars);
       {const ep=(decoded as any).world?.entityPhysicsV1;if(ep)registerAssets(ep.assets);}
-      const rt = m.Runtime.restore(s.mars, (s as {groundV1?:boolean}).groundV1 ? groundRegistry(registry) : registry, services(base), m.invariants, decoded);
+      const rt = m.Runtime.restore(s.mars, (s as {groundV1?:boolean}).groundV1 ? groundRegistry(registry, groundReach((decoded as any).world?.groundV1)) : registry, services(base), m.invariants, decoded);
       if(cfg.scene==='eden-commons'&&(rt.world.base.campus!=='eden-commons'||rt.world.base.staticHash!==base.base.staticHash))throw new Error('snapshot commons physical base differs from the native factory');
       const engine = new MarsEngine(m, rt, s.cfg ?? cfg, { programs: s.programs, nextProg: s.nextProg, leaving: s.leaving,renderPlatformsV1:s.renderPlatformsV1 });
       if (s.quiet) engine.beginQuiet();
@@ -3641,11 +3641,11 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND, env: Re
 /** Explicit reader for a logged Greenfield -> commons physical checkpoint.
  * Genesis stays Greenfield. A newly constructed commons world is not a replay
  * substitute; only its validated checkpoint can enter this history reader. */
-export async function marsCommonsTransitionFactory(cfg:MarsWorldConfig=GREEN_FIELD_WORLD,options?:{safeArrivalV1?:boolean}):Promise<EngineFactory> {
+export async function marsCommonsTransitionFactory(cfg:MarsWorldConfig=GREEN_FIELD_WORLD,options?:{safeArrivalV1?:boolean;env?:Record<string,string|undefined>}):Promise<EngineFactory> {
   if(cfg.scene!=='greenfield')throw new Error('commons-transition.factory-origin');
   const target=options?.safeArrivalV1?{commonsArrivalV1:true,safeArrivalV1:true}:{};
-  const old=await marsFactory({...cfg,commonsTransitionV1:true,...(options?.safeArrivalV1?{commonsArrivalV1:true}:{})}),
-    next=await marsFactory({...cfg,...EDEN_COMMONS_WORLD,commonsTransitionV1:true,...target});
+  const old=await marsFactory({...cfg,commonsTransitionV1:true,...(options?.safeArrivalV1?{commonsArrivalV1:true}:{})},options?.env),
+    next=await marsFactory({...cfg,...EDEN_COMMONS_WORLD,commonsTransitionV1:true,...target},options?.env);   // #2416: the world's env
   const allowed=(v:string)=>v===old.rulesVersion||v===next.rulesVersion;
   return {rulesVersion:old.rulesVersion,canReplayHistory:allowed,canRestoreSnapshot:allowed,
     genesis:old.genesis,

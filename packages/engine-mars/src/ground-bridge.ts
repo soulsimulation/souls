@@ -71,7 +71,7 @@ export function groundFact(g: Ground, editSeq: number, opts: { paged?: boolean }
 import { swimTo, swimIn, shoreToward, groundTravel, inDeepWater, destinationInDeepWater } from '../../../mars/viewer/engine/locomotion/swim.ts';
 import { acknowledgeRelocation, humanStaticClearance, humanStaticClearanceWithOverlay, speedWithinCap, SPEED_CAPS } from '../../../mars/viewer/engine/runtime/invariants.ts';
 import { entityList } from '../../../mars/viewer/engine/world/entity-list.ts';
-import { WALK_SPEED_CAP, setWalkReach } from '../../../mars/viewer/engine/locomotion/walk.ts';
+import { WALK_SPEED_CAP, walkToWithin } from '../../../mars/viewer/engine/locomotion/walk.ts';
 import { G_SWIM, swimRootY } from '../../../mars/viewer/engine/spatial/ground.ts';
 import type { Spatial } from '../../../mars/viewer/engine/spatial/service.ts';
 import { dcos, dsin } from '../../../mars/viewer/engine/core/math.ts';
@@ -82,10 +82,17 @@ type Rt = { world: any; registry: Map<string, any>; services: Record<string, any
 
 /** Verbs a ground world adds to its registry. */
 export const GROUND_VERBS = [swimTo, groundTravel, swimIn];
-/** The registry with the ground verbs (the same map when they are there already). */
-export function groundRegistry(base: Map<string, any>): Map<string, any> {
-  if (GROUND_VERBS.every((v) => base.get(v.verb) === v)) return base;
-  const m = new Map(base); for (const v of GROUND_VERBS) m.set(v.verb, v); return m;
+/** GOD-ENV: how far walk_to reaches on this ground (a god's world may grow past ±500 m: its recipe's extent). */
+export function groundReach(fact: { recipeHash: string } | undefined): number {
+  const ext = fact ? groundRecipe(fact.recipeHash)?.extent : undefined;
+  return ext ? Math.max(500, ...ext.map((v) => Math.abs(v))) : 500;
+}
+/** The registry with the ground verbs, and walk_to reaching `reach` m (the same map when they are there already).
+ *  #2416: the reach is this world's own, in its own registry. */
+export function groundRegistry(base: Map<string, any>, reach = 500): Map<string, any> {
+  const walk = base.has('walk_to') ? walkToWithin(reach) : undefined;
+  if (GROUND_VERBS.every((v) => base.get(v.verb) === v) && (!walk || base.get('walk_to') === walk)) return base;
+  const m = new Map(base); for (const v of GROUND_VERBS) m.set(v.verb, v); if (walk) m.set('walk_to', walk); return m;
 }
 
 const GROUND_SPEED_CAPS: Readonly<Record<string, number>> = { ...SPEED_CAPS, wade: WALK_SPEED_CAP, swim: WALK_SPEED_CAP, tread: 0.08 };
@@ -153,8 +160,7 @@ export function attachGround(rt: Rt): boolean {
   sp.pagedCover = paged ? () => pagedCover(rt) : undefined;
   sp.setGround(groundField(fact.recipeHash), rt.world, coverPoints(rt), { paged });
   // GOD-ENV: a god's world may grow past ±500 m; walk_to reaches its bounds (only ground worlds ever get here)
-  const ext = groundRecipe(fact.recipeHash)?.extent; if (ext) setWalkReach(Math.max(500, ...ext.map((v) => Math.abs(v))));
-  rt.registry = groundRegistry(rt.registry);
+  rt.registry = groundRegistry(rt.registry, groundReach(fact));
   rt.invariants = groundInvariants(rt.invariants);
   return true;
 }
