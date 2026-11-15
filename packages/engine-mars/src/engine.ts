@@ -2246,6 +2246,27 @@ export class MarsEngine implements Engine {
     const { g, at } = this.arrivalGroundV1(), q: [number, number] = [at[0], at[1]];
     return !(g.clear(q) >= g.radius && g.medium(q) <= 1) || !arrivalPocket(g, q).open;
   }
+  /** Where a direct create's birth-near/1 hint (no `first`) goes, or null for none. The hint keeps spawnHuman's rings first
+   *  (6 rings of 0.9 m, 91 spots), so placement is unchanged while they have room, and once they are full lands the body on
+   *  the nearest free standing ground instead of throwing (no free standing room: a fault and a rewind of the world).
+   *  - arrival-clearance/1 (`safeArrivalV1`): the rings already check the standing disc, so every birth carries it.
+   *  - otherwise only when fewer than `free` spots stand clear of bodies (0.8 m) and of solids (the standing disc), less the
+   *    `queued` births not yet applied, so the default placement stays bit-identical on an arrival point with room. Read-only. */
+  arrivalCrowdV1(queued = 0, free = 24): [number, number] | null {
+    const [ax, az] = this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival;
+    if (this.cfg.safeArrivalV1) return [ax, az];
+    const people = listEntities(this.ents).filter((e: any) => e.kind === 'human').map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]);
+    const spatial = this.rt.services.spatial as Spatial; spatial.sync(this.rt.world);
+    let open = 0;
+    for (let ring = 0; ring < 6; ring++) for (let k = 0; k < Math.max(1, ring * 6); k++) {
+      const ang = (k / Math.max(1, ring * 6)) * Math.PI * 2 + ring * 0.5, x = r3(ax + dcos(ang) * ring * 0.9), z = r3(az + dsin(ang) * ring * 0.9);
+      if (people.some(([px, pz]) => hypot(px - x, pz - z) < 0.8)) continue;
+      const grid = spatial.levelAt(0, [x, z]);
+      if (!grid || clearanceAt(grid, [x, z]) < HUMAN_RADIUS) continue;
+      if (++open >= free + queued) return null;
+    }
+    return [ax, az];
+  }
   /** birth-near/1: the nearest ground point (rings of 0.25 m out to 12 m) with a clear standing disc, nobody within
    * 0.8 m and no deep water. Walkability from there is proved by the caller's own physical walk, never assumed. */
   /** `opts` (#1521): `skip` a body's own place without taking it out of the table (a plan must not reorder it), and keep clear of
