@@ -18,7 +18,8 @@ import { hashOf, applyBatch, containerClaims, containerHidden, containerInside, 
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { legalEditsV1 } from '../edge-runtime-rules.ts';
+import { legalEditsV1, legalEditsV2 } from '../edge-runtime-rules.ts';
+import { sealedBy, type SealResident, type Sealed } from './seal-check.ts';
 import { previewWorldEditOffThreadV1, type PreviewViolationV1 } from './edit-preview.ts';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
@@ -1248,7 +1249,10 @@ export class EngineBridge {
     if (tick % 5 === 4 || this.activitySpots.deriving()) { this.spotsStep(); if (S) t = S.add('spots', t); }
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
-    if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
+    // #1744: edits every tick or two re-arm the first build faster than it finishes, so with Souls waiting the rescue read takes
+    // its tick (a poll, or #1548's one forced relabel per NAV_STUCK_TICKS) in place of the slice, or no read would ever come
+    if (this.navPending && tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
+    else if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
     else if (this.navHeld && tick % 10 === 3) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }   // held, the rescue still reads: a Soul that left lets the hold go, and #1548's forced relabel can fire
     else if ((this.navCold && (this.navColdSlices < NAV_REWARM_BURST || this.navHeld)) || tick % NAV_REWARM_POLL_TICKS === NAV_REWARM_POLL_AT) { this.navRewarmStep(startedAtMs); if (S) t = S.add('navRewarm', t); }
     else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
@@ -1446,7 +1450,7 @@ export class EngineBridge {
       // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
       // waiting Souls out and re-arms the re-warm.
       if (!E.navWarmV1?.(0)) {
-        if (this.navCold === null) { this.navWarm = false; this.navPending = true; return; }
+        if (this.navCold === null && !this.navPending) { this.navWarm = false; this.navPending = true; return; }   // #1744: already pending (edits keep cancelling it), the forced relabel below still applies
         this.navCold = true; this.navHeld = true;
         if (!this.navForceRelabel(E, souls.length)) return;
         this.navHeld = false;
@@ -1624,7 +1628,19 @@ export class EngineBridge {
       detail: m.released.length ? `${m.name} is using ${m.released.map(id => before.pathOf(id) || id).join(', ')}, which this edit changes (${m.reason}).` : `${m.name} is in this edit's way (${m.reason}).`,
       measured: { soul: m.soulId, at: m.from, ...(m.level ? { level: m.level } : {}) }, suggest: { p: m.to }, fix: `Wait until ${m.name} has moved on, or build elsewhere; Souls are not moved for an edit.` });
     for (const x of stuck) if (!named.has(x.body)) failures.push({ op: -1, code: 'body.in-the-way', entity: x.body, field: 'legal-edits/1', detail: `${x.name} is in this edit's way (${x.reason}).`, measured: { soul: x.soulId }, fix: `Wait until ${x.name} has moved on, or build elsewhere.` });
+    if (legalEditsV2(this.host)) failures.push(...this.sealFailures(before, after, diff, new Set([...named, ...moved.map(m => m.body), ...stuck.map(x => x.body)])));
     return failures.length ? failures : null;
+  }
+  /** legal-edits/2 (#2188): the Souls this edit would leave with no walk out (seal-check.ts), each named; `named` already are. */
+  private sealFailures(before: WorldModel, after: WorldModel, diff: Diff, named: Set<string | undefined>): Failure[] {
+    const residents: SealResident[] = [];
+    for (const m of this.host.minds.values()) { const b = this.engine.world.entities[m.entityId]; if (b && !named.has(m.entityId)) residents.push({ body: m.entityId, soulId: m.soulId, name: m.name, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0 }); }
+    if (!residents.length) return [];
+    let sealed: Sealed[];
+    try { sealed = sealedBy(before, after, diff, residents, { skipped: (souls) => this.log(`seal check: ${souls.length} Soul(s) past the window cap left to nav-connect/1`) }); } catch (e) { this.log(`seal check: ${(e as Error).message}`); return []; }
+    return sealed.map(s => ({ op: -1, code: 'body.sealed-in', entity: s.body, field: 'legal-edits/2',
+      detail: `${s.name} would have no walk out: this edit closes ${s.name} in ${s.pocket} m² at (${s.at.map(n => Math.round(n * 10) / 10).join(', ')}), shut off by ${s.by.slice(0, 2).map(id => after.pathOf(id) || id).join(' and ')}${s.by.length > 2 ? ` and ${s.by.length - 2} more` : ''}.`,
+      measured: { soul: s.soulId, at: s.at, pocket: s.pocket, by: s.by }, fix: `Leave a way out (a gap of 1 m, a door or a gate), or wait until ${s.name} has walked out.` }));
   }
   /** legal-edits/1: whether the draft's preview could find anything. True when an entity a rule watches (a body, an item, an
    *  engine-native part, a vehicle, a fixture held or reserved: anything but a resting god fixture) stands within LEGAL_NEAR_M

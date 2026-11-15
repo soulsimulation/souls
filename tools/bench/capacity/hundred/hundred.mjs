@@ -36,16 +36,19 @@ const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
 const N_SMALL = Number(opt('small', SHORT ? 6 : 100)), N_EDEN = Number(opt('eden', SHORT ? 1 : 4)), SEED = Number(opt('seed', 2301));
 const PORT = Number(opt('port', 4800)), CONTROL = PORT + 1, RANGE = [PORT + 2, PORT + 2 + 2 * (N_SMALL + N_EDEN) + 3];
-const ACTIVE_MS = Number(opt('active-min', SHORT ? 6 : 60)) * 60_000, GAP_MS = Number(opt('gap-min', SHORT ? 3 : 60)) * 60_000;
+const ACTIVE_MS = Number(opt('active-min', SHORT ? 4 : 60)) * 60_000, GAP_MS = Number(opt('gap-min', SHORT ? 3 : 60)) * 60_000;
 const [ACT_LO, ACT_HI] = opt('act-min', SHORT ? '0.5-1.5' : '2-10').split('-').map(Number);
 const QUIET_MS = SHORT ? 60_000 : 600_000, BUILD_PAR = Number(opt('build-parallel', 3));
 // short knobs (dev worlds only, #2295): silent 1 min, the walk out bounded at 2 min; real worlds keep the hour
 const BODY_KNOBS = SHORT ? { wanderTicks: 1200, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 2400 } : null;
-const SETTLE_MS = Number(opt('settle-min', SHORT ? 6 : 80)) * 60_000;   // agents silent → every world unloaded: wind-down + quiet + margin
+// #2367: --short's settle covers its wind-down (a 2 min walk out, 1 min quiet, the sweep) with a margin; the short
+// horizon lets a world with a reminder minutes ahead unload (the launcher's 10 min would keep all of them in memory)
+const SETTLE_MS = Number(opt('settle-min', SHORT ? 7 : 80)) * 60_000;   // agents silent → every world unloaded: wind-down + quiet + margin
+const HORIZON_MS = SHORT ? 60_000 : undefined;
 const OUT = resolve(opt('out', join(ROOT, '.local/bench/hundred', new Date().toISOString().replace(/[:.]/g, '-'))));
 const FIX = join(OUT, 'fixture'), LDATA = join(FIX, 'launcher'), HOME = join(OUT, 'home');
 const ORIGIN = `http://localhost:${PORT}`, MARS_WEB = join(ROOT, 'mars/viewer/dist');
-const MEM_MB = Number(opt('worlds-mem-mb', memFigure(25)));
+const MEM_MB = Number(opt('worlds-mem-mb', memFigure(SHORT ? 10 : 25)));   // #2367: --short under some memory pressure too
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 const sh = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
 const clean = (s) => String(s ?? '').split(ROOT).join('.').split(OUT).join('<out>');
@@ -53,7 +56,7 @@ mkdirSync(HOME, { recursive: true });
 const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] ${clean(a.join(' '))}`; console.log(s); appendFileSync(join(OUT, 'hundred.log'), s + '\n'); };
 for (const [p, fix] of [[MARS_WEB, 'pnpm build:viewer'], [join(ROOT, 'apps/web/dist/kit-contract.json'), 'pnpm --filter @souls/web build']]) if (!existsSync(p)) throw new Error(`missing ${relative(ROOT, p)}: run \`${fix}\` in the checkout`);
 const R = { issue: 2301, commit: sh('git', ['-C', ROOT, 'rev-parse', 'HEAD']), node: process.version, platform: process.platform, cpus: cpus().length, memGb: +(totalmem() / 2 ** 30).toFixed(1),
-  loadBefore: loadavg().map((x) => +x.toFixed(2)), short: SHORT, knobs: { small: N_SMALL, eden: N_EDEN, activeMin: ACTIVE_MS / 60_000, gapMin: GAP_MS / 60_000, actMin: [ACT_LO, ACT_HI], quietSec: QUIET_MS / 1000, worldsMemMb: MEM_MB, bodyKnobs: BODY_KNOBS, seed: SEED } };
+  loadBefore: loadavg().map((x) => +x.toFixed(2)), short: SHORT, knobs: { small: N_SMALL, eden: N_EDEN, activeMin: ACTIVE_MS / 60_000, gapMin: GAP_MS / 60_000, actMin: [ACT_LO, ACT_HI], quietSec: QUIET_MS / 1000, horizonSec: HORIZON_MS ? HORIZON_MS / 1000 : null, worldsMemMb: MEM_MB, bodyKnobs: BODY_KNOBS, seed: SEED } };
 const save = () => writeFileSync(join(OUT, 'results.json'), JSON.stringify(R, null, 1) + '\n');
 
 // ------------------------------------------------------------------ what the checkout has (named, never assumed)
@@ -65,7 +68,7 @@ let L = null;
 async function getJ(url, { ms = 10_000, headers = {} } = {}) { try { const r = await fetch(url, { headers, signal: AbortSignal.timeout(ms) }); return { status: r.status, j: await r.json().catch(() => null), h: r.headers }; } catch (e) { return { status: 0, j: null, error: e.name }; } }
 async function startLauncher({ unload }) {
   const cfgFile = join(OUT, `launcher-${unload ? 'run' : 'build'}.json`), memSupported = !R.missing.some((m) => m.key === 'mem');
-  const cfg = { eager: 0, worldHeapMb: 0, unloadStill: unload, ...(unload ? { stillQuietMs: QUIET_MS } : {}),
+  const cfg = { eager: 0, worldHeapMb: 0, unloadStill: unload, ...(unload ? { stillQuietMs: QUIET_MS, ...(HORIZON_MS ? { stillHorizonMs: HORIZON_MS } : {}) } : {}),
     // #2233's one memory figure when the checkout has it; otherwise the port-era cap at the same number of small worlds
     ...(unload && memSupported ? { worldsMemMb: MEM_MB } : { maxRunning: Math.min(RANGE[1] - RANGE[0] + 1, unload ? Math.max(1, Math.floor(MEM_MB / SMALL_MB)) : BUILD_PAR + 1) }), maxWorlds: N_SMALL + N_EDEN + 10 };
   const worldEnv = { SIM_BOOT_HASH: '1', ...(BODY_KNOBS ? { SIM_BODY_KNOBS: JSON.stringify(BODY_KNOBS) } : {}) };
@@ -103,7 +106,7 @@ const agentOf = (dir) => { try { return JSON.parse(readFileSync(join(dir, '.eden
 const soulApi = (dir, path, { method = 'GET', body, ms = 60_000 } = {}) => {
   const a = agentOf(dir);
   return fetch(`${a.world}${path}`, { method, headers: { authorization: `Bearer ${a.token}`, 'content-type': 'application/json', 'x-soul-client': 'bench/1' }, ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(ms) })
-    .then(async (r) => ({ status: r.status, j: await r.json().catch(() => null) }), (e) => ({ status: 0, j: null, error: e.name }));
+    .then(async (r) => ({ status: r.status, h: r.headers, j: await r.json().catch(() => null) }), (e) => ({ status: 0, j: null, error: e.name }));
 };
 
 // ------------------------------------------------------------------ A1: the fixture
@@ -219,7 +222,7 @@ async function run(fx) {
   }));
   // the needs and the kept live picture of every world, as the agents fall silent (one read each; the world is loaded now)
   const silentAt = Date.now(), before = {};
-  for (const w of worlds) before[w.slug] = { live: (await getJ(`${ORIGIN}/w/${w.slug}/v1/edge/live`, { headers: { 'x-soul-client': 'bench/1' } })).j?.clock ?? null, needs: a4.includes(w) ? needsOf((await soulApi(soulDir(w), '/v1/edge/here')).j) : undefined };
+  for (const w of worlds) before[w.slug] = { live: (await soulApi(soulDir(w), '/v1/edge/live')).j?.clock ?? null, needs: a4.includes(w) ? needsOf((await soulApi(soulDir(w), '/v1/agent/status')).j) : undefined };
   const win = samples.filter((s) => s.at >= t0 && s.at <= end);
   R.a6 = { ...summarizeActs(acts, win), fractionInMemory: inMemoryFractions(win), timeline: win.map(({ status, ...s }) => ({ ...s, at: Math.round((s.at - t0) / 1000) })) };
   log(`A6: ${acts.length} acts, ${R.a6.failed} failed, ${R.a6.refused} refused, added wait p50 ${R.a6.addedWaitMs.p50} p95 ${R.a6.addedWaitMs.p95} max ${R.a6.addedWaitMs.max} ms; in memory at most ${R.a6.inMemMax}`);
@@ -241,10 +244,10 @@ async function run(fx) {
     const p = await ps(); for (const [s, v] of Object.entries(p?.worlds ?? {})) if (v.status !== 'running' && v.status !== 'starting' && !unloadedAt[s]) unloadedAt[s] = Date.now(); else if (v.status === 'running') delete unloadedAt[s];
     if (Object.keys(p?.worlds ?? {}).every((s) => unloadedAt[s])) { allOut = Date.now(); break; }
   }
-  const p3 = await ps(), t3 = tree(L.pid), clocks = {};
-  for (const w of worlds) { const r = await getJ(`${ORIGIN}/w/${w.slug}/v1/edge/live`, { headers: { 'x-soul-client': 'bench/1' } }); clocks[w.slug] = { status: r.status, cache: r.h?.get?.('x-sim-cache') ?? null, clock: r.j?.clock ?? null, readAt: Date.now() }; }
+  const p3 = await ps(), t3 = tree(L.pid), clocks = {};   // each clock read as its Soul: the caller whose picture the launcher kept
+  for (const w of worlds) { const r = await soulApi(soulDir(w), '/v1/edge/live'); clocks[w.slug] = { status: r.status, cache: r.h?.get?.('x-sim-cache') ?? null, clock: r.j?.clock ?? null, readAt: Date.now() }; }
   R.a3 = { shown: !!allOut, allUnloadedAfterS: allOut ? Math.round((allOut - silentAt) / 1000) : null, stillRunning: Object.entries(p3?.worlds ?? {}).filter(([, v]) => v.status === 'running').map(([s]) => s),
-    processes: [...t3.keys()].map((pid) => ({ pid: pid === L.pid ? 'launcher' : 'child', command: clean(sh('ps', ['-o', 'args=', '-p', String(pid)])).slice(0, 120) })), rssMb: Math.round([...t3.values()].reduce((a, b) => a + b, 0) / 1024), memAvailableMb: memAvailMb(),
+    processes: [...t3.keys()].map((pid) => ({ pid: pid === L.pid ? 'launcher' : 'child', command: clean(sh('ps', ['-o', 'args=', '-p', String(pid)])).replace(/^\S*\/node /, 'node ').slice(0, 120) })), rssMb: Math.round([...t3.values()].reduce((a, b) => a + b, 0) / 1024), memAvailableMb: memAvailMb(),
     clocks: Object.fromEntries(Object.entries(clocks).map(([s, c]) => [s, { status: c.status, cache: c.cache, clock: c.clock }])), horizons: p3?.horizons ?? {} };
   log(`A3: ${allOut ? `every world unloaded ${R.a3.allUnloadedAfterS} s after the agents fell silent` : `not shown: ${R.a3.stillRunning.length} world(s) still in memory`}; ${R.a3.processes.length} process(es), ${R.a3.rssMb} MB`);
   save();
@@ -276,7 +279,7 @@ async function run(fx) {
     const f0 = stopTick(w.slug), wasIn = (await ps())?.worlds?.[w.slug]?.status;
     const walks = fx.ids[w.template]?.walk?.length ? fx.ids[w.template].walk : ['sit-ground:here'], t = Date.now();
     const r = await cli(soulDir(w), ['act', walks[0], '--json'], 120_000);
-    const still = await childStill(w.slug), here = await soulApi(soulDir(w), '/v1/edge/here');
+    const still = await childStill(w.slug), here = await soulApi(soulDir(w), '/v1/agent/status');
     R.a4[w.slug] = { template: w.template, statusBefore: wasIn, gapS: Math.round((t - (unloadedAt[w.slug] ?? t)) / 1000), actMs: r.ms, accepted: r.j?.accepted ?? null, code: r.j?.code ?? null,
       tickAtUnload: f0, still: still.status === 200 ? still.j : `missing (${still.status || 'no answer'}) #2297`,
       ticksMoved: f0 != null && Number.isFinite(still.j?.tick) ? still.j.tick - f0 : null, ticksForGap: Math.round((t - (unloadedAt[w.slug] ?? t)) / 50), needsBefore: before[w.slug]?.needs ?? null, needsAfter: needsOf(here.j) };

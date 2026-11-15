@@ -1,11 +1,12 @@
 // #2378: no stuck world. Real worlds (apps/server main.ts, fake minds) under the launcher's ChildPool and its guard, failing
 // on purpose (SIM_FAULT_INJECT=1), one test per freeze cause the crash-proofing of #2366 left:
 //  1 invariant corruption: a Soul's body broken in memory is quarantined and the same process runs on
-//  2 a restart loop (A2): a step that hangs at the same tick on every boot is quarantined by name on the third boot
+//  2 a restart loop (A2): a step that hangs on every boot (on a durable-clock world, one tick later each boot) is
+//    quarantined by its stable identity on the third boot, for a window of ticks
 //  3 a database wait: another process holds the write lock; the world's write waits its limit, halts by name, and the
 //    launcher restarts it once the lock is gone, exactly
 //  4 a disk under its headroom: an alert in the log, a prune by the retention rules (no more), and the world runs on
-// (5, a launcher hold that never ends, is guard.test.mjs (c2).) The timings are printed as test diagnostics.
+// (5, a launcher hold that never ends, is guard.test.mjs (c2, c3).) On a failure the world's log tail is printed. The timings are printed as test diagnostics.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,7 +34,7 @@ function harness(t, { slug, worldId, env, range, guard }) {
   const url = () => `http://127.0.0.1:${pool.status(slug).port}`;
   const h = {
     dataDir, frontiers, pool, world: { slug, dataDir },
-    log: () => readFileSync(join(logDir, `${slug}.log`), 'utf8'),
+    log: () => { try { return readFileSync(join(logDir, `${slug}.log`), 'utf8'); } catch { return ''; } },
     pid: () => pool.status(slug).pid,
     health: async () => (await fetch(`${url()}/w/${slug}/healthz`, { signal: AbortSignal.timeout(3000) })).json(),
     fault: (q) => new Promise((yes, no) => request_(`${url()}/__sim/fault?${q}`, { method: 'POST', agent: false }, (r) => { r.resume(); r.on('end', () => yes(r.statusCode)); }).on('error', no).end()),
@@ -44,6 +45,10 @@ function harness(t, { slug, worldId, env, range, guard }) {
     back: async (pid, t0, ms = 180_000) => { let goneAt = null; for (const end = Date.now() + ms; Date.now() < end;) { const s = pool.status(slug); if (!goneAt && s.pid !== pid) goneAt = Date.now(); if (s.status === 'running' && s.pid && s.pid !== pid) return { gone: goneAt - t0, serving: Date.now() - t0 }; await wait(50); } throw new Error(`${slug}: not serving again in ${ms} ms`); },
   };
   return h;
+}
+/** Run `body`; on a failure print the world's log tail first, so a failure in CI says what the world did. */
+async function withLogTail(h, body) {
+  try { await body(); } catch (e) { console.error(`--- the world's log, last 80 lines:\n${h.log().split('\n').slice(-80).join('\n')}`); throw e; }
 }
 async function admitSoul(h) {
   const { code } = (await h.request('/v1/admin', 'admin', { action: 'invite', uses: 1 })).json();
@@ -58,10 +63,12 @@ test('causes 1, 3, 4 on an Eden core world: corruption quarantined in place, a h
   const WORLD = 'no-stuck-eden-20261114';
   const h = harness(t, { slug: 'eden', worldId: WORLD, range: [P0, P0 + 5], guard: { pollMs: 1000 },
     env: { ENGINE: 'mars', ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_CLOSED_HUMAN_GOALS: '1', ENABLE_REGISTERED_HUMAN_ACTIVITIES: '1', ENABLE_LIVING_WORLD: '1', MIND_DRIVER: 'central', NODE_OPTIONS: '--max-old-space-size=1024', SIM_HANG_KILL_MS: '10000' } });   // (the production hang limit: a write's 5 s lock wait ends first)
+  await withLogTail(h, async () => {
   await h.pool.ensure(h.world); h.pool.startGuard();
   const soulId = await admitSoul(h);
 
-  // 1: a Soul's body broken in memory (its pose no number). Quarantined, held whole, the same process ticking on.
+  // 1: a Soul's body broken in memory (its pose no number), then the broken-body sweep run at once, as the next sweep tick
+  // would (fault-inject.ts: no race with the tick that would otherwise sweep it). Quarantined, held whole, the same process on.
   { const pid0 = h.pid(), t0 = Date.now(), before = (await h.health()).tick;
     assert.equal(await h.fault('kind=corrupt'), 202);
     let seen = null; for (let i = 0; i < 200 && !seen; i++) { seen = /\[world\] glitch rung=\w+ rule=entity\.corrupt tick=\d+ [^\n]*/.exec(h.log()); if (!seen) await wait(50); }
@@ -103,36 +110,47 @@ test('causes 1, 3, 4 on an Eden core world: corruption quarantined in place, a h
     assert.doesNotMatch(h.log(), /replay differs/);
     const halt = /\[world\] glitch rung=halt rule=([\w.-]+)/.exec(h.log());
     t.diagnostic(`3 database lock 12 s: process gone ${r.gone} ms, serving again ${r.serving} ms after the lock was taken (${halt ? `halted ${halt[1]}` : 'no halt line'}; exit ${exit?.signal ?? exit?.code} ${exit?.reason ?? ''}); frontier tick ${fr.tick} restored with the same hash; now tick ${health.tick}`); }
+  });
 });
 
-test('A2 (cause 2): a step that hangs at the same tick on every boot is quarantined by name, and the world comes up and runs', { timeout: 600_000 }, async (t) => {
-  // a toy world: no durable clock frontier, so a restart reruns the ticks since its last snapshot (the catch-up) and meets the
-  // same step again. bootStallMs 8 s: a catch-up step runs before the world serves, where the launcher's boot guard ends it
-  const h = harness(t, { slug: 'toy', worldId: 'no-stuck-toy-20261114', range: [P0 + 6, P0 + 11], guard: { pollMs: 1000, bootStallMs: 8000 }, env: {} });
+test('A2 (cause 2) on an Eden core world (durable clock): a step that hangs on every boot is quarantined by its identity, and the world comes up and runs', { timeout: 600_000 }, async (t) => {
+  // the durable clock frontier is written before the listeners, so a boot restores the tick its step hung at and dies at the
+  // next one: the step hangs for 30 ticks (K) from T. bootStallMs 8 s: a catch-up step may run before the world serves,
+  // where the launcher's boot guard ends it
+  const K = 30;
+  const h = harness(t, { slug: 'eden', worldId: 'no-stuck-loop-20261115', range: [P0 + 6, P0 + 11], guard: { pollMs: 1000, bootStallMs: 8000 },
+    env: { ENGINE: 'mars', ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_CLOSED_HUMAN_GOALS: '1', ENABLE_REGISTERED_HUMAN_ACTIVITIES: '1', ENABLE_LIVING_WORLD: '1', MIND_DRIVER: 'central', NODE_OPTIONS: '--max-old-space-size=1024' } });
+  await withLogTail(h, async () => {
   await h.pool.ensure(h.world); h.pool.startGuard();
   const pid0 = h.pid(), tick0 = (await h.health()).tick, T = tick0 + 100, events = h.events(), t0 = Date.now();
-  assert.equal(await h.fault(`kind=hang-at&tick=${T}`), 202);
+  assert.equal(await h.fault(`kind=hang-at&tick=${T}&ticks=${K}`), 202);
   // the first death, then the boots that meet it again, until one comes up with the step quarantined
+  const re = /\[world\] step quarantined: (fault-inject hang-at) skipped from tick (\d+) until tick (\d+) \(it ended the world on (\d+) boots in a row: [^\n]*\)/;
   let line = null, pid = pid0;
-  for (let boots = 0; boots < 4 && !line; boots++) {
+  for (let boots = 0; boots < 5 && !line; boots++) {
     await h.back(pid, t0); pid = h.pid();
-    for (let i = 0; i < 100 && !line; i++) { line = /\[world\] step quarantined: (afterTick\[\d+\][^\n]*) skipped at tick (\d+) \(it ended the world there on (\d+) boots in a row\)/.exec(h.log()); if (!line) await wait(100); }
-    if (!line && h.pid() === pid && h.pool.status('toy').status === 'running') { await wait(6000); }   // (this boot may yet meet it)
+    for (let i = 0; i < 100 && !line; i++) { line = re.exec(h.log()); if (!line) await wait(100); }
+    if (!line && h.pid() === pid && h.pool.status('eden').status === 'running') { await wait(6000); }   // (this boot may yet meet it)
   }
   assert.ok(line, 'a boot came up with the step quarantined by name');
-  assert.equal(Number(line[2]), T, 'at the tick it hangs'); assert.ok(Number(line[3]) >= 2);
-  // (the line can come from a boot after the one `back` returned: a boot that served, then met the step in its catch-up)
-  for (let i = 0; i < 600 && h.pool.status('toy').status !== 'running'; i++) await wait(50);
+  const from = Number(line[2]), until = Number(line[3]);
+  assert.ok(from >= T && from < T + K, `skipped inside the ticks it hangs at (${T}..${T + K - 1}): ${from}`); assert.ok(until >= T + K, `the window covers them (until ${until})`);
+  assert.ok(Number(line[4]) >= 2);
+  const deaths = [...h.log().matchAll(/--- exit [^\n]*/g)].length;
+  for (let i = 0; i < 600 && h.pool.status('eden').status !== 'running'; i++) await wait(50);
   pid = h.pid();
-  const served = Date.now() - t0, ended = (h.log().match(/^--- [^\n]* start toy /gm) ?? []).length;
+  const served = Date.now() - t0;
   await wait(2000);
   const a = (await h.health()).tick; await wait(1000); const b = (await h.health()).tick;
-  assert.ok(a > T && b > a, `the world runs on past the tick (${T} -> ${a} -> ${b})`);
+  assert.ok(a > T + K && b > a, `the world runs on past the ticks (${T + K} -> ${a} -> ${b})`);
   assert.equal(h.pid(), pid, 'and stays up');
+  { const hz = await h.health(); if (hz.tick < until) assert.deepEqual(hz.quarantine && { untilTick: hz.quarantine.untilTick, deaths: hz.quarantine.deaths }, { untilTick: until, deaths: Number(line[4]) }, 'healthz shows the skipped step while it is skipped'); }
   assert.equal(h.events().slice(0, events.length - 1), events.slice(0, -1), 'every event logged before the fault is kept');
   assert.doesNotMatch(h.log(), /replay differs/);
   const glitch = /\[world\] glitch rung=contained rule=world\.step-quarantined tick=(\d+)/.exec(h.log());
-  assert.ok(glitch && Number(glitch[1]) === T, 'counted as a glitch (world.step-quarantined)');
-  const exits = h.pool.status('toy');
-  t.diagnostic(`A2 restart loop: fault -> serving with the step quarantined ${served} ms (${ended} boots; restarts ${JSON.stringify(exits.restartsByReason ?? {})}); ${line[1]} skipped at tick ${T} after ${line[3]} deaths there; now tick ${b}`);
+  assert.ok(glitch && Number(glitch[1]) === from, 'counted once as a glitch (world.step-quarantined)');
+  assert.equal(h.log().match(/\[world\] step quarantined:/g).length, 1, 'named once, not once a tick');
+  const exits = h.pool.status('eden');
+  t.diagnostic(`A2 restart loop (durable clock): fault -> serving with the step quarantined ${served} ms (${deaths} deaths; restarts ${JSON.stringify(exits.restartsByReason ?? {})}); ${line[1]} skipped from tick ${from} (hangs ${T}..${T + K - 1}) until ${until} after ${line[4]} deaths; now tick ${b}`);
+  });
 });

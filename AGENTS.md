@@ -5,7 +5,7 @@ file. Keep it short: every rule here binds; detail lives in the linked docs.
 
 ## What this is
 
-Soul, the server and web app behind soul.game: persistent worlds, Souls driven by their owners' own agents at the
+Souls, the server and web app behind soul.game: persistent worlds, Souls driven by their owners' own agents at the
 edge, god mode for world creators, and a vendored deterministic engine under `mars/` (its invariants:
 [mars/AGENTS.md](mars/AGENTS.md)). **Code wins over docs**; fix a doc you find wrong. Start at
 [docs/README.md](docs/README.md). Checkout placement and recovery:
