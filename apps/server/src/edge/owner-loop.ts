@@ -78,6 +78,8 @@ type Link = {scope: {scope: string; owner: string}; message: string; steps?: Mes
    *  completed aboard; `flew`: the ride left its boarding while this Soul was aboard; `said`: the aboard progress line is out. */
   ride?: {object: string; name: string; since?: number; flew?: true; said?: true}};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
+/** #2452: the acts an instruction to sit is done by once the body is seated. */
+const SITS = new Set(['sit', 'sit-ground']);
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
   const v = step[0];
@@ -253,6 +255,8 @@ export class OwnerLoop {
         if (!r) continue;   // dropped at the next sweep: nothing the owner sees
         if (!OPEN.includes(r.phase)) {at(l.ride?.since !== undefined && this.world?.aboard?.(soul) ? l.ride.since + RIDE_TICKS : tick + 1); continue;}
         if (l.late) continue;   // its end closes it (`ended`)
+        // #2452: a sit closes its message once seated: each sweep looks until it is (holding needs a second of the pose)
+        if (SITS.has(verbOf(r as EdgeReceipt))) {at(Math.max(tick + 1, r.acceptedTick + 20)); continue;}
         at(r.acceptedTick + Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0)));
       } catch {at(tick + 1);}
     }
@@ -269,6 +273,13 @@ export class OwnerLoop {
       return;
     }
     if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full, tick); else this.forget(id); return;}
+    // #2452 (coordinator's decision): an instruction to sit is done once the Soul is seated. The sit goes on, timed or not; its
+    // end writes nothing more
+    if (!l.late && SITS.has(verbOf(r as EdgeReceipt)) && this.world?.holding?.(soul, id)) {
+      this.forget(id);
+      for (const one of [l, ...(l.also ?? [])]) this.report(one, r as EdgeReceipt, {text: 'Sitting now.', outcome: 'done'});
+      return;
+    }
     // a timed act gets the time it asked for, and a minute more, before it counts as overlong
     const limit = Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0));
     if (l.late || tick - r.acceptedTick < limit) return;
