@@ -116,24 +116,6 @@
         },
         {
           "op": "place",
-          "def": "core/door@2",
-          "name": "cottage-door-1",
-          "p": [
-            42.032,
-            2.369,
-            12.421
-          ],
-          "r": -1.069,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
           "def": "core/bench@1",
           "name": "bench",
           "in": {
@@ -369,25 +351,6 @@
             "d": 8,
             "floors": 1,
             "front": "s"
-          },
-          "tmp": "$df1"
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "lab-presentation-hall-door-1",
-          "p": [
-            14,
-            0,
-            -4.11
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.35,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
           }
         },
         {
@@ -446,25 +409,6 @@
             "d": 8,
             "floors": 1,
             "front": "n"
-          },
-          "tmp": "$df2"
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "lab-pond-hall-door-1",
-          "p": [
-            2,
-            0,
-            36.11
-          ],
-          "r": -3.141,
-          "params": {
-            "sx": 1.35,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
           }
         },
         {
@@ -791,6 +735,68 @@
               "what": "A small hamlet with a cottage on a grassy knoll, a pond, a presentation hall, a waterside hall and a closed reading room.",
               "tour": "Start at the Village Green near the plaza flag. The Presentation Hall to the northeast has a presenter’s chair beside a desk and an audience bench. South of the green, Waterside Hall stands beside Hamlet Pond. The closed Reading Room is northwest; Knoll Cottage and its outdoor bench are east of the green. The Orchard flag marks a proposed orchard, not planted fruit trees."
             }
+          }
+        }
+      ]
+    },
+    {
+      "note": "door-fit/1 (#2383): a real door in each fitted outside doorway, at its building's height",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cottage-door-1",
+          "p": [
+            42.032,
+            2.369,
+            12.421
+          ],
+          "r": -1.069,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "lab-presentation-hall-door-1",
+          "p": [
+            14,
+            0,
+            -4.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "lab-pond-hall-door-1",
+          "p": [
+            2,
+            0,
+            36.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
           }
         }
       ]

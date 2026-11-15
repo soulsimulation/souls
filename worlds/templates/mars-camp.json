@@ -1494,25 +1494,6 @@
                 }
               ]
             }
-          },
-          "tmp": "$df1"
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "kitchen-door-1",
-          "p": [
-            -14,
-            0,
-            -8.11
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.18,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
           }
         },
         {
@@ -1567,12 +1548,12 @@
               ]
             }
           },
-          "tmp": "$df2"
+          "tmp": "$df1"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df2"
+            "parent": "$df1"
           },
           "def": "core/door@2",
           "name": "living-room-door-1",
@@ -1584,24 +1565,6 @@
           "r": 1.571,
           "params": {
             "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "living-room-door-2",
-          "p": [
-            5.02,
-            0,
-            -8.11
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.35,
             "sy": 0.9
           },
           "state": {
@@ -1650,25 +1613,6 @@
                 }
               ]
             }
-          },
-          "tmp": "$df3"
-        },
-        {
-          "op": "place",
-          "def": "core/door@2",
-          "name": "bunkhouse-door-1",
-          "p": [
-            16.5,
-            0,
-            -8.11
-          ],
-          "r": 0,
-          "params": {
-            "sx": 1.18,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
           }
         }
       ]
@@ -2779,6 +2723,73 @@
                 "living-room"
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "note": "door-fit/1 (#2383): a real door in each fitted outside doorway, at its building's height",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "kitchen-door-1",
+          "p": [
+            -14,
+            0,
+            -8.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.18,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "bunkhouse-door-1",
+          "p": [
+            16.5,
+            0,
+            -8.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.18,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        }
+      ]
+    },
+    {
+      "note": "door-fit/2 (#2434): a real door in each outside doorway door-fit/1 left bare, at its building's height",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "living-room-door-2",
+          "p": [
+            5.02,
+            0,
+            -8.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
           }
         }
       ]
