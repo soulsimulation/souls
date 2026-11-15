@@ -5,7 +5,7 @@
 // can smooth inside them and never needs collision sliding to make progress.
 import { add2, dist2, pointInObb, rot2, sub2, type Vec2, hypot } from '../core/math.ts';
 import type { Diagnostic } from '../actions/types.ts';
-import { cellOf, centreOf, gridContentKeys, latticeCentre, nearestBlocker, segmentClearance, type GridSet, type LevelGrid } from './grid.ts';
+import { cellOf, centreOf, gridContentKeys, groundHeights, latticeCentre, nearestBlocker, segmentClearance, type GridSet, type LevelGrid } from './grid.ts';
 import type { AgentProfile, Link, SpatialScene } from './types.ts';
 
 export type Place = { level: number; p: Vec2 };
@@ -397,7 +397,11 @@ function obstaclesNear(scene: SpatialScene, g: LevelGrid, p: Vec2, grow: number,
   for (const o of scene.obstacles) if (want(o.id) && atHeight(o, g) && pointInObb(p, o.obb, grow)) out.add(o.id);
   return out.size ? [...out].sort() : undefined;
 }
-const atHeight = (o: { y0: number; y1: number }, g: LevelGrid) => g.y >= o.y0 - 0.3 && g.y < o.y1;
+/** On a composed ground grid, at the terrain under the obstacle's centre (groundHeights), else at the grid's floor. */
+const atHeight = (o: { obb: { c: Vec2 }; y0: number; y1: number }, g: LevelGrid) => {
+  const y = groundHeights.get(g)?.(o.obb.c[0], o.obb.c[1]) ?? g.y;
+  return y >= o.y0 - 0.3 && y < o.y1;
+};
 
 /**
  * `nameObstacles` for a failed search (see RouteOpts). An obstacle is named when it separates the
