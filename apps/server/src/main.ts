@@ -41,7 +41,7 @@ import {installBirthLooks} from './god/birth-look.ts';
 import { setKitViewerContract } from '@souls/generators';
 import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
-import { faultGuard, installFaultGuard, killRule, stallConfig, startWatchdog, writeLiveNow } from './load/watchdog.ts';
+import { faultExit, faultGuard, installFaultGuard, killRule, stallConfig, startWatchdog, stoppedByFault, writeLiveNow } from './load/watchdog.ts';
 import { StallLog } from './load/stall-log.ts';
 import { S, sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
@@ -211,7 +211,7 @@ monitor.register('hub', (l) => hub.setLoadLevel(l));
 { const b = engineBridge as unknown as { setLoadLevel?: (l: 'green' | 'amber' | 'red' | 'black') => void } | undefined; if (b?.setLoadLevel) monitor.register('perception', (l) => b.setLoadLevel!(l)); }
 // Waking limit: DARK unless SIM_WAKING_LIMIT=1 (tranche §5.1); bound below, once the edge body rule exists.
 let waking: WakingLimit | undefined;
-const app = buildApp({ load: { admission, monitor, crowded: (soulId) => waking?.position(soulId) ?? null }, cfg: config, db, host, auth, hub, brain, souls, takes, intentV2, edge, god, contextReady: engineBridge ? ()=>engineBridge.contextReady() : undefined, contextWait: engineBridge ? signal=>engineBridge.waitForContext({signal}) : undefined, contextLevelAt: engineBridge ? (x,z,y)=>engineBridge.levelAt(x,z,y) : undefined });
+const app = buildApp({ load: { admission, monitor, faults: () => faults.counts, crowded: (soulId) => waking?.position(soulId) ?? null }, cfg: config, db, host, auth, hub, brain, souls, takes, intentV2, edge, god, contextReady: engineBridge ? ()=>engineBridge.contextReady() : undefined, contextWait: engineBridge ? signal=>engineBridge.waitForContext({signal}) : undefined, contextLevelAt: engineBridge ? (x,z,y)=>engineBridge.levelAt(x,z,y) : undefined });
 if (process.env.SIM_WAKING_LIMIT === '1' && edge?.bodyRule) {
   const rule = edge.bodyRule;
   waking = new WakingLimit({ maxAwake: Number(process.env.SIM_MAX_AWAKE) || 12, owner: () => god?.owner ?? config.ownerId ?? null,
@@ -293,21 +293,29 @@ function stillAnswer() {
     ticksComputed: k.ticksComputed, ticksJumped: k.ticksJumped, jumps: k.jumps, lastHorizon: k.lastHorizon };
 }
 const loopback = (a: string | undefined) => a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
-// #2366 A1: a fault in a timer, a promise, a request handler or a tick is logged by name and the world goes on; 50 in a
-// minute is a broken world, restarted as planned (snapshot, exit 75). The process handlers go in once the world serves.
-const faults = faultGuard({ onStorm: (n) => { console.error(`[world] ${n} faults in a minute: planned restart (snapshot, exit 75)`); plannedSnapshot('fault storm: planned restart'); void shutdown('fault-storm', 75).catch(() => process.exit(75)); } });
-host.onFault = faults.note;
+// #2366 A1: a fault in a timer, a promise, a request handler, a tick or one listener's step is logged by name and the world
+// goes on; 50 in a minute is a broken world: a crash exit (70, never the planned 75) that the launcher's breaker counts, with
+// the step that threw most of them recorded for the next boot. A tick fault that leaves the clock stopped for good (its timer
+// gone, or unavailable with no named halt) exits the same way: nothing else would notice. The process handlers go in once
+// the world serves.
+const faults = faultGuard({ onStorm: (n, step) => { if (!closing) faultExit(config.dataDir, `world.fault.storm: ${n} faults in a minute`, step); } });
+host.onFault = (name, error, step) => {
+  faults.note(name, error, step);
+  const stopped = stoppedByFault(host, closing); if (stopped) faultExit(config.dataDir, stopped, null);
+};
 server.on('request', (req, res) => {
   try { onRequest(req, res); }
   catch (error) { faults.note('world.fault.request', error); if (!res.headersSent) res.writeHead(500, { 'Cache-Control': 'no-store' }).end('Internal error.'); else res.destroy(); }
 });
 // #2366: SIM_FAULT_INJECT=1 (tests and measurement only; loopback, never forwarded): POST /__sim/fault?kind=… makes this
 // world fail on purpose: tick, timer, rejection, request (a throw in a handler), hang (&ms=), alloc (one runaway turn),
-// leak (a growing heap across turns).
+// leak (a growing heap across turns), stop (a tick fault that stops the clock), storm (a step that throws every tick).
 const FAULT_INJECT = process.env.SIM_FAULT_INJECT === '1';
 function injectFault(kind: string, ms: number) {
   const boom = (where: string) => new Error(`injected ${where} fault (#2366)`);
   if (kind === 'tick') { const l = { afterTick: () => { host.listeners.splice(host.listeners.indexOf(l), 1); throw boom('tick'); } }; host.listeners.push(l); }
+  else if (kind === 'stop') { const l = { afterTick: () => { host.listeners.splice(host.listeners.indexOf(l), 1); host.stop(); throw boom('stop'); } }; host.listeners.push(l); }   // a fault that stops the clock
+  else if (kind === 'storm') host.listeners.push({ name: 'fault-inject storm', afterTick: () => { throw boom('storm'); }, stillness: () => [{ name: 'fault-inject storm', busy: true }] });   // a step that throws on every tick
   else if (kind === 'timer') setTimeout(() => { throw boom('timer'); }, 0);
   else if (kind === 'rejection') void Promise.reject(boom('rejection'));
   else if (kind === 'request') throw boom('request');

@@ -25,7 +25,8 @@ test('a world survives its own errors, and comes back exactly from a hang and a 
     BRAIN_MODE: 'fake', BRAIN_BUDGET_USD_PER_DAY: '0', ARCHIVE_TAKES: '0', PORT: String(port), HOST: '127.0.0.1', PUBLIC_URL: `http://127.0.0.1:${port}/w/eden`, BUILD_ID: 'crash-proof',
     SIM_FAULT_INJECT: '1', SIM_BOOT_HASH: '1', NODE_OPTIONS: '--max-old-space-size=768', SIM_HANG_KILL_MS: '5000', SIM_HEAP_KILL_MS: '2000', SIM_STALL_STACK_MS: '1000' });
   const frontiers = [];
-  const pool = new ChildPool({ root, range: [P0, P0 + 5], logDir, publicOrigin: 'http://127.0.0.1', healthPath: () => '/w/eden/healthz',
+  // (five restarts in a row here: the breaker and the backoff are widened, so the test sees each restart, not the hold)
+  const pool = new ChildPool({ root, range: [P0, P0 + 5], logDir, publicOrigin: 'http://127.0.0.1', healthPath: () => '/w/eden/healthz', guard: { breakerN: 10, backoffCapMs: 2000 },
     command: (w, port) => ({ cmd: process.execPath, args: [main], env: env(port) }),
     // the durable clock frontier the killed process left, read the moment the launcher saw it exit (before the restart)
     onChange: (slug) => { const s = pool.status(slug).status; if (s === 'restarting') try { const db = new Db(join(dataDir, 'sim.db')); try { frontiers.push(JSON.parse(db.db.prepare('SELECT body FROM clock_frontiers_v1 WHERE world_id=?').get(WORLD).body)); } finally { db.close(); } } catch (e) { frontiers.push({ error: e.message }); } } });
@@ -43,15 +44,17 @@ test('a world survives its own errors, and comes back exactly from a hang and a 
   const pid0 = pid();
 
   // A1: each kind of thrown error, the same process ticking on
-  for (const [kind, name] of [['tick', 'world.fault.tick'], ['timer', 'world.fault.uncaught'], ['rejection', 'world.fault.rejection'], ['request', 'world.fault.request']]) {
+  // (a listener's afterTick that throws is its own step: world.fault.step, named, and the rest of the tick runs on)
+  for (const [kind, name] of [['tick', 'world.fault.step'], ['timer', 'world.fault.uncaught'], ['rejection', 'world.fault.rejection'], ['request', 'world.fault.request']]) {
     const before = (await health()).tick, r = await fault(kind);
     assert.equal(r.status, kind === 'request' ? 500 : 202, kind);
     await wait(300);
     const after = await health();
     assert.ok(after.tick > before, `${kind}: still ticking (${before} -> ${after.tick})`);
     assert.equal(pid(), pid0, `${kind}: the same process`);
-    assert.match(log(), new RegExp(`\\[world\\] fault ${name.replace(/\./g, '\\.')} \\(\\d+ in 60 s\\): Error: injected ${kind === 'tick' ? 'tick' : kind} fault`), kind);
+    assert.match(log(), new RegExp(`\\[world\\] fault ${name.replace(/\./g, '\\.')}${kind === 'tick' ? ' in afterTick [0-9a-f]{8} \\(.*\\) at tick \\d+' : ''} \\(\\d+ in 60 s\\): Error: injected ${kind} fault`), kind);
   }
+  assert.deepEqual(Object.keys((await health()).faults ?? {}).sort(), ['world.fault.rejection', 'world.fault.request', 'world.fault.step', 'world.fault.uncaught'], 'healthz counts the faults by name');
 
   // an accepted act before the failures: a Soul created through its lifecycle (logged before it is answered)
   const request = (path, owner, data) => fetch(`${base()}/w/eden${path}`, { method: data ? 'POST' : 'GET', headers: { authorization: `Bearer dev:${owner}`, ...(data ? { 'content-type': 'application/json' } : {}), 'X-Sim-Lifecycle': '1' }, ...(data ? { body: JSON.stringify(data) } : {}) })
@@ -64,8 +67,9 @@ test('a world survives its own errors, and comes back exactly from a hang and a 
   for (let i = 0; i < 600 && !admitted; i++) { const r = await request(`/v1/lifecycle/${lifecycle.requestId}`, 'alice'); admitted = r.status === 200 && r.json().lifecycle?.ready === true; if (!admitted) await wait(50); }
   assert.ok(admitted, 'the Soul is admitted before the faults');
 
-  // A2 hang, A3 a runaway in one turn (alloc) and a heap that grows across turns (leak)
-  for (const kind of ['hang', 'alloc', 'leak']) {
+  // A2 hang, A3 a runaway in one turn (alloc) and a heap that grows across turns (leak); a tick fault that stops the clock
+  // (stop) and a step that throws on every tick (storm): each ends as a crash (exit 70) the breaker counts, restarted exactly
+  for (const kind of ['hang', 'alloc', 'leak', 'stop', 'storm']) {
     const db = new Db(join(dataDir, 'sim.db')), events = JSON.stringify(db.events(WORLD)); db.close();
     const n0 = frontiers.length, pidBefore = pid(), t0 = Date.now();
     assert.equal((await fault(kind)).status, 202);
@@ -88,6 +92,11 @@ test('a world survives its own errors, and comes back exactly from a hang and a 
     const caught = [...segment().matchAll(/\[clock\][^\n]*/g)].map((m) => m[0]).join(' | ');
     say(`${kind}: fault -> process gone ${killedAt ? killedAt - t0 : '?'} ms, -> serving again ${back - t0} ms; exit ${exit?.signal ?? exit?.code} (${exit?.reason ?? 'no reason'}); frontier tick ${fr.tick}, now tick ${h.tick}; ${caught}`);
     if (kind === 'hang') assert.match(exit?.reason ?? '', /wedged: main thread stuck \d+ s \(its watchdog ended it\)/);
+    if (kind === 'stop' || kind === 'storm') {
+      assert.equal(exit?.code, 70, `${kind}: a crash exit, not the planned 75`);
+      assert.match(log(), kind === 'stop' ? /\[world\] world\.fault\.clock-stopped: exiting 70/ : /\[world\] world\.fault\.storm: 50 faults in a minute \(step fault-inject storm, 50 faults, ticks \d+\.\.\d+\): exiting 70/);
+      assert.equal(JSON.parse(readFileSync(join(dataDir, 'fault-exit.json'), 'utf8')).reason.split(':')[0], kind === 'stop' ? 'world.fault.clock-stopped' : 'world.fault.storm');
+    }
   }
   assert.match(log(), /\[load\] watchdog: world\.killed\.hang: main thread stuck \d+ s/);
 });

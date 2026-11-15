@@ -140,17 +140,26 @@ hang or a memory runaway.
   broadcast) is reported through `WorldHost.onFault` and the clock goes on with the next frame. A timer, a rejected
   promise or a request handler that throws reaches the world's fault guard (`load/watchdog.ts` `faultGuard`, installed
   once the world serves; a boot that throws still exits). Each is logged as
-  `[world] fault world.fault.<tick|uncaught|rejection|request> (n in 60 s): <stack>`, the stack once a minute per name;
-  a request gets 500. Fifty in a minute is a broken world: a planned restart (snapshot, exit 75). Engine invariant
-  corruption keeps its own handling: rewind, quarantine, a named halt (#1150).
+  `[world] fault world.fault.<tick|step|uncaught|rejection|request> (n in 60 s): <stack>`, the stack once a minute per
+  name; a request gets 500. Each listener's `afterTick` is its own step, caught on its own (`world.fault.step in <step>
+  at tick <n>`, the step by a stable identity: its `name`, else a hash of its source), so one bad listener never skips
+  the rest of the tick (the other listeners, the broadcast, the heartbeat, the snapshot). The counts by name are in
+  `/healthz` `faults`. Fifty in a minute is a broken world: a crash exit (70, never the planned 75, so the launcher's
+  breaker counts it and its backoff applies), with the step that threw most of them written to
+  `<DATA_DIR>/fault-exit.json` for the next boot. A tick fault that leaves the clock stopped for good (its timer gone, or
+  unavailable without a named halt) exits the same way, `world.fault.clock-stopped` or `.clock-unavailable`: an unrunning
+  clock owes no ticks, so nothing else would notice. No snapshot is taken on either: the restart replays the log. Engine
+  invariant corruption keeps its own handling: rewind, quarantine, a named halt (#1150).
 - **Hard limits in the watchdog thread.** It still sees the world while the main thread is stuck. A serving world
   whose main thread has not turned for `SIM_HANG_KILL_MS` (10 s), or whose heap has stayed at `SIM_HEAP_KILL_PCT`
-  (95) % of the old-space cap for `SIM_HEAP_KILL_MS` (5 s), is ended with SIGKILL. A rule holds only over two looks in a
+  (95) % of the old-space cap for `SIM_HEAP_KILL_MS` (5 s) while garbage collection took `SIM_HEAP_KILL_GC_PCT` (30) %
+  of the last 10 s (it thrashes), is ended with SIGKILL. A steady live set near the cap that collects calmly is left
+  alone: a restart would only rebuild it and loop. A rule holds only over two looks in a
   row, and a gap between looks (the process was frozen) starts it again. live.json gets `killed`; the launcher
   restarts the world as `wedged`, and the stall stack (#457, after 2 s) names the frame it was stuck in. A SIGKILL
   loses nothing accepted: acts are logged before they are answered, and the boot replays the log and catches the
   clock up (#2235).
-- `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak`.
+- `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak|stop|storm`.
 
 **Measured** (`tools/world-launcher/crash-proof.test.mjs`): a real fake-mind Eden core world with its durable clock,
 under the launcher's `ChildPool`, a 5 s hang limit and a 768 MB heap cap. The workstation was loaded (load average 28 on

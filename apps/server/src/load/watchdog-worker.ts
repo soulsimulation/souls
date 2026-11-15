@@ -51,7 +51,7 @@ if (kill) {
     const now = Date.now(), v = judge(liveOf(a, pid, now), now);
     if (!v) return;
     clearInterval(look); killed = {...v, at: now}; write();
-    const what = v.reason === 'hang' ? `main thread stuck ${Math.round(v.stuckMs / 1000)} s${lastStall && lastStall.at >= now - v.stuckMs ? ` in ${lastStall.error ?? frameText(lastStall.frames[0])}` : ''}` : `heap ${v.usedMb} of ${v.limitMb} MB for ${Math.round(v.forMs / 1000)} s`;
+    const what = v.reason === 'hang' ? `main thread stuck ${Math.round(v.stuckMs / 1000)} s${lastStall && lastStall.at >= now - v.stuckMs ? ` in ${lastStall.error ?? frameText(lastStall.frames[0])}` : ''}` : `heap ${v.usedMb} of ${v.limitMb} MB for ${Math.round(v.forMs / 1000)} s, gc ${Math.round(v.gcPct10s)}% of the last 10 s`;
     try { writeSync(2, `[load] watchdog: world.killed.${v.reason}: ${what}; ending the process for the launcher to restart it\n`); } catch { /* stderr gone */ }
     process.kill(pid, 'SIGKILL');
   }, 500);
