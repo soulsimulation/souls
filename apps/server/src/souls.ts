@@ -4,7 +4,7 @@ import type {WorldAccounts} from './accounts/service.ts';
 import { randomBytes } from 'node:crypto';
 import {PROBE_PREFIX, PROBE_OWNER, isVerificationProbe} from './verification-probe.ts';
 import { createSoulSchema, describeIntent, intentSchema, proposeCardsSchema, steerSchema, type EventKind, type MandateRule, type AgendaStep, type BirthPayload, type DeckPayload, type IntentPayload, type LogEvent, type WireIntent } from '@souls/protocol';
-import { blockedArrivalNear, crowdedArrivalNear } from './arrival-placement.ts';
+import { arrivalPointNear, blockedArrivalNear, crowdedArrivalNear } from './arrival-placement.ts';
 import {mandateOf,explicitTrigger} from './mandate.ts';
 import {clockAt} from '@souls/brain';
 import { deckView } from './deck.ts';
@@ -214,6 +214,25 @@ export class Souls {
     if (!native) try { near = blockedArrivalNear(this.host) ?? crowdedArrivalNear(this.host); } catch { near = undefined; }
     await this.host.enqueue('birth', native ? 'world' : `soul:${id}`, { soulId: id, entityId, name: p.data.name, description: p.data.description, owner, ...(near ? { near } : {}) } satisfies BirthPayload);
     return this.db.soul(id)!;
+  }
+  /** Every Soul whose birth threw or a rewind left out (WorldHost.unbornV1) is born again: the same ids, a new journaled birth
+   *  with birth-near/1 at the arrival point (rings first, then the nearest free standing ground). Retired, native and already
+   *  embodied Souls are skipped. Returns how many births were queued. */
+  rebirthUnborn(): number {
+    let n = 0;
+    for (const id of [...this.host.unbornV1]) {
+      this.host.unbornV1.delete(id);
+      const s = this.db.soul(id);
+      if (!s || s.retired_at != null || s.native || s.world_id !== this.host.worldId || this.host.minds.has(id) || this.host.engine.world.entities[s.entity_id]) continue;
+      let near: BirthPayload['near'];
+      try { near = blockedArrivalNear(this.host) ?? crowdedArrivalNear(this.host) ?? arrivalPointNear(this.host); } catch { near = undefined; }
+      try { this.host.enqueue('birth', `soul:${id}`, { soulId: id, entityId: s.entity_id, name: s.name, description: s.description, owner: s.owner, ...(near ? { near } : {}) } satisfies BirthPayload)
+        .catch((e) => console.warn(`[souls] ${id}: the birth again failed:`, String(e).slice(0, 200))); }
+      catch (e) { this.host.unbornV1.add(id); console.warn(`[souls] ${id}: no birth again yet:`, String(e).slice(0, 200)); continue; }
+      n++;
+    }
+    if (n) console.warn(`[souls] ${n} Soul(s) without a body after a failed birth: born again`);
+    return n;
   }
   async retire(soul: SoulRow) {
     this.db.retireSoul(soul.id);

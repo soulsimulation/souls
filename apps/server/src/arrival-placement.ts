@@ -41,11 +41,17 @@ export function planNativeBirth(host: WorldHost, who: BirthIdentity): BirthPlan 
   return { probe: probeNativeHumanBirth(host.engine, host.factory, { ...who, near: near satisfies BirthNearV1 }), near };
 }
 
-/** A direct create onto a crowded arrival point (fewer than 24 of the placer's ring spots free of bodies): birth-near/1 at
- *  the arrival point itself, without `first`, so the rings are tried first as before and, once bodies fill them, the birth
- *  lands on the nearest free standing ground instead of throwing (no free standing room: a fault and a rewind of the world). */
+/** A direct create's birth-near/1 hint at the arrival point itself, without `first` (MarsEngine.arrivalCrowdV1): in a world
+ *  with arrival-clearance/1 always, else once bodies and solids leave fewer than 24 ring spots, counting the births queued
+ *  and not yet applied. Rings first as before; once bodies fill them, the nearest free standing ground, never a throw. */
 export function crowdedArrivalNear(host: WorldHost): { at: [number, number] } | undefined {
-  const at = (host.engine as unknown as { arrivalCrowdV1?(): [number, number] | null }).arrivalCrowdV1?.();
+  const at = (host.engine as unknown as { arrivalCrowdV1?(queued?: number): [number, number] | null }).arrivalCrowdV1?.(host.queuedBirthsV1());
+  return at ? { at: [at[0], at[1]] } : undefined;
+}
+
+/** birth-near/1 at the arrival point whatever the crowd (a birth again after one that failed). */
+export function arrivalPointNear(host: WorldHost): { at: [number, number] } | undefined {
+  const at = (host.engine as unknown as { arrivalCrowdV1?(queued?: number, free?: number): [number, number] | null }).arrivalCrowdV1?.(0, Infinity);
   return at ? { at: [at[0], at[1]] } : undefined;
 }
 

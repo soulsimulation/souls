@@ -393,9 +393,11 @@ export async function startWorld(config: Config) {
     if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
     if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
   }
-  const startClock = () => { wallClock.start(); host.start(); };
+  // a Soul whose birth threw at boot replay or that a rewind left out is born again (WorldHost.unbornV1), once the clock runs
+  const startClock = () => { wallClock.start(); host.start(); souls.rebirthUnborn(); };
   if (host.owedTicks > 0 && !host.paused) catchingUp = catchUpBoot().catch((e) => console.error('[clock] catch-up failed:', e)).finally(() => { catchingUp = null; if (!closing) startClock(); });
   else startClock();
+  host.listeners.push({ onApplied: (e) => { if (e.kind === 'rules' && e.payload?.recovery && host.unbornV1.size) queueMicrotask(() => souls.rebirthUnborn()); } });
   if (config.seedNatives && db.liveSouls(host.worldId).length === 0) {
     if (config.worldKey === 'toy') {
       for (const n of NATIVES) await souls.create('system', n, true);
