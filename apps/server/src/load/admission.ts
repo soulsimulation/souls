@@ -4,6 +4,8 @@
 // bucket under contention (`soul.slow-down`); a job whose deadline passes is answered `world.busy` unrun, and a job
 // whose client went away is dropped. It queues, delays and refuses; it never chooses or retries an act for a Soul.
 import {createHash} from 'node:crypto';
+import {writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import {performance as perf} from 'node:perf_hooks';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
@@ -122,7 +124,24 @@ export class Admission {
   private tickSpent: () => number;
   private idleShare: () => number;
   private tickService: () => number;
-  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
+  /** MEASURE #2440 (never merged) */
+  m = {jobs: 0, acts: 0, chargedMs: 0, chargedActMs: 0, charged300: 0, charged300Ms: 0, chargedMax: 0, ownMs: 0, ownN: 0, freeJobs: 0,
+    creditWaitMs: 0, bucketWaitMs: 0, sweptActs: 0, budgetMsSum: 0, budgetN: 0, creditMin: 0, spareMs: 0, noIdleMs: 0, noServiceMs: 0, blackMs: 0,
+    level: {green: 0, amber: 0, red: 0, black: 0} as Record<Level, number>, est: {} as Record<string, number>, idleSum: 0};
+  private mAt = 0; private mStall: {kind: 'credit' | 'bucket'; at: number} | null = null;
+  private mFlush(dir: string) {
+    const now = this.now();
+    if (this.mAt) { const dt = now - this.mAt; this.m.level[this.level] += dt; this.m.budgetMsSum += this.frameBudget() * dt; this.m.budgetN += dt;
+      const idle = this.idleShare(), svc = this.tickService(); this.m.idleSum += idle * dt;
+      if (this.level === 'black') this.m.blackMs += dt; else if (svc < SPARE_SERVICE) this.m.noServiceMs += dt; else if (idle < SPARE_IDLE) this.m.noIdleMs += dt; else this.m.spareMs += dt; }
+    this.mAt = now; this.m.est = Object.fromEntries(this.est);
+    try { writeFileSync(join(dir, 'admission-stats.json'), JSON.stringify({at: Date.now(), ...this.m})); } catch { /* measure only */ }
+  }
+  private mStallEnd(now: number) { const st = this.mStall; if (!st) return; if (st.kind === 'credit') this.m.creditWaitMs += now - st.at; else this.m.bucketWaitMs += now - st.at; this.mStall = null; }
+  private mStallStart(kind: 'credit' | 'bucket', now: number) { if (!this.mStall) this.mStall = {kind, at: now}; }
+  mOwn(ms: number) { this.m.ownMs += ms; this.m.ownN++; }
+  constructor(o: AdmissionOpts = {}) {
+    const dir = process.env.DATA_DIR; if (dir && !o.now) setInterval(() => this.mFlush(dir), 250).unref(); this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
     this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
     // the tick service is 1 until the monitor's first sample
     this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1); }
@@ -219,6 +238,7 @@ export class Admission {
     // #2440: a job run on spare time leaves no debt: once the thread is busy again, the budgets start from even, not from
     // the idle time the requests used meanwhile
     if (free) this.credit = Math.max(0, this.credit);
+    this.m.jobs++; if (free) this.m.freeJobs++; this.m.chargedMs += ms; if (id === 'edge:act') { this.m.acts++; this.m.chargedActMs += ms; } if (ms >= 300) { this.m.charged300++; this.m.charged300Ms += ms; } if (ms > this.m.chargedMax) this.m.chargedMax = ms; if (this.credit < this.m.creditMin) this.m.creditMin = this.credit;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
@@ -248,7 +268,7 @@ export class Admission {
       if (j.closed()) { this.queue.splice(i, 1); this.outstanding.delete(j.key); this.shed.dropped++; j.settle('dropped'); continue; }
       if (now + Math.min(this.estimate(j.route.id), 1000) + ANSWER_MARGIN_MS >= j.deadline) {
         this.queue.splice(i, 1); this.outstanding.delete(j.key);
-        if (j.route.cls === 'C2') this.shed.reads++; else this.shed.acts++;
+        if (j.route.cls === 'C2') this.shed.reads++; else { this.shed.acts++; this.m.sweptActs++; }
         j.settle(this.told(j.key, j.god, now, busyRefusal(this.level)).refusal);
       }
     }
@@ -280,14 +300,16 @@ export class Admission {
   async drain() {
     if (this.draining) return; this.draining = true;
     try {
+      if (!this.queue.length) this.mStallEnd(this.now());
       while (this.queue.length) {
         let now = this.now();
         this.sweep(now);
         const budget = this.frameBudget();
         const free = this.spare();
-        if (this.creditNow(now) <= 0 && !free) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        if (this.creditNow(now) <= 0 && !free) { this.mStallStart('credit', now); this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
         const i = this.pick(now);
-        if (i < 0) { this.later(FRAME_MS); return; }
+        if (i < 0) { this.mStallStart('bucket', now); this.later(FRAME_MS); return; }
+        this.mStallEnd(now);
         const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
         j.settle('run');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
@@ -383,7 +405,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (v !== 'run') return refuse(v);
     const queued = t.waitedMs();
     let act: ActTiming | undefined;
-    try { const h = run(c, next); act = h.act; await h.done; } finally { t.done(); }
+    try { const o0 = performance.now(); const h = run(c, next); adm.mOwn(performance.now() - o0); act = h.act; await h.done; } finally { t.done(); }
     stamp(c, lv, token); timed(c, t0, queued, act);
   };
 }

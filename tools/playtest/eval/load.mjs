@@ -138,12 +138,14 @@ export async function runLoad(o) {
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
+      const admFile = join(dir, 'server', 'data', 'admission-stats.json'), adm0 = readLive(admFile);   // MEASURE #2440
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      { const adm1 = readLive(admFile); const d = {}; for (const [k, v] of Object.entries(adm1 ?? {})) d[k] = typeof v === 'number' && typeof adm0?.[k] === 'number' && !['chargedMax', 'creditMin', 'needAct', 'refillSoul', 'active', 'queueMax', 'at'].includes(k) ? v - adm0[k] : (k === 'level' && adm0?.level ? Object.fromEntries(Object.entries(v).map(([l, x]) => [l, x - (adm0.level[l] ?? 0)])) : v); server.admission = d; log(`MEASURE admission n${n} r${rep}: ${JSON.stringify(d)}`); }
       const http = [], pairs = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
