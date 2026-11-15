@@ -36,3 +36,32 @@ test('a main thread busy for 4 s: live.json keeps being rewritten and the worker
   assert.equal(h.ok, true); assert.ok(h.loop.lastTurnAgeMs >= 2000);
   assert.ok(!out.includes('FREE'), 'all of this while the main thread was still busy');
 });
+
+test('#2444: a shard program has one watchdog thread for all its worlds; a stopped world is no longer watched', {timeout: 30_000}, async t => {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'souls-watchdog-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const script = `
+    import {shareWatchdog, startWatchdog} from ${JSON.stringify(join(here, 'load/watchdog.ts'))};
+    import {newWorldLoad, S} from ${JSON.stringify(join(here, 'load/shared.ts'))};
+    import {mkdirSync} from 'node:fs';
+    const root = ${JSON.stringify(dir)}, dog = shareWatchdog(), a = newWorldLoad(), b = newWorldLoad();
+    a.boot.phase('serving', 3); b.boot.phase('serving', 9);
+    for (const d of ['a', 'b']) mkdirSync(root + '/' + d);
+    const wa = startWatchdog({dataDir: root + '/a', everyMs: 100, shared: a.shared, api: a.api});
+    const wb = startWatchdog({dataDir: root + '/b', everyMs: 100, shared: b.shared, api: b.api});
+    console.log('ONE ' + (wa === dog.worker && wb === dog.worker));
+    setTimeout(() => { dog.remove(root + '/a'); console.log('REMOVED'); }, 500);
+    setInterval(() => { a.shared[S.lastTurnAt] = b.shared[S.lastTurnAt] = Date.now(); }, 50);`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], {stdio: ['ignore', 'pipe', 'inherit']});
+  t.after(() => child.kill('SIGKILL'));
+  let out = ''; child.stdout!.on('data', (b: Buffer) => { out += b; });
+  for (let i = 0; i < 100 && !out.includes('REMOVED'); i++) await new Promise(r => setTimeout(r, 100));
+  assert.match(out, /ONE true/, 'both worlds are watched by the program\'s one thread');
+  await new Promise(r => setTimeout(r, 300));
+  const live = (d: string) => JSON.parse(readFileSync(join(dir, d, 'live.json'), 'utf8'));
+  const [a0, b0] = [live('a'), live('b')];
+  assert.equal(a0.pid, child.pid); assert.equal(b0.pid, child.pid);
+  assert.equal(a0.phase, 'serving'); assert.equal(b0.phase, 'serving');
+  await new Promise(r => setTimeout(r, 600));
+  assert.equal(live('a').at, a0.at, 'the removed world\'s live.json is no longer written');
+  assert.ok(live('b').at > b0.at, 'the other world\'s still is');
+});

@@ -62,7 +62,7 @@ const NATIVES: { name: string; description: string }[] = [
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
  *  guard, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
-export async function startWorld(config: Config) {
+export async function startWorld(config: Config, o: { exit?: (code: number) => void; signals?: boolean } = {}) {   // #2444: a shard passes exit (the world ends, not the program) and signals: false
   // Lane P5: when the boot's phases end (ms since the process started; the first is this release's code load)
   const bootAt: Record<string, number> = { code: performance.now() };
   // Release pre-warm (SIM_STANDBY=1, launcher handover): all code is loaded here; the database and port open only after SIGUSR2.
@@ -312,6 +312,7 @@ export async function startWorld(config: Config) {
   // the step that threw most of them recorded for the next boot. A tick fault that leaves the clock stopped for good (its timer
   // gone, or unavailable with no named halt) exits the same way: nothing else would notice. The process handlers go in once
   // the world serves. Program-level: faultExit ends the process (one world per program until #2389's later steps).
+  let uninstallFaults: (() => void) | undefined;
   const faults = faultGuard({ onStorm: (n, step) => { if (!closing) faultExit(config.dataDir, `world.fault.storm: ${n} faults in a minute`, step); } });
   host.onFault = (name, error, step) => {
     faults.note(name, error, step);
@@ -445,7 +446,7 @@ export async function startWorld(config: Config) {
         }
       } finally {
         process.off('SIGTERM', term); process.off('SIGINT', interrupt);
-        process.exit(abort.signal.aborted ? 0 : 1);
+        (o.exit ?? process.exit)(abort.signal.aborted ? 0 : 1); throw new Error('world.boot.ended');   // (a shard's exit returns: this world goes no further)
       }
     } finally {
       process.off('SIGTERM', term); process.off('SIGINT', interrupt);
@@ -453,7 +454,7 @@ export async function startWorld(config: Config) {
   }
   const listening = new Promise<void>((r) => server.once('listening', () => r()));
   server.listen(config.port, config.host, () => {
-    load.boot.phase('serving', host.engine.world.tick); installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
+    load.boot.phase('serving', host.engine.world.tick); uninstallFaults = installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
     console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
     const s = (ms: number) => (ms / 1000).toFixed(2);
     console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);
@@ -493,12 +494,15 @@ export async function startWorld(config: Config) {
     server.close(); void hub.closeClients('server restarting');
     await closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews);
     (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
-    auth.close();db.close(); process.exit(exitCode);
+    if (o.exit) { clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); void (readPool as { close?(): Promise<void> } | undefined)?.close?.(); }   // #2444: nothing of a stopped world runs on in its shard
+    auth.close();db.close(); (o.exit ?? process.exit)(exitCode);
   };
   // The launcher's wedge path sends SIGUSR2 before SIGTERM (LOAD-CONTRACT §4): a diagnostic report, if this thread can still run.
+  if (o.signals !== false) {
   process.on('SIGUSR2', () => { try { console.log(`[load] SIGUSR2: diagnostic report ${process.report?.writeReport(join(config.dataDir, `report-${Date.now()}.json`))}`); } catch (e) { console.error('[load] report failed', e); } });
   process.on('SIGTERM', () => void shutdown('SIGTERM').catch(()=>console.error('[world] shutdown is incomplete; retain database and inspect')));
   process.on('SIGINT', () => void shutdown('SIGINT').catch(()=>console.error('[world] shutdown is incomplete; retain database and inspect')));
+  }
 
   // Hourly on-box backup with retention: the last 6 hourly files plus one per day (the 00:00 UTC file) for 7 days.
   function pruneBackups() {
@@ -535,7 +539,7 @@ export async function startWorld(config: Config) {
   const backupWork=new Set<Promise<void>>();
   function trackedBackup(){const work=backupNow();backupWork.add(work);void work.finally(()=>backupWork.delete(work)).catch(()=>{});return work;}
   pruneBackups();
-  const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(config.env), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); disk.start();   // #2378
+  const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(config.env), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); const diskTimer = disk.start();   // #2378
   const firstBackup=setTimeout(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 60_000);firstBackup.unref();
   const backupTimer=setInterval(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 3600_000);backupTimer.unref();
   return { config, host, db, server, listening, shutdown, load, readPool: () => readPool };

@@ -53,15 +53,26 @@ export function killJudge(rule: KillRule, gapMs = 2_000) {
     return null;
   };
 }
-export function startWatchdog(opts: {dataDir: string; port?: number; everyMs?: number; shared?: Float64Array; api?: Float64Array; onListening?: (port: number) => void; stall?: ReturnType<typeof stallConfig>; kill?: KillRule}) {
-  const worker = new Worker(new URL('./watchdog-worker.ts', import.meta.url), {
-    workerData: {buffer: (opts.shared ?? sharedLoad).buffer, api: (opts.api ?? sharedApi).buffer, file: join(opts.dataDir, 'live.json'), pid: process.pid, port: opts.port, everyMs: opts.everyMs, stall: opts.stall, kill: opts.kill},
-    execArgv: [], resourceLimits: {maxOldGenerationSizeMb: 32},
-  });
-  worker.on('message', (m: {error?: string; listening?: number; info?: string}) => { if (m.error) console.error(`[load] watchdog: ${m.error}`); else if (m.info) console.log(`[load] watchdog: ${m.info}`); else if (m.listening) { console.log(`[load] watchdog /healthz on 127.0.0.1:${m.listening}`); opts.onListening?.(m.listening); } });
+function watchdogThread(workerData: object, onListening?: (port: number) => void) {
+  const worker = new Worker(new URL('./watchdog-worker.ts', import.meta.url), {workerData, execArgv: [], resourceLimits: {maxOldGenerationSizeMb: 32}});
+  worker.on('message', (m: {error?: string; listening?: number; info?: string}) => { if (m.error) console.error(`[load] watchdog: ${m.error}`); else if (m.info) console.log(`[load] watchdog: ${m.info}`); else if (m.listening) { console.log(`[load] watchdog /healthz on 127.0.0.1:${m.listening}`); onListening?.(m.listening); } });
   worker.on('error', e => console.error('[load] watchdog thread failed', e));
   worker.unref();
   return worker;
+}
+/** #2444: the shard program's one watchdog thread (shareWatchdog), or null in a program of one world. */
+let programWatchdog: Worker | null = null;
+/** #2444 shards: from now on every world this program starts is watched by one thread (watchdog-worker.ts `shared`), not
+ *  one each. Called once by the shard program (tools/world-launcher/shard.mjs) before its first world. `remove(dataDir)`
+ *  ends the watch of a world that stopped, so a later world of the same data in the same program is watched afresh. */
+export function shareWatchdog() {
+  const w = programWatchdog ??= watchdogThread({shared: true});
+  return {worker: w, remove: (dataDir: string) => w.postMessage({remove: join(dataDir, 'live.json')})};
+}
+export function startWatchdog(opts: {dataDir: string; port?: number; everyMs?: number; shared?: Float64Array; api?: Float64Array; onListening?: (port: number) => void; stall?: ReturnType<typeof stallConfig>; kill?: KillRule}) {
+  const data = {buffer: (opts.shared ?? sharedLoad).buffer, api: (opts.api ?? sharedApi).buffer, file: join(opts.dataDir, 'live.json'), pid: process.pid, port: opts.port, everyMs: opts.everyMs, stall: opts.stall, kill: opts.kill};
+  if (programWatchdog) { programWatchdog.postMessage({add: data}); return programWatchdog; }
+  return watchdogThread(data, opts.onListening);
 }
 
 /** A step (a listener's afterTick, world.ts stepIdOf) that faulted: its stable id and name, and the ticks it faulted at. */
@@ -115,6 +126,8 @@ export function faultExit(dataDir: string, reason: string, step: FaultStep | nul
 }
 /** Route the process's uncaught errors to the guard (installed once the world serves: a boot that throws still exits). */
 export function installFaultGuard(g: {note: (name: string, error: unknown) => void}, proc: NodeJS.Process = process) {
-  proc.on('uncaughtException', e => g.note('world.fault.uncaught', e));
-  proc.on('unhandledRejection', e => g.note('world.fault.rejection', e));
+  const uncaught = (e: unknown) => g.note('world.fault.uncaught', e), rejection = (e: unknown) => g.note('world.fault.rejection', e);
+  proc.on('uncaughtException', uncaught); proc.on('unhandledRejection', rejection);
+  /** #2444: a world that stops in a shard takes its handlers with it. */
+  return () => { proc.off('uncaughtException', uncaught); proc.off('unhandledRejection', rejection); };
 }

@@ -88,9 +88,9 @@ in the program. The load gauges are one per program.
 | `mars/viewer/engine/locomotion/walk.ts` (`setWalkReach`), `god/poster-boards.ts` (`setWorldDaySource`), `god/ground-host.ts` (`DEEP_MIDDLE` listed whole), `god/context-views.ts` (`closeContextViews`), `world-main.ts` (`globalThis.__soulsReadPool`, `setKitViewerContract`), `mars/viewer/engine/spatial/path.ts` (`strandedMetrics`, served by `http.ts`) | World state in module scope: the last world to set it wins. Walk reach feeds `walk_to` validation, so it touches replay. **Done (#2416):** walk reach is in the world's registry (`groundRegistry(base, groundReach(fact))`, also on a snapshot restore); the world day is read from the world's host (`worldDayOf(host)`) and passed to the boards; the deep middles are per `installGroundCapabilities`; each world closes its own context views; the read pool is returned by `startWorld`. Shared on purpose: `strandedMetrics` is a content-keyed memo (its answer is a function of the grids and goal it is keyed by; the debug counters are the program's), and `setKitViewerContract` follows the viewer bundled with the program's code, the same for every world. `apps/server/src/world-module-state.test.ts` fails on new module-level mutable state | Form 2 |
 | `process.env` read after boot: `http.ts`, `auth.ts`, `hub.ts`, `edge/routes.ts`, `edge/eyes/routes.ts`, `god/assets.ts`, `moderation/store.ts`, `god/workbench.ts`, `god/real-clock.ts`, `god/layers.ts`, `god/ground-host.ts`, `edge/ledger/ledger.ts`, `packages/engine-mars/src/engine.ts` | World name, steward token, data paths and rule flags come from the one process env. **Done (#2389):** they read the world's `cfg.env`. What stays is listed by file, with its reason, in `apps/server/src/world-config-reads.test.ts`: import-time measurement switches (the same for every world in a program) and default-parameter fallbacks for tests and tools | Form 2; form 1 only with a per-worker env |
 | `apps/server/src/eden-bootstrap.ts` (`edenOriginHistoryFactory`), `packages/engine-mars/src/engine.ts` (`marsCommonsTransitionFactory`), `split/god-replica.ts` (`defaultAssetDir()`) | Calls that take no world env yet: these factories build `marsFactory` from `process.env`, and a read worker's replica finds its asset dir from the program's env. `world-config-reads.test.ts` lists the replica's call and `marsFactory`'s default env. **Done (#2416)** for `edenOriginHistoryFactory` and `marsCommonsTransitionFactory`: they take the world's env (`world-factory.ts` passes it). The Eden life readers (`retainedCommonsShoreFactory` and the other transition factories) and `god-replica.ts` still read the program's | Form 2 |
-| `apps/server/src/god/host-render-slot.ts`, `god/look-renderer.ts` | Lock liveness is checked by pid, so a dead world's lock is never stale while the program lives | Both |
+| `apps/server/src/god/host-render-slot.ts`, `god/look-renderer.ts` | Lock liveness is checked by pid, so a dead world's lock is never stale while the program lives. **Done (#2444):** in a shard each world's slots are held under its name (`renderWorld`), and a world that stops releases them (`releaseWorldRenderSlots`); still one render at a time on the host | Both |
 | Content caches: `packages/engine-mars/src/ground-bridge.ts` (`RECIPES`, `FIELDS`), `catalog-adapter.ts` / `CATALOG`, `mars/viewer/engine/spatial/grid.ts`, `path.ts`, the library and the generator memos | Keyed by content, so sharing them is the point of form 2. But their byte caps become shared, and a registry can let a world resolve a hash it never logged | Shareable |
-| `apps/server/src/load/watchdog.ts` (`faultGuard`, `installFaultGuard`), `load/watchdog-worker.ts` (the kill), `world-main.ts` (`/__sim/fault`) (#2366) | One fault guard per program: the `uncaughtException` and `unhandledRejection` handlers cannot tell which world threw, and its storm exit (70) and stopped-clock exit end every world. The watchdog's hard limits end the whole process | Form 2 |
+| `apps/server/src/load/watchdog.ts` (`faultGuard`, `installFaultGuard`), `load/watchdog-worker.ts` (the kill), `world-main.ts` (`/__sim/fault`) (#2366) | One fault guard per program: the `uncaughtException` and `unhandledRejection` handlers cannot tell which world threw, and its storm exit (70) and stopped-clock exit end every world. The watchdog's hard limits end the whole process **Done (#2444) by design:** a shard has one watchdog thread (`shareWatchdog`) and a fault ends it; the launcher reloads its worlds | Form 2 |
 | `apps/server/src/god/edit-preview.ts` (`live`, `pending`) | One preview worker and `PREVIEW_MAX_PENDING` (2) per program: one world's previews refuse another's | Form 2 |
 | `apps/server/src/edge/ledger/vocabulary.ts` (`knownMemo`, `synonymWords`, `stepVerbs`), `god/mirror.ts` (`lastGroundHashed`) | One-slot memos. Keyed by their input, so never wrong, but two worlds taking turns rebuild them every call | Form 2 (cost) |
 | `apps/server/src/moderation/classifier.ts` (`selected`), `god/context-timing.ts` (`emitted`) | The upload classifier and the timing budget are per program | Form 2 |
@@ -116,6 +116,36 @@ exactly:
 | B4 | Env reads after boot become world config fields | 2 h | T2 | the `process.env` readers in the table above |
 | B5 | The shard program and the launcher's use of it: load and stop one world by message, one watchdog per shard, a fault ends the shard and its worlds reload, render locks by world, off by default | 4 h | T3 | new `tools/world-launcher/shard.mjs` (from `tools/bench/capacity/colocate/host.mjs`), `tools/world-launcher/{children,registry,production}.mjs`, `apps/server/src/load/watchdog.ts`, `apps/server/src/god/host-render-slot.ts` |
 | B6 | Measure the built shard: the `colocate` bench with `--forms shard`, 50 small worlds | 2 h | T0 | `tools/bench/capacity/colocate/` |
+
+### The shard program (B5, #2444)
+
+`tools/world-launcher/shard.mjs`, off unless the launcher's environment sets `SIM_SHARDS` to the worlds per shard (2 to
+8). With it off, `ChildPool` spawns one process per world exactly as before.
+
+- **Placement.** `ChildPool.launch` asks `ShardSet` for the world. A world goes into a shard only when its command is the
+  world server's own (`apps/server/src/main.ts`; not a fork, a standby or a world with read workers) and its registry
+  entry does not say `shard: false`. Worlds share a shard only when every setting but their own (`PER_WORLD` in
+  shard.mjs: name, key, path, port, data dir, owner, zone, health port, load pins) is equal, so no world runs under
+  another's settings. The program's heap cap is a world's cap times the shard's size.
+- **Load and stop by message.** `{op:'load'}` runs `startWorld(loadConfig(env), {signals: false, exit})` with the world's
+  own env; `{op:'stop'}` runs its shutdown (snapshot saved), after which none of its timers, handlers, watchdog entry or
+  render slots stay in the program. Each world's log lines are tagged in the program and written to its own log.
+- **One watchdog per shard.** `shareWatchdog()` starts one thread; each world adds its live.json and health port to it.
+  A hang shows in every world of the shard: the world whose tick was running is named in its live.json `killed`.
+- **A fault ends the shard.** A fault storm, a clock stopped by a fault, a boot that throws (exit 70) or the watchdog's
+  hang or heap rule (SIGKILL) ends the program. The world that ended it exits as the crash it was (the breaker counts
+  it) and reloads in a program of its own; the others exit as a planned restart (75) and reload at once in another
+  program. Each replays its log to the durable clock frontier it left and catches its clock up.
+- **The handle.** A world in a shard is a ChildProcess-shaped handle (pid, stdout, stderr, kill, `exit`): SIGTERM stops
+  it alone, SIGKILL ends its shard, SIGSTOP is refused (a world in a shard is never frozen alone). Its Pss is the
+  shard's split between its worlds.
+
+**Proved** (`tools/world-launcher/shard.test.mjs`, loaded workstation): three Eden core worlds in one shard; one stopped
+and loaded again while the other two ticked on in the same program; `stop` and `storm` injected into one world each
+ended the shard, and all three were serving again in other programs 12.8 s and 15.8 s after the fault, each restored
+exactly at its frontier (tick and engine hash), no tick owed. Two worlds in one shard, one held at the red load level:
+a god edit in one left the other's entities, edits and owner as they were; each read its own level, day and state
+hash, and each restored exactly the state it saved.
 
 ### Capacity on the production host: estimates
 
