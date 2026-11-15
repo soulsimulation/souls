@@ -5,6 +5,13 @@
 //   baseline    one program per world, as today (`node --import preload.mjs apps/server/src/main.ts`)
 //   threads     form 1: one program, each world on its own worker thread (host.mjs --form threads)
 //   one-thread  form 2: one program, every world on one thread sharing code, definitions and caches (host.mjs --form one-thread)
+//   shard       #2451 (B6): the built shard program (tools/world-launcher/shard.mjs, #2444) through the launcher's own
+//               ShardSet, --shard-size worlds per program (default 8); shard-preload.mjs arms the forced GC per program
+// --small N (#2451): N small worlds instead of the six, every one ticking (SIM_SKIP=0), one more small world, no walking
+// phase; the faults are the world's own (SIM_FAULT_INJECT, /__sim/fault: storm, then a hang the watchdog ends), and in
+// the shard form every world a fault ended is loaded again at once, as the launcher's pool would; the report splits what
+// the other worlds saw into those that shared the failed program and the rest. --callback-slot: the shard programs write
+// the running world on every callback (shard-preload.mjs), to measure what that costs.
 // Measured per form (A2, A3):
 //   memory      Pss (/proc/<pid>/smaps_rollup, Linux) after each load, after --settle-s quiet, and after --walk-s with one
 //               Soul walking in a small world and one in an Eden world (the program's total; per process for the baseline)
@@ -18,7 +25,7 @@
 // locally only as a smoke (`--short`, figures indicative, no Pss off Linux).
 //
 //   node tools/bench/capacity/colocate/colocate.mjs [--forms baseline,threads,one-thread] [--settle-s 90] [--walk-s 60]
-//        [--busy 10] [--out <dir>] [--port 4800] [--root <checkout>] [--short]
+//        [--busy 10] [--small N] [--shard-size 8] [--callback-slot] [--out <dir>] [--port 4800] [--root <checkout>] [--short]
 // Writes <out>/{results.json, REPORT.md, colocate.log} and <out>/<form>/<world>/{world.log, tick-spans.jsonl}.
 // No host name, user, home path or token in results.json or REPORT.md.
 import { spawn, execFileSync } from 'node:child_process';
@@ -33,13 +40,17 @@ const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--
 const ROOT = resolve(opt('root', new URL('../../../..', import.meta.url).pathname)), SHORT = flag('short');
 const PORT = Number(opt('port', 4800)), SETTLE_S = Number(opt('settle-s', SHORT ? 20 : 90)), WALK_S = Number(opt('walk-s', SHORT ? 20 : 60)), BUSY = Number(opt('busy', SHORT ? 2 : 10));
 const FORMS = opt('forms', 'baseline,threads,one-thread').split(',');
-for (const f of FORMS) if (!['baseline', 'threads', 'one-thread'].includes(f)) throw new Error(`--forms ${f}: baseline | threads | one-thread`);
-const SIX = SHORT && flag('tiny') ? [['s1', 'small'], ['s2', 'small'], ['e1', 'eden']] : [['s1', 'small'], ['s2', 'small'], ['s3', 'small'], ['s4', 'small'], ['e1', 'eden'], ['e2', 'eden']];
-const MORE = [['s5', 'small'], ['e3', 'eden']], TEMPLATE = { small: 'hello-hamlet', eden: 'eden-2026' };
+for (const f of FORMS) if (!['baseline', 'threads', 'one-thread', 'shard'].includes(f)) throw new Error(`--forms ${f}: baseline | threads | one-thread | shard`);
+const N = Number(opt('small', 0)), SHARD_SIZE = Number(opt('shard-size', 8)), SLOT = flag('callback-slot');
+if (!(Number.isInteger(N) && N >= 0 && N <= 60)) throw new Error('--small: 1 to 60 small worlds');
+const SIX = N ? Array.from({ length: N }, (_, i) => [`s${i + 1}`, 'small']) : SHORT && flag('tiny') ? [['s1', 'small'], ['s2', 'small'], ['e1', 'eden']] : [['s1', 'small'], ['s2', 'small'], ['s3', 'small'], ['s4', 'small'], ['e1', 'eden'], ['e2', 'eden']];
+const MORE = N ? [[`s${N + 1}`, 'small']] : [['s5', 'small'], ['e3', 'eden']], TEMPLATE = { small: 'hello-hamlet', eden: 'eden-2026' };
+const SPAN = Math.max(40, SIX.length + MORE.length + 10);
 const OUT = resolve(opt('out', join(ROOT, '.local/bench/colocate', new Date().toISOString().replace(/[:.]/g, '-'))));
 const { defaultCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/children.mjs')).href);
 const { decorateCommand } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/production.mjs')).href);
 const { worldHeapMb } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/registry.mjs')).href);
+const { ShardSet } = await import(pathToFileURL(join(ROOT, 'tools/world-launcher/shard.mjs')).href);
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 const sh = (cmd, args) => { try { return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
 const scrub = (s) => String(s).split(ROOT).join('.');
@@ -61,20 +72,33 @@ function smaps(pids) {
   }
   return sum.processes ? { rssMb: mb(sum.rss), pssMb: mb(sum.pss), privateMb: mb(sum.private), processes: sum.processes } : null;
 }
+/** #2451: CPU seconds (user + system) the processes have used, from /proc/<pid>/stat; null off Linux. */
+function cpuS(pids) {
+  let t = 0, n = 0;
+  for (const p of pids) { try { const f = readFileSync(`/proc/${p}/stat`, 'utf8').split(') ')[1].split(' '); t += Number(f[11]) + Number(f[12]); n++; } catch { /* gone */ } }
+  return n ? t / 100 : null;   // USER_HZ
+}
 
 // ------------------------------------------------------------------ one world's command (the launcher's, decorated)
 const portFree = (p) => new Promise((r) => { const s = createServer(); s.once('error', () => r(false)); s.listen(p, '127.0.0.1', () => s.close(() => r(true))); });
 const TAKEN = new Set();
 /** A port of the run's span that is free now: an outgoing connection can hold a port of the span (the ephemeral range
  *  overlaps it), so each world's port is checked just before it loads. */
-async function freePort(i) { for (let p = PORT + i; p < PORT + 40; p++) if (!TAKEN.has(p) && await portFree(p)) { TAKEN.add(p); return p; } throw new Error('no free port in the span'); }
+async function freePort(i) { for (let p = PORT + i; p < PORT + SPAN; p++) if (!TAKEN.has(p) && await portFree(p)) { TAKEN.add(p); return p; } throw new Error('no free port in the span'); }
 async function worldSpec(form, id, kind, i) {
-  const dir = join(OUT, form, id), data = join(dir, 'data'), library = join(dir, 'library'); mkdirSync(data, { recursive: true }); mkdirSync(library, { recursive: true });
+  // a shard holds only worlds whose settings but their own are equal (shard.mjs PER_WORLD): one library and one tick-span
+  // file for the form, as production has one library (SOULS_TICK_SPANS is read from the program's env: the shard's worlds
+  // append to one file, so its tick figures are pooled over every world)
+  const dir = join(OUT, form, id), data = join(dir, 'data'), library = form === 'shard' ? join(OUT, form, 'library') : join(dir, 'library'); mkdirSync(data, { recursive: true }); mkdirSync(library, { recursive: true });
   const port = await freePort(i), origin = `http://127.0.0.1:${port}`, slug = `co-${id}`, heapMb = worldHeapMb({ template: TEMPLATE[kind] }, 0), soul = (f) => join(ROOT, 'tools/world-launcher/soul', f);
   const base = defaultCommand({ slug, dataDir: data, name: `Colocate ${id}`, templateFile: join(ROOT, 'worlds/templates', `${TEMPLATE[kind]}.json`) }, port,
     { publicOrigin: origin, marsWebDir: MARS_WEB, root: ROOT, libraryDir: library, soulControllerCliFile: soul('eden.mjs'), soulCliFile: soul('eden-agent.mjs'), soulSkillFile: soul('skill.md'), soulInstructionsFile: soul('instructions.md') });
   const { cmd, args, env } = decorateCommand(base, { devAuth: true, publicOrigin: origin, base: '', worldHeapMb: heapMb, build: 'dev' });
-  Object.assign(env, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake', SOULS_TICK_SPANS: join(dir, 'tick-spans.jsonl') });
+  Object.assign(env, { MIND_DRIVER: 'edge', BRAIN_MODE: 'fake', SOULS_TICK_SPANS: form === 'shard' ? join(OUT, form, 'tick-spans.jsonl') : join(dir, 'tick-spans.jsonl') });
+  // --small: every world ticks (SIM_SKIP=0, as #2300 measured before still worlds jumped their clocks, #2298), so tick
+  // time is read on every world and a shard's thread carries all of its worlds' ticks: the worst case for sharing
+  if (N) Object.assign(env, { SIM_FAULT_INJECT: '1', SIM_SKIP: '0' });
+  if (form === 'shard') Object.assign(env, { COLOCATE_PROGRAMS: join(OUT, form, 'programs'), ...(SLOT ? { COLOCATE_CALLBACK_SLOT: '1' } : {}) });
   for (const k of Object.keys(env)) if (k.startsWith('EDGE_EYES')) delete env[k];
   return { id, kind, dir, data, port, origin, slug, heapMb, cmd, args, env, form };
 }
@@ -83,11 +107,12 @@ async function worldSpec(form, id, kind, i) {
 async function getJ(url, ms = 3000) { try { const r = await fetch(url, { signal: AbortSignal.timeout(ms) }); return { status: r.status, j: await r.json().catch(() => null) }; } catch { return { status: 0, j: null }; } }
 /** baseline: a program per world; threads / one-thread: one host program. load(w) → resolves at the first /healthz. */
 function program(form) {
+  if (form === 'shard') return shardProgram();
   const P = { form, worlds: new Map(), host: null, exits: [], hostExit: null };
   const pids = () => (form === 'baseline' ? [...P.worlds.values()].filter((w) => w.child?.exitCode == null).map((w) => w.child.pid) : P.host && P.hostExit == null ? [P.host.pid] : []);
   /** Memory after a full GC of every live world's heap (faults.mjs `gc`), so a large heap limit's waiting garbage is not counted. */
   P.mem = async () => { for (const w of P.worlds.values()) if (P.alive(w)) try { writeFileSync(join(w.data, 'colocate-fault'), 'gc'); } catch { /* gone */ } await sleep(2500); return smaps(pids()); };
-  P.memOf = (w) => (form === 'baseline' && w.child?.exitCode == null ? smaps([w.child.pid]) : null);
+  P.memOf = (w) => (form === 'baseline' && w.child?.exitCode == null ? smaps([w.child.pid]) : null); P.pids = pids;
   P.alive = (w) => (form === 'baseline' ? w.child?.exitCode == null : P.hostExit == null && !w.ended);
   function startHost() {
     const sumHeap = SIX.concat(MORE).reduce((s, [, k]) => s + worldHeapMb({ template: TEMPLATE[k] }, 0), 0), any = { env: { MALLOC_ARENA_MAX: '2', MALLOC_MMAP_THRESHOLD_: '262144', MALLOC_TRIM_THRESHOLD_: '1048576' } };   // production.mjs WORLD_MALLOC_ENV
@@ -109,7 +134,7 @@ function program(form) {
     if (form === 'baseline') {
       w.child = spawn(w.cmd, ['--import', pathToFileURL(join(ROOT, 'tools/bench/capacity/colocate/preload.mjs')).href, ...w.args], { cwd: ROOT, env: w.env, stdio: ['ignore', 'pipe', 'pipe'] });
       const wl = (b) => appendFileSync(join(w.dir, 'world.log'), b); w.child.stdout.on('data', wl); w.child.stderr.on('data', wl);
-      w.child.on('exit', (code, sig) => { w.ended = { code, sig, at: Date.now() }; P.exits.push({ id: w.id, code, sig }); });
+      w.child.on('exit', (code, sig) => { w.ended = { code, sig, at: Date.now() }; P.exits.push({ id: w.id, code, sig, at: w.ended.at }); });
     } else {
       if (!P.host || P.hostExit) { P.hostExit = null; startHost(); }
       const { NODE_OPTIONS, ...env } = w.env; void NODE_OPTIONS;
@@ -131,17 +156,59 @@ function program(form) {
   };
   return P;
 }
+/** #2451: the shard form, through the launcher's ShardSet (the shard program as the launcher runs it). `P.reload` on: a
+ *  world whose handle exits is loaded again at once (the pool restarts a planned exit at once; its crash backoff for the
+ *  world that ended the shard is left out, so the figures are the shard's own). */
+function shardProgram() {
+  const P = { form: 'shard', worlds: new Map(), exits: [], hostExit: null, reload: false, reloads: [] };
+  const set = new ShardSet({ root: ROOT, size: SHARD_SIZE, logDir: join(OUT, 'shard'), log: (l) => log(`shard: ${scrub(l)}`) });
+  const programs = join(OUT, 'shard', 'programs'); mkdirSync(programs, { recursive: true });
+  const live = () => [...set.shards].filter((s) => s.child.exitCode == null && s.child.signalCode == null);
+  P.set = set; P.shardOf = (w) => w.child?.shard?.n ?? null; P.shards = () => live().length;
+  P.alive = (w) => w.child != null && w.child.exitCode === null && w.child.signalCode === null;
+  P.memOf = () => null; P.pids = () => live().map((s) => s.child.pid);
+  P.mem = async () => { for (const s of live()) try { mkdirSync(join(programs, String(s.child.pid)), { recursive: true }); writeFileSync(join(programs, String(s.child.pid), 'colocate-fault'), 'gc'); } catch { /* gone */ } await sleep(2500); return smaps(live().map((s) => s.child.pid)); };
+  const spawnIn = (w) => {
+    const h = set.spawn(w.slug, { cmd: w.cmd, args: ['--import', pathToFileURL(join(ROOT, 'tools/bench/capacity/colocate/shard-preload.mjs')).href, ...w.args], env: w.env });
+    if (!h) throw new Error(`${w.id}: its command does not go into a shard`);
+    w.child = h; w.ended = null;
+    const wl = (b) => appendFileSync(join(w.dir, 'world.log'), b); h.stdout.on('data', wl); h.stderr.on('data', wl);
+    h.once('exit', (code, sig) => {
+      w.ended = { code, sig, at: Date.now() }; P.exits.push({ id: w.id, code, sig, at: w.ended.at });
+      if (P.reload) { const t0 = Date.now(); spawnIn(w); P.reloads.push({ id: w.id, code, sig, at: t0 }); }
+    });
+  };
+  P.load = async (w) => {
+    P.worlds.set(w.id, w); const t0 = Date.now(); spawnIn(w);
+    while (!(await getJ(`${w.origin}/healthz`)).j?.ok) {
+      if (w.ended && !P.reload) throw new Error(`${w.id} ended at boot (${w.ended.code ?? w.ended.sig}): see shard/${w.id}/world.log`);
+      if (Date.now() - t0 > 600_000) throw new Error(`${w.id} did not answer /healthz in 10 min`);
+      await sleep(250);
+    }
+    w.loadS = +((Date.now() - t0) / 1000).toFixed(2);
+    return w;
+  };
+  P.stop = async () => { P.reload = false; for (const w of P.worlds.values()) TAKEN.delete(w.port); for (const s of [...set.shards]) s.child.kill('SIGKILL'); await sleep(1000); };
+  return P;
+}
 const PROGRAMS = new Set();
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { log(`interrupted (${sig})`); await Promise.all([...PROGRAMS].map((p) => p.stop())); process.exit(130); });
 
 // ------------------------------------------------------------------ ticks (SOULS_TICK_SPANS: [tick, total, …] every 100 ticks)
-const spanRows = (w) => { try { return readFileSync(w.env.SOULS_TICK_SPANS, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+const spanRows = (w) => { try { return readFileSync(w.env.SOULS_TICK_SPANS, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } }); } catch { return []; } };
 function tickStats(rows) {
   const t = rows.map((r) => r[1]).sort((a, b) => a - b); if (!t.length) return null;
   const q = (p) => t[Math.min(t.length - 1, Math.floor(p * t.length))];
   return { ticks: t.length, p50Ms: r1(q(0.5)), p99Ms: r1(q(0.99)), maxMs: r1(t.at(-1)), meanMs: r1(t.reduce((s, x) => s + x, 0) / t.length) };
 }
 /** Tick stats of each world over a window of `ms` (rows that land in it; a row batch lands every 100 ticks). */
+/** #2451: tick stats of every row the worlds' span files got over a window (pooled over the worlds; a shard's worlds
+ *  share one file). */
+async function pooledWindow(worlds, ms) {
+  const files = [...new Set(worlds.map((w) => w.env.SOULS_TICK_SPANS))], rows = (f) => spanRows({ env: { SOULS_TICK_SPANS: f } });
+  const from = new Map(files.map((f) => [f, rows(f).length])); await sleep(ms);
+  return tickStats(files.flatMap((f) => rows(f).slice(from.get(f))));
+}
 async function tickWindow(worlds, ms) {
   const from = new Map(worlds.map((w) => [w.id, spanRows(w).length])); await sleep(ms);
   return Object.fromEntries(worlds.map((w) => [w.id, tickStats(spanRows(w).slice(from.get(w.id)))]));
@@ -201,6 +268,43 @@ function walk(w, souls) {
   return async () => { on = false; await Promise.all(loops); return n; };
 }
 
+// ------------------------------------------------------------------ #2451: one more world, and the faults, for --small
+async function oneMore(form, P, R) {
+  try {
+    for (const [j, [id, kind]] of MORE.entries()) {
+      const others = [...P.worlds.values()].filter((w) => P.alive(w)), m0 = await P.mem(), stopWatch = watch(others);
+      const w = await P.load(await worldSpec(form, id, kind, SIX.length + j)); const seen = await stopWatch(); await sleep(SHORT ? 3000 : 15_000);
+      const m1 = await P.mem(), shard = P.shardOf?.(w) ?? null, near = others.filter((o) => shard != null && P.shardOf(o) === shard);
+      R.oneMore.push({ id, kind, loadS: w.loadS, shard, othersMaxGapMs: Math.max(...Object.values(seen).map((x) => x.maxGapMs)), othersFailedPolls: Object.values(seen).reduce((s, x) => s + x.fail, 0),
+        sameShard: near.length, sameShardMaxGapMs: near.length ? Math.max(...near.map((o) => seen[o.id].maxGapMs)) : null, pssAddedMb: m0 && m1 ? r1(m1.pssMb - m0.pssMb) : null, pssAfterMb: m1?.pssMb ?? null });
+      log(`${form}: one more ${id} up in ${w.loadS} s; others' longest /healthz gap ${R.oneMore.at(-1).othersMaxGapMs} ms`);
+    }
+  } catch (e) { R.oneMoreError = scrub(e.message ?? e); log(`${form}: one more: ${R.oneMoreError}`); }
+}
+/** The world's own faults (SIM_FAULT_INJECT): a storm (a step that throws every tick: exit 70 at 50 in a minute), then a
+ *  hang the watchdog ends (10 s). Each in a world of a different shard; what every other world saw over FAULT_S. */
+async function smallFaults(form, P, R) {
+  const FAULT_S = SHORT ? 40 : 60;
+  P.reload = true;
+  for (const [fault, target] of [['storm', 's2'], ['hang', `s${Math.min(N, SHARD_SIZE + 2)}`]]) {
+    try {
+      const tw = P.worlds.get(target), others = [...P.worlds.values()].filter((w) => w !== tw && P.alive(w));
+      const shard = P.shardOf?.(tw) ?? null, near = new Set(others.filter((o) => shard != null && P.shardOf(o) === shard).map((o) => o.id));
+      const stopWatch = watch(others), t0 = Date.now();
+      const r = await fetch(`${tw.origin}/__sim/fault?kind=${fault}${fault === 'hang' ? '&ms=60000' : ''}`, { method: 'POST', signal: AbortSignal.timeout(5000) }).then((x) => x.status, (e) => `error ${e.message}`);
+      await sleep(FAULT_S * 1000);
+      const seen = await stopWatch(), ex = P.exits.find((x) => x.id === tw.id && x.at >= t0);
+      const group = (ids) => { const xs = ids.map((id) => seen[id]); return { worlds: xs.length, maxGapMs: xs.length ? Math.max(...xs.map((x) => x.maxGapMs)) : null, failedPolls: xs.reduce((s, x) => s + x.fail, 0), answeringAtEnd: xs.filter((x) => x.answeringAtEnd).length }; };
+      R.faults.push({ fault, target: tw.id, shard, injected: r, targetEnded: ex ? { afterS: +((ex.at - t0) / 1000).toFixed(1), code: ex.code ?? null, sig: ex.sig ?? null } : null,
+        targetAnsweringAtEnd: (await getJ(`${tw.origin}/healthz`)).j?.ok === true,
+        sameProgram: group([...near]), otherPrograms: group(others.map((o) => o.id).filter((id) => !near.has(id))),
+        reloads: (P.reloads ?? []).filter((x) => x.at >= t0).length, programsAfter: P.shards?.() ?? null });
+      log(`${form}: fault ${fault} in ${tw.id}: ${JSON.stringify(R.faults.at(-1))}`);
+    } catch (e) { R.faults.push({ fault, target, error: scrub(e.message ?? e) }); log(`${form}: fault ${fault}: ${scrub(e.message ?? e)}`); }
+  }
+  P.reload = false;
+}
+
 // ------------------------------------------------------------------ one form, start to end
 async function runForm(form) {
   mkdirSync(join(OUT, form), { recursive: true });
@@ -210,6 +314,7 @@ async function runForm(form) {
     const W = {};
     for (const [i, [id, kind]] of SIX.entries()) {
       const w = await P.load(await worldSpec(form, id, kind, i)); W[id] = w;
+      if (N) { R.loads.push({ id, kind, loadS: w.loadS, shard: P.shardOf?.(w) ?? null }); if ((i + 1) % 10 === 0 || i + 1 === N) log(`${form}: ${i + 1} worlds up (last in ${w.loadS} s)`); continue; }
       await sleep(SHORT ? 3000 : 15_000);
       const m = await P.mem(); R.loads.push({ id, kind, loadS: w.loadS, pssAfterMb: m?.pssMb ?? null, rssAfterMb: m?.rssMb ?? null, own: P.memOf(w) });
       log(`${form}: ${id} (${kind}) up in ${w.loadS} s; program Pss ${m?.pssMb ?? '—'} MB`);
@@ -217,6 +322,17 @@ async function runForm(form) {
     const six = Object.values(W), small = six.filter((w) => w.kind === 'small'), eden = six.filter((w) => w.kind === 'eden');
     // quiet: settle, then a tick window of every world, then memory
     await sleep(Math.max(0, SETTLE_S - 60) * 1000);
+    if (N) {
+      const winMs = SHORT ? 15_000 : 60_000, c0 = cpuS(P.pids());
+      R.ticks.pooled = await pooledWindow(six, winMs);
+      const c1 = cpuS(P.pids()); R.cpuCores = c0 != null && c1 != null ? +((c1 - c0) / (winMs / 1000)).toFixed(2) : null;
+      if (form === 'shard' && SLOT) R.callbackSlot = true;
+      R.memory.quiet = { total: await P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])), programs: P.shards?.() ?? six.length };
+      log(`${form}: ${N} quiet: Pss ${R.memory.quiet.total?.pssMb ?? '—'} MB in ${R.memory.quiet.programs} programs; ticks ${JSON.stringify(R.ticks.pooled)}`);
+      await oneMore(form, P, R);
+      await smallFaults(form, P, R);
+      return R;
+    }
     R.ticks.quiet = await tickWindow(six, SHORT ? 15_000 : 60_000);
     R.memory.quiet = { total: await P.mem(), perWorld: Object.fromEntries(six.map((w) => [w.id, P.memOf(w)])) };
     log(`${form}: quiet Pss ${R.memory.quiet.total?.pssMb ?? '—'} MB; ticks ${JSON.stringify(Object.fromEntries(Object.entries(R.ticks.quiet).map(([k, v]) => [k, v?.p50Ms])))}`);
@@ -268,16 +384,18 @@ async function runForm(form) {
 
 // ------------------------------------------------------------------ run and report
 const commit = sh('git', ['-C', ROOT, 'rev-parse', 'HEAD']);
-const receipt = { issue: 2300, commit, node: process.version, platform: process.platform, cpus: cpus().length, memGb: +(totalmem() / 2 ** 30).toFixed(1), loadBefore: loadavg().map((x) => +x.toFixed(2)), settleS: SETTLE_S, walkS: WALK_S, busy: BUSY, short: SHORT };
+const receipt = { issue: N || FORMS.includes('shard') ? 2451 : 2300, commit, node: process.version, platform: process.platform, cpus: cpus().length, memGb: +(totalmem() / 2 ** 30).toFixed(1), loadBefore: loadavg().map((x) => +x.toFixed(2)), settleS: SETTLE_S, walkS: WALK_S, busy: BUSY, short: SHORT, small: N || null, shardSize: FORMS.includes('shard') ? SHARD_SIZE : null };
 log(`colocate: forms ${FORMS.join(',')}, worlds ${SIX.map(([id, k]) => `${id}:${k}`).join(' ')}, commit ${commit?.slice(0, 9)}`);
 const results = [];
 for (const form of FORMS) { results.push(await runForm(form)); writeFileSync(join(OUT, 'results.json'), JSON.stringify({ receipt, results }, null, 1) + '\n'); }
+receipt.callbackSlot = SLOT || null;
 receipt.loadAfter = loadavg().map((x) => +x.toFixed(2));
 writeFileSync(join(OUT, 'results.json'), JSON.stringify({ receipt, results }, null, 1) + '\n');
 writeFileSync(join(OUT, 'REPORT.md'), report({ receipt, results }));
 log('done: REPORT.md');
 
 export function report({ receipt: rc, results: rs }) {
+  if (rc.small) return smallReport({ receipt: rc, results: rs });
   const f = (x) => (x == null ? '—' : String(x)), mean = (xs) => { const v = xs.filter((x) => x != null); return v.length ? r1(v.reduce((s, x) => s + x, 0) / v.length) : null; };
   const L = [`# Several worlds in one program (#2300)`, '', `commit ${f(rc.commit?.slice(0, 9))} · node ${rc.node} · ${rc.cpus} CPUs · ${rc.memGb} GB · load ${rc.loadBefore.join(' ')} → ${f(rc.loadAfter?.join(' '))} · settle ${rc.settleS} s · walk ${rc.walkS} s · busy ${rc.busy} walkers${rc.short ? ' · SHORT (indicative)' : ''}`, ''];
   L.push('## Memory (Pss, MB)', '', 'After a full GC of every world\'s heap. Program totals; per world for the baseline is each world program\'s own Pss, for the forms the rise in the program\'s Pss as each world loaded (15 s after its first /healthz).', '',
@@ -300,5 +418,27 @@ export function report({ receipt: rc, results: rs }) {
     L.push(`| ${r.form} | ${x.fault} | ${x.target} | ${x.targetEnded ? `after ${x.targetEnded.afterS} s (${f(x.targetEnded.code ?? x.targetEnded.sig)}${x.targetEnded.error ? `: ${x.targetEnded.error.slice(0, 60)}` : ''})` : 'no'} | ${x.programEnded ? `after ${x.programEnded.afterS} s (${f(x.programEnded.code ?? x.programEnded.sig)})` : 'no'} | ${o} |`);
   }
   for (const r of rs) for (const k of ['error', 'walkError', 'oneMoreError']) if (r[k]) L.push('', `${r.form} ${k === 'error' ? 'stopped early' : k === 'walkError' ? 'walking and busy phase' : 'one more world'}: ${r[k]}`);
+  return L.join('\n') + '\n';
+}
+
+/** #2451: the report of a --small run (N small worlds per form). */
+function smallReport({ receipt: rc, results: rs }) {
+  const f = (x) => (x == null ? '—' : String(x)), med = (xs) => { const v = xs.filter((x) => x != null).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : null; };
+  const L = [`# ${rc.small} small worlds: the shard program beside one program per world (#2451)`, '', `commit ${f(rc.commit?.slice(0, 9))} · node ${rc.node} · ${rc.cpus} CPUs · ${rc.memGb} GB · load ${rc.loadBefore.join(' ')} → ${f(rc.loadAfter?.join(' '))} · settle ${rc.settleS} s · shards of ${f(rc.shardSize)}${rc.short ? ' · SHORT (indicative)' : ''}`, ''];
+  L.push('## Memory and ticks, quiet', '', 'Pss after a full GC of every program\'s heap. Ticks: every world\'s SOULS_TICK_SPANS rows over 60 s, pooled.', '',
+    '| form | programs | Pss total MB | per world MB | tick p50 / p99 ms | ticks | CPU cores, quiet | load s, median (max) |', '|---|---|---|---|---|---|---|---|');
+  for (const r of rs) {
+    const q = r.memory.quiet?.total, n = r.loads.length, t = r.ticks.pooled;
+    L.push(`| ${r.form}${r.callbackSlot ? ' + callback slot' : ''} | ${f(r.memory.quiet?.programs)} | ${f(q?.pssMb)} | ${f(q && n ? r1(q.pssMb / n) : null)} | ${t ? `${t.p50Ms} / ${t.p99Ms}` : '—'} | ${f(t?.ticks)} | ${f(r.cpuCores)} | ${f(med(r.loads.map((x) => x.loadS)))} (${f(r.loads.length ? Math.max(...r.loads.map((x) => x.loadS)) : null)}) |`);
+  }
+  L.push('', '## One more world', '', '| form | load to first /healthz s | others\' longest gap ms | others\' failed polls | same program: worlds · longest gap ms | Pss added MB |', '|---|---|---|---|---|---|');
+  for (const r of rs) for (const x of r.oneMore) L.push(`| ${r.form} | ${x.loadS} | ${x.othersMaxGapMs} | ${x.othersFailedPolls} | ${x.shard == null ? '—' : `${x.sameShard} · ${f(x.sameShardMaxGapMs)}`} | ${f(x.pssAddedMb)} |`);
+  L.push('', '## One world fails (watched 60 s; in the shard form every world that exits is loaded again at once)', '', '| form | fault | target ended | target serving at end | same program: worlds · longest gap ms · failed polls · serving at end | other programs: worlds · longest gap ms · serving at end |', '|---|---|---|---|---|---|');
+  for (const r of rs) for (const x of r.faults) {
+    if (x.error) { L.push(`| ${r.form} | ${x.fault} | error: ${x.error.slice(0, 120)} ||||`); continue; }
+    const g = (y) => (y.worlds ? `${y.worlds} · ${y.maxGapMs} · ${y.failedPolls} · ${y.answeringAtEnd}` : '—');
+    L.push(`| ${r.form} | ${x.fault} | ${x.targetEnded ? `after ${x.targetEnded.afterS} s (${f(x.targetEnded.code ?? x.targetEnded.sig)})` : 'no'} | ${x.targetAnsweringAtEnd ? 'yes' : 'no'} | ${g(x.sameProgram)} | ${x.otherPrograms.worlds} · ${f(x.otherPrograms.maxGapMs)} · ${x.otherPrograms.answeringAtEnd} |`);
+  }
+  for (const r of rs) for (const k of ['error', 'oneMoreError']) if (r[k]) L.push('', `${r.form} ${k === 'error' ? 'stopped early' : 'one more world'}: ${r[k]}`);
   return L.join('\n') + '\n';
 }
