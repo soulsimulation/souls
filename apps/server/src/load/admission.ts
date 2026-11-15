@@ -213,8 +213,9 @@ export class Admission {
     // amber (a boot or creation spike still stepping down) is not slowed; red/black always queue (budgets bind).
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
-      settle('run'); ranAt = now;
-      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
+      settle('run'); ranAt = now; const ticks = this.tickSpent();
+      // #2440 review: as in the dispatcher, the ticks that ran while the job was timed are the tick's, not the job's
+      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
     return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
@@ -227,6 +228,13 @@ export class Admission {
     // #2440: a job run on spare time leaves no debt: once the thread is busy again, the budgets start from even, not from
     // the idle time the requests used meanwhile
     if (free) this.credit = Math.max(0, this.credit);
+    // #2440: an outlier leaves at most a frame's budget, or its route's usual cost, of world debt. A job's measured span
+    // can hold work the dispatcher cannot separate from it (the async continuations of acts admitted before it: up to
+    // 1.7 s on a paced run, with ~0 GC and ~0 tick); debited whole, one such charge held every queued request for
+    // seconds. Jobs that cost what their route usually costs are debited in full, so a crowd of genuinely heavy jobs is
+    // still held to the budget; the outlier's full charge lands on its principal's bucket and the route estimate.
+    const usual = this.est.get(id);
+    if (usual !== undefined) this.credit = Math.max(this.credit, -Math.max(this.frameBudget(), usual));
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
