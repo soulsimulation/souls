@@ -254,7 +254,8 @@ export class LoadMonitor {
       // taken once a second (under the 2 s stall threshold, so the tick age stays fresh); a wake turns both back at once
       const asleep = !!this.o.host.sleeping;
       if (asleep !== this.drowsy) { this.drowsy = asleep; if (asleep) this.hist?.disable(); else { this.hist?.reset(); this.hist?.enable(); this.histAt = this.now(); } }
-      if (asleep && this.now() - this.sampledAt < DROWSY_SAMPLE_MS) return;
+      // (the turn and the tick age stay fresh at the full cadence, so a host pause under load is not read as a stall)
+      if (asleep && this.now() - this.sampledAt < DROWSY_SAMPLE_MS) { const n = this.now(); this.a[S.lastTurnAt] = n; if (this.a[S.stallMs] > 0) this.a[S.tickAt] = n; return; }
       if (!this.pendingSample) this.pendingSample = setImmediate(() => { this.pendingSample = null; this.sample(); });
     }, this.o.sampleMs ?? 250); this.timer.unref();
     this.sample();
