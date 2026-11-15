@@ -151,5 +151,81 @@ test('legal-edits/2, the check alone: 40 single walls among 12 Souls (S6 bar p95
   assert.equal(sealed.length, inRing.length, `the plaza's Souls named: ${sealed.length} of ${inRing.length}`); assert.ok(sealed.every(s => s.by.includes(closed.after.get('n-2')!.id)));
   const inside = apply(closed.after, [{ op: 'place', def: coreRef('wall'), params: { w: 2, h: 2.6, d: 0.5 }, name: 'inner', p: [x + 8, z + 8] }]);
   assert.deepEqual(seal.sealedBy(closed.after, inside.after, inside.diff, crowd), [], 'already closed before this edit: not its doing');
+
+  // a scattered batch: 16 short walls 30 m apart (a 4 × 4 grid 90 m across) with the twelve Souls among them, 20 times over;
+  // and 50 pieces scattered over 200 m. The windows are capped, so the cost does not grow with the pieces.
+  const scattered = (n: number, step: number, k: number) => Array.from({ length: n }, (_, i) => ({ op: 'place', def: coreRef('wall'), params: { w: 2, h: 2.6, d: 0.5 }, name: `sc-${k}-${i}`, p: [x - 45 + (i % Math.ceil(Math.sqrt(n))) * step + k * 0.1, z - 45 + Math.floor(i / Math.ceil(Math.sqrt(n))) * step], r: (i * 0.4) % 3 }));
+  const among = Array.from({ length: 12 }, (_, i) => ({ body: `m-${i}`, soulId: `m-${i}`, name: `M${i}`, p: [x - 30 + (i % 4) * 25, z - 30 + Math.floor(i / 4) * 30] as [number, number] }));
+  for (const [label, n, step] of [['16 walls 30 m apart', 16, 30], ['50 walls over 200 m', 50, 28]] as const) {
+    const t2: number[] = [];
+    for (let k = 0; k < 20; k++) {
+      const b = apply(base, scattered(n, step, k)), t0 = performance.now();
+      assert.deepEqual(seal.sealedBy(base, b.after, b.diff, among), []);
+      t2.push(performance.now() - t0);
+    }
+    t2.sort((a, b) => a - b);
+    t.diagnostic(`seal check per commit, ${label}, 12 Souls among them: p50 ${t2[10].toFixed(1)} ms, p95 ${t2[18].toFixed(1)} ms, max ${t2[19].toFixed(1)} ms`);
+    assert.ok(t2[18] < 100, `${label}: p95 ${t2[18].toFixed(1)} ms`);
+  }
+});
+
+test('legal-edits/2, the check alone: a 48 m pen closed at its far corner names a Soul in the opposite corner; a parent moved with a wall child is checked', { timeout: 300000 }, async t => {
+  const w = await world(); t.after(cleanup(w));
+  await w.settle(2);
+  const apply = (m: any, ops: any[]) => { const after = m.fork(), r: any = applyBatch(after, { ops } as any, 'god', 0); assert.equal(r.result.accepted, true, JSON.stringify(r.result).slice(0, 300)); return { after, diff: r.diff }; };
+  const base = w.god.model.fork(), a = 60, L = 48;
+  // a pen 48 m a side, eight 6 m walls a side; the north-east corner piece is left out, then closed
+  const pen: any[] = [];
+  for (let i = 0; i < 8; i++) {
+    const o = a + SEG / 2 + i * SEG;
+    pen.push(seg(`ps-${i}`, [o, a], 0), seg(`pw-${i}`, [a - 0.3, o], Math.PI / 2), seg(`pe-${i}`, [a + L + 0.3, o], Math.PI / 2));
+    if (i !== 7) pen.push(seg(`pn-${i}`, [o, a + L], 0));
+  }
+  const open = apply(base, pen), closed = apply(open.after, [seg('pn-7', [a + L - SEG / 2, a + L], 0)]);
+  for (const d of [1.5, 3]) {
+    const sw = { body: 'sw', soulId: 'sw', name: 'Sw', p: [a + d, a + d] as [number, number] };
+    const got = seal.sealedBy(open.after, closed.after, closed.diff, [sw]);
+    assert.equal(got.length, 1, `a Soul ${d} m in from the south-west corner is named: ${JSON.stringify(got)}`);
+    assert.ok(got[0].pocket > 2000 && got[0].pocket <= seal.SEAL_MAX_POCKET, `pocket ${got[0].pocket}`);
+  }
+
+  // a parent that is not solid, carrying a wall: moved so the wall closes the pen's corner
+  const host = apply(open.after, [
+    { op: 'define', def: { schema: 'def/1', name: 'pen-gate-host', size: { box: [8, 3, 8] }, make: { kind: 'none' }, slots: [{ id: 'ground', kind: 'floor', p: [0, 0, 0], accepts: {}, capacity: 8 }] } },
+    { op: 'place', tmp: '$g', def: 'pen-gate-host@1', name: 'gate-host', p: [a + 200, a + L] },
+    { op: 'place', def: coreRef('wall'), params: { w: SEG, h: 2.6, d: 0.5 }, name: 'carried', in: { parent: '$g', slot: 'ground' }, p: [0, 0, 0] },
+  ]);
+  const moved = apply(host.after, [{ op: 'move', id: 'gate-host', p: [a + L - SEG / 2, a + L] }]);
+  const carried = [...moved.after.entities.values()].find((e: any) => e.name === 'carried');
+  assert.ok(carried, 'the child wall exists');
+  const got = seal.sealedBy(host.after, moved.after, moved.diff, [{ body: 'sw', soulId: 'sw', name: 'Sw', p: [a + 2, a + 2] }]);
+  assert.equal(got.length, 1, `the parent move is checked: ${JSON.stringify(got)}`); assert.ok(got[0].by.includes((carried as any).id), 'the carried wall is named');
+});
+
+test('legal-edits/2: an undo that puts back the wall closing a ring round a Soul is refused by name', { timeout: 300000 }, async t => {
+  const w = await world(); t.after(cleanup(w));
+  await w.settle(2);
+  const bo = await w.soul('bo', 'Bo');
+  await w.rules(false);
+  const [x, z] = w.at(bo.entityId);
+  const ring: any = await w.god.checked(() => w.god.act(openRing(x, z)));
+  assert.equal(ring.accepted, true, JSON.stringify(ring).slice(0, 400));
+  const placed: any = await w.god.checked(() => w.god.act({ ops: [{ ...seg('gap', [x + 40, z + 40], 0) }] }));
+  assert.equal(placed.accepted, true, JSON.stringify(placed).slice(0, 400));
+  // under legal-edits/1 alone: the wall moved into the ring's gap and out again; the undo of the move out puts it back
+  const into: any = await w.god.checked(() => w.god.act({ ops: [{ op: 'move', id: 'gap', p: [x, z - R] }] }));
+  assert.equal(into.accepted, true, 'under legal-edits/1 alone the move into the gap is accepted');
+  const out: any = await w.god.checked(() => w.god.act({ ops: [{ op: 'move', id: 'gap', p: [x + 40, z + 40] }] }));
+  assert.equal(out.accepted, true, JSON.stringify(out).slice(0, 400));
+  await w.settle(4);
+  const p = w.at(bo.entityId);
+  if (Math.hypot(p[0] - x, p[1] - z) > 0.5) { await accept(w.host, w.host.enqueue('edge-relocate', 'test:seal', { soulId: bo.soulId, entityId: bo.entityId, to: [x, z], why: 'seal test fixture' })); await w.settle(2); }
+  await accept(w.host, enableLegalEditsV2(w.host, 'test:legal-edits') as never); await w.settle(2);
+  const seq = w.god.model.editSeq;
+  const undo: any = await w.god.checked(() => w.god.undo());
+  assert.equal(undo.accepted, false, JSON.stringify(undo).slice(0, 600));
+  const f = undo.failures.find((x: any) => x.entity === bo.entityId);
+  assert.ok(f, JSON.stringify(undo.failures)); assert.equal(f.code, 'body.sealed-in'); assert.match(f.detail, /^Bo would have no walk out/);
+  assert.equal(w.god.model.editSeq, seq, 'nothing committed');
 });
 

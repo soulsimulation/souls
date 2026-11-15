@@ -1635,7 +1635,7 @@ export class EngineBridge {
     for (const m of this.host.minds.values()) { const b = this.engine.world.entities[m.entityId]; if (b && !named.has(m.entityId)) residents.push({ body: m.entityId, soulId: m.soulId, name: m.name, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0 }); }
     if (!residents.length) return [];
     let sealed: Sealed[];
-    try { sealed = sealedBy(before, after, diff, residents); } catch (e) { this.log(`seal check: ${(e as Error).message}`); return []; }
+    try { sealed = sealedBy(before, after, diff, residents, { skipped: (souls) => this.log(`seal check: ${souls.length} Soul(s) past the window cap left to nav-connect/1`) }); } catch (e) { this.log(`seal check: ${(e as Error).message}`); return []; }
     return sealed.map(s => ({ op: -1, code: 'body.sealed-in', entity: s.body, field: 'legal-edits/2',
       detail: `${s.name} would have no walk out: this edit closes ${s.name} in ${s.pocket} m² at (${s.at.map(n => Math.round(n * 10) / 10).join(', ')}), shut off by ${s.by.slice(0, 2).map(id => after.pathOf(id) || id).join(' and ')}${s.by.length > 2 ? ` and ${s.by.length - 2} more` : ''}.`,
       measured: { soul: s.soulId, at: s.at, pocket: s.pocket, by: s.by }, fix: `Leave a way out (a gap of 1 m, a door or a gate), or wait until ${s.name} has walked out.` }));

@@ -56,17 +56,20 @@ legal-edits/1 the last wall of a ring closed 15 m from a Soul was accepted, and 
   (`god/seal-check.ts`).
   - The pocket rule is nav-connect/1's: free ground cut off from everything else, at most 2,500 m².
   - The check is model-only, on BUILDSAFE's 0.1 m ground raster. It runs only for an edit that adds or moves
-    blocking geometry within 56 m of a Soul on the ground. It rasters one window round the edit's pieces and floods
-    each region holding a Soul once, after the edit. It rasters the window before the edit only when a Soul is
-    sealed after it. Measured with 12 Souls in reach on a loaded workstation: p50 13 ms, p95 66 ms a commit.
+    blocking geometry (its own, or a moved parent's children) within 56 m of a Soul on the ground, measured along
+    each axis. It rasters a window 56 m round those Souls, shared by Souls near each other, up to 144 m a side. It
+    rasters at most two windows per edit; Souls past them are logged and left to nav-connect/1. It floods each region
+    that holds a Soul once, after the edit, and rasters the window before the edit only when a Soul is sealed after
+    it. Measured on a workstation at load 26, per commit with 12 Souls in reach: one wall, p95 19 ms; 16 walls
+    30 m apart, p95 83 ms; 50 walls over 200 m, p95 43 ms.
   - Edits logged before the event keep legal-edits/1's verdicts.
 - **Construction-closure walk-outs stay** (`evacuateSites`). They are not edits that break a rule on a body. They
   are ordinary walks off a site the god has closed, each planned with a route and logged (`edge-god-walkout`), so
   replay folds them as recorded. Refusing the closure instead would let one idle Soul hold a build site for as long
   as she stands there.
 - **nav-connect/1's step-out stays as the fallback.** It serves worlds without legal-edits/1, and under it whatever
-  the check does not see: bodies on upper floors, and a pocket of the rule's size that reaches more than 56 m from
-  the pieces that close it. A frozen Soul is worse than a logged step.
+  the check does not see: bodies on upper floors, a pocket of the rule's size that reaches more than 56 m from the
+  Soul, and Souls past the window cap of one edit. A frozen Soul is worse than a logged step.
 
 ## 2. One shared legality rule
 
