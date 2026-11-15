@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import type { Entity, StoredDef } from '@souls/world-compiler';
 import { VARIANT_CAP, variantCount, variantOf } from './material-variants.ts';
-import { quantizeGlow, syncLightGlow } from './motion.ts';
+import { quantizeGlow, setClockNight, STEADY_WOBBLE_HZ, steadyGlowAt, syncLightGlow } from './motion.ts';
 import { mergedMaterialCount, mergeStatic } from './static-merge.ts';
 
 test('variantOf: one clone per (source, key), shared, released with its source, capped', () => {
@@ -106,4 +106,17 @@ test('steady glows merge by base material at a tracked level; an off lamp is dyn
   syncLightGlow(c.g, entity('c'), lampDef, null, 100);
   assert.equal(c.glow.userData.renderDynamic, undefined); assert.equal(glowSourceMaterial(c.glow), base); assert.equal((c.g.userData.frozenDrawn as { thaw: boolean }).thaw, true);
   assert.equal(mergedGlowMaterial(new THREE.MeshStandardMaterial()), null);
+});
+
+test('#1588: the shared steady glow level steps at most ~4 times a second (day, dusk, night), and at least once a second', () => {
+  const t0 = 1_800_000_000;   // world seconds (motion.ts worldSeconds passes these through)
+  for (const night of [0, 0.5, 1]) {
+    setClockNight(night);
+    let steps = 0, last = quantizeGlow(steadyGlowAt(t0, null));
+    for (let f = 1; f <= 60 * 60; f++) { const q = quantizeGlow(steadyGlowAt(t0 + f / 60, null)); if (q !== last) { last = q; steps++; } }
+    assert.ok(steps <= 60 * STEADY_WOBBLE_HZ, `night ${night}: ${steps} steps in 60 s`);
+    assert.ok(steps >= 60, `night ${night}: still breathing (${steps} steps in 60 s)`);
+    if (night === 0) assert.ok(steps / 60 < 4.5, `by day ${steps / 60} steps/s`);
+  }
+  setClockNight(null);
 });
