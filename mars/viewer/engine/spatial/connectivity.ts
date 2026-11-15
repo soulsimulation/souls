@@ -28,7 +28,7 @@ import { GROUND_TILE_M, G_OUTSIDE, G_STEEP, G_WALK, type GroundField } from './g
 import { linkApproach, linkEdgeTest, PLAN_MARGIN, snap as snapCell } from './path.ts';
 import type { Spatial } from './service.ts';
 import { boxesOf, type GroundNav } from './tiled.ts';
-import { HUMAN_PROFILE, type Link, type Obstacle, type Surface, type SpatialScene } from './types.ts';
+import { doorSides, HUMAN_PROFILE, type Link, type Obstacle, type Surface, type SpatialScene } from './types.ts';
 
 /** Policy id of the audit's rules (what counts as connected, what a rescue picks): bump when they change. */
 export const NAV_CONNECT_POLICY = 'nav-connect/1';
@@ -62,6 +62,8 @@ export type ConnVerdict = {
   pocket?: number;
   /** Upper floors: the floor (surface id) it stands on, when not connected. */
   floor?: string;
+  /** Connected by ONE closed ground hand door only (doors-pass/1): a walk between it and the main area goes through that door. */
+  door?: true;
 };
 
 const ALL = new Int32Array(0), NONE = new Int32Array(0);
@@ -138,6 +140,8 @@ export class NavConnectivity {
   private flatUpper = new WeakMap<LevelGrid, Int32Array>();
   /** Components joined to the main area both ways (node ids: `0:<root>` level 0, `u<cluster>:<level>:<label>` upper). */
   private good = new Set<string>();
+  /** Areas in `good` only by one ground hand door (doors-pass/1): a walk between one of these and the rest goes through it. */
+  private behind = new Set<string>();
   private fwd = new Set<string>();
   private bwd = new Set<string>();
   private graphVer = '';
@@ -188,7 +192,7 @@ export class NavConnectivity {
       work.clusterMemo = new Map(this.clusterMemo); work.linkMemo = new Map(this.linkMemo);
       work.flat = this.flat; work.flatUpper = this.flatUpper; work.ext = this.ext; work.per = this.per;
       work.parent = this.parent.slice(); work.base = new Map(this.base); work.rootSize = new Map(this.rootSize);
-      work.clusters = this.clusters; work.good = this.good; work.fwd = this.fwd; work.bwd = this.bwd;
+      work.clusters = this.clusters; work.good = this.good; work.behind = this.behind; work.fwd = this.fwd; work.bwd = this.bwd;
       work.main = this.main; work.version = this.version; work.graphVer = this.graphVer; work.dirty = this.dirty;
       const carry = this.carried; this.carried = undefined;
       if (carry && ground === carry.ground && ground.per === carry.per) {
@@ -242,7 +246,7 @@ export class NavConnectivity {
     this.tiles = w.tiles; this.ext = w.ext; this.per = w.per; this.flat = w.flat;
     this.parent = w.parent; this.base = w.base; this.rootSize = w.rootSize; this.lru = w.lru; this.mediaMemo = w.mediaMemo;
     this.dirty = w.dirty; this.clusters = w.clusters; this.clusterMemo = w.clusterMemo; this.flatUpper = w.flatUpper;
-    this.good = w.good; this.fwd = w.fwd; this.bwd = w.bwd; this.graphVer = w.graphVer; this.linkMemo = w.linkMemo;
+    this.good = w.good; this.behind = w.behind; this.fwd = w.fwd; this.bwd = w.bwd; this.graphVer = w.graphVer; this.linkMemo = w.linkMemo;
     this.main = w.main; this.version = w.version;
   }
 
@@ -599,11 +603,27 @@ export class NavConnectivity {
       while (q.length) for (const n of adj.get(q.pop()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n); }
       return seen;
     };
-    this.good = new Set();
+    this.good = new Set(); this.behind = new Set();
     if (this.main >= 0) {
       const m = `0:${this.main}`;
       this.fwd = reach(fwdAdj, m); this.bwd = reach(bwdAdj, m);
       for (const n of this.fwd) if (this.bwd.has(n)) this.good.add(n);
+      // doors-pass/1 (#2365): a ground area ONE closed, unlocked hand door away from the main area is joined to it (a walk
+      // opens that door, passes and closes it: entry 31), with every area that walks to and from it without another door:
+      // the building's upper floors by its stairs (#2383). Not across a second door: an area two doors away, or behind a
+      // door upstairs, stays cut off, since the passage opens one door on the ground; there the step-out stays the way out.
+      const y0 = sp.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0, extra: string[] = [];
+      for (const o of this.scene.obstacles) {
+        if (o.door !== 'pass' || Math.abs(o.y0 - (y0 ?? sp.ground!.standY(o.obb.c[0], o.obb.c[1]))) > 0.6) continue;
+        const [a, b] = doorSides(o), ra = this.snap(a, 0.6)?.root, rb = this.snap(b, 0.6)?.root;
+        if (ra === undefined || rb === undefined || ra === rb) continue;
+        const na = `0:${ra}`, nb = `0:${rb}`;
+        if (this.good.has(na) && !this.good.has(nb)) extra.push(nb); else if (this.good.has(nb) && !this.good.has(na)) extra.push(na);
+      }
+      for (const n of extra) {
+        const f = reach(fwdAdj, n), b = reach(bwdAdj, n);
+        for (const x of f) if (b.has(x) && !this.good.has(x)) { this.good.add(x); this.behind.add(x); this.fwd.add(x); this.bwd.add(x); }
+      }
     } else { this.fwd = new Set(); this.bwd = new Set(); }
     this.linkMemo = memo;
     this.stats.links = tasks.length / 2; this.stats.edges = edges;
@@ -657,7 +677,7 @@ export class NavConnectivity {
       if (u && c >= 0) { node = u.node(c); floor = u.floor; }
     }
     if (!node) return { id, level, ok: false, code: 'nav.no-standing-room' };
-    if (this.good.has(node)) return { id, level, ok: true, area: node };
+    if (this.good.has(node)) return { id, level, ok: true, area: node, ...(this.behind.has(node) ? { door: true as const } : {}) };
     const code = this.fwd.has(node) || this.bwd.has(node) ? 'nav.one-way' : 'nav.disconnected';
     return { id, level, ok: false, code, area: node, ...(level === 0 ? { pocket } : { floor }) };
   }

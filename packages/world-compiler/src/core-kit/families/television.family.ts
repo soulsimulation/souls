@@ -8,7 +8,7 @@ import type { DefInput } from '../../schemas.ts';
 export const TV_CHANNELS = ['garden', 'sea', 'stars', 'test-card'] as const;
 type Part = [u: number, v: number, w: number, h: number, color: string, disc?: true];
 /** Each picture in screen units: u across (-0.5 left … 0.5 right), v up, w and h as fractions of the screen; back to front. */
-const PICTURES: Record<(typeof TV_CHANNELS)[number], Part[]> = {
+export const PICTURES: Record<(typeof TV_CHANNELS)[number], Part[]> = {
   garden: [[0, 0.2, 1, 0.6, '#8fc9ef'], [0, -0.3, 1, 0.4, '#4f9a45'], [0.22, -0.08, 0.56, 0.12, '#7bb35a'], [-0.26, 0.24, 0.16, 0.2, '#ffd75e', true]],
   sea: [[0, 0.22, 1, 0.56, '#f4b37a'], [0, -0.28, 1, 0.44, '#2a5d8f'], [0, -0.02, 0.2, 0.26, '#ffe08a', true], [0, -0.26, 0.06, 0.36, '#f7c873']],
   stars: [[0, 0, 1, 1, '#0d1636'], [0.28, 0.2, 0.18, 0.24, '#f2efd8', true],

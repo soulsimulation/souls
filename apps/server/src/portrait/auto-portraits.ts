@@ -25,7 +25,7 @@ export class AutoPortraits{
  readonly host:WorldHost;readonly enabled:boolean;
  private queue=new Map<string,Job>();private failed=new Map<string,string>();private busy=false;
  private child:ChildProcessWithoutNullStreams|null=null;private ready:Promise<void>|null=null;private pending=new Map<string,(r:{ok:boolean;png?:string;error?:string})=>void>();
- private idle:ReturnType<typeof setTimeout>|null=null;private timer:ReturnType<typeof setInterval>|null=null;private seq=0;private crashes=0;private disposed=false;
+ private idle:ReturnType<typeof setTimeout>|null=null;private timer:ReturnType<typeof setInterval>|null=null;private seq=0;private crashes=0;private disposed=false;private first:ReturnType<typeof setTimeout>|null=null;
  /** Called after a portrait is stored (tests and the hub use it). */
  onStored:(soulId:string)=>void=()=>{};
  constructor(host:WorldHost,opts:{enabled?:boolean;sweepMs?:number}={}){
@@ -37,7 +37,7 @@ export class AutoPortraits{
   const sweepMs=opts.sweepMs??30000;
   // the first sweep waits 5-30 s at random, so the worlds of one host restarting together don't all render at once
   // (a renderer holds ~300 MB while busy and exits 10 s after its last portrait)
-  if(sweepMs>0){setTimeout(()=>this.sweep(),Math.min(sweepMs,5000+Math.floor(Math.random()*55000))).unref();this.timer=setInterval(()=>this.sweep(),sweepMs);this.timer.unref();}
+  if(sweepMs>0){this.first=setTimeout(()=>this.sweep(),Math.min(sweepMs,5000+Math.floor(Math.random()*55000)));this.first.unref();this.timer=setInterval(()=>{if(!host.silent?.())this.sweep();},sweepMs);/* #2303: a portrait is for viewers; a silent world has none, and the sweep after it catches up */this.timer.unref();}
  }
  /** The look a Soul's current body draws with, or null (no body, a legacy unparameterised body, a creature, an upload). */
  private job(soulId:string):Job|null{
@@ -106,5 +106,5 @@ export class AutoPortraits{
    this.pending.set(id,r=>{clearTimeout(t);resolve(r);});this.child!.stdin.write(JSON.stringify({id,look})+'\n');
   });
  }
- dispose(){this.disposed=true;if(this.timer)clearInterval(this.timer);if(this.idle)clearTimeout(this.idle);this.queue.clear();this.stopWorker();}
+ dispose(){this.disposed=true;if(this.timer)clearInterval(this.timer);if(this.first)clearTimeout(this.first);if(this.idle)clearTimeout(this.idle);this.queue.clear();this.stopWorker();}
 }

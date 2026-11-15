@@ -7,6 +7,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout } from 'node:timers/promises';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { acquireLock } from '../../../../tools/god-skill/lib/locks.mjs';
 const exec = promisify(execFile);
 export function hostRenderLockPath(env = process.env, platform = process.platform) {
@@ -20,7 +21,26 @@ export function hostRenderLockPath(env = process.env, platform = process.platfor
         throw new Error('Configure SIM_RENDER_LOCK_DIR outside systemd PrivateTmp for all world units');
     return join(tmpdir(), 'sim-host-render-slot');
 }
+/** #2444 shards: the world a call runs for, in a program of several worlds. The shard program (tools/world-launcher/shard.mjs)
+ *  starts each world inside it, so the world's timers, requests and promises carry it; unset in a program of one world. */
+export const renderWorld = new AsyncLocalStorage<string>();
+/** #2444: the slots each world of this program holds. The slot's liveness is checked by pid, and a shard's pid outlives
+ *  a world it stops: a world that stops releases what it holds (releaseWorldRenderSlots), so its slot never blocks the
+ *  other worlds' renders. */
+const heldBy = new Map<string, Set<() => void>>();
+export function releaseWorldRenderSlots(world: string) {
+    for (const release of heldBy.get(world) ?? []) release();
+    heldBy.delete(world);
+}
 export async function hostRenderSlot(signal: AbortSignal) {
+    const world = renderWorld.getStore();
+    if (world === undefined) return hostRenderSlotOf(signal);
+    const release = await hostRenderSlotOf(signal), held = heldBy.get(world) ?? new Set<() => void>();
+    const own = () => { held.delete(own); release(); };
+    held.add(own); heldBy.set(world, held);
+    return own;
+}
+async function hostRenderSlotOf(signal: AbortSignal) {
     const path = hostRenderLockPath();
     let nextIdentityCheck = 0;
     for (;;) {

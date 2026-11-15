@@ -19,6 +19,8 @@ export type Session = {
   scope?: string | null;
   /** What to show for "signed in as" (an email, a name). */
   label: string | null;
+  /** The account's profile picture (Clerk `imageUrl`), when it has one. */
+  avatarUrl?: string | null;
   /** Clerk on a non-canonical origin: sign in over there. */
   signInUrl?: string;
   getToken: () => Promise<string | null>;
@@ -34,7 +36,7 @@ export const watchSession = subscribe;
 
 /** main.tsx / Shell: publish the page's sign-in. Re-renders subscribers only when what they show changes. */
 export function publishSession(next: Session) {
-  const changed = next.mode !== current.mode || next.ready !== current.ready || next.authed !== current.authed || next.scope !== current.scope || next.label !== current.label || next.signInUrl !== current.signInUrl;
+  const changed = next.mode !== current.mode || next.ready !== current.ready || next.authed !== current.authed || next.scope !== current.scope || next.label !== current.label || next.avatarUrl !== current.avatarUrl || next.signInUrl !== current.signInUrl;
   // functions are always refreshed (a Clerk getToken closes over the latest session) without a re-render
   current = changed ? { ...next } : Object.assign(current, { getToken: next.getToken, login: next.login, logout: next.logout });
   if (changed) for (const fn of subs) fn();

@@ -119,6 +119,18 @@ export class Fading {
     });
   }
 
+  /** #2297: the wall time (ms) at which `sweep` next warns or fades a Soul (30, 50, 60 minutes idle), or null (the beam is
+   *  off, as it is since the body rule; or nobody is left to fade). A Soul it has not seen yet is due at once. */
+  nextDueMs(): number | null {
+    if (!this.enabled || !this.beam) return null;
+    let t: number | null = null; const at = (ms: number) => {t = t === null ? ms : Math.min(t, ms);};
+    for (const soulId of this.core.liveSoulIds()) {
+      const r = this.row(soulId); if (!r) {at(this.core.now()); continue;}
+      if (r.colour === 'gone') continue;
+      at(r.last_at + (r.colour === 'red' ? GONE_MS : r.colour === 'yellow' ? RED_MS : YELLOW_MS));
+    }
+    return t;
+  }
   sweep() {
     if (!this.enabled || !this.beam) return;
     const now = this.core.now();

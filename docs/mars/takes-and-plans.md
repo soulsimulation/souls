@@ -55,6 +55,9 @@ keyframeEvery, tracks, changes, events, finalStateHash, finalState, entities0?, 
   first with `n` and `until`. Read them through `takeEvents` / `expandEvents`; `blockedWaits` counts raw waits.
 - `finalState`: the full successor state, so replay never needs the planner or runtime.
 - `entities0`: every tracked entity as first recorded (minus provenance, label, tags); `removed: [{ id, t }]`.
+- `id`, `baselineStateHash` and `finalStateHash` are computed when first read, not when the take is cut, with the same
+  bytes (#2422). A take nobody reads (an unwatched world's) costs a copy of what changed. They read as plain strings,
+  in JSON, spread and `structuredClone` too. A take's fields are read-only.
 
 Guarantees (`take-fields.test.ts`): sampling at every tick reproduces true poses within 4.5 mm / 8.5 mrad, hands within
 5.5 mm, speed within 1.5 cm/s, and exact activity and level.

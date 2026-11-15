@@ -1,0 +1,66 @@
+{
+ "name": "god-greenfield-1",
+ "recipe": "god-greenfield",
+ "recordedAt": "2026-11-14",
+ "reader": {
+  "engine": "mars",
+  "worldKey": "corpus-green",
+  "worldEngine": true
+ },
+ "worldId": "corpus-green",
+ "seed": "corpus-green",
+ "adopted": [
+  "quietStallReleaseV1",
+  "yieldTimeoutV1",
+  "spreadV2",
+  "routeReachV1",
+  "occupiedLinkRoutingV1",
+  "concurrentLinkEgressV1",
+  "stairLandingClearanceV1",
+  "bodyStepGuardV1",
+  "quarantineV1",
+  "refusalSettleV1",
+  "stairWayV1",
+  "quarantineMarkV1",
+  "standHeightV1",
+  "nonFiniteHoldV1",
+  "standHeightV2",
+  "itemApproachV1",
+  "carrierParkAwayV1",
+  "stallReleaseSupportV1",
+  "climbSpacingV1",
+  "heldActivitiesV1",
+  "godNoticeV1"
+ ],
+ "pins": [
+  {
+   "tick": 221,
+   "state": "28935f431cda2a88cddf51f8b165ca653a7d8b1bcc8eef64df05355ed952770c",
+   "kernel": "2cf7513bb69334a2f71c94c8fa300fc19d39618d9945859d92662b445d760ca2",
+   "note": "born"
+  },
+  {
+   "tick": 629,
+   "state": "8673befd7b90aa9ce85efbb282ec623968b3fbb7094ca706a956e39e6af3afb5",
+   "kernel": "ea57c2f8aa939cc0fd68868a6fe559e500cf40f9d71b299fedbe9ef35e55d2d9",
+   "note": "walls"
+  },
+  {
+   "tick": 1233,
+   "state": "ef8843cefd4390f5e9381d2ed098fa020df197bb1caedf9b6f5da783c81b0168",
+   "kernel": "ac1cca15a0d74187234ee7cc06b2074304df0b2cfcfaf60d6c40ec653177ef2d",
+   "note": "a wall removed"
+  }
+ ],
+ "head": {
+  "tick": 1151,
+  "seq": 56,
+  "state": "2cc387d6cb6ccd7e218d10ad78d45ee6094c91ba3f299c2b822822b8f213ce85",
+  "kernel": "ac1cca15a0d74187234ee7cc06b2074304df0b2cfcfaf60d6c40ec653177ef2d",
+  "note": "boot head"
+ },
+ "snapshot": {
+  "tick": 629,
+  "seq": 39
+ }
+}

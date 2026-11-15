@@ -24,7 +24,7 @@ import { heldGodThing } from './held.ts';
 import { waterRole, wordOf } from './water.ts';
 import { economyOn } from './layers.ts';
 import { supportY } from './nav.ts';
-import { posterStale, worldDay } from './poster-boards.ts';
+import { posterStale } from './poster-boards.ts';
 import { posterList, signupNoun, wantedList } from '@souls/world-compiler';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -89,6 +89,8 @@ export function signText(e: Entity, def: StoredDef): string | null {
 
 export type PerceiveHost = {
   model: WorldModel;
+  /** #2416: this world's day (posters, fading paintings); absent: day 0. */
+  worldDay?: () => number;
   version?: () => number;
   edge?: EdgeLedger;
   engine: { world: { entities: Record<string, any> } };
@@ -110,13 +112,13 @@ export type PerceiveHost = {
   mending?: { plan(soul: { entityId: string }, thing: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; whole(id: string): boolean };
   watering?: { plan(soul: { entityId: string }, plant: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** Entry 43 (tea.ts): the kettle and cup acts. */
-  tea?: { plan(soul: { entityId: string }, id: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
+  tea?: { plan(soul: { entityId: string }, id: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string, capability?: string): void };
   /** #438 (harvest.ts): picking from a planter into a basket or a vase. */
   harvest?: { plan(soul: { entityId: string }, id: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | { code: string; reason: string } | null; expect(body: string): void };
   /** #435 (W072): a thing kept in a lost-and-found (a container with `claim: "owner"`) is only its owner's to handle. */
   claim?: (id: string, soul: EdgeSoul) => { code: string; reason: string } | null;
   /** LAYERS (layers.ts): owner/price/hours in what Souls see; private things refuse other Souls' actuators. */
-  layers?: { active(): boolean; tag(e: Entity): string; refusal(id: string, soul: { soulId: string; name: string }): { code: string; reason: string } | null; ownerWord(id: string, soul?: { soulId: string; name: string }): string | null; hoursOf(s: Entity['schedule']): string };
+  layers?: { readonly economy?: boolean; active(): boolean; tag(e: Entity): string; refusal(id: string, soul: { soulId: string; name: string }): { code: string; reason: string } | null; ownerWord(id: string, soul?: { soulId: string; name: string }): string | null; hoursOf(s: Entity['schedule']): string };
 };
 
 /** Item 6 (F1): god-built buildings, their rooms and named areas (a plaza, a pond, a meadow) join the ledger's places
@@ -199,7 +201,7 @@ export class GodPerceive {
       watering: (soul: EdgeSoul, id: string) => this.h.watering?.plan(soul, id) ?? null,
       wateringBegun: (soul: EdgeSoul) => this.h.watering?.expect(soul.entityId),
       tea: (soul: EdgeSoul, id: string, action: string) => this.h.tea?.plan(soul, id, action) ?? null,
-      teaBegun: (soul: EdgeSoul) => this.h.tea?.expect(soul.entityId),
+      teaBegun: (soul: EdgeSoul, capability: string) => this.h.tea?.expect(soul.entityId, capability),
       harvest: (soul: EdgeSoul, id: string, action: string, params?: Record<string, unknown>) => this.h.harvest?.plan(soul, id, action, params) ?? null,
       harvestBegun: (soul: EdgeSoul) => this.h.harvest?.expect(soul.entityId),
       contactPlan:(soul:EdgeSoul,id:string,action:string,params?:Record<string,unknown>)=>this.h.edge?.contactActuator?.plan(soul,id,action,params)??null,
@@ -208,6 +210,7 @@ export class GodPerceive {
       thingAt: (id: string) => this.entries.get(id)?.at ?? null,
       deferFar: (soul: EdgeSoul, far: FarAct | null) => { if (far) this.farActs.set(soul.entityId, { soul, far }); else this.farActs.delete(soul.entityId); },
       hidden: (soul: EdgeSoul, at: Vec2) => !!this.h.edge?.knowledge?.hidesPoint(soul.soulId, at),
+      worldDay: () => this.h.worldDay?.() ?? 0,
       bodyAt: (soul: EdgeSoul): Vec2 | null => { const b = this.h.engine.world.entities[soul.entityId]; return b?.pose?.p ? [b.pose.p[0], b.pose.p[2]] : null; },
       commit: (id: string, patch: Record<string, unknown>, note: string) => this.h.commit!([{ op: 'set', id, state: patch }], note),
       stateOf: (id: string) => { const e = this.h.model.entities.get(id), def = e && this.h.model.resolvedDef(e.def); return e && def ? actuatedState(e, def) : null; },
@@ -230,20 +233,26 @@ export class GodPerceive {
       // SOULFIX: where to stand to operate it: a clear spot within reach (1.5 m) on its level that the body can walk to,
       // nearest its front first, else nearest the thing (bars across a cell work from either side); deterministic order
       approach: (id: string, soul: EdgeSoul, front: Vec2 | null, radius = 1.5) => {
-        const E = this.h.engine as unknown as { clearanceAtV1?: (x: number, z: number, level?: number) => number; reachV1?: (a: { p: Vec2; level?: number }, b: { p: Vec2; level?: number }) => { ok: boolean } };
+        const E = this.h.engine as unknown as { clearanceAtV1?: (x: number, z: number, level?: number) => number; reachV1?: (a: { p: Vec2; level?: number }, b: { p: Vec2; level?: number }) => { ok: boolean }; readPassV1?: <T>(f: () => T) => T };
         const e = this.h.model.entities.get(id), b = this.h.engine.world.entities[soul.entityId];
         if (!e || !b?.pose?.p || !E.clearanceAtV1 || !E.reachV1) return null;
-        const wp = this.h.model.worldPose(e), at: Vec2 = [wp.x, wp.z], level = this.h.levelAt ? this.h.levelAt(wp.x, wp.z, wp.y) : 0;
-        const me = { p: [b.pose.p[0], b.pose.p[2]] as Vec2, level: b.human?.level ?? 0 };
-        const cands: { p: Vec2; d: number }[] = [];
-        for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
-          const p: Vec2 = [Math.round((at[0] + i * 0.25) * 100) / 100, Math.round((at[1] + j * 0.25) * 100) / 100], r = Math.hypot(p[0] - at[0], p[1] - at[1]);
-          if (r < 0.3 || r > radius || E.clearanceAtV1(p[0], p[1], level) < 0.4) continue;
-          cands.push({ p, d: front ? Math.hypot(p[0] - front[0], p[1] - front[1]) : r });
-        }
-        cands.sort((x, y) => x.d - y.d || x.p[0] - y.p[0] || x.p[1] - y.p[1]);
-        for (const c of cands.slice(0, 16)) if (E.reachV1(me, { p: c.p, level }).ok) return { p: c.p, level };
-        return null;
+        const clearAt = E.clearanceAtV1, reach = E.reachV1;
+        const find = (): { p: Vec2; level: number } | null => {
+          const wp = this.h.model.worldPose(e), at: Vec2 = [wp.x, wp.z], level = this.h.levelAt ? this.h.levelAt(wp.x, wp.z, wp.y) : 0;
+          const me = { p: [b.pose.p[0], b.pose.p[2]] as Vec2, level: b.human?.level ?? 0 };
+          const cands: { p: Vec2; d: number }[] = [];
+          for (let i = -6; i <= 6; i++) for (let j = -6; j <= 6; j++) {
+            const p: Vec2 = [Math.round((at[0] + i * 0.25) * 100) / 100, Math.round((at[1] + j * 0.25) * 100) / 100], r = Math.hypot(p[0] - at[0], p[1] - at[1]);
+            if (r < 0.3 || r > radius || clearAt.call(E, p[0], p[1], level) < 0.4) continue;
+            cands.push({ p, d: front ? Math.hypot(p[0] - front[0], p[1] - front[1]) : r });
+          }
+          cands.sort((x, y) => x.d - y.d || x.p[0] - y.p[0] || x.p[1] - y.p[1]);
+          for (const c of cands.slice(0, 16)) if (reach.call(E, me, { p: c.p, level }).ok) return { p: c.p, level };
+          return null;
+        };
+        // #2354: these reads change nothing the planner sees, so the planner is synced once for all of them (each of up to
+        // 169 clearance reads re-scanned every static entity on its own: ~0.9 s a put-out at 24 Souls). Same answers.
+        return E.readPassV1 ? E.readPassV1(find) : find();
       },
     };
   }
@@ -263,7 +272,12 @@ export class GodPerceive {
   private wantOne(e: Entity, layersOn: boolean): { w: Want; sign?: SignRow } | null {
     const m = this.h.model, def = m.resolvedDef(e.def); if (!def) return null;
     const c = def.components as Record<string, unknown>;
-    if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) return null;
+    // #1900: held action-bearing carryables still publish their acts while the native body owns their pose.
+    // On restart the projection is rebuilt from scratch; excluding the held object marks its saved facade gone.
+    const native = this.h.engine.world.entities[e.id], support = native?.support;
+    const heldActionTool = !!c.carryable && actionsOf(def).length > 0 && support?.kind === 'in-hand'
+      && e.in.parent === support.by && !!this.h.engine.world.entities[support.by]?.human;
+    if (c.body || c.behavior || c.hover || /^core[-/]flag@/.test(def.ref) || (this.h.engineOwned(e) && !heldActionTool)) return null;
     if (keptShut(m, e)) return null;   // entry 42: kept in a shut drawer or locker: not a thing anyone sees until it is opened
     const text = signText(e, def), acts = this.h.commit ? actionsOf(def).some((a) => a.name !== 'repair' || !this.h.mending?.whole(e.id)) : false;
     // LAYERS: an owned, priced or scheduled thing is seen as such (a loaf for sale, Ana's door, the café's hours)
@@ -279,7 +293,7 @@ export class GodPerceive {
     const near = this.h.namesNear(at, e.id).filter((n) => n !== name).slice(0, 2);
     const prefix = article(kind);
     const suffix = `${parent?.name ? ` in ${m.pathOf(parent.id)}` : ''}${near.length ? `, by ${near.join(' and ')}` : ''}${lay ? `; ${lay}` : ''}`;
-    const painting = paintingLine(e, def, worldDay());
+    const painting = paintingLine(e, def, this.h.worldDay?.() ?? 0);
     // Keep the complete bounded painting credit plus exactly the suffix visible before it was painted.
     // Unpainted input is unchanged; only painted initialization opts into the 230-character bound.
     const what = painting ? painting + clip(prefix + suffix, 120).slice(prefix.length) : prefix + suffix;
@@ -477,7 +491,7 @@ export class GodPerceive {
         const placeId = pl.place ?? v.placeId;
         // LAYERS: whose it is, to this viewer ("yours" / "Ana's, private" / "public"), its price and hours now
         const ent = lay ? this.h.model.entities.get(v.id) : undefined, word = ent ? this.h.layers!.ownerWord(v.id, soul) : null;
-        const extra = ent ? { ...(word ? { owner: word } : {}), ...(ent.price && economyOn() ? { price: ent.price } : {}), ...(ent.schedule ? { hours: this.h.layers!.hoursOf(ent.schedule) } : {}) } : {};
+        const extra = ent ? { ...(word ? { owner: word } : {}), ...(ent.price && (this.h.layers!.economy ?? economyOn()) ? { price: ent.price } : {}), ...(ent.schedule ? { hours: this.h.layers!.hoursOf(ent.schedule) } : {}) } : {};
         built.push({ ...v, placeId, here: placeId !== root && inside.has(placeId), dist: Math.round(d * 10) / 10, ...extra });
       }
       built.sort((a, b) => a.dist - b.dist || (a.id < b.id ? -1 : 1));
@@ -522,7 +536,7 @@ export class GodPerceive {
       const names = s.list === 'signup' ? s.text.split('\n').filter(Boolean).length : 0;
       // entry 25: counts only, never the names or the question (they come with the read)
       // entry 38: counts only (posters, out-of-date ones, wanted / offered / taken notes), never a title, a note or a name
-      const listLabel = s.list === 'posters' ? (() => { const ps = posterList(s.state ?? {}), old = ps.filter(p => posterStale(p)).length; return `Read ${s.name} (a poster wall, ${ps.length} poster${ps.length === 1 ? '' : 's'}${old ? `, ${old} out of date` : ''}, ${Math.round(d)} m)`; })()
+      const listLabel = s.list === 'posters' ? (() => { const ps = posterList(s.state ?? {}), old = ps.filter(p => posterStale(p, this.h.worldDay?.() ?? 0)).length; return `Read ${s.name} (a poster wall, ${ps.length} poster${ps.length === 1 ? '' : 's'}${old ? `, ${old} out of date` : ''}, ${Math.round(d)} m)`; })()
         : s.list === 'wanted' ? (() => { const ns = wantedList(s.state ?? {}), w = ns.filter(n => n.c === 'w').length, tk = ns.filter(n => n.tk).length; return `Read ${s.name} (a wanted/offered board, ${w} wanted, ${ns.length - w} offered${tk ? `, ${tk} taken` : ''}, ${Math.round(d)} m)`; })() : null;
       const label = listLabel ?? (s.game ? `Read ${s.name} (${s.game}, ${Math.round(d)} m)` : s.list === 'poll' ? `Read ${s.name} (a poll, ${s.votes ?? 0} vote${s.votes === 1 ? '' : 's'}, ${Math.round(d)} m)` : names ? `Read ${s.name} (a ${s.noun ?? 'sign-up sheet'}, ${names} name${names > 1 ? 's' : ''}, ${Math.round(d)} m)` : pinned && s.notebook ? `Read ${s.name} (a notebook, ${pinned} line${pinned > 1 ? 's' : ''} written, ${Math.round(d)} m)` : pinned ? `Read ${s.name} (${pinned} pinned note${pinned > 1 ? 's' : ''}, ${Math.round(d)} m)` : s.writable ? `Read ${s.name} (a board with writing on it, ${Math.round(d)} m)` : `Read ${s.name} (a sign, ${Math.round(d)} m): "${words.length > 160 ? words.slice(0, 157) + '…' : words}"`);
       caps.push({ id, verb: 'read', label, target: { id: s.id, kind: 'object' }, available: true });

@@ -28,6 +28,7 @@ import { G_SWIM, G_WALK } from '../spatial/ground.ts';
 import type { GroundNav } from '../spatial/tiled.ts';
 import type { Spatial } from '../spatial/service.ts';
 import { humanRadius } from '../bodies/humanoid.ts';
+import { floaterBody, isFloater } from '../bodies/body.ts';
 
 export type CarrierSeatDef = { id: string; local: Vec2; yaw: number; exit: Vec2 };
 /** `doorway`: local floor points between the seats and the door, inside first (a basket's door opening): boarding walks
@@ -250,7 +251,7 @@ function turnToward(e: Entity, yaw: number, dt: number) { const t = angleDelta(e
 /** Take the boarding step if it is free (or already mine). */
 const takeDoor = (c: CarrierState, actor: string) => { if (c.doorBy && c.doorBy !== actor) return false; c.doorBy = actor; return true; };
 const freeDoor = (c: CarrierState, actor: string) => { if (c.doorBy === actor) c.doorBy = null; };
-type RideExec = { actor: string; carrier: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; leg: number; stopping: boolean; waited: number; id: string; path: Vec3[]; throughReturn?: boolean };
+type RideExec = { actor: string; carrier: string; slot: string; phase: 'boarding' | 'seated' | 'leaving'; leg: number; stopping: boolean; waited: number; id: string; path: Vec3[]; throughReturn?: boolean; blockedBy?: string; pathWaited?: number };
 /** The doorway's points in world space, inside first. */
 const inside = (e: Entity, d: CarrierDef) => (d.doorway ?? []).map(q => at(e, q, d.floorY));
 /** From where the boarder stands, round the basket (never through it) to the boarding step, through the door, then to its seat. */
@@ -260,6 +261,48 @@ export function boardingPath(e: Entity, from: Vec3, seat: Vec3, d: CarrierDef): 
   const side = l[1] >= 0 ? 1 : -1, out = d.door[0] >= 0 ? 1 : -1, pts: Vec2[] = [];
   if (l[0] * out < Math.abs(d.door[0]) - 0.05) { if (Math.abs(l[1]) < hz) pts.push([l[0], side * hz]); pts.push([d.door[0], side * hz]); }
   return [...pts.map(q => at(e, q)), doorPoint(e)!, ...inside(e, d).reverse(), seat];
+}
+/** board-path/1 (logged runtime policy `carrierBoardPathV1`): a boarder's step never brings it within the human-human
+ *  invariant's separation of another body. Outside the basket it goes round the other way when that way is clear; otherwise it
+ *  waits (`boarding-wait`, the blocker named on the ride and by a `carrier.board-path-blocked` mark). Waits and reroutes are
+ *  bounded by BOARD_TIMEOUT: before the boarding step (or a bank's plank) the seat is then given up with that refusal; past it
+ *  (inside the basket) the boarder steps out as a timed-out boarder always has. */
+function boardPathRule(rt: Runtime): boolean { return rt.services.carrierBoardPathV1 === true; }
+const bodyRadius = (e: Entity) => isFloater(e) ? floaterBody(e.body).radius : humanRadius(e);
+/** board-path/1: the body a straight step from a to b would bring within the separation collision.human-human reads (the two
+ *  radii − 0.08 on the same level, within 1 m of height) and nearer than it stands now; null when the step is clear. */
+function pathBlocker(rt: Runtime, me: Entity, a: Vec3, b: Vec3): string | null {
+  const vx = b[0] - a[0], vz = b[2] - a[2], len2 = vx * vx + vz * vz, ra = bodyRadius(me), lv = me.human?.level;
+  for (const o of Object.values(rt.world.entities)) {
+    if (o.id === me.id || o.kind !== 'human' || !o.human || o.human.level !== lv) continue;
+    const q = o.pose.p; if (Math.abs(q[1] - a[1]) > 1 && Math.abs(q[1] - b[1]) > 1) continue;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * vx + (q[2] - a[2]) * vz) / len2)) : 0;
+    const near = hypot(a[0] + vx * t - q[0], a[2] + vz * t - q[2]);
+    if (near < ra + bodyRadius(o) - 0.08 && near < hypot(a[0] - q[0], a[2] - q[2]) - 1e-6) return o.id;
+  }
+  return null;
+}
+/** board-path/1: from where the boarder stands outside the basket, the shortest way round it to the boarding step (either side,
+ *  round the far end if need be) whose every step stays off the basket, clear of static geometry and clear of other bodies; null
+ *  when there is none. The points before the door, in world space. */
+function boardDetour(rt: Runtime, e: Entity, me: Entity, d: CarrierDef): Vec3[] | null {
+  const size = CATALOG[e.def].size, ra = bodyRadius(me), hx = size[0] / 2 + ra - 0.02, hzIn = size[2] / 2 + ra - 0.02;
+  const hz = size[2] / 2 + 0.6, dx = d.door[0], fx = (dx >= 0 ? -1 : 1) * (size[0] / 2 + 0.6), door = doorPoint(e)!, w = (q: Vec2) => at(e, q);
+  const loc = (p: Vec3) => rot2([p[0] - e.pose.p[0], p[2] - e.pose.p[2]], -e.pose.yaw);
+  const offBasket = (a: Vec3, b: Vec3) => { const la = loc(a), lb = loc(b), n = Math.max(1, Math.ceil(hypot(lb[0] - la[0], lb[1] - la[1]) / 0.05));
+    for (let i = 1; i < n; i++) { const x = la[0] + (lb[0] - la[0]) * i / n, z = la[1] + (lb[1] - la[1]) * i / n; if (Math.abs(x) < hx && Math.abs(z) < hzIn) return false; }
+    return true; };
+  let best: Vec3[] | null = null, bestLen = Infinity;
+  for (const s of [1, -1]) for (const via of s === 1 ? [[], [[dx, hz]], [[fx, hz], [dx, hz]], [[fx, -hz], [fx, hz], [dx, hz]]] : [[[dx, -hz]], [[fx, -hz], [dx, -hz]], [[fx, hz], [fx, -hz], [dx, -hz]]]) {
+    const pts = (via as Vec2[]).map(w), legs = [me.pose.p, ...pts, door];
+    let len = 0, ok = true;
+    for (let i = 1; i < legs.length && ok; i++) {
+      len += hypot(legs[i][0] - legs[i - 1][0], legs[i][2] - legs[i - 1][2]);
+      ok = offBasket(legs[i - 1], legs[i]) && !pathBlocker(rt, me, legs[i - 1], legs[i]) && stepClear(rt, me.id, legs[i - 1], legs[i]);
+    }
+    if (ok && len < bestLen - 1e-9) { best = pts; bestLen = len; }
+  }
+  return best;
 }
 /** together/1: places kept for companions who have not boarded yet. */
 const keptSeats = (c: CarrierState) => c.hold ? Math.max(0, c.hold.seats - c.hold.filled) : 0;
@@ -325,6 +368,29 @@ const ride: ActionDef<RideParams, { slot: string }, RideExec> = {
       const blocker = blockerAt(rt, ex.actor, to);
       if (blocker && hypot(a.pose.p[0] - to[0], a.pose.p[2] - to[2]) > 1e-9)
         return ++ex.waited > BOARD_TIMEOUT ? (leave(), { status: 'running', phase: 'leaving' }) : { status: 'running', phase: 'boarding-wait' };
+      if (boardPathRule(rt)) {
+        // before the boarding step the legs past it (step to doorway to seat) are read too, so a body that would block them
+        // (a seated rider in the way on a punt) is waited for where the seat can still be given up
+        const doorAt = ex.path.length - 2 - (c.bank ? 0 : (d.doorway ?? []).length);
+        let by = pathBlocker(rt, a, a.pose.p, last ? seat.p : to);
+        for (let i = doorAt; !by && ex.leg <= doorAt && i < ex.path.length - 1; i++) by = pathBlocker(rt, a, ex.path[i], i + 1 === ex.path.length - 1 ? seat.p : ex.path[i + 1]);
+        if (by) {
+          // before the boarding step (or a bank's plank) the seat can be given up where the body stands: outside a basket go
+          // round the other way when that is clear, else wait. Past the step the body waits, then steps out as before.
+          // board-path/1 waits and reroutes have their own bound (pathWaited), apart from the door wait.
+          const doorIdx = doorAt, before = ex.leg <= doorIdx;
+          const bound = () => (ex.pathWaited = (ex.pathWaited ?? 0) + 1) > BOARD_TIMEOUT;
+          if (ex.blockedBy !== by) { ex.blockedBy = by; rt.mark('carrier.board-path-blocked', { carrier: e.id, actor: ex.actor, by }); }
+          const round = before && !c.bank ? boardDetour(rt, e, a, d) : null;
+          if (bound()) {
+            if (before) return abandon(diag('board-path-blocked', `${rt.world.entities[by]?.label ?? by} stayed in the way to the boarding step of ${e.label ?? e.id}`, [by, e.id]));
+            leave(); return { status: 'running', phase: 'leaving' };
+          }
+          if (round) { ex.path = [...round, ...ex.path.slice(doorIdx)]; ex.leg = 0; return { status: 'running', phase: 'boarding' }; }
+          return { status: 'running', phase: 'boarding-wait' };
+        }
+        delete ex.blockedBy;
+      }
       if (!last) { const dx = to[0] - a.pose.p[0], dz = to[2] - a.pose.p[2]; if (Math.abs(dx) + Math.abs(dz) > 1e-6) turnToward(a, heading([dx, dz]), dt); if (moveToward(a, to, d.transferSpeed, dt)) ex.leg++; return { status: 'running', phase: 'boarding' }; }
       turnToward(a, seat.yaw, dt);
       if (moveToward(a, seat.p, d.transferSpeed, dt) && Math.abs(angleDelta(a.pose.yaw, seat.yaw)) < 1e-9) {

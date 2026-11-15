@@ -3,7 +3,7 @@ import test, {type TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:http';
-import {mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from 'node:fs';
+import {closeSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -72,6 +72,13 @@ async function world(t: TestContext, minVersion: string, config: object = {}) {
   t.after(() => { server.closeAllConnections(); server.close(); });
   return {base: `http://127.0.0.1:${(server.address() as {port: number}).port}/w`, seen};
 }
+/** Edit a home's config.json under the home's own lock (`.souls/.lock`, home.mjs `locked`), as the client does: a command
+ *  starts a detached feed check that rewrites the config, and an unlocked edit can land inside its read and write and be lost. */
+async function editHome(d: string, fn: (cfg: {worlds: Record<string, Record<string, unknown> & {url: string}>}) => void) {
+  const lock = join(d, '.souls', '.lock'), file = join(d, '.souls', 'config.json');
+  for (;;) { try { closeSync(openSync(lock, 'wx', 0o600)); break; } catch { await new Promise(r => setTimeout(r, 20)); } }
+  try { const cfg = JSON.parse(readFileSync(file, 'utf8')); fn(cfg); writeFileSync(file, JSON.stringify(cfg)); } finally { unlinkSync(lock); }
+}
 function folder(t: TestContext) {
   const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-min-cli-'))); t.after(() => rmSync(d, {recursive: true, force: true}));
   const run = (...args: string[]) => new Promise<{code: number | null; out: string; err: string; json: Record<string, unknown> | null}>((resolve) => {
@@ -104,9 +111,11 @@ test('A3: on the code a command fails with the run line, and serve stops and rec
 test('A3: a home\'s cached minimum fails that world\'s commands, not another world\'s, and never upgrade, help, version or doctor', async (t) => {
   const w = await world(t, '1.0.0', {soulClient: {contract: 'eden-edge/1', version: HEAD, bytes: 1, sha256: 'x', minVersion: '1.0.0'}}), {d, run} = folder(t);
   for (const slug of ['old', 'other']) assert.equal((await run('register', `${w.base}/${slug}`)).code, 0);
-  const file = join(d, '.souls', 'config.json'), cfg = JSON.parse(readFileSync(file, 'utf8'));
-  const key = Object.keys(cfg.worlds).find(k => cfg.worlds[k].url.endsWith('/old'))!, other = Object.keys(cfg.worlds).find(k => k !== key)!;
-  cfg.worlds[key].minClient = MIN; cfg.worlds[key].bundle = MIN; writeFileSync(file, JSON.stringify(cfg));   // an upgrade that meets it is served
+  let key = '', other = '';
+  await editHome(d, cfg => {
+    key = Object.keys(cfg.worlds).find(k => cfg.worlds[k].url.endsWith('/old'))!; other = Object.keys(cfg.worlds).find(k => k !== key)!;
+    cfg.worlds[key].minClient = MIN; cfg.worlds[key].bundle = MIN;   // an upgrade that meets it is served
+  });
   const refused = await run(`@${key}`, 'here');
   assert.equal(refused.code, 1);
   assert.match(refused.err, new RegExp(`needs ${MIN} or newer, and this is ${HEAD}\\. Run: node eden\\.mjs upgrade ${key}\\n`));
@@ -118,8 +127,8 @@ test('A3: a home\'s cached minimum fails that world\'s commands, not another wor
 test('A3: a cached minimum above the client with no newer bundle served never locks a world out: the command runs and a warning names the gap', async (t) => {
   const w = await world(t, '1.0.0', {soulClient: {contract: 'eden-edge/1', version: HEAD, bytes: 1, sha256: 'x', minVersion: '1.0.0'}}), {d, run} = folder(t);
   assert.equal((await run('register', `${w.base}/old`)).code, 0);
-  const file = join(d, '.souls', 'config.json'), cfg = JSON.parse(readFileSync(file, 'utf8')), key = Object.keys(cfg.worlds)[0];
-  cfg.worlds[key].minClient = MIN; cfg.worlds[key].bundle = HEAD; writeFileSync(file, JSON.stringify(cfg));
+  let key = '';
+  await editHome(d, cfg => { key = Object.keys(cfg.worlds)[0]; cfg.worlds[key].minClient = MIN; cfg.worlds[key].bundle = HEAD; });
   const r = await run(`@${key}`, 'status');
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json?.world, `${w.base}/old`, 'the command ran');

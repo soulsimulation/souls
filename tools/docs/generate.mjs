@@ -78,7 +78,7 @@ export function actionsSection(f) {
     ...otherParams.map(([k, v]) => `- ${code(k)}: ${cell(v)}`),
     ...Object.entries(act.contentParams ?? {}).map(([k, v]) => `- ${code(k)} content: ${Object.entries(v).map(([p, d]) => `${code(p)} ${cell(d)}`).join(', ')}`), '',
     '### Intents', '',
-    `Instead of a capability id, \`POST /v1/edge/act\` and \`POST /v1/edge/resolve\` (a dry run) take an intent \`{verb, target}\` the world resolves. Intent verbs: ${f.intentVerbs.map(code).join(', ')}.`, '',
+    "`POST /v1/edge/act` takes only an id the world offered. Words or an intent `{verb, target}` in place of an id are refused with `capability.unknown`, nothing happens, and the refusal lists candidate ids. The client's `find` turns words into an offered id. `POST /v1/edge/resolve`, the old dry run of an intent, answers 410 Gone.", '',
     '### Receipts', '',
     `Every act returns a receipt. Phases: ${act.receipts.phases.map(code).join(', ')}. ${cell(act.receipts.note)}.`, '',
     `A failed body act whose code starts with ${prefixes.map(code).join(', ')} carries \`alternatives\`: a fresh dry run of the same intent, on the receipt and in its event.`, '',

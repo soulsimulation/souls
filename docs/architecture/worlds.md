@@ -125,18 +125,64 @@ switch independent. A previously saved master mute migrates to both switches off
     resident reads in flight, and up for at least 30 s. Before every stop the launcher reads `/__sim/still` again and
     records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, is recorded as due at once
     and the keep-alive boots it as before). An unloaded world is never booted by the keep-alive, and loads on an act, a
-    god call, a visitor's connection or a page; at `moveWallMs`, always; at `untilWallMs`, only when a resident read for
-    it was seen in the last 10 minutes. Otherwise it is not loaded by time at all, and catches up its missed events in
-    order when it next loads. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    god call, a visitor's connection or a page, and by its alarm 30 s before `moveWallMs` or `untilWallMs`, listener or
+    not (#2367): the horizon holds every deadline, a personal reminder's (`edge.reminder.*`) and a plan step's among
+    them, so they are met on time by the world running. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
     get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
     with no picture kept, loads the world. Not yet: memory admission (#2233) and the load queue (#2304).
-  - **Gaps are caught up exactly, by ticking.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
-    them, the world runs every tick it missed through the ordinary tick, from the wall anchor in
+    **Measured (#2301, one run, 48-CPU runner, fake minds, `--worlds-mem-mb 6250`):** 100 small and 4 Eden-class worlds,
+    each with an agent acting every 2 to 10 minutes for an hour. At most 27 worlds were in memory, with about 7.5 GB in the
+    launcher's process tree (p50). Each world spent a median of 21 % of the hour in memory (Eden-class worlds 24 to 35 %).
+    Loading added a median of 3.4 s to an act (p95 8.3 s, longest 36 s). The run used 2 processor cores at the median
+    and 6 at most. 33 of 1,006 acts were refused with `world.capacity`: the memory was full and no world was quiet
+    enough to unload. 28 minutes after the agents fell silent, every world was out of memory, and the launcher alone held
+    117 MB. Three worlds jumped and unloaded reached the same state hash as a twin ticked straight through from genesis.
+    In the same run, 18 of the 22 reminders that were set were still undelivered 8 minutes after they fell due while
+    their worlds were unloaded. A world's alarm load was not seen.
+  - **A still world's clock is jumped, not stepped (#2298; `SIM_SKIP=0` ticks every world as before).** One function
+    moves a world's time, live and after any gap: `WorldHost.advanceStep(target)`. When `stillUntil()` says still, the
+    engine skips (`skipToV1`) to the tick before the earlier of the horizon and the target, and the ordinary tick runs the
+    landing tick, listeners, log and all; otherwise one ordinary tick runs. Deadlines are asked again after every jump.
+    Live, a still world only counts the ticks it owes on each frame. Once it has jumped and nobody watches, it sleeps
+    (#2384): its frame timer stops and one timer is set for the wall time of its horizon, where it lands exactly. A
+    request (`settle`), a viewer's connection or any queued input wakes it first, and it owes the wall time it slept as
+    ticks. While it sleeps the load monitor counts it as owing nothing and keeps its tick age fresh, so healthz, live.json
+    and the launcher do not read it as stalled; the real-time keeper reads the wall's tick (`wallTick`). Before its first
+    jump it jumps every 1.5 s (`jumpCap`, 30 ticks), and every half second on a broadcast boundary while a viewer is
+    connected (so batches and the sky go out as before); inputs drain at the landing tick. A landing sends the batch, heartbeat and
+    kernel view the ticks it covered would have, and the load monitor counts it as due that many intervals on. At a landing with nothing logged since, the durable clock frontier and the periodic snapshot are not written
+    again, and the wall anchor is not re-saved while still (the last pair still gives the ticks owed); all are written as
+    the stillness ends or the world stops. A periodic snapshot a landing owes is captured on the next turn, at the same
+    tick, never skipped (#2406): the landing's own turn stays short. `GET /__sim/still` also reports `ticksComputed`, `ticksJumped`, `jumps` and
+    `lastHorizon`. A Soul whose needs still add up every tick (before need-anchor/1, #2296) keeps its world ticking.
+  - **A silent world's timers do nothing (#2303).** A world is silent while it has been still since its last jump and no
+    viewer is connected (`WorldHost.silent()`). Then the wall timers around it return at once: the plan runner, the
+    reminders pump and the comms sweep until the world reaches the deadline they reported in the horizon (so it lands
+    there and they run), the real-time keeper until its daylight-saving deadline falls, and brain maintenance, pairing
+    expiry, auto-portraits, the take archive and the hub's sweeps and viewer stats altogether. The watchdog writes
+    `live.json` every 10 s instead of every 2 s (the launcher calls it stale after 30 s; a main thread stuck for over
+    5 s is reported at the full pace). The take recorder keeps the first chunk of a still stretch (the still poses, for
+    a replay) and writes no other until the world moves or is watched. The hourly backup is skipped when nothing has
+    written to the database since the last one (`total_changes()`, or, before this process's first backup, the newest
+    backup file is newer than the database and its log); retention is unchanged.
+  - **Gaps are caught up exactly.** Some gaps no world can avoid: restart, deploy, eviction, crash. Across
+    them, the world advances every tick it missed (jumping where it is still, above), from the wall anchor in
     `<DATA_DIR>/clock-wall.json` (`apps/server/src/clock-catchup.ts`). The engine, needs and day reach the state a world
     ticked through the gap would have reached. Listener state kept in memory or on the wall clock does not yet: the edge
     ambient-life idle clock and the body rule's timers (#2236).
+  - **A world says whether it is still, and until when (#2297).** `GET /__sim/still` on the world's own port, from
+    loopback and never forwarded (the launcher only), answers the #2241 contract `{ still, tick, wallMs, untilTick,
+    untilWallMs, moveTick, moveWallMs }` from `WorldHost.stillUntil()`. Still means the engine is still (held activities
+    only, #2294), nothing is queued or being written, no catch-up runs and no part of the world is busy. `untilTick` is the
+    earliest deadline any part reports from stored state (`HostListener.stillness`): held ends and programme waits, a held
+    gaze, the body rule's next wind-down step, the day turn and moments, light changes, garden drying, invitations,
+    follows and placed items, standing agreements, calendar items and presentations, conversation timeouts, the steward's
+    digest slot, reminders, plan steps and the zone's next daylight-saving change (wall times at the admin's rate).
+    `moveTick` is the earliest at which the world itself moves a body (a held end or the body rule). The still check (`SIM_STILL_CHECK=1`, off in production; `still-until.test.ts`) asserts on every tick inside a
+    claimed horizon that the log did not grow, the world RNG did not draw and the engine state hash changed only in its
+    clock fields.
   - **A catching-up world still answers.** Its port opens during the catch-up. Reads are answered at once, with the
     ticks still owed: header `x-sim-catching-up`, and `catchingUp.ticksOwed` in `/healthz`. Writes wait in arrival order
     and are dispatched one at a time after the catch-up, each once the one before it is answered (at most 2 s each). A

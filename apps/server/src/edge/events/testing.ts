@@ -57,13 +57,13 @@ export class FakeActor {
   last(soulId?: string) { return [...this.acts].reverse().find(a => !soulId || a.soulId === soulId); }
 }
 
-export function eventsFixture(names: string[], options: {comms?: CommsOptions; events?: EventsOptions; existing?: {dir: string; db: Db; clock: {now: number}}; actor?: FakeActor} = {}) {
+export function eventsFixture(names: string[], options: {comms?: CommsOptions; events?: EventsOptions; existing?: {dir: string; db: Db; clock: {now: number}}; actor?: FakeActor; planTickMs?: number} = {}) {
   const f = commsFixture(names, {fading: true, beam: true, ...(options.comms ?? {})}, options.existing, (app, deps, clock) => mountIdempotency(app, deps, () => clock.now));
   (f.host as unknown as {minds: Map<string, unknown>}).minds = new Map(names.map(n => [f.id(n), {soulId: f.id(n), entityId: `h_${f.id(n)}`, name: n, owner: `dev:${n}`}]));
   const actor = options.actor ?? new FakeActor(r => { for (const l of f.ledger.receiptListeners) l(r); }, f.db);
   let plans: Plans | null = null;
   const events = registerEdgeEvents(f.app, f.deps, f.runtime, {heartbeatMs: 150, planSummary: id => plans?.summary(id) ?? null, ...(options.events ?? {})});
-  plans = registerEdgePlans(f.app, f.deps, f.runtime, events, actor, {tickMs: 0});
+  plans = registerEdgePlans(f.app, f.deps, f.runtime, events, actor, {tickMs: options.planTickMs ?? 0});
   mountSchema(f.app);
   let server: Server | null = null;
   const listen = async () => {

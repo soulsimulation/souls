@@ -83,7 +83,17 @@ test('#1753: ack and result are retried with one key after a busy refusal and a 
   assert.equal(results.length, 2); assert.equal(results[1].key, results[0].key);
 });
 
-test('act and say retry with the same Idempotency-Key and body after a busy refusal and a dropped connection', { timeout: 8_000 }, async t => {
+test('#2107 A1: without serve, an act refused rate-limited is answered at once with its code and limit, not waited out or looked up', { timeout: 8_000 }, async t => {
+  const f = await fixture(t, (_req, res) => json(res, 429, { error: { code: 'rate-limited', message: 'more than 60 acts a minute: this act was not taken', limit: 60, window_s: 60 } }));
+  const got = await f.run('act', 'wave:here');
+  assert.equal(got.code, 75, got.stderr);
+  const out = JSON.parse(got.stdout);
+  assert.equal(out.code, 'rate-limited'); assert.equal(out.limit, 60); assert.equal(out.accepted, false);
+  assert.deepEqual(f.seen.map(s => s.url), ['/v1/edge/act'], 'one try, no resend and no lookup');
+  assert.doesNotMatch(got.stderr, /waiting/);
+});
+
+test('act and say retry with the same Idempotency-Key and body after a busy refusal and a dropped connection',{ timeout: 8_000 }, async t => {
   const f = await fixture(t, (req, res, n) => {
     if (n === 1) return busy(res, 'soul.busy', 1);
     if (n === 2) return res.socket.destroy();
@@ -150,5 +160,7 @@ test('a live but stuck listener (lock not renewed for 60 s) is stopped and its l
   const end = await stuck.done;
   assert.ok(end.code === 143 || end.signal === 'SIGTERM', `the stuck listener was stopped (${end.code}/${end.signal})`);
   assert.equal(holder()?.pid, next.pid, 'its exit did not remove the new holder\'s lock');
-  assert.match(next.err, new RegExp(`listener pid ${stuck.pid} has not renewed its lock for 120 s`));
+  // the heartbeat was aged 120 s before `next` started, so it reads 120 s plus however long that start took (121 s on a loaded runner)
+  const age = new RegExp(`listener pid ${stuck.pid} has not renewed its lock for (\\d+) s`).exec(next.err);
+  assert.ok(age && Number(age[1]) >= 120 && Number(age[1]) <= 130, next.err);
 });

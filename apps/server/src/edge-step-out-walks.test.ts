@@ -116,9 +116,10 @@ test('#1287 (#1501 re-review): from open ground, a sit in a locked yard (more th
   assert.ok(plan && plan.steps.some((s: any) => s.verb !== 'walk_to' && s.verb !== 'stand'), `more than walk steps: ${JSON.stringify(plan?.steps)}`);
   const r = await act({capability: id});
   t.diagnostic(`outcome: ${JSON.stringify({accepted: r.accepted, code: r.code, reason: r.reason})}`);
-  // the outcome before #1501's door gate (c5e7a4c1e): refused route.unreachable in the planner's own words, no door refusal
-  assert.equal(r.accepted, false, JSON.stringify(r)); assert.equal(r.code, 'route.unreachable');
-  assert.doesNotMatch(r.reason, /locked|It was not opened/, r.reason); assert.match(r.reason, /no walkable route reaches it/);
+  // #2383: a sit behind a closed door goes through it as a walk there does, so the locked door refuses it by name, as
+  // door passage refuses the walk (before, refused route.unreachable in the planner's own words); never the step-out's gate
+  assert.equal(r.accepted, false, JSON.stringify(r)); assert.equal(r.code, 'door.locked');
+  assert.match(r.reason, /goes through lock-door, which is locked/, r.reason);
   assert.equal(steps().length, 0);
 });
 

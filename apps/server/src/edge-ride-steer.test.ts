@@ -16,7 +16,7 @@ import {installPuntActivities} from './punt-install.ts';
 import {centroid} from './edge/ledger/places.ts';
 import {rerouteCarrier} from '../../../mars/viewer/engine/vehicles/carrier.ts';
 
-async function world(t:any,opts:{balloon?:boolean;punt?:boolean}){
+async function world(t:any,opts:{balloon?:boolean;punt?:boolean;ambient?:boolean}){
  const f=fixture(':memory:',await retainedCommonsShoreFactory().then(nativeSleepSnapshotFactoryV1),{durableClockV1:true});f.souls.enableLifecycle();f.brain.quiesce();t.after(()=>{f.host.stop();f.db.close();});
  await accept<unknown>(f.host,new LivingWorld(f.host).install(['Owners drive their Souls.']));for(let i=0;i<4;i++)f.host.tickOnce();
  await accept(f.host,f.host.installCommonsProvisionsV1());await accept(f.host,f.host.installRetainedCommonsShoreV1());
@@ -24,14 +24,15 @@ async function world(t:any,opts:{balloon?:boolean;punt?:boolean}){
  const rows:any[]=[];for(const n of ['ana','ben','cy']){await invite(f,n);rows.push(await accept(f.host,f.souls.create('dev:'+n,{name:n,description:'rider'})));}
  const tokens=rows.map((r,i)=>{const tok='sim_STEER_TEST_TOKEN_'+i;f.db.setSoulToken(r.id,hashToken(tok),'synthetic');return tok;});
  if(opts.balloon)await accept<unknown>(f.host,f.host.installCarrierV1({id:'eden-balloon',def:'hot-air-balloon',label:'Red balloon',at:[-20,-9],yaw:Math.PI,route:'commons-hop',waitSeconds:60}));
- const ledger=new EdgeLedger(f.host,f.db,undefined,{ambient:true}),app=new Hono(),bearer=(c:any)=>c.req.header('authorization')?.replace(/^Bearer\s+/i,'');
+ const ledger=new EdgeLedger(f.host,f.db,undefined,{ambient:opts.ambient??true}),app=new Hono(),bearer=(c:any)=>c.req.header('authorization')?.replace(/^Bearer\s+/i,'');
  const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,soul:edgeSoulResolver(f.host,f.souls,bearer),ledger});t.after(()=>comms.close());
  if(opts.balloon)comms.objects.create({id:'ride-eden-balloon',kind:'ride',name:'Red balloon',placeId:'world',params:{carrier:'eden-balloon'}});
  if(opts.punt){const installer=installPuntActivities(f.host,ledger);t.after(()=>installer.close());}
  const pump=async<T>(p:Promise<T>|T)=>{const q=Promise.resolve(p);let done=false;q.then(()=>done=true,()=>done=true);for(let i=0;i<400&&!done;i++){await setImmediate();f.host.drainInputs();}assert.ok(done,'request settled');return q;};
  const call=async(i:number,method:string,path:string,body?:unknown)=>{const res=await pump(app.request(path,{method,headers:{authorization:'Bearer '+tokens[i],'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}) as Promise<Response>);return await res.json() as any;};
  const run=async(n:number,until:()=>boolean)=>{for(let i=0;i<n&&!until();i++){f.host.tickOnce();if(i%20===0){await setImmediate();f.host.drainInputs();}}return until();};
- const W=f.host.engine.world as any,ent=(i:number)=>W.entities[rows[i].entity_id],car=(id:string)=>W.entities[id];
+ // read the host's current world every time: a fault recovery replaces the engine, and a world captured once goes stale
+ const W=()=>f.host.engine.world as any,ent=(i:number)=>W().entities[rows[i].entity_id],car=(id:string)=>W().entities[id];
  const steer=(i:number,ride:string,params:Record<string,unknown>)=>call(i,'POST',`/v1/edge/objects/${ride}/act`,{action:'steer',params});
  return {f,rows,ledger,comms,call,run,ent,car,steer};
 }
@@ -77,8 +78,10 @@ test('steer the balloon to a named place and land there; the other rider is refu
 
 // #2196 park-away/1: with the rule adopted, a balloon that landed away never moves with nobody aboard. It stays parked where its
 // rider left it, never teleports or respawns, and offers its ride right there; the rider gets back in and flies it home.
+// Ambient life is off here: over the five idle minutes it can leave the third Soul standing by the basket, and the rider's
+// boarding brush with her is set aside by a fault recovery ("choose again"), which is not what this test is about.
 test('park-away/1: the empty balloon stays where it landed and its rider rides it home',{timeout:600000},async t=>{
- const w=await world(t,{balloon:true}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
+ const w=await world(t,{balloon:true,ambient:false}),b=()=>w.car('eden-balloon'),home=[...b().carrier.home];
  await accept<unknown>(w.f.host,w.f.host.enableCarrierParkAwayV1('test'));
  await boardAndLift(w);
  const go=await w.call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-balloon:steer',params:{to:'presentation deck',land:true}});assert.equal(go.accepted,true,JSON.stringify(go));

@@ -1,4 +1,5 @@
 // Mounts the EDGE-CONTRACT-v1 surface under /v1/edge. Ledger verbs here; Comms registers its own.
+import {worldConfig} from '../config.ts';
 import {createHash} from 'node:crypto';
 import {inspectFrame} from './perception/inspect.ts';
 import type {Context, Hono} from 'hono';
@@ -28,6 +29,7 @@ import {ownerDoing, type DoingMessage} from './owner-doing.ts';
 import {livePlatforms} from './eyes/platforms.ts';
 import {OwnerLoop, ownerLinkStore, type OwnerLoopInbox} from './owner-loop.ts';
 import type {WorldHost} from '../world.ts';
+import {RESOLVE_GONE} from '../client-minimum.ts';
 import type {Souls} from '../souls.ts';
 import {loadOf, worldBlock} from '../load/admission.ts';
 import {clockNow} from '../load/clock-source.ts';
@@ -42,17 +44,18 @@ export function edgeSoulResolver(host: WorldHost, souls: Souls, bearer: (c: Cont
   };
 }
 export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}, options:{evidenceCapture?:CaptureGate}={}) {
-  const L = deps.ledger;
+  const L = deps.ledger, env = worldConfig(deps.host).env;
   // D3: an act names the owner message it serves (`for`); the world closes that message when the act ends
   const box = deps.ownerInbox as Partial<OwnerLoopInbox> | undefined;
   const loop = box?.hasMessage && box.serverResult ? new OwnerLoop(box as OwnerLoopInbox, (soul, id) => L.receipt(soul, id) as never, l => L.onReceipt(l),
     {stepTarget: (soul, words) => L.stepTarget(soul, words), actTarget: (soul, capability) => L.actTarget(soul, capability), placePath: id => L.placeAncestry(id), posOf: id => L.positionOf(id),
       holding: (soulId, id) => L.holding(soulId, id), brief: (soulId, id) => L.receiptBrief(soulId, id),
       // #1329: a ride join's message waits for the body to be back on the ground
-      rideName: id => L.rideName(id), aboard: soulId => {const m = deps.host.minds.get(soulId), a = m ? L.aboard(m.entityId) : null; return a ? {phase: a.phase} : null;}}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(process.env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(process.env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
+      rideName: id => L.rideName(id), aboard: soulId => {const m = deps.host.minds.get(soulId), a = m ? L.aboard(m.entityId) : null; return a ? {phase: a.phase} : null;}}, {store: ownerLinkStore(deps.db, deps.host.worldId), holdTicks: Number(env.SIM_OWNER_HOLD_S) > 0 ? Math.round(Number(env.SIM_OWNER_HOLD_S) * 20) : undefined}) : null;
   // #1295: the loop closes what a replaced or overlong act left open, once a second of world time. SIM_OWNER_HOLD_S
   // shortens the hold limit (15 minutes) for tests and proof worlds.
-  if (loop) L.onTick(tick => loop.sweep(tick));
+  // #2298: the sweep's next closure is a deadline of the still contract, so a jumped world lands on it (never busy)
+  if (loop) {L.onTick(tick => loop.sweep(tick)); deps.host.listeners.push({stillness: tick => {const t = loop.nextDue(tick); return t === null ? [] : [{name: 'edge.owner-loop', tick: t}];}});}
   mountBootRoutes(app,deps,[...EDGE_ACT_VERBS,...INTENT_VERBS]);
   // #1737: the world's structure as one public file a Soul's client keeps on disk
   const catalog = mountCatalogRoute(app,deps);
@@ -66,7 +69,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     c.header('Cache-Control', 'no-store');
     // LOAD-CONTRACT §3: at amber and above a frame says so in world words (admission sets the level it was admitted at)
     // #1326: a dilated clock says so (`slowed`, its speed; `load: slowed` when nothing else is said); a stall is added by http.ts
-    try {const out = edgeBody(await fn(c) as object), lv = loadOf(c), clk = clockBlockOf(clockNow()), slowed = clk && 'slowed' in clk ? clk : null;
+    try {const out = edgeBody(await fn(c) as object), lv = loadOf(c), clk = clockBlockOf(clockNow(c)), slowed = clk && 'slowed' in clk ? clk : null;
       if (slowed) return c.json({...out, world: {...('world' in out && out.world && typeof out.world === 'object' ? out.world as object : lv && lv !== 'green' ? worldBlock(lv) : {load: 'slowed'}), ...slowed}});
       return c.json(lv && lv !== 'green' && !('world' in out) ? {...out, world: worldBlock(lv)} : out);}
     catch (error) {
@@ -114,8 +117,9 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   app.get('/v1/edge/inspect/:id', wrap(c => {const s = deps.soul(c); limit(s, 'inspect', 120); return {tick: deps.host.engine.world.tick, inspect: inspectFrame(L, s, c.req.param('id') ?? '', {all: c.req.query('all') === '1'})};}));
   // knowledge/1: look around / explore — more of what is near, places close by, and secret places found (remembered).
   app.get('/v1/edge/around', wrap(c => {const s = deps.soul(c); limit(s, 'around', 30); const to = c.req.query('to'); return {tick: deps.host.engine.world.tick, around: aroundFrame(L, s), ...(to !== undefined ? {route: routeFrame(L, s, to)} : {})};}));
-  // #1910: the word resolver is closed; a client finds ids in its own copy of the catalog
-  app.post('/v1/edge/resolve', c => {c.header('Cache-Control', 'no-store'); return c.json({ok: false, code: 'gone', message: "resolve was removed; use the client's find"}, 410);});
+  // #1910: the word resolver is closed; a client finds ids in its own copy of the catalog. Only a client too old to have
+  // `find` calls it, so the answer names the upgrade (#1937).
+  app.post('/v1/edge/resolve', c => {c.header('Cache-Control', 'no-store'); return c.json(RESOLVE_GONE, 410);});
   app.get('/v1/edge/receipts/:id', wrap(c => {const s = deps.soul(c); const id = c.req.param('id') ?? '', r = L.receipt(s.soulId, id) ?? L.pendingReceipt(s.soulId, id); if (!r) throw new EdgeError(404, 'not-found', 'no such receipt for this Soul'); return {receipt: r};}));
   // Public and read often: it revalidates. The answer's own bytes are the tag, so a Soul that changed never reads as unchanged.
   const publicSoul = wrap(c => L.publicSoul(c.req.param('soulId') ?? ''));
@@ -136,7 +140,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   app.get('/v1/edge/items', wrap(() => ({tick: deps.host.engine.world.tick, items: L.together.publicItems()})));
   // Eyes (M3): GET /v1/edge/view first-person sight + alt caption; render worker only when EDGE_EYES=<viewer url>.
   const eyes = mountEdgeEyes(app, deps);
-  const comms = registerEdgeComms(app, deps, {stewardToken: process.env.EDGE_STEWARD_TOKEN || undefined, fading: process.env.EDGE_FADING === '1'});
+  const comms = registerEdgeComms(app, deps, {stewardToken: env.EDGE_STEWARD_TOKEN || undefined, fading: env.EDGE_FADING === '1'});
   L.attachComms(comms);
   // #1737: who is where and what was said, world-wide, for a Soul's client to follow
   const live = mountLiveRoute(app, deps, comms as never, catalog.version);
@@ -146,7 +150,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   // EVENTS-v1 (tranche agent-minds M1/M2/M4): push stream (SSE + WS), digest, world.notice, server-side plans, schema.
   let plans: Plans | null = null;
   const events = registerEdgeEvents(app, deps, comms, {placeName: id => L.places.byId.get(id)?.name ?? null, planSummary: id => plans?.summary(id) ?? null, live,
-    bootNotice: process.env.EDGE_BOOT_NOTICE === '1' ? `The world server restarted${deps.build ? ` (${deps.build})` : ''}. Plans and open acts carried on; read the digest if you missed anything.` : null});
+    bootNotice: env.EDGE_BOOT_NOTICE === '1' ? `The world server restarted${deps.build ? ` (${deps.build})` : ''}. Plans and open acts carried on; read the digest if you missed anything.` : null});
   plans = registerEdgePlans(app, deps, comms, events, L);
   // #1313: the owner's card reads the act under way for its newest message from the world's records
   if (box && 'doingOf' in box) {const names = ownerNames(L); (box as {doingOf: unknown}).doingOf = (soulId: string, latest: DoingMessage | null, away: boolean) =>

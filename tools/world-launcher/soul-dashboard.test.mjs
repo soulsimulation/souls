@@ -87,6 +87,7 @@ test('dashboard: the page and dashboard-data/1 for one Soul, with the world unre
   assert.equal(data.status.now, null);
   assert.equal(data.status.link.paired, true);
   assert.match(data.status.client, /^\d+\.\d+\.\d+$/);
+  assert.equal(data.status.body, null, '#2309: no phase read yet');
   assert.equal(data.resident.up, false);
   assert.equal(data.plan, null);
   assert.equal(data.wakes.budget.budget, 'normal'); assert.equal(data.wakes.budget.deliveredLastHour, 0); assert.ok(data.wakes.rules.some((r) => r.id === 'owner-message'));
@@ -119,6 +120,7 @@ test('dashboard: with serve running it says so; --template prints the page; --pa
   const serve = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e6)', join(runtime, 'eden.mjs'), 'serve', '--foreground'], { cwd: runtime, stdio: 'ignore' });
   t.after(() => serve.kill());
   writeFileSync(join(runtime, '.eden-serve.lock'), JSON.stringify({ pid: serve.pid, start: '2026-11-13T08:00:00.000Z', beatAt: Date.now() }));
+  writeFileSync(join(runtime, '.eden-serve.json'), JSON.stringify({ body: { state: 'asleep', doing: 'dozing', since: Date.now() - 600_000, read: Date.now() } }));   // #2309: what serve last read
   writeFileSync(join(root, 'mine.html'), '<!doctype html><title>Mine</title><p>my own page</p>');
   const d = run(root, ['dashboard', '--page', 'mine.html']);
   t.after(() => d.child.kill());
@@ -127,6 +129,7 @@ test('dashboard: with serve running it says so; --template prints the page; --pa
   assert.match((await get(port, '/')).body, /my own page/);
   const data = JSON.parse((await get(port, '/data.json')).body);
   assert.equal(data.resident.up, true); assert.equal(data.resident.since, '2026-11-13T08:00:00.000Z'); assert.equal(data.status.link.by, 'serve');
+  assert.deepEqual([data.status.body.phase, data.status.body.doing, data.status.body.note], ['asleep', 'dozing', 'Asleep until you act; your next act wakes it.'], '#2309 A3: the dashboard shows the phase');
 
   const tpl = await run(root, ['dashboard', '--template']).done;
   assert.equal(tpl.code, 0); assert.equal(tpl.out, PAGE);

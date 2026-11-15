@@ -62,6 +62,11 @@ test('through the launcher: HTML, twins by suffix and by Accept, llms files, cha
     assert.equal(r.headers.get('x-robots-tag'), 'noindex, nofollow', p);
   }
   assert.equal((await get('/changelog')).headers.get('vary'), 'Accept', 'the changelog HTML is negotiated too');
+  // the home page is an app: a reader that prefers Markdown gets the docs index (the text of /llms.txt); a browser gets the page
+  const home = await get('/', 'text/markdown'), page = await get('/', 'text/html,application/xhtml+xml,*/*;q=0.8');
+  assert.ok(home.headers.get('content-type').startsWith('text/markdown')); assert.equal(await home.text(), await (await get('/llms.txt')).text());
+  assert.ok(page.headers.get('content-type').startsWith('text/html')); assert.ok((await page.text()).includes('<title>Souls'));
+  for (const r of [home, page]) { assert.equal(r.headers.get('vary'), 'Accept', 'the home page is negotiated'); assert.match(r.headers.get('link'), /^<http:\/\/[^>]+\/llms\.txt>; rel="alternate"; type="text\/markdown"$/); }
   const locs = [...(await (await get('/sitemap.xml')).text()).matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1].replace(`http://127.0.0.1:${PORT}`, ''));
   assert.deepEqual(locs, ['/', '/changelog', '/docs', '/docs/concepts'], 'published docs pages from the build; a malformed entry is dropped');
   assert.equal(L.registry.worlds.length, 0);

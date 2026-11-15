@@ -52,7 +52,7 @@ const turn = () => setImmediate();
 type F = ReturnType<typeof fixture>;
 const state = (f: F) => ({ tick: f.host.engine.world.tick, seq: f.host.seq, engine: f.host.engine.stateHash(), kernel: kernelHash(f.host.kernel),
   lives: hashOf([...f.host.minds.values()].map((m) => [m.soulId, m.life])), events: hashOf(f.db.events(f.host.worldId).map((e) => [e.seq, e.tick, e.kind, e.author, e.payload])) });
-async function world(t: test.TestContext, dir: string, ambient: boolean) {
+async function world(t: test.TestContext, dir: string, ambient: boolean, anchors = false) {
   const f = fixture(join(dir, 'world.db'), await factory(), { durableClockV1: true }); f.souls.enableLifecycle(); f.brain.quiesce();
   t.after(() => { f.host.stop(); f.db.close(); });
   await accept<unknown>(f.host, new LivingWorld(f.host).install(['Owners drive their Souls.'])); for (let i = 0; i < 4; i++) f.host.tickOnce();
@@ -61,7 +61,8 @@ async function world(t: test.TestContext, dir: string, ambient: boolean) {
   await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: 0, dayTicks: 2400, customs: ['Owners drive their Souls.'] }, why: 'test: a 2-minute day, so the gap crosses its moments and a day turn' }));
   for (const n of ['ana', 'ben', 'cy']) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'idle' })); }
   if (ambient) new EdgeLedger(f.host, f.db, undefined, { ambient: true });
-  for (let i = 0; i < 200; i++) { f.host.tickOnce(); await turn(); }
+  // #2296: need-anchor/1 adopted halfway, 50 ticks after a snapshot, so a boot from it replays the old reader, then the adoption
+  for (let i = 0; i < 200; i++) { if (anchors && i === 50) f.host.saveSnapshot(true); if (anchors && i === 100) await accept<unknown>(f.host, f.host.enableNeedAnchorsV1()); f.host.tickOnce(); await turn(); }
   return f;
 }
 /** The process comes back: the world boots from the database it left and gets the same listeners main.ts gives it. */
@@ -107,19 +108,21 @@ test('held-activity/1: a world cold-booted halfway through a 3,600 s read ends i
   assert.equal(after.host.engine.stateHash(), control.host.engine.stateHash(), 'equal hashes at the end tick');
 });
 
-for (const how of ['restart', 'crash'] as const) for (const ambient of [false, true]) {
-  const what = `${how === 'restart' ? 'stopped and cold-booted' : 'that crashed and cold-booted'}, ${ambient ? 'idle Souls with the edge ambient-life reflex' : 'idle Souls, needs and day moving'}`;
+for (const how of ['restart', 'crash'] as const) for (const [ambient, anchors] of [[false, false], [true, false], [false, true]]) {
+  const what = `${how === 'restart' ? 'stopped and cold-booted' : 'that crashed and cold-booted'}, ${ambient ? 'idle Souls with the edge ambient-life reflex' : anchors ? 'idle Souls whose needs are anchors (need-anchor/1, adopted mid-history)' : 'idle Souls, needs and day moving'}`;
   // #2236: the ambient-life reflex keeps its idle clock in memory, so a reboot shifts the idle Souls' next acts: unproved
   test(`equivalence: a world ${what}, caught up by ticking, matches one ticked straight through`, { timeout: 600_000, ...(ambient ? { todo: '#2236: the ambient-life idle clock is lost on reboot' } : {}) }, async (t) => {
     const dir = mkdtempSync(join(tmpdir(), `catchup-${how}-`)); t.after(() => rmSync(dir, { recursive: true, force: true }));
-    const control = await world(t, dir, ambient), gap = 2400, copy = join(dir, 'away.db');
+    const control = await world(t, dir, ambient, anchors), gap = 2400, copy = join(dir, 'away.db');
     if (how === 'restart') control.host.saveSnapshot(true);                    // a clean stop saves its head
     else for (let i = 0; i < 300; i++) { control.host.tickOnce(); await turn(); }   // a crash: the last snapshot is older than the head
     control.db.db.exec(`VACUUM INTO '${copy}'`);                                 // what the stopped process left on disk
-    const away = state(control);
+    const away = state(control), needs = (f: F) => hashOf([...f.host.minds.values()].map((m) => f.host.needsOf(m))), awayNeeds = needs(control);
     for (let i = 0; i < gap; i++) { control.host.tickOnce(); await turn(); }    // the control never stopped
     const after = await reboot(t, copy, ambient);
     assert.equal(after.host.engine.world.tick, away.tick, 'booted to where it stopped');
+    if (anchors && how === 'crash') { const adopted = after.db.events(after.host.worldId).find((e) => (e.payload as {runtimePolicy?: {needAnchorsV1?: boolean}})?.runtimePolicy?.needAnchorsV1)!;
+      assert.ok(after.db.latestSnapshot(after.host.worldId)!.tick < adopted.tick, 'the boot replayed the old reader\'s ticks and the adoption from an older snapshot'); }
     const ran = await after.host.catchUp(control.host.engine.world.tick - after.host.engine.world.tick, turn);
     assert.equal(ran, gap);
     const inGap = control.db.events(control.host.worldId).filter((e) => e.tick > away.tick && e.tick < away.tick + gap);
@@ -127,7 +130,8 @@ for (const how of ['restart', 'crash'] as const) for (const ambient of [false, t
     const day = inGap.filter((e) => e.kind === 'rules' && e.author === 'world').map((e) => Object.keys(e.payload as object).filter((k) => k !== 'why').join('+'));
     t.diagnostic(JSON.stringify({ how, ambient, gap, acts, day }));
     assert.ok(day.length > 0, 'the day turned in the gap (LivingWorld logged its events)');
-    assert.notEqual(state(control).lives, away.lives, 'needs moved in the gap');
+    assert.notEqual(needs(control), awayNeeds, 'needs moved in the gap');
+    if (anchors) assert.ok([...control.host.minds.values()].every((m) => m.life!.anchor), 'every Soul\'s needs are an anchor');
     if (ambient) assert.ok(acts > 0, 'the idle Souls lived in the gap (ambient acts were logged)');
     assert.deepEqual(state(after), state(control));
   });
@@ -173,4 +177,162 @@ test('wind-down/1: a world stopped and cold-booted twice between the last agent 
   assert.equal(b.f.host.engine.world.tick, end + 2);
   assert.equal(b.rule.nextMoveTick(), null, 'nothing more is due');
   assert.deepEqual(state(b.f), state(control.f));
+});
+
+// #2298: a still world's clock is jumped, not stepped (WorldHost.advanceStep, the engine's skipToV1). The same god world,
+// once ticked straight through and once brought forward by the boot catch-up, which jumps where the world is still, reaches
+// the same state hash and the same log; again when the jumping run is stopped and cold-booted halfway. JUMP_FULL=1: three
+// real days (1,728,000 ticks each, about an hour of ticking per case); otherwise three 2,400-tick days as above (JUMP_DAY to
+// change it; the same deadlines and day turns at a smaller scale).
+const JUMP_FULL = process.env.JUMP_FULL === '1';
+const JUMP_DAY = JUMP_FULL ? 1_728_000 : Number(process.env.JUMP_DAY) || 2_400;
+const KNOBS = { wanderTicks: 400, zombieTicks: 600, legMinTicks: 100, legMaxTicks: 200, boundTicks: 1500 };
+async function godWorld(t: test.TestContext, path: string, souls: number | null, day = JUMP_DAY) {
+  const { Hono } = await import('hono'), { mountEdgeRoutes } = await import('./edge/routes.ts'), { GodMode } = await import('./god/god.ts'), { installEngineBridge } = await import('./god/engine-bridge.ts');
+  const f = fixture(path, undefined, { durableClockV1: true }); f.brain.quiesce(); t.after(() => { f.host.stop(); f.db.close(); });
+  const ledger = new EdgeLedger(f.host, f.db), rule = ledger.startBodyRule(KNOBS)!;
+  const comms = mountEdgeRoutes(new Hono(), { host: f.host, db: f.db, souls: f.souls, ledger, soul: () => { throw new Error('no requests'); } } as never);
+  t.after(() => comms.close());
+  const god = new GodMode(f.db, { worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit: () => {} });
+  installEngineBridge({ host: f.host, god, edge: ledger, log: () => {}, worldLore: false, worldClock: false });
+  new LivingWorld(f.host);
+  if (souls !== null) {   // a fresh world: a day, held activities, the Souls and each one's last act (a ten-second read)
+    // a day gives every Soul needs; under need-anchor/1 (#2296) they are an anchor and a rate, so a still world can jump
+    await accept(f.host, f.host.enqueue('rules', 'world', { dayConfig: { origin: f.host.engine.world.tick, dayTicks: day, customs: [], zone: 'UTC' }, why: 'test: a day' }));
+    for (const p of [f.host.enableContinuousDayV1(), f.host.enableHeldActivitiesV1(), f.host.enableNeedAnchorsV1()]) await accept<unknown>(f.host, p);
+    for (const n of ['ana', 'ben'].slice(0, souls)) { await invite(f, n); await accept(f.host, f.souls.create('dev:' + n, { name: n, description: 'quiet' })); }
+    for (const m of f.host.minds.values()) await accept(f.host, f.host.enqueue('decision', `edge:${m.soulId}`, { soulId: m.soulId, entityId: m.entityId, option: 'rest', label: 'Read a book',
+      steps: [{ verb: 'mars:pose_v1', params: { activity: 'read', prop: 'book', seconds: 10 } }], reevalTicks: 1e9, fallback: false, trigger: 'edge-act:r_last' }));
+  }
+  return { f, rule };
+}
+const tickTo = async (f: F, to: number) => { for (let i = 0; f.host.engine.world.tick < to; i++) { f.host.tickOnce(); if (i % 2000 === 0) await turn(); } };
+const copyOf = (f: F, dir: string, name: string) => { f.host.saveSnapshot(true); const p = join(dir, name); f.db.db.exec(`VACUUM INTO '${p}'`); return p; };
+type Skip = { skipToV1(t: number): { ok: true; from: number; to: number } | { ok: false; reason: string } };
+
+test('#2298 A1: skipToV1 leaves what ticking leaves; refused while not still or at the horizon', { timeout: 300_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'jump-a1-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { f } = await godWorld(t, join(dir, 'world.db'), 2), skip = (g: F) => g.host.engine as unknown as Skip;
+  assert.deepEqual(skip(f).skipToV1(f.host.engine.world.tick + 5), { ok: false, reason: 'skip.not-still' }, 'two Souls starting a read');
+  const still = () => (f.host.engine as unknown as { stillnessV1(): { still: boolean; untilTick: number | null } }).stillnessV1();
+  for (let i = 0; i < 100 && !still().still; i++) f.host.tickOnce();   // both start reading, held to its end
+  const eng = still();
+  assert.equal(eng.still, true); assert.ok(eng.untilTick! > f.host.engine.world.tick + 150, JSON.stringify(eng));
+  const copy = copyOf(f, dir, 'a1.db'), from = f.host.engine.world.tick;
+  assert.deepEqual(skip(f).skipToV1(eng.untilTick!), { ok: false, reason: 'skip.past-horizon' }, 'the step that ends the read is not skipped');
+  assert.deepEqual(skip(f).skipToV1(from), { ok: false, reason: 'skip.not-ahead' });
+  const b = await godWorld(t, copy, null), to = eng.untilTick! - 1;
+  await tickTo(f, to);
+  assert.deepEqual(skip(b.f).skipToV1(to), { ok: true, from, to });
+  assert.equal(b.f.host.engine.world.env.datetime, f.host.engine.world.env.datetime, 'the time of day');
+  assert.equal(b.f.host.engine.stateHash(), f.host.engine.stateHash(), 'the state hash: clock, attention and every other field');
+  for (let i = 0; i < 3; i++) { f.host.tickOnce(); b.f.host.tickOnce(); }
+  assert.deepEqual(state(b.f), state(f), 'and the ordinary ticks after it agree, the log included');
+});
+
+const asleep = (w: { f: F; rule: { view(id: string): { state?: string } | null | undefined } }) => [...w.f.host.minds.values()].map((m) => w.rule.view(m.soulId)?.state);
+for (const [name, souls, settle, span] of [
+  ['an empty world over 3 days', 0, 0, 3 * JUMP_DAY],
+  ['two Souls asleep over 3 days', 2, 4_000, 3 * JUMP_DAY],
+  ['two Souls from the last agent act through the wind-down and one day more', 2, 0, 4_000 + JUMP_DAY],
+] as const) for (const how of ['straight', 'stopped and cold-booted halfway'] as const) {
+  test(`#2298 A3: ${name}, jumped (${how}), equals ticked straight through`, { timeout: JUMP_FULL ? 14_400_000 : 900_000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'jump-a3-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const control = await godWorld(t, join(dir, 'world.db'), souls);
+    if (settle) { await tickTo(control.f, control.f.host.engine.world.tick + settle); assert.deepEqual(asleep(control), ['asleep', 'asleep'], 'both asleep'); }
+    const start = control.f.host.engine.world.tick, end = start + span, copy = copyOf(control.f, dir, 'start.db');
+    const at = performance.now(); await tickTo(control.f, end); const tickedMs = performance.now() - at;
+    let run = await godWorld(t, copy, null), jumped = 0, computed = 0;
+    const go = async (to: number) => { const k = run.f.host.skipStats, j = k.ticksJumped, c = k.ticksComputed; await run.f.host.catchUp(to - run.f.host.engine.world.tick, turn); jumped += k.ticksJumped - j; computed += k.ticksComputed - c; };
+    const jt = performance.now();
+    if (how === 'straight') await go(end);
+    else { await go(start + Math.floor(span / 2)); run = await godWorld(t, copyOf(run.f, dir, 'half.db'), null); await go(end); }
+    const jumpedMs = performance.now() - jt;
+    t.diagnostic(JSON.stringify({ name, how, span, jumped, computed, tickedMs: Math.round(tickedMs), jumpedMs: Math.round(jumpedMs) }));
+    assert.equal(run.f.host.engine.world.tick, end);
+    if (souls) { assert.deepEqual(asleep(run), asleep(control)); const { needsAt } = await import('@souls/brain'), read = (g: F, t: number) => [...g.host.minds.values()].map((m) => needsAt(m.life!, t));
+      assert.ok([...run.f.host.minds.values()].every((m) => m.life), 'the Souls have needs'); assert.deepEqual(read(run.f, end), read(control.f, end), 'the needs read at the end are equal');
+      assert.notDeepEqual(read(control.f, end), read(control.f, start), 'and they moved over the span'); }
+    assert.deepEqual(state(run.f), state(control.f), 'state hash and full log equal');
+    // a short day's moments and day turns fall every few hundred ticks, each an ordinary tick and a re-ask
+    assert.ok(jumped > span * 0.5, `most of the span was jumped (${jumped} of ${span})`);
+  });
+}
+
+// #2298 A4a, #2384 A1: on the live clock a still, unwatched world sleeps to its horizon: no frame timer and no landing in
+// between. While it sleeps the load monitor counts it as owing nothing (not stalled, service whole), so /healthz, live.json and
+// the launcher's stall test read it healthy; an hour away is caught up in a few ordinary ticks, and an input wakes it and is
+// accepted at the tick the wall has reached. Once more on a busy host: the turn that starts the clock runs 60 ms late, so its
+// first frame owes no tick and the world sleeps at its second, unticked, where the monitor's sample can catch it just started.
+for (const busyMs of [0, 60]) test(`#2298 A4a, #2384 A1: a still world sleeps to its horizon, never reads as stalled, and an input wakes it${busyMs ? ` (a busy host: the clock starts ${busyMs} ms into its turn)` : ''}`, { timeout: 120_000 }, async (t) => {
+  const { STALL_MIN_MS, LoadMonitor } = await import('./load/monitor.ts'), { S, clockOf } = await import('./load/shared.ts');
+  const dir = mkdtempSync(join(tmpdir(), 'jump-a4-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { f } = await godWorld(t, join(dir, 'world.db'), 0, 1_728_000), h = f.host;   // a real-time day
+  const hour = 72_000, c0 = h.skipStats.ticksComputed;
+  await h.catchUp(hour, turn);
+  assert.ok(h.skipStats.ticksComputed - c0 < 200, `an hour away took ${h.skipStats.ticksComputed - c0} ordinary ticks`);
+  const done: { at: number; tick: number }[] = [], batches: number[] = [];
+  h.listeners.push({ afterTickComplete: (tick: number) => { done.push({ at: performance.now(), tick }); }, onBatch: () => { batches.push(performance.now()); } });
+  const hh = h as unknown as { frame(): void }, frame = hh.frame.bind(h); let frames = 0; hh.frame = () => { frames++; frame(); };
+  const shared = new Float64Array(S.size), mon = new LoadMonitor({ host: h, shared, sampleMs: 100 }); mon.start(); t.after(() => mon.stop());
+  // a deadline five seconds on, then none (a listener's stillness): the world sleeps to it, lands on it exactly, and sleeps on.
+  // After an ordinary tick the world first jumps once (within 1.5 s, the cap), so the timers that read `silent()` agree.
+  const deadline = h.engine.world.tick + 100; h.listeners.push({ stillness: (tick: number) => (tick < deadline ? [{ name: 'test.deadline', tick: deadline }] : []) });
+  const t0 = performance.now(), tick0 = h.engine.world.tick, wait = async (ok: () => boolean, ms: number) => { for (const end = performance.now() + ms; !ok() && performance.now() < end;) await new Promise((r) => setTimeout(r, 20)); };
+  for (const end = performance.now() + busyMs; performance.now() < end;);   // the busy host: synchronous work before the start
+  h.start(); await wait(() => h.sleeping, 2500);
+  assert.ok(h.sleeping, 'asleep after its first jump'); const f0 = frames, d0 = done.length, slept = performance.now();
+  await new Promise((r) => setTimeout(r, Math.max(0, t0 + 4600 - slept)));
+  assert.equal(frames, f0, 'no frame while asleep'); assert.equal(done.length, d0, 'no landing while asleep');
+  assert.equal(clockOf(shared, Date.now()).stalled, false, 'not stalled while asleep');
+  t.diagnostic(JSON.stringify({ sleptAfterMs: Math.round(slept - t0), service: mon.signals.service, level: mon.level }));
+  await new Promise((r) => setTimeout(r, 900));
+  assert.deepEqual(done.slice(d0).map((d) => d.tick), [deadline], 'it woke and landed on its deadline exactly');
+  assert.ok(h.sleeping, 'and sleeps again'); assert.equal(mon.signals.service, 1, 'the tick service is whole');
+  await new Promise((r) => setTimeout(r, 2500));
+  assert.equal(done.length, d0 + 1, 'no landing in the 2.5 s after it'); assert.equal(clockOf(shared, Date.now()).stalled, false, 'still not stalled');
+  assert.ok(Date.now() - shared[S.tickAt] < STALL_MIN_MS, 'the tick age stays fresh while asleep'); assert.equal(mon.level, 'green', 'the load level stays green');
+  const e = await h.enqueue('rules', 'world', { why: 'test: an input wakes a sleeping world' });
+  assert.ok(Math.abs(e.tick - (tick0 + (performance.now() - t0) / 50)) <= 25, `the input landed at now (tick ${e.tick})`);
+  const s0 = done.length; h.settle(); await new Promise((r) => setTimeout(r, 300));
+  assert.ok(h.sleeping, 'a request wakes it, and it sleeps again'); h.stop();
+  t.diagnostic(JSON.stringify({ wallMs: Math.round(performance.now() - t0), ran: h.engine.world.tick - tick0, frames, completed: done.length - s0 }));
+  assert.ok(h.engine.world.tick - tick0 >= (performance.now() - t0) / 50 - 25, 'the clock kept wall pace');
+  hh.frame = frame;
+  // A4b: watched, a jump covers one batch and lands on its boundary, so batches go out every half second as before
+  h.watched = () => true; batches.length = 0;
+  const w0 = performance.now(), wt = h.engine.world.tick; h.start(); await new Promise((r) => setTimeout(r, 2000)); h.stop();
+  let bgap = batches[0] - w0; for (let i = 1; i < batches.length; i++) bgap = Math.max(bgap, batches[i] - batches[i - 1]);
+  t.diagnostic(JSON.stringify({ watched: true, ran: h.engine.world.tick - wt, batches: batches.length, maxBatchGapMs: Math.round(bgap) }));
+  assert.ok(bgap < 800, `watched: the longest gap between batches was ${Math.round(bgap)} ms`);
+  assert.ok(batches.length >= Math.floor((h.engine.world.tick - wt) / 10) - 2);
+});
+
+// #2406 A1: a landing after a long sleep is a long turn; the periodic snapshot it owes is captured on the next turn, at the
+// landing tick's boundary, never skipped, and a cold boot from it is the world exact. An ordinary tick that comes first takes it.
+test('#2406 A1: a landing defers the snapshot it owes to the next turn; a cold boot from it is exact', { timeout: 120_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'land-snap-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { f } = await godWorld(t, join(dir, 'world.db'), 0, 1_728_000), h = f.host;
+  const hi = h as unknown as { lastSnapshotTick: number; periodicSnapshot: unknown };
+  const persisted = async () => { for (let i = 0; i < 200 && hi.periodicSnapshot; i++) await turn(); assert.equal(hi.periodicSnapshot, null, 'the snapshot finished'); };
+  await h.catchUp(72_000, turn); await persisted();
+  const jumpOwing = async () => {   // something new since the last snapshot, one due, and a long jump
+    await accept(h, h.enqueue('rules', 'world', { why: 'test: something new since the last snapshot' })); await persisted();
+    h.requestSnapshot('test'); const from = h.engine.world.tick, j = h.skipStats.jumps;
+    h.advanceStep(from + 10_000, { inputsAtTarget: true });
+    assert.equal(h.skipStats.jumps, j + 1, 'it jumped'); assert.ok(h.engine.world.tick > from + 1_000, `a long jump (${h.engine.world.tick - from} ticks)`);
+    return h.engine.world.tick;
+  };
+  const landed = await jumpOwing(), before = f.db.latestSnapshot(h.worldId)?.tick ?? -1;
+  assert.ok(hi.lastSnapshotTick < landed && before < landed, 'not captured in the landing\'s own turn');
+  await turn();
+  assert.equal(hi.lastSnapshotTick, landed, 'captured on the next turn, at the landing tick'); await persisted();
+  assert.equal(f.db.latestSnapshot(h.worldId)?.tick, landed, 'and persisted');
+  const copy = join(dir, 'landed.db'); f.db.db.exec(`VACUUM INTO '${copy}'`);
+  const b = await godWorld(t, copy, null);
+  assert.deepEqual(state(b.f), state(f), 'a cold boot from it is the world exact: state hash and full log');
+  // an ordinary tick before the deferred turn takes the snapshot itself; the deferred turn then has nothing to do
+  const landed2 = await jumpOwing(); h.tickOnce();
+  assert.equal(hi.lastSnapshotTick, landed2 + 1, 'the ordinary tick took it'); await turn(); assert.equal(hi.lastSnapshotTick, landed2 + 1, 'not taken twice');
+  await persisted();
 });

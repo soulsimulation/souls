@@ -7,6 +7,7 @@ import {ReadPool, readPorts} from './split/read-pool.ts';
 import {Admission} from './load/admission.ts';
 import {liveOf, newSharedLoad, S} from './load/shared.ts';
 import type {WorldInit} from './split/read-model.ts';
+import {SECURITY_HEADERS} from './security-headers.ts';
 
 const human = (id: string, x: number) => ({id, kind: 'human', pose: {p: [x, 0, 0], yaw: 0}, human: {}});
 const init = (tick = 7): WorldInit => ({v: 1, gen: 1, seq: 0, tick, logSeq: 0, entities: {ent1: human('ent1', 0), ent2: human('ent2', 5)}, env: {}, living: null,
@@ -40,6 +41,7 @@ test('one worker: health, subset answers by token, lag, live.json advertises rea
     assert.equal(h.status, 200); assert.equal(h.body!.tick, 7); assert.equal(h.body!.subset, true); assert.equal(h.body!.lagGens, 0);
     const here = await get(port, '/w/test/v1/edge/here', 'sim_a');
     assert.equal(here.status, 200); assert.equal(here.headers.get('x-sim-read'), 'worker'); assert.equal(here.headers.get('x-sim-account'), 'acct-s1');
+    for (const r of [h, here]) for (const [k, v] of Object.entries(SECURITY_HEADERS)) assert.equal(r.headers.get(k), v, `#1025: a worker-answered ${k}`);
     assert.deepEqual(here.body!.here, {me: {pos: [0, 0]}, near: [{id: 's2', dist: 5}], things: [{kind: 'fire', id: 'fire1', dist: 3}]});
     assert.equal(here.body!.subset, true);
     const caps = await get(port, '/v1/edge/capabilities', 'sim_b');

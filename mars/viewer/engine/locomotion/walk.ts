@@ -175,13 +175,6 @@ const walkSchemaWithin = (reach: number) => z.strictObject({
   gait: z.enum(['walk', 'jog', 'run', 'cycle']).optional(),
 }).refine(p => p.speed === undefined || p.speed <= GAIT_SPEED_CAPS[p.gait ?? 'walk'], { message: 'speed exceeds the selected gait cap', path: ['speed'] });
 const walkSchema500 = walkSchemaWithin(500);
-let walkSchemaWide: typeof walkSchema500 | null = null;
-/** GOD-ENV: a god's (entity) world can grow past ±500 m ("extend the world east"); its server widens the reach of
- *  walk_to to the world's bounds. Worlds that never call this (the old worlds) parse with the same ±500 schema as before. */
-export function setWalkReach(metres: number) { walkSchemaWide = metres > 500 ? walkSchemaWithin(Math.min(16000, metres)) : null; }
-/** The walk_to schema now (lane NAV: read on every use — a `z.lazy` memoises its first schema, so a world widened after the
- *  process's first walk kept ±500 m). */
-export const walkSchemaNow = () => walkSchemaWide ?? walkSchema500;
 
 const spatial = bodySpatial;
 
@@ -274,7 +267,7 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
   navPure: true,
   description:
     'Walk a person to (x, z) on a level (default: current level) along a planned corridor route, using completed stairs between levels. Fails with a diagnostic if no route exists.',
-  get schema() { return walkSchemaNow(); },
+  schema: walkSchema500,
   reservations: (_w, p) => [{ resource: `actor:${p.actor}`, mode: 'exclusive' }],
   plan(rt, p) {
     const a = actorOf(rt, p.actor);
@@ -542,6 +535,24 @@ function faceAt(ex: Exec, s: number): number {
 /** Speed allowed with heading error `err`: full up to HEAD_FULL, linear to 0 at TURN_IN_PLACE (turn in place beyond). */
 export const headingCap = (err: number, speed: number) => speed * clamp((TURN_IN_PLACE - Math.abs(err)) / (TURN_IN_PLACE - HEAD_FULL), 0, 1);
 
+/** W38's test: `occ`'s walk is blocked yielding to me on a single-file passage (directly, or under a deadlock report). */
+function yieldsToMe(rt: Runtime, ex: Exec, occ: string): boolean {
+  const ot = rt.world.entities[occ]?.human?.task, orec = ot ? rt.records.get(ot) : undefined;
+  return orec?.status === 'blocked' && ((orec.diagnostic?.code === 'traffic.yield' && !!orec.diagnostic.subjects?.includes(ex.actor)) || (!!orec.diagnostic?.code.startsWith('deadlock.') && publishedWaitsFor(rt, occ, ex.actor, 'traffic.yield')));
+}
+/** #2426: the body standing on the end of my walk leg is yielding on a single-file passage either to me (W38's test) or to
+ *  another walker that is itself waiting at the end of its own leg for a body on its spot. Never for a walker passing through. */
+function destinationYieldsToWaiter(rt: Runtime, ex: Exec, a: Entity): boolean {
+  const occ = occupant(rt, a, pointAt(ex, ex.total), ex.profile.radius);
+  if (!occ) return false;
+  if (yieldsToMe(rt, ex, occ)) return true;
+  const ot = rt.world.entities[occ]?.human?.task, orec = ot ? rt.records.get(ot) : undefined, d = orec?.status === 'blocked' ? orec.diagnostic : undefined;
+  if (!d) return false;
+  const to = d.code === 'traffic.yield' ? d.subjects?.[1] : d.code.startsWith('deadlock.') ? d.subjects?.find((y) => y !== occ && publishedWaitsFor(rt, occ, y, 'traffic.yield')) : undefined;
+  const yt = to ? rt.world.entities[to]?.human?.task : undefined, yx = yt ? walkExecs(rt).get(yt) : undefined, yr = yt ? rt.records.get(yt) : undefined;
+  return !!yx && yx.s >= yx.total - 1e-6 && yr?.status === 'blocked' && (yr.diagnostic?.code === 'walk.goal-occupied' || !!yr.diagnostic?.code.startsWith('deadlock.'));
+}
+
 function releaseAll(rt: Runtime, ex: Exec) {
   const t = traffic(rt);
   for (const r of ex.held) {
@@ -766,7 +777,12 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
       }
       continue;
     }
-    if (ex.s >= n.s0 - (r + 0.9)) { yieldTo = tryEnter(rt, ex, n); }
+    // #2426 cede-passage/1: a walker at the end of its walk leg, which does not hold this passage, does not take it up while
+    // the body standing on its spot is yielding to it, or to another walker waiting at the end of its own leg. Two walkers
+    // whose legs ended in one passage, each waiting for such a body, took turns holding it (W38 lets it go, the other takes
+    // it the same tick), so the bodies they asked to make way always found it held and never moved. A walker whose spot's
+    // body yields to anyone passing through enters as before.
+    if (ex.s >= n.s0 - (r + 0.9) && !(rt.services.cedePassageV1 === true && ex.s >= ex.total - 1e-6 && !ex.held.has(n.res) && destinationYieldsToWaiter(rt, ex, a))) { yieldTo = tryEnter(rt, ex, n); }
     break;
   }
   const tan = tangentAt(ex, ex.s);
@@ -1110,8 +1126,7 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
       if (occ) {
         // W38: the person on my destination waits for me to clear a single-file passage my destination lies in — I hold it
         // while I wait for them (chiba 2022, D1: m3 / m6 deadlocked for 16 h): let the passage go so they walk on through
-        const ot = rt.world.entities[occ].human?.task, orec = ot ? rt.records.get(ot) : undefined;
-        if (ex.held.size && orec?.status === 'blocked' && ((orec.diagnostic?.code === 'traffic.yield' && orec.diagnostic.subjects?.includes(ex.actor)) || (orec.diagnostic?.code.startsWith('deadlock.') && publishedWaitsFor(rt, occ, ex.actor, 'traffic.yield')))) releaseAll(rt, ex);
+        if (ex.held.size && yieldsToMe(rt, ex, occ)) releaseAll(rt, ex);
         makeWay(rt, occ, pointAt(ex, ex.total));
         return blockedWait(rt, ex.id, ex.actor, [occ], { code: 'walk.goal-occupied', message: `${ex.actor} cannot step onto its destination: ${occ} is standing there`, subjects: [ex.actor, occ] });
       }
@@ -1967,4 +1982,19 @@ function remainingValid(rt: Runtime, ex: Exec): boolean {
     for (let i = 1; i < pts.length; i++) if (segmentClearance(g, pts[i - 1], pts[i]) < ex.profile.radius) return false;
   }
   return true;
+}
+
+/** GOD-ENV: a god's (entity) world can grow past ±500 m ("extend the world east"); its registry carries walk_to with the
+ *  reach widened to the world's bounds (#2416: per world, in the world's own registry; never a module-wide switch).
+ *  Worlds that never widen (the old worlds) keep `walkTo` itself, the same ±500 m schema as before. The widened defs are
+ *  immutable and keyed by their reach, so worlds of the same size share one. */
+const walkToByReach = new Map<number, typeof walkTo>();
+/** Whether `d` is walk_to as this module makes it (plain or widened), not a wrapper some runtime installed. */
+export const isWalkToDef = (d: unknown) => d === walkTo || [...walkToByReach.values()].includes(d as typeof walkTo);
+export function walkToWithin(metres: number): typeof walkTo {
+  const reach = Math.min(16000, metres);
+  if (!(reach > 500)) return walkTo;
+  let d = walkToByReach.get(reach);
+  if (!d) walkToByReach.set(reach, (d = { ...walkTo, schema: walkSchemaWithin(reach) }));
+  return d;
 }

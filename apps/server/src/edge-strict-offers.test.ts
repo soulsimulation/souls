@@ -79,11 +79,11 @@ test('strict act: a place by name is not an id; params are checked against the o
   assert.equal(shape.code, 'capability.params');
 });
 
-test('#1910: the resolve route is gone: 410 naming the client\'s find, and nothing happens', async t => {
+test('#1910: the resolve route is gone: 410 naming the upgrade command, and nothing happens', async t => {
   const w = await world(t), before = w.receipts();
   const res = await w.app.request('/v1/edge/resolve', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability: 'walk to the pond'})});
   assert.equal(res.status, 410);
-  assert.deepEqual(await res.json(), {ok: false, code: 'gone', message: "resolve was removed; use the client's find"});
+  assert.deepEqual(await res.json(), {ok: false, code: 'gone', message: 'resolve was removed, and this Soul client still uses it. Run: node eden.mjs upgrade', run: 'node eden.mjs upgrade'});
   assert.equal(w.receipts(), before);
 });
 

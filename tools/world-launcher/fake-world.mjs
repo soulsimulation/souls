@@ -37,7 +37,9 @@ const server = createServer((req, res) => {
   if (path.split('?')[0] === '/v1/edge/wait') { const t = setTimeout(() => res.writeHead(200, { 'content-type': 'application/json' }).end('{"events":[],"cursor":"c_1"}'), Math.min(30, Number(new URL(req.url, 'http://x').searchParams.get('timeout') ?? 25)) * 1000); req.on('close', () => clearTimeout(t)); return; }
   if (path.split('?')[0] === '/v1/edge/events') { res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write('event: hello\ndata: {}\n\n'); const t = setInterval(() => res.write(': beat\n\n'), 200); req.on('close', () => clearInterval(t)); return; }
   if (process.env.FAKE_ACT === '1' && path === '/v1/edge/act' && req.method === 'POST') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, acted: true, pid: process.pid }));   // #2231
-  if (path === '/v1/config') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worldId: `${slug}-1`, worldKey: slug }));
+  if (path === '/v1/config') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worldId: `${slug}-1`, worldKey: slug, pid: process.pid, host: req.headers['x-forwarded-host'] ?? req.headers.host ?? null }));
+  // a snapshot part (content-addressed, immutable); /v1/world/part/<32 0s> answers privately (a shared cache must not keep it)
+  if (/^\/v1\/world\/part\/[0-9a-f]{32}$/.test(path)) return res.writeHead(200, { 'content-type': 'application/json', 'cache-control': path.endsWith('0'.repeat(32)) ? 'private, no-store' : 'public, max-age=31536000, immutable' }).end(JSON.stringify({ part: path.slice(-32), pid: process.pid, who: req.headers.authorization ?? null }));
   if (path === '/v1/god/status') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ worldId: `${slug}-1`, hasOwner: false, you: 'anonymous', pending: [], entities: 3, seq: 1, timeZone: process.env.FAKE_STATUS_ZONE || process.env.WORLD_TIME_ZONE || null }));
   if (path === '/v1/god/edits?limit=1') return req.headers.authorization === 'Bearer god_ok' ? res.writeHead(200).end('{"edits":[]}') : res.writeHead(401).end('{}');
   if (path === '/v1/god/preview' && req.method === 'POST') return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'pv_test', accepted: true, summary: { upserts: 1 } }));
@@ -113,6 +115,9 @@ if (process.env.SIM_READ_WORKER === '1') { L[5] = process.env.FAKE_READ_MODE ===
 if (process.env.FAKE_BOOT_TICK_MS) { const t = setInterval(() => { if (L[1] === 1) return clearInterval(t); L[2]++; if (process.env.FAKE_LIVE !== '1') console.log(`replay ${L[2]}`); }, Number(process.env.FAKE_BOOT_TICK_MS)); }
 server.on('listening', () => {
   L[1] = 1;
+  // #2367: FAKE_DUE_FILE ({ dueAt, out }): a reminder the running world delivers at dueAt (at once if it loads later),
+  // appending the delivery time to `out`, as the reminders' pump does
+  if (process.env.FAKE_DUE_FILE) { let d = null; try { d = JSON.parse(readFileSync(process.env.FAKE_DUE_FILE, 'utf8')); } catch { /* none */ } if (d) { const fire = () => { if (Date.now() < d.dueAt) return void setTimeout(fire, d.dueAt - Date.now()).unref(); appendFileSync(d.out, `${Date.now()}\n`); }; fire(); } }   // (a timer may fire a ms early; the pump never does)
   if (process.env.FAKE_LIVE === '1') process.on('SIGUSR2', () => console.log('[report] (a process report, as lane L2 writes one)'));
   if (process.env.FAKE_FLAP_MS) setTimeout(() => process.exit(3), Number(process.env.FAKE_FLAP_MS));
   if (process.env.FAKE_PLANNED_MS) setTimeout(() => process.exit(75), Number(process.env.FAKE_PLANNED_MS));

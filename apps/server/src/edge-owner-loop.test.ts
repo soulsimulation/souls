@@ -243,3 +243,34 @@ test('D3d: a default-linked last step closes only at its target; an unresolved t
   assert.deepEqual(act(one, 'o1', 'walk:bank-bench', 'walk completed at g-commons.', at('g-commons', [250, 60])), {open: false});
   assert.equal(row(one).result, 'walk completed at g-commons.');
 });
+
+// #2298: a still world is jumped, not stepped. The owner loop's next closure (a replaced act's message 40 ticks on, an
+// overlong act past the hold limit) is a deadline, so a world advanced by jumps (ordinary ticks only at each landing, as
+// `WorldHost.advanceTo` runs them) closes each message on the tick a world ticked straight through closes it.
+test('#2298 jumped: a replaced and an overlong owner message close on the same tick as when ticked', () => {
+  const run = (jumped: boolean) => {
+    let now = 100, landings = 0;
+    const closed: [string, number, string][] = [], receipts = new Map<string, EdgeReceipt>(), listeners: ((r: EdgeReceipt) => void)[] = [];
+    const inbox = {hasMessage: () => true, serverResult: (_s: unknown, id: string, _t: string, outcome: string) => {closed.push([id, now, outcome]); return true;}};
+    const loop = new OwnerLoop(inbox, (_soul, id) => receipts.get(id) ?? null, l => listeners.push(l), null, {holdTicks: 300});
+    const soul = {soulId: 's1', entityId: 'e1', name: 'Avery', owner: 'dev:alice'};
+    const receipt = (id: string, capability: string) => {const r = {id, soulId: 's1', capability, phase: 'started', acceptedTick: now, endedTick: null} as unknown as EdgeReceipt; receipts.set(id, r); return r;};
+    loop.link(soul as never, receipt('r-walk', 'walk:bench'), 'm-replaced');
+    loop.link(soul as never, receipt('r-hold', 'gesture:wave'), 'm-overlong');
+    const advanceTo = (target: number) => {
+      while (now < target) {
+        const due = jumped ? loop.nextDue(now) : null;
+        now = jumped ? Math.min(due ?? target, target) : now + 1; landings++;
+        loop.sweep(now);
+      }
+    };
+    advanceTo(130);   // the replacing act arrives as an input at tick 130: an ordinary tick in both worlds
+    const walk = receipts.get('r-walk')!; Object.assign(walk, {phase: 'replaced', endedTick: 130}); for (const l of listeners) l(walk);
+    advanceTo(1000);
+    return {closed, landings};
+  };
+  const ticked = run(false), jumped = run(true);
+  assert.deepEqual(ticked.closed, [['m-replaced', 180, 'failed'], ['m-overlong', 400, 'failed']]);
+  assert.deepEqual(jumped.closed, ticked.closed, 'the jumped world closed both on the same ticks');
+  assert.ok(jumped.landings < 10, `the jumped world landed only at its deadlines (${jumped.landings})`);
+});

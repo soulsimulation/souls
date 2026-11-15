@@ -3,11 +3,13 @@
 // the park. Many sampled walks across the map never cross a footprint; walks to every native place still arrive.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
 import {WorldHost} from './world.ts';
 import {kernelHash} from '@souls/kernel';
 import {HUMAN_PROFILE} from '../../../mars/viewer/engine/spatial/types.ts';
 import {HUMAN_RADIUS} from '../../../mars/viewer/engine/world/catalog.ts';
 import {edenNavWorld, inSolid} from '../test/eden-nav-fixture.ts';
+import {accept} from '../test/native-owner-fixture.ts';
 
 const rng = (seed: number) => () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32);
 
@@ -78,4 +80,23 @@ test('nav/1: walks to every native place arrive; no body is ever inside a footpr
   w.f.db.db.prepare('DELETE FROM snapshots WHERE world_id=?').run(w.f.host.worldId);
   const h = new WorldHost(w.f.db, w.fac, w.f.host.seed, 1e9, w.f.host.worldId, {durableClockV1: true}); assert.equal(h.boot().from, 'genesis');
   assert.deepEqual({engine: h.engine.stateHash(), kernel: kernelHash(h.kernel)}, head, 'replay exact'); h.stop();
+});
+
+// A solid admitted over an idle Soul (a later nav/1 fact, logged) never strands her: in the ticked world she stands on
+// clear ground with the walk planner's margin and her next walk starts. Read the body through f.host.engine, the live
+// engine: a recovery may replace the engine, so a reference taken at boot can show a stale pose.
+test('nav/1: a solid admitted over an idle Soul leaves her on clear ground in a ticked world; her next walk starts', {timeout: 300000}, async t => {
+  const w = await edenNavWorld(1); t.after(() => {w.f.brain.quiesce(); w.f.host.stop(); w.f.db.close();});
+  const s = w.souls[0], E = () => w.f.host.engine as any, f = w.f;
+  const pos = () => {const p = E().world.entities[s.entityId].pose.p; return [p[0], p[2]] as [number, number];};
+  const [x, z] = pos(), box = {id: 'test-box-over-soul', c: [x + 0.5, z] as [number, number], half: [1, 1] as [number, number], yaw: 0, height: 3};
+  assert.equal(inSolid(x, z, box), true, 'the new solid covers where she stands');
+  assert.deepEqual(await accept(f.host, f.host.installNavV1({...w.spec!, solids: [...w.spec!.solids, box]} as never)), {installed: true});
+  for (let i = 0; i < 300; i++) {f.host.tickOnce(); if (i % 20 === 0) {await setImmediate(); f.host.drainInputs();}}
+  const [x1, z1] = pos();
+  assert.equal(inSolid(x1, z1, box), false, `out of the solid @${x1},${z1}`);
+  assert.ok(E().clearanceUpToV1(x1, z1, 1) >= 0.27, 'clear by the walk planner\'s margin');
+  assert.deepEqual(E().runtime.violations.filter((v: any) => v.code === 'collision.human-static'), []);
+  const out: any = await w.act(s, 'walk:social-eden-fire-circle');
+  assert.equal(out.accepted, true, JSON.stringify(out));
 });

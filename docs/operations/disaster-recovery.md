@@ -4,7 +4,8 @@
 public site is root-only `https://soul.game`; do not copy the dual-stage uploads, memory settings or Caddy routing
 below onto its host. Recovery must use the current release owner's approved host/bootstrap record, base `/`,
 actual backup inventory and isolated restore verification. A fully rehearsed root-only recovery procedure remains
-unverified; local backups alone do not prove recovery from losing the server. Offsite provisioning is deferred.
+unverified. Production's snapshots are copied off-site nightly and drilled from there
+([off-site copy](../operations.md#off-site-copy)).
 See [operations](../operations.md) and [release](../release.md#current-production-topology).
 
 
@@ -17,7 +18,7 @@ nightly backup. Stages and paths are described in [operations](../operations.md)
 | Item | Where it comes from |
 |---|---|
 | The restic repository | The off-host copy (`SIM_BACKUP_OFFSITE`), or the old host's disk if it is still readable |
-| The restic password | Kept outside the host; without it the backups cannot be opened |
+| The restic password | Kept outside the host (the maintainer's recovery key, [off-site copy](../operations.md#off-site-copy)); without it the backups cannot be opened |
 | A clean checkout of the commit to restore, with the Mars web asset overlay | The repository (`MARS_WEB_SRC`, see [release](../release.md#releasesh)) |
 | Root SSH access to the new host | Deployment secrets (`SIM_DEPLOY_HOST`, `SIM_DEPLOY_USER`) |
 | Clerk public settings | The Clerk dashboard ([auth](auth.md)) |

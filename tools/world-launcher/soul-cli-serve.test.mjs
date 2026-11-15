@@ -67,6 +67,7 @@ async function world(t) {
     w.heavyNow++; w.heavyMax = Math.max(w.heavyMax, w.heavyNow);
     await sleep(p === '/v1/edge/act' && w.actMs ? w.actMs : 10); w.heavyNow--;
     if (w.busyNext > 0) { w.busyNext--; return json(429, { error: { code: 'soul.busy', message: 'one at a time' } }, { 'retry-after': '0' }); }
+    if (p === '/v1/edge/act' && w.overLimit) return json(429, { error: { code: 'rate-limited', message: 'more than 60 acts a minute: this act was not taken', limit: 60, window_s: 60 } });   // as edge/routes.ts answers
     if (p === '/v1/edge/act') {
       const b = body ? JSON.parse(body) : {}, cap = b.capability ?? 'walk:x';
       w.bodies.push(b);
@@ -457,6 +458,8 @@ test('the harness listen keeps working through serve: same output, by cursor, an
 test('A4: soul.busy is waited out inside serve, and heavy requests never overlap', async (t) => {
   const w = await world(t);
   await w.cli('serve');
+  // serve reads observe once at start (#2309), a heavy call: let it be answered first, or it takes one of the busy answers
+  assert.ok(await until(() => w.calls.some(([, p]) => p === '/v1/edge/observe') && w.heavyNow === 0), 'serve\'s start observe answered');
   w.busyNext = 2;
   const r = await w.cli('here');
   assert.equal(r.json.place, 'green', r.err);
@@ -539,6 +542,17 @@ test('a keyed write repeated for soul.busy keeps its one key, so the world acts 
   assert.equal(r.json.accepted, true, r.err);
   assert.equal(w.keys.length, 1, 'the refused try did not reach the act handler');
   assert.ok(w.keys[0]);
+});
+
+test('#2107 A1: an act refused rate-limited is told to the agent at once, with its code and limit, and never resent', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.overLimit = true;
+  const r = await w.cli('act', 'walk:mill');
+  assert.equal(r.code, 75, r.err);
+  assert.equal(r.json.accepted, false); assert.equal(r.json.code, 'rate-limited'); assert.equal(r.json.limit, 60); assert.equal(r.json.window_s, 60);
+  assert.equal(w.calls.filter(([m, p]) => m === 'POST' && p === '/v1/edge/act').length, 1, 'neither serve nor the CLI sent it again');
+  assert.equal(w.acts, 0);
 });
 
 test('pure state: an event is read once across a cut, a long tail hands over in pieces, messages fold once', () => {
@@ -1007,7 +1021,9 @@ test('#476 A1: it wakes a held listen, a peek does not use it up, and a wait and
   await w.cli('serve');
   await until(() => w.streams > 0);
   const listening = w.cli('listen'), waiting = w.cli('wait', '30');
-  await sleep(300);
+  // both must be held when it is said: one that starts after the other has heard it is a later reader, and hears nothing
+  const held = await until(async () => { const h = (await w.cli('serve', '--status')).json?.held; return h?.waits >= 1 && h?.listens >= 1 && h; }, 10_000);
+  assert.ok(held, 'the listen and the wait are both held in serve');
   w.say('Ada, over here');
   const [l, wa] = await Promise.all([listening, waiting]);
   assert.equal(l.json.addressed[0].text, 'Ada, over here', l.err);
@@ -1132,7 +1148,7 @@ test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, thro
   assert.ok(await until(() => faces(w).length === 1, 2000), 'one reflex');
   assert.ok(Date.now() - t0 < 1000, `within the second (${Date.now() - t0} ms)`);
   const f = faces(w)[0];
-  assert.deepEqual([f.capability, f.strict, typeof f.clientRef], ['face:s_bo', true, 'string']);
+  assert.deepEqual([f.capability, f.strict, typeof f.clientRef, f.reflex], ['face:s_bo', true, 'string', true], '#2309 A1: the reflex is marked');
   assert.equal(w.acts, acts + 1);
   const p = await w.cli('pending');
   assert.deepEqual(p.json.addressed.map((a) => a.text), ['Ada, over here!'], 'heard as before');
@@ -1141,6 +1157,8 @@ test('#1345 A1/A4: speech said to the Soul turns it to the speaker at once, thro
   w.say('Ada, again');
   await sleep(600);
   assert.equal(faces(w).length, 1, 'A3: once per speaker per 30 s');
+  assert.equal((await w.cli('act', 'face:s_cy')).code, 0);
+  assert.equal(w.bodies.at(-1).capability, 'face:s_cy'); assert.equal(w.bodies.at(-1).reflex, undefined, '#2309 A1: an agent\'s act is not');
 });
 
 test('#1345 A2/A3/A5: no reflex over the agent\'s own look, after auto-face:off, or with --no-reflex; a refused one is not retried', async (t) => {

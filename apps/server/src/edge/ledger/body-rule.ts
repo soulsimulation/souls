@@ -119,6 +119,9 @@ export class BodyRule {
   view(soulId: string): BodyView | null {const r = this.row(soulId); return r ? {state: r.state, doing: r.doing, since: r.since} : null;}
   /** Bodies the rule holds (ambient life leaves them alone): anything but Owned. */
   reflexOwns(soulId: string) {const s = this.st.get(soulId); return !!s && s.wander !== null;}
+  /** #2298: the rule has not read its state yet (it boots at its first tick), or a Soul is not adopted yet (looked for once a
+   *  second): it may act at its next tick, so the world is not still. */
+  pending(): boolean {return !this.booted || this.migrate.size > 0 || this.port.souls().some(x => !this.st.has(x.soulId));}
   /** #2297 `moveTick`: the next tick at which the rule moves a body, or null when none is due (every Soul asleep). */
   nextMoveTick(): number | null {let t: number | null = null; for (const s of this.st.values()) if (s.next !== null && (t === null || s.next < t)) t = s.next; return t;}
 

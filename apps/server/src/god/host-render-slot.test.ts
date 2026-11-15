@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { hostRenderSlot } from './host-render-slot.ts';
+import { hostRenderSlot, releaseWorldRenderSlots, renderWorld } from './host-render-slot.ts';
 test('foreign holder keeps another world waiting without blocking its event loop; dead holder recovers', async () => {
     const previous = process.env.SIM_RENDER_LOCK_DIR, dir = mkdtempSync(join(tmpdir(), 'context-host-lock-'));
     process.env.SIM_RENDER_LOCK_DIR = dir;
@@ -31,6 +31,28 @@ test('foreign holder keeps another world waiting without blocking its event loop
     finally {
         if (child.exitCode === null && child.signalCode === null)
             child.kill('SIGKILL');
+        if (previous === undefined)
+            delete process.env.SIM_RENDER_LOCK_DIR;
+        else
+            process.env.SIM_RENDER_LOCK_DIR = previous;
+    }
+});
+test('#2444: a world that stops in a shard releases its render slot, so it never blocks the other worlds of the program', async () => {
+    const previous = process.env.SIM_RENDER_LOCK_DIR, dir = mkdtempSync(join(tmpdir(), 'context-host-lock-'));
+    process.env.SIM_RENDER_LOCK_DIR = dir;
+    try {
+        const heldByA = await renderWorld.run('a', () => hostRenderSlot(AbortSignal.timeout(2000)));
+        // world b in the same program waits while a holds the slot (one render at a time on the host, as before)...
+        await assert.rejects(renderWorld.run('b', () => hostRenderSlot(AbortSignal.timeout(300))));
+        // ...and gets it once world a stops, though the program (its pid) lives on and a never released it itself
+        releaseWorldRenderSlots('a');
+        const heldByB = await renderWorld.run('b', () => hostRenderSlot(AbortSignal.timeout(2000)));
+        heldByA();   // a's own late release is a no-op: b still holds the slot
+        await assert.rejects(renderWorld.run('c', () => hostRenderSlot(AbortSignal.timeout(300))));
+        heldByB();
+        (await hostRenderSlot(AbortSignal.timeout(2000)))();
+    }
+    finally {
         if (previous === undefined)
             delete process.env.SIM_RENDER_LOCK_DIR;
         else

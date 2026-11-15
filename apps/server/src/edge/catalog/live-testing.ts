@@ -28,7 +28,8 @@ export function fakeLiveWorld() {
   const lines = new Map<string, {text: string; at: number}>();
   const soulNow = {onChange: (_id: string) => {}, set(id: string, text: string | null) { if (text) lines.set(id, {text, at: 1}); else lines.delete(id); this.onChange(id); }};
   const host: {worldId: string; engine: {world: typeof world}; minds: typeof minds; clockRate: number; paused: boolean; living?: {origin: number; dayTicks: number}; soulNow: typeof soulNow; nowOf: (id: string) => {text: string; at: number} | null} = {worldId: 'w-1', engine: {world}, minds, clockRate: 1, paused: false, soulNow, nowOf: id => lines.get(id) ?? null};
-  const L = {host, faded: new Set<string>(), placePathOf, poseOf, knowledge, places, thingStates, concealedThing} as unknown as EdgeLedger;
+  const faded = new Set<string>();
+  const L = {host, faded, placePathOf, poseOf, knowledge, places, thingStates, concealedThing} as unknown as EdgeLedger;
   let spectate: (m: any) => void = () => {};
   const app = new Hono(), hub = mountLiveRoute(app, {ledger: L}, {onSpectator: l => { spectate = l; }}, () => 'cat-1');
   const get = async () => JSON.parse(await (await app.request('/v1/edge/live')).text());
@@ -37,5 +38,7 @@ export function fakeLiveWorld() {
   const secret = (id: string, on: boolean) => { if (on) secrets.add(id); else secrets.delete(id); knowledge.version++; };
   // a place's outline redrawn (the places' version moves, the knowledge's does not)
   const reshape = (id: string, polygon: [number, number][]) => { (places.byId.get(id) as {polygon: [number, number][]}).polygon = polygon; places.version++; };
-  return {hub, app, get, advance, say, secret, reshape, setThing, entities, world, host};
+  // #1903: a rename as the world applies one (the name set in place, the roster entry set again)
+  const rename = (id: string, name: string) => { const m = minds.get(id)!; m.name = name; minds.set(id, m); };
+  return {hub, app, get, advance, say, secret, reshape, setThing, rename, entities, world, host, faded};
 }

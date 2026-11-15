@@ -3,6 +3,8 @@
 import type {ObjectEvent, ObjectKind, SoulRef, TimeCtx} from './types.ts';
 import {readOnlyObjectAdvance} from './framework.ts';
 
+/** #2297: the next tick at which an item changes phase (starts, ends), or null once it is over. */
+export const calendarNextTick = (s: CalendarState): number | null => s.phase === 'upcoming' ? s.startsAtTick : s.phase === 'happening' ? s.endsAtTick : null;
 export type CalendarState = {title: string; description: string; placeId: string; placeName: string; startsAtTick: number; endsAtTick: number;
   proposedBy: string; interested: SoulRef[];
   /** #1917: the posting Soul's id (absent on steward items and items made before it; outside `schema`, so they still check). */

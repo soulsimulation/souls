@@ -143,6 +143,20 @@ test('the Soul\'s own direct act pauses the plan; say does not; holding a postur
   } finally { f.destroy(); }
 });
 
+test('#2303: a silent world\'s runner still retries a keep-up that ended inside the reissue gap', async () => {
+  const f = eventsFixture(['Roger'], {planTickMs: 20});
+  (f.host as unknown as {silent(): boolean}).silent = () => true;
+  try {
+    const l = (await f.post('Roger', '/v1/edge/plan', {steps: [{do: 'lie', for: '90m'}]})).body.plan;
+    const first = f.actor.last()!;
+    f.clock.now += 3_000; f.actor.set(first.receipt!.id, 'completed'); await flush();   // ended early, inside the 5 s gap
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(f.actor.last(), first, 'not before the gap');
+    f.clock.now += 3_000; await new Promise(r => setTimeout(r, 80));
+    assert.equal(f.actor.last()!.input.clientRef, `pl:${l.id}:0:2`, 'silent, the runner woke for the retry and lay down again');
+  } finally { f.destroy(); }
+});
+
 test('#485: a sit taken over from the seat ends done, and its plan still pauses, as on a replaced step', async () => {
   const f = eventsFixture(['Roger']);
   try {

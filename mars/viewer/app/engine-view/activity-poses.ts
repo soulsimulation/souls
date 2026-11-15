@@ -43,6 +43,8 @@ export type FrameOpts = { groundSeat?: boolean; since?: number; gap?: number;ins
    *  her singing ended, the seconds since (the hand lets go of the mic and the pose eases out). */
   accompanist?: Accompanist | null; released?: number; priorAge?:number };
 const GAP: Record<string, number> = { hug: 0.52, handshake: 0.85, 'high-five': 0.75, give: 0.9, take: 0.9 };
+/** #1977: a rider's hand on a basket's front rim, from the body root: [forward, outward, height above the floor]. */
+export const RIDE_RIM_HAND: HandGoal = [0.3, 0.16, 1.04];
 /** Shoulder height and half width the hand goals below are written for (BODY_MODEL: shoulders at 1.34 m). */
 const SH = 1.34, HALF = 0.19;
 /** core/piano@1 highest keys: black centre .795 m + half thickness .01 m. */
@@ -138,9 +140,14 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     return f;
   }
   switch (activity) {
-    // standing in a balloon basket (carrier 'ride'): both hands on the rim in front, a slow lean and look over the side
+    // standing in a balloon basket (carrier 'ride'): both hands on the rim in front, a slow lean and look over the side.
+    // #1977: the hands rest at the rim's own height above the floor and inside its front wall, whatever the body's size (goals
+    // from the body root, not the shoulder: shoulder-relative hands sat below the rim and 0.1 m through the wall). Riders stand
+    // 0.45 m in from the front wall turned 0.35 rad (carrier/1 seats; core/balloon's wall is 0.65 m out, its rim 0.98–1.06 m
+    // up), so 0.3 m forward and 0.16 m out reach at most 0.64 m: on the rim's inner edge, never past the wall.
     case 'ride': { const sway = Math.sin(t * 0.21);
-      f.hands = [[0.36, 0.06, -0.38], [0.36, 0.06, -0.38]]; f.lean = 0.1 + 0.03 * sway; f.side = 0.03 * sway; f.look = 0.18 + 0.06 * Math.sin(t * 0.13); return f; }
+      f.hands = [[0.36, 0.06, -0.38], [0.36, 0.06, -0.38]]; f.rootHands = [RIDE_RIM_HAND, RIDE_RIM_HAND];
+      f.lean = 0.08 + 0.03 * sway; f.side = 0.03 * sway; f.look = 0.18 + 0.06 * Math.sin(t * 0.13); return f; }
     case 'row': { const {pull,lift}=rowingStroke(seconds);f.hands=[[.3+.16*pull,.06,-.3+.06*lift],[.3+.16*pull,.06,-.3+.06*lift]];f.lean=.06+.12*pull;f.look=.12;return f; }
     // leisure: cast and wait, with now and then a small lift of the rod; toss bread by the handful; work the soil with a trowel
     case 'fish': { const cyc = t % 14, cast = cyc < 1.6 ? S(cyc / 1.6) : 0, bite = Math.max(0, Math.sin(t * 0.43) - 0.93) * 9;

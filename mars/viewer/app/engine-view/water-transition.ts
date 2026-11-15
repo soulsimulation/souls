@@ -12,8 +12,20 @@ export type RecordedWaterPose={activity:string;contact:ShoreContactV1};
 export type WaterPoseOrigin={weight:number;pose:RecordedWaterPose|null};
 export type WaterTransition={weight:number;from:RecordedWaterPose|null;origins:WaterPoseOrigin[]};
 const smooth=(x:number)=>{const k=Math.max(0,Math.min(1,x));return k*k*(3-2*k);};
+const INDEX=/^(0|[1-9]\d*)$/,isIndex=(k:string)=>INDEX.test(k)&&+k<4294967295;
+type Kinded=Readonly<Record<string,{readonly kind?:unknown}|undefined>>;
+/** #1569: the human ids of `{...entities,...entities0}`, in that object's key order (integer-like keys ascending, then the
+ *  rest in insertion order, entities first), the later table's record deciding, without building the ~4,500-entry merge. */
+export function humanIds(entities:Kinded,entities0?:Kinded):string[]{
+ const ints:string[]=[],rest:string[]=[];
+ const add=(id:string,e:{readonly kind?:unknown}|undefined)=>{if(e?.kind==='human')(isIndex(id)?ints:rest).push(id);};
+ for(const id in entities)if(Object.hasOwn(entities,id))add(id,entities0&&Object.hasOwn(entities0,id)?entities0[id]:entities[id]);
+ if(entities0)for(const id in entities0)if(Object.hasOwn(entities0,id)&&!Object.hasOwn(entities,id))add(id,entities0[id]);
+ if(!ints.length)return rest;
+ ints.sort((a,b)=>+a-+b);return ints.concat(rest);
+}
 export function waterTransitions(take:Take,recorded:readonly Take[]=[]):(id:string,seconds:number)=>WaterTransition {
- const ids=Object.entries({...take.finalState.entities,...take.entities0}).filter(([,e])=>e.kind==='human').map(([id])=>id);
+ const ids=humanIds(take.finalState.entities,take.entities0);
  const chain:Take[]=[take];let first=take;
  // Only unique, exact adjacent recorded checkpoints can supply preceding pose history.
  while((take.startTick-first.startTick)*take.dt<WATER_ENTRY_SECONDS){const matches=recorded.filter(p=>p!==first&&p.startTick+p.ticks===first.startTick&&p.ticks>0&&p.dt===first.dt&&p.rulesVersion===first.rulesVersion&&p.finalStateHash===first.baselineStateHash&&JSON.stringify(Reflect.get(p,'renderSceneRef'))===JSON.stringify(Reflect.get(first,'renderSceneRef')));if(matches.length!==1)break;first=matches[0];chain.unshift(first);}

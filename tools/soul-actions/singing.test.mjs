@@ -48,8 +48,8 @@ test('mic stand: sing along, one singer per mic, stop when told or when the musi
  assert.equal(seen?.doing,'singing at the microphone',JSON.stringify(seen));
  // a second singer is refused politely, by name, and nobody walks over
  const calAt=[...body(cal).pose.p],second=await act(cal,cap.id);
- // #1911: by the mic's own id the act itself refuses (spot.taken), and names the mic; only the words' reading named the singer (#2189)
- assert.equal(second.accepted,false);assert.equal(second.code,'spot.taken',JSON.stringify(second));assert.match(second.reason,/^microphone in .* is taken right now/,second.reason);
+ // #1911: by the mic's own id the act itself refuses (spot.taken), and names the mic; #2189: and the Soul singing at it
+ assert.equal(second.accepted,false);assert.equal(second.code,'spot.taken',JSON.stringify(second));assert.match(second.reason,/^microphone in .* is taken right now: Ana is using it/,second.reason);
  await tick(20);assert.ok(Math.hypot(body(cal).pose.p[0]-calAt[0],body(cal).pose.p[2]-calAt[2])<0.05,'Cal stays where she is');
  // "stop singing": she stops
  const stopAt=W().tick,stop=await act(ana,'stand:here');assert.equal(stop.accepted,true);

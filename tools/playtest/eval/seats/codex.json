@@ -1,0 +1,1 @@
+{ "adapter": "codex-headless", "wake": true, "note": "#2364: live Codex seat (the CLI's default model). Not runnable yet: the world budget refuses every turn of a seat that reports no dollar cost (#1098, arena/seat.mjs), and Codex bills by subscription. It needs a decision: a per-token price for Codex turns, or an exemption for subscription seats." }
