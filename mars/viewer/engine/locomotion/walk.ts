@@ -766,7 +766,10 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
       }
       continue;
     }
-    if (ex.s >= n.s0 - (r + 0.9)) { yieldTo = tryEnter(rt, ex, n); }
+    // #2426 cede-passage/1: a walker already at its goal, which does not hold this passage, does not take it up again. Two
+    // walkers whose goals lie in one passage, each waiting for a body standing on its goal, took turns holding it (W38 lets
+    // it go, the other takes it the same tick), so the bodies they asked to make way always found it held and never moved
+    if (ex.s >= n.s0 - (r + 0.9) && !(rt.services.cedePassageV1 === true && ex.s >= ex.total - 1e-6 && !ex.held.has(n.res))) { yieldTo = tryEnter(rt, ex, n); }
     break;
   }
   const tan = tangentAt(ex, ex.s);
