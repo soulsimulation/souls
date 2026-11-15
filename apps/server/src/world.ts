@@ -1924,6 +1924,7 @@ export class WorldHost {
     // Keep the outer recipe's original violation ceiling even when its replay prefix is superseded.
     this.restoreBody(recipe.baseline);
     if (recipe.lastRung) return this.applyLastRung(recipe);
+    this.recoveryReplays?.push(Math.max(0, recipe.untilTick - this.engine.world.tick));
     const historicViolations=this.engine.runtime.violations.length;
     if (nested >= 0) { this.apply(recipe.events[nested],true); this.seq=recipe.events[nested].seq; }
     else {
@@ -1947,7 +1948,21 @@ export class WorldHost {
     for (const m of this.minds.values()) { m.nextEvalTick=this.engine.world.tick+1; m.evalTrigger='activity-failed'; m.lastFingerprint=''; if (m.pending && recipe.excluded.includes(m.pending.card)) m.pending=null; }
     this.kernel.tick=this.engine.world.tick; sweep(this.kernel); this.kernelDirty=true;
   }
+  /** #2458 (SIM_FAULT_INJECT, tests and measurement only): run after each engine step with the tick it stepped from; a throw
+   *  here is a fault inside the tick, recovered as an engine fault is. */
+  stepFaultV1: ((tick: number) => void) | null = null;
+  /** #2458: the replays the current recovery ran (each one from its baseline to the faulted tick), for its hold line. */
+  private recoveryReplays: number[] | null = null;
+  /** #2458: one line per recovery: how long it held the main thread and how far back it replayed. */
   private recoverFault(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
+    const t0 = performance.now(), tick = this.engine.world.tick, replays: number[] = this.recoveryReplays = [], debt = this.replayDebtMs, since = tick - this.lastSnapshotTick, age = t0 - this.lastSnapshotWall;
+    try { this.recoverFaultV1(error, cardHint, edgeHint); }
+    finally {
+      this.recoveryReplays = null; const ms = performance.now() - t0, ticks = replays.reduce((a, b) => a + b, 0);
+      console.log(`[world] recovery hold ${Math.round(ms)} ms at tick ${tick}: ${replays.length} replays (${replays.join(', ') || 'none'} ticks)${ticks ? `, ${(ms / ticks).toFixed(2)} ms per replayed tick` : ''}; since the last snapshot ${since} ticks, ${Math.round(age)} ms of wall, ${Math.round(debt)} ms of steps (its cost ${Math.round(this.lastSnapshotCostMs)} ms)`);
+    }
+  }
+  private recoverFaultV1(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
     // A pending checkpoint already owns this boundary. Materialize that same
     // capture before recovery replaces the engine; never fall back to an older head.
     let baseline: SnapshotBody | null;
@@ -2109,7 +2124,7 @@ export class WorldHost {
    *  waits on a tick that isn't coming and a replay can't spin on one. */
   private stepEngine(): ReturnType<Engine['step']> {
     const tick = this.engine.world.tick;
-    try { return this.engine.step(); }
+    try { const out = this.engine.step(); this.stepFaultV1?.(tick); return out; }
     catch (error) {
       // always, even if the tick did move: this is also where the step check's memory and the bounds the step skipped are put right
       if (this.repairRules) { const to = Math.max(this.engine.world.tick, tick + 1); try { this.engine.setClockV1!(to); } catch { this.engine.world.tick = to; } }
