@@ -39,8 +39,10 @@ export function createContactActuatorService(d:{/** #2416: this world's day (pos
  return {
   /** `from`/`open` (entry 31's door passage): plan as if the body stood at `from` and the door were already open/shut. */
   plan(soul:EdgeSoul,target:string,action:string,input:Record<string,unknown>={},opts?:{from?:[number,number];open?:boolean}){
-   const m=d.model(),e=m.entities.get(target),def=e&&m.resolvedDef(e.def),body=d.body(soul.entityId);if(!e||!def||!body)return null;
-   const wp=m.worldPose(e),me=opts?.from?[opts.from[0],body.pose.p[1],opts.from[1]]:body.pose.p,at:[number,number,number]=[wp.x,wp.y+1.04*wp.s,wp.z];
+   const m=d.model(),e=m.entities.get(target),def=e&&m.resolvedDef(e.def);if(!e||!def)return null;
+   // #2383 door-fit/1 plans a door no body stands at yet: with `from`, a body standing there on the thing's floor
+   const wp=m.worldPose(e),body=d.body(soul.entityId)??(opts?.from?{pose:{p:[opts.from[0],wp.y,opts.from[1]]}} as NonNullable<ReturnType<typeof d.body>>:undefined);if(!body)return null;
+   const me=opts?.from?[opts.from[0],body.pose.p[1],opts.from[1]]:body.pose.p,at:[number,number,number]=[wp.x,wp.y+1.04*wp.s,wp.z];
    const params:Omit<HandActuatorParams,'actor'>={target,at};let root:[number,number,number],face:[number,number]|undefined,faceTo:[number,number]|undefined,noRoom=false;
    if(contactStateKey(def,action)==='text'){
     // Stand square in front of the board's face; the hand works across the face from its centre.

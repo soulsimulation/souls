@@ -80,6 +80,7 @@ Read in `apps/server/src/config.ts` (and `thinking-budget.ts`, `auth.ts`). `.env
 | `ACCOUNT_REGISTRY_PATH` | none | Identity-only SQLite registry shared by every world on a host |
 | `ADMIN_EMAILS` | none | Comma-separated admin emails |
 | `DEV_AUTH` | off | `1` accepts `Bearer dev:<name>`. Never in production |
+| `DOOR_FIT_BOOT` | off | `1` lets a live world adopt door-fit/1 at boot (real doors in its buildings, #2383). Off until a fit runs in slices under 1 s |
 | `INVITE_REQUIRED` | on | `0` lets any signed-in user create Souls |
 | `MAX_SOULS_PER_USER` | `20` | Soul bodies per account in one world |
 | `SEED_NATIVES` | on | Seed a new world's defined cast |

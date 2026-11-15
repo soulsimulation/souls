@@ -1,0 +1,938 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-14 #2383 doors everywhere. Forty new immutable revisions, one per core building def (core-<name>@2; core-hall@3, after core-hall@2): make.args.doorThings leaves each outside ground-floor doorway bare, widened to at least 1.2 m, for a core/door@2 placed in it (templates, and door-fit/1 at boot in live worlds). Older revisions keep their bytes. A K=2 run of `conformance.mjs --k 2 --filter <ref>` for each new revision placed, baked, furnished and rendered every sample of all 40 defs. The findings (gallery-budget/triangles: 78, place/architecture: 2 pins) are gallery triangle budgets at large sizes and many floors, plus two layout findings from the generator's plans: core-lighthouse@2 at wallThickness.max (no entrance), the same as the pinned core-lighthouse@1, and core-prison@2 at random[0] (an unreachable cell), a kind pinned for core-prison@1 at other random samples. These are the same kinds already pinned for the @1 revisions (bsgen-20261021, z2-catalogue-20261020, known-20261015), and they are pinned here by the new hashes. No budgets, samples or gap checks were relaxed.",
+  "findings": [
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6202 > 6000",
+      "fields": [
+        "defaults",
+        "params.balcony=false",
+        "params.balcony=true",
+        "params.chimney=false",
+        "params.chimney=true",
+        "params.d.min",
+        "params.doorLamp=false",
+        "params.doorLamp=true",
+        "params.floors.max",
+        "params.floors.min",
+        "params.flowerBoxes=false",
+        "params.flowerBoxes=true",
+        "params.front=e",
+        "params.front=n",
+        "params.front=s",
+        "params.front=w",
+        "params.hood=true",
+        "params.material=brick",
+        "params.material=metal",
+        "params.material=plaster",
+        "params.material=stone",
+        "params.material=wood",
+        "params.porch.min",
+        "params.quoins=false",
+        "params.quoins=true",
+        "params.roof=flat",
+        "params.roofPitch.max",
+        "params.roofPitch.min",
+        "params.shutters=false",
+        "params.shutters=true",
+        "params.style=barn",
+        "params.style=chapel",
+        "params.style=cottage",
+        "params.style=greenhouse",
+        "params.style=hall",
+        "params.style=pavilion",
+        "params.style=shed",
+        "params.style=shop",
+        "params.style=tower",
+        "params.style=townhouse",
+        "params.wallThickness.max",
+        "params.wallThickness.min",
+        "size.scale.max",
+        "size.scale.min"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "10586 > 6000",
+      "fields": [
+        "params.d.max",
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6082 > 6000",
+      "fields": [
+        "params.floorHeight.min",
+        "params.roof=none"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6498 > 6000",
+      "fields": [
+        "params.floorHeight.max"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6238 > 6000",
+      "fields": [
+        "params.roof=gable"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6182 > 6000",
+      "fields": [
+        "params.roof=hip"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6122 > 6000",
+      "fields": [
+        "params.roof=shed"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6410 > 6000",
+      "fields": [
+        "params.roof=dome"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6166 > 6000",
+      "fields": [
+        "params.hood=false"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6770 > 6000",
+      "fields": [
+        "params.porch.max"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8394 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-apartment-block@2",
+      "hash": "1a1f9b3ea74a354b2d12674e0eb6be4ce17a6444c53de51b3244b594f2bac0c6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "14558 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-dormitory@2",
+      "hash": "64d30cf173507884ab4696d3a84d1ca7063893741129fce04c6cc90cd8f1323b",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6764 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-dormitory@2",
+      "hash": "64d30cf173507884ab4696d3a84d1ca7063893741129fce04c6cc90cd8f1323b",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7320 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-fire-station@2",
+      "hash": "9435801bb4dec4aa31c02a24f492b8f7ec35bd451fe6fcfdb252855041060df6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6020 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-fire-station@2",
+      "hash": "9435801bb4dec4aa31c02a24f492b8f7ec35bd451fe6fcfdb252855041060df6",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7394 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-garage@2",
+      "hash": "fe9aef005b285f3bb6044d10ecf7b76659d706f451098ca81dc07d5bca6e0759",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7696 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-hospital@2",
+      "hash": "ebe28e0c24b55df21572b561256e1fa39378decd3f866c183bc014d3b4cf88dc",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8818 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-hospital@2",
+      "hash": "ebe28e0c24b55df21572b561256e1fa39378decd3f866c183bc014d3b4cf88dc",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9124 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-hospital@2",
+      "hash": "ebe28e0c24b55df21572b561256e1fa39378decd3f866c183bc014d3b4cf88dc",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7186 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-hospital@2",
+      "hash": "ebe28e0c24b55df21572b561256e1fa39378decd3f866c183bc014d3b4cf88dc",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9808 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7438 > 6000",
+      "fields": [
+        "defaults",
+        "params.balcony=false",
+        "params.balcony=true",
+        "params.chimney=false",
+        "params.chimney=true",
+        "params.doorLamp=false",
+        "params.doorLamp=true",
+        "params.floors.max",
+        "params.floors.min",
+        "params.flowerBoxes=false",
+        "params.flowerBoxes=true",
+        "params.front=e",
+        "params.front=n",
+        "params.front=s",
+        "params.front=w",
+        "params.hood=true",
+        "params.material=brick",
+        "params.material=metal",
+        "params.material=plaster",
+        "params.material=stone",
+        "params.material=wood",
+        "params.porch.max",
+        "params.quoins=false",
+        "params.quoins=true",
+        "params.roof=hip",
+        "params.roofPitch.max",
+        "params.roofPitch.min",
+        "params.shutters=false",
+        "params.shutters=true",
+        "params.style=barn",
+        "params.style=chapel",
+        "params.style=cottage",
+        "params.style=greenhouse",
+        "params.style=hall",
+        "params.style=pavilion",
+        "params.style=shed",
+        "params.style=shop",
+        "params.style=tower",
+        "params.style=townhouse",
+        "params.wallThickness.min",
+        "size.scale.max",
+        "size.scale.min"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "12442 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7138 > 6000",
+      "fields": [
+        "params.d.min"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "12738 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7270 > 6000",
+      "fields": [
+        "params.floorHeight.min"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7918 > 6000",
+      "fields": [
+        "params.floorHeight.max"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7494 > 6000",
+      "fields": [
+        "params.roof=gable"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7458 > 6000",
+      "fields": [
+        "params.roof=flat"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7378 > 6000",
+      "fields": [
+        "params.roof=shed"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7666 > 6000",
+      "fields": [
+        "params.roof=dome"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7338 > 6000",
+      "fields": [
+        "params.roof=none"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6534 > 6000",
+      "fields": [
+        "params.material=glass"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7402 > 6000",
+      "fields": [
+        "params.hood=false"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6718 > 6000",
+      "fields": [
+        "params.porch.min"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9720 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7070 > 6000",
+      "fields": [
+        "params.wallThickness.max"
+      ]
+    },
+    {
+      "def": "core-hotel@2",
+      "hash": "f8e93f0d53f7face204dd7e37c76a13304a9a11396223b3b6f3935ab5060fe7a",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "10528 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-house@2",
+      "hash": "bcbc7d313046faf63903aab6669db597162f51786eb579e337f829fefcc8f26d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6232 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-lighthouse@2",
+      "hash": "f5465193ef557681f709528a0a99981e1f2acfabb0263d5af9b3b6b94e52989e",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6166 > 6000",
+      "fields": [
+        "params.material=glass"
+      ]
+    },
+    {
+      "def": "core-lighthouse@2",
+      "hash": "f5465193ef557681f709528a0a99981e1f2acfabb0263d5af9b3b6b94e52989e",
+      "stage": "place",
+      "code": "architecture",
+      "detail": " building.no-entrance: no door to the outside; room.unreachable: entrance (floor 0) cannot be reached from a door to the outside; room.unreachable: room (floor 1) cannot be reached from a door to the outside; room.unreachable: room-2 (floor 2) cannot be reached from a door to the outside; room.unreachable: room-3 (floor 3) cannot be reached from a door to the outside; room.unreachable: lantern (floor 4) cannot be reached from a door to the outside",
+      "fields": [
+        "params.wallThickness.max"
+      ]
+    },
+    {
+      "def": "core-mall@2",
+      "hash": "2eea2f27ab7604df2957cff441fc59c05d780ae1822d41740c91c51670f2a1e5",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6866 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6184 > 6000",
+      "fields": [
+        "defaults",
+        "params.balcony=false",
+        "params.balcony=true",
+        "params.chimney=false",
+        "params.chimney=true",
+        "params.doorLamp=false",
+        "params.doorLamp=true",
+        "params.floors.max",
+        "params.floors.min",
+        "params.flowerBoxes=false",
+        "params.flowerBoxes=true",
+        "params.front=e",
+        "params.front=n",
+        "params.front=s",
+        "params.front=w",
+        "params.hood=true",
+        "params.material=brick",
+        "params.material=metal",
+        "params.material=plaster",
+        "params.material=stone",
+        "params.material=wood",
+        "params.porch.max",
+        "params.quoins=false",
+        "params.quoins=true",
+        "params.roof=hip",
+        "params.roofPitch.max",
+        "params.roofPitch.min",
+        "params.shutters=false",
+        "params.shutters=true",
+        "params.style=barn",
+        "params.style=chapel",
+        "params.style=cottage",
+        "params.style=greenhouse",
+        "params.style=hall",
+        "params.style=pavilion",
+        "params.style=shed",
+        "params.style=shop",
+        "params.style=tower",
+        "params.style=townhouse",
+        "params.wallThickness.max",
+        "params.wallThickness.min",
+        "size.scale.max",
+        "size.scale.min"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9288 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9128 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6076 > 6000",
+      "fields": [
+        "params.floorHeight.min"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6400 > 6000",
+      "fields": [
+        "params.floorHeight.max"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6240 > 6000",
+      "fields": [
+        "params.roof=gable"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6204 > 6000",
+      "fields": [
+        "params.roof=flat"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6124 > 6000",
+      "fields": [
+        "params.roof=shed"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6412 > 6000",
+      "fields": [
+        "params.roof=dome"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6084 > 6000",
+      "fields": [
+        "params.roof=none"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6148 > 6000",
+      "fields": [
+        "params.hood=false"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8024 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-mansion@2",
+      "hash": "e73aedecc949e23c1465328169c05fd49bbcee727054da2ff199a5aec3495d22",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "11672 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-mobile-home@2",
+      "hash": "00dab0cade4804d1906bbf6a558a0195b8b3fa0ae2a33efa9d40ee0835cd1000",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6340 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-office-block@2",
+      "hash": "f857d0985109240292bcf45d80959ea8a27c8b80d0bfe2f544ebaa7fb1c6470d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7458 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-office-block@2",
+      "hash": "f857d0985109240292bcf45d80959ea8a27c8b80d0bfe2f544ebaa7fb1c6470d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7742 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-office-block@2",
+      "hash": "f857d0985109240292bcf45d80959ea8a27c8b80d0bfe2f544ebaa7fb1c6470d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6906 > 6000",
+      "fields": [
+        "params.material=brick",
+        "params.material=metal",
+        "params.material=plaster",
+        "params.material=stone",
+        "params.material=wood"
+      ]
+    },
+    {
+      "def": "core-office-block@2",
+      "hash": "f857d0985109240292bcf45d80959ea8a27c8b80d0bfe2f544ebaa7fb1c6470d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8608 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-office-block@2",
+      "hash": "f857d0985109240292bcf45d80959ea8a27c8b80d0bfe2f544ebaa7fb1c6470d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9294 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-prison@2",
+      "hash": "f0b5052ae38125d1131bc4f00626b15c5f2250a37b587db4eda97d7eb0a082c3",
+      "stage": "place",
+      "code": "architecture",
+      "detail": " room.unreachable: cell-1 (floor 0) cannot be reached from a door to the outside; room.unreachable: cell-6 (floor 0) cannot be reached from a door to the outside",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-restaurant@2",
+      "hash": "724f8e82ee4023b4eb8e2759132c5918f181f0905a8914f3cb5652b6729fb326",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7060 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8508 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9342 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6034 > 6000",
+      "fields": [
+        "params.floorHeight.max"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6014 > 6000",
+      "fields": [
+        "params.roof=dome"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6758 > 6000",
+      "fields": [
+        "params.porch.max"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7040 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-school@2",
+      "hash": "05346d6d9197eeca50c1329ec50c76d982335cd02367de66dfac8a8001a0cf90",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8952 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-townhouse@2",
+      "hash": "261535a8758be862b35b8a17f794bd30188ceb49816d69c92c3234a143cc1377",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7154 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-townhouse@2",
+      "hash": "261535a8758be862b35b8a17f794bd30188ceb49816d69c92c3234a143cc1377",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6606 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-townhouse@2",
+      "hash": "261535a8758be862b35b8a17f794bd30188ceb49816d69c92c3234a143cc1377",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "9240 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8212 > 6000",
+      "fields": [
+        "params.w.max"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "8728 > 6000",
+      "fields": [
+        "params.d.max"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6028 > 6000",
+      "fields": [
+        "params.floorHeight.max"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6264 > 6000",
+      "fields": [
+        "params.porch.max"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "6348 > 6000",
+      "fields": [
+        "params.windows.max"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "7464 > 6000",
+      "fields": [
+        "random[0]"
+      ]
+    },
+    {
+      "def": "core-townhouse-row@2",
+      "hash": "18a884c734d82eb0bd815c5fb0818df5e1a02c4bdab573ac9bfdfbc3e3381b4d",
+      "stage": "gallery-budget",
+      "code": "triangles",
+      "detail": "10234 > 6000",
+      "fields": [
+        "random[1]"
+      ]
+    }
+  ]
+}

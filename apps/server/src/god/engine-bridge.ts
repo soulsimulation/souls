@@ -40,10 +40,10 @@ import { createWatering, type Watering } from './watering.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
-import { createContactActuatorService } from './contact-actuator.ts';
+import { createContactActuatorService, isContactActuator } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
 import { worldDayOf } from './poster-boards.ts';
-import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
+import { actionsOf, actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
 import { GodLayers } from './layers.ts';
@@ -259,6 +259,8 @@ type WriteBackBody = { pose: string; entity: Entity | undefined };
 
 const listed2 = (n: [string, string]) => n[0] === n[1] ? `two ${n[0]}s` : `${n[0]} and ${n[1]}`;
 export class EngineBridge {
+  /** #2383: the no-comms warning is said once per world (#2416: per bridge, not module state). */
+  private noCommsWarned = false;
   readonly host: WorldHost; readonly god: GodMode; readonly edge?: EdgeLedger;
   /** B-facade: the read worker's bridge (BridgeOptions.read) */
   private readonly readSide: boolean;
@@ -360,7 +362,10 @@ export class EngineBridge {
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
       moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
-      record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
+      record:(soul,id,action,params={})=>{const act=this.edge!.comms?.objects.act;
+        // #2383: a host without comms (the Eden test fixture) keeps no object record; said once, so a misconfigured host shows
+        if(!act){if(!this.noCommsWarned){this.noCommsWarned=true;console.warn('[world] contact: no comms on this host, object actions are not recorded');}return;}
+        const r=act.call(this.edge!.comms!.objects,id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
     // #442: repair with a tool in hand (mending.ts): the world changes when the receipt completes, no tick work
@@ -869,6 +874,8 @@ export class EngineBridge {
     const free = freeDoorOpening(def, baked), openings = free ? [...(baked.openings ?? []), free] : baked.openings ?? [];
     const gates = worldFrame ? openings.filter((o) => o.kind === 'gate') : [];
     if (gates.length) this.gated.add(e.id); else this.gated.delete(e.id);
+    // doors-pass/1 (#2365): a closed gap of an unlocked door a hand opens is a way through for reach and connectivity
+    const pass = () => actionsOf(def).some((a) => a.name === 'open' && isContactActuator(def, a)) && actuatedState(e, def).locked !== true;
     const shut = isShut(e, def);
     for (const o of openings) {
       // a wall's or fence's gate with a door standing in it yields to the door (the door blocks or passes by its state)
@@ -877,7 +884,7 @@ export class EngineBridge {
       if (!closed) continue;
       // a gate of a world-frame wall/fence sits on the ground under it (sill and height are ground-relative)
       const obb = this.gapBox(o, def, e), c = obb.c;
-      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)` });
+      (part.solids ??= []).push({ id: `${e.id}#door:${o.id}`, obb, y0: heightAt(o.sill ?? 0, c), y1: heightAt((o.sill ?? 0) + o.height, c), kind: 'fixture' as const, label: `${this.model.pathOf(e.id)} ${o.id} (closed)`, ...(pass() ? { door: 'pass' as const } : {}) });
     }
     // floors: polygons → oriented rectangles on levels
     const surfaces = [...(baked.surfaces ?? [])];
