@@ -2,7 +2,7 @@
 // local copy, with no call to the world. Pure functions over the catalog the world publishes at /v1/edge/catalog. What
 // the agent loads into its context is what a question asks for and no more; every answer says what it left out.
 
-const STOP = new Set(["the", "a", "an", "to", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
+const STOP = new Set(["the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
 const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"] };
 export const tokensOf = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => (w.length > 4 && w.endsWith("ies") ? w.slice(0, -3) + "y" : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
@@ -78,6 +78,12 @@ function namesake(ix, p) {
   const me = placeWords(p).name.join(" "), out = new Set();
   if (me.includes(" ")) for (const [name, shown] of by.get(p.parent ?? "") ?? []) if (name.includes(" ") && (name.startsWith(me + " ") || me.startsWith(name + " "))) out.add(shown);
   return [...out].slice(0, 6);
+}
+/** #2452: water no walk reaches (the world's paths go round it); its bank does: the shore it lies in, or the one inside it. */
+function waterEdge(ix, p) {
+  if (p.kind !== "water") return null;
+  const parent = p.parent ? ix.places.get(p.parent) : null;
+  return parent?.kind === "shore" ? parent : (ix.kids.get(p.id) ?? []).find((k) => k.kind === "shore") ?? null;
 }
 /** The place words name best, or null: the anchor of "near the pond" and "in the library". */
 export function bestPlace(ix, words, at) {
@@ -159,7 +165,9 @@ export function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, stat
     const name = placeWords(p).name, full = name.join(" ") === q.join(" "), inside = nameIn(q, name);
     const s = full ? 100 + score(q, placeWords(p)) : inside ? 50 + inside : score(q, placeWords(p)); if (!s) continue;
     const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act: p.fixed ? null : ix.walkId(p), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    // #2452: water's row walks to its bank, and says so: the world refuses a walk into the water itself
+    const edge = waterEdge(ix, p), act = p.fixed ? null : ix.walkId(edge ?? p);
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {

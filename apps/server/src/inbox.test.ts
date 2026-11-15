@@ -28,6 +28,7 @@ test('soul queue: nothing overwrites, the oldest waits first, listen takes the w
   const third = inbox.send(a, 'can you ride the horse?').latest!; now++;
   assert.equal(inbox.ownerView(a).latest!.id, third.id, 'the owner card shows the newest message');
   assert.equal(inbox.view(a).latest!.id, first.id, 'the agent sees the oldest waiting'); assert.equal(inbox.view(a).queued, 3);
+  assert.deepEqual(inbox.view(a).waiting, [first.id, second.id, third.id], '#2452: their ids, oldest first');
   assert.equal(inbox.view(b).latest, null); assert.equal(other.view(a).latest, null);
   // a private notice on any other answer does not consume it (listen is the one consumer)
   inbox.touch(a); assert.equal(inbox.view(a).latest!.state, 'sent'); assert.equal(inbox.view(a).presence, 'away', 'PRESENCE: other calls never make a Soul present');
