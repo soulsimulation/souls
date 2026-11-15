@@ -227,8 +227,11 @@ pool restarts a planned exit. The crash backoff of the world that ended the shar
 - A shard fails as a whole and comes back in about 4 s after a storm, or about 14 s after a hang, as #2300 expected.
 - The worlds of the other shards are not untouched. The 8 reloaded worlds go into programs that still have room, and
   each load holds that program's thread for its boot, which stops its worlds for up to 3 s. Reloading them into a
-  fresh program instead would keep the other shards clear. The design already sends an Eden-class load to a fresh
-  shard; a fault's reload is not yet treated that way.
+  fresh program instead would keep the other shards clear. #2469 does that, and measured it the same way (runs
+  43772204100 and 43772206135, commit `60cfde7c1`): the 43 worlds of the other shards saw at most 390 and 394 ms after
+  a storm and 397 and 354 ms after a hang, all serving throughout, as near as one program per world (0.40 s). The
+  failed shard's own worlds wait for the fresh program's cold start: 4.7 to 4.8 s after a storm, 19.3 to 19.4 s after
+  a hang. After the hang no world was named, so each of its 8 worlds loaded in a program of its own (15 programs).
 - The world that hung was not the one blamed. In every run it exited as a planned restart (75), and a neighbour was
   counted as the crash: the hang ran outside a tick (a timer), where the watchdog names the first world it judged.
 
