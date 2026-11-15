@@ -449,7 +449,7 @@
             "sy": 0.9
           },
           "state": {
-            "open": false
+            "open": true
           }
         },
         {
@@ -592,7 +592,7 @@
             "sy": 0.9
           },
           "state": {
-            "open": false
+            "open": true
           }
         },
         {
@@ -735,7 +735,7 @@
             "sy": 0.9
           },
           "state": {
-            "open": false
+            "open": true
           }
         },
         {
@@ -878,7 +878,7 @@
             "sy": 0.9
           },
           "state": {
-            "open": false
+            "open": true
           }
         },
         {
@@ -913,7 +913,7 @@
             "sy": 0.9
           },
           "state": {
-            "open": false
+            "open": true
           }
         }
       ]

@@ -3,7 +3,7 @@
 // and a hand-operated core/door@2 is placed in each bare doorway (buildingDoorFits). Templates carry the result; a live
 // world gets it once, as one recorded engine edit at boot (the last rule in adoptBootRuntimePoliciesV1).
 //
-// It refuses nothing and moves nobody: a door whose spot a body stands near is placed open, so nobody is pushed; a
+// It refuses nothing and moves nobody: every door is placed open (until #2434), so nobody is pushed; a
 // building with a resident's body inside its subtree (seated in it) is left as it is and fitted at a later boot; a
 // building whose door the world refuses (a tower's stair crowding its doorway) keeps its old revision and drawn leaf for
 // now, and is tried again at the next boot.
@@ -18,8 +18,6 @@ import { createContactActuatorService } from './contact-actuator.ts';
 import type { GodMode } from './god.ts';
 
 export const DOOR_FIT_DOOR = 'core/door@2';
-/** A body this close (m) to a door's spot stands in its doorway: the door is placed open. */
-const IN_DOORWAY = 1.0;
 /** #2434: the narrowest doorway a core/door@2 fits (its frame at the least stretch, 0.8 x 1.16 m, plus a margin). */
 const NARROWEST = 0.96;
 /** How far (m) in front of a door its outside is probed for another building's room. */
@@ -60,11 +58,11 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
     if (all && n && taken(n)) n = `${name}-door-${k + 1}-${f.floor}`.slice(0, 64);
     if (all?.existing?.(f.p[0], f.p[1], f.floor)) return [];
     if (!all && indoors(f.p[0] + SERIES_PROBE * Math.sin(f.r), f.p[1] + SERIES_PROBE * Math.cos(f.r))) { series.push(n ?? f.opening); return []; }
-    const occupied = bodies.some((b) => Math.hypot(b[0] - f.p[0], b[1] - f.p[1]) < IN_DOORWAY);
     const fy = y === undefined ? undefined : Math.round((y + (f.y ?? 0)) * 1000) / 1000;
     at.push(f.p);
     return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: fy === undefined ? f.p : [f.p[0], fy, f.p[1]], r: f.r, params: { sx: f.sx, sy: f.sy },
-      state: { open: !to.enclosed || occupied || (!!all && !f.exterior) }, mode: 'strict' } as PlaceOp];
+      // placed open (coordinator, until the multi-door passage #2434 is proven): the passage leaves a door as it found it
+      state: { open: true }, mode: 'strict' } as PlaceOp];
   });
   return { ref: to.ref, doors, series, at };
 }

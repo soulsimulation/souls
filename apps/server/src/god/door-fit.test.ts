@@ -45,14 +45,14 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
   await w.settle(10);
 
-  // the same ids and contents, on the fitted revisions; the doors the fitted template places, closed
+  // the same ids and contents, on the fitted revisions; the doors the fitted template places, open (until #2434)
   for (const [id, sub] of ids0) { assert.equal(god.model.entities.get(id)!.def.replace('core-', 'core/'), DOOR_FIT_FROM.get(old.find((o) => o.name === god.model.entities.get(id)!.name)!.def)!.ref); assert.deepEqual(god.model.subtree(id), sub, 'contents kept'); }
   assert.equal([...god.model.entities.values()].filter((e) => doorFitted(e.def)).length, 0, 'nothing left on an old revision');
   const doors = [...god.model.entities.values()].filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR).map((e) => ({ name: e.name, p: [e.p![0], e.p![e.p!.length - 1]], r: e.r, sx: e.params?.sx, sy: e.params?.sy, open: e.state?.open }));
   const want = places(fitted).filter((o) => o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? '')).map((o) => ({ name: o.name, p: [o.p![0], o.p![o.p!.length - 1]], r: o.r, sx: o.params?.sx, sy: o.params?.sy, open: o.state?.open }));
   assert.equal(doors.length, 3);
   assert.deepEqual(new Set(doors.map((d) => JSON.stringify(d))), new Set(want.map((d) => JSON.stringify(d))), 'the live world and the template agree');
-  assert.ok(doors.every((d) => d.open === false), 'enclosed rooms: closed');
+  assert.ok(doors.every((d) => d.open === true), 'placed open until the multi-door passage (#2434)');
   assert.deepEqual(ents()[soul.entityId]!.pose.p, pose0.p, 'nobody moved');
   assert.deepEqual(host.engine.runtime.violations, []);
 
@@ -60,13 +60,12 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   assert.equal(god.model.editSeq, seq0 + 1, 'and edits nothing');
 });
 
-test('door-fit/1: a door whose doorway a body stands in is placed open', () => {
+test('door-fit/1: every door is placed open (until #2434), a body in its doorway or not', () => {
   const cottage = places(fitted).find((o) => o.def === 'core/cottage@2')!;
   const fit = doorFit('core/cottage@1', cottage.params, cottage.p, cottage.r, cottage.name)!;
   const at = fit.doors[0]!.p as [number, number];
   const busy = doorFit('core/cottage@1', cottage.params, cottage.p, cottage.r, cottage.name, [[at[0] + 0.3, at[1]]])!;
-  assert.equal(busy.doors[0]!.state!.open, true, 'occupied: open');
-  assert.deepEqual(busy.doors.slice(1).map((d) => d.state!.open), fit.doors.slice(1).map(() => false), 'the rest closed');
+  assert.ok(fit.doors.length > 0 && [...fit.doors, ...busy.doors].every((d) => d.state!.open === true), 'open');
   assert.equal(doorFit('core/hall@2', {}, [0, 0], 0, 'x'), null, 'core/hall@2 already has its doors');
 });
 
