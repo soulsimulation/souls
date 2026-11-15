@@ -4262,7 +4262,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df29"
+          "tmp": "$df206"
         },
         {
           "op": "place",
@@ -4380,7 +4380,7 @@
               ]
             }
           },
-          "tmp": "$df30"
+          "tmp": "$df207"
         },
         {
           "op": "place",
@@ -4474,7 +4474,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df31"
+          "tmp": "$df29"
         },
         {
           "op": "place",
@@ -4544,7 +4544,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df32"
+          "tmp": "$df201"
         },
         {
           "op": "place",
@@ -4620,7 +4620,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df33"
+          "tmp": "$df202"
         },
         {
           "op": "place",
@@ -4737,7 +4737,7 @@
               ]
             }
           },
-          "tmp": "$df34"
+          "tmp": "$df203"
         },
         {
           "op": "place",
@@ -4745,7 +4745,7 @@
           "name": "region-abbey-cloister-kitchen-door-1",
           "p": [
             -162,
-            0.724,
+            0.686,
             112.59
           ],
           "r": 0,
@@ -4824,7 +4824,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df35"
+          "tmp": "$df204"
         },
         {
           "op": "place",
@@ -4893,7 +4893,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df36"
+          "tmp": "$df205"
         },
         {
           "op": "place",
@@ -4960,7 +4960,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df37"
+          "tmp": "$df195"
         },
         {
           "op": "place",
@@ -5069,7 +5069,7 @@
               ]
             }
           },
-          "tmp": "$df38"
+          "tmp": "$df30"
         },
         {
           "op": "place",
@@ -5113,7 +5113,7 @@
             "material": "wood",
             "roof": "gable"
           },
-          "tmp": "$df39"
+          "tmp": "$df31"
         },
         {
           "op": "place",
@@ -5151,7 +5151,7 @@
             "material": "wood",
             "roof": "flat"
           },
-          "tmp": "$df40"
+          "tmp": "$df32"
         },
         {
           "op": "place",
@@ -5289,7 +5289,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df41"
+          "tmp": "$df33"
         },
         {
           "op": "place",
@@ -5382,7 +5382,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df42"
+          "tmp": "$df34"
         },
         {
           "op": "place",
@@ -5472,7 +5472,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df43"
+          "tmp": "$df35"
         },
         {
           "op": "place",
@@ -5583,12 +5583,12 @@
               "stairs": []
             }
           },
-          "tmp": "$df44"
+          "tmp": "$df36"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df44"
+            "parent": "$df36"
           },
           "def": "core/door@2",
           "name": "int-bakery-door-1-0",
@@ -5695,7 +5695,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df45"
+          "tmp": "$df37"
         },
         {
           "op": "place",
@@ -5791,7 +5791,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df46"
+          "tmp": "$df38"
         },
         {
           "op": "place",
@@ -5881,7 +5881,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df47"
+          "tmp": "$df39"
         },
         {
           "op": "place",
@@ -5972,7 +5972,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df48"
+          "tmp": "$df40"
         },
         {
           "op": "place",
@@ -6065,7 +6065,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df49"
+          "tmp": "$df41"
         },
         {
           "op": "place",
@@ -6137,7 +6137,7 @@
             "material": "glass",
             "windows": 0.6
           },
-          "tmp": "$df50"
+          "tmp": "$df42"
         },
         {
           "op": "place",
@@ -6177,7 +6177,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df51"
+          "tmp": "$df43"
         },
         {
           "op": "place",
@@ -6252,7 +6252,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df52"
+          "tmp": "$df44"
         },
         {
           "op": "place",
@@ -6316,7 +6316,7 @@
             "material": "plaster",
             "windows": 0.6
           },
-          "tmp": "$df53"
+          "tmp": "$df45"
         },
         {
           "op": "place",
@@ -6415,7 +6415,7 @@
               ]
             }
           },
-          "tmp": "$df54"
+          "tmp": "$df46"
         },
         {
           "op": "place",
@@ -6473,7 +6473,7 @@
             "material": "stone",
             "windows": 0.6
           },
-          "tmp": "$df55"
+          "tmp": "$df47"
         },
         {
           "op": "place",
@@ -6549,7 +6549,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df56"
+          "tmp": "$df48"
         },
         {
           "op": "place",
@@ -6607,7 +6607,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df57"
+          "tmp": "$df49"
         },
         {
           "op": "place",
@@ -6649,12 +6649,12 @@
             "windows": 0.6,
             "balcony": true
           },
-          "tmp": "$df58"
+          "tmp": "$df50"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df58"
+            "parent": "$df50"
           },
           "def": "core/door@2",
           "name": "region-farm-hamlet-farmhouse-door-1-0",
@@ -6675,7 +6675,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df58"
+            "parent": "$df50"
           },
           "def": "core/door@2",
           "name": "region-farm-hamlet-farmhouse-door-2",
@@ -6696,7 +6696,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df58"
+            "parent": "$df50"
           },
           "def": "core/door@2",
           "name": "region-farm-hamlet-farmhouse-door-3",
@@ -6717,7 +6717,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df58"
+            "parent": "$df50"
           },
           "def": "core/door@2",
           "name": "region-farm-hamlet-farmhouse-door-4",
@@ -6788,7 +6788,7 @@
             "material": "plaster",
             "windows": 0.6
           },
-          "tmp": "$df59"
+          "tmp": "$df51"
         },
         {
           "op": "place",
@@ -6869,7 +6869,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df60"
+          "tmp": "$df52"
         },
         {
           "op": "place",
@@ -6928,12 +6928,12 @@
             "windows": 0.6,
             "balcony": true
           },
-          "tmp": "$df61"
+          "tmp": "$df64"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df61"
+            "parent": "$df64"
           },
           "def": "core/door@2",
           "name": "region-vineyard-villa-door-1-0",
@@ -6954,7 +6954,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df61"
+            "parent": "$df64"
           },
           "def": "core/door@2",
           "name": "region-vineyard-villa-door-2",
@@ -6975,7 +6975,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df61"
+            "parent": "$df64"
           },
           "def": "core/door@2",
           "name": "region-vineyard-villa-door-3",
@@ -6996,7 +6996,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df61"
+            "parent": "$df64"
           },
           "def": "core/door@2",
           "name": "region-vineyard-villa-door-4",
@@ -7017,7 +7017,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df61"
+            "parent": "$df64"
           },
           "def": "core/door@2",
           "name": "region-vineyard-villa-door-5",
@@ -7038,7 +7038,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df61"
+            "parent": "$df64"
           },
           "def": "core/door@2",
           "name": "region-vineyard-villa-door-7",
@@ -7094,7 +7094,7 @@
             "material": "stone",
             "windows": 0.6
           },
-          "tmp": "$df62"
+          "tmp": "$df65"
         },
         {
           "op": "place",
@@ -7135,7 +7135,7 @@
             "material": "stone",
             "windows": 0.6
           },
-          "tmp": "$df63"
+          "tmp": "$df232"
         },
         {
           "op": "place",
@@ -7210,7 +7210,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df64"
+          "tmp": "$df53"
         },
         {
           "op": "place",
@@ -7270,12 +7270,12 @@
             "windows": 0.6,
             "balcony": true
           },
-          "tmp": "$df65"
+          "tmp": "$df54"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df65"
+            "parent": "$df54"
           },
           "def": "core/door@2",
           "name": "region-west-lake-inn-door-1-0",
@@ -7296,7 +7296,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df65"
+            "parent": "$df54"
           },
           "def": "core/door@2",
           "name": "region-west-lake-inn-door-2",
@@ -7317,7 +7317,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df65"
+            "parent": "$df54"
           },
           "def": "core/door@2",
           "name": "region-west-lake-inn-door-3",
@@ -7338,7 +7338,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df65"
+            "parent": "$df54"
           },
           "def": "core/door@2",
           "name": "region-west-lake-inn-door-4",
@@ -7359,7 +7359,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df65"
+            "parent": "$df54"
           },
           "def": "core/door@2",
           "name": "region-west-lake-inn-door-5",
@@ -7380,7 +7380,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df65"
+            "parent": "$df54"
           },
           "def": "core/door@2",
           "name": "region-west-lake-inn-door-7",
@@ -7438,12 +7438,12 @@
             "windows": 0.6,
             "balcony": true
           },
-          "tmp": "$df66"
+          "tmp": "$df55"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df66"
+            "parent": "$df55"
           },
           "def": "core/door@2",
           "name": "region-campsite-lodge-door-1-0",
@@ -7464,7 +7464,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df66"
+            "parent": "$df55"
           },
           "def": "core/door@2",
           "name": "region-campsite-lodge-door-2",
@@ -7485,7 +7485,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df66"
+            "parent": "$df55"
           },
           "def": "core/door@2",
           "name": "region-campsite-lodge-door-3",
@@ -7506,7 +7506,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df66"
+            "parent": "$df55"
           },
           "def": "core/door@2",
           "name": "region-campsite-lodge-door-4",
@@ -7527,7 +7527,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df66"
+            "parent": "$df55"
           },
           "def": "core/door@2",
           "name": "region-campsite-lodge-door-5",
@@ -7548,7 +7548,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df66"
+            "parent": "$df55"
           },
           "def": "core/door@2",
           "name": "region-campsite-lodge-door-7",
@@ -7663,7 +7663,7 @@
               ]
             }
           },
-          "tmp": "$df67"
+          "tmp": "$df56"
         },
         {
           "op": "place",
@@ -7710,7 +7710,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df68"
+          "tmp": "$df57"
         },
         {
           "op": "place",
@@ -7751,7 +7751,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df69"
+          "tmp": "$df58"
         },
         {
           "op": "place",
@@ -7792,7 +7792,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df70"
+          "tmp": "$df59"
         },
         {
           "op": "place",
@@ -7833,12 +7833,12 @@
             "trim": "#e9dfcc",
             "windows": 0.6
           },
-          "tmp": "$df71"
+          "tmp": "$df200"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df71"
+            "parent": "$df200"
           },
           "def": "core/door@2",
           "name": "region-abbey-church-door-1-0",
@@ -7895,7 +7895,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df72"
+          "tmp": "$df60"
         },
         {
           "op": "place",
@@ -7936,7 +7936,7 @@
             "material": "wood",
             "windows": 0.6
           },
-          "tmp": "$df73"
+          "tmp": "$df61"
         },
         {
           "op": "place",
@@ -7958,7 +7958,7 @@
             "material": "glass",
             "windows": 0.6
           },
-          "tmp": "$df74"
+          "tmp": "$df62"
         },
         {
           "op": "place",
@@ -7999,7 +7999,7 @@
             "windows": 0.6
           },
           "r": 1.571,
-          "tmp": "$df75"
+          "tmp": "$df63"
         },
         {
           "op": "place",
@@ -8047,12 +8047,12 @@
             "windows": 0.6,
             "balcony": true
           },
-          "tmp": "$df76"
+          "tmp": "$df66"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df76"
+            "parent": "$df66"
           },
           "def": "core/door@2",
           "name": "region-west-river-watermill-door-1-0",
@@ -8073,7 +8073,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df76"
+            "parent": "$df66"
           },
           "def": "core/door@2",
           "name": "region-west-river-watermill-door-2",
@@ -8094,7 +8094,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df76"
+            "parent": "$df66"
           },
           "def": "core/door@2",
           "name": "region-west-river-watermill-door-3",
@@ -8115,7 +8115,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df76"
+            "parent": "$df66"
           },
           "def": "core/door@2",
           "name": "region-west-river-watermill-door-4",
@@ -8171,7 +8171,7 @@
             "material": "plaster",
             "windows": 0.6
           },
-          "tmp": "$df77"
+          "tmp": "$df227"
         },
         {
           "op": "place",
@@ -8239,7 +8239,7 @@
             "material": "plaster",
             "windows": 0.6
           },
-          "tmp": "$df78"
+          "tmp": "$df184"
         },
         {
           "op": "place",
@@ -8338,7 +8338,7 @@
               ]
             }
           },
-          "tmp": "$df79"
+          "tmp": "$df185"
         },
         {
           "op": "place",
@@ -8414,7 +8414,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df80"
+          "tmp": "$df67"
         },
         {
           "op": "place",
@@ -8507,7 +8507,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df81"
+          "tmp": "$df68"
         },
         {
           "op": "place",
@@ -8606,7 +8606,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df82"
+          "tmp": "$df187"
         },
         {
           "op": "place",
@@ -8699,7 +8699,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df83"
+          "tmp": "$df230"
         },
         {
           "op": "place",
@@ -8739,7 +8739,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@3",
           "name": "region-alpine-mountain-restaurant",
           "p": [
             6,
@@ -8758,6 +8758,151 @@
             "material": "wood",
             "windows": 0.6,
             "balcony": true
+          },
+          "tmp": "$df231"
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df231"
+          },
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-1",
+          "p": [
+            -2.356,
+            0,
+            -1.945
+          ],
+          "r": 1.571,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df231"
+          },
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-2",
+          "p": [
+            -2.356,
+            0,
+            1.945
+          ],
+          "r": 1.571,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df231"
+          },
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-3",
+          "p": [
+            -3.927,
+            2.8,
+            -1.83
+          ],
+          "r": -3.141,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df231"
+          },
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-4",
+          "p": [
+            0,
+            2.8,
+            -1.83
+          ],
+          "r": -3.141,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df231"
+          },
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-5",
+          "p": [
+            3.927,
+            2.8,
+            -1.83
+          ],
+          "r": 0.001,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-6",
+          "p": [
+            4.256,
+            34.615,
+            -305.889
+          ],
+          "r": -3.141,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df231"
+          },
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-7",
+          "p": [
+            -3.902,
+            2.8,
+            3.89
+          ],
+          "r": 3.142,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
           }
         },
         {
@@ -8857,12 +9002,12 @@
               ]
             }
           },
-          "tmp": "$df84"
+          "tmp": "$df69"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df84"
+            "parent": "$df69"
           },
           "def": "core/door@2",
           "name": "region-campus-library-annex-door-1-0",
@@ -8994,7 +9139,7 @@
               ]
             }
           },
-          "tmp": "$df85"
+          "tmp": "$df70"
         },
         {
           "op": "place",
@@ -9110,7 +9255,7 @@
               ]
             }
           },
-          "tmp": "$df86"
+          "tmp": "$df71"
         },
         {
           "op": "place",
@@ -9167,7 +9312,7 @@
             "material": "stone",
             "roof": "hip"
           },
-          "tmp": "$df87"
+          "tmp": "$df72"
         },
         {
           "op": "place",
@@ -9206,12 +9351,12 @@
             "roof": "flat",
             "balcony": true
           },
-          "tmp": "$df88"
+          "tmp": "$df73"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df88"
+            "parent": "$df73"
           },
           "def": "core/door@2",
           "name": "campus-residence-1-door-1-0",
@@ -9232,7 +9377,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df88"
+            "parent": "$df73"
           },
           "def": "core/door@2",
           "name": "campus-residence-1-door-2",
@@ -9253,7 +9398,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df88"
+            "parent": "$df73"
           },
           "def": "core/door@2",
           "name": "campus-residence-1-door-3",
@@ -9274,7 +9419,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df88"
+            "parent": "$df73"
           },
           "def": "core/door@2",
           "name": "campus-residence-1-door-5",
@@ -9335,12 +9480,12 @@
             "roof": "flat",
             "balcony": true
           },
-          "tmp": "$df89"
+          "tmp": "$df74"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df89"
+            "parent": "$df74"
           },
           "def": "core/door@2",
           "name": "campus-residence-2-door-1-0",
@@ -9361,7 +9506,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df89"
+            "parent": "$df74"
           },
           "def": "core/door@2",
           "name": "campus-residence-2-door-2",
@@ -9382,7 +9527,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df89"
+            "parent": "$df74"
           },
           "def": "core/door@2",
           "name": "campus-residence-2-door-3",
@@ -9403,7 +9548,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df89"
+            "parent": "$df74"
           },
           "def": "core/door@2",
           "name": "campus-residence-2-door-5",
@@ -9491,7 +9636,7 @@
               "stairs": []
             }
           },
-          "tmp": "$df90"
+          "tmp": "$df196"
         },
         {
           "op": "place",
@@ -9545,7 +9690,7 @@
             "d": 6,
             "roof": "flat"
           },
-          "tmp": "$df91"
+          "tmp": "$df197"
         },
         {
           "op": "place",
@@ -9563,7 +9708,7 @@
             "d": 6,
             "roof": "hip"
           },
-          "tmp": "$df92"
+          "tmp": "$df75"
         },
         {
           "op": "place",
@@ -9581,7 +9726,7 @@
             "d": 5,
             "roof": "hip"
           },
-          "tmp": "$df93"
+          "tmp": "$df198"
         },
         {
           "op": "place",
@@ -9599,7 +9744,7 @@
             "d": 4,
             "roof": "hip"
           },
-          "tmp": "$df94"
+          "tmp": "$df199"
         },
         {
           "op": "place",
@@ -9619,7 +9764,7 @@
             "material": "stone",
             "floorHeight": 4.2
           },
-          "tmp": "$df95"
+          "tmp": "$df194"
         },
         {
           "op": "place",
@@ -9637,7 +9782,7 @@
             "d": 6.4,
             "roof": "hip"
           },
-          "tmp": "$df96"
+          "tmp": "$df76"
         }
       ]
     },
@@ -9666,12 +9811,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df97"
+          "tmp": "$df77"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df97"
+            "parent": "$df77"
           },
           "def": "core/door@2",
           "name": "canal-west-home-1-door-1-0",
@@ -9692,7 +9837,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df97"
+            "parent": "$df77"
           },
           "def": "core/door@2",
           "name": "canal-west-home-1-door-2",
@@ -9713,7 +9858,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df97"
+            "parent": "$df77"
           },
           "def": "core/door@2",
           "name": "canal-west-home-1-door-3",
@@ -9734,7 +9879,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df97"
+            "parent": "$df77"
           },
           "def": "core/door@2",
           "name": "canal-west-home-1-door-5",
@@ -9755,7 +9900,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df97"
+            "parent": "$df77"
           },
           "def": "core/door@2",
           "name": "canal-west-home-1-door-8",
@@ -9811,12 +9956,12 @@
             "roof": "hip",
             "windows": 0.65
           },
-          "tmp": "$df98"
+          "tmp": "$df78"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df98"
+            "parent": "$df78"
           },
           "def": "core/door@2",
           "name": "canal-west-home-2-door-1-0",
@@ -9837,7 +9982,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df98"
+            "parent": "$df78"
           },
           "def": "core/door@2",
           "name": "canal-west-home-2-door-2",
@@ -9858,7 +10003,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df98"
+            "parent": "$df78"
           },
           "def": "core/door@2",
           "name": "canal-west-home-2-door-3",
@@ -9879,7 +10024,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df98"
+            "parent": "$df78"
           },
           "def": "core/door@2",
           "name": "canal-west-home-2-door-5",
@@ -9900,7 +10045,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df98"
+            "parent": "$df78"
           },
           "def": "core/door@2",
           "name": "canal-west-home-2-door-7",
@@ -9921,7 +10066,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df98"
+            "parent": "$df78"
           },
           "def": "core/door@2",
           "name": "canal-west-home-2-door-8",
@@ -9978,12 +10123,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df99"
+          "tmp": "$df79"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-1-0",
@@ -10004,7 +10149,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-2",
@@ -10025,7 +10170,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-3",
@@ -10046,7 +10191,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-5",
@@ -10067,7 +10212,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-7",
@@ -10088,7 +10233,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-8",
@@ -10109,7 +10254,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df99"
+            "parent": "$df79"
           },
           "def": "core/door@2",
           "name": "canal-west-home-3-door-10",
@@ -10165,12 +10310,12 @@
             "roof": "flat",
             "windows": 0.65
           },
-          "tmp": "$df100"
+          "tmp": "$df80"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df100"
+            "parent": "$df80"
           },
           "def": "core/door@2",
           "name": "canal-west-home-4-door-1-0",
@@ -10191,7 +10336,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df100"
+            "parent": "$df80"
           },
           "def": "core/door@2",
           "name": "canal-west-home-4-door-2",
@@ -10212,7 +10357,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df100"
+            "parent": "$df80"
           },
           "def": "core/door@2",
           "name": "canal-west-home-4-door-3",
@@ -10233,7 +10378,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df100"
+            "parent": "$df80"
           },
           "def": "core/door@2",
           "name": "canal-west-home-4-door-5",
@@ -10254,7 +10399,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df100"
+            "parent": "$df80"
           },
           "def": "core/door@2",
           "name": "canal-west-home-4-door-7",
@@ -10275,7 +10420,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df100"
+            "parent": "$df80"
           },
           "def": "core/door@2",
           "name": "canal-west-home-4-door-8",
@@ -10332,12 +10477,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df101"
+          "tmp": "$df81"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-1-0",
@@ -10358,7 +10503,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-2",
@@ -10379,7 +10524,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-3",
@@ -10400,7 +10545,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-5",
@@ -10421,7 +10566,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-7",
@@ -10442,7 +10587,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-8",
@@ -10463,7 +10608,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df101"
+            "parent": "$df81"
           },
           "def": "core/door@2",
           "name": "canal-west-home-5-door-10",
@@ -10519,12 +10664,12 @@
             "roof": "flat",
             "windows": 0.65
           },
-          "tmp": "$df102"
+          "tmp": "$df82"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df102"
+            "parent": "$df82"
           },
           "def": "core/door@2",
           "name": "canal-west-home-6-door-1-0",
@@ -10545,7 +10690,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df102"
+            "parent": "$df82"
           },
           "def": "core/door@2",
           "name": "canal-west-home-6-door-2",
@@ -10566,7 +10711,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df102"
+            "parent": "$df82"
           },
           "def": "core/door@2",
           "name": "canal-west-home-6-door-3",
@@ -10587,7 +10732,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df102"
+            "parent": "$df82"
           },
           "def": "core/door@2",
           "name": "canal-west-home-6-door-5",
@@ -10608,7 +10753,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df102"
+            "parent": "$df82"
           },
           "def": "core/door@2",
           "name": "canal-west-home-6-door-7",
@@ -10629,7 +10774,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df102"
+            "parent": "$df82"
           },
           "def": "core/door@2",
           "name": "canal-west-home-6-door-8",
@@ -10686,12 +10831,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df103"
+          "tmp": "$df83"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-1-0",
@@ -10712,7 +10857,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-2",
@@ -10733,7 +10878,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-3",
@@ -10754,7 +10899,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-5",
@@ -10775,7 +10920,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-7",
@@ -10796,7 +10941,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-8",
@@ -10817,7 +10962,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df103"
+            "parent": "$df83"
           },
           "def": "core/door@2",
           "name": "canal-west-home-7-door-10",
@@ -10873,12 +11018,12 @@
             "roof": "gable",
             "windows": 0.65
           },
-          "tmp": "$df104"
+          "tmp": "$df84"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df104"
+            "parent": "$df84"
           },
           "def": "core/door@2",
           "name": "canal-west-home-8-door-1-0",
@@ -10899,7 +11044,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df104"
+            "parent": "$df84"
           },
           "def": "core/door@2",
           "name": "canal-west-home-8-door-2",
@@ -10920,7 +11065,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df104"
+            "parent": "$df84"
           },
           "def": "core/door@2",
           "name": "canal-west-home-8-door-3",
@@ -10941,7 +11086,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df104"
+            "parent": "$df84"
           },
           "def": "core/door@2",
           "name": "canal-west-home-8-door-5",
@@ -11004,12 +11149,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df105"
+          "tmp": "$df85"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-1-0",
@@ -11030,7 +11175,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-2",
@@ -11051,7 +11196,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-3",
@@ -11072,7 +11217,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-5",
@@ -11093,7 +11238,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-7",
@@ -11114,7 +11259,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-8",
@@ -11135,7 +11280,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df105"
+            "parent": "$df85"
           },
           "def": "core/door@2",
           "name": "canal-west-home-9-door-10",
@@ -11192,12 +11337,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df106"
+          "tmp": "$df86"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df106"
+            "parent": "$df86"
           },
           "def": "core/door@2",
           "name": "canal-west-home-10-door-1-0",
@@ -11218,7 +11363,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df106"
+            "parent": "$df86"
           },
           "def": "core/door@2",
           "name": "canal-west-home-10-door-2",
@@ -11239,7 +11384,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df106"
+            "parent": "$df86"
           },
           "def": "core/door@2",
           "name": "canal-west-home-10-door-3",
@@ -11260,7 +11405,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df106"
+            "parent": "$df86"
           },
           "def": "core/door@2",
           "name": "canal-west-home-10-door-5",
@@ -11281,7 +11426,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df106"
+            "parent": "$df86"
           },
           "def": "core/door@2",
           "name": "canal-west-home-10-door-8",
@@ -11337,12 +11482,12 @@
             "roof": "gable",
             "windows": 0.65
           },
-          "tmp": "$df107"
+          "tmp": "$df87"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df107"
+            "parent": "$df87"
           },
           "def": "core/door@2",
           "name": "canal-west-home-11-door-1-0",
@@ -11363,7 +11508,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df107"
+            "parent": "$df87"
           },
           "def": "core/door@2",
           "name": "canal-west-home-11-door-2",
@@ -11384,7 +11529,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df107"
+            "parent": "$df87"
           },
           "def": "core/door@2",
           "name": "canal-west-home-11-door-3",
@@ -11405,7 +11550,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df107"
+            "parent": "$df87"
           },
           "def": "core/door@2",
           "name": "canal-west-home-11-door-5",
@@ -11462,12 +11607,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df108"
+          "tmp": "$df88"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df108"
+            "parent": "$df88"
           },
           "def": "core/door@2",
           "name": "canal-west-home-12-door-1-0",
@@ -11488,7 +11633,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df108"
+            "parent": "$df88"
           },
           "def": "core/door@2",
           "name": "canal-west-home-12-door-2",
@@ -11509,7 +11654,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df108"
+            "parent": "$df88"
           },
           "def": "core/door@2",
           "name": "canal-west-home-12-door-3",
@@ -11530,7 +11675,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df108"
+            "parent": "$df88"
           },
           "def": "core/door@2",
           "name": "canal-west-home-12-door-5",
@@ -11551,7 +11696,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df108"
+            "parent": "$df88"
           },
           "def": "core/door@2",
           "name": "canal-west-home-12-door-8",
@@ -11608,12 +11753,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df109"
+          "tmp": "$df89"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-1-0",
@@ -11634,7 +11779,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-2",
@@ -11655,7 +11800,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-3",
@@ -11676,7 +11821,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-5",
@@ -11697,7 +11842,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-7",
@@ -11718,7 +11863,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-8",
@@ -11739,7 +11884,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df109"
+            "parent": "$df89"
           },
           "def": "core/door@2",
           "name": "canal-east-home-1-door-10",
@@ -11795,12 +11940,12 @@
             "roof": "flat",
             "windows": 0.65
           },
-          "tmp": "$df110"
+          "tmp": "$df90"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df110"
+            "parent": "$df90"
           },
           "def": "core/door@2",
           "name": "canal-east-home-2-door-1-0",
@@ -11821,7 +11966,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df110"
+            "parent": "$df90"
           },
           "def": "core/door@2",
           "name": "canal-east-home-2-door-2",
@@ -11842,7 +11987,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df110"
+            "parent": "$df90"
           },
           "def": "core/door@2",
           "name": "canal-east-home-2-door-3",
@@ -11863,7 +12008,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df110"
+            "parent": "$df90"
           },
           "def": "core/door@2",
           "name": "canal-east-home-2-door-5",
@@ -11920,12 +12065,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df111"
+          "tmp": "$df91"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df111"
+            "parent": "$df91"
           },
           "def": "core/door@2",
           "name": "canal-east-home-3-door-1-0",
@@ -11946,7 +12091,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df111"
+            "parent": "$df91"
           },
           "def": "core/door@2",
           "name": "canal-east-home-3-door-2",
@@ -11967,7 +12112,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df111"
+            "parent": "$df91"
           },
           "def": "core/door@2",
           "name": "canal-east-home-3-door-3",
@@ -11988,7 +12133,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df111"
+            "parent": "$df91"
           },
           "def": "core/door@2",
           "name": "canal-east-home-3-door-5",
@@ -12009,7 +12154,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df111"
+            "parent": "$df91"
           },
           "def": "core/door@2",
           "name": "canal-east-home-3-door-8",
@@ -12065,12 +12210,12 @@
             "roof": "flat",
             "windows": 0.65
           },
-          "tmp": "$df112"
+          "tmp": "$df92"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df112"
+            "parent": "$df92"
           },
           "def": "core/door@2",
           "name": "canal-east-home-4-door-1-0",
@@ -12091,7 +12236,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df112"
+            "parent": "$df92"
           },
           "def": "core/door@2",
           "name": "canal-east-home-4-door-2",
@@ -12112,7 +12257,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df112"
+            "parent": "$df92"
           },
           "def": "core/door@2",
           "name": "canal-east-home-4-door-3",
@@ -12133,7 +12278,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df112"
+            "parent": "$df92"
           },
           "def": "core/door@2",
           "name": "canal-east-home-4-door-5",
@@ -12196,12 +12341,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df113"
+          "tmp": "$df93"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df113"
+            "parent": "$df93"
           },
           "def": "core/door@2",
           "name": "canal-east-home-5-door-1-0",
@@ -12222,7 +12367,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df113"
+            "parent": "$df93"
           },
           "def": "core/door@2",
           "name": "canal-east-home-5-door-2",
@@ -12243,7 +12388,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df113"
+            "parent": "$df93"
           },
           "def": "core/door@2",
           "name": "canal-east-home-5-door-3",
@@ -12264,7 +12409,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df113"
+            "parent": "$df93"
           },
           "def": "core/door@2",
           "name": "canal-east-home-5-door-5",
@@ -12285,7 +12430,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df113"
+            "parent": "$df93"
           },
           "def": "core/door@2",
           "name": "canal-east-home-5-door-8",
@@ -12341,12 +12486,12 @@
             "roof": "flat",
             "windows": 0.65
           },
-          "tmp": "$df114"
+          "tmp": "$df94"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df114"
+            "parent": "$df94"
           },
           "def": "core/door@2",
           "name": "canal-east-home-6-door-1-0",
@@ -12367,7 +12512,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df114"
+            "parent": "$df94"
           },
           "def": "core/door@2",
           "name": "canal-east-home-6-door-2",
@@ -12388,7 +12533,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df114"
+            "parent": "$df94"
           },
           "def": "core/door@2",
           "name": "canal-east-home-6-door-3",
@@ -12409,7 +12554,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df114"
+            "parent": "$df94"
           },
           "def": "core/door@2",
           "name": "canal-east-home-6-door-5",
@@ -12430,7 +12575,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df114"
+            "parent": "$df94"
           },
           "def": "core/door@2",
           "name": "canal-east-home-6-door-7",
@@ -12451,7 +12596,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df114"
+            "parent": "$df94"
           },
           "def": "core/door@2",
           "name": "canal-east-home-6-door-8",
@@ -12508,12 +12653,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df115"
+          "tmp": "$df95"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-1-0",
@@ -12534,7 +12679,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-2",
@@ -12555,7 +12700,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-3",
@@ -12576,7 +12721,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-5",
@@ -12597,7 +12742,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-7",
@@ -12618,7 +12763,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-8",
@@ -12639,7 +12784,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df115"
+            "parent": "$df95"
           },
           "def": "core/door@2",
           "name": "canal-east-home-7-door-10",
@@ -12695,12 +12840,12 @@
             "roof": "gable",
             "windows": 0.65
           },
-          "tmp": "$df116"
+          "tmp": "$df96"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df116"
+            "parent": "$df96"
           },
           "def": "core/door@2",
           "name": "canal-east-home-8-door-1-0",
@@ -12721,7 +12866,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df116"
+            "parent": "$df96"
           },
           "def": "core/door@2",
           "name": "canal-east-home-8-door-2",
@@ -12742,7 +12887,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df116"
+            "parent": "$df96"
           },
           "def": "core/door@2",
           "name": "canal-east-home-8-door-3",
@@ -12763,7 +12908,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df116"
+            "parent": "$df96"
           },
           "def": "core/door@2",
           "name": "canal-east-home-8-door-5",
@@ -12820,12 +12965,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df117"
+          "tmp": "$df97"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df117"
+            "parent": "$df97"
           },
           "def": "core/door@2",
           "name": "canal-east-home-9-door-1-0",
@@ -12846,7 +12991,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df117"
+            "parent": "$df97"
           },
           "def": "core/door@2",
           "name": "canal-east-home-9-door-2",
@@ -12867,7 +13012,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df117"
+            "parent": "$df97"
           },
           "def": "core/door@2",
           "name": "canal-east-home-9-door-3",
@@ -12888,7 +13033,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df117"
+            "parent": "$df97"
           },
           "def": "core/door@2",
           "name": "canal-east-home-9-door-5",
@@ -12909,7 +13054,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df117"
+            "parent": "$df97"
           },
           "def": "core/door@2",
           "name": "canal-east-home-9-door-8",
@@ -12966,12 +13111,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df118"
+          "tmp": "$df98"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df118"
+            "parent": "$df98"
           },
           "def": "core/door@2",
           "name": "canal-east-home-10-door-1-0",
@@ -12992,7 +13137,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df118"
+            "parent": "$df98"
           },
           "def": "core/door@2",
           "name": "canal-east-home-10-door-2",
@@ -13013,7 +13158,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df118"
+            "parent": "$df98"
           },
           "def": "core/door@2",
           "name": "canal-east-home-10-door-3",
@@ -13034,7 +13179,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df118"
+            "parent": "$df98"
           },
           "def": "core/door@2",
           "name": "canal-east-home-10-door-5",
@@ -13055,7 +13200,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df118"
+            "parent": "$df98"
           },
           "def": "core/door@2",
           "name": "canal-east-home-10-door-8",
@@ -13111,12 +13256,12 @@
             "roof": "gable",
             "windows": 0.65
           },
-          "tmp": "$df119"
+          "tmp": "$df99"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df119"
+            "parent": "$df99"
           },
           "def": "core/door@2",
           "name": "canal-east-home-11-door-1-0",
@@ -13137,7 +13282,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df119"
+            "parent": "$df99"
           },
           "def": "core/door@2",
           "name": "canal-east-home-11-door-2",
@@ -13158,7 +13303,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df119"
+            "parent": "$df99"
           },
           "def": "core/door@2",
           "name": "canal-east-home-11-door-3",
@@ -13179,7 +13324,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df119"
+            "parent": "$df99"
           },
           "def": "core/door@2",
           "name": "canal-east-home-11-door-5",
@@ -13236,12 +13381,12 @@
             "windows": 0.65,
             "balcony": true
           },
-          "tmp": "$df120"
+          "tmp": "$df100"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df120"
+            "parent": "$df100"
           },
           "def": "core/door@2",
           "name": "canal-east-home-12-door-1-0",
@@ -13262,7 +13407,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df120"
+            "parent": "$df100"
           },
           "def": "core/door@2",
           "name": "canal-east-home-12-door-2",
@@ -13283,7 +13428,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df120"
+            "parent": "$df100"
           },
           "def": "core/door@2",
           "name": "canal-east-home-12-door-3",
@@ -13304,7 +13449,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df120"
+            "parent": "$df100"
           },
           "def": "core/door@2",
           "name": "canal-east-home-12-door-5",
@@ -13325,7 +13470,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df120"
+            "parent": "$df100"
           },
           "def": "core/door@2",
           "name": "canal-east-home-12-door-8",
@@ -13387,12 +13532,12 @@
             "roof": "gable",
             "balcony": true
           },
-          "tmp": "$df121"
+          "tmp": "$df101"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df121"
+            "parent": "$df101"
           },
           "def": "core/door@2",
           "name": "market-street-shop-1-door-1-0",
@@ -13413,7 +13558,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df121"
+            "parent": "$df101"
           },
           "def": "core/door@2",
           "name": "market-street-shop-1-door-2",
@@ -13434,7 +13579,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df121"
+            "parent": "$df101"
           },
           "def": "core/door@2",
           "name": "market-street-shop-1-door-3",
@@ -13455,7 +13600,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df121"
+            "parent": "$df101"
           },
           "def": "core/door@2",
           "name": "market-street-shop-1-door-5",
@@ -13510,12 +13655,12 @@
             "material": "plaster",
             "roof": "hip"
           },
-          "tmp": "$df122"
+          "tmp": "$df102"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df122"
+            "parent": "$df102"
           },
           "def": "core/door@2",
           "name": "market-street-shop-2-door-1-0",
@@ -13536,7 +13681,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df122"
+            "parent": "$df102"
           },
           "def": "core/door@2",
           "name": "market-street-shop-2-door-2",
@@ -13592,12 +13737,12 @@
             "roof": "flat",
             "balcony": true
           },
-          "tmp": "$df123"
+          "tmp": "$df103"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df123"
+            "parent": "$df103"
           },
           "def": "core/door@2",
           "name": "market-street-shop-3-door-1-0",
@@ -13618,7 +13763,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df123"
+            "parent": "$df103"
           },
           "def": "core/door@2",
           "name": "market-street-shop-3-door-2",
@@ -13639,7 +13784,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df123"
+            "parent": "$df103"
           },
           "def": "core/door@2",
           "name": "market-street-shop-3-door-4",
@@ -13694,12 +13839,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df124"
+          "tmp": "$df104"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df124"
+            "parent": "$df104"
           },
           "def": "core/door@2",
           "name": "market-street-shop-4-door-1-0",
@@ -13720,7 +13865,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df124"
+            "parent": "$df104"
           },
           "def": "core/door@2",
           "name": "market-street-shop-4-door-2",
@@ -13741,7 +13886,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df124"
+            "parent": "$df104"
           },
           "def": "core/door@2",
           "name": "market-street-shop-4-door-3",
@@ -13797,12 +13942,12 @@
             "roof": "hip",
             "balcony": true
           },
-          "tmp": "$df125"
+          "tmp": "$df105"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df125"
+            "parent": "$df105"
           },
           "def": "core/door@2",
           "name": "market-street-shop-5-door-1-0",
@@ -13823,7 +13968,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df125"
+            "parent": "$df105"
           },
           "def": "core/door@2",
           "name": "market-street-shop-5-door-2",
@@ -13844,7 +13989,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df125"
+            "parent": "$df105"
           },
           "def": "core/door@2",
           "name": "market-street-shop-5-door-4",
@@ -13899,12 +14044,12 @@
             "material": "plaster",
             "roof": "flat"
           },
-          "tmp": "$df126"
+          "tmp": "$df106"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df126"
+            "parent": "$df106"
           },
           "def": "core/door@2",
           "name": "market-street-shop-6-door-1-0",
@@ -13925,7 +14070,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df126"
+            "parent": "$df106"
           },
           "def": "core/door@2",
           "name": "market-street-shop-6-door-2",
@@ -13981,12 +14126,12 @@
             "roof": "gable",
             "balcony": true
           },
-          "tmp": "$df127"
+          "tmp": "$df107"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df127"
+            "parent": "$df107"
           },
           "def": "core/door@2",
           "name": "market-street-shop-7-door-1-0",
@@ -14007,7 +14152,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df127"
+            "parent": "$df107"
           },
           "def": "core/door@2",
           "name": "market-street-shop-7-door-2",
@@ -14028,7 +14173,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df127"
+            "parent": "$df107"
           },
           "def": "core/door@2",
           "name": "market-street-shop-7-door-3",
@@ -14049,7 +14194,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df127"
+            "parent": "$df107"
           },
           "def": "core/door@2",
           "name": "market-street-shop-7-door-5",
@@ -14104,12 +14249,12 @@
             "material": "plaster",
             "roof": "hip"
           },
-          "tmp": "$df128"
+          "tmp": "$df108"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df128"
+            "parent": "$df108"
           },
           "def": "core/door@2",
           "name": "market-street-shop-8-door-1-0",
@@ -14130,7 +14275,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df128"
+            "parent": "$df108"
           },
           "def": "core/door@2",
           "name": "market-street-shop-8-door-2",
@@ -14192,12 +14337,12 @@
             "roof": "flat",
             "balcony": true
           },
-          "tmp": "$df129"
+          "tmp": "$df109"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df129"
+            "parent": "$df109"
           },
           "def": "core/door@2",
           "name": "market-street-shop-9-door-1-0",
@@ -14218,7 +14363,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df129"
+            "parent": "$df109"
           },
           "def": "core/door@2",
           "name": "market-street-shop-9-door-2",
@@ -14239,7 +14384,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df129"
+            "parent": "$df109"
           },
           "def": "core/door@2",
           "name": "market-street-shop-9-door-4",
@@ -14294,12 +14439,12 @@
             "porch": 1.6,
             "balcony": true
           },
-          "tmp": "$df130"
+          "tmp": "$df110"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df130"
+            "parent": "$df110"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-1-door-1-0",
@@ -14320,7 +14465,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df130"
+            "parent": "$df110"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-1-door-2",
@@ -14341,7 +14486,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df130"
+            "parent": "$df110"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-1-door-5",
@@ -14395,12 +14540,12 @@
             "roof": "gable",
             "porch": 1.6
           },
-          "tmp": "$df131"
+          "tmp": "$df175"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df131"
+            "parent": "$df175"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-2-door-1-0",
@@ -14421,7 +14566,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df131"
+            "parent": "$df175"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-2-door-2",
@@ -14476,12 +14621,12 @@
             "porch": 1.6,
             "balcony": true
           },
-          "tmp": "$df132"
+          "tmp": "$df176"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df132"
+            "parent": "$df176"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-3-door-1-0",
@@ -14502,7 +14647,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df132"
+            "parent": "$df176"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-3-door-2",
@@ -14523,7 +14668,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df132"
+            "parent": "$df176"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-3-door-5",
@@ -14577,12 +14722,12 @@
             "roof": "gable",
             "porch": 1.6
           },
-          "tmp": "$df133"
+          "tmp": "$df177"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df133"
+            "parent": "$df177"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-4-door-1-0",
@@ -14603,7 +14748,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df133"
+            "parent": "$df177"
           },
           "def": "core/door@2",
           "name": "old-town-north-arcade-4-door-2",
@@ -14659,12 +14804,12 @@
             "porch": 1.6,
             "balcony": true
           },
-          "tmp": "$df134"
+          "tmp": "$df111"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df134"
+            "parent": "$df111"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-1-door-1-0",
@@ -14685,7 +14830,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df134"
+            "parent": "$df111"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-1-door-2",
@@ -14706,7 +14851,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df134"
+            "parent": "$df111"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-1-door-5",
@@ -14761,12 +14906,12 @@
             "roof": "gable",
             "porch": 1.6
           },
-          "tmp": "$df135"
+          "tmp": "$df112"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df135"
+            "parent": "$df112"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-2-door-1-0",
@@ -14787,7 +14932,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df135"
+            "parent": "$df112"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-2-door-2",
@@ -14843,12 +14988,12 @@
             "porch": 1.6,
             "balcony": true
           },
-          "tmp": "$df136"
+          "tmp": "$df113"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df136"
+            "parent": "$df113"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-3-door-1-0",
@@ -14869,7 +15014,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df136"
+            "parent": "$df113"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-3-door-2",
@@ -14890,7 +15035,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df136"
+            "parent": "$df113"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-3-door-5",
@@ -14951,12 +15096,12 @@
             "roof": "gable",
             "porch": 1.6
           },
-          "tmp": "$df137"
+          "tmp": "$df114"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df137"
+            "parent": "$df114"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-4-door-1-0",
@@ -14977,7 +15122,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df137"
+            "parent": "$df114"
           },
           "def": "core/door@2",
           "name": "old-town-south-arcade-4-door-2",
@@ -15148,12 +15293,12 @@
               }
             }
           },
-          "tmp": "$df138"
+          "tmp": "$df115"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df138"
+            "parent": "$df115"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-1-door-1-1",
@@ -15174,7 +15319,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df138"
+            "parent": "$df115"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-1-door-2",
@@ -15345,12 +15490,12 @@
               }
             }
           },
-          "tmp": "$df139"
+          "tmp": "$df116"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df139"
+            "parent": "$df116"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-2-door-1-1",
@@ -15371,7 +15516,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df139"
+            "parent": "$df116"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-2-door-2",
@@ -15542,12 +15687,12 @@
               }
             }
           },
-          "tmp": "$df140"
+          "tmp": "$df117"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df140"
+            "parent": "$df117"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-3-door-1-1",
@@ -15568,7 +15713,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df140"
+            "parent": "$df117"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-3-door-2",
@@ -15739,12 +15884,12 @@
               }
             }
           },
-          "tmp": "$df141"
+          "tmp": "$df118"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df141"
+            "parent": "$df118"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-4-door-1-1",
@@ -15765,7 +15910,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df141"
+            "parent": "$df118"
           },
           "def": "core/door@2",
           "name": "seafront-hotel-4-door-2",
@@ -15819,7 +15964,7 @@
             "material": "glass",
             "roof": "gable"
           },
-          "tmp": "$df142"
+          "tmp": "$df119"
         },
         {
           "op": "place",
@@ -15857,7 +16002,7 @@
             "material": "glass",
             "roof": "gable"
           },
-          "tmp": "$df143"
+          "tmp": "$df120"
         },
         {
           "op": "place",
@@ -15895,7 +16040,7 @@
             "material": "glass",
             "roof": "gable"
           },
-          "tmp": "$df144"
+          "tmp": "$df121"
         },
         {
           "op": "place",
@@ -15942,7 +16087,7 @@
             "roof": "none",
             "windows": 0.35
           },
-          "tmp": "$df145"
+          "tmp": "$df122"
         },
         {
           "op": "place",
@@ -15983,7 +16128,7 @@
             "roof": "hip",
             "windows": 0.25
           },
-          "tmp": "$df146"
+          "tmp": "$df123"
         },
         {
           "op": "place",
@@ -16024,7 +16169,7 @@
             "roof": "none",
             "windows": 0.25
           },
-          "tmp": "$df147"
+          "tmp": "$df124"
         },
         {
           "op": "place",
@@ -16065,7 +16210,7 @@
             "roof": "hip",
             "windows": 0.25
           },
-          "tmp": "$df148"
+          "tmp": "$df125"
         },
         {
           "op": "place",
@@ -16106,7 +16251,7 @@
             "roof": "none",
             "windows": 0.25
           },
-          "tmp": "$df149"
+          "tmp": "$df126"
         },
         {
           "op": "place",
@@ -16146,7 +16291,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df150"
+          "tmp": "$df127"
         },
         {
           "op": "place",
@@ -16186,7 +16331,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df151"
+          "tmp": "$df128"
         },
         {
           "op": "place",
@@ -16226,7 +16371,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df152"
+          "tmp": "$df129"
         },
         {
           "op": "place",
@@ -16272,7 +16417,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df153"
+          "tmp": "$df130"
         },
         {
           "op": "place",
@@ -16312,7 +16457,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df154"
+          "tmp": "$df131"
         },
         {
           "op": "place",
@@ -16352,7 +16497,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df155"
+          "tmp": "$df132"
         },
         {
           "op": "place",
@@ -16392,7 +16537,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df156"
+          "tmp": "$df133"
         },
         {
           "op": "place",
@@ -16432,7 +16577,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df157"
+          "tmp": "$df134"
         },
         {
           "op": "place",
@@ -16472,7 +16617,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df158"
+          "tmp": "$df135"
         },
         {
           "op": "place",
@@ -16512,7 +16657,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df159"
+          "tmp": "$df136"
         },
         {
           "op": "place",
@@ -16552,7 +16697,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df160"
+          "tmp": "$df137"
         },
         {
           "op": "place",
@@ -16598,7 +16743,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df161"
+          "tmp": "$df138"
         },
         {
           "op": "place",
@@ -16638,7 +16783,7 @@
             "roof": "gable",
             "windows": 0.2
           },
-          "tmp": "$df162"
+          "tmp": "$df139"
         },
         {
           "op": "place",
@@ -16672,12 +16817,12 @@
             "roofColor": "#a8553a",
             "trim": "#f3eee2"
           },
-          "tmp": "$df163"
+          "tmp": "$df140"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df163"
+            "parent": "$df140"
           },
           "def": "core/door@2",
           "name": "suburb-house-1-door-1-0",
@@ -16698,7 +16843,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df163"
+            "parent": "$df140"
           },
           "def": "core/door@2",
           "name": "suburb-house-1-door-3",
@@ -16719,7 +16864,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df163"
+            "parent": "$df140"
           },
           "def": "core/door@2",
           "name": "suburb-house-1-door-4",
@@ -16740,7 +16885,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df163"
+            "parent": "$df140"
           },
           "def": "core/door@2",
           "name": "suburb-house-1-door-5",
@@ -16790,12 +16935,12 @@
             "roofColor": "#b86a45",
             "trim": "#2f4f5f"
           },
-          "tmp": "$df164"
+          "tmp": "$df141"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df164"
+            "parent": "$df141"
           },
           "def": "core/door@2",
           "name": "suburb-house-2-door-1-0",
@@ -16816,7 +16961,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df164"
+            "parent": "$df141"
           },
           "def": "core/door@2",
           "name": "suburb-house-2-door-3",
@@ -16837,7 +16982,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df164"
+            "parent": "$df141"
           },
           "def": "core/door@2",
           "name": "suburb-house-2-door-4",
@@ -16858,7 +17003,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df164"
+            "parent": "$df141"
           },
           "def": "core/door@2",
           "name": "suburb-house-2-door-5",
@@ -16908,12 +17053,12 @@
             "roofColor": "#5a5f66",
             "trim": "#7a2f2a"
           },
-          "tmp": "$df165"
+          "tmp": "$df142"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df165"
+            "parent": "$df142"
           },
           "def": "core/door@2",
           "name": "suburb-house-3-door-1-0",
@@ -16934,7 +17079,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df165"
+            "parent": "$df142"
           },
           "def": "core/door@2",
           "name": "suburb-house-3-door-3",
@@ -16955,7 +17100,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df165"
+            "parent": "$df142"
           },
           "def": "core/door@2",
           "name": "suburb-house-3-door-4",
@@ -16976,7 +17121,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df165"
+            "parent": "$df142"
           },
           "def": "core/door@2",
           "name": "suburb-house-3-door-5",
@@ -17026,12 +17171,12 @@
             "roofColor": "#3f4448",
             "trim": "#355e3b"
           },
-          "tmp": "$df166"
+          "tmp": "$df143"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df166"
+            "parent": "$df143"
           },
           "def": "core/door@2",
           "name": "suburb-house-4-door-1-0",
@@ -17052,7 +17197,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df166"
+            "parent": "$df143"
           },
           "def": "core/door@2",
           "name": "suburb-house-4-door-3",
@@ -17073,7 +17218,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df166"
+            "parent": "$df143"
           },
           "def": "core/door@2",
           "name": "suburb-house-4-door-4",
@@ -17094,7 +17239,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df166"
+            "parent": "$df143"
           },
           "def": "core/door@2",
           "name": "suburb-house-4-door-5",
@@ -17144,12 +17289,12 @@
             "roofColor": "#6f7f5a",
             "trim": "#f3eee2"
           },
-          "tmp": "$df167"
+          "tmp": "$df144"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df167"
+            "parent": "$df144"
           },
           "def": "core/door@2",
           "name": "suburb-house-5-door-1-0",
@@ -17170,7 +17315,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df167"
+            "parent": "$df144"
           },
           "def": "core/door@2",
           "name": "suburb-house-5-door-3",
@@ -17191,7 +17336,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df167"
+            "parent": "$df144"
           },
           "def": "core/door@2",
           "name": "suburb-house-5-door-4",
@@ -17212,7 +17357,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df167"
+            "parent": "$df144"
           },
           "def": "core/door@2",
           "name": "suburb-house-5-door-5",
@@ -17261,12 +17406,12 @@
             "roofColor": "#8a3a2a",
             "trim": "#2f4f5f"
           },
-          "tmp": "$df168"
+          "tmp": "$df145"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df168"
+            "parent": "$df145"
           },
           "def": "core/door@2",
           "name": "suburb-house-6-door-1-0",
@@ -17287,7 +17432,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df168"
+            "parent": "$df145"
           },
           "def": "core/door@2",
           "name": "suburb-house-6-door-3",
@@ -17308,7 +17453,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df168"
+            "parent": "$df145"
           },
           "def": "core/door@2",
           "name": "suburb-house-6-door-4",
@@ -17329,7 +17474,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df168"
+            "parent": "$df145"
           },
           "def": "core/door@2",
           "name": "suburb-house-6-door-5",
@@ -17385,12 +17530,12 @@
             "roofColor": "#4f5d6b",
             "trim": "#7a2f2a"
           },
-          "tmp": "$df169"
+          "tmp": "$df146"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df169"
+            "parent": "$df146"
           },
           "def": "core/door@2",
           "name": "suburb-house-7-door-1-0",
@@ -17411,7 +17556,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df169"
+            "parent": "$df146"
           },
           "def": "core/door@2",
           "name": "suburb-house-7-door-3",
@@ -17432,7 +17577,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df169"
+            "parent": "$df146"
           },
           "def": "core/door@2",
           "name": "suburb-house-7-door-4",
@@ -17453,7 +17598,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df169"
+            "parent": "$df146"
           },
           "def": "core/door@2",
           "name": "suburb-house-7-door-5",
@@ -17502,12 +17647,12 @@
             "roofColor": "#9c6b4a",
             "trim": "#355e3b"
           },
-          "tmp": "$df170"
+          "tmp": "$df147"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df170"
+            "parent": "$df147"
           },
           "def": "core/door@2",
           "name": "suburb-house-8-door-1-0",
@@ -17528,7 +17673,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df170"
+            "parent": "$df147"
           },
           "def": "core/door@2",
           "name": "suburb-house-8-door-3",
@@ -17549,7 +17694,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df170"
+            "parent": "$df147"
           },
           "def": "core/door@2",
           "name": "suburb-house-8-door-4",
@@ -17570,7 +17715,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df170"
+            "parent": "$df147"
           },
           "def": "core/door@2",
           "name": "suburb-house-8-door-5",
@@ -17620,12 +17765,12 @@
             "roofColor": "#5d4a3f",
             "trim": "#f3eee2"
           },
-          "tmp": "$df171"
+          "tmp": "$df148"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df171"
+            "parent": "$df148"
           },
           "def": "core/door@2",
           "name": "suburb-house-9-door-1-0",
@@ -17646,7 +17791,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df171"
+            "parent": "$df148"
           },
           "def": "core/door@2",
           "name": "suburb-house-9-door-3",
@@ -17667,7 +17812,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df171"
+            "parent": "$df148"
           },
           "def": "core/door@2",
           "name": "suburb-house-9-door-4",
@@ -17688,7 +17833,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df171"
+            "parent": "$df148"
           },
           "def": "core/door@2",
           "name": "suburb-house-9-door-5",
@@ -17737,12 +17882,12 @@
             "roofColor": "#a8553a",
             "trim": "#2f4f5f"
           },
-          "tmp": "$df172"
+          "tmp": "$df149"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df172"
+            "parent": "$df149"
           },
           "def": "core/door@2",
           "name": "suburb-house-10-door-1-0",
@@ -17763,7 +17908,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df172"
+            "parent": "$df149"
           },
           "def": "core/door@2",
           "name": "suburb-house-10-door-3",
@@ -17784,7 +17929,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df172"
+            "parent": "$df149"
           },
           "def": "core/door@2",
           "name": "suburb-house-10-door-4",
@@ -17805,7 +17950,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df172"
+            "parent": "$df149"
           },
           "def": "core/door@2",
           "name": "suburb-house-10-door-5",
@@ -17855,12 +18000,12 @@
             "roofColor": "#b86a45",
             "trim": "#7a2f2a"
           },
-          "tmp": "$df173"
+          "tmp": "$df150"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df173"
+            "parent": "$df150"
           },
           "def": "core/door@2",
           "name": "suburb-house-11-door-1-0",
@@ -17881,7 +18026,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df173"
+            "parent": "$df150"
           },
           "def": "core/door@2",
           "name": "suburb-house-11-door-3",
@@ -17902,7 +18047,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df173"
+            "parent": "$df150"
           },
           "def": "core/door@2",
           "name": "suburb-house-11-door-4",
@@ -17923,7 +18068,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df173"
+            "parent": "$df150"
           },
           "def": "core/door@2",
           "name": "suburb-house-11-door-5",
@@ -17972,12 +18117,12 @@
             "roofColor": "#5a5f66",
             "trim": "#355e3b"
           },
-          "tmp": "$df174"
+          "tmp": "$df151"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df174"
+            "parent": "$df151"
           },
           "def": "core/door@2",
           "name": "suburb-house-12-door-1-0",
@@ -17998,7 +18143,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df174"
+            "parent": "$df151"
           },
           "def": "core/door@2",
           "name": "suburb-house-12-door-3",
@@ -18019,7 +18164,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df174"
+            "parent": "$df151"
           },
           "def": "core/door@2",
           "name": "suburb-house-12-door-4",
@@ -18040,7 +18185,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df174"
+            "parent": "$df151"
           },
           "def": "core/door@2",
           "name": "suburb-house-12-door-5",
@@ -18089,12 +18234,12 @@
             "roofColor": "#3f4448",
             "trim": "#f3eee2"
           },
-          "tmp": "$df175"
+          "tmp": "$df152"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df175"
+            "parent": "$df152"
           },
           "def": "core/door@2",
           "name": "suburb-house-13-door-1-0",
@@ -18115,7 +18260,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df175"
+            "parent": "$df152"
           },
           "def": "core/door@2",
           "name": "suburb-house-13-door-3",
@@ -18136,7 +18281,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df175"
+            "parent": "$df152"
           },
           "def": "core/door@2",
           "name": "suburb-house-13-door-4",
@@ -18157,7 +18302,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df175"
+            "parent": "$df152"
           },
           "def": "core/door@2",
           "name": "suburb-house-13-door-5",
@@ -18206,12 +18351,12 @@
             "roofColor": "#6f7f5a",
             "trim": "#2f4f5f"
           },
-          "tmp": "$df176"
+          "tmp": "$df153"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df176"
+            "parent": "$df153"
           },
           "def": "core/door@2",
           "name": "suburb-house-14-door-1-0",
@@ -18232,7 +18377,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df176"
+            "parent": "$df153"
           },
           "def": "core/door@2",
           "name": "suburb-house-14-door-3",
@@ -18253,7 +18398,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df176"
+            "parent": "$df153"
           },
           "def": "core/door@2",
           "name": "suburb-house-14-door-4",
@@ -18274,7 +18419,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df176"
+            "parent": "$df153"
           },
           "def": "core/door@2",
           "name": "suburb-house-14-door-5",
@@ -18329,12 +18474,12 @@
             "roofColor": "#8a3a2a",
             "trim": "#7a2f2a"
           },
-          "tmp": "$df177"
+          "tmp": "$df154"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df177"
+            "parent": "$df154"
           },
           "def": "core/door@2",
           "name": "suburb-house-15-door-1-0",
@@ -18355,7 +18500,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df177"
+            "parent": "$df154"
           },
           "def": "core/door@2",
           "name": "suburb-house-15-door-3",
@@ -18376,7 +18521,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df177"
+            "parent": "$df154"
           },
           "def": "core/door@2",
           "name": "suburb-house-15-door-4",
@@ -18397,7 +18542,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df177"
+            "parent": "$df154"
           },
           "def": "core/door@2",
           "name": "suburb-house-15-door-5",
@@ -18446,12 +18591,12 @@
             "roofColor": "#4f5d6b",
             "trim": "#355e3b"
           },
-          "tmp": "$df178"
+          "tmp": "$df155"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df178"
+            "parent": "$df155"
           },
           "def": "core/door@2",
           "name": "suburb-house-16-door-1-0",
@@ -18472,7 +18617,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df178"
+            "parent": "$df155"
           },
           "def": "core/door@2",
           "name": "suburb-house-16-door-3",
@@ -18493,7 +18638,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df178"
+            "parent": "$df155"
           },
           "def": "core/door@2",
           "name": "suburb-house-16-door-4",
@@ -18514,7 +18659,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df178"
+            "parent": "$df155"
           },
           "def": "core/door@2",
           "name": "suburb-house-16-door-5",
@@ -18563,7 +18708,7 @@
             "wall": "#7a2f2a",
             "roofColor": "#3f4448"
           },
-          "tmp": "$df179"
+          "tmp": "$df156"
         },
         {
           "op": "place",
@@ -18578,7 +18723,7 @@
             "wall": "#5a6a3a",
             "roofColor": "#3f4448"
           },
-          "tmp": "$df180"
+          "tmp": "$df157"
         },
         {
           "op": "place",
@@ -18593,7 +18738,7 @@
             "wall": "#2f4f5f",
             "roofColor": "#3f4448"
           },
-          "tmp": "$df181"
+          "tmp": "$df158"
         },
         {
           "op": "place",
@@ -18608,7 +18753,7 @@
             "wall": "#8a5a36",
             "roofColor": "#3f4448"
           },
-          "tmp": "$df182"
+          "tmp": "$df159"
         },
         {
           "op": "place",
@@ -18623,7 +18768,7 @@
             "wall": "#b08a5f",
             "roofColor": "#3f4448"
           },
-          "tmp": "$df183"
+          "tmp": "$df160"
         },
         {
           "op": "place",
@@ -18638,7 +18783,7 @@
             "wall": "#d9a85e",
             "roofColor": "#3f4448"
           },
-          "tmp": "$df184"
+          "tmp": "$df161"
         }
       ]
     },
@@ -18668,12 +18813,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df185"
+          "tmp": "$df233"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df185"
+            "parent": "$df233"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-1-door-1-0",
@@ -18694,7 +18839,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df185"
+            "parent": "$df233"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-1-door-2",
@@ -18715,7 +18860,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df185"
+            "parent": "$df233"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-1-door-3",
@@ -18736,7 +18881,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df185"
+            "parent": "$df233"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-1-door-4",
@@ -18794,12 +18939,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df186"
+          "tmp": "$df228"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df186"
+            "parent": "$df228"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-2-door-1-0",
@@ -18820,7 +18965,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df186"
+            "parent": "$df228"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-2-door-2",
@@ -18841,7 +18986,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df186"
+            "parent": "$df228"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-2-door-3",
@@ -18862,7 +19007,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df186"
+            "parent": "$df228"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-2-door-4",
@@ -18920,12 +19065,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df187"
+          "tmp": "$df234"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df187"
+            "parent": "$df234"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-3-door-1-0",
@@ -18946,7 +19091,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df187"
+            "parent": "$df234"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-3-door-2",
@@ -18967,7 +19112,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df187"
+            "parent": "$df234"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-3-door-3",
@@ -18988,7 +19133,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df187"
+            "parent": "$df234"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-3-door-4",
@@ -19046,12 +19191,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df188"
+          "tmp": "$df229"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df188"
+            "parent": "$df229"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-4-door-1-0",
@@ -19072,7 +19217,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df188"
+            "parent": "$df229"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-4-door-2",
@@ -19093,7 +19238,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df188"
+            "parent": "$df229"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-4-door-3",
@@ -19114,7 +19259,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df188"
+            "parent": "$df229"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-4-door-4",
@@ -19172,12 +19317,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df189"
+          "tmp": "$df237"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df189"
+            "parent": "$df237"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-5-door-1-0",
@@ -19198,7 +19343,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df189"
+            "parent": "$df237"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-5-door-2",
@@ -19219,7 +19364,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df189"
+            "parent": "$df237"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-5-door-3",
@@ -19240,7 +19385,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df189"
+            "parent": "$df237"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-5-door-4",
@@ -19298,12 +19443,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df190"
+          "tmp": "$df235"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df190"
+            "parent": "$df235"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-6-door-1-0",
@@ -19324,7 +19469,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df190"
+            "parent": "$df235"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-6-door-2",
@@ -19345,7 +19490,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df190"
+            "parent": "$df235"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-6-door-3",
@@ -19366,7 +19511,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df190"
+            "parent": "$df235"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-6-door-4",
@@ -19424,12 +19569,12 @@
             "roofPitch": 40,
             "balcony": true
           },
-          "tmp": "$df191"
+          "tmp": "$df236"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df191"
+            "parent": "$df236"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-7-door-1-0",
@@ -19450,7 +19595,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df191"
+            "parent": "$df236"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-7-door-2",
@@ -19471,7 +19616,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df191"
+            "parent": "$df236"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-7-door-3",
@@ -19492,7 +19637,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df191"
+            "parent": "$df236"
           },
           "def": "core/door@2",
           "name": "alpine-chalet-7-door-4",
@@ -19548,12 +19693,12 @@
             "material": "plaster",
             "roof": "shed"
           },
-          "tmp": "$df192"
+          "tmp": "$df162"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df192"
+            "parent": "$df162"
           },
           "def": "core/door@2",
           "name": "artists-studio-1-door-1-0",
@@ -19574,7 +19719,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df192"
+            "parent": "$df162"
           },
           "def": "core/door@2",
           "name": "artists-studio-1-door-2",
@@ -19636,12 +19781,12 @@
             "material": "wood",
             "roof": "gable"
           },
-          "tmp": "$df193"
+          "tmp": "$df163"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df193"
+            "parent": "$df163"
           },
           "def": "core/door@2",
           "name": "artists-studio-2-door-1-0",
@@ -19662,7 +19807,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df193"
+            "parent": "$df163"
           },
           "def": "core/door@2",
           "name": "artists-studio-2-door-2",
@@ -19718,12 +19863,12 @@
             "material": "plaster",
             "roof": "flat"
           },
-          "tmp": "$df194"
+          "tmp": "$df164"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df194"
+            "parent": "$df164"
           },
           "def": "core/door@2",
           "name": "artists-studio-3-door-2",
@@ -19779,12 +19924,12 @@
             "material": "plaster",
             "roof": "shed"
           },
-          "tmp": "$df195"
+          "tmp": "$df165"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df195"
+            "parent": "$df165"
           },
           "def": "core/door@2",
           "name": "artists-studio-4-door-1-0",
@@ -19805,7 +19950,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df195"
+            "parent": "$df165"
           },
           "def": "core/door@2",
           "name": "artists-studio-4-door-2",
@@ -19861,12 +20006,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df196"
+          "tmp": "$df166"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df196"
+            "parent": "$df166"
           },
           "def": "core/door@2",
           "name": "artists-studio-5-door-1-0",
@@ -19887,7 +20032,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df196"
+            "parent": "$df166"
           },
           "def": "core/door@2",
           "name": "artists-studio-5-door-2",
@@ -19943,12 +20088,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df197"
+          "tmp": "$df167"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df197"
+            "parent": "$df167"
           },
           "def": "core/door@2",
           "name": "artists-studio-8-door-1-0",
@@ -19969,7 +20114,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df197"
+            "parent": "$df167"
           },
           "def": "core/door@2",
           "name": "artists-studio-8-door-2",
@@ -20025,12 +20170,12 @@
             "material": "plaster",
             "roof": "flat"
           },
-          "tmp": "$df198"
+          "tmp": "$df168"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df198"
+            "parent": "$df168"
           },
           "def": "core/door@2",
           "name": "artists-studio-9-door-1-0",
@@ -20051,7 +20196,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df198"
+            "parent": "$df168"
           },
           "def": "core/door@2",
           "name": "artists-studio-9-door-2",
@@ -20107,12 +20252,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df199"
+          "tmp": "$df226"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df199"
+            "parent": "$df226"
           },
           "def": "core/door@2",
           "name": "cliff-house-2-door-1-0",
@@ -20168,12 +20313,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df200"
+          "tmp": "$df171"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df200"
+            "parent": "$df171"
           },
           "def": "core/door@2",
           "name": "cliff-house-3-door-1-0",
@@ -20194,7 +20339,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df200"
+            "parent": "$df171"
           },
           "def": "core/door@2",
           "name": "cliff-house-3-door-2",
@@ -20256,7 +20401,7 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df201"
+          "tmp": "$df169"
         },
         {
           "op": "place",
@@ -20296,7 +20441,7 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df202"
+          "tmp": "$df219"
         },
         {
           "op": "place",
@@ -20336,7 +20481,7 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df203"
+          "tmp": "$df220"
         },
         {
           "op": "place",
@@ -20378,12 +20523,12 @@
             "balcony": true
           },
           "r": 1.571,
-          "tmp": "$df204"
+          "tmp": "$df221"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df204"
+            "parent": "$df221"
           },
           "def": "core/door@2",
           "name": "cliff-house-7-door-1-1",
@@ -20404,7 +20549,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df204"
+            "parent": "$df221"
           },
           "def": "core/door@2",
           "name": "cliff-house-7-door-3",
@@ -20461,12 +20606,12 @@
             "windows": 0.5
           },
           "r": 1.571,
-          "tmp": "$df205"
+          "tmp": "$df222"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df205"
+            "parent": "$df222"
           },
           "def": "core/door@2",
           "name": "cliff-house-8-door-1-1",
@@ -20522,12 +20667,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df206"
+          "tmp": "$df223"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df206"
+            "parent": "$df223"
           },
           "def": "core/door@2",
           "name": "cliff-house-9-door-1-0",
@@ -20548,7 +20693,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df206"
+            "parent": "$df223"
           },
           "def": "core/door@2",
           "name": "cliff-house-9-door-2",
@@ -20605,12 +20750,12 @@
             "windows": 0.5
           },
           "r": -1.571,
-          "tmp": "$df207"
+          "tmp": "$df224"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df207"
+            "parent": "$df224"
           },
           "def": "core/door@2",
           "name": "cliff-house-11-door-1-1",
@@ -20667,7 +20812,7 @@
             "windows": 0.5
           },
           "r": 1.571,
-          "tmp": "$df208"
+          "tmp": "$df225"
         },
         {
           "op": "place",
@@ -20713,12 +20858,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df209"
+          "tmp": "$df212"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df209"
+            "parent": "$df212"
           },
           "def": "core/door@2",
           "name": "cliff-house-13-door-2",
@@ -20739,7 +20884,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df209"
+            "parent": "$df212"
           },
           "def": "core/door@2",
           "name": "cliff-house-13-door-3",
@@ -20796,12 +20941,12 @@
             "windows": 0.5
           },
           "r": 1.571,
-          "tmp": "$df210"
+          "tmp": "$df213"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df210"
+            "parent": "$df213"
           },
           "def": "core/door@2",
           "name": "cliff-house-14-door-1-0",
@@ -20857,12 +21002,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df211"
+          "tmp": "$df214"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df211"
+            "parent": "$df214"
           },
           "def": "core/door@2",
           "name": "cliff-house-15-door-1-0",
@@ -20883,7 +21028,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df211"
+            "parent": "$df214"
           },
           "def": "core/door@2",
           "name": "cliff-house-15-door-2",
@@ -20939,12 +21084,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df212"
+          "tmp": "$df215"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df212"
+            "parent": "$df215"
           },
           "def": "core/door@2",
           "name": "cliff-house-17-door-1-0",
@@ -21001,12 +21146,12 @@
             "windows": 0.5
           },
           "r": -1.571,
-          "tmp": "$df213"
+          "tmp": "$df170"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df213"
+            "parent": "$df170"
           },
           "def": "core/door@2",
           "name": "cliff-house-18-door-1-0",
@@ -21063,12 +21208,12 @@
             "windows": 0.5
           },
           "r": 1.571,
-          "tmp": "$df214"
+          "tmp": "$df216"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df214"
+            "parent": "$df216"
           },
           "def": "core/door@2",
           "name": "cliff-house-19-door-1-1",
@@ -21125,7 +21270,7 @@
             "windows": 0.5
           },
           "r": 1.571,
-          "tmp": "$df215"
+          "tmp": "$df217"
         },
         {
           "op": "place",
@@ -21166,12 +21311,12 @@
             "windows": 0.5,
             "balcony": true
           },
-          "tmp": "$df216"
+          "tmp": "$df218"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df216"
+            "parent": "$df218"
           },
           "def": "core/door@2",
           "name": "cliff-house-21-door-2",
@@ -21192,7 +21337,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df216"
+            "parent": "$df218"
           },
           "def": "core/door@2",
           "name": "cliff-house-21-door-3",
@@ -21213,7 +21358,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df216"
+            "parent": "$df218"
           },
           "def": "core/door@2",
           "name": "cliff-house-21-door-5",
@@ -21276,12 +21421,12 @@
             "windows": 0.5,
             "balcony": true
           },
-          "tmp": "$df217"
+          "tmp": "$df208"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df217"
+            "parent": "$df208"
           },
           "def": "core/door@2",
           "name": "cliff-house-23-door-1-1",
@@ -21302,7 +21447,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df217"
+            "parent": "$df208"
           },
           "def": "core/door@2",
           "name": "cliff-house-23-door-3",
@@ -21358,12 +21503,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df218"
+          "tmp": "$df209"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df218"
+            "parent": "$df209"
           },
           "def": "core/door@2",
           "name": "cliff-house-24-door-2",
@@ -21384,7 +21529,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df218"
+            "parent": "$df209"
           },
           "def": "core/door@2",
           "name": "cliff-house-24-door-3",
@@ -21441,12 +21586,12 @@
             "windows": 0.5,
             "balcony": true
           },
-          "tmp": "$df219"
+          "tmp": "$df210"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df219"
+            "parent": "$df210"
           },
           "def": "core/door@2",
           "name": "cliff-house-25-door-2",
@@ -21467,7 +21612,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df219"
+            "parent": "$df210"
           },
           "def": "core/door@2",
           "name": "cliff-house-25-door-3",
@@ -21488,7 +21633,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df219"
+            "parent": "$df210"
           },
           "def": "core/door@2",
           "name": "cliff-house-25-door-5",
@@ -21544,12 +21689,12 @@
             "roof": "flat",
             "windows": 0.5
           },
-          "tmp": "$df220"
+          "tmp": "$df211"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df220"
+            "parent": "$df211"
           },
           "def": "core/door@2",
           "name": "cliff-house-27-door-1-0",
@@ -21604,12 +21749,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df221"
+          "tmp": "$df172"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df221"
+            "parent": "$df172"
           },
           "def": "core/door@2",
           "name": "hillside-home-1-door-1-0",
@@ -21630,7 +21775,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df221"
+            "parent": "$df172"
           },
           "def": "core/door@2",
           "name": "hillside-home-1-door-2",
@@ -21651,7 +21796,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df221"
+            "parent": "$df172"
           },
           "def": "core/door@2",
           "name": "hillside-home-1-door-3",
@@ -21707,12 +21852,12 @@
             "roof": "shed",
             "balcony": true
           },
-          "tmp": "$df222"
+          "tmp": "$df173"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df222"
+            "parent": "$df173"
           },
           "def": "core/door@2",
           "name": "hillside-home-2-door-1-0",
@@ -21733,7 +21878,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df222"
+            "parent": "$df173"
           },
           "def": "core/door@2",
           "name": "hillside-home-2-door-2",
@@ -21754,7 +21899,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df222"
+            "parent": "$df173"
           },
           "def": "core/door@2",
           "name": "hillside-home-2-door-3",
@@ -21775,7 +21920,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df222"
+            "parent": "$df173"
           },
           "def": "core/door@2",
           "name": "hillside-home-2-door-5",
@@ -21830,12 +21975,12 @@
             "material": "plaster",
             "roof": "hip"
           },
-          "tmp": "$df223"
+          "tmp": "$df174"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df223"
+            "parent": "$df174"
           },
           "def": "core/door@2",
           "name": "hillside-home-3-door-1-0",
@@ -21856,7 +22001,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df223"
+            "parent": "$df174"
           },
           "def": "core/door@2",
           "name": "hillside-home-3-door-2",
@@ -21877,7 +22022,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df223"
+            "parent": "$df174"
           },
           "def": "core/door@2",
           "name": "hillside-home-3-door-3",
@@ -21938,12 +22083,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df224"
+          "tmp": "$df179"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df224"
+            "parent": "$df179"
           },
           "def": "core/door@2",
           "name": "hillside-home-4-door-1-0",
@@ -21964,7 +22109,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df224"
+            "parent": "$df179"
           },
           "def": "core/door@2",
           "name": "hillside-home-4-door-2",
@@ -22019,12 +22164,12 @@
             "material": "plaster",
             "roof": "shed"
           },
-          "tmp": "$df225"
+          "tmp": "$df180"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df225"
+            "parent": "$df180"
           },
           "def": "core/door@2",
           "name": "hillside-home-5-door-1-0",
@@ -22045,7 +22190,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df225"
+            "parent": "$df180"
           },
           "def": "core/door@2",
           "name": "hillside-home-5-door-2",
@@ -22066,7 +22211,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df225"
+            "parent": "$df180"
           },
           "def": "core/door@2",
           "name": "hillside-home-5-door-3",
@@ -22087,7 +22232,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df225"
+            "parent": "$df180"
           },
           "def": "core/door@2",
           "name": "hillside-home-5-door-4",
@@ -22125,7 +22270,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@3",
           "name": "hillside-home-7",
           "p": [
             219.41,
@@ -22141,6 +22286,67 @@
             "floors": 1,
             "material": "plaster",
             "roof": "gable"
+          },
+          "tmp": "$df181"
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df181"
+          },
+          "def": "core/door@2",
+          "name": "hillside-home-7-door-1",
+          "p": [
+            -1.376,
+            0,
+            -1.33
+          ],
+          "r": 1.571,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df181"
+          },
+          "def": "core/door@2",
+          "name": "hillside-home-7-door-2",
+          "p": [
+            -1.376,
+            0,
+            1.33
+          ],
+          "r": 1.571,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-7-door-3",
+          "p": [
+            216.594,
+            5.887,
+            10.611
+          ],
+          "r": -1.736,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
           }
         },
         {
@@ -22163,12 +22369,12 @@
             "roof": "hip",
             "balcony": true
           },
-          "tmp": "$df226"
+          "tmp": "$df191"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df226"
+            "parent": "$df191"
           },
           "def": "core/door@2",
           "name": "hillside-home-8-door-1-0",
@@ -22189,7 +22395,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df226"
+            "parent": "$df191"
           },
           "def": "core/door@2",
           "name": "hillside-home-8-door-2",
@@ -22210,7 +22416,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df226"
+            "parent": "$df191"
           },
           "def": "core/door@2",
           "name": "hillside-home-8-door-3",
@@ -22231,7 +22437,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df226"
+            "parent": "$df191"
           },
           "def": "core/door@2",
           "name": "hillside-home-8-door-4",
@@ -22286,12 +22492,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df227"
+          "tmp": "$df182"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df227"
+            "parent": "$df182"
           },
           "def": "core/door@2",
           "name": "hillside-home-9-door-1-0",
@@ -22312,7 +22518,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df227"
+            "parent": "$df182"
           },
           "def": "core/door@2",
           "name": "hillside-home-9-door-2",
@@ -22367,12 +22573,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df228"
+          "tmp": "$df183"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df228"
+            "parent": "$df183"
           },
           "def": "core/door@2",
           "name": "hillside-home-10-door-1-0",
@@ -22393,7 +22599,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df228"
+            "parent": "$df183"
           },
           "def": "core/door@2",
           "name": "hillside-home-10-door-2",
@@ -22448,12 +22654,12 @@
             "material": "plaster",
             "roof": "hip"
           },
-          "tmp": "$df229"
+          "tmp": "$df192"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df229"
+            "parent": "$df192"
           },
           "def": "core/door@2",
           "name": "hillside-home-11-door-1-0",
@@ -22474,7 +22680,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df229"
+            "parent": "$df192"
           },
           "def": "core/door@2",
           "name": "hillside-home-11-door-2",
@@ -22529,12 +22735,12 @@
             "material": "plaster",
             "roof": "flat"
           },
-          "tmp": "$df230"
+          "tmp": "$df193"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df230"
+            "parent": "$df193"
           },
           "def": "core/door@2",
           "name": "hillside-home-12-door-2",
@@ -22595,12 +22801,12 @@
             "material": "plaster",
             "roof": "flat"
           },
-          "tmp": "$df231"
+          "tmp": "$df188"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df231"
+            "parent": "$df188"
           },
           "def": "core/door@2",
           "name": "hillside-home-13-door-1-0",
@@ -22621,7 +22827,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df231"
+            "parent": "$df188"
           },
           "def": "core/door@2",
           "name": "hillside-home-13-door-2",
@@ -22659,7 +22865,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@3",
           "name": "hillside-home-14",
           "p": [
             248.232,
@@ -22675,6 +22881,109 @@
             "floors": 2,
             "material": "plaster",
             "roof": "gable"
+          },
+          "tmp": "$df189"
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df189"
+          },
+          "def": "core/door@2",
+          "name": "hillside-home-14-door-1",
+          "p": [
+            -1.755,
+            0,
+            -1.9
+          ],
+          "r": 1.571,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df189"
+          },
+          "def": "core/door@2",
+          "name": "hillside-home-14-door-2",
+          "p": [
+            -1.755,
+            0,
+            1.9
+          ],
+          "r": 1.571,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df189"
+          },
+          "def": "core/door@2",
+          "name": "hillside-home-14-door-3",
+          "p": [
+            -2.194,
+            2.8,
+            -1.74
+          ],
+          "r": -3.141,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "in": {
+            "parent": "$df189"
+          },
+          "def": "core/door@2",
+          "name": "hillside-home-14-door-4",
+          "p": [
+            2.194,
+            2.8,
+            -1.74
+          ],
+          "r": 0.001,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-14-door-5",
+          "p": [
+            247.079,
+            10.804,
+            -23.479
+          ],
+          "r": 3.105,
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
           }
         },
         {
@@ -22697,12 +23006,12 @@
             "roof": "flat",
             "balcony": true
           },
-          "tmp": "$df232"
+          "tmp": "$df190"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df232"
+            "parent": "$df190"
           },
           "def": "core/door@2",
           "name": "hillside-home-15-door-1-0",
@@ -22723,7 +23032,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df232"
+            "parent": "$df190"
           },
           "def": "core/door@2",
           "name": "hillside-home-15-door-2",
@@ -22744,7 +23053,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df232"
+            "parent": "$df190"
           },
           "def": "core/door@2",
           "name": "hillside-home-15-door-3",
@@ -22765,7 +23074,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df232"
+            "parent": "$df190"
           },
           "def": "core/door@2",
           "name": "hillside-home-15-door-5",
@@ -22820,12 +23129,12 @@
             "material": "plaster",
             "roof": "gable"
           },
-          "tmp": "$df233"
+          "tmp": "$df178"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df233"
+            "parent": "$df178"
           },
           "def": "core/door@2",
           "name": "hillside-home-16-door-1-0",
@@ -22846,7 +23155,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df233"
+            "parent": "$df178"
           },
           "def": "core/door@2",
           "name": "hillside-home-16-door-2",
@@ -23336,7 +23645,7 @@
             "trim": "#6c735b",
             "roofColor": "#686b55"
           },
-          "tmp": "$df234"
+          "tmp": "$df186"
         },
         {
           "op": "place",
@@ -51588,9 +51897,9 @@
             "slot": "storeroom"
           },
           "p": [
-            -1.9,
+            -0.8999999999999999,
             0,
-            -1.15
+            -0.65
           ],
           "r": 0
         },
