@@ -26,12 +26,14 @@ for (let i = 0; i < 30; i++) {                            // a world just up may
 // off camera: up to the landing, the bedroom door shut by hand, then out to the bakery's front (~45 m away)
 run(['act', 'walk:canal-west-home-3/landing', '--run', '--wait', '150', '--json']);
 const caps = run(['caps', '--search', 'canal-west-home-3-door-3'], 90_000), out = caps.stdout + caps.stderr;
-const door = /object:([^:\s"']+):close[^}]*canal-west-home-3-door-3"/s.exec(out)?.[1];
-if (door) run(['act', `object:${door}:close`, '--wait', '60', '--json'], 90_000);   // else it is shut already (only "open" offered)
+// the door's id from whichever of its offers is listed (open or close); closing a shut door is a no-op refusal
+const idOf = (text, label) => new RegExp(`"id": "object:([^:"]+):\\w+",\\s*"label": "${label}"`).exec(text)?.[1];
+const door = idOf(out, 'canal-west-home-3/canal-west-home-3-door-3');
+if (door) run(['act', `object:${door}:close`, '--wait', '60', '--json'], 90_000);
 // fitted doors start open (the coordinator's call): out to the front step, and the front door shut by hand behind her
 run(['act', 'walk:canal-west-home-3', '--run', '--wait', '150', '--json']);
 const caps1 = run(['caps', '--search', 'canal-west-home-3-door-1'], 90_000), out1 = caps1.stdout + caps1.stderr;
-const front = /object:([^:\s"']+):close[^}]*canal-west-home-3-door-1"/s.exec(out1)?.[1];
+const front = idOf(out1, 'canal-west-home-3-door-1');
 if (front) run(['act', `object:${front}:close`, '--wait', '60', '--json'], 90_000);
 run(['act', 'walk:int-bakery', '--run', '--wait', '150', '--json']);
 
