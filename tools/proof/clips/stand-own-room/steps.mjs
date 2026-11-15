@@ -13,22 +13,28 @@ const parse = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const run = (args) => spawnSync(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: 60_000 });
 for (let i = 0; i < 30; i++) { if (run(['catalog']).status === 0) break; spawnSync('sleep', ['2']); }   // a world just up may 503
 
-/** The first offered walk of these kitchen stools (each measured on #1243 with its stand's search outside the kitchen). */
-const HOUSES = ['campus-residence-1', 'campus-residence-2', 'region-farm-hamlet-farmhouse', 'region-west-river-watermill', 'alpine-chalet-1'];
-const r = run(['caps', '--search', 'kitchen stool', '--verb', 'walk', '--all', '--json']);
-const offers = (parse(r.stdout)?.offers ?? []).filter((o) => /^walk:.*\/kitchen-stool$/.test(o.id ?? ''));
-console.error(`kit: kitchen stools offered: ${JSON.stringify(offers.map((o) => [o.id, o.metres]).slice(0, 12))} ${r.status ? r.stderr.slice(0, 400) : ''}`);
-const HOUSE = HOUSES.find((h) => offers.some((o) => o.id === `walk:${h}/kitchen-stool`));
-if (!HOUSE) throw Error('kit: none of the measured kitchen stools is offered');
-const STOOL = `walk:${HOUSE}/kitchen-stool`;
-console.error(`kit: target ${STOOL}`);
-
 const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
   (e, out, err) => res({ code: e ? (e.code ?? 1) : 0, out: String(out), err: String(err) })));
 const said = (n, x) => console.error(`kit: ${n} exit ${x.code}: ${(x.out || x.err).slice(0, 1500)}`);
+const stools = () => {
+  const r = run(['caps', '--search', 'kitchen stool', '--verb', 'walk', '--all', '--json']);
+  const ids = (parse(r.stdout)?.offers ?? []).map((o) => o.id).filter((id) => /^walk:.*kitchen-stool$/.test(id ?? ''));
+  console.error(`kit: kitchen stools offered: ${JSON.stringify(ids.slice(0, 12))} ${r.status ? r.stderr.slice(0, 400) : r.stdout.slice(0, 300)}`);
+  return ids;
+};
 
-// before the page opens: Ana walks into the house (not filmed)
-said(`Ana into ${HOUSE}`, await eden(['act', `walk:${HOUSE}`, '--wait', '170', '--json'], 180_000));
+// before the page opens (not filmed): Ana walks into the first of these houses (each measured on #1243 with its kitchen
+// stool's stand search outside the kitchen) whose walk is offered, so the stool's walk is offered from inside
+const HOUSES = ['campus-residence-1', 'campus-residence-2', 'region-farm-hamlet-farmhouse', 'region-west-river-watermill', 'alpine-chalet-1'];
+stools(); let HOUSE;
+for (const h of HOUSES) {
+  if (HOUSE) break;
+  const x = await eden(['act', `walk:${h}`, '--wait', '170', '--json'], 180_000); said(`Ana into ${h}`, x);
+  if (x.code === 0 && stools().includes(`walk:${h}/kitchen-stool`)) HOUSE = h;
+}
+if (!HOUSE) throw Error('kit: none of the measured kitchen stools is offered');
+const STOOL = `walk:${HOUSE}/kitchen-stool`;
+console.error(`kit: target ${STOOL}`);
 said('Ana here', await eden(['here', '--json'], 60_000));
 
 export default async function steps(page, { mark }) {
