@@ -122,7 +122,8 @@ node e2e/local-smoke.mjs --build                 # any free port; --port N or E2
 
 [testing/e2e.md](testing/e2e.md#local-smoke) has its checks, output and exit codes. The other scenarios in
 `e2e/scenarios/` drive an isolated client fixture and write a proof bundle under `.e2e/runs/`; the `e2e` repo skill
-runs and authors them. Rendering diagnostics for camera follow and temporal stability are in `tools/render-checks/`.
+runs and authors them. Rendering diagnostics for camera follow and temporal stability are in `tools/render-checks/`; `strobe.mjs` there
+holds the camera still and fails on any region that flips between frames (#1265).
 The engine's own browser tests are in `mars/viewer/e2e/`.
 
 ## CI window

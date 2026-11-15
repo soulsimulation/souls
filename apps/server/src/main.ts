@@ -41,8 +41,9 @@ import {installBirthLooks} from './god/birth-look.ts';
 import { setKitViewerContract } from '@souls/generators';
 import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
-import { stallConfig, startWatchdog, writeLiveNow } from './load/watchdog.ts';
+import { faultExit, faultGuard, installFaultGuard, killRule, stallConfig, startWatchdog, stoppedByFault, writeLiveNow } from './load/watchdog.ts';
 import { StallLog } from './load/stall-log.ts';
+import { noteLastExit } from './load/restart-loop.ts'; import { diskHeadroom, diskMinFreeMb } from './load/disk-headroom.ts'; import { installFaultInject } from './load/fault-inject.ts';
 import { S, sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
@@ -63,7 +64,8 @@ await standby(async () => {
 bootAt.go = performance.now();
 // srv-load (LOAD-CONTRACT §4): the watchdog thread first, before the database opens, so <DATA_DIR>/live.json reports the
 // whole boot. Not during a standby wait (the serving process still owns the file then). SIM_HEALTH_PORT: its own /healthz.
-if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir) });
+const lastExit = process.env.SIM_WATCHDOG !== '0' ? noteLastExit(config.dataDir) : null;   // #2378 A2: before the watchdog rewrites live.json
+if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir), kill: killRule() });
 bootPhase('boot:restore');
 
 // K1 / NT5: new kit fields are admitted only with the viewer that can draw them.
@@ -168,6 +170,8 @@ server.on('upgrade', req => { req.url = stripWorldPath(req.url); host.wake(); })
 hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
 host.watched = () => hub.clients.size > 0;   // #2298 A4b
 host.listeners.push({ afterTick: () => { sharedLoad[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
+const faultInject = process.env.SIM_FAULT_INJECT === '1' ? installFaultInject(host, config.dataDir) : null;
+host.stepSlots = sharedLoad; if (lastExit?.quarantine) host.quarantinedStep = lastExit.quarantine;   // #2378 A2: a step that ended two boots in a row
 hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPersist;
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
@@ -211,7 +215,7 @@ monitor.register('hub', (l) => hub.setLoadLevel(l));
 { const b = engineBridge as unknown as { setLoadLevel?: (l: 'green' | 'amber' | 'red' | 'black') => void } | undefined; if (b?.setLoadLevel) monitor.register('perception', (l) => b.setLoadLevel!(l)); }
 // Waking limit: DARK unless SIM_WAKING_LIMIT=1 (tranche §5.1); bound below, once the edge body rule exists.
 let waking: WakingLimit | undefined;
-const app = buildApp({ load: { admission, monitor, crowded: (soulId) => waking?.position(soulId) ?? null }, cfg: config, db, host, auth, hub, brain, souls, takes, intentV2, edge, god, contextReady: engineBridge ? ()=>engineBridge.contextReady() : undefined, contextWait: engineBridge ? signal=>engineBridge.waitForContext({signal}) : undefined, contextLevelAt: engineBridge ? (x,z,y)=>engineBridge.levelAt(x,z,y) : undefined });
+const app = buildApp({ load: { admission, monitor, faults: () => faults.counts, crowded: (soulId) => waking?.position(soulId) ?? null }, cfg: config, db, host, auth, hub, brain, souls, takes, intentV2, edge, god, contextReady: engineBridge ? ()=>engineBridge.contextReady() : undefined, contextWait: engineBridge ? signal=>engineBridge.waitForContext({signal}) : undefined, contextLevelAt: engineBridge ? (x,z,y)=>engineBridge.levelAt(x,z,y) : undefined });
 if (process.env.SIM_WAKING_LIMIT === '1' && edge?.bodyRule) {
   const rule = edge.bodyRule;
   waking = new WakingLimit({ maxAwake: Number(process.env.SIM_MAX_AWAKE) || 12, owner: () => god?.owner ?? config.ownerId ?? null,
@@ -294,7 +298,45 @@ function stillAnswer() {
     ticksComputed: k.ticksComputed, ticksJumped: k.ticksJumped, jumps: k.jumps, lastHorizon: k.lastHorizon };
 }
 const loopback = (a: string | undefined) => a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
+// #2366 A1: a fault in a timer, a promise, a request handler, a tick or one listener's step is logged by name and the world
+// goes on; 50 in a minute is a broken world: a crash exit (70, never the planned 75) that the launcher's breaker counts, with
+// the step that threw most of them recorded for the next boot. A tick fault that leaves the clock stopped for good (its timer
+// gone, or unavailable with no named halt) exits the same way: nothing else would notice. The process handlers go in once
+// the world serves.
+const faults = faultGuard({ onStorm: (n, step) => { if (!closing) faultExit(config.dataDir, `world.fault.storm: ${n} faults in a minute`, step); } });
+host.onFault = (name, error, step) => {
+  faults.note(name, error, step);
+  // (not during the boot catch-up: its clock has not started yet, and a stop there ends the catch-up and starts the clock)
+  const stopped = catchingUp ? null : stoppedByFault(host, closing); if (stopped) faultExit(config.dataDir, stopped, null);
+};
 server.on('request', (req, res) => {
+  try { onRequest(req, res); }
+  catch (error) { faults.note('world.fault.request', error); if (!res.headersSent) res.writeHead(500, { 'Cache-Control': 'no-store' }).end('Internal error.'); else res.destroy(); }
+});
+// #2366: SIM_FAULT_INJECT=1 (tests and measurement only; loopback, never forwarded): POST /__sim/fault?kind=… makes this
+// world fail on purpose: tick, timer, rejection, request (a throw in a handler), hang (&ms=), alloc (one runaway turn),
+// leak (a growing heap across turns), stop (a tick fault that stops the clock), storm (a step that throws every tick).
+const FAULT_INJECT = process.env.SIM_FAULT_INJECT === '1';
+function injectFault(kind: string, ms: number) {
+  const boom = (where: string) => new Error(`injected ${where} fault (#2366)`);
+  if (kind === 'tick') { const l = { afterTick: () => { host.listeners.splice(host.listeners.indexOf(l), 1); throw boom('tick'); } }; host.listeners.push(l); }
+  else if (kind === 'stop') { const l = { afterTick: () => { host.listeners.splice(host.listeners.indexOf(l), 1); host.stop(); throw boom('stop'); } }; host.listeners.push(l); }   // a fault that stops the clock
+  else if (kind === 'storm') host.listeners.push({ name: 'fault-inject storm', afterTick: () => { throw boom('storm'); }, stillness: () => [{ name: 'fault-inject storm', busy: true }] });   // a step that throws on every tick
+  else if (kind === 'timer') setTimeout(() => { throw boom('timer'); }, 0);
+  else if (kind === 'rejection') void Promise.reject(boom('rejection'));
+  else if (kind === 'request') throw boom('request');
+  else if (kind === 'hang') setTimeout(() => { const end = Date.now() + ms; while (Date.now() < end) { /* stuck */ } }, 100);   // (after the answer has gone)
+  else if (kind === 'alloc') setTimeout(() => { const keep: number[][] = []; for (;;) keep.push(new Array(1 << 16).fill(keep.length)); }, 100);
+  else if (kind === 'leak') { const keep: number[][] = []; setInterval(() => { for (let i = 0; i < 40; i++) keep.push(new Array(1 << 16).fill(i)); }, 20); }
+  else return false;
+  return true;
+}
+function onRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
+  if (FAULT_INJECT && req.method === 'POST' && req.url?.startsWith('/__sim/fault?') && loopback(req.socket.remoteAddress) && req.headers['x-forwarded-for'] === undefined) {
+    const q = new URL(req.url, 'http://x').searchParams, kind = q.get('kind') ?? '';
+    const ok = kind === 'disk' ? (disk.pretend(q.has('mb') ? Number(q.get('mb')) : null), true) : injectFault(kind, Number(q.get('ms')) || 600_000) || !!faultInject?.(kind, q);
+    res.writeHead(ok ? 202 : 400).end(ok ? `injected ${kind}` : 'unknown kind'); return;
+  }
   if (!catchingUp) { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); } }   // #2298 A4: a request first brings a still world to now
   if (req.method === 'GET' && req.url === '/__sim/still') {
     if (!loopback(req.socket.remoteAddress) || req.headers['x-forwarded-for'] !== undefined) { res.writeHead(404).end(); return; }
@@ -310,7 +352,7 @@ server.on('request', (req, res) => {
   if (catchingUp) res.setHeader('x-sim-catching-up', String(host.owedTicks));
   if (write && (catchingUp || held > 0)) { hold(req, res, catchingUp ?? Promise.resolve()); return; }
   serve(req, res);
-});
+}
 function serve(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   req.url = stripWorldPath(req.url);
   if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
@@ -401,7 +443,7 @@ if (engineBridge) {
   }
 }
 server.listen(config.port, config.host, () => {
-  bootPhase('serving', host.engine.world.tick); monitor.start(); stallLog?.start(); servingWarm('boot');
+  bootPhase('serving', host.engine.world.tick); installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
   console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
   const s = (ms: number) => (ms / 1000).toFixed(2);
   console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);
@@ -471,7 +513,7 @@ function unchangedSinceBackup(): boolean {
   return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
 }
 async function backupNow() {
-  if (unchangedSinceBackup()) return;
+  if (disk.low || unchangedSinceBackup()) return;   // #2378: no backup while the disk is under its headroom
   db.pruneBrainCalls(); db.pruneTalk();
   const changes = dbChanges();
   // (lane L5) no VACUUM here: it rewrote the whole file on the tick thread, stalling a serving world for seconds.
@@ -483,5 +525,6 @@ async function backupNow() {
 const backupWork=new Set<Promise<void>>();
 function trackedBackup(){const work=backupNow();backupWork.add(work);void work.finally(()=>backupWork.delete(work)).catch(()=>{});return work;}
 pruneBackups();
+const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); disk.start();   // #2378
 const firstBackup=setTimeout(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 60_000);firstBackup.unref();
 const backupTimer=setInterval(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 3600_000);backupTimer.unref();

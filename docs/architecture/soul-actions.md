@@ -368,6 +368,15 @@ until the Soul Client cutover; new families do not append another section here.
       For a cut, the blocker is the labelled obstacle at the cut itself. An obstacle without a label is not named, and a
       name that looks like an entity or part id (`e_…`, `…#…`) is dropped. Each stream gets `shared.blocked`. Moving again for 0.5 s sends `shared.resumed`
       and clears the reasons.
+    - **On the way to a station ([#1239](https://github.com/soulsimulation/souls/issues/1239)).** A construction
+      maneuver (raise, beam, joist, sheet, flight) walks its crew to their stations as child walks while the maneuver
+      itself goes on `executing`. When the maneuver is not blocked and names nothing itself, a held child walk speaks for
+      it, with its own code (`walk.goal-occupied`, `traffic.yield`, `deadlock.stalled`, …), so the operation is `blocked`
+      as above. Two held children report the least code, so a pair whose codes swap each tick reads as one hold.
+      `inspect <project>` lists such holds under `maneuvers.held` (maneuver, op, code, blocker).
+      Two crew members whose stations lie in one single-file passage, each waiting for a body standing on its station,
+      no longer hold each other there for good: under `cede-passage/1` (#2426) a walker at the end of its walk leg leaves
+      the passage to the body making way while that body is yielding to it.
     - **Unproven cut.** The replan after a cut searches from where the crew stands to the destination only. When it
       stops at its pose budget, the reason says how many poses it searched and that this does not prove there is no
       other way. The port passes the planner's own `expanded` and `budget` in the diagnostic's details, not in message

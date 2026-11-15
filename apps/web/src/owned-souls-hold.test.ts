@@ -23,6 +23,18 @@ test('#2280 A2: the held list is never shown to anyone else, and a welcome witho
   assert.deepEqual(shownOwnedSouls(held, true, 'dev:ada', null, true).ids, ['s_a']);
 });
 
+test('#2368 A2: after a reload, while sign-in is still loading, the tab keeps its last list (never empty in between)', () => {
+  const held: HeldSouls = { identity: 'dev:ada', souls: ['s_a', 's_b'] };
+  const loading = shownOwnedSouls(held, false, null, null, true, false);         // Clerk not loaded / account not known yet
+  assert.deepEqual(loading.ids, ['s_a', 's_b']); assert.equal(loading.reconnecting, true); assert.equal(loading.owner, 'dev:ada');
+  const welcomed = shownOwnedSouls(loading.held, false, null, null, false, false); // the socket's welcome came first
+  assert.deepEqual(welcomed.ids, ['s_a', 's_b']);
+  const known = shownOwnedSouls(welcomed.held, true, 'dev:ada', null, true, true); // signed in, Me on its way
+  assert.deepEqual(known.ids, ['s_a', 's_b']);
+  assert.deepEqual(shownOwnedSouls(held, false, null, null, true, true).ids, []);  // loaded and signed out: nothing shown
+  assert.deepEqual(shownOwnedSouls(null, false, null, null, true, false).ids, []); // nothing held: nothing invented
+});
+
 test('#2280 A3: the held list and drafts survive in tab storage; a bad or blocked store is ignored', () => {
   const m = new Map<string, string>();
   const store = { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => { m.set(k, v); }, removeItem: (k: string) => { m.delete(k); } };

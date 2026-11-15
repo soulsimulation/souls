@@ -250,7 +250,10 @@ tools/test-harness/remote-suite.sh <outDir> [--ref HEAD] [--baseline-ref main|no
 It ships `git archive <ref>` (plus the baseline for V4's failure-set comparison) and the committed harness to
 `modal_suite.py`, which builds a `node:<version>-bookworm` image with pinned pnpm. Each container runs
 `pnpm install --frozen-lockfile` and `one-validation.sh` with V7 and V8 skipped. Frozen fixtures also get a Git
-object pack with exactly the historical source files they declare (`historical-inputs.mjs`). The ref's
+object pack with exactly the historical source files they declare (`historical-inputs.mjs`). The archive has no
+tags, so the latest `v*` release tag's client `SOURCES.json` is staged beside it as `release-sources.json`;
+V3-launcher-unit reads it through `SOUL_RELEASE_SOURCES` to check that a changed frozen client file moved its
+version. The ref's
 `pnpm-lock.yaml` keys a prebuilt dependency layer, so an unchanged lockfile installs offline from it.
 
 The steps run as groups in parallel containers (`GROUPS`, `LARGE`, `V5_SHARDS` in `modal_suite.py`): one larger

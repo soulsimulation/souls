@@ -62,7 +62,7 @@ test('admission counts running worlds\' Pss and each loading world\'s estimate, 
   const big = join(dir, 'eden.json'), small = join(dir, 'hamlet.json');
   writeFileSync(big, 'x'.repeat(1_100_000)); writeFileSync(small, '{}');
   assert.equal(worldClass({ templateFile: big }), 'eden'); assert.equal(worldClass({ templateFile: small }), 'small'); assert.equal(worldClass({ fork: true }), 'eden');
-  const p = pool({ worldsMemMb: 1400, pss: () => 300, maxRunning: 1 });
+  const p = pool({ worldsMemMb: 1400, pss: () => 300, maxRunning: 1, roomWaitMs: 0 });
   recording(p);
   kid(p, 'one');                                                              // 300 MB measured
   kid(p, 'eden', { status: 'starting', world: { templateFile: big } });       // 650 MB estimated while it loads
@@ -79,6 +79,25 @@ test('admission counts running worlds\' Pss and each loading world\'s estimate, 
   // 'one' and 'three' were used just now and are not still: nothing can be unloaded, so the load is refused
   await assert.rejects(p.makeRoom('new'), (e) => e.code === 'capacity' && /memory is full \(1560 of 1400 MB/.test(e.message));
   assert.ok(p.problems().some((x) => x.code === 'worlds.capacity'), 'a host problem code on the health data');
+});
+
+test('#2367 A2: a load with no room waits, reading still answers afresh, and unloads the world that turns still; past the wait it is refused and stays unloaded, never failed', async () => {
+  const still = new Map(); let looks = 0;
+  const p = pool({ worldsMemMb: 700, pss: () => 300, roomWaitMs: 1500, roomLookMs: 100, still: (k) => still.get(k.slug) ?? null,
+    refreshStill: async () => { looks++; if (looks === 3) still.set('b', { still: true, untilWallMs: null, at: Date.now() }); } });
+  const stopped = recording(p);
+  kid(p, 'a', { lastUsed: Date.now() - MIN }); kid(p, 'b', { lastUsed: Date.now() - 2 * MIN });   // 600 MB, neither still nor quiet
+  const t0 = Date.now();
+  await p.makeRoom('new');
+  assert.ok(Date.now() - t0 >= 150, 'it waited'); assert.ok(looks >= 3); assert.deepEqual(stopped, ['b'], 'the world that turned still went');
+  // nothing ever turns still: refused after the wait with code capacity, and the world is left unloaded (not failed)
+  still.clear(); kid(p, 'b', { lastUsed: Date.now() });
+  const q = pool({ worldsMemMb: 700, pss: () => 300, roomWaitMs: 300, roomLookMs: 100, range: [1, 2] });
+  recording(q); kid(q, 'a'); kid(q, 'b');
+  const t1 = Date.now();
+  await assert.rejects(q.ensure({ slug: 'new' }, { timeoutMs: 0 }), (e) => e.code === 'capacity');
+  assert.ok(Date.now() - t1 >= 290, 'refused only after the wait');
+  assert.equal(q.status('new').status, 'stopped'); assert.equal(worldState(q.status('new')), 'unloaded');
 });
 
 test('Pss is read from smaps_rollup, at most every 30 s per process', () => {

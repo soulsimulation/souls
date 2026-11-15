@@ -104,7 +104,9 @@ reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that acco
 the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
 folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
 A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
-the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
+the old folder from their account first. On a dev-identity world (no account approvals) `pair <soulId>` follows the same rule as a login's
+move (#2050): `POST /v1/souls/:id/pair` is free while no agent is connected and otherwise answers 409
+`soul.held-elsewhere` naming that agent (`heldBy`), unless the body says `move: true` (`--move`). Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
@@ -139,8 +141,13 @@ With a login (#2246), `adopt <name|id>` and `pair <id>` need no window code and 
 the Soul token. A name is looked up in `GET /v1/agent/account` (folded as the world folds names; two Souls with one
 name is an error listing both ids). A Soul paired this way is tagged with its account (`config.souls.<id>.account`),
 and every later move, revoke or retire of it uses that account's login whatever `--as` says; an untagged Soul uses
-`--as`, else the origin's active login. The last device to ask wins: the world disconnects the one before
-(`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
+`--as`, else the origin's active login. Moving follows #2401 (D1, decided 14 November): while no agent is connected
+for the Soul (its link is not `connected`), another device takes it freely; while one is connected, the pair route
+answers 409 `soul.held-elsewhere` naming that device (`heldBy`, its `agent.label`) and the client prints it with the
+same command plus `--move` as `next`; `--move` (body `move: true`) forces it. Only the account's own Soul gets that
+answer, and a retry of an already made request is not refused. A browser click never takes a Soul. When the home
+taking it has no memory for it, the answer says so in `memory`, naming `export` there and `import` here. A take
+disconnects the device before (`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
 (`runs`, the `agent.label` from one account read, when that home is logged in) and gives `adopt <name>` as `next`;
 the Soul becomes `unpaired` there and its dead token is removed, its memory untouched, so it no longer makes a bare
 command ambiguous. A `revoked` token is treated the same. No resident process (`serve`, `listen`) ever pairs again by
@@ -379,7 +386,8 @@ withholds. Owner messages and credentials are never in it.
   `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
-  its anchor. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
+  its anchor. "sit" and "seat" name seats, and "sit at the bandstand" finds the seats in it, or, when it has none of its
+  own, the nearest within 80 m around it. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
   door of Eden House 3 Kitchen"); a place row's `also` names the places beside it whose names share its own as a prefix
   (Eden House 3, Eden House 3 Kitchen). `query` takes several questions in one call, each with its own depth, filters and token budget, and says
   what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
@@ -644,4 +652,7 @@ ticks (10 s) on cold labels while the static world kept changing, one relabel ru
 most and at most once per 200 ticks a world. When that relabel fits in 250 ms and the Soul isn't inside its one-minute
 step-out cooldown, it is out about 10-13 s after the walk ends. The server log says
 `nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it
-(#1548). A stream of god edits re-arms the first build instead, which this doesn't cover yet (#1744).
+(#1548). A stream of god edits re-arms the first build faster than its 20 ms slices finish; with a Soul waiting, every
+tenth tick the rescue read takes that tick instead of the slice, so the same forced relabel fires under edits every tick
+too (also after a re-warm error): when that relabel fits in 250 ms, the Soul is asked within 210 ticks of the walk ending
+(#1744).

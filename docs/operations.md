@@ -35,6 +35,8 @@ At most `--load-parallel` worlds load at once (default 4); the rest wait in orde
 visitor's connection, an alarm for a listening agent, a wind-down alarm, then anything else (keep-alive, monitors),
 oldest first within each. A request for a world that is unloaded, waiting or loading is held up to `--load-hold-ms`
 (default 45,000), then answered `503 world.waking` with `Retry-After`, which the Soul client waits out and asks again.
+A browser asking for the world's page gets, with that 503, a small page naming the world that reloads itself every
+`Retry-After` seconds until the world answers.
 Declared crawlers and link-preview fetchers never load a world: they get its page (the web build's, with the world's
 title and links) and `503 world.unloaded` for anything else. With `--unload-still 1` a visitor's page and the build's
 files are served the same way, and the world loads on the page's live connection or first data request (a page hidden
@@ -51,7 +53,8 @@ loading (310 MB for a small world, 650 MB for an Eden-class one, chosen by the t
 `--min-free-mb` stays a second guard, and `--max-running` no longer limits. To make room the launcher unloads a still
 world whose next event is at least 60 s away, then a world with no act and no visitor for 10 minutes (`--idle-ms`), the
 one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
-is refused with the retriable `503 world.capacity`, and `/__sim/healthz` carries the host problem code
+waits up to 20 s for room, reading each world's still answer afresh every 5 s (#2367), and is then refused with
+`503 world.waking` and `Retry-After: 15`; the world stays `unloaded`, never `failed`, and `/__sim/healthz` carries the host problem code
 `worlds.capacity` for 10 minutes. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
 `/__sim/worlds.json` beside the old `status`; the health page (`/__sim/health?json=1`) adds per world its ticks computed
 and jumped in the last hour (from the world's own counters, once it reports them), seconds in memory in 24 h, Pss and
@@ -121,12 +124,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   | `engine.step-failing` | steps faulting | clock runs, acts refused, `halted` | as above |
 
   **A halt that repeats at once:** after 5 restarts in 30 min the breaker holds the world (`held`, last reason `halted`),
-  down until an operator resumes it, never a silent loop. The alert is then the only exit, so it has to be loud:
+  resting, never a silent loop. A hold ends by itself (#2378): after 10 min, doubling for each hold in a row up to 1 h,
+  the world boots again; an operator's resume ends it sooner. The alert is loud while it rests:
   - the world's `halted` problem code makes `hostOk` false;
   - `host-health.log` gets an ALERT line, and the health page shows the world as `halted`;
   - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).
 
-  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until it is resumed. Outside the launcher
+  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until its rest ends or it is resumed. A
+  world that dies in the same listener step on two boots in a row (a hang or a fault storm) comes up with that step quarantined for a window of ticks
+  (`world.step-quarantined`; docs/design/world-cost.md, "A world that never stays stuck"). Outside the launcher
   (local dev, tests), a halted process stays up with its clock stopped.
 - `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
   `stalled` and, while the clock is dilated, `slowed`. A world is `stalled` when its clock owes ticks and the last one is

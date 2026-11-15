@@ -125,13 +125,22 @@ switch independent. A previously saved master mute migrates to both switches off
     resident reads in flight, and up for at least 30 s. Before every stop the launcher reads `/__sim/still` again and
     records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, is recorded as due at once
     and the keep-alive boots it as before). An unloaded world is never booted by the keep-alive, and loads on an act, a
-    god call, a visitor's connection or a page; at `moveWallMs`, always; at `untilWallMs`, only when a resident read for
-    it was seen in the last 10 minutes. Otherwise it is not loaded by time at all, and catches up its missed events in
-    order when it next loads. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    god call, a visitor's connection or a page, and by its alarm 30 s before `moveWallMs` or `untilWallMs`, listener or
+    not (#2367): the horizon holds every deadline, a personal reminder's (`edge.reminder.*`) and a plan step's among
+    them, so they are met on time by the world running. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
     get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll
     with no picture kept, loads the world. Not yet: memory admission (#2233) and the load queue (#2304).
+    **Measured (#2301, one run, 48-CPU runner, fake minds, `--worlds-mem-mb 6250`):** 100 small and 4 Eden-class worlds,
+    each with an agent acting every 2 to 10 minutes for an hour. At most 27 worlds were in memory, with about 7.5 GB in the
+    launcher's process tree (p50). Each world spent a median of 21 % of the hour in memory (Eden-class worlds 24 to 35 %).
+    Loading added a median of 3.4 s to an act (p95 8.3 s, longest 36 s). The run used 2 processor cores at the median
+    and 6 at most. 33 of 1,006 acts were refused with `world.capacity`: the memory was full and no world was quiet
+    enough to unload. 28 minutes after the agents fell silent, every world was out of memory, and the launcher alone held
+    117 MB. Three worlds jumped and unloaded reached the same state hash as a twin ticked straight through from genesis.
+    In the same run, 18 of the 22 reminders that were set were still undelivered 8 minutes after they fell due while
+    their worlds were unloaded. A world's alarm load was not seen.
   - **A still world's clock is jumped, not stepped (#2298; `SIM_SKIP=0` ticks every world as before).** One function
     moves a world's time, live and after any gap: `WorldHost.advanceStep(target)`. When `stillUntil()` says still, the
     engine skips (`skipToV1`) to the tick before the earlier of the horizon and the target, and the ordinary tick runs the
