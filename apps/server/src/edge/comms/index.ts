@@ -359,6 +359,9 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
   const silent = () => !!deps.host.silent?.() && (dueTick === null || core.tick() < dueTick);
   const timer = (options.sweepMs ?? 30_000) > 0 ? setInterval(() => { if (!silent()) scheduleSweep(); }, options.sweepMs ?? 30_000) : null;
   timer?.unref?.();
+  // #2384 A2: a silent world lands on the deadline nextDueTick named; the sweep runs there, not at the next 30 s timer.
+  // Until it runs the deadline stays due at the next tick, so the world left its still stretch and ticked for up to 30 s.
+  deps.host.listeners?.push({ afterTick: (tick: number) => { if (dueTick !== null && tick >= dueTick && !pendingSweep && deps.host.silent?.()) setImmediate(scheduleSweep).unref?.(); } });
   for (const r of db.prepare('SELECT soul_id FROM edge_comms_subscriptions WHERE world_id = ?').all(worldId) as {soul_id: string}[]) void webhooks.push(r.soul_id);
 
   return {
@@ -373,7 +376,8 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     sweep,
     /** #2297: the next tick at which the comms sweep changes something: a calendar item or a presentation changes phase, a
      *  Soul's calendar item is removed a day after it ends, the steward's digest slot opens, a conversation drops a silent member or lapses an invitation, a
-     *  Soul fades (wall times converted at the admin's rate). The sweep runs on a 30 s wall timer: it lands up to 30 s later. */
+     *  Soul fades (wall times converted at the admin's rate). The sweep runs on a 30 s wall timer, and at once when a silent
+     *  world lands on this tick (#2384). */
     nextDueTick(now = Date.now()): number | null {
       const tick = core.tick(); let t: number | null = null; const at = (x: number | null) => {if (x !== null) t = t === null ? x : Math.min(t, x);};
       const wall = (ms: number | null) => ms === null ? null : tick + Math.max(1, Math.ceil((ms - now) / 50 * (deps.host.baseRate > 0 ? deps.host.baseRate : 1)));

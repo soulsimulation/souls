@@ -113,7 +113,8 @@ export type ActuatorHost = {
   wateringBegun?(soul: EdgeSoul): void;
   /** Entry 43 (tea.ts): "fill the kettle", "put the kettle on", "pour the tea", "make a cup of tea" as acts of native steps. */
   tea?(soul: EdgeSoul, thing: string, action: string): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
-  teaBegun?(soul: EdgeSoul): void;
+  /** The act (its capability) was accepted: watch this Soul's body for its tea moments. */
+  teaBegun?(soul: EdgeSoul, capability: string): void;
   /** #438 (harvest.ts): "pick the tomatoes", "pick flowers for the vase" as acts of native steps. */
   harvest?(soul: EdgeSoul, thing: string, action: string, params?: Record<string, unknown>): { steps: { verb: string; params: Record<string, unknown> }[]; summary: string } | Refusal | null;
   harvestBegun?(soul: EdgeSoul): void;
@@ -500,7 +501,7 @@ export function wrapAct(objects: { act(id: string, soul: EdgeSoul, input: Record
     // Entry 34: the watering-can act changes the world at its own native moments (watering.ts), never here
     if (a.name === 'water' && host.watering?.(soul, id, a.name)) { host.wateringBegun?.(soul); return out; }
     // Entry 43: so does a tea act (tea.ts)
-    if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul); return out; }
+    if (host.tea?.(soul, id, a.name)) { host.teaBegun?.(soul, `object:${id}:${a.name}`); return out; }
     // #438: and a picking act (harvest.ts)
     const pick = host.harvest?.(soul, id, a.name, (input.params ?? {}) as Record<string, unknown>);
     if (pick) { if (!('code' in pick)) host.harvestBegun?.(soul); return out; }

@@ -29,6 +29,7 @@ import {ownerDoing, type DoingMessage} from './owner-doing.ts';
 import {livePlatforms} from './eyes/platforms.ts';
 import {OwnerLoop, ownerLinkStore, type OwnerLoopInbox} from './owner-loop.ts';
 import type {WorldHost} from '../world.ts';
+import {RESOLVE_GONE} from '../client-minimum.ts';
 import type {Souls} from '../souls.ts';
 import {loadOf, worldBlock} from '../load/admission.ts';
 import {clockNow} from '../load/clock-source.ts';
@@ -116,8 +117,9 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
   app.get('/v1/edge/inspect/:id', wrap(c => {const s = deps.soul(c); limit(s, 'inspect', 120); return {tick: deps.host.engine.world.tick, inspect: inspectFrame(L, s, c.req.param('id') ?? '', {all: c.req.query('all') === '1'})};}));
   // knowledge/1: look around / explore — more of what is near, places close by, and secret places found (remembered).
   app.get('/v1/edge/around', wrap(c => {const s = deps.soul(c); limit(s, 'around', 30); const to = c.req.query('to'); return {tick: deps.host.engine.world.tick, around: aroundFrame(L, s), ...(to !== undefined ? {route: routeFrame(L, s, to)} : {})};}));
-  // #1910: the word resolver is closed; a client finds ids in its own copy of the catalog
-  app.post('/v1/edge/resolve', c => {c.header('Cache-Control', 'no-store'); return c.json({ok: false, code: 'gone', message: "resolve was removed; use the client's find"}, 410);});
+  // #1910: the word resolver is closed; a client finds ids in its own copy of the catalog. Only a client too old to have
+  // `find` calls it, so the answer names the upgrade (#1937).
+  app.post('/v1/edge/resolve', c => {c.header('Cache-Control', 'no-store'); return c.json(RESOLVE_GONE, 410);});
   app.get('/v1/edge/receipts/:id', wrap(c => {const s = deps.soul(c); const id = c.req.param('id') ?? '', r = L.receipt(s.soulId, id) ?? L.pendingReceipt(s.soulId, id); if (!r) throw new EdgeError(404, 'not-found', 'no such receipt for this Soul'); return {receipt: r};}));
   // Public and read often: it revalidates. The answer's own bytes are the tag, so a Soul that changed never reads as unchanged.
   const publicSoul = wrap(c => L.publicSoul(c.req.param('soulId') ?? ''));

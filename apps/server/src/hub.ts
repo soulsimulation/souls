@@ -155,7 +155,8 @@ export class Hub {
           else if(scene)db.saveRenderSceneCapture(host.worldId,scene);
         }
         this.lastTakeTick = chunks.at(-1)!.toTick;
-        if (chunks.length) this.broadcast({t: 'takes', serverTick: tick, chunks: chunks.map(viewerChunk)});
+        // #2422: a take's hashes are computed when first read; with no viewer to send it to, nothing reads them
+        if ([...this.clients].some(c => c.ready)) this.broadcast({t: 'takes', serverTick: tick, chunks: chunks.map(viewerChunk)});
       },
       onBatch: (b) => this.broadcast({ t: 'batch', ...b, log: b.log.map(publicEvent) }),
       onHeartbeat: (h) => this.broadcast({ t: 'heartbeat', ...h, clients: this.clients.size }),
