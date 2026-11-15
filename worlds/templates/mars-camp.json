@@ -1495,7 +1495,7 @@
               ]
             }
           },
-          "tmp": "$df-kitchen"
+          "tmp": "$df1"
         },
         {
           "op": "place",
@@ -1567,12 +1567,12 @@
               ]
             }
           },
-          "tmp": "$df-living-room"
+          "tmp": "$df2"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df-living-room"
+            "parent": "$df2"
           },
           "def": "core/door@2",
           "name": "living-room-door-1",
@@ -1651,7 +1651,7 @@
               ]
             }
           },
-          "tmp": "$df-bunkhouse"
+          "tmp": "$df3"
         },
         {
           "op": "place",

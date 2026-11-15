@@ -370,7 +370,7 @@
             "floors": 1,
             "front": "s"
           },
-          "tmp": "$df-lab-presentation-hall"
+          "tmp": "$df1"
         },
         {
           "op": "place",
@@ -447,7 +447,7 @@
             "floors": 1,
             "front": "n"
           },
-          "tmp": "$df-lab-pond-hall"
+          "tmp": "$df2"
         },
         {
           "op": "place",

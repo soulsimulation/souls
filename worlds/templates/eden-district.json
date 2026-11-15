@@ -245,7 +245,7 @@
             "w": 6,
             "d": 4.5
           },
-          "tmp": "$df-commons-pavilion"
+          "tmp": "$df1"
         },
         {
           "op": "place",
@@ -390,12 +390,12 @@
             "roof": "flat",
             "roofColor": "#5e5a57"
           },
-          "tmp": "$df-eden-house-1"
+          "tmp": "$df2"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-1"
+            "parent": "$df2"
           },
           "def": "core/door@2",
           "name": "eden-house-1-door-1-0",
@@ -416,7 +416,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-1"
+            "parent": "$df2"
           },
           "def": "core/door@2",
           "name": "eden-house-1-door-2",
@@ -470,12 +470,12 @@
             "wall": "#e8dcc6",
             "roofColor": "#5e5a57"
           },
-          "tmp": "$df-eden-house-2"
+          "tmp": "$df3"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-2"
+            "parent": "$df3"
           },
           "def": "core/door@2",
           "name": "eden-house-2-door-1-0",
@@ -496,7 +496,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-2"
+            "parent": "$df3"
           },
           "def": "core/door@2",
           "name": "eden-house-2-door-2",
@@ -517,7 +517,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-2"
+            "parent": "$df3"
           },
           "def": "core/door@2",
           "name": "eden-house-2-door-3",
@@ -538,7 +538,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-2"
+            "parent": "$df3"
           },
           "def": "core/door@2",
           "name": "eden-house-2-door-4",
@@ -559,7 +559,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-2"
+            "parent": "$df3"
           },
           "def": "core/door@2",
           "name": "eden-house-2-door-6",
@@ -613,12 +613,12 @@
             "wall": "#b98a5c",
             "roofColor": "#5e5a57"
           },
-          "tmp": "$df-eden-house-3"
+          "tmp": "$df4"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-3"
+            "parent": "$df4"
           },
           "def": "core/door@2",
           "name": "eden-house-3-door-1-0",
@@ -639,7 +639,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-3"
+            "parent": "$df4"
           },
           "def": "core/door@2",
           "name": "eden-house-3-door-2",
@@ -660,7 +660,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-3"
+            "parent": "$df4"
           },
           "def": "core/door@2",
           "name": "eden-house-3-door-3",
@@ -681,7 +681,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-3"
+            "parent": "$df4"
           },
           "def": "core/door@2",
           "name": "eden-house-3-door-4",
@@ -702,7 +702,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-3"
+            "parent": "$df4"
           },
           "def": "core/door@2",
           "name": "eden-house-3-door-5",
@@ -756,12 +756,12 @@
             "wall": "#cfc8bb",
             "roofColor": "#5e5a57"
           },
-          "tmp": "$df-eden-house-4"
+          "tmp": "$df5"
         },
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-4"
+            "parent": "$df5"
           },
           "def": "core/door@2",
           "name": "eden-house-4-door-1-0",
@@ -782,7 +782,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-4"
+            "parent": "$df5"
           },
           "def": "core/door@2",
           "name": "eden-house-4-door-2",
@@ -803,7 +803,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-4"
+            "parent": "$df5"
           },
           "def": "core/door@2",
           "name": "eden-house-4-door-3",
@@ -824,7 +824,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-4"
+            "parent": "$df5"
           },
           "def": "core/door@2",
           "name": "eden-house-4-door-4",
@@ -845,7 +845,7 @@
         {
           "op": "place",
           "in": {
-            "parent": "$df-eden-house-4"
+            "parent": "$df5"
           },
           "def": "core/door@2",
           "name": "eden-house-4-door-5",
@@ -896,7 +896,7 @@
             "wall": "#efe6d4",
             "windows": 0.8
           },
-          "tmp": "$df-eden-library-1"
+          "tmp": "$df6"
         },
         {
           "op": "place",
