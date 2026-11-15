@@ -28,8 +28,8 @@ import { repairBatch, tagPlaces, untagPlaces, type Repair } from './buildsafe.ts
 import { entitiesWithoutPrivateWords } from './private-words.ts';
 /** #1649: a `world` op's time patch is held to the clock rules wherever it comes from (act, preview, env): on a production
  *  world the clock is real time (no accelerated clock, no set hour, no day length); `clock: 'real'` needs real time on. */
-function worldClockFailure(ops: readonly { op: string; state?: unknown }[]) {
-  const realTime = realTimeEnabled(), production = productionWorld();
+function worldClockFailure(ops: readonly { op: string; state?: unknown }[], env?: Record<string, string | undefined>) {
+  const realTime = realTimeEnabled(env), production = productionWorld(env);
   for (const [i, o] of ops.entries()) {
     const t = o.op === 'world' ? (o.state as { time?: Record<string, unknown> } | undefined)?.time : undefined; if (!t) continue;
     if (t.clock === 'real' && !realTime) return { op: i, code: 'time.real-clock-off', field: 'state.time.clock', detail: 'Real time is not on for this server.', fix: 'Leave time.clock unset.' };
@@ -444,7 +444,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const field = preview ? preview.build : this.callerField(input.build);
     const gate = this.helperGate(field, normalized.ops); if (gate) return { accepted: false, failures: [gate] };
     const retirement = this.retirementFailure(normalized.ops); if (retirement) return { accepted: false, failures: [retirement] };
-    if (!trusted) { const clock = worldClockFailure(normalized.ops); if (clock) return { accepted: false, failures: [clock] }; }
+    if (!trusted) { const clock = worldClockFailure(normalized.ops, this.opts.env); if (clock) return { accepted: false, failures: [clock] }; }
     const stale = [...this.stale(preview?.expect ?? {}), ...this.staleSubtrees(preview), ...this.stale(input.expect ?? {})];
     for (const expected of [input.expectWorldAbout, preview?.expectWorldAbout]) if (expected !== undefined && expected !== hashOf(this.model.state.about ?? null)) stale.push({ op: -1, code: 'revision.stale', field: 'expectWorldAbout', detail: 'World meaning changed since it was read. Read it again before replacing it.' });
     if (stale.length) return { accepted: false, failures: [...new Map(stale.map(f => [f.entity, f])).values()] };

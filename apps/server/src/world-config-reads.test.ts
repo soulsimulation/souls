@@ -85,6 +85,37 @@ test('#2389 A2: no new process.env read in the server code outside loadConfig, a
 });
 
 test('#2389 A2: the server code never imports the module-level config (only tests and tools do)', () => {
-  const imports = sources().filter((f) => /import\s*\{[^}]*(?<!type\s)\bconfig\b[^}]*\}\s*from\s*'[./]*config\.ts'/.test(readFileSync(join(repo, f), 'utf8')));
+  const named = /import\s*\{[^}]*(?<!type\s)\bconfig\b[^}]*\}\s*from\s*['"][./]*config\.ts['"]/;
+  const namespace = /import\s*\*\s*as\s+\w+\s+from\s*['"][./]*config\.ts['"]/, dynamic = /\bimport\(\s*['"`][./]*config\.ts['"`]\s*\)/;
+  const imports = sources().filter((f) => { const s = strip(readFileSync(join(repo, f), 'utf8')); return named.test(s) || namespace.test(s) || dynamic.test(s); });
   assert.deepEqual(imports, []);
+});
+
+// The env-defaulted helpers read process.env when called with no env. In server code each call passes the world's env;
+// what is left is listed by file with its reason, as above.
+const HELPERS = /\b(?:realTimeEnabled|productionWorld|clockContext|defaultSiteLog|defaultAssetDir|economyOn)\(\s*\)|\bclockMode\((?:[^(),]|\([^()]*\))*\)/g;
+const HELPER_ALLOWED: Record<string, [number, string]> = {
+  'apps/server/src/moderation/store.ts': [1, FALLBACK],   // the constructor's default; http.ts passes the world's site log
+  'apps/server/src/god/perceive.ts': [1, FALLBACK],       // `layers.economy ?? economyOn()`; a started world sets layers.economy
+  'apps/server/src/split/god-replica.ts': [1, LATER],     // a read worker's replica: one per program until B2 and B3
+};
+
+test('#2389 A2: no new argument-less call to an env-defaulted helper in the server code, and the list only shrinks', () => {
+  const problems: string[] = [];
+  const found: Record<string, number> = {};
+  for (const f of sources()) { const n = (strip(readFileSync(join(repo, f), 'utf8')).match(HELPERS) ?? []).length; if (n) found[f] = n; }
+  for (const [f, n] of Object.entries(found)) {
+    const allowed = HELPER_ALLOWED[f]?.[0] ?? 0;
+    if (n > allowed) problems.push(`${f}: ${n} env-defaulted helper calls with no env, ${allowed} allowed. Pass the world's env (cfg.env, god.opts.env)`);
+    else if (n < allowed) problems.push(`${f}: ${n} such calls now; lower its count in world-config-reads.test.ts to ${n}`);
+  }
+  for (const f of Object.keys(HELPER_ALLOWED)) if (!found[f]) problems.push(`${f}: no such call left; remove it from world-config-reads.test.ts`);
+  assert.deepEqual(problems, []);
+});
+
+test('#2389 A2: the guard patterns catch what they are meant to', () => {
+  for (const s of ['realTimeEnabled()', 'productionWorld( )', 'clockContext()', 'defaultSiteLog()', 'defaultAssetDir()', 'economyOn()', 'clockMode(t as { clock?: string | null })', 'clockMode(f(x))'])
+    assert.equal((s.match(HELPERS) ?? []).length, 1, s);
+  for (const s of ['realTimeEnabled(env)', 'clockMode(t, env)', 'clockMode(t as { clock?: string | null }, god.opts.env)', 'export function clockMode(time: X | undefined, env = process.env)'])
+    assert.equal((s.match(HELPERS) ?? []).length, 0, s);
 });
