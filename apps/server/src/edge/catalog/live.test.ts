@@ -90,6 +90,25 @@ test('a thing\'s state is pushed; one inside a secret outline, on any floor, is 
   back.stop(); c.stop(); w.hub.close();
 });
 
+test('#1903: a Soul joining, leaving, fading, coming back or renamed is one frame and in GET with the clock paused', async () => {
+  const w = fakeWorld(), c = follow(w.hub), ids = async () => (await w.get()).souls.map((r: any) => `${r.id}:${r.name}`);
+  w.host.paused = true; await w.get(); const n = c.got.length;   // the clock stands still from here: the tick never moves
+  w.entities.h_c = {pose: {p: [40, 0, 40]}, human: {activity: null}}; w.host.minds.set('s_c', {soulId: 's_c', entityId: 'h_c', name: 'Cy'}); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls, {set: [{id: 's_c', name: 'Cy', at: [40, 40], place: 'world', doing: null}], del: []}, 'a join is pushed');
+  assert.deepEqual(await ids(), ['s_a:Ada', 's_b:Bo', 's_c:Cy'], 'and GET carries it');
+  w.faded.add('s_b'); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls, {set: [], del: ['s_b']}, 'a fade is pushed'); assert.deepEqual(await ids(), ['s_a:Ada', 's_c:Cy']);
+  w.faded.delete('s_b'); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls.set.map((r: any) => r.id), ['s_b'], 'coming back is pushed'); assert.deepEqual(await ids(), ['s_a:Ada', 's_b:Bo', 's_c:Cy']);
+  w.rename('s_a', 'Ada Lovelace'); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls.set.map((r: any) => r.name), ['Ada Lovelace'], 'a rename is pushed'); assert.deepEqual(await ids(), ['s_a:Ada Lovelace', 's_b:Bo', 's_c:Cy']);
+  w.host.minds.delete('s_c'); await w.get();
+  assert.deepEqual(c.got.at(-1)!.data.souls, {set: [], del: ['s_c']}, 'a leave is pushed'); assert.deepEqual(await ids(), ['s_a:Ada Lovelace', 's_b:Bo']);
+  assert.equal(c.got.length, n + 5, 'one frame per change'); assert.equal(w.world.tick, 0, 'the clock never moved');
+  await w.get(); assert.equal(c.got.length, n + 5, 'nothing more while nothing changes');
+  c.stop(); w.hub.close();
+});
+
 test('a thing\'s change and a redrawn secret outline are sent at once, not at the next tick bucket (a slow or paused clock)', async () => {
   const w = fakeWorld(), c = follow(w.hub);
   w.setThing('e_door', {open: true}); await w.get();   // no tick: the clock is paused
