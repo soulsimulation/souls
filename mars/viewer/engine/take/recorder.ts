@@ -131,56 +131,89 @@ function sameKeys(live: Record<string, unknown>, copy: Record<string, unknown>):
   return true;
 }
 
-type Kept = { copy: object; text: string };
-/** Per world: the kept copies, the last entity table copy (reused whole while every entity is), the hash resume mark. */
-type WorldCopies = { fields: Map<string, Kept>; entities: Map<string, Kept>; table?: { ids: string[]; out: object; text: string }; mark?: ResumeMark };
-const COPIES = new WeakMap<object, WorldCopies>();
+// #2422: a kept copy (an entity, a world field, an entity table) is never mutated, so its stable text is made once, when a
+// hash first needs it, and kept by identity (KNOWN answers for kept copies only). A cut copies; it hashes nothing.
+const COPY = new WeakSet<object>();
+const TEXT = new WeakMap<object, string>();
 const flat = (text: string) => { text.charCodeAt(0); return text; };   // flatten the rope once (G1: re-walking cached ropes per hash)
-const keep = (live: object, prev: Kept | undefined): Kept => {
-  if (prev && sameCopy(live, prev.copy)) return prev;
+const KNOWN = {
+  has: (o: object) => COPY.has(o),
+  get: (o: object) => { let t = TEXT.get(o); if (t === undefined && COPY.has(o)) TEXT.set(o, t = flat(stableStringify(o, inside(o)))); return t; },
+} as ReadonlyMap<object, string>;
+/** KNOWN for writing `o` itself: the copies inside it come from KNOWN, `o` is written out. */
+const inside = (o: object) => ({ has: (x: object) => x !== o && COPY.has(x), get: KNOWN.get }) as ReadonlyMap<object, string>;
+const keep = (live: object, prev: object | undefined): object => {
+  if (prev && sameCopy(live, prev)) return prev;
   const copy = structuredClone(live);
-  return { copy, text: flat(stableStringify(copy)) };
+  COPY.add(copy);
+  return copy;
 };
+/** Per world: the entity ids and their copies in the table's order, the last table copy (reused whole while every entity
+ *  is), the kept world fields, and the latest hash resume mark (any mark is safe to resume from: hashStableResumable
+ *  resumes only over the very same objects). */
+type WorldCopies = { ids: string[]; copies: unknown[]; table?: object; fields: Map<string, object>; mark?: ResumeMark };
+const COPIES = new WeakMap<object, WorldCopies>();
 
-/** The take's final state: what `{ ...structuredClone(world without entityPhysicsV1), entityPhysicsV1 }` (or a plain
- *  structuredClone(world) without physics) was, same keys in the same order, with each unchanged entity and world field
- *  (and the whole entity table when every entity is unchanged) shared from the copy made for an earlier take; `known`
- *  holds every shared copy's stable text, and `hash` is the final state hash (the digest resumes after the leading
- *  unchanged fields: base, entities, entityPhysicsV1 on an idle god world). */
-export function finalStateOf(world: Runtime['world']): { state: Runtime['world']; known: Map<object, string>; hash: string } {
+/** The take's final state, copied now: what `{ ...structuredClone(world without entityPhysicsV1), entityPhysicsV1 }` (or a
+ *  plain structuredClone(world) without physics) was, same keys in the same order, with each unchanged entity and world
+ *  field (and the whole entity table when every entity is unchanged) shared from the copy made for an earlier take.
+ *  `hash` is its state hash, computed on the first call (#2422: nothing in the tick that cuts a take reads it); the digest
+ *  resumes after the leading fields that are the very objects an earlier hash of this world read. */
+export function captureFinalState(world: Runtime['world']): { state: Runtime['world']; hash: () => string } {
   const w = world as unknown as Record<string, unknown>;
   const physics = w.entityPhysicsV1;
-  const prev = COPIES.get(world), next: WorldCopies = { fields: new Map(), entities: new Map() };
-  const known = new Map<object, string>(), state: Record<string, unknown> = {};
+  let c = COPIES.get(world);
+  if (!c) COPIES.set(world, c = { ids: [], copies: [], fields: new Map() });
+  const state: Record<string, unknown> = {}, fields = new Map<string, object>();
   for (const k of Object.keys(w)) {
     if (k === 'entityPhysicsV1' && physics !== undefined) continue;
     const v = w[k];
     if (k === 'entities' && v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
-      const ents = v as Record<string, object>, ids = Object.keys(ents), was = prev?.table;
-      let out: Record<string, unknown> = {}, same = !!was && was.ids.length === ids.length;
+      const ents = v as Record<string, unknown>, ids = Object.keys(ents), was = c.ids, wasCopies = c.copies;
+      const ordered = was.length === ids.length;
+      let same = !!c.table && ordered, byId: Map<string, unknown> | undefined;
+      const copies = new Array<unknown>(ids.length);
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i], e = ents[id];
-        if (e === null || typeof e !== 'object') { out[id] = e; same = false; continue; }
-        const before = prev?.entities.get(id), kept = keep(e, before);
-        if (kept !== before || !was || was.ids[i] !== id) same = false;
-        next.entities.set(id, kept); known.set(kept.copy, kept.text); out[id] = kept.copy;
+        if (e === null || typeof e !== 'object') { copies[i] = e; same = false; continue; }
+        let before: unknown;
+        if (ordered && was[i] === id) before = wasCopies[i];
+        else { same = false; byId ??= new Map(was.map((x, j) => [x, wasCopies[j]])); before = byId.get(id); }
+        const kept = keep(e, before !== null && typeof before === 'object' ? before : undefined);
+        if (kept !== before) same = false;
+        copies[i] = kept;
       }
-      if (same) next.table = was;
-      else { const text = flat(stableStringify(out, known)); next.table = { ids, out, text }; }
-      out = next.table!.out as Record<string, unknown>;
-      known.set(out, next.table!.text);
-      state[k] = out;
+      if (!same) {
+        const out: Record<string, unknown> = {};
+        for (let i = 0; i < ids.length; i++) out[ids[i]] = copies[i];
+        COPY.add(out);
+        c.table = out;
+      }
+      c.ids = ids; c.copies = copies;
+      state[k] = c.table;
       continue;
     }
     if (v === null || typeof v !== 'object') { state[k] = v; continue; }
-    const kept = keep(v, prev?.fields.get(k));
-    next.fields.set(k, kept); known.set(kept.copy, kept.text); state[k] = kept.copy;
+    const kept = keep(v, c.fields.get(k));
+    fields.set(k, kept); state[k] = kept;
   }
+  c.fields = fields;
   if (physics !== undefined) state.entityPhysicsV1 = physics;
-  const { hash, mark } = hashStableResumable(state, known, prev?.mark);
-  next.mark = mark;
-  COPIES.set(world, next);
-  return { state: state as unknown as Runtime['world'], known, hash };
+  const held = c;
+  let hash: string | undefined;
+  return {
+    state: state as unknown as Runtime['world'],
+    hash: () => {
+      if (hash === undefined) { const r = hashStableResumable(state, KNOWN, held.mark); if (r.mark) held.mark = r.mark; hash = r.hash; }
+      return hash;
+    },
+  };
+}
+
+/** captureFinalState with its hash computed now; `known` gives every kept copy's stable text. */
+export function finalStateOf(world: Runtime['world']): { state: Runtime['world']; known: ReadonlyMap<object, string>; hash: string } {
+  const { state, hash } = captureFinalState(world);
+  return { state, known: KNOWN, hash: hash() };
 }
 
 /** Recording needs state and events, not the engine scheduler or its services. */
@@ -190,7 +223,9 @@ export class TakeRecorder implements RuntimeObserver {
   readonly opts: Required<Pick<RecorderOptions, 'keyframeEvery'>> & RecorderOptions;
   private tol: { pos: number; ang: number };
   readonly startTick: number;
-  readonly baselineStateHash: string;
+  /** #2422: the baseline's hash, computed when first read (a function from the take finished at this same tick). */
+  private readonly baseline: () => string;
+  get baselineStateHash(): string { return this.baseline(); }
   private tracks = new Map<string, TrackState>();
   private last = new Map<string, Map<string, string>>();
   private changes: ChangeEvent[] = [];
@@ -201,8 +236,9 @@ export class TakeRecorder implements RuntimeObserver {
 
   /** `stateHashNow`: the caller's rt.stateHash() at this tick when it has it already — the final state hash of the take it
    *  finished at this same tick, with nothing stepped or edited in between (lane L1: one world serialisation per take
-   *  boundary instead of two). Omitted: computed here, as before. */
-  constructor(rt: TakeSource, opts: RecorderOptions, stateHashNow?: string) {
+   *  boundary instead of two). Omitted: computed here, as before. #2422: it may be that take's lazy hash (a function), read
+   *  only when this take's baseline is. */
+  constructor(rt: TakeSource, opts: RecorderOptions, stateHashNow?: string | (() => string)) {
     const ref=opts.renderSceneRef;
     if(ref && (ref.contract!=='render-scene-ref/1'||ref.rulesVersion!==opts.rulesVersion||!/^[a-f0-9]{64}$/.test(ref.hash)))
       throw new TypeError('invalid recorder render scene reference');
@@ -211,7 +247,8 @@ export class TakeRecorder implements RuntimeObserver {
     const tol = opts.tol ?? TRACK_TOL;
     this.tol = typeof tol === 'number' ? { pos: tol, ang: tol } : { pos: tol.pos, ang: tol.ang };
     this.startTick = rt.tick;
-    this.baselineStateHash = stateHashNow ?? rt.stateHash();
+    if (typeof stateHashNow === 'function') this.baseline = stateHashNow;
+    else { const hash = stateHashNow ?? rt.stateHash(); this.baseline = () => hash; }
     this.cursor = rt.events.length;
     this.sample();
     rt.observers.push(this);
@@ -344,7 +381,12 @@ export class TakeRecorder implements RuntimeObserver {
   }
 
   /** Stop observing and produce the Take (content-addressed). */
-  finish(): Take {
+  finish(): Take { return this.finishLazy().take; }
+
+  /** finish(), and the take's final state hash as a function (#2422): the take's `baselineStateHash`, `finalStateHash` and
+   *  `id` are computed when first read, from the same bytes, so a take nobody reads (an unwatched world's) costs a copy of
+   *  what changed and no hashing. Each reads as a plain string field: in JSON, spread and structuredClone too. */
+  finishLazy(): { take: Take; finalStateHash: () => string } {
     if (this.finished) throw new Error('TakeRecorder.finish() called twice');
     this.finished = true;
     this.sample(); // catch events emitted after the last tick (e.g. cancellations)
@@ -357,33 +399,48 @@ export class TakeRecorder implements RuntimeObserver {
     }
     // E-life P1: the static entity physics (entity-physics/1, ~3 MB on Eden 2026) is replaced, never mutated, when it
     // changes, so the take shares it instead of deep-copying it every take; everything else is copied as before
-    // S1 V7b: the copy and its text come from finalStateOf, which shares every entity / world field that still equals its
+    // S1 V7b: the copy comes from captureFinalState, which shares every entity / world field that still equals its
     // copy in the take before (an idle Eden 2026 re-copied and re-serialised ~4,900 unchanged entities every second)
-    const { state: finalState, known, hash: finalStateHash } = finalStateOf(this.rt.world);
+    const { state: finalState, hash: finalStateHash } = captureFinalState(this.rt.world);
     const changes = thinChanges(dedupeChanges(this.changes), { ...INTERP_FIELDS, ...this.opts.fieldTol });
     const entities0: Record<string, TakeEntity0> = {};
     for (const id of [...this.first.keys()].sort()) entities0[id] = this.first.get(id)!;
-    const body: Omit<Take, 'id'> = {
-      schema: TAKE_SCHEMA,
-      planHash: this.opts.planHash,
-      baselineCheckpoint: this.opts.baselineCheckpoint,
-      baselineStateHash: this.baselineStateHash,
-      rulesVersion: this.opts.rulesVersion,
-      renderSceneRef: this.opts.renderSceneRef ? structuredClone(this.opts.renderSceneRef) : undefined,
-      dt: DT,
-      startTick: this.startTick,
-      ticks: this.rt.tick - this.startTick,
-      keyframeEvery: this.opts.keyframeEvery,
-      tracks,
-      changes,
-      events: this.opts.compactEvents === false ? this.events : compactEvents(this.events),
-      finalStateHash,
-      finalState,
-      entities0,
-      removed: changes.filter((c) => c[2] === 'present' && c[3] === false).map((c) => ({ id: c[1], t: c[0] })),
-    };
-    return { ...stripUndefined(body), id: takeIdOf(body, known) } as Take;
+    const baseline = this.baseline;
+    // the fields of the take in the order they always had; a lazy one is a getter (a setter replaces it, as a field would)
+    const fields: [string, unknown, boolean][] = [
+      ['schema', TAKE_SCHEMA, false],
+      ['planHash', this.opts.planHash, false],
+      ['baselineCheckpoint', this.opts.baselineCheckpoint, false],
+      ['baselineStateHash', baseline, true],
+      ['rulesVersion', this.opts.rulesVersion, false],
+      ['renderSceneRef', this.opts.renderSceneRef ? structuredClone(this.opts.renderSceneRef) : undefined, false],
+      ['dt', DT, false],
+      ['startTick', this.startTick, false],
+      ['ticks', this.rt.tick - this.startTick, false],
+      ['keyframeEvery', this.opts.keyframeEvery, false],
+      ['tracks', tracks, false],
+      ['changes', changes, false],
+      ['events', this.opts.compactEvents === false ? this.events : compactEvents(this.events), false],
+      ['finalStateHash', finalStateHash, true],
+      ['finalState', finalState, false],
+      ['entities0', entities0, false],
+      ['removed', changes.filter((c) => c[2] === 'present' && c[3] === false).map((c) => ({ id: c[1], t: c[0] })), false],
+    ];
+    const body: Record<string, unknown> = {}, take: Record<string, unknown> = {};
+    for (const [k, v, lazy] of fields) {
+      if (v === undefined) continue;
+      if (lazy) { lazyField(body, k, v as () => string); lazyField(take, k, () => body[k] as string); }
+      else body[k] = take[k] = v;
+    }
+    lazyField(take, 'id', () => takeIdOf(body as Omit<Take, 'id'>, KNOWN));
+    return { take: take as Take, finalStateHash: () => body.finalStateHash as string };
   }
+}
+
+/** An enumerable field read through `compute` once (#2422); writing it replaces the value, as on a plain field. */
+function lazyField(o: Record<string, unknown>, k: string, compute: () => string) {
+  let value: string | undefined;
+  Object.defineProperty(o, k, { enumerable: true, configurable: true, get: () => (value ??= compute()), set: (v: string) => { value = v; } });
 }
 
 /** The take's content address (every field except `id`). */
@@ -423,11 +480,6 @@ function dedupeChanges(cs: ChangeEvent[]) {
     out.push(cs[i]);
   }
   return out.reverse();
-}
-function stripUndefined<T extends object>(o: T): T {
-  const out = { ...o } as Record<string, unknown>;
-  for (const k of Object.keys(out)) if (out[k] === undefined) delete out[k];
-  return out as T;
 }
 
 /** Longest run of recorded points one keyframe pair may cover (bounds the simplifier's work per point). */
