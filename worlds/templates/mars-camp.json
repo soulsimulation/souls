@@ -1571,12 +1571,15 @@
         },
         {
           "op": "place",
+          "in": {
+            "parent": "$df-living-room"
+          },
           "def": "core/door@2",
           "name": "living-room-door-1",
           "p": [
-            0.2,
+            -1.8,
             0,
-            -14
+            0
           ],
           "r": 1.571,
           "params": {

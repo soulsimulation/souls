@@ -20,6 +20,8 @@ import type { GodMode } from './god.ts';
 export const DOOR_FIT_DOOR = 'core/door@2';
 /** A body this close (m) to a door's spot stands in its doorway: the door is placed open. */
 const IN_DOORWAY = 1.0;
+/** #2434: the narrowest doorway a core/door@2 fits (its frame at the least stretch, 0.8 x 1.16 m, plus a margin). */
+const NARROWEST = 0.96;
 /** How far (m) in front of a door its outside is probed for another building's room. */
 const SERIES_PROBE = 0.6;
 
@@ -46,8 +48,11 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
   const local = all?.parent ? buildingDoorFits(params ?? {}, to.args, { p: [0, 0], r: 0 }) : [];
   const y = Array.isArray(p) && p.length > 2 ? Math.round(Number(p[1]) * 1000) / 1000 : all?.baseY;
   const doors = fits.flatMap((f, k) => {
-    if (all?.parent && f.floor > 0 && !all.existing?.(f.p[0], f.p[1], f.floor)) {
-      const l = local[k]!, n = name ? `${name}-door-${k + 1}`.slice(0, 64) : undefined;
+    // a doorway narrower than the door's narrowest frame (its wall had no room to widen it) stays bare, named
+    if (all && f.width < NARROWEST && !all.existing?.(f.p[0], f.p[1], f.floor)) { series.push(`${name ?? f.opening} ${f.opening} (${f.width} m wide)`); return []; }
+    // an inside or upstairs door is the building's child (its ancestor's walls do not count as overlapping it)
+    if (all?.parent && (f.floor > 0 || !f.exterior) && !all.existing?.(f.p[0], f.p[1], f.floor)) {
+      const l = local[k]!; let n = name ? `${name}-door-${k + 1}`.slice(0, 64) : undefined; if (n && taken(n)) n = `${name}-door-${k + 1}-${f.floor}`.slice(0, 64);
       at.push(f.p);
       return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: all.parent }, ...(n && !taken(n) ? { name: n } : {}), p: [l.p[0], l.y ?? 0, l.p[1]], r: l.r, params: { sx: l.sx, sy: l.sy }, state: { open: true }, mode: 'strict' } as PlaceOp];
     }
@@ -274,7 +279,7 @@ export function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) =
   const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && ALL_DOORS_FROM.has(opRef(e.def)));
   const out: DoorFit2Report = { buildings: 0, doors: 0, left: [], kept: [], series: [], held: [], fitted: [], flipped: [], moved: [] };
   if (!targets.length) return out;
-  const done = (e: Entity, f: ReturnType<typeof fitOps2>) => { out.buildings++; out.doors += f.doors.length; out.held.push(...f.held); out.flipped.push(...f.flipped); out.moved.push(...f.moved); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors, ...(f.moves.length ? { moves: f.moves } : {}) }); };
+  const done = (e: Entity, f: ReturnType<typeof fitOps2>) => { out.buildings++; out.doors += f.doors.length; out.held.push(...f.held, ...f.series.map((s) => `${s}: narrower than a door`)); out.flipped.push(...f.flipped); out.moved.push(...f.moved); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors, ...(f.moves.length ? { moves: f.moves } : {}) }); };
   const note = (n: number, d: number) => `door-fit/2 (#2434): ${n} building(s) moved to their every-doorway revision, ${d} more real door(s) set in their doorways`;
   const each = targets.map((e) => ({ e, fit: fitOps2(god, e, bodies, obstacles) }));
   const whole = god.engineAct(each.flatMap((x) => x.fit.ops), note(each.length, each.reduce((a, x) => a + x.fit.doors.length, 0)));
