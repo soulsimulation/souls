@@ -30,8 +30,10 @@ function rng(seed) {
 const r3 = (x) => Math.round(x * 1000) / 1000;
 const rad = (deg) => r3((deg * Math.PI) / 180);
 
-/** Every building/1 type with its default footprint (40 types). */
-export const BUILDING_TYPES = [...structures, ...vocabW3].filter((d) => d?.make?.gen === 'building/1')
+/** Every building/1 type with its default footprint (40 types), once each: its first revision, the one `ref` places. A later
+ *  revision listed beside it (core-hall@2, #2284) is not another type; counted twice it shifted every later type onto
+ *  another ground of the sweep's Latin square (#2383). */
+export const BUILDING_TYPES = [...structures, ...vocabW3].filter((d) => d?.make?.gen === 'building/1' && (d.version ?? 1) === 1)
   .map((d) => ({ type: String(d.name).replace(/^core-/, ''), w: d.params?.w?.default ?? 8, d: d.params?.d?.default ?? 8, roof: d.params?.roof?.default }));
 
 export function fuzzWorld(seed = FUZZ_SEED) {
