@@ -213,6 +213,10 @@ screenshots or transcripts. Machines without the original run folders can then r
 - **Use a quiet machine.** The machine gate requires a 1-minute load under 10 and at least 6 GB of reclaimable memory.
   A loaded machine produces slow client calls and false failures. `replay-set` waits for the gate (`--gate-wait-min`,
   default 30) and stops if it never clears. `--force-machine` continues and records the breach.
+- **On a busy machine, use the hamlet battery.** Eden 2026 takes minutes to boot on a loaded host, so the m4-v1 score
+  then measures the host. `soul-eval.mjs run --battery m4-hamlet-v1 --seat <seat>` runs the m4-v1 items that have a
+  place of their kind in `hello-hamlet`, which boots in seconds; the battery file lists the items it leaves out and
+  why. Each episode's world boot time is in the report. Use m4-v1 on Eden 2026 for the full score on a quiet host.
 - **Two repeats per arm.** Compare arms only on like-for-like repeats (scripted replay against scripted replay),
   and fix acceptance bars and budgets before the baseline is measured.
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the
