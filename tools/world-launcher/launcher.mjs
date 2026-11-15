@@ -901,6 +901,9 @@ export async function openLauncher(cfg = {}) {
   }
   /** #894: every response of an unlisted world says noindex, whatever the world sent (listing read per response, so
    *  listing or unlisting a world applies at once); a listed world's own headers pass unchanged. */
+  /** #897: the site's docs index (the build's llms.txt plus every listed world's reader, from the registry per request); null when the web app is not built. */
+  function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
+    return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
   function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData } = {}) {
     if (clientGone(req, res)) return;
@@ -1438,13 +1441,17 @@ export async function openLauncher(cfg = {}) {
         // per request, so a world listed or unlisted appears or drops out at once.
         if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' }).end(req.method === 'HEAD' ? undefined : robotsTxt({ origin: publicOrigin, base: B })); return; }
         if (path === '/sitemap.xml') { res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : sitemapXml({ origin: publicOrigin, base: B, pages: docsPages(), worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) })); return; }
+        // The home page is an app: a reader that prefers Markdown (wantsMarkdown) gets the docs index, the same text as /llms.txt;
+        // either answer names it in a Link header, for a reader that got the page.
+        if (path === '/') { res.setHeader('vary', 'Accept'); res.setHeader('link', `<${publicOrigin}${B}/llms.txt>; rel="alternate"; type="text/markdown"`); const idx = wantsMarkdown(req.headers.accept) ? siteIndex() : null;
+          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : idx); return; } }
         if (path === '/' || path === '/index.html') { if (serveFile(res, join(webDir, 'index.html'), 'no-cache')) return; res.writeHead(500, { 'content-type': 'text/plain' }).end('The web app is not built: pnpm --filter @souls/web build'); return; }
         // #896: the docs, llms.txt and the changelog's Markdown twin, all built into the web build (apps/web/src/docs-site.ts).
         // A page answers as HTML, or as its Markdown twin at <path>.md or for `Accept: text/markdown`.
         if (path === '/llms-full.txt' && serveFile(res, join(webDir, 'llms-full.txt'), 'no-cache', req)) return;
         // #897: the root llms.txt is the build's docs index plus every listed world's reader (registry, per request)
-        if (path === '/llms.txt') { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { idx = null; }
-          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) })); return; } }
+        if (path === '/llms.txt') { const idx = siteIndex();
+          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : idx); return; } }
         if (path === '/.well-known/mcp/server.json') { json(res, 200, mcpServerJson({ origin: publicOrigin, base: B, version: BUILD }), { 'cache-control': 'public, max-age=3600', 'x-robots-tag': 'noindex' }); return; }
         const doc = docFile(path, req.headers.accept), negotiated = /^\/docs(?:\.md$|\/|$)|^\/changelog(?:\/|\.md)?$/.test(path);
         if (negotiated) res.setHeader('vary', 'Accept');
