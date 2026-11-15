@@ -605,8 +605,9 @@ export class NavConnectivity {
       this.fwd = reach(fwdAdj, m); this.bwd = reach(bwdAdj, m);
       for (const n of this.fwd) if (this.bwd.has(n)) this.good.add(n);
       // doors-pass/1 (#2365): a ground area ONE closed, unlocked hand door away from the main area is joined to it (a walk
-      // opens that door, passes and closes it: entry 31). Not transitive: an area two doors away, or behind a door upstairs,
-      // stays cut off, since the passage opens one door on the ground; there the step-out stays the way out.
+      // opens that door, passes and closes it: entry 31), with every area that walks to and from it without another door:
+      // the building's upper floors by its stairs (#2383). Not across a second door: an area two doors away, or behind a
+      // door upstairs, stays cut off, since the passage opens one door on the ground; there the step-out stays the way out.
       const y0 = sp.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0, extra: string[] = [];
       for (const o of this.scene.obstacles) {
         if (o.door !== 'pass' || Math.abs(o.y0 - (y0 ?? sp.ground!.standY(o.obb.c[0], o.obb.c[1]))) > 0.6) continue;
@@ -615,7 +616,10 @@ export class NavConnectivity {
         const na = `0:${ra}`, nb = `0:${rb}`;
         if (this.good.has(na) && !this.good.has(nb)) extra.push(nb); else if (this.good.has(nb) && !this.good.has(na)) extra.push(na);
       }
-      for (const n of extra) { this.good.add(n); this.fwd.add(n); this.bwd.add(n); }
+      for (const n of extra) {
+        const f = reach(fwdAdj, n), b = reach(bwdAdj, n);
+        for (const x of f) if (b.has(x)) { this.good.add(x); this.fwd.add(x); this.bwd.add(x); }
+      }
     } else { this.fwd = new Set(); this.bwd = new Set(); }
     this.linkMemo = memo;
     this.stats.links = tasks.length / 2; this.stats.edges = edges;

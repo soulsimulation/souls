@@ -750,10 +750,11 @@ export class Spatial {
     // a route through ONE closed, unlocked hand door on the ground (level 0): a route to one face of a door the failed search
     // names and one from its other face to the goal, both with doors shut. Two doors in series, or a door upstairs, do not
     // count (the passage opens one door on level 0), so reach, offers and the walk agree.
+    // The start and goal may be on any level (#2383): the door is on the ground, the legs to and from it climb stairs.
     if (opts?.doors === 'pass') {
       const { doors: _, ...rest } = opts;
       const r = this.routeNow(world, profile, start, goal, rest);
-      if (r.ok || r.diagnostic.code !== 'route.unreachable' || start.level !== 0 || goal.level !== 0) return r;
+      if (r.ok || r.diagnostic.code !== 'route.unreachable') return r;
       // only doors on the ground (within 0.6 m of level 0's floor or the terrain), as the connectivity audit counts them
       const y0 = this.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0;
       const pass = new Map(this.scene.obstacles.filter((o) => o.door === 'pass' && Math.abs(o.y0 - (y0 ?? this.ground!.standY(o.obb.c[0], o.obb.c[1]))) <= 0.6).map((o) => [o.id, o]));
