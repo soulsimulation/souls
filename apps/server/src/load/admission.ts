@@ -4,6 +4,8 @@
 // bucket under contention (`soul.slow-down`); a job whose deadline passes is answered `world.busy` unrun, and a job
 // whose client went away is dropped. It queues, delays and refuses; it never chooses or retries an act for a Soul.
 import {createHash} from 'node:crypto';
+import {writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
@@ -95,7 +97,24 @@ export class Admission {
   private now: () => number;
   private o: AdmissionOpts;
   private quietTick: () => number;
-  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]); }
+  /** MEASURE #2440 (never merged): cumulative admission internals, dumped to <DATA_DIR>/admission-stats.json. */
+  m = {jobs: 0, acts: 0, chargedMs: 0, chargedActMs: 0, charged300: 0, charged300Ms: 0, chargedMax: 0, ownMs: 0, ownN: 0, fast: 0, fastMs: 0,
+    creditWaitMs: 0, bucketWaitMs: 0, creditStalls: 0, bucketStalls: 0, sweptActs: 0, sweptReads: 0, budgetMsSum: 0, budgetN: 0, creditMin: 0,
+    level: {green: 0, amber: 0, red: 0, black: 0} as Record<Level, number>, est: {} as Record<string, number>, needAct: 0, refillSoul: 0, active: 0, queueMax: 0};
+  private mAt = 0; private mStall: {kind: 'credit' | 'bucket'; at: number} | null = null;
+  private mDump?: NodeJS.Timeout;
+  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
+    const dir = process.env.DATA_DIR;
+    if (dir && !o.now) { this.mDump = setInterval(() => this.mFlush(dir), 1000); this.mDump.unref(); } }
+  private mFlush(dir: string) {
+    const now = this.now(); if (this.mAt) { this.m.level[this.level] += now - this.mAt; this.m.budgetMsSum += this.frameBudget() * (now - this.mAt); this.m.budgetN += now - this.mAt; } this.mAt = now;
+    this.m.est = Object.fromEntries(this.est); this.m.needAct = this.need('edge:act'); this.m.refillSoul = this.refillPerS(false); this.m.active = this.active();
+    try { writeFileSync(join(dir, 'admission-stats.json'), JSON.stringify({at: Date.now(), ...this.m})); } catch { /* measure only */ }
+  }
+  private mStallEnd(now: number) { const st = this.mStall; if (!st) return; if (st.kind === 'credit') this.m.creditWaitMs += now - st.at; else this.m.bucketWaitMs += now - st.at; this.mStall = null; }
+  private mStallStart(kind: 'credit' | 'bucket', now: number) { if (this.mStall) return; this.mStall = {kind, at: now}; if (kind === 'credit') this.m.creditStalls++; else this.m.bucketStalls++; }
+  /** MEASURE: a job's own time (the turn to its first real await). */
+  mOwn(ms: number) { this.m.ownMs += ms; this.m.ownN++; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 
@@ -172,7 +191,7 @@ export class Admission {
     // amber (a boot or creation spike still stepping down) is not slowed; red/black always queue (budgets bind).
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
-      settle('run'); ranAt = now;
+      settle('run'); ranAt = now; this.m.fast++;
       return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
@@ -183,6 +202,7 @@ export class Admission {
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
   private charge(key: string, god: boolean, id: string, ms: number, startedAt: number) {
     this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
+    this.m.jobs++; this.m.chargedMs += ms; if (id === 'edge:act') { this.m.acts++; this.m.chargedActMs += ms; } if (ms >= 300) { this.m.charged300++; this.m.charged300Ms += ms; } if (ms > this.m.chargedMax) this.m.chargedMax = ms; if (this.credit < this.m.creditMin) this.m.creditMin = this.credit;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
@@ -212,7 +232,7 @@ export class Admission {
       if (j.closed()) { this.queue.splice(i, 1); this.outstanding.delete(j.key); this.shed.dropped++; j.settle('dropped'); continue; }
       if (now + Math.min(this.estimate(j.route.id), 1000) + ANSWER_MARGIN_MS >= j.deadline) {
         this.queue.splice(i, 1); this.outstanding.delete(j.key);
-        if (j.route.cls === 'C2') this.shed.reads++; else this.shed.acts++;
+        if (j.route.cls === 'C2') { this.shed.reads++; this.m.sweptReads++; } else { this.shed.acts++; this.m.sweptActs++; }
         j.settle(this.told(j.key, j.god, now, busyRefusal(this.level)).refusal);
       }
     }
@@ -244,13 +264,16 @@ export class Admission {
   async drain() {
     if (this.draining) return; this.draining = true;
     try {
+      if (!this.queue.length) this.mStallEnd(this.now());
       while (this.queue.length) {
         let now = this.now();
         this.sweep(now);
         const budget = this.frameBudget();
-        if (this.creditNow(now) <= 0) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        if (this.queue.length > this.m.queueMax) this.m.queueMax = this.queue.length;
+        if (this.creditNow(now) <= 0) { this.mStallStart('credit', now); this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
         const i = this.pick(now);
-        if (i < 0) { this.later(FRAME_MS); return; }
+        if (i < 0) { this.mStallStart('bucket', now); this.later(FRAME_MS); return; }
+        this.mStallEnd(now);
         const [j] = this.queue.splice(i, 1);
         j.settle('run');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
@@ -344,7 +367,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     if (v !== 'run') return refuse(v);
     const queued = t.waitedMs();
     let act: ActTiming | undefined;
-    try { const h = run(c, next); act = h.act; await h.done; } finally { t.done(); }
+    try { const o0 = performance.now(); const h = run(c, next); adm.mOwn(performance.now() - o0); act = h.act; await h.done; } finally { t.done(); }
     stamp(c, lv, token); timed(c, t0, queued, act);
   };
 }
