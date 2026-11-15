@@ -55,6 +55,8 @@ export type TeaHost = {
   log(m: string): void;
   /** #435: why this Soul may not take this thing or reach into this container (private, for sale), if so. */
   denied?(id: string, soul: never): Refusal | null;
+  /** #1217: whether this body's act (its capability) still has an open receipt: its watch lasts as long as the act. */
+  actOpen?(body: string, capability: string): boolean;
 };
 
 export function createTea(h: TeaHost) {
@@ -410,9 +412,33 @@ export function createTea(h: TeaHost) {
   // ---- the world changes at the motion's moments ----
   const watching = new Map<string, number>(), fired = new Map<string, Set<string>>(), planned = new Map<string, string>(), kettleOf = new Map<string, string>(), lastSupport = new Map<string, string>();
   let visits = 0;
-  /** A body was given a tea act: watch its motions until they are done (with a minute's grace before them). */
-  function expect(body: string) { watching.set(body, h.engine.world.tick + GRACE_TICKS); const k = planned.get(body); if (k) kettleOf.set(body, k); }
-  function commit(ops: Op[], note: string) { if (!ops.length) return; const r = h.commit(ops, note); if (!r.accepted) h.log(`tea ${note}: the world refused ${JSON.stringify(ops)}`); }
+  /** #1217: each watched body's act (its capability), the changes its motions made (`made`), and why one was not made. */
+  const acting = new Map<string, string>(), made = new Map<string, Set<string>>(), missed = new Map<string, string>();
+  /** A body was given a tea act: watch its motions until they are done, and while its receipt is open (a minute's grace
+   *  before them without one). */
+  function expect(body: string, capability?: string) {
+    watching.set(body, h.engine.world.tick + GRACE_TICKS); const k = planned.get(body); if (k) kettleOf.set(body, k);
+    made.delete(body); missed.delete(body); if (capability) acting.set(body, capability); else acting.delete(body);
+  }
+  function commit(ops: Op[], note: string): boolean { if (!ops.length) return false; const r = h.commit(ops, note); if (!r.accepted) h.log(`tea ${note}: the world refused ${JSON.stringify(ops)}`); return r.accepted; }
+  const did = (body: string, change: string) => { const s = made.get(body) ?? new Set<string>(); s.add(change); made.set(body, s); };
+  /** The change each act is for: its receipt completes only once that change was made (#1217, as #1214 for harvest). */
+  const CHANGE: Record<string, { change: string; not: string }> = {
+    fill: { change: 'filled', not: 'the kettle was not filled' }, boil: { change: 'switched', not: 'the kettle was not switched on' },
+    pour: { change: 'poured', not: 'nothing was poured into the cup' }, brew: { change: 'poured', not: 'nothing was poured into the cup' },
+    drink: { change: 'sipped', not: 'nothing was drunk' }, sip: { change: 'sipped', not: 'nothing was drunk' },
+    eat: { change: 'sipped', not: 'nothing was eaten' }, bite: { change: 'sipped', not: 'nothing was eaten' },
+    wash: { change: 'washed', not: 'the cup was not rinsed' } };
+  /** What a tea act came to when its steps ended, for its receipt; null when this is not this body's tea act, or the steps
+   *  stopped (the programme's own reason stands). The steps ending says only that the body moved: the receipt says whether
+   *  the world changed. */
+  function outcome(capability: string, body: string, finished: boolean): 'done' | Refusal | null {
+    if (acting.get(body) !== capability) return null;
+    const want = CHANGE[capability.slice(capability.lastIndexOf(':') + 1)], ok = made.get(body)?.has(want?.change ?? ''), why = missed.get(body);
+    acting.delete(body); made.delete(body); missed.delete(body);
+    if (!want || !finished) return null;
+    return ok ? 'done' : { code: 'contact.not-applied', reason: `The motions ended but ${want.not}${why ? `: ${why}` : ''}.` };
+  }
   const set = (ops: Op[], id: string, state: Record<string, unknown>) => ops.push(opSchema.parse({ op: 'set', id, state }));
   function pourEvent(m: WateringMotion, actor: string, key: string, data: Record<string, unknown>) {
     const ops: Op[] = [], cupNow = num(stateOf(m.target).tea), tick = h.engine.world.tick;
@@ -424,7 +450,7 @@ export function createTea(h: TeaHost) {
       if (poured >= 0.999) set(ops, m.target, { tea: 1 });
       set(ops, m.item, { level: typeof data.level === 'number' ? data.level : Math.max(0, Math.round((num(stateOf(m.item).level) - poured * CUP_LITRES / litres) * 1000) / 1000) });
     }
-    commit(ops, `${actor} tea ${key} ${m.target}`);
+    if (commit(ops, `${actor} tea ${key} ${m.target}`) && key === 'pour-end') did(actor, 'poured');
   }
   /** Entry 44: a sip leaves the tea the drink's own timeline says (cupEvents: a pure function of the record); a rinse turns
    *  the tap on and off at the valve contacts and leaves the mug clean when its water has run out. */
@@ -434,13 +460,13 @@ export function createTea(h: TeaHost) {
     else if (key === 'valve-on' && m.target) set(ops, m.target, { on: true });
     else if (key === 'valve-off' && m.target) set(ops, m.target, { on: false });
     else if (key === 'washed') set(ops, item, { tea: 0, brewedTick: -1, bag: false });
-    commit(ops, `${actor} tea ${key} ${item}`);
+    if (commit(ops, `${actor} tea ${key} ${item}`) && (key.startsWith('sip-') || key === 'washed')) did(actor, key === 'washed' ? 'washed' : 'sipped');
   }
   function fillEvent(m: WateringMotion, actor: string, key: string, data: Record<string, unknown>) {
     const ops: Op[] = [];
     if (key === 'valve-on') set(ops, m.target, { on: true });
     else if (key === 'valve-off') { set(ops, m.target, { on: false }); set(ops, m.item, { level: num(data.level, 1), heatTick: -1 }); }
-    commit(ops, `${actor} tea ${key} ${m.target}`);
+    if (commit(ops, `${actor} tea ${key} ${m.target}`) && key === 'valve-off') did(actor, 'filled');
   }
   /** Per tick, only for bodies given a tea act (usually none). Returns the kettles grasped or released this tick. */
   function tick(): string[] {
@@ -476,14 +502,18 @@ export function createTea(h: TeaHost) {
           done.add('switch');
           // the heat starts at the contact itself: its tick is fixed by the press's own timeline
           const at = am.startTick + Math.ceil(HAND_REACH_SECONDS / d - 1e-9), k = kettleHeat(stateOf(am.target), now, d);
-          if (k.phase === 'cold') { const ops: Op[] = []; set(ops, am.target, { heatTick: at }); commit(ops, `${body} tea switch-on ${am.target}`); }
-          else h.log(`tea switch-on ${am.target}: ${k.phase}, not switched`);
+          if (k.phase === 'cold') { const ops: Op[] = []; set(ops, am.target, { heatTick: at }); if (commit(ops, `${body} tea switch-on ${am.target}`)) did(body, 'switched'); }
+          else { h.log(`tea switch-on ${am.target}: ${k.phase}, not switched`); missed.set(body, `${M().pathOf(am.target)} was ${k.phase === 'empty' ? 'empty' : k.phase === 'heating' ? 'already on' : `already ${k.phase}`} when your hand reached the switch`); }
         }
-      } else if (!active && now > until) { watching.delete(body); drinkers.delete(body); }
+      } else if (!active && now > until) {
+        // #1217: the grace is only for an act that never began; one still open may still be on its way
+        const act = acting.get(body);
+        if (act && h.actOpen?.(body, act)) watching.set(body, now + GRACE_TICKS); else { watching.delete(body); drinkers.delete(body); }
+      }
       if (fired.size > 64) for (const x of [...fired.keys()].slice(0, 32)) fired.delete(x);
     }
     return moved;
   }
-  return { plan, facts, expect, tick, watchingCount: () => watching.size, visits: () => visits, steam: (id: string) => cupSteam(stateOf(id), h.engine.world.tick, dt()) };
+  return { plan, facts, expect, outcome, tick, watchingCount: () => watching.size, visits: () => visits, steam: (id: string) => cupSteam(stateOf(id), h.engine.world.tick, dt()) };
 }
 export type Tea = ReturnType<typeof createTea>;
