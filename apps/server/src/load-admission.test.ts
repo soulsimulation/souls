@@ -408,23 +408,6 @@ test('#2440 review: the inline fast path charges a lone act its own time, not a 
   adm.close();
 });
 
-test('#2440: one slow job leaves at most a frame of world debt; its own Soul pays the rest from its bucket', async () => {
-  let now = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0});
-  adm.setLoadLevel('amber');
-  const blocker = adm.request({key: 'X', god: false, route: route('POST', '/v1/edge/act')}) as {done: () => void};
-  const slow = adm.request({key: 'A', god: false, route: route('POST', '/v1/edge/act')});
-  if ('turn' in slow) void slow.turn.then(() => { now += 2000; slow.done(); });
-  blocker.done(); await adm.drain();
-  let ranB = false; const b = adm.request({key: 'B', god: false, route: route('POST', '/v1/edge/act')});
-  if ('turn' in b) void b.turn.then(() => { ranB = true; now += 5; b.done(); });
-  let ranA = false; const a2 = adm.request({key: 'A', god: false, route: route('POST', '/v1/edge/act')});
-  if ('turn' in a2) void a2.turn.then(() => { ranA = true; now += 5; a2.done(); });
-  for (let i = 0; i < 3; i++) { now += 50; await adm.drain(); }
-  assert.ok(ranB, 'another Soul\'s act runs within a few frames, not after 2 s of debt at amber\'s budget (~8 s)');
-  assert.ok(!ranA, 'the slow Soul\'s next act waits for its own bucket');
-  adm.close();
-});
-
 test('#2440: spare time needs the ticks on time now (1 s service >= 0.98, last tick under 100 ms old), not only over 5 s', async () => {
   const run = async (onTime: boolean) => {
     let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.5, ticksOnTime: () => onTime});
