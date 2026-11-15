@@ -92,9 +92,9 @@ test('wired: the page, the two pairings and the god approval count; the build de
   assert.match(src('./PairApprove.tsx'), /setOk\(true\); countPairing\('pair:'\+code\);/);
   assert.match(src('./GodPanel.tsx'), /await G\.approve\(code\); countEvent\('god connected'\);/);
   assert.match(src('../vite.config.ts'), /__SIM_GOATCOUNTER__: JSON\.stringify\(process\.env\.SIM_GOATCOUNTER \?\? 'simeden'\)/);
-  // The world pages' only CSP is frame-ancestors (http.ts). A connect-src/img-src/default-src added there must allow
+  // The world pages' only CSP is frame-ancestors (security-headers.ts). A connect-src/img-src/default-src added there must allow
   // https://simeden.goatcounter.com, or no visit is counted.
-  const csp = src('../../server/src/http.ts').match(/c\.header\('Content-Security-Policy', "([^"]*)"\)/)?.[1];
+  const csp = src('../../server/src/security-headers.ts').match(/export const FRAME_ANCESTORS = "([^"]*)"/)?.[1];
   assert.ok(csp !== undefined); assert.ok(!/(default|connect|img)-src/.test(csp!) || /goatcounter\.com/.test(csp!), csp);
 });
 
