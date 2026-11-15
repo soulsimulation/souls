@@ -1,9 +1,8 @@
-// Clip kit (#2383): in Eden 2026, two building types whose outside doorways now hold real doors, both closed: the dome
-// (core/roundhouse@2) and the bakery (core/hall@3). Each walk into a building starts far from it (review of #2397: a long
-// walk is planned through the door from the start, not stopped short of it). Before the take, admin's Soul Clara runs to
-// the bakery's front, about 55 m from the dome. On camera (Ctrl+K, Enter follows Clara) she runs from there into the dome,
-// opening its door by hand and closing it behind her, walks back out through it, then runs from the dome about 55 m into
-// the bakery's shop the same way (one closed door per walk).
+// Clip kit (#2383), part 1 of 2 (part 2: doors-everywhere-bakery): in Eden 2026, the dome (core/roundhouse@2), whose
+// outside doorways now hold real doors, closed. The walk in starts far from it (review of #2397: a long walk is planned
+// through the door from the start, not stopped short of it). Before the take, admin's Soul Clara runs to the bakery's
+// front, about 55 m from the dome. On camera (Ctrl+K, Enter follows Clara) she runs from there into the dome, opening its
+// door by hand and closing it behind her, then walks back out through it.
 import { execFile, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { cast } from '../_shared/cast.mjs';
@@ -38,13 +37,10 @@ export default async function steps(page, { mark }) {
   mark('follow Clara at the bakery front, ~55 m from the dome (core/roundhouse@2), its doors closed');
   await page.waitForTimeout(1500);
   mark('one walk from ~55 m away: run into the dome');
-  await eden(['act', 'walk:eden-dome', '--run', '--wait', '60', '--json'], 70_000);
+  await eden(['act', 'walk:eden-dome', '--run', '--wait', '80', '--json'], 90_000);
   mark('inside the dome, door closed behind');
   await page.waitForTimeout(1000);
   mark('walk back out through the dome door');
-  await eden(['act', 'walk:street-bicycle-bike-9', '--wait', '30', '--json'], 40_000);
-  mark('one walk from ~55 m away: run into the bakery (core/hall@3) shop, its door closed');
-  await eden(['act', 'walk:int-bakery/shop', '--run', '--wait', '60', '--json'], 70_000);
-  mark('inside the bakery, door closed behind');
-  await page.waitForTimeout(1500);
+  await eden(['act', 'walk:street-bicycle-bike-9', '--wait', '40', '--json'], 50_000);
+  await page.waitForTimeout(1000);
 }
