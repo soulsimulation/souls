@@ -119,7 +119,7 @@ type ClockHost = {
   engine: { world: { tick: number } };
   living?: { origin: number; dayTicks: number; customs?: string[] } | undefined;
   enqueue(kind: 'rules', author: string, payload: unknown): Promise<unknown>;
-  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number; silent?(): boolean;
+  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number; silent?(): boolean; wallTick?(): number;
   /** #2297: the keeper reports the zone's next daylight-saving change as a deadline (WorldHost.stillUntil). */
   listeners?: { stillness?(tick: number): { name: string; tick?: number | null }[] }[];
 };
@@ -172,7 +172,7 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
     if (!active()) return Promise.resolve();
     if (pending) return pending.then(sync);
     // #2235: during a boot catch-up the clock is read as caught up (the event applies after the owed ticks)
-    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick + (host.owedTicks ?? 0), zone = o.zone();
+    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.wallTick?.() ?? host.engine.world.tick + (host.owedTicks ?? 0), zone = o.zone();
     mapCut(l?.cutOver);
     let payload: { dayConfig: Record<string, unknown>; why: string };
     if (o.paused?.()) {
