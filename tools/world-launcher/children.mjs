@@ -211,8 +211,9 @@ export class ChildPool {
   /** This pool's canary failed (keeper.mjs hands back to the previous launcher): the world is never started here again
    *  and the pid file is the previous launcher's alone. */
   handBack(slug) { const k = this.kids.get(slug); if (k) k.handedBack = true; this.o.pidFile = null; }
-  /** The next launcher's canary failed (keeper.mjs): this pool runs its worlds again. */
-  unfence() { this.fenced = false; }
+  /** The next launcher's canary failed (keeper.mjs): this pool runs its worlds again. fence() cleared every timer: each held
+   *  world's rest is armed again (#2378), so a world held during the failed handover still ends its rest by itself. */
+  unfence() { this.fenced = false; for (const k of this.kids.values()) if (k.held?.until) this.armRest(k); }
   /** The running children, for the next launcher to adopt. */
   handoverList() { for (const k of this.kids.values()) this.thaw(k); return [...this.kids.values()].filter((k) => k.child && k.status === 'running').map((k) => ({ slug: k.slug, port: k.port, pid: k.child.pid, script: k.script, ...(k.healthPort ? { healthPort: k.healthPort } : {}), ...(k.readPorts?.length ? { readPorts: k.readPorts } : {}) })); }
 
@@ -393,7 +394,9 @@ export class ChildPool {
     if (k && !passive) k.lastUsed = Date.now();
     if (k?.frozen) this.thaw(k, { use: !passive });
     if (k && (k.status === 'running')) return Promise.resolve(k.port);
-    // held (lane L1 breaker): too many failures in a row; nothing restarts it but an operator's resume()
+    // held (lane L1 breaker): too many failures in a row; it rests until held.until (#2378), then boots again: here too, so
+    // a rest whose timer was lost (a fence) never holds it for ever
+    if (k?.held?.until && k.held.until <= Date.now()) { this.log(`world ${k.slug} rested past its hold: resuming it`); this.resume(k.slug); }
     if (k?.held) { const e = new Error(`world ${world.slug} is resting after ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${k.held.reason}); it boots again by itself${k.held.until ? ` in ${Math.max(0, Math.round((k.held.until - Date.now()) / 1000))} s` : ''}`); e.code = 'held'; return Promise.reject(e); }
     // #2304: a world waiting for a load slot moves up to the most urgent reason anyone has asked for it
     const rank = rankOf(reason);
@@ -623,15 +626,20 @@ export class ChildPool {
     // #2378: a hold is a rest, never a terminal state: it ends by itself after holdRestMs (10 min), doubling for each hold
     // in a row up to holdRestMaxMs (1 h), and the world boots again (no one is paged for it). resume() still ends it early.
     const rest = Math.min(this.g.holdRestMaxMs ?? 3_600_000, (this.g.holdRestMs ?? 600_000) * 2 ** Math.min(6, k.holds ?? 0));
-    k.holds = (k.holds ?? 0) + 1; k.held.until = Date.now() + rest;
+    k.holds = (k.holds ?? 0) + 1; k.held.until = Date.now() + rest; k.held.restMs = rest;
+    this.armRest(k);
+    this.log(`world ${k.slug} held: ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${reason}); it rests ${Math.round(rest / 1000)} s, then boots again`);
+  }
+  /** The timer that ends a held world's rest at held.until (now, if that has passed) and boots it again. */
+  armRest(k) {
+    if (k.timer) clearTimeout(k.timer);
     k.timer = setTimeout(() => {
       k.timer = null;
       if (!k.held || this.closing || k.stopped || this.fenced || !k.world) return;
-      this.log(`world ${k.slug} rested ${Math.round(rest / 1000)} s after its hold: resuming it`);
+      this.log(`world ${k.slug} rested ${Math.round((k.held.restMs ?? 0) / 1000)} s after its hold: resuming it`);
       this.resume(k.slug); this.ensure(k.world).catch((e) => this.log(`world ${k.slug} did not come back after its rest: ${e.message}`));
-    }, rest);
+    }, Math.max(0, k.held.until - Date.now()));
     k.timer.unref?.();
-    this.log(`world ${k.slug} held: ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${reason}); it rests ${Math.round(rest / 1000)} s, then boots again`);
   }
   /** End a hold: the failure count starts again; the next request (or the caller's ensure) boots it. */
   resume(slug) {

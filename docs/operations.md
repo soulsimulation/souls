@@ -128,7 +128,7 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).
 
   A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until its rest ends or it is resumed. A
-  world that dies at the same step of the same tick on two boots in a row comes up with that step quarantined
+  world that dies in the same listener step on two boots in a row (a hang or a fault storm) comes up with that step quarantined for a window of ticks
   (`world.step-quarantined`; docs/design/world-cost.md, "A world that never stays stuck"). Outside the launcher
   (local dev, tests), a halted process stays up with its clock stopped.
 - `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
