@@ -144,6 +144,7 @@ test('A2 (cause 2) on an Eden core world (durable clock): a step that hangs on e
   const a = (await h.health()).tick; await wait(1000); const b = (await h.health()).tick;
   assert.ok(a > T + K && b > a, `the world runs on past the ticks (${T + K} -> ${a} -> ${b})`);
   assert.equal(h.pid(), pid, 'and stays up');
+  { const hz = await h.health(); if (hz.tick < until) assert.deepEqual(hz.quarantine && { untilTick: hz.quarantine.untilTick, deaths: hz.quarantine.deaths }, { untilTick: until, deaths: Number(line[4]) }, 'healthz shows the skipped step while it is skipped'); }
   assert.equal(h.events().slice(0, events.length - 1), events.slice(0, -1), 'every event logged before the fault is kept');
   assert.doesNotMatch(h.log(), /replay differs/);
   const glitch = /\[world\] glitch rung=contained rule=world\.step-quarantined tick=(\d+)/.exec(h.log());

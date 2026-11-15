@@ -123,6 +123,8 @@ export function limitBody(maxSize: number, onError: (c: Context) => Response | P
     return bytes > maxSize ? onError(c) : next();
   };
 }
+/** #2378: a listener step skipped as a restart loop's, while it is skipped (public: its id and tick numbers only). */
+const quarantineOf = (h: WorldHost) => { const q = h.quarantinedStep; return q && h.engine.world.tick < q.untilTick ? {quarantine: {step: `step ${q.id.toString(16).padStart(8, '0')}`, fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths}} : {}; };
 type Deps = { cfg: Config; db: Db; host: WorldHost; auth: Auth; hub: Hub; brain: Brain; souls: Souls; takes?: TakeArchive; station?:CandidateStationV1; stationV2?:CandidateStationV2; intentV2?:IntentControlV2; edge?:EdgeLedger; god?: GodMode; contextReady?:()=>boolean; contextWait?:(signal:AbortSignal)=>Promise<void>; contextLevelAt?:(x:number,z:number,y:number)=>number; load?:{admission?:Admission;monitor:LoadMonitor;faults?:()=>Record<string,number>;crowded?:(soulId:string)=>{position:number;eta_s:number}|null} };
 
 export function buildApp(d: Deps) {
@@ -302,7 +304,7 @@ export function buildApp(d: Deps) {
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
       tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
       skip: d.host.skipStats,   // #2298 A5: ticks computed and jumped, jumps, the last horizon
-      ...(mon ? {load: mon.health()} : {}), ...(d.load?.faults && Object.keys(d.load.faults()).length ? {faults: d.load.faults()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
+      ...(mon ? {load: mon.health()} : {}), ...(d.load?.faults && Object.keys(d.load.faults()).length ? {faults: d.load.faults()} : {}), ...quarantineOf(d.host), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
   const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile); return soulClient ? {soulClient} : {}; };

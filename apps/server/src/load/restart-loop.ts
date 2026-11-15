@@ -45,22 +45,27 @@ export function noteLastExit(dataDir: string, now = Date.now()): {deaths: Death[
         name: step ? `step ${hex(step.id)}${top ? ` (${top})` : ''}` : null};
     }
   }
-  if (death) deaths = [...deaths, death].slice(-5);
+  if (death) deaths = [...deaths, death].slice(-12);   // (enough deaths for the window to reach its cap: 2 + 6 doublings)
   if (fx || last) { try { writeFileSync(file + '.tmp', JSON.stringify(deaths) + '\n'); renameSync(file + '.tmp', file); } catch { /* a full disk: no record, no quarantine */ } }
   return {deaths, quarantine: stepQuarantine(deaths)};
 }
 
-/** The step to skip: the last `n` deaths or more named the same step, each within `window` ticks of the next. It is skipped
- *  from the first of their ticks to `window` ticks past the last (doubled for each death past `n`). */
+/** The window a chain of `same` deaths earns: none under `n`, then `window` doubling for each death past `n`, capped. */
+const windowFor = (same: number, n: number, window: number) => (same < n ? 0 : Math.min(QUARANTINE_MAX_TICKS, window * 2 ** (same - n)));
+/** The step to skip: the last `n` deaths or more named the same step, in one chain: each death within `window` ticks of the
+ *  one before it plus the quarantine window that death had earned (a step that hangs again just past its window is still
+ *  the same loop, so the window keeps doubling up to its cap). It is skipped from the first of their ticks to the earned
+ *  window past the last. */
 export function stepQuarantine(deaths: Death[], n = 2, window = QUARANTINE_TICKS): StepQuarantine | null {
   const d = deaths.at(-1);
   if (!d || d.id === null || d.tick === null) return null;
-  let same = 0, from = d.fromTick ?? d.tick, until = d.tick, near = d.tick;
-  for (let i = deaths.length - 1; i >= 0; i--) {
-    const e = deaths[i];
-    if (e.id !== d.id || e.tick === null || Math.abs(near - e.tick) > window) break;
-    same++; from = Math.min(from, e.fromTick ?? e.tick); until = Math.max(until, e.tick); near = e.tick;
-  }
+  let start = deaths.length - 1;
+  while (start > 0 && deaths[start - 1].id === d.id && deaths[start - 1].tick !== null) start--;
+  const run = deaths.slice(start) as (Death & {tick: number})[];
+  let chain = 0;
+  for (let j = 1; j < run.length; j++) if (Math.abs(run[j].tick - run[j - 1].tick) > window + windowFor(j - chain, n, window)) chain = j;
+  const same = run.length - chain;
   if (same < n) return null;
-  return {id: d.id, name: d.name ?? `step ${hex(d.id)}`, fromTick: from, untilTick: until + Math.min(QUARANTINE_MAX_TICKS, window * 2 ** (same - n)), deaths: same};
+  const links = run.slice(chain), from = Math.min(...links.map(e => e.fromTick ?? e.tick)), until = Math.max(...links.map(e => e.tick));
+  return {id: d.id, name: d.name ?? `step ${hex(d.id)}`, fromTick: from, untilTick: until + windowFor(same, n, window), deaths: same};
 }

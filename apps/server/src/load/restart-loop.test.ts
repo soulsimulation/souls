@@ -38,6 +38,20 @@ test('two deaths in a row in the same step (by its stable id) at near ticks quar
   assert.equal(stepQuarantine([d(5, 1), d(6, 1)])?.untilTick, 6 + QUARANTINE_TICKS, 'adjacent ticks');
   const three = stepQuarantine([d(5, 1), d(6, 1), d(7, 1)]);
   assert.equal(three?.deaths, 3); assert.equal(three?.untilTick, 7 + 2 * QUARANTINE_TICKS, 'the window doubles for each death past two');
+  // a step that hangs again just past each window (a durable-clock world dies one tick past it): one chain, the window
+  // doubling to its cap, never back to the base or to none
+  const chain: ReturnType<typeof d>[] = [d(1000, 1), d(1001, 1)];
+  const windows: number[] = [];
+  for (let k = 0; k < 9; k++) { const q = stepQuarantine(chain)!; windows.push(q.untilTick - chain.at(-1)!.tick!); assert.equal(q.deaths, chain.length); chain.push(d(q.untilTick, 1)); }
+  assert.deepEqual(windows, [1200, 2400, 4800, 9600, 19_200, 38_400, 72_000, 72_000, 72_000]);
+  assert.equal(stepQuarantine([...chain, d(chain.at(-1)!.tick! + 72_000 + QUARANTINE_TICKS + 1, 1)]), null, 'a death past the window and the base: a new chain of one');
+  // and through noteLastExit, whose record keeps enough deaths for the cap
+  const dir2 = mkdtempSync(join(tmpdir(), 'restart-loop-'));
+  try {
+    let tick = 1000, last = 0, q: ReturnType<typeof stepQuarantine> = null;
+    for (let k = 0; k < 9; k++) { writeFileSync(join(dir2, 'live.json'), killedAt(tick, 5)); last = tick; q = noteLastExit(dir2).quarantine; tick = q ? q.untilTick : tick + 1; }
+    assert.equal(q!.deaths, 9); assert.equal(q!.untilTick - last, 72_000, 'the cap, through deaths.json');
+  } finally { rmSync(dir2, {recursive: true, force: true}); }
 });
 
 test('disk headroom: under it, the log says so and the retention rules prune once a look; the backup waits while low', () => {
