@@ -2608,7 +2608,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // place of the passage's last leg
       const up = steps.find(s => s.verb === 'mars:walk_to' && typeof s.params.x === 'number' && typeof s.params.z === 'number');
       const to = up ? [up.params.x, up.params.z] : typeof chosen?.target === 'string' ? chosen.target : null;
-      const what = label.replace(/^\S+ (at |on |in |to )?/i, '') || 'there', rest = steps[0]?.verb === 'stand' ? steps.slice(1) : steps;
+      const what = label.replace(/\s*\(.*$/, '') || 'there', rest = steps[0]?.verb === 'stand' ? steps.slice(1) : steps;
       const p = to ? this.doorPassage(soul, [{verb: 'walk_to', params: {to, standoff: up ? 0 : 0.9}}], what) : null;
       if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
       if (p) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}

@@ -51,8 +51,9 @@ test('Eden 2026: catalog acts by id are offered cold; a kitchen counter is craft
     assert.deepEqual(moved, [], 'every spot main used walks to main\'s point');
   }
 
-  // a ground-floor kitchen counter whose chair stands on its standing point (Canal Village), asked for by id from afar
-  const id = 'craft:craft.e_07d35dd0', counter = host.engine.world.entities.e_07d35dd0!;
+  // a ground-floor kitchen counter whose chair stands on its standing point (Canal Village, canal-west-home-11/kitchen-counter;
+  // its id moved when the fitted doors (#2383) took earlier ids), asked for by id from afar
+  const id = 'craft:craft.e_7a0795d4', counter = host.engine.world.entities.e_7a0795d4!;
   const out = await accept(host, Promise.resolve(L.act(w.soul, {capability: id, clientRef: 'counter-1'}))) as Act;
   assert.equal(out.accepted, true, JSON.stringify(out));
   const body = () => host.engine.world.entities[w.soul.entityId]!;
@@ -63,7 +64,7 @@ test('Eden 2026: catalog acts by id are offered cold; a kitchen counter is craft
   assert.ok(Math.hypot(p[0] - c[0], p[2] - c[2]) <= 0.85 + 0.5 + 0.05, `at the counter (${p.map(v => v.toFixed(2))} vs ${c.map(v => v.toFixed(2))})`);
 
   // #1871: the Eden House 4 easel's paint act by id walks into the living room and paints there
-  const easelId = 'paint:paint.e_9ae05996', easel = host.engine.world.entities.e_9ae05996!;
+  const easelId = 'paint:paint.e_0e7da4b4', easel = host.engine.world.entities.e_0e7da4b4!;
   const painted = await accept(host, Promise.resolve(L.act(w.soul, {capability: easelId, clientRef: 'easel-1'}))) as Act;
   assert.equal(painted.accepted, true, JSON.stringify(painted));
   const t1 = host.engine.world.tick;
