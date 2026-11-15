@@ -61,7 +61,7 @@ const NATIVES: { name: string; description: string }[] = [
 /** Shards (#2389): one world, booted from its own config. A world is a value, not the program: what it reads after boot
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
- *  guard, the read pool's global, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
+ *  guard, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
 export async function startWorld(config: Config) {
   // Lane P5: when the boot's phases end (ms since the process started; the first is this release's code load)
   const bootAt: Record<string, number> = { code: performance.now() };

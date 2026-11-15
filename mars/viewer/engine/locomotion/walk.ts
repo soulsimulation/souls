@@ -1967,6 +1967,8 @@ function remainingValid(rt: Runtime, ex: Exec): boolean {
  *  Worlds that never widen (the old worlds) keep `walkTo` itself, the same ±500 m schema as before. The widened defs are
  *  immutable and keyed by their reach, so worlds of the same size share one. */
 const walkToByReach = new Map<number, typeof walkTo>();
+/** Whether `d` is walk_to as this module makes it (plain or widened), not a wrapper some runtime installed. */
+export const isWalkToDef = (d: unknown) => d === walkTo || [...walkToByReach.values()].includes(d as typeof walkTo);
 export function walkToWithin(metres: number): typeof walkTo {
   const reach = Math.min(16000, metres);
   if (!(reach > 500)) return walkTo;

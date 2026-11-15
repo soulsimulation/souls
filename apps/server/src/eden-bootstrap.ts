@@ -29,12 +29,12 @@ async function edenOriginHistoryFactory(db:Db,worldId:string,env?:Record<string,
   const header=db.world(worldId);
   if(!header)return marsFactory({...EDEN_SAFE_COMMONS_WORLD,safeCrewRemoval:true},env);
   const policy=db.db.prepare("SELECT seq FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.crewRemovalTransition.contract')='crew-removal-transition/1' ORDER BY seq LIMIT 1").get(worldId);
-  if(policy)return marsCrewRemovalTransitionFactory();
+  if(policy)return marsCrewRemovalTransitionFactory(env);
   const physical=db.db.prepare("SELECT payload FROM events WHERE world_id=? AND kind='rules' AND json_extract(payload,'$.commonsTransition.contract')='commons-transition/1' ORDER BY seq LIMIT 1").get(worldId) as {payload:string}|undefined;
   const originalRules=physical?JSON.parse(physical.payload).commonsTransition.fromRulesVersion:header.rules_version;
   if(!physical&&header.rules_version.includes('+commons/1'))return marsFactory({...EDEN_SAFE_COMMONS_WORLD,safeCrewRemoval:true},env);
   if(originalRules.includes('+crew-removal/1'))return marsCommonsTransitionFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true},{safeArrivalV1:true,env});
-  return marsCrewRemovalTransitionFactory();
+  return marsCrewRemovalTransitionFactory(env);
 }
 
 export async function installEdenCore(host:WorldHost,options:{applyCrew:boolean;applyCommons:boolean;retainReader?:boolean}){

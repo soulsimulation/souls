@@ -71,7 +71,7 @@ export function groundFact(g: Ground, editSeq: number, opts: { paged?: boolean }
 import { swimTo, swimIn, shoreToward, groundTravel, inDeepWater, destinationInDeepWater } from '../../../mars/viewer/engine/locomotion/swim.ts';
 import { acknowledgeRelocation, humanStaticClearance, humanStaticClearanceWithOverlay, speedWithinCap, SPEED_CAPS } from '../../../mars/viewer/engine/runtime/invariants.ts';
 import { entityList } from '../../../mars/viewer/engine/world/entity-list.ts';
-import { WALK_SPEED_CAP, walkToWithin } from '../../../mars/viewer/engine/locomotion/walk.ts';
+import { WALK_SPEED_CAP, walkToWithin, isWalkToDef } from '../../../mars/viewer/engine/locomotion/walk.ts';
 import { G_SWIM, swimRootY } from '../../../mars/viewer/engine/spatial/ground.ts';
 import type { Spatial } from '../../../mars/viewer/engine/spatial/service.ts';
 import { dcos, dsin } from '../../../mars/viewer/engine/core/math.ts';
@@ -90,7 +90,7 @@ export function groundReach(fact: { recipeHash: string } | undefined): number {
 /** The registry with the ground verbs, and walk_to reaching `reach` m (the same map when they are there already).
  *  #2416: the reach is this world's own, in its own registry. */
 export function groundRegistry(base: Map<string, any>, reach = 500): Map<string, any> {
-  const walk = base.has('walk_to') ? walkToWithin(reach) : undefined;
+  const walk = isWalkToDef(base.get('walk_to')) ? walkToWithin(reach) : undefined;   // a wrapped walk_to is left as it is
   if (GROUND_VERBS.every((v) => base.get(v.verb) === v) && (!walk || base.get('walk_to') === walk)) return base;
   const m = new Map(base); for (const v of GROUND_VERBS) m.set(v.verb, v); if (walk) m.set('walk_to', walk); return m;
 }
