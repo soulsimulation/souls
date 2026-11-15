@@ -118,15 +118,28 @@ export function impliedSpecs(def: DefLike | undefined): SoundSpec[] {
   return out.slice(0, 4);
 }
 
+/** #1571: a def's own and implied specs, made once per def object (frozen; the scan copies before it changes one). A merged
+ *  (extending) def is a fresh object per resolve, so it misses and is derived as before. */
+const defSpecCache = new WeakMap<object, { own: readonly SoundSpec[]; implied: readonly SoundSpec[] }>();
+export function defSpecs(def: StoredDef): { own: readonly SoundSpec[]; implied: readonly SoundSpec[] } {
+  let hit = defSpecCache.get(def);
+  if (!hit) {
+    const freeze = (l: SoundSpec[]) => Object.freeze(l.map((x) => Object.freeze(x)));
+    hit = { own: freeze(specsOf(def)), implied: freeze(impliedSpecs(def as DefLike)) };
+    defSpecCache.set(def, hit);
+  }
+  return hit;
+}
 /** Every entity's sounds in the model, with position(s), current state (def defaults filled) and a chosen variant.
  *  Implied sounds of kinds in CLUSTERED are merged per cell into one `cloud` emitter (a wood rustles as one). */
 export function emittersOf(model: WorldModel): Emitter[] {
   const out: Emitter[] = [], clusters = new Map<string, Emitter>();
   for (const e of model.entities.values()) {
-    const def = model.resolvedDef(e.def), own = specsOf(def), implied = impliedSpecs(def as DefLike | undefined);
-    if (!def || (!own.length && !implied.length)) continue;
+    const def = model.resolvedDef(e.def); if (!def) continue;
+    let { own, implied } = defSpecs(def);
+    if (!own.length && !implied.length) continue;
     // a fountain's own water is the splashing voicing (its drip and pigeons come as extra sounds)
-    if (own[0] && own[0].variant === undefined && ((def as DefLike).tags ?? []).includes('fountain')) own[0] = { ...own[0], variant: 0 };
+    if (own[0] && own[0].variant === undefined && ((def as DefLike).tags ?? []).includes('fountain')) own = [{ ...own[0], variant: 0 }, ...own.slice(1)];
     const specs = own.length ? [...own, ...implied].slice(0, 4) : implied.filter((s) => !CLUSTERED.has(s.kind));
     if (!own.length) for (const spec of implied) {
       if (!CLUSTERED.has(spec.kind)) continue;

@@ -12,7 +12,8 @@ import { now, sleep } from '../lib/clock.mjs';
 import * as claude from './adapters/claude-headless.mjs';
 import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
-import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
+import { worldBudgetFor, priceDriftOf, callUsd, tokensUsd, CODEX_USD_PER_MTOK } from './world-budget.mjs';
+const TOKEN_PRICED = { 'codex-headless': CODEX_USD_PER_MTOK };   // #2381: adapters that report tokens and no dollars
 import { assertSeatHome } from './seat-home.mjs';
 import { recordOn } from '../record/switch.mjs';
 
@@ -150,8 +151,10 @@ export class Seat {
     this.inTurn = true;
     const n = ++this.turnN, started = now();
     try { onStart?.({ turn: n, reason, startedAt: started.t, startMono: started.mono }); } catch { /* observer hook is best effort */ }
-    // #1098: a live seat with no real cost report (Codex) can't be held to the world budget, so under one it is refused
-    const noCost = this.budget && this.info.adapter !== 'claude-headless' ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
+    // #1098: a live seat with no cost report can't be held to the world budget, so under one it is refused; #2381: one that
+    // reports tokens (Codex) is priced from them
+    const tokenPrice = TOKEN_PRICED[this.info.adapter] ?? null;
+    const noCost = this.budget && this.info.adapter !== 'claude-headless' && !tokenPrice ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
     const ctxBefore = this.info.sessionContextTokens ?? null;   // the session's context at its last call (null: no call yet)
     if (this.info.seatCheck && !this.info.seatCheck.ok) {   // #1687: a seat that failed its first-call check takes no further live turn
       const ended = now(); this.inTurn = false;
@@ -186,7 +189,7 @@ export class Seat {
     // keeps the priced last call. The limit: an in-flight call that cost more than that reads low by the difference, at most one
     // observation plus one output ($0.073 at the defaults). A kill on a seat's last turn, or a new session, stays counted.
     const sessionCost = this.info.adapter === 'claude-headless' ? r.usage?.costUsd ?? null : null;
-    let turnCost = r.usage?.costUsd ?? null;
+    let turnCost = r.usage?.costUsd ?? (tokenPrice && r.usage ? tokensUsd(r.usage, tokenPrice) : null);
     if (r.timedOut) turnCost = null;
     else if (sessionCost != null) {
       const sid = r.sessionId ?? this.info.sessionId, prev = this.info.sessionCostUsd?.[sid] ?? 0;
