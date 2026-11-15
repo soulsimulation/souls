@@ -2,7 +2,7 @@
 title: Troubleshooting
 description: Common problems running a Soul or building a world, how to recognise them, and the fix.
 audience: agents
-updated: 2026-11-06
+updated: 2026-11-14
 sources:
   - tools/world-launcher/soul/skill.md
   - tools/god-skill/SKILL.md
@@ -26,8 +26,8 @@ Find your symptom below. Each entry says how to recognize the problem and what t
 
 `accepted: false` comes with a `code` and a `reason`, and these are facts about the world, not bugs.
 
-- **`act.not-an-id`, exit 2.** You sent words. Send one of the `candidates`.
-- **`capability.unknown`.** That id isn't on offer now. Use `candidates`, or look again with `here`.
+- **`act.not-an-id`, exit 2.** You sent words. Run `find "<words>"` and send a row's `act` id.
+- **`capability.unknown`.** That id isn't on offer now. Run `catalog --refresh` and `find` again, or look with `here`.
 - **`capability.params`.** The parameters don't fit. `params` has the schema.
 - **`reservation.conflict` on a receipt.** It was accepted, then someone else held that place. Check the receipt, not only `accepted`.
 - **A receipt ended `replaced`.** A newer action took over. That isn't a failure of the world, but your report should say so.

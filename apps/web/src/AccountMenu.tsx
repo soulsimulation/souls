@@ -4,6 +4,7 @@ import {copyText,manualCopyHint} from './clipboard.ts';
 import {requestFeedback,FEEDBACK_LABEL} from './feedback-request.ts';
 import {connectedAgents,disconnectAgent,type ConnectedAgent} from './god-ui/join-api.ts';
 import {ageText} from './soul-state.ts';
+import {AccountPicture} from './AccountPicture.tsx';
 export type AccountMenuAuth={ready:boolean;authed:boolean;label:string|null;avatarUrl?:string|null;signInUrl?:string;login():void;logout(returnUrl?:string):Promise<void>|void};
 /** Explicit auth-off worlds retain their existing creation entry; required auth never falls back. */
 export function WorldAccountControls({signinEnabled,accountAuthRequired,auth,newSoul,inviteUrl}:{signinEnabled:boolean;accountAuthRequired?:boolean;auth:AccountMenuAuth;newSoul?:ReactNode;inviteUrl?:string}){return signinEnabled?<AccountMenu auth={auth} newSoul={newSoul} inviteUrl={inviteUrl}/>:<>{accountAuthRequired!==true&&newSoul}</>;}
@@ -36,7 +37,7 @@ function SignedInMenu({auth,newSoul,inviteUrl}:{auth:AccountMenuAuth;newSoul?:Re
  // #2245: the agents logged in to this account, read each time the menu opens; no item when there are none
  const [agents,setAgents]=useState<ConnectedAgent[]>([]);
  const load=()=>{void connectedAgents().then(list=>{if(list)setAgents(list);});};
- return <>{newSoul}<MenuDetails className="account-menu" onOpen={load} summary={<summary className="account-avatar" aria-label="Account menu" title={auth.label??'Your account'}>{auth.avatarUrl?<img src={auth.avatarUrl} alt="" referrerPolicy="no-referrer"/>:<span aria-hidden="true">{auth.label?.trim()[0]?.toUpperCase()??'●'}</span>}</summary>}>
+ return <>{newSoul}<MenuDetails className="account-menu" onOpen={load} summary={<summary className="account-avatar" aria-label="Account menu" title={auth.label??'Your account'}><AccountPicture avatarUrl={auth.avatarUrl} label={auth.label}/></summary>}>
   {inviteUrl&&<InviteLink url={inviteUrl}/>}<ConnectedAgents agents={agents} setAgents={setAgents}/><FeedbackItem/><button type="button" onClick={()=>{void auth.logout(worldSignOutReturnUrl(location));}}>Sign out</button>
  </MenuDetails></>;
 }
