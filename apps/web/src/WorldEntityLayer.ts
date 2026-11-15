@@ -811,6 +811,12 @@ export class WorldEntityLayer {
     for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def) && !hasOwnCars(def)) out.push(carrierIdOf(e, id => m.entities.has(id))); }
     return out;
   }
+  /** #1976: of rideCars, the ferris wheels (their car is fixed to the rim): native carrier id → the wheel's world x, z. */
+  rideCarWheels(): Map<string, [number, number]> {
+    const out = new Map<string, [number, number]>(), m = this.model; if (!m) return out;
+    for (const e of m.entities.values()) { if (e.in.parent !== 'world') continue; const def = m.resolvedDef(e.def) as (StoredDef & { components: Record<string, unknown> }) | undefined; if (def && isRideCarrierDef(def) && !isRideBalloonDef(def) && !hasOwnCars(def) && (def.tags ?? []).includes('ferris-wheel')) { const wp = m.worldPose(e); out.set(carrierIdOf(e, id => m.entities.has(id)), [wp.x, wp.z]); } }
+    return out;
+  }
   /** #2198: world-level god rides ridden in their own cars (a big wheel's gondolas): native carrier id → the thing's id. */
   rideWheels(): Map<string, string> {
     const out = new Map<string, string>(), m = this.model; if (!m) return out;
