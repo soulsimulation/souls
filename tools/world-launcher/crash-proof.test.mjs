@@ -24,12 +24,12 @@ test('a world survives its own errors, and comes back exactly from a hang and a 
     ENABLE_CLOSED_HUMAN_GOALS: '1', ENABLE_REGISTERED_HUMAN_ACTIVITIES: '1', ENABLE_LIVING_WORLD: '1', SEED_NATIVES: '0', DEV_AUTH: '1', WORLD_OWNER_ID: 'dev:admin', MIND_DRIVER: 'central',
     BRAIN_MODE: 'fake', BRAIN_BUDGET_USD_PER_DAY: '0', ARCHIVE_TAKES: '0', PORT: String(port), HOST: '127.0.0.1', PUBLIC_URL: `http://127.0.0.1:${port}/w/eden`, BUILD_ID: 'crash-proof',
     SIM_FAULT_INJECT: '1', SIM_BOOT_HASH: '1', NODE_OPTIONS: '--max-old-space-size=768', SIM_HANG_KILL_MS: '5000', SIM_HEAP_KILL_MS: '2000', SIM_STALL_STACK_MS: '1000' });
-  const frontiers = [];
+  const frontiers = [], exitRecords = [];
   // (five restarts in a row here: the breaker and the backoff are widened, so the test sees each restart, not the hold)
   const pool = new ChildPool({ root, range: [P0, P0 + 5], logDir, publicOrigin: 'http://127.0.0.1', healthPath: () => '/w/eden/healthz', guard: { breakerN: 10, backoffCapMs: 2000 },
     command: (w, port) => ({ cmd: process.execPath, args: [main], env: env(port) }),
     // the durable clock frontier the killed process left, read the moment the launcher saw it exit (before the restart)
-    onChange: (slug) => { const s = pool.status(slug).status; if (s === 'restarting') try { const db = new Db(join(dataDir, 'sim.db')); try { frontiers.push(JSON.parse(db.db.prepare('SELECT body FROM clock_frontiers_v1 WHERE world_id=?').get(WORLD).body)); } finally { db.close(); } } catch (e) { frontiers.push({ error: e.message }); } } });
+    onChange: (slug) => { const s = pool.status(slug).status; if (s === 'restarting') { try { exitRecords.push(JSON.parse(readFileSync(join(dataDir, 'fault-exit.json'), 'utf8'))); } catch { exitRecords.push(null); } } if (s === 'restarting') try { const db = new Db(join(dataDir, 'sim.db')); try { frontiers.push(JSON.parse(db.db.prepare('SELECT body FROM clock_frontiers_v1 WHERE world_id=?').get(WORLD).body)); } finally { db.close(); } } catch (e) { frontiers.push({ error: e.message }); } } });
   const world = { slug: 'eden', dataDir };
   t.after(async () => { await pool.closeAll(); rmSync(dir, { recursive: true, force: true }); });
   const log = () => readFileSync(join(logDir, 'eden.log'), 'utf8');
@@ -95,7 +95,8 @@ test('a world survives its own errors, and comes back exactly from a hang and a 
     if (kind === 'stop' || kind === 'storm') {
       assert.equal(exit?.code, 70, `${kind}: a crash exit, not the planned 75`);
       assert.match(log(), kind === 'stop' ? /\[world\] world\.fault\.clock-stopped: exiting 70/ : /\[world\] world\.fault\.storm: 50 faults in a minute \(step fault-inject storm, 50 faults, ticks \d+\.\.\d+\): exiting 70/);
-      assert.equal(JSON.parse(readFileSync(join(dataDir, 'fault-exit.json'), 'utf8')).reason.split(':')[0], kind === 'stop' ? 'world.fault.clock-stopped' : 'world.fault.storm');
+      // (read as the launcher saw the exit: a later boot reads it once and removes it, #2378)
+      assert.equal(exitRecords[n0]?.reason.split(':')[0], kind === 'stop' ? 'world.fault.clock-stopped' : 'world.fault.storm');
     }
   }
   assert.match(log(), /\[load\] watchdog: world\.killed\.hang: main thread stuck \d+ s/);
