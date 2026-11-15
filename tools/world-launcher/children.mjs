@@ -396,7 +396,7 @@ export class ChildPool {
   }
 
   /** Start (or join the start of) a world; resolves with its port once /healthz answers. */
-  ensure(world, { timeoutMs = 90_000, passive = false, reason = 'visitor' } = {}) {
+  ensure(world, { timeoutMs = 90_000, passive = false, reason = 'visitor', why = null } = {}) {
     if (this.fenced) { const e = new Error(`world ${world.slug} is served by a newer launcher`); e.code = 'handed-over'; return Promise.reject(e); }
     // closing (closeAll): nothing boots again, e.g. a long-poll's GET retried after its world was stopped under it would
     // otherwise start a world no one stops (lane srv-shed, found with 100 listens open at close)
@@ -404,7 +404,7 @@ export class ChildPool {
     let k = this.kids.get(world.slug);
     if (k?.handedBack) { const e = new Error(`world ${world.slug} is going back to the previous launcher`); e.code = 'handed-back'; return Promise.reject(e); }
     // being stopped (put to sleep, its memory given back): boot it again only once that process is gone (one writer)
-    if (k?.stopping) return k.stopping.then(() => { if (this.closing) { const e = new Error(`world ${world.slug} is stopping`); e.code = 'stopping'; throw e; } return this.ensure(world, { timeoutMs, passive, reason }); });
+    if (k?.stopping) return k.stopping.then(() => { if (this.closing) { const e = new Error(`world ${world.slug} is stopping`); e.code = 'stopping'; throw e; } return this.ensure(world, { timeoutMs, passive, reason, why }); });
     if (k && !passive) k.lastUsed = Date.now();
     if (k?.frozen) this.thaw(k, { use: !passive });
     if (k && (k.status === 'running')) return Promise.resolve(k.port);
@@ -416,7 +416,7 @@ export class ChildPool {
     const rank = rankOf(reason);
     if (k?.ready) k.loadRank = Math.min(k.loadRank ?? rank, rank);
     // (a handover that left the world unloaded: load it here, as any other)
-    if (k?.ready) return this.waitFor(k.ready.then((p) => (p === UNLOADED ? this.ensure(world, { timeoutMs, passive, reason }) : p)), timeoutMs, world.slug);
+    if (k?.ready) return this.waitFor(k.ready.then((p) => (p === UNLOADED ? this.ensure(world, { timeoutMs, passive, reason, why }) : p)), timeoutMs, world.slug);
     // adopted but its handover failed: the previous launcher may still hold its database, so it is never started here
     if (k?.adopted) { const e = new Error(`world ${world.slug} could not be taken over from the previous launcher${k.lastError ? `: ${k.lastError}` : ''}`); e.code = 'handover-failed'; return Promise.reject(e); }
     k = k ?? { slug: world.slug, world, restarts: 0, crashes: 0, status: 'starting', port: null, child: null, upSince: null, lastExit: null, ready: null, stopped: false, lastUsed: Date.now() };
@@ -426,6 +426,8 @@ export class ChildPool {
     // after a single crash someone waiting restarts it now, as before
     if (k.timer && k.crashes > 1) return this.waitFor(k.pending.p, timeoutMs, world.slug);
     if (k.timer) { clearTimeout(k.timer); k.timer = null; }
+    // #2475 A3: every load is in the log with what asked for it (a timed run's artifact shows what loaded each world)
+    this.log(`world ${k.slug} loads (${reason}${why ? `: ${why}` : ''})`);
     k.loadRank = rank; k.ready = this.boot(k, timeoutMs).finally(() => { k.ready = null; k.loadRank = null; });
     // a boot a visitor started fails: not retried here (the next visit tries again), but it counts toward the breaker,
     // so a world that cannot boot is held instead of booted by every visit
