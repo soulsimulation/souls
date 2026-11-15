@@ -583,7 +583,9 @@ export class ChildPool {
 
   onExit(k, child, code, signal) {
     if (k.child !== child) return;
-    const wedged = k.wedging; k.wedging = null;
+    // #2366: the world's own watchdog ended it (stuck past its hard limit, or its heap at the limit): live.json says why
+    const killed = !k.wedging && signal === 'SIGKILL' && k.world?.dataDir ? readLive(join(k.world.dataDir, 'live.json'), child.pid)?.killed : null;
+    const wedged = k.wedging ?? (killed ? { reason: killed.reason === 'heap' ? `heap ${killed.usedMb} of ${killed.limitMb} MB (its watchdog ended it)` : `main thread stuck ${Math.round(killed.stuckMs / 1000)} s (its watchdog ended it)`, at: killed.at } : null); k.wedging = null;
     const halted = k.haltRestarting; k.haltRestarting = null;
     if (k.memSince) { (k.memSpans ??= []).push([k.memSince, Date.now()]); k.memSince = null; }   // #2233 A4
     k.child = null; k.frozen = false; k.lastExit = { code, signal, at: Date.now(), ...(wedged ? { reason: `wedged: ${wedged.reason}` } : halted ? { reason: 'halted' } : {}) }; this.savePids();

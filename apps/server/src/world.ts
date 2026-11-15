@@ -142,7 +142,20 @@ export type HostListener = {
    *  work under way, so the world is not still) and its deadlines, each the next tick at which it changes something (`move`
    *  when that change moves a body). A periodic check that would find nothing is not a deadline. */
   stillness?(tick: number): StillPart[];
+  /** #2366: a stable name for this listener's afterTick step (fault logs, the fault storm's record); default: its source. */
+  name?: string;
 };
+/** #2366: a listener's afterTick step by a stable identity: its `name`, else its function's source, as a 32-bit hash (`id`, the
+ *  same on every boot of a build, whatever the listener's place in `host.listeners`) and a short readable `name`. */
+export type StepId = { id: number; name: string };
+const stepIds = new WeakMap<HostListener, StepId>();
+export function stepIdOf(l: HostListener): StepId {
+  let s = stepIds.get(l); if (s) return s;
+  const text = l.name ?? String(l.afterTick ?? '');
+  let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  s = { id: h, name: l.name ?? `afterTick ${h.toString(16).padStart(8, '0')} (${text.replace(/\s+/g, ' ').slice(0, 60)})` };
+  stepIds.set(l, s); return s;
+}
 /** #2297: one deadline (or a busy flag) a part of the world reports to `WorldHost.stillUntil`. */
 export type StillPart = { name: string; tick?: number | null; move?: boolean; busy?: boolean };
 /** #2297 the still contract (#2241) as the host answers it: `untilTick` the earliest deadline, `moveTick` the earliest at
@@ -713,6 +726,11 @@ export class WorldHost {
   /** When it answers true the frame is skipped and its wall time carried to the next one (the hub, while a visitor's join set
    *  is still going out: lane P5). Holds stay well under the 1 s elapsed cap, so the same ticks run, only later. */
   holdClock?: () => boolean;
+  /** #2366 A1: a served world's tick that throws past the engine's own fault handling (#1150: a listener, the drain, the
+   *  broadcast) is reported here and the clock goes on with the next frame. Unset (tests, tools): it throws, as before. */
+  onFault?: (name: string, error: unknown, step?: StepId & { tick: number }) => void;
+  /** #2366: a halt was recorded by name in this process (a glitch of rung `halt`): the launcher restarts a halted world. */
+  haltNamed = false;
   private frame() {
     if (!this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); this.last = performance.now(); return; }
@@ -753,7 +771,7 @@ export class WorldHost {
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (this.holdClock?.()) return; // park; the interval polls the hold without an immediate spin
     try { batch.remaining -= this.skip ? Math.max(1, this.advanceStep(this.engine.world.tick + batch.remaining, this.watched?.() ? { inputsAtTarget: true, cap: BATCH_TICKS, align: BATCH_TICKS } : { inputsAtTarget: true, cap: this.jumpCap })) : (this.tickOnce(), 1); }
-    catch (error) { this.cancelFrameBatch(); throw error; }
+    catch (error) { this.cancelFrameBatch(); if (!this.onFault) throw error; this.onFault('world.fault.tick', error); return; }   // #2366 A1: the next frame goes on
     if (this.frameBatch !== batch) return; // a listener may have stopped/restarted or paused the host
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); return; }
     if (batch.remaining <= 0) { this.frameBatch = null; return; }
@@ -817,7 +835,11 @@ export class WorldHost {
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
     const tickContext = Object.freeze({ startedAtMs: t0 });
-    for (const l of this.listeners) l.afterTick?.(now, tickContext);
+    // #2366: each listener's afterTick is its own step: one that throws is reported by its stable identity and the rest of the
+    // tick (the other listeners, the broadcast, the heartbeat, the snapshot) runs on. Without onFault (tests, tools) it throws.
+    for (const l of this.listeners) { if (!l.afterTick) continue;
+      try { l.afterTick(now, tickContext); }
+      catch (error) { if (!this.onFault) throw error; this.onFault('world.fault.step', error, { ...stepIdOf(l), tick: now }); } }
     if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
     // #2298: a jump's landing sends what the ticks it covered would have (a batch, a heartbeat, the periodic kernel view)
@@ -2245,6 +2267,7 @@ export class WorldHost {
   }
   /** One record per recovery and per halt. Never throws and writes nothing to the log: whatever called it goes on as before. */
   private recordGlitch(rung: GlitchRung, fault: unknown, o: {rule?: string; tick?: number; bodies?: string[]; evidence?: Record<string, unknown>}) {
+    if (rung === 'halt') this.haltNamed = true;
     try {
       const facts = faultFacts(fault), rule = o.rule ?? facts.rule, counts = this.glitches;
       const g: GlitchRecordV1 = {rung, rule, bodies: facts.bodies.length ? facts.bodies : [...new Set(o.bodies ?? [])].sort(), tick: o.tick ?? this.engine.world.tick, at: Date.now(),
