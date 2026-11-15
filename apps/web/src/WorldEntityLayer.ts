@@ -1183,7 +1183,11 @@ export class WorldEntityLayer {
     // Z2: no extent yet (only frame hooks, whose geometry is one point: a mesh with a distant version picks and loads its
     // model from its hook, mesh-lod.ts) = nothing to cull by. A zero-radius sphere was always "under cullPx", so the hook
     // never ran and the thing never appeared on phones.
-    d.sphere = _box.isEmpty() || _box.min.equals(_box.max) ? undefined : _box.getBoundingSphere(new THREE.Sphere());
+    // #1265: a mesh with frustumCulled off is placed by its shader (the panorama follows the camera; its buffer holds
+    // directions and heights, not positions), so no box of its buffer bounds what it draws: nothing to cull by either.
+    // Culling it by that box hid it on every frame without a shadow pass and kept it on the others (a strobe).
+    let unbounded = false; d.obj.traverse((o) => { if ((o as THREE.Mesh).isMesh && !o.frustumCulled) unbounded = true; });
+    d.sphere = unbounded || _box.isEmpty() || _box.min.equals(_box.max) ? undefined : _box.getBoundingSphere(new THREE.Sphere());
     d.frozen = list;
     if (this.scatterPooling && d.world) this.scatterPools.add(d.obj.uuid, d.obj);   // PERF-BATCH round 2: its instances draw from the shared pools
     if (!d.cut) delete d.obj.userData.renderDynamic; this.staticRevision++;
