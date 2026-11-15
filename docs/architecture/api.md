@@ -62,6 +62,8 @@ Every installed client upgrades through these parts, so they never change (#1938
   fails that world's commands with `run`, except `upgrade`, `help`, `version` and `doctor`, as it does when a home's cached
   minimum for the world is above it and the world serves a bundle that meets it (with none, it warns and goes on);
   `serve` stops and `serve --status` names why.
+- The retired `POST /v1/edge/resolve` (#1910), which only a client from before `find` calls, answers HTTP 410
+  `{ok:false, code:"gone", message:"resolve was removed, and this Soul client still uses it. Run: node eden.mjs upgrade", run}`.
 
 `tools/world-launcher/soul-upgrade-compat.test.mjs` upgrades the released 2.32.0 client to head through them, and shows it
 printing the refusal.
