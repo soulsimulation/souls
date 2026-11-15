@@ -5,10 +5,13 @@
 // for the same params; only the drawn leaves go. Older revisions keep their bytes.
 import structures from '../structures.json' with { type: 'json' };
 import vocabW3 from '../vocab-w3.json' with { type: 'json' };
+import hallBareDoor from '../hall-bare-door.json' with { type: 'json' };
 import type { DefInput } from '../../schemas.ts';
 
 type Def = DefInput & { name: string; version: number; make: { kind: string; gen?: string; args?: Record<string, unknown> }; description?: string };
-const all = [...structures, ...vocabW3] as unknown as Def[];
+/** core-hall@2 (#2282, bare doorways) lives in its own file: structures.json is part of the frozen historical corpus (legacy.ts). */
+export const HALL_BARE_DOOR = hallBareDoor as unknown as DefInput[];
+const all = [...structures, ...vocabW3, ...hallBareDoor] as unknown as Def[];
 
 /** The door-fitted revision of each core building def, pinned (review of #2397): a def revision that lands later never
  *  renumbers these. Each builds on the revision just before it (core-hall@3 on core-hall@2's bareDoors). */
@@ -46,4 +49,4 @@ export const DOOR_FIT_FROM: ReadonlyMap<string, { ref: string; args: Record<stri
     const place = (d as unknown as { components?: { place?: { enclosed?: boolean } } }).components?.place;
     return [ref(d.version), { ref: ref(DOOR_FITTED_VERSIONS[d.name]!), args: { ...to.make.args, doorThings: true }, enclosed: place?.enclosed !== false }];
   }));
-export default DOOR_FITTED_BUILDINGS;
+export default [...HALL_BARE_DOOR, ...DOOR_FITTED_BUILDINGS];
