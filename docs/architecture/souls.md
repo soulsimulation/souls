@@ -641,7 +641,8 @@ is refused `route.unreachable` naming the door.
 
 Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
 revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
-enclosed room. Templates carry them; a live world gets them once at boot (`door-fit/1`, the last boot rule). Inside doors,
+enclosed room. Templates carry them; a live world gets them once at boot (`door-fit/1`, the last boot rule), one building at a time, each
+its own recorded edit, with the world serving between them; a restart part way through goes on where it stopped. Inside doors,
 upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room, or into a yard
 the buildings close in all round (Eden's courtyard compounds), stays an open doorway, with no door in it, until a walk can
 pass several closed doors in a row (#2370). So does a doorway whose door a hand could not work: where something stands

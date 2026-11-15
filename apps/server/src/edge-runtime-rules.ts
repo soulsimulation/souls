@@ -59,7 +59,7 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
 }
 
 /** #2383 door-fit/1, once per world: its buildings on a revision that draws fixed door leaves move to their door-fitted
- *  revision with a real hand-operated door in each ground-floor doorway (god/door-fit.ts; one recorded engine edit),
+ *  revision with a real hand-operated door in each ground-floor doorway (god/door-fit.ts; one recorded engine edit per building, in slices),
  *  then one logged rules event marks it done. A building left (a resident seated in it) or refused keeps the event back,
  *  so the next boot fits what is left. A world without a god (no entity world) has nothing to fit and logs nothing. */
 export function doorFitV1(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { doorFitV1?: boolean } | undefined)?.doorFitV1 === true; }
@@ -71,7 +71,8 @@ export async function enableDoorFitV1(host: WorldHost, god: GodMode | undefined,
   // the walk graph's solids as they stand: a door a hand cannot work for one of them is held back (door-fit.ts)
   const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
   spatial?.sync(host.engine.world);
-  const r = fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
+  // review of #2438: in slices, one building at a time, while the world serves; the rules event once it is all done
+  const r = await fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
   // a building left (seated in) or refused this boot is tried again at the next: the event waits for both
   if (r.left.length || r.kept.length) return;
   return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors, series: r.series.length, held: r.held.length },

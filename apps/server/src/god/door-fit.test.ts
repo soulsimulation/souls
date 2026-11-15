@@ -1,5 +1,5 @@
 // #2383 door-fit/1 on a copy of a template world: Hello Hamlet as it was before its buildings were door-fitted (the fitted
-// revisions mapped back, their doors left out) boots, the boot rule fits it in one recorded edit and logs one rules event,
+// revisions mapped back, their doors left out) boots, the boot rule fits it, one recorded edit per building, and logs one rules event,
 // the result equals the fitted template's own buildings and doors, nobody moves, and a second boot does nothing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +40,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   const fact = await accept<unknown>(host, enableDoorFitV1(host, god) as Promise<never>) as { payload: { doorFitV1: unknown; runtimePolicy: { doorFitV1: boolean } } };
   assert.deepEqual(fact.payload.doorFitV1, { buildings: 3, doors: 3, series: 0, held: 0 }, 'logged with what it fitted');
   assert.equal(fact.payload.runtimePolicy.doorFitV1, true);
-  assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
+  assert.equal(god.model.editSeq, seq0 + 3, 'one recorded edit per building (review of #2438: in slices)');
   await w.settle(10);
 
   // the same ids and contents, on the fitted revisions; the doors the fitted template places, open (until #2434)
@@ -55,7 +55,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   assert.deepEqual(host.engine.runtime.violations, []);
 
   assert.equal(await enableDoorFitV1(host, god), undefined, 'once: a second boot queues nothing');
-  assert.equal(god.model.editSeq, seq0 + 1, 'and edits nothing');
+  assert.equal(god.model.editSeq, seq0 + 3, 'and edits nothing');
 });
 
 test('door-fit/1: every door is placed open (until #2434), a body in its doorway or not', () => {

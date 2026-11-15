@@ -1,7 +1,7 @@
 // #2383 door-fit/1: every built-in doorway is a real door. A building on a core revision that draws its ground-floor
 // doors as fixed leaves moves to its door-fitted revision (DOOR_FIT_FROM; same walls, rooms and slots, bare doorways),
 // and a hand-operated core/door@2 is placed in each bare doorway (buildingDoorFits). Templates carry the result; a live
-// world gets it once, as one recorded engine edit at boot (the last rule in adoptBootRuntimePoliciesV1).
+// world gets it once, one recorded engine edit per building in slices at boot (the last rule in adoptBootRuntimePoliciesV1).
 //
 // It refuses nothing and moves nobody: every door is placed open (until #2434), so nobody is pushed; a
 // building with a resident's body inside its subtree (seated in it) is left as it is and fitted at a later boot; a
@@ -150,27 +150,40 @@ function fitOps(god: GodMode, e: Entity, bodies: Vec2[], indoors: (x: number, z:
 export type DoorFitReport = { buildings: number; doors: number; left: string[]; kept: string[]; series: string[]; held: string[];
   fitted: { id: string; name?: string; ref: string; doors: PlaceOp[] }[] };
 
-/** door-fit/1 on `god`'s world: every world-root building on a replaced revision, in one engine edit when it is
- *  accepted whole, else building by building (a refused one is left, named, for a later boot). `obstacles`: the walk
- *  graph's solids now, for the hand check (without them every door is placed). */
-export function fitWorldDoorsV1(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[]): DoorFitReport {
-  const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && doorFitted(e.def));
+/** Review of #2438 (#2397's door-fit/1 measured 267 s in one turn on Eden): the boot fits run while the world serves, so a fit is cut in slices, one building each (its own
+ *  recorded edit), and the event loop turns between slices (the ticks, the hub and the watchdog's heartbeat run there).
+ *  `pause` waits for the next turn; `slice` hears how long each slice held the thread. */
+export type FitSlices = { pause?: () => Promise<void>; slice?: (ms: number, what: string) => void };
+const nextTurn = () => new Promise<void>((r) => setImmediate(r));
+
+/** door-fit/1 on `god`'s world: every world-root building on a replaced revision, building by building, one recorded edit
+ *  and one slice each (a refused one is left, named, for a later boot). A building fitted already (a restart part way
+ *  through) is on its fitted revision and is skipped. `obstacles`: the walk graph's solids now, for the hand check
+ *  (without them every door is placed). */
+export async function fitWorldDoorsV1(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[], o: FitSlices = {}): Promise<DoorFitReport> {
+  const pause = o.pause ?? nextTurn;
+  const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && doorFitted(e.def)).map((e) => e.id);
   const out: DoorFitReport = { buildings: 0, doors: 0, left: [], kept: [], series: [], held: [], fitted: [] };
   if (!targets.length) return out;
+  let t = performance.now();
   const indoors = indoorsOf(god);
-  const done = (e: Entity, f: ReturnType<typeof fitOps>) => { out.buildings++; out.doors += f.doors.length; out.series.push(...f.series); out.held.push(...f.held); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors }); };
-  const note = (n: number, d: number) => `door-fit/1 (#2383): ${n} building(s) moved to their door-fitted revision, ${d} real door(s) set in their doorways`;
-  const each = targets.map((e) => ({ e, fit: fitOps(god, e, bodies, indoors(e.id), obstacles) }));
-  const whole = god.engineAct(each.flatMap((x) => x.fit.ops), note(each.length, each.reduce((a, x) => a + x.fit.doors.length, 0)));
-  if (whole.accepted) for (const { e, fit } of each) done(e, fit);
-  else for (const { e } of each) {
-    const fit = fitOps(god, e, bodies, indoors(e.id), obstacles);   // names taken by an earlier building's doors are seen afresh
-    const r = god.engineAct(fit.ops, note(1, fit.doors.length));
-    if (r.accepted) { done(e, fit); continue; }
-    const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
-    // review of #2397: no refusal is final; a building the world refuses now is tried again at the next boot
-    (seated ? out.left : out.kept).push(e.id);
-    log(`door-fit/1: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its old revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+  o.slice?.(performance.now() - t, 'rooms'); await pause();
+  const note = (d: number) => `door-fit/1 (#2383): 1 building moved to its door-fitted revision, ${d} real door(s) set in its doorways`;
+  for (const id of targets) {
+    t = performance.now();
+    const e = god.model.entities.get(id);
+    if (e && e.in.parent === 'world' && doorFitted(e.def)) {   // (an edit between slices may have removed or refitted it)
+      const fit = fitOps(god, e, bodies, indoors(e.id), obstacles);
+      const r = god.engineAct(fit.ops, note(fit.doors.length));
+      if (r.accepted) { out.buildings++; out.doors += fit.doors.length; out.series.push(...fit.series); out.held.push(...fit.held); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: fit.ref, doors: fit.doors }); }
+      else {
+        const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
+        // review of #2397: no refusal is final; a building the world refuses now is tried again at the next boot
+        (seated ? out.left : out.kept).push(e.id);
+        log(`door-fit/1: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its old revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+      }
+    }
+    o.slice?.(performance.now() - t, id); await pause();
   }
   for (const h of out.held) log(`door-fit/1: held back, a hand cannot work it: ${h}`);
   log(`door-fit/1: ${out.buildings} building(s) fitted, ${out.doors} door(s) placed, ${out.series.length} door(s) in series held back, ${out.held.length} a hand cannot work held back${out.kept.length ? `, ${out.kept.length} refused this boot` : ''}${out.left.length ? `, ${out.left.length} left for a later boot` : ''}`);
