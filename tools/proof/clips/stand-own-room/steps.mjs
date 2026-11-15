@@ -16,23 +16,16 @@ for (let i = 0; i < 30; i++) { if (run(['catalog']).status === 0) break; spawnSy
 const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
   (e, out, err) => res({ code: e ? (e.code ?? 1) : 0, out: String(out), err: String(err) })));
 const said = (n, x) => console.error(`kit: ${n} exit ${x.code}: ${(x.out || x.err).slice(0, 1500)}`);
-const stools = () => {
-  const r = run(['caps', '--search', 'kitchen stool', '--verb', 'walk', '--all', '--json']);
-  const ids = (parse(r.stdout)?.offers ?? []).map((o) => o.id).filter((id) => /^walk:.*kitchen-stool$/.test(id ?? ''));
-  console.error(`kit: kitchen stools offered: ${JSON.stringify(ids.slice(0, 12))} ${r.status ? r.stderr.slice(0, 400) : r.stdout.slice(0, 300)}`);
-  return ids;
-};
-
 // before the page opens (not filmed): Ana walks into the first of these houses (each measured on #1243 with its kitchen
-// stool's stand search outside the kitchen) whose walk is offered, so the stool's walk is offered from inside
-const HOUSES = ['campus-residence-1', 'campus-residence-2', 'region-farm-hamlet-farmhouse', 'region-west-river-watermill', 'alpine-chalet-1'];
-stools(); let HOUSE;
+// stool's stand search outside the kitchen) that she reaches; the take then acts on its stool directly (a seat's walk is
+// offered by the world from inside without `caps --search` listing it)
+const HOUSES = ['campus-residence-1', 'campus-residence-2', 'region-farm-hamlet-farmhouse'];
+let HOUSE;
 for (const h of HOUSES) {
-  if (HOUSE) break;
   const x = await eden(['act', `walk:${h}`, '--wait', '170', '--json'], 180_000); said(`Ana into ${h}`, x);
-  if (x.code === 0 && stools().includes(`walk:${h}/kitchen-stool`)) HOUSE = h;
+  if (x.code === 0) { HOUSE = h; break; }
 }
-if (!HOUSE) throw Error('kit: none of the measured kitchen stools is offered');
+if (!HOUSE) throw Error('kit: Ana reached none of the measured houses');
 const STOOL = `walk:${HOUSE}/kitchen-stool`;
 console.error(`kit: target ${STOOL}`);
 said('Ana here', await eden(['here', '--json'], 60_000));
