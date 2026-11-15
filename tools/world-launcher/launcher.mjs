@@ -140,7 +140,7 @@ export function withHeap(d, heapMb) {
   return d;
 }
 /** How a world the launcher cannot reach right now is reported (children.mjs ensure() error codes; LOAD-CONTRACT §4). */
-const WORLD_CODES = { held: 'world.held', starting: 'world.waking', capacity: 'world.capacity' };   // #2233 A2: no room to load it: retriable   // #2304: a load past the hold: retriable
+const WORLD_CODES = { held: 'world.held', starting: 'world.waking', capacity: 'world.waking' };   // #2367 A2: no room after a wait: retriable, world.waking   // #2233 A2: no room to load it: retriable   // #2304: a load past the hold: retriable
 /** The dark soul.slow-down hint on C2 reads at amber (lane srv-shed; LOAD-CONTRACT §2b "Refusal shapes"). */
 const SLOW_DOWN_HINT = Object.freeze({ header: 'soul.slow-down', retryAfterMs: 5000, message: 'The world is busy and asked you to slow down for 5 s between reads' });
 /** LOAD-CONTRACT §1 levels; at HOT ones the proxy sheds C2 and caches C3 for 2 s. After a restart, C1/C2 ramp up over RAMP_MS. */
@@ -304,9 +304,11 @@ export async function openLauncher(cfg = {}) {
   /** #2299: a still world leaves memory (--unload-still 1; off by default, and 0 is today's behaviour). The world's
    *  GET /__sim/still (#2241) is read before every stop and recorded beside the registry (<data>/horizons.json: slug ->
    *  { still, untilWallMs, moveWallMs, at }); a world stopped while still is *unloaded*: no keep-alive boots it, and the
-   *  alarm loads it at moveWallMs, or at untilWallMs while a resident reads it. Times are cfg-overridable for tests. */
+   *  alarm loads it at moveWallMs, or at untilWallMs while a resident reads it. Times are cfg-overridable for tests.
+   *  #2367 A1: the alarm loads it leadMs before its next deadline of any kind (a reminder, a plan step, a body's move:
+   *  untilWallMs), listener or not, so the deadline is met by the world running, not by its next visitor. */
   const unloadStill = cfg.unloadStill === true;
-  const STILL = { quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
+  const STILL = { leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
   const horizonsFile = join(dataDir, 'horizons.json');
   const horizons = new Map((() => { try { return Object.entries(JSON.parse(readFileSync(horizonsFile, 'utf8'))); } catch { return []; } })());
   const saveHorizons = () => { try { writeFileSync(`${horizonsFile}.tmp`, JSON.stringify(Object.fromEntries(horizons), null, 1) + '\n'); renameSync(`${horizonsFile}.tmp`, horizonsFile); } catch (e) { log(`horizons: ${e.message}`); } };
@@ -344,7 +346,7 @@ export async function openLauncher(cfg = {}) {
   const siteKey = randomBytes(32).toString('hex');
   const siteOk = (req) => { const h = String(req.headers['x-sim-site-key'] ?? ''); return direct(req) && h.length === siteKey.length && timingSafeEqual(Buffer.from(h), Buffer.from(siteKey)); };
   const pool = new ChildPool({ root, range, site: { url: `${origin}${prod.base}`, key: siteKey }, logDir: join(dataDir, 'logs'), pidFile: join(dataDir, 'children.json'), libraryDir: join(dataDir, 'library'), compileCache: cfg.compileCache === false || process.env.SIM_COMPILE_CACHE === '0' ? null : compileCacheDir(dataDir, BUILD), cobuilders: cfg.cobuilders ?? process.env.SIM_COBUILDERS === '1', idleMs: cfg.idleMs, marsWebDir, publicOrigin, auth: auth?.child, soulControllerCliFile: resolve(cfg.soulControllerCli ?? SOUL.controllerCli), soulSkillFile: resolve(cfg.soulSkill ?? SOUL.skill), soulInstructionsFile: resolve(cfg.soulInstructions ?? SOUL.instructions), command: cfg.command ?? ((w, p, o) => (w.fork ? forkCommand : defaultCommand)(w, p, o)), healthPath: (s) => `${wp(s)}/healthz`,
-    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0, sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
+    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* #2367 A2 */ roomWaitMs: cfg.roomWaitMs, refreshStill: () => lookAtWorlds(), /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0, sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
     /* worlds serve the same web build, with its --base */ onChange: (slug) => { const s = pool.status(slug); if (s.port && registry.get(slug) && registry.get(slug).port !== s.port) registry.update(slug, { port: s.port }); if (unloadStill && s.status === 'running') loaded(slug); wakeParked(slug); },
     /* #2304: at most loadParallel worlds load at once, in order of reason */ loadParallel: cfg.loadParallel ?? 4,
     ...(unloadStill ? { beforeStop: (k) => recordHorizon(k), afterRelease: (slug) => moveOnHandover(slug) } : {}) });
@@ -792,8 +794,7 @@ export async function openLauncher(cfg = {}) {
     const head = { 'x-sim-cache': 'unloaded' };
     if (rest.startsWith('/assets/')) { const f = inside(webDir, rest); if (f && serveFile(res, f, 'public, max-age=31536000, immutable', req)) return true; return false; }
     if (rest === '/manifest.webmanifest') return serveFile(res, join(webDir, 'manifest.webmanifest'), 'public, max-age=3600', req);
-    const page = rest === '/' || rest === '/index.html' || (!/^\/(?:v1|mcp|__)(?:\/|$)/.test(rest) && !extname(rest) && String(req.headers.accept ?? '').includes('text/html'));
-    if (!page) return false;
+    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
     const body = Buffer.from(withWorldMeta(html, { name: w.name ?? slug, url: `${publicOrigin}${wp(slug)}/` }));
     res.writeHead(200, robotsOf(slug, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), ...head })).end(req.method === 'HEAD' ? undefined : body);
@@ -871,7 +872,7 @@ export async function openLauncher(cfg = {}) {
     }));
     return out.filter(Boolean);
   }
-  /** The alarm (A2): an unloaded world loads when a body is due to move, or at its next event while a resident reads it. */
+  /** The alarm (A2): an unloaded world loads when a body is due to move or its next deadline nears (#2367 A1). */
   const alarmLoading = new Set();
   function alarmScan(now = Date.now()) {
     if (!unloadStill || phase !== 'active' || gate || pool.closing || pool.fenced) return [];
@@ -881,7 +882,8 @@ export async function openLauncher(cfg = {}) {
       if (!w) { horizons.delete(slug); saveHorizons(); continue; }
       if (!h.still || !sleeping(slug) || pool.state(slug)?.stopping || alarmLoading.has(slug)) continue;
       const listener = now - (residentAt.get(slug) ?? -Infinity) < STILL.listenerMs;
-      const why = h.moveWallMs != null && h.moveWallMs <= now ? 'a body is due to move' : listener && h.untilWallMs != null && h.untilWallMs <= now ? 'its next event, with a listener' : null;
+      // #2367 A1: any deadline (a reminder is one: edge.reminder.* in the world's horizon), leadMs early to load in time
+      const why = h.moveWallMs != null && h.moveWallMs - STILL.leadMs <= now ? 'a body is due to move' : h.untilWallMs != null && h.untilWallMs - STILL.leadMs <= now ? (listener ? 'its next event, with a listener' : 'its next deadline') : null;
       if (!why) continue;
       alarmLoading.add(slug); due.push(slug);
       // #2304: in the load queue behind acts and visitors: a listener's alarm, then a wind-down step
@@ -898,6 +900,9 @@ export async function openLauncher(cfg = {}) {
   }
   /** #894: every response of an unlisted world says noindex, whatever the world sent (listing read per response, so
    *  listing or unlisting a world applies at once); a listed world's own headers pass unchanged. */
+  /** #897: the site's docs index (the build's llms.txt plus every listed world's reader, from the registry per request); null when the web app is not built. */
+  function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
+    return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
   function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData } = {}) {
     if (clientGone(req, res)) return;
@@ -929,12 +934,24 @@ export async function openLauncher(cfg = {}) {
     if (maxBody > 0 && !req.readableEnded) { let n = 0; req.on('data', (c) => { n += c.length; if (n > maxBody) { up.destroy(); req.unpipe(up); if (!res.headersSent) json(res, 413, { ok: false, code: 'request.too-large', message: `a request body may be at most ${Math.round(maxBody / 1024)} KB` }, { connection: 'close' }); } }); }
     if (req.readableEnded) up.end(); else req.pipe(up);   // a retried GET: its (empty) body was already read
   }
+  /** #2393: a browser asking for one of a world's pages (not the Soul API, MCP, the launcher's routes or a file). */
+  const pageAsk = (req, rest) => (req.method === 'GET' || req.method === 'HEAD') && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(rest) && !extname(rest) && String(req.headers.accept ?? '').includes('text/html');
+  /** #2393: a page asked of a world still loading (or waiting for room) gets a small page that names the world and asks
+   *  again by itself every `s` seconds (a meta refresh: no script, nothing loaded from elsewhere) until the world answers.
+   *  Still a 503 with Retry-After, so nothing caches or indexes it. */
+  function wakingPage(req, res, slug, s) {
+    const name = String(registry.get(slug)?.name ?? slug).replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const body = Buffer.from(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="${s}"><meta name="robots" content="noindex"><title>${name} is waking up · Souls</title><style>:root{color-scheme:light dark}body{font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:18vh auto;padding:0 20px}p{opacity:.75}</style></head><body><h1>${name} is waking up</h1><p>This world was resting and is loading now. This page tries again every ${s} seconds and opens the world as soon as it is ready.</p></body></html>`);
+    res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'retry-after': String(s), 'x-robots-tag': NOINDEX, 'x-sim-cache': 'waking', 'content-length': String(body.length), 'server-timing': launcherTiming(res, 'answered') }).end(req.method === 'HEAD' ? undefined : body);
+  }
   /** ensure() refused: a world handed over (or going back) is asked through the keeper, any other is answered 503. */
-  async function unreachable(req, res, slug, e) {
+  async function unreachable(req, res, slug, e, rest = null) {
     if (e.code === 'handed-over' && retiredTo) { forward(req, res); return; }
     // our canary failed and the world is going back to the previous launcher: wait for the keeper to switch back
     if (await waitHandBack(slug, e)) { forward(req, res); return; }
-    json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'capacity' ? '30' : e.code === 'starting' ? '5' : '3', ...(e.code === 'starting' ? { 'cache-control': 'no-store' } : {}) });
+    if ((e.code === 'capacity' || e.code === 'starting') && rest != null && pageAsk(req, rest)) { ceilings.note(slug, 'world.waking', e.code === 'capacity' ? 'memory' : 'boot'); wakingPage(req, res, slug, e.code === 'capacity' ? 15 : 5); return; }
+    if (e.code === 'capacity') { ceilings.note(slug, 'world.waking', 'memory'); json(res, 503, { ...refusalBody('world.waking', `The world is waiting for room to load: ${e.message}. It asked you to wait 15 s`, 15_000, 'memory'), slug }, { 'retry-after': '15', 'cache-control': 'no-store' }); return; }
+    json(res, 503, { ok: false, code: WORLD_CODES[e.code] ?? 'world.unavailable', slug, message: e.message }, { 'retry-after': e.code === 'held' ? '60' : e.code === 'starting' ? '5' : '3', ...(e.code === 'starting' ? { 'cache-control': 'no-store' } : {}) });
   }
   /** #2231: hold a Soul API call until its booting world listens, at most `ms` (the call's own deadline). Resolves with
    *  the ms it waited, or null once it was answered here (over the world's cap, past its deadline, a refused boot) or its
@@ -1033,7 +1050,7 @@ export async function openLauncher(cfg = {}) {
     // #2304: the load's place in the queue (an act or god call first) and the hold, past which the answer is world.waking
     const reason = resident ? 'listener' : passive ? 'background' : edgeRest.startsWith('/v1/god/') ? 'god' : req.headers.authorization || /^\/(?:v1\/(?:edge|god|agent)\/|mcp\b)/.test(edgeRest) ? 'act' : 'visitor';
     try { p = await pool.ensure(worldEnv(w), { passive, reason, timeoutMs: BOOT_HOLD_MS }); }
-    catch (e) { await unreachable(req, res, slug, e); return; }
+    catch (e) { await unreachable(req, res, slug, e, edgeRest); return; }
     if (clientGone(req, res)) return;   // before httpLive: a closed response never fires 'close' again to undo it
     // a request in flight (a god's long-poll listen, a slow upload) keeps the world awake (pool busy), and its end counts as
     // use; a resident's does neither (#1997), and is ended cleanly if the world falls asleep under it (endResidents)
@@ -1434,13 +1451,17 @@ export async function openLauncher(cfg = {}) {
         // per request, so a world listed or unlisted appears or drops out at once.
         if (path === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' }).end(req.method === 'HEAD' ? undefined : robotsTxt({ origin: publicOrigin, base: B })); return; }
         if (path === '/sitemap.xml') { res.writeHead(200, { 'content-type': 'application/xml; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : sitemapXml({ origin: publicOrigin, base: B, pages: docsPages(), worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) })); return; }
+        // The home page is an app: a reader that prefers Markdown (wantsMarkdown) gets the docs index, the same text as /llms.txt;
+        // either answer names it in a Link header, for a reader that got the page.
+        if (path === '/') { res.setHeader('vary', 'Accept'); res.setHeader('link', `<${publicOrigin}${B}/llms.txt>; rel="alternate"; type="text/markdown"`); const idx = wantsMarkdown(req.headers.accept) ? siteIndex() : null;
+          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : idx); return; } }
         if (path === '/' || path === '/index.html') { if (serveFile(res, join(webDir, 'index.html'), 'no-cache')) return; res.writeHead(500, { 'content-type': 'text/plain' }).end('The web app is not built: pnpm --filter @souls/web build'); return; }
         // #896: the docs, llms.txt and the changelog's Markdown twin, all built into the web build (apps/web/src/docs-site.ts).
         // A page answers as HTML, or as its Markdown twin at <path>.md or for `Accept: text/markdown`.
         if (path === '/llms-full.txt' && serveFile(res, join(webDir, 'llms-full.txt'), 'no-cache', req)) return;
         // #897: the root llms.txt is the build's docs index plus every listed world's reader (registry, per request)
-        if (path === '/llms.txt') { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { idx = null; }
-          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) })); return; } }
+        if (path === '/llms.txt') { const idx = siteIndex();
+          if (idx !== null) { res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : idx); return; } }
         if (path === '/.well-known/mcp/server.json') { json(res, 200, mcpServerJson({ origin: publicOrigin, base: B, version: BUILD }), { 'cache-control': 'public, max-age=3600', 'x-robots-tag': 'noindex' }); return; }
         const doc = docFile(path, req.headers.accept), negotiated = /^\/docs(?:\.md$|\/|$)|^\/changelog(?:\/|\.md)?$/.test(path);
         if (negotiated) res.setHeader('vary', 'Accept');

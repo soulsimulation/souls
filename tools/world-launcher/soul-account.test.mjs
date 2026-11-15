@@ -51,7 +51,7 @@ async function world(t, { accountLogin = true } = {}) {
       if (!g.live) return json(res, 401, { ok: false, code: 'account.revoked', message: 'This account login has ended.' });
       if (path === '/v1/agent/account/logout' && req.method === 'POST') { g.live = false; return json(res, 200, { ok: true }); }
       if (path === '/v1/agent/account') return json(res, 200, { account: { id: g.accountId }, grant: { id: g.id, agentLabel: 'eden', device: g.device, createdAt: 0 }, world: at, maxSouls: 5,
-        souls: [...souls].filter(([, s]) => s.account === g.accountId).map(([id, s]) => ({ id, name: s.name, control: { held: live.has(id), state: live.has(id) ? 'connected' : 'disconnected', since: null }, agent: holder.has(id) ? { label: holder.get(id).label, since: 0 } : null })) });
+        souls: [...souls].filter(([, s]) => s.account === g.accountId).map(([id, s]) => ({ id, name: s.name, control: { held: holder.has(id), state: live.has(id) ? 'connected' : 'disconnected', since: null }, agent: holder.has(id) ? { label: holder.get(id).label, since: 0 } : null })) });
       const one = /^\/v1\/agent\/account\/souls\/([^/]+)\/(pair|revoke|retire)$/.exec(path);
       if (one && req.method === 'POST') {
         const [, id, what] = one, s = souls.get(id);
@@ -59,6 +59,8 @@ async function world(t, { accountLogin = true } = {}) {
         if (s.account !== g.accountId) return json(res, 403, { ok: false, code: 'forbidden', message: 'Not your Soul.' });
         if (what === 'pair') {
           let a = [...approvals].find(([, x]) => x.idempotencyKey === body.idempotencyKey);
+          // #2401 (D1): while the Soul's agent is connected the take is refused, naming its device; move forces it
+          if (!a && !body.move && live.has(id)) return json(res, 409, { ok: false, code: 'soul.held-elsewhere', message: 'connected', heldBy: holder.get(id)?.label ?? 'another device' });
           if (!a) { a = [`ap_${approvals.size + 1}`, { ...body, soulId: id, name: s.name, status: 'ready', agentLabel: `${body.agentLabel} on ${g.device.name}` }]; approvals.set(...a); }
           return json(res, 200, { approval: { id: a[0], status: 'ready', soulId: id, name: s.name, mode: 'repair' }, world: at, delivery: 'account', intervalSeconds: 3 });
         }
@@ -97,7 +99,9 @@ async function world(t, { accountLogin = true } = {}) {
   const count = (method, path) => hits.filter((h) => h.method === method && h.path === path).length;
   /** The fake person answers a retire request: ready, or cancelled (and who ended it, #2258). */
   const decide = (requestId, status, ended) => { Object.assign(requests.get(requestId), { status }, ended ? { ended } : {}); };
-  return { base, url: `${base}/acct`, requests, grants, souls, approvals, holder, hits, approve, approveSoul, decide, tokenOf, revoke, count, close,
+  /** #2401: the Soul's agent stops listening: no agent is connected now, though the device still holds the token. */
+  const away = (soulId) => live.delete(soulId);
+  return { base, url: `${base}/acct`, away, requests, grants, souls, approvals, holder, hits, approve, approveSoul, decide, tokenOf, revoke, count, close,
     secrets: () => [...[...grants.values()].map((g) => g.token), ...[...requests.values()].map((q) => q.pollSecret), ...[...approvals.values()].flatMap((a) => [a.pollSecret, a.token])].filter(Boolean) };
 }
 const runIn = (cwd, home, printed = []) => (...args) => new Promise((resolve) => {
@@ -310,7 +314,7 @@ test('#2246 A3, A4: two accounts in one home; a tagged Soul uses its own login; 
 
 // #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person; with no memory
 // for it here, it says the memory stayed there and names export there and import here. The last device to ask still wins.
-test('#2257 A6: adopt and pair --move name the device a Soul was taken from, and warn when its memory stayed there', async (t) => {
+test('#2257 A6, #2401 A1: adopt is refused while an agent is connected, naming its device; --move or a free take name the device a Soul was taken from, and warn when its memory stayed there', async (t) => {
   const w = await world(t), homes = tmp(t), dir = (n) => { const d = join(homes, n); mkdirSync(d); return d; };
   const one = runIn(dir('one'), homes), two = runIn(dir('two'), homes), three = runIn(dir('three'), homes), rootOne = join(homes, 'one', '.souls');
   assert.equal((await one('register', w.url)).code, 0);
@@ -319,13 +323,20 @@ test('#2257 A6: adopt and pair --move name the device a Soul was taken from, and
   assert.equal((await one('status')).code, 0);   // home one's agent holds Mira now
   // With a login: home two adopts her; no memory of her here.
   await logIn(w, two, 'acct_1', w.url, '--device', 'desk');
-  const moved = await two('adopt', 'Mira');
+  // #2401: home one's agent is connected, so the take is refused and names that device; --move forces it.
+  const refused = await two('adopt', 'Mira');
+  assert.equal(refused.code, 1, refused.out); assert.equal(refused.d, null);
+  assert.match(refused.err, /^error: soul\.held-elsewhere: Mira's agent is connected now from eden [0-9.]+ on old laptop\. Run there, or add --move to take control here, which disconnects it\. Next: node eden\.mjs adopt Mira --move$/m);
+  assert.equal(w.count('POST', `/v1/agent/account/souls/${mira.id}/pair`), 1, 'refused: no approval made');
+  const moved = await two('adopt', 'Mira', '--move');
   assert.equal(moved.d?.status, 'ready', moved.out + moved.err);
   assert.match(moved.d.takenFrom, /^eden [0-9.]+ on old laptop$/);
   assert.equal(moved.d.tell, `Tell your person: Mira was taken from ${moved.d.takenFrom}; that device no longer controls it.`);
   assert.equal(moved.d.memory, `Mira's memory stayed on ${moved.d.takenFrom}: there run node eden.mjs export Mira, bring the folder here, then node eden.mjs import <folder>.`);
   assert.equal((await two('status')).code, 0);   // home two holds her now
-  // Home one keeps her memory: taking her back names the device and gives no memory warning.
+  // Home one keeps her memory. #2401: home two's agent stops listening, so home one takes her back freely, no --move:
+  // the notice names the device and gives no memory warning.
+  w.away(mira.id);
   mkdirSync(join(rootOne, 'souls', mira.id, 'memory'), { recursive: true }); writeFileSync(join(rootOne, 'souls', mira.id, 'memory', 'self.md'), '# Self\n');
   const back = await one('adopt', 'Mira');
   assert.equal(back.d?.status, 'ready', back.out + back.err);
