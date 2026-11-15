@@ -83,7 +83,7 @@ test('closeClients with only answering viewers resolves without waiting for the 
 });
 
 test('every world stop path closes its viewers through closeClients, never a bare 1001 loop', () => {
-  for (const f of ['../../../tools/core/edge-server.mjs', '../../../tools/core/multiworld/world-server.mjs', '../../../tools/core/local-eden-expanded.mjs', './main.ts']) {
+  for (const f of ['../../../tools/core/edge-server.mjs', '../../../tools/core/multiworld/world-server.mjs', '../../../tools/core/local-eden-expanded.mjs', './world-main.ts']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8');
     assert.ok(src.includes('hub.closeClients('), `${f} stops through hub.closeClients`);
     assert.ok(!/c\.ws\.close\(1001/.test(src), `${f}: no bare 1001 loop`);

@@ -34,6 +34,21 @@ export function bootTick(tick: number): void {
   if ((tick & 63) === 0) view[base + BOOT_SLOT.at] = Date.now();
 }
 
+/** #2416: one world's boot progress, written into that world's own slots (its load array at S.boot). The module-level
+ *  functions above write the program's default slots, for tests and tools; a started world uses its own BootProgress. */
+export class BootProgress {
+  readonly view: Float64Array<ArrayBufferLike>; readonly base: number;
+  constructor(view: Float64Array<ArrayBufferLike> = new Float64Array(BOOT_SLOT_COUNT), base = 0) { this.view = view; this.base = base; view[base + BOOT_SLOT.phase] = -1; }
+  phase(phase: BootPhase, tick = 0, target = tick): void {
+    const v = this.view, b = this.base;
+    v[b + BOOT_SLOT.phase] = BOOT_PHASES.indexOf(phase); v[b + BOOT_SLOT.tick] = tick; v[b + BOOT_SLOT.target] = target; v[b + BOOT_SLOT.at] = Date.now();
+  }
+  tick(tick: number): void {
+    this.view[this.base + BOOT_SLOT.tick] = tick;
+    if ((tick & 63) === 0) this.view[this.base + BOOT_SLOT.at] = Date.now();
+  }
+}
+
 /** Decode slots (for the worker / tests): the live.json `phase` and, while booting, `boot`. */
 export function readBootProgress(slots: Float64Array, offset = 0): { phase: BootPhase | null; at: number; boot?: { stage: string; tick: number; target: number } } {
   const i = slots[offset + BOOT_SLOT.phase], phase = i >= 0 ? BOOT_PHASES[i] ?? null : null, at = slots[offset + BOOT_SLOT.at];

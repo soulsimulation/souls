@@ -1,6 +1,7 @@
 // WebSocket hub: many clients, one world. On join: welcome + snapshot (or a
 // replay of missed batches). Then batches every 500 ms and a heartbeat every
 // 5 s carrying the view hash so each client can verify its replica.
+import { worldConfig } from './config.ts';
 import type { IncomingMessage, Server } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
@@ -99,7 +100,7 @@ export class Hub {
   readonly takeChunks = new TakeChunksEncoderV1();
   /** Take recordings (take_chunks) are a pose-keyframe cache, off by default (TAKES_PERSIST=1 turns them on).
    * The engine's in-memory live buffer still feeds new viewers; the event log rebuilds a world. */
-  persistTakes = process.env.TAKES_PERSIST === '1';
+  persistTakes: boolean;
   private silentTakeKept = false;
   host: WorldHost; auth: Auth; db: Db;
   private lifecycleSouls?:Souls;
@@ -107,7 +108,7 @@ export class Hub {
   private stationV2?:CandidateStationV2;
 
   constructor(server: Server, host: WorldHost, auth: Auth, db: Db,lifecycleSouls?:Souls,station?:CandidateStationV1,stationV2?:CandidateStationV2) {
-    this.host = host; this.auth = auth; this.db = db;
+    this.host = host; this.auth = auth; this.db = db; this.persistTakes = worldConfig(host).env.TAKES_PERSIST === '1';
     if(station){if(station.host!==host)throw new Error('station must belong to selected Hub host');this.station=station;}
     if(stationV2){if(stationV2.host!==host)throw new Error('V2 station must belong to selected Hub host');this.stationV2=stationV2;}
     // Internal opt-in only; production bootstrap does not supply this adapter.

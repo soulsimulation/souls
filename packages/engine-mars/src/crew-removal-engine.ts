@@ -5,12 +5,13 @@ import {GREEN_FIELD_WORLD,MarsEngine,marsCommonsTransitionFactory,marsFactory} f
  * Replays original Greenfield with its original policy until a named fact.
  * Also reads the existing subsequent commons checkpoint; policy adoption and
  * physical adoption are two independently guarded facts. */
-export async function marsCrewRemovalTransitionFactory():Promise<EngineFactory>{
-  const old=await marsCommonsTransitionFactory(GREEN_FIELD_WORLD,{safeArrivalV1:true});
-  const next=await marsCommonsTransitionFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true},{safeArrivalV1:true});
+/** `env`: the world's own environment (#2416); unset reads the process's. */
+export async function marsCrewRemovalTransitionFactory(env?:Record<string,string|undefined>):Promise<EngineFactory>{
+  const old=await marsCommonsTransitionFactory(GREEN_FIELD_WORLD,{safeArrivalV1:true,env});
+  const next=await marsCommonsTransitionFactory({...GREEN_FIELD_WORLD,safeCrewRemoval:true},{safeArrivalV1:true,env});
   const versions=new Set([old.rulesVersion,next.rulesVersion,
-    (await marsFactory({...GREEN_FIELD_WORLD,scene:'eden-commons',safeArrivalV1:true})).rulesVersion,
-    (await marsFactory({...GREEN_FIELD_WORLD,scene:'eden-commons',safeCrewRemoval:true,safeArrivalV1:true})).rulesVersion]);
+    (await marsFactory({...GREEN_FIELD_WORLD,scene:'eden-commons',safeArrivalV1:true},env)).rulesVersion,
+    (await marsFactory({...GREEN_FIELD_WORLD,scene:'eden-commons',safeCrewRemoval:true,safeArrivalV1:true},env)).rulesVersion]);
   const install=(e:Engine)=>{if(!(e instanceof MarsEngine))throw Error('crew-removal-transition.native-reader-required');e.enableCrewRemovalTransitionReaderV1();return e;};
   return {rulesVersion:old.rulesVersion,genesis:old.genesis,
     canReplayHistory:v=>versions.has(v),canRestoreSnapshot:v=>versions.has(v),

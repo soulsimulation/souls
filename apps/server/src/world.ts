@@ -37,6 +37,7 @@ import {
   type PlayPayload, type PlayView, type PublicSoul, type ScenePayload, type Snapshot, type WireIntent,
 } from '@souls/protocol';
 import type { Db } from './db.ts';
+import type { Config } from './config.ts';
 import { advanceNeedAnchor, advanceNeeds, DAY_TICKS, needRates, needsAt, newLife, type Life, type Needs } from '@souls/brain';
 import { REAL_DAY_TICKS } from './god/real-clock.ts';
 import { arrivalPlace, baseVocabulary, codeVocabulary, foldEvent, initKernel, pinnedVocabulary, soulThing, type Vocabulary, type FoldResult } from './fold.ts';
@@ -46,7 +47,7 @@ import { emptyIntentHistoryV2, foldIntentHistoryV2, type IntentHistoryV2 } from 
 import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
-import { bootPhase, bootTick } from './load/boot-progress.ts';
+import { BootProgress } from './load/boot-progress.ts';
 import { S } from './load/shared.ts';
 import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
@@ -179,6 +180,8 @@ const RING_BATCHES = 600;
 
 export class WorldHost {
   engine!: Engine;
+  /** Shards (#2389): the world's own config, set by startWorld (world-main.ts). Read it through worldConfig(host). */
+  config?: Config;
   /** Meaning: things, links, vocabulary, decks. Replays from the log without the engine. */
   kernel!: KState;
   counts: Record<string, number> = {};       // successful plays per card
@@ -274,7 +277,7 @@ export class WorldHost {
   private bootSkippedV1: {tick: number; seq: number; reason: string; error: unknown}[] | null = null;
   private bootV1(): { from: 'genesis' | 'snapshot'; replayed: number } {
     this.bootSkippedV1 = null;
-    const tBoot = performance.now(); bootPhase('boot:restore');
+    const tBoot = performance.now(); this.bootProgress.phase('boot:restore');
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null;
     let w = this.db.world(this.worldId);
     if (!w) {
@@ -343,8 +346,8 @@ export class WorldHost {
     const stepReplay=()=>{
       const before=this.engine.runtime.violations.length;
       let out:ReturnType<Engine['step']>;
-      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;bootTick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
-      this.advanceLives();replayTicks++;bootTick(this.engine.world.tick);
+      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;this.bootProgress.tick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
+      this.advanceLives();replayTicks++;this.bootProgress.tick(this.engine.world.tick);
       replayedRefusals+=out.refusals?.length??0;
       if(this.durableClockV1){
         if(this.engine.runtime.violations.length>before&&!this.repairRules)throw new Error('clock-frontier.replay-violates');   // #1150: a repair in the log follows it
@@ -376,7 +379,7 @@ export class WorldHost {
       later=later.slice(repaired+1);
     }
     const target = Math.max(this.engine.world.tick, later.length ? later[later.length - 1].tick : 0, clock && !checkedClock ? clock.tick : 0);
-    bootPhase('boot:replay', this.engine.world.tick, target);
+    this.bootProgress.phase('boot:replay', this.engine.world.tick, target);
     for (const e of later) {
       if(clock&&!checkedClock&&e.seq>clock.throughSeq)verifyClock();
       while (this.engine.world.tick < e.tick) stepReplay();
@@ -777,6 +780,8 @@ export class WorldHost {
   /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in (its stable id) for the
    *  watchdog. Unset: none. */
   stepSlots?: Float64Array;
+  /** #2416: this world's boot progress (startWorld gives its load array's slots; tests get private ones). */
+  bootProgress = new BootProgress();
   /** #2378 A2: a step (a listener's afterTick, by its stable id: stepIdOf) that ended the process on two boots in a row
    *  (load/restart-loop.ts): skipped from `fromTick` until `untilTick`, named once in the log and the glitch counts
    *  (`world.step-quarantined`), so the world comes up and runs on. By id, not by place: `listeners` changes at runtime. */

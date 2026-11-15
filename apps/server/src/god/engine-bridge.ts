@@ -42,7 +42,7 @@ import { createTea, type Tea } from './tea.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
-import { setWorldDaySource } from './poster-boards.ts';
+import { worldDayOf } from './poster-boards.ts';
 import { actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
@@ -57,7 +57,7 @@ import { installWorldLore } from './world-lore.ts';
 import { installLecternBooks } from './lectern-books.ts';
 import { installHeld } from './held.ts';
 import { installWorldClock } from './world-clock.ts';
-import { config, KNOWN_WORLD_KEYS } from '../config.ts';
+import { KNOWN_WORLD_KEYS, worldConfig } from '../config.ts';
 import { floorPlatesOf, plateIsStep } from './floor-plates.ts';
 import { isVerificationProbe } from '../verification-probe.ts';
 import { planWalkouts, dropReleased, unhand, stuckWarning, type StuckResident } from './walkout.ts';
@@ -318,7 +318,7 @@ export class EngineBridge {
     engineBridges.set(this.god.model, this);
     if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
     this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
-    this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
+    this.layers = new GodLayers({ env: worldConfig(o.host).env, model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
       return typeof ref==='string'&&this.places.forRef(ref)?.id===id?ref:undefined;
@@ -337,8 +337,6 @@ export class EngineBridge {
     };
     // Soul Actions entry 32: a thing's owner for its lock, and who hears a knock on a door
     const owner=(id:string,soul:EdgeSoul)=>{const o=this.layers.ownership(id);return o?.owner?{name:this.layers.nameOf(o.owner),mine:this.layers.isOf(o.owner,soul)}:null;};
-    // Entry 38: posters know the world day they went up (age on demand; no per-day pass)
-    setWorldDaySource(()=>{const l=this.host.living;return l&&l.dayTicks>0?Math.floor(Math.max(0,this.host.engine.world.tick-l.origin)/l.dayTicks):0;});
     if(this.edge){
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
@@ -356,7 +354,8 @@ export class EngineBridge {
       this.edge.seatThing=(id)=>{const x=this.engine.world.entities[id] as {def?:string;tags?:string[]}|undefined;return !!x?.def&&!!x.tags?.includes('entity-world')&&!!(this.physics?.assets[x.def] as {slots?:{kind:string}[]}|undefined)?.slots?.some((s)=>s.kind==='seat');};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
-    if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),
+    if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,worldDay:()=>worldDayOf(this.host),   // entry 38: posters know the world day they went up (#2416: this world's)
+      levelAt:(x,z,y)=>this.levelAt(x,z,y),
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
@@ -375,7 +374,7 @@ export class EngineBridge {
     this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false });
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why), actApplied: (body, capability) => this.edge?.actApplied(body, capability) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, worldDay: () => worldDayOf(o.host), version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -437,9 +436,9 @@ export class EngineBridge {
     // F3: a god thing in a Soul's hand shows as held (observe, receipts) and can be put down (held.ts)
     if (this.edge) installHeld(this.edge, { get engine() { return o.host.engine as never; }, model: this.model, minds: this.host.minds });
     // F3: a god's world keeps time like the live worlds (a logged dayConfig; world-clock.ts)
-    if (!R && (o.worldClock ?? (!config.livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey)))) installWorldClock(this.host, this.god, this.log);
+    if (!R && (o.worldClock ?? (!worldConfig(this.host).livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(this.host).worldKey)))) installWorldClock(this.host, this.god, this.log);
     // F3: a god's new world serves its constitution (or a neutral line) as lore, never Eden's (world-lore.ts)
-    if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey))) installWorldLore(this.edge, this.god);
+    if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(this.host).worldKey))) installWorldLore(this.edge, this.god);
     // #428: a lectern holding a catalogue book reads that book, in every world (lectern-books.ts; after world lore)
     if (this.edge) installLecternBooks(this.edge, this.god);
   }

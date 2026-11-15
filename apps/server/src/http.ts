@@ -3,6 +3,7 @@ import {mountClientCounter, type EdgeClients} from './client-version.ts';
 import {mountClientMinimum} from './client-minimum.ts';
 import {soulClientManifest} from './soul-client-manifest.ts';
 import {mountContextViews} from './god/context-views.ts';
+import {worldDayOf} from './god/poster-boards.ts';
 import {AutoPortraits} from './portrait/auto-portraits.ts';
 import {SoulProfiles} from './soul-profile.ts';
 import {WorldAccounts} from './accounts/service.ts';
@@ -56,6 +57,7 @@ import { RefusalLog, floodGuard } from './flood.ts';
 import { poolOf } from './god/builds.ts';
 import {VerifyUse} from './god/verify-use.ts';
 import { mountModeration } from './moderation/routes.ts';
+import { defaultSiteLog } from './moderation/store.ts';
 import { mountEdgeSnapshot, safeKey, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
 import { withInlineConfig, withWorldMeta } from './inline-config.ts';
 import { mountSharedLibraryRoutes } from './god/shared-library.ts';
@@ -94,7 +96,7 @@ export function servingRead(method: string, path: string, view?: string): boolea
  *  nor billed as the request's own time; nothing to wait for: no extra turn. */
 export type ServingWarmState = {kind: 'boot' | 'rewarm'; ageMs: number} | null;
 export function servingWait(whenServing: (ceilingMs?: number) => Promise<void> | null, state: () => ServingWarmState = () => null, level: () => Level = () => 'green',
-  o: {bootWaitMs?: number; busyForMs?: number} = {}): MiddlewareHandler {
+  o: {bootWaitMs?: number; busyForMs?: number; api?: Float64Array} = {}): MiddlewareHandler {
   const bootWaitMs = o.bootWaitMs ?? SERVING_BOOT_WAIT_MS, busyForMs = o.busyForMs ?? SERVING_WAIT_MS;
   // #1750: the wait is said (Server-Timing `warm;dur`, and the route's queue time in /healthz `api`): it happens before
   // admission, so without this it was invisible on the world's side of an answer. During the boot warm a read waits at
@@ -110,7 +112,7 @@ export function servingWait(whenServing: (ceilingMs?: number) => Promise<void> |
     (c.set as (k: string, v: unknown) => void)(WARM_WAIT_KEY, ms);
     const now = state();
     if (!boot || now?.kind !== 'boot' || now.ageMs >= busyForMs) return next();
-    const route = apiRoute(c.req.method, c.req.path); if (route) recordApi(route, ms, 0);
+    const route = apiRoute(c.req.method, c.req.path); if (route) recordApi(route, ms, 0, undefined, o.api);
     return c.json({contract: EDGE_CONTRACT, error: {code: 'world.busy', message: 'the world is still warming up after starting; ask again in 2 s'}, world: worldBlock(level(), 2)}, 503,
       {'Retry-After': '2', 'Cache-Control': 'no-store', 'X-Sim-Load': level(), 'Server-Timing': `world;dur=${ms.toFixed(1)}, queue;dur=0.0, warm;dur=${ms.toFixed(1)}`});
   };
@@ -129,7 +131,7 @@ export function limitBody(maxSize: number, onError: (c: Context) => Response | P
 }
 /** #2378: a listener step skipped as a restart loop's, while it is skipped (public: its id and tick numbers only). */
 const quarantineOf = (h: WorldHost) => { const q = h.quarantinedStep; return q && h.engine.world.tick < q.untilTick ? {quarantine: {step: `step ${q.id.toString(16).padStart(8, '0')}`, fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths}} : {}; };
-type Deps = { cfg: Config; db: Db; host: WorldHost; auth: Auth; hub: Hub; brain: Brain; souls: Souls; takes?: TakeArchive; station?:CandidateStationV1; stationV2?:CandidateStationV2; intentV2?:IntentControlV2; edge?:EdgeLedger; god?: GodMode; contextReady?:()=>boolean; contextWait?:(signal:AbortSignal)=>Promise<void>; contextLevelAt?:(x:number,z:number,y:number)=>number; load?:{admission?:Admission;monitor:LoadMonitor;faults?:()=>Record<string,number>;crowded?:(soulId:string)=>{position:number;eta_s:number}|null} };
+type Deps = { cfg: Config; db: Db; host: WorldHost; auth: Auth; hub: Hub; brain: Brain; souls: Souls; takes?: TakeArchive; station?:CandidateStationV1; stationV2?:CandidateStationV2; intentV2?:IntentControlV2; edge?:EdgeLedger; god?: GodMode; contextReady?:()=>boolean; contextWait?:(signal:AbortSignal)=>Promise<void>; contextLevelAt?:(x:number,z:number,y:number)=>number; load?:{admission?:Admission;monitor:LoadMonitor;api?:Float64Array;faults?:()=>Record<string,number>;crowded?:(soulId:string)=>{position:number;eta_s:number}|null} };
 
 export function buildApp(d: Deps) {
   if(d.station&&d.station.host!==d.host)throw new Error('station must belong to selected host');
@@ -146,7 +148,7 @@ export function buildApp(d: Deps) {
     c.header('X-Frame-Options', SECURITY_HEADERS['X-Frame-Options']); c.header('Content-Security-Policy', withFrameAncestors(c.res.headers.get('content-security-policy')));
   });
   // #1774 A4: a dev world's per-request record for playtests (load/request-record.ts); unset, nothing is mounted
-  const requestRecord = requestRecordFile(process.env, d.auth.devAuth);
+  const requestRecord = requestRecordFile(d.cfg.env, d.auth.devAuth);
   if (requestRecord) app.use('*', requestRecordMiddleware(requestRecord));
   if(d.cfg.accountAuthRequired)d.souls.accounts??=new WorldAccounts(d.host,d.souls,d.auth.registryDb);
   if(d.souls.accounts)d.auth.legacyOwnerAllowed=owner=>d.souls.ownedRows(owner).length>0;
@@ -158,7 +160,7 @@ export function buildApp(d: Deps) {
   // P2 runaway-agent protection: overall buckets per god token and per visitor address, before anything else answers
   // (SIM_FLOOD=0 turns it off for a local experiment)
   const refusals = new RefusalLog();   // every 429/413 this world answers, in its log without flooding it
-  if (process.env.SIM_FLOOD !== '0') app.use('*', floodGuard({ log: refusals, godPool: (t) => { const who = d.god?.godIdentity(t); return who ? poolOf(who) : hashToken(t); } }));
+  if (d.cfg.env.SIM_FLOOD !== '0') app.use('*', floodGuard({ log: refusals, godPool: (t) => { const who = d.god?.godIdentity(t); return who ? poolOf(who) : hashToken(t); } }));
   // SEC2 2026-10-21: a ceiling on every request body before any route reads one. Routes mounted above the /v1/* 64 KB
   // limit below (edge, travel, art, moderation) otherwise read a chunked body (no content-length) without bound: one
   // anonymous 200 MB POST to /v1/edge/say grew a world by ~90-500 MB. Tighter route limits still apply; god routes keep
@@ -169,15 +171,15 @@ export function buildApp(d: Deps) {
   // #1326 (registered before the edge routes, which answer and end the chain): a stalled clock (it owes ticks and none has completed past its threshold) is said, never hidden behind a 200
   // with the old tick. An act that would wait on the clock is refused before it writes anything; an edge read that
   // answers meanwhile carries `world.stalled` and the tick's age (the long-polls end early: comms wait, inbox listen).
-  if (d.load?.monitor) { const mon = d.load.monitor; setClockSource(() => mon.clock()); }
+  if (d.load?.monitor) { const mon = d.load.monitor, clock = () => mon.clock(); app.use('*', async (c, next) => { setClockSource(c, clock); await next(); }); }   // #2416: this world's clock
   app.use('/v1/edge/*', async (c, next) => {
-    const before = clockNow();
+    const before = clockNow(c);
     if (before?.stalled && c.req.method === 'POST' && STALL_REFUSED.has(c.req.path.replace(/^.*(?=\/v1\/edge\/)/, ''))) {
       const world = clockBlockOf(before)!;
       return c.json({contract: EDGE_CONTRACT, error: {code: 'world.stalled', message: 'the world\'s clock has stopped moving; nothing was done, try again shortly'}, world}, 503, {'Retry-After': '5', 'Cache-Control': 'no-store'});
     }
     await next();
-    const after = clockNow();
+    const after = clockNow(c);
     if (!after?.stalled || c.res.status !== 200 || !(c.res.headers.get('content-type') ?? '').includes('application/json')) return;
     // a cacheable answer (an ETag, or a Cache-Control that isn't no-store) is left as it is: a cache must never keep the stall
     const cache = c.res.headers.get('cache-control');
@@ -190,7 +192,7 @@ export function buildApp(d: Deps) {
       c.res = new Response(JSON.stringify({...body, world}), {status: 200, headers});
     } catch { /* not a JSON object: left as it is */ }
   });
-  if (d.edge) { const edge = d.edge, mon = d.load?.monitor; app.use('/v1/edge/*', servingWait((ms) => edge.whenServing(ms), () => edge.servingWarmState(), () => mon?.level ?? 'green')); }
+  if (d.edge) { const edge = d.edge, mon = d.load?.monitor; app.use('/v1/edge/*', servingWait((ms) => edge.whenServing(ms), () => edge.servingWarmState(), () => mon?.level ?? 'green', {api: d.load?.api})); }
   // srv-load (LOAD-CONTRACT §2): heavy Soul/god requests queue for the admission dispatcher; edge answers carry X-Sim-Load
   // #456: the public Soul's `slowed`, from the admission's refusals addressed to that Soul (load/soul-slowed.ts)
   slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
@@ -199,7 +201,7 @@ export function buildApp(d: Deps) {
   (app as unknown as {edgeClients?: EdgeClients}).edgeClients = mountClientCounter(app, d.db.db, c => d.souls.soulFromToken(bearer(c))?.id ?? null); // #1936: x-soul-client per Soul and day
   mountClientMinimum(app, {served: () => soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile), isSoul: c => !!d.souls.soulFromToken(bearer(c))}); // #1937: a too-old client is told the command that fixes it
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
-  const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId });
+  const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId, siteLog: defaultSiteLog(d.cfg.env) });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
   const godForKey = d.god, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version() }) : null;
   if (currentSnapshotKey) mountEdgeSnapshot(app, currentSnapshotKey);
@@ -213,15 +215,15 @@ export function buildApp(d: Deps) {
   // Travel (M3, travel/): a Soul whose body is in another world acts there; here only its travel calls answer.
   let travel: Travel | undefined;
   const travelGate = (resolve: ReturnType<typeof edgeSoulResolver>) => (c: Context) => { const s = resolve(c), t = travel?.inc(s.soulId); if (t && (t.state === 'away' || t.state === 'departing')) throw new EdgeError(409, t.state === 'away' ? 'travel.away' : 'travel.departing', `${s.name} is ${t.state === 'away' ? 'in' : 'on the way to'} ${t.at}: act there, or travel home (POST /v1/edge/travel {"to":"home"})`); return s; };
-  if (d.edge) { if (d.edge.host !== d.host) throw new Error('edge ledger must belong to selected host'); const comms = mountEdgeRoutes(app, { host: d.host, db: d.db, souls: d.souls, build: d.cfg.build, soul: travelGate(edgeSoulResolver(d.host, d.souls, bearer)), ledger: d.edge, ownerInbox, ownerSoul: async (c, id) => { try { const {u} = await profileIdentity(c); const s = ownSoul(u, id); return {soulId: s.id, entityId: s.entity_id, name: s.name, owner: s.owner}; } catch (e) { if (e instanceof ApiError) throw new EdgeError(e.status, e.code, e.message); throw e; } } }, {evidenceCapture:process.env.SIM_CONTINUITY_EVIDENCE_CONFIG?{configPath:process.env.SIM_CONTINUITY_EVIDENCE_CONFIG,devAuth:d.auth.devAuth,bindHost:d.cfg.host}:undefined}); comms.onSpectator(m => d.hub?.broadcast?.(m as never)); d.load?.monitor.register('eyes', l => comms.eyes.setLoadLevel(l)); d.hub?.joinMessages?.push(() => comms.spectatorJoin()); d.hub?.upgradeHandlers?.push((req, socket, head) => comms.events.upgrade(req, socket, head)); }
+  if (d.edge) { if (d.edge.host !== d.host) throw new Error('edge ledger must belong to selected host'); const comms = mountEdgeRoutes(app, { host: d.host, db: d.db, souls: d.souls, build: d.cfg.build, soul: travelGate(edgeSoulResolver(d.host, d.souls, bearer)), ledger: d.edge, ownerInbox, ownerSoul: async (c, id) => { try { const {u} = await profileIdentity(c); const s = ownSoul(u, id); return {soulId: s.id, entityId: s.entity_id, name: s.name, owner: s.owner}; } catch (e) { if (e instanceof ApiError) throw new EdgeError(e.status, e.code, e.message); throw e; } } }, {evidenceCapture:d.cfg.env.SIM_CONTINUITY_EVIDENCE_CONFIG?{configPath:d.cfg.env.SIM_CONTINUITY_EVIDENCE_CONFIG,devAuth:d.auth.devAuth,bindHost:d.cfg.host}:undefined}); comms.onSpectator(m => d.hub?.broadcast?.(m as never)); d.load?.monitor.register('eyes', l => comms.eyes.setLoadLevel(l)); d.hub?.joinMessages?.push(() => comms.spectatorJoin()); d.hub?.upgradeHandlers?.push((req, socket, head) => comms.events.upgrade(req, socket, head)); }
   if (d.edge && d.god) {
     const comms = (d.edge as unknown as {comms?: {fading?: ConstructorParameters<typeof Travel>[0]['fading']}}).comms, god = d.god;
-    travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
-      site: launcherSite(process.env.SIM_SITE_URL, process.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
+    travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: d.cfg.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
+      site: launcherSite(d.cfg.env.SIM_SITE_URL, d.cfg.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
       resolveBodyRef: (ref, owner) => bodyRefResolvers.get(d.host)?.(ref, owner) ?? {ok: false, code: 'body.ref-unsupported', reason: 'This world cannot resolve carried body references'} });
     d.edge.travelLogOf = (soulId) => { const row = d.db.soul(soulId), t = row ? travel!.identity(row) : null; return t ? t.log.filter((e) => e.kind === 'travel' && e.from === d.cfg.worldKey).map((e) => ({at: e.at, to: e.toName, from: e.fromName})) : []; };
     travel.onLeave = (soulId, at, world) => d.edge?.noteTravel(soulId, at, world);
-    mountTravelRoutes(app, { travel, siteKey: process.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
+    mountTravelRoutes(app, { travel, siteKey: d.cfg.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
       tokenSoul: (c) => { const s = d.souls.soulFromToken(bearer(c)); if (!s) { const r = d.souls.controlRefusal(bearer(c)); throw new TravelError(401, r.code, r.message, r.extra); } return s; },
       ownerSoul: async (c, id) => { const u = await requireUser(c); return ownSoul(u, id); },
       isGod: async (c) => { const t = bearer(c); if (t?.startsWith('god_')) { const w = god.godIdentity(t); return !!w && !w.child; } const u = t ? await d.auth.userFromToken(t) : null; return !!u && !!god.owner && u.id === god.owner; } });
@@ -253,19 +255,19 @@ export function buildApp(d: Deps) {
   const body = async (c: Context) => { try { return await c.req.json(); } catch { throw new ApiError(400, 'bad-json', 'body must be JSON'); } };
   const limitIp = (c: Context, key: string, max: number, windowMs: number) => { const l = d.souls.limits.allow(`${key}:${ip(c)}`, max, windowMs); if (!l.ok) throw new ApiError(429, 'rate-limited', 'too many requests', { retry_after: l.retryAfter }); };
 
-  const worldName = process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  const worldName = d.cfg.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
   /** The title a visitor sees (viewer arrival card, Explore, welcome-back), served in /v1/config so the first frame never shows a slug. */
   const displayWorldName = d.god ? safeWorldName(worldName) : d.cfg.worldKey === 'littlemartians' ? 'Little Martians' : d.cfg.worldKey[0].toUpperCase() + d.cfg.worldKey.slice(1);
   // the world's one skill (/SKILL.md) and who lives here (/v1/world/souls): lane P2
   if (d.god) { mountJoinRoutes(app, { worldName, baseOf, souls: () => d.db.liveSouls(d.host.worldId).filter((s) => !travel?.isAway(s.id)), nowOf: (id) => d.host.nowOf(id), bodyOf: (id) => d.edge?.bodyRule?.view(id) ?? null, poseOf: (id) => { const p = (d.host.engine.world.entities as Record<string, { pose?: { p?: number[] } } | undefined>)[id]?.pose?.p; return p ? { x: p[0], y: p[1], z: p[2] } : null; } }); }
   const godRoutes = d.god ? mountGodRoutes(app, { god: d.god, worldName, requireUser, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, baseOf, limitIp, verifyUse: new VerifyUse(d.host, d.souls, d.god, d.edge), lookWorldUrl: `http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}` /* W2 remote looks */ }) : null;
-  if(d.god&&d.edge)mountContextViews(app,{god:d.god,edge:d.edge,build:d.cfg.build,artOriginals:{dir:join(defaultAssetDir(),'art'),basePath:d.cfg.worldPath},levelAt:d.contextLevelAt,contextReady:d.contextReady,waitForContext:d.contextWait,worldUrl:`http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}`,soul:c=>{const token=bearer(c);if(!token)return null;return travelGate(edgeSoulResolver(d.host,d.souls,bearer))(c).soulId;},limit:c=>limitIp(c,'context-views',120,60000)});
+  if(d.god&&d.edge)(app as unknown as {contextViews?: {close(): Promise<void>}}).contextViews=mountContextViews(app,{god:d.god,edge:d.edge,build:d.cfg.build,artOriginals:{dir:join(defaultAssetDir(d.cfg.env),'art'),basePath:d.cfg.worldPath},levelAt:d.contextLevelAt,contextReady:d.contextReady,waitForContext:d.contextWait,worldUrl:`http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}`,soul:c=>{const token=bearer(c);if(!token)return null;return travelGate(edgeSoulResolver(d.host,d.souls,bearer))(c).soulId;},limit:c=>limitIp(c,'context-views',120,60000)});
   // #1262: the god route that marked a place secret (secret-routes.ts) is unmounted; no place is secret
-  if (d.god) { const god = d.god; mountSharedLibraryRoutes(app, { god, slug: d.cfg.worldKey, dir: process.env.SIM_LIBRARY_DIR, requireGod: (c) => { if (!god.godFromToken(bearer(c))) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); } }); }  // M4 shared library
-  if (d.god) { const god = d.god; mountArtRoutes(app, { model: () => god.model, godAct: (ops, note) => god.act({ ops }, note), engineAct: (ops, note) => god.engineAct(ops, note), isGod: (c) => { const w = god.godIdentity(bearer(c)); return !!w && !w.child; }, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, owner: () => god.owner, baseOf, limitIp, dir: join(defaultAssetDir(), 'art') }); }  // W6 art: frames, screens, gallery walls
+  if (d.god) { const god = d.god; mountSharedLibraryRoutes(app, { god, slug: d.cfg.worldKey, dir: d.cfg.env.SIM_LIBRARY_DIR, requireGod: (c) => { if (!god.godFromToken(bearer(c))) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); } }); }  // M4 shared library
+  if (d.god) { const god = d.god; mountArtRoutes(app, { model: () => god.model, godAct: (ops, note) => god.act({ ops }, note), engineAct: (ops, note) => god.engineAct(ops, note), isGod: (c) => { const w = god.godIdentity(bearer(c)); return !!w && !w.child; }, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, owner: () => god.owner, baseOf, limitIp, dir: join(defaultAssetDir(d.cfg.env), 'art') }); }  // W6 art: frames, screens, gallery walls
   if (d.god && d.edge) {
     const god = d.god;
-    d.edge.painting = createPaintingService({ model: () => god.model, dir: join(defaultAssetDir(), 'art'), basePath: d.cfg.worldPath, worldId: d.host.worldId, commit: (ops, note, complete, durable) => god.engineAct(ops, note, complete, durable) });
+    d.edge.painting = createPaintingService({ model: () => god.model, worldDay: () => worldDayOf(d.host), dir: join(defaultAssetDir(d.cfg.env), 'art'), basePath: d.cfg.worldPath, worldId: d.host.worldId, commit: (ops, note, complete, durable) => god.engineAct(ops, note, complete, durable) });
   }
   if (d.god) { const god = d.god; mountEnvRoutes(app, { host: d.host, god, requireGod: (c) => { const who = god.godIdentity(bearer(c)); if (!who) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); if (who.child) throw new ApiError(403, 'helper.scope', 'helper tokens cannot change the environment'); return who; } }); }  // R4-LIVE env setter; WD7: helpers refused, edits attributed
 
@@ -296,7 +298,7 @@ export function buildApp(d: Deps) {
   // ---- public
   mountWelcomeRoutes(app,d);
   // lane OPS2: operator commands for TEST Souls (the launcher only, with the site key: op-souls.ts)
-  mountOperatorSouls(app,{db:d.db,worldId:d.host.worldId,souls:d.souls,inbox:ownerInbox,god:d.god,siteKey:process.env.SIM_SITE_KEY,body:()=>d.edge?.bodyRule??null});
+  mountOperatorSouls(app,{db:d.db,worldId:d.host.worldId,souls:d.souls,inbox:ownerInbox,god:d.god,siteKey:d.cfg.env.SIM_SITE_KEY,body:()=>d.edge?.bodyRule??null});
   // #1875: whether a Soul's control is held now, so an agent in another folder asks before taking it over.
   const controlOf=(soulId:string)=>{const row=d.db.soul(soulId);if(!row)return null;const l=soulLink(d.souls,ownerInbox,row,null);return {held:!!l.holder,state:l.state,since:l.since};};
   if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp,control:controlOf,agentOf:soulId=>{const row=d.db.soul(soulId);return row?soulLink(d.souls,ownerInbox,row,null).holder:null;},refreshMe:owner=>d.hub.refreshMe(owner)});
@@ -313,7 +315,7 @@ export function buildApp(d: Deps) {
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
       tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
       skip: d.host.skipStats,   // #2298 A5: ticks computed and jumped, jumps, the last horizon
-      ...(mon ? {load: mon.health()} : {}), ...(d.load?.faults && Object.keys(d.load.faults()).length ? {faults: d.load.faults()} : {}), ...quarantineOf(d.host), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
+      ...(mon ? {load: mon.health()} : {}), ...(d.load?.faults && Object.keys(d.load.faults()).length ? {faults: d.load.faults()} : {}), ...quarantineOf(d.host), api: apiOf(d.load?.api) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
   const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile); return soulClient ? {soulClient} : {}; };
@@ -365,8 +367,8 @@ export function buildApp(d: Deps) {
   app.get('/cards.md', (c) => c.text(cardGrammar(d.host.engine.describeVerbs().filter((v) => v.verb !== 'do_activity')), 200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'public, max-age=60' }));
   // N1 nav diagnostics, served only with SIM_NAV_DEBUG (the e2es set it): the failed-search memo's counts, and one probe
   // walk from (sx,sz) on level sl to (gx,gz) on gl for an r m-radius body (nothing moves).
-  if (process.env.SIM_NAV_DEBUG) app.get('/v1/debug/nav', (c) => c.json({ stranded: strandedMetrics() }, 200, { 'Cache-Control': 'no-store' }));
-  if (process.env.SIM_NAV_DEBUG) app.get('/v1/debug/route', (c) => {
+  if (d.cfg.env.SIM_NAV_DEBUG) app.get('/v1/debug/nav', (c) => c.json({ stranded: strandedMetrics() }, 200, { 'Cache-Control': 'no-store' }));
+  if (d.cfg.env.SIM_NAV_DEBUG) app.get('/v1/debug/route', (c) => {
     const n = (k: string, v = 0) => { const x = Number(c.req.query(k)); return Number.isFinite(x) ? x : v; };
     const rt = (d.host.engine as unknown as { rt?: { world: unknown; services: { spatial?: { route: Function } } } }).rt, sp = rt?.services.spatial;
     if (!rt || !sp) return c.json({ error: 'no spatial service' }, 404);
