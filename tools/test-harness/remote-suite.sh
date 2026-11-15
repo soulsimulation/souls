@@ -63,6 +63,12 @@ for (const [name, f] of Object.entries(pins.files)) {
 JS
 fi
 (cd "$ROOT" && node tools/test-harness/historical-inputs.mjs "$REF" "$STAGE/historical-inputs.pack")
+# #2213: the archive carries no tags, so the latest release tag's client SOURCES.json goes beside it (soul-stamp.test.mjs
+# reads it through SOUL_RELEASE_SOURCES, set by one-validation.sh) to check that a changed frozen file moved its version.
+if TAG="$(git -C "$ROOT" describe --tags --match 'v*' --abbrev=0 "$REF" 2>/dev/null)" &&
+   SOURCES="$(git -C "$ROOT" show "$TAG:tools/world-launcher/soul/SOURCES.json" 2>/dev/null)"; then
+  printf '%s' "$SOURCES" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.stringify({tag:process.argv[1],sources:JSON.parse(s)})+"\n"))' "$TAG" > "$STAGE/release-sources.json"
+fi
 { echo "head $REF $(git -C "$ROOT" rev-parse "$REF")"; } > "$STAGE/REFS.txt"
 if [ "$BASE" != none ]; then git -C "$ROOT" archive --format=tar.gz -o "$STAGE/base.tgz" "$BASE"; echo "baseline $BASE $(git -C "$ROOT" rev-parse "$BASE")" >> "$STAGE/REFS.txt"; fi
 node --input-type=module - "$STAGE" "$REF" "$BASE" "$HARNESS" "$(git -C "$ROOT" rev-parse "$HARNESS:tools/test-harness")" "$NODE" "$SKIP" "$SERVER_FILES" "$ONLY" <<'JS'
