@@ -443,3 +443,13 @@ test('#2440: spare time needs the ticks on time now (1 s service >= 0.98, last t
   a[S.stallMs] = 0; assert.equal(ticksOnTimeNow(a, t), true, 'a clock that owes no ticks is not behind');
   a[S.stallMs] = 2000; a[S.tickAt] = t - 40; a[S.service1s] = 0.95; assert.equal(ticksOnTimeNow(a, t), false, '1 s service 0.95: behind');
 });
+
+test('#2440: on spare time a Soul over its budget still runs, but after the Souls within theirs', async () => {
+  let now = 0; const order: string[] = []; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.5});
+  adm.setLoadLevel('red');   // contended: buckets would bind without spare time
+  (adm as unknown as {bucket(k: string, g: boolean, n: number): {tokens: number}}).bucket('F', false, now).tokens = 0;   // the flooder, spent
+  for (const k of ['F', 'A', 'B']) { const t = adm.request({key: k, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { order.push(k); now += 5; t.done(); } }); }
+  for (let i = 0; i < 5; i++) { await adm.drain(); now += 10; }
+  assert.deepEqual(order, ['A', 'B', 'F'], 'the bystanders first, though the flooder asked first; the flooder still runs');
+  adm.close();
+});

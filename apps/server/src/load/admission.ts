@@ -290,13 +290,16 @@ export class Admission {
     const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls), spare = this.spare();
     let best = -1, bestScore = Infinity;
     for (let i = 0; i < this.queue.length; i++) {
-      const j = this.queue[i];
+      const j = this.queue[i]; let over = false;
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.need(j.route.id) && this.contended(j.key) && !spare) continue;   // short of budget: the act waits (#2440: unless the thread has spare time)
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) {
+          if (!spare) continue;   // short of budget: the act waits (#2440: unless the thread has spare time)
+          over = true;   // #2440: on spare time it still runs, but after every Soul within its budget (a flood never queues ahead of bystanders)
+        }
       }
-      const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
+      const score = (j.route.cls === 'C1' ? 0 : 1e12) + (over ? 1e10 : 0) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
     }
     return best;
