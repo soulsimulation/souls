@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { componentsSchema, coreLibrary } from '@souls/world-compiler';
-import { ambienceAt, condition, DEFAULT_SETTINGS, distanceTo, emittersOf, exposureAt, impliedSpecs, treeIndex, treesOf, loadSettings, Movement, saveSettings, SETTINGS_KEY, specsOf, variantOf, VARIANTS, KINDS, MASTER_DEFAULT, QueuedNotes } from './sound-plan.ts';
+import { ambienceAt, condition, DEFAULT_SETTINGS, defSpecs, distanceTo, emittersOf, exposureAt, impliedSpecs, treeIndex, treesOf, loadSettings, Movement, saveSettings, SETTINGS_KEY, specsOf, variantOf, VARIANTS, KINDS, MASTER_DEFAULT, QueuedNotes } from './sound-plan.ts';
 
 test('a def may carry one sound or a list; unknown kinds are dropped; the schema accepts both', () => {
   assert.equal(specsOf({ components: { sound: { kind: 'water', radius: 10, volume: 0.5 } } } as never).length, 1);
@@ -96,6 +96,20 @@ test('implied sounds: things sound like what they are; sounding things gain a se
   const fountain = { name: 'core-fountain', form: 'point', tags: ['fountain'], size: { box: [2, 2, 2] }, components: { sound: { kind: 'water', radius: 14, volume: 0.5 } } };
   const em = emittersOf(fakeModel([['f', 'fo', [0, 0]]], { fo: fountain }) as never);
   assert.deepEqual(em.map((e) => `${e.id}:${e.spec.kind}`), ['f#0:water', 'f#1:water', 'f#2:birds']);
+});
+
+test('#1571: a def\'s specs are made once per def object, frozen; the fountain re-voicing copies; a fresh def misses', () => {
+  const fountain = { name: 'core-fountain', form: 'point', tags: ['fountain'], size: { box: [2, 2, 2] }, components: { sound: { kind: 'water', radius: 14, volume: 0.5 } } };
+  const a = defSpecs(fountain as never);
+  assert.equal(defSpecs(fountain as never), a, 'cached per def object');
+  assert.ok(Object.isFrozen(a.own) && Object.isFrozen(a.own[0]) && Object.isFrozen(a.implied[0]));
+  const once = emittersOf(fakeModel([['f', 'fo', [0, 0]], ['g', 'fo', [5, 0]]], { fo: fountain }) as never);
+  const twice = emittersOf(fakeModel([['f', 'fo', [0, 0]], ['g', 'fo', [5, 0]]], { fo: fountain }) as never);
+  assert.deepEqual(twice, once, 'the same emitters scan after scan');
+  assert.equal(once[0].spec.variant, 0, 'the fountain\'s own water is the splashing voicing');
+  assert.equal(a.own[0].variant, undefined, 'the cached spec is not changed');
+  const merged = { ...fountain };   // a merged (extending) def: a fresh object per resolve
+  assert.notEqual(defSpecs(merged as never), a); assert.deepEqual(defSpecs(merged as never), a);
 });
 
 test('a wood rustles as one voice per cluster, louder than a single tree; the distance is to the nearest tree', () => {
