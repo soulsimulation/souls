@@ -992,7 +992,7 @@ export class MarsEngine implements Engine {
   }
   /** #1150: the take ends and the next begins, even if closing this one throws: a recorder left finished would throw every tick after. */
   private recutV1(between?: () => void) {
-    let hash: string | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
+    let hash: (() => string) | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
     between?.(); this.startRecorder(between ? undefined : hash);
   }
   /** #1150 rung 3: the clock moves to the fault's tick without stepping the world, so ticks stay monotonic for the log. */
@@ -2425,8 +2425,9 @@ export class MarsEngine implements Engine {
   // dayTicks from the scene; the time itself travels in each take's env.datetime)
   private renderContextKeyV1(){return JSON.stringify([this.rt.world.base.campus,this.cfg.scene,this.cfg.clock?.dayTicks??null,this.rulesVersion]);}
   /** `stateHashNow`: rt.stateHash() at this tick when the caller has it (the take it just finished); used only when no
-   *  render base is captured in between (lane L1: one world serialisation per 20-tick take boundary, not two). */
-  private startRecorder(stateHashNow?:string) {
+   *  render base is captured in between (lane L1: one world serialisation per 20-tick take boundary, not two). #2422: it
+   *  is that take's lazy hash, computed only when the new take's baseline is read. */
+  private startRecorder(stateHashNow?:string|(()=>string)) {
     if(this.readerRecordingDepth)return;
     // Authored render bases are immutable for this engine instance. Supported
     // campus/clock/config boundaries change this key; actor/object motion is in
@@ -2441,14 +2442,15 @@ export class MarsEngine implements Engine {
     const retained=new Set([this.recorderScene.ref.hash,...this.chunks.map(c=>(c.take as {renderSceneRef:{hash:string}}).renderSceneRef.hash)]);
     for(const hash of this.takeScenes.keys())if(!retained.has(hash))this.takeScenes.delete(hash);
   }
-  /** Finishes the current take; returns its final state hash (= rt.stateHash() now), or undefined inside a reader setup. */
-  private finishRecorder():string|undefined {
+  /** Finishes the current take; returns its final state hash (= rt.stateHash() now) as a function, computed when first
+   *  called (#2422: the take's hashes are not computed in the tick that cuts it), or undefined inside a reader setup. */
+  private finishRecorder():(()=>string)|undefined {
     if(this.readerRecordingDepth)return undefined;
-    const take=this.recorder.finish();
-    if(this.rt.tick<=take.startTick)return take.finalStateHash;
+    const {take,finalStateHash}=this.recorder.finishLazy() as {take:{startTick:number};finalStateHash:()=>string};
+    if(this.rt.tick<=take.startTick)return finalStateHash;
     this.chunks.push({fromTick:take.startTick,toTick:this.rt.tick,take});
     if(this.chunks.length>12)this.chunks.shift();
-    return take.finalStateHash;
+    return finalStateHash;
   }
   takeScene(hash:string) { const captured=this.takeScenes.get(hash);return captured?structuredClone(captured):undefined; }
   actorBorrowed(actor: string) {
