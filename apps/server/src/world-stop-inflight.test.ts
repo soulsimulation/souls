@@ -53,4 +53,5 @@ test('#2469: a world stopped in a shard answers its in-flight requests 503 world
   assert.equal(r.answer?.status, 503, `the write in flight is answered by the stop: ${JSON.stringify(r.answer)}`);
   assert.equal(JSON.parse(r.answer.body).code, 'world.stopping');
   assert.equal(r.connections, 0, 'no connection to the stopped world is left open');
+  assert.equal(r.idleSockets, 0, 'the idle keep-alive connection was closed too');
 });

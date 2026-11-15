@@ -173,13 +173,13 @@ test('review, #2469 A2: a world dropped while it loads stops alone, whatever its
   const h = harness(t, { size: 2, worlds, range: [P0, P0 + 5] });
   await h.pool.ensure(h.world('stay'), { timeoutMs: 300_000 });
   const pid0 = h.pid('stay'), tick0 = (await h.health('stay')).tick;
-  const boot = h.pool.ensure(h.world('drop'), { timeoutMs: 300_000 }).catch((e) => e);
+  const loadAt = Date.now(), boot = h.pool.ensure(h.world('drop'), { timeoutMs: 300_000 }).catch((e) => e);
   let first = null;
   for (let i = 0; i < 12_000 && !(first = h.pool.state('drop')?.child)?.pid; i++) await wait(5);
   assert.equal(first?.pid, pid0, 'drop loads into the program of stay');
   assert.equal(first.loaded, false, 'and is still loading');
   // a handover's prepare abandons the boot (SIGKILL, as healthy() and stopChild() send too)
-  const dropAt = Date.now(), settling = h.pool.settled({ waitMs: 0, goneMs: 300_000 });
+  const settling = h.pool.settled({ waitMs: 0, goneMs: 300_000 });
   // a second load of the same data dir meanwhile is not sent to any program while the first may still write
   const port = h.pool.state('drop').port;
   const load = () => { const x = h.pool.shards.spawn('drop', h.pool.o.command(h.world('drop'), port)); x.stdout.resume(); x.stderr.resume(); return x; };
@@ -193,7 +193,7 @@ test('review, #2469 A2: a world dropped while it loads stops alone, whatever its
   const abandoned = await settling;
   assert.deepEqual(abandoned.map((b) => b.slug), ['drop']);
   assert.ok(first.exitCode !== null || first.signalCode !== null, 'the dropped world exited');
-  assert.ok(Date.now() - dropAt >= HOLD_MS - 500, `its boot outlasted the old 3 s grace (${Date.now() - dropAt} ms)`);
+  assert.ok(Date.now() - loadAt >= HOLD_MS, `its boot outlasted the old 3 s grace (${Date.now() - loadAt} ms from its load)`);
   // its boot ended at its open wait (the projection) the moment the hold was over, or it booted and stopped
   assert.match(h.log('drop'), /boot interrupted: stop|\[world\] SIGTERM: snapshot saved/, 'it ended its boot and stopped');
   assert.equal(first.exitCode, 0, 'as a stop, not a crash');
