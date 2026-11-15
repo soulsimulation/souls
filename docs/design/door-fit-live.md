@@ -1,0 +1,71 @@
+# Door-fit in live worlds
+
+Templates, and so new worlds, carry real doors (#2397, #2438). A live world keeps its drawn doorways until the
+live rule is switched on for it: `door-fit/1`, then `door-fit/2`, the last boot rules
+(`apps/server/src/god/door-fit.ts`, wired in `apps/server/src/edge-runtime-rules.ts`). This note says what the rule
+guarantees, what must be measured before it is switched on, how to switch it on and how to roll it back. Switching it
+on for any production world is a separate step that needs the maintainer's yes.
+
+## What the rule does
+
+Each world fits once. The fit starts after the other boot rules and does not hold them up. It runs one building at a
+time, each building its own recorded edit, and the world serves between slices. Each fit then logs one rules event.
+A building it could not fit this boot (a body in the way, an engine that had not caught up, a building that kept
+changing) holds the event back, so the next boot fits what is left. A restart part way through goes on where it stopped.
+
+What one building's fit guarantees (#2462):
+
+- **BUILDSAFE.** The edit is checked on the would-be world before it commits, as a god edit is. It is not made when it
+  edits a resident's body, when legal-edits/1 refuses it (its preview breaks a rule on a Soul, a Soul is in its way or
+  uses what it changes), or, in a world without legal-edits/1, when the walk-out planner would have to walk somebody out
+  of its way. A fit never walks anyone. The building is tried again at the next boot.
+- **Bodies.** The bodies are read again for each building. A doorway with a body standing in it gets no door this
+  boot. A prop never moves onto a body.
+- **Reach.** The engine must have taken the edit in before anything is judged: three waits, then the fit is undone and
+  tried again at the next boot. The check walks from outside the building's front door, or, when the building has no
+  door yet, from outside the outside doorway its fit plans. If it has neither, the building is refused and keeps its
+  drawn doorways. The walk goes to both sides of each new door, and to each thing, seat, bed and body of the building
+  on every floor that was reached before the fit. Anything reached before and not after undoes the prop moves first.
+  Then the new doors come out one by one: the door whose side is cut, else the one nearest the front. If something is
+  still cut off with every new door out, the whole fit is undone.
+- **The engine is told.** Each edit's own diff (entities, defs, tiles) goes to the engine as it is made.
+- **Doors follow.** A live-fitted door is its building's child, and door-fit/2 makes door-fit/1's doors its children
+  too, so a later edit that moves the building moves its doors. A template's outside doors are world-root until the
+  templates are refitted.
+- **Turns.** Each slice is cut at 100 ms (#2433's turn budget). A turn over it is logged with what held it, and each
+  fit ends with its longest turn (`[world] door-fit/N: longest turn … ms`). One building's edit is a single turn and
+  cannot be cut. Before #2443 it took up to 15.9 s on Eden. #2443 removed the cause: re-settling every padded neighbour
+  on the edit's tiles. Whether one edit now stays under the budget on each live world is what the measurement below
+  answers.
+
+Doorways a door does not fit stay bare (the maintainer, 15 Nov). That covers doorways narrower than the door's frame,
+doors a hand cannot work either way, doors held by name in `DOOR_FIT_HELD`, and doors whose frame cuts a way off.
+
+## Before switching it on
+
+For each live world, on a local copy of its production snapshot (read-only, never written back; how snapshots are kept
+is in [operations](../operations.md)), booted with `BRAIN_MODE=fake`, an isolated `DATA_DIR` and `DOOR_FIT_BOOT=1`:
+
+1. The fit completes, and its rules events are logged.
+2. The walk audit after the fit is no worse than before it, per world (`tools/test-harness/walk/walk.mjs` on the copy).
+3. Every Soul's position is still reached (the walk audit's per-Soul targets, before and after).
+4. The longest turn the fit logs, and the slowest building's edit, are recorded. Bar: no turn over the budget. A
+   world that misses it stays off until a single fit edit costs less.
+
+Only a world that meets all four is proposed for switching on.
+
+## Switching on
+
+Set `DOOR_FIT_BOOT=1` for that world's process and restart it in the release window, smallest world first and Eden
+last. Watch the world log for the `door-fit/1` and `door-fit/2` summary lines, the longest-turn lines, and the healthz
+and watchdog heartbeats while it fits.
+
+## Rollback
+
+1. **Stop.** Unset `DOOR_FIT_BOOT` and restart. No further building is fitted. Buildings already fitted keep their
+   doors, and the world serves as before.
+2. **Undo one building.** Each fit edit is in the journal as an engine edit with a `door-fit/` note. Its inverse (the
+   old revision and contents, by the same ids) can be applied as one engine edit. No tool does this yet; write one only
+   if a fitted building is found wrong.
+3. **Restore.** Restoring the world's snapshot from before the switch rewinds everything since, Souls' time included.
+   It is a destructive production step and needs the maintainer's explicit yes.

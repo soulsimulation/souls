@@ -609,11 +609,13 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   /** A trusted edit the engine made (a Soul moved a thing, a body was born or retired): journaled by 'engine',
    *  never the god's to undo (and it does not clear the redo stack), published to viewers. Ordinary engine edits
    *  skip onCommit; an atomic painting participant also notifies context/perception before receipt observers. */
-  engineAct(ops: Op[], note: string, complete?: () => void, durable?: () => void): Result {
+  engineAct(ops: Op[], note: string, complete?: () => void, durable?: () => void, gate?: (before: WorldModel, after: WorldModel, diff: Diff, inverse: Op[]) => Result | null): Result {
     const tick = this.opts.tick();
     const next = this.model.fork();
     const r = applyBatch(next, { ops }, 'engine', tick, { trusted: true });
     if (!r.result.accepted) return r.result;
+    // #2462: a boot door fit's edit is checked as a god edit would be (door-fit.ts `fitAct`) on the would-be world
+    const gated = gate?.(this.model, next, r.diff!, r.inverse ?? []); if (gated) return gated;
     const roots = this.builds.rootsDelta(this.model, next, r.diff!, 'engine'), updates = this.builds.writes({ warnings: [] }, roots, r.result.seq, this.now());
     if (updates.failures) return { accepted: false, failures: updates.failures };
     let notify: (() => void) | undefined;
