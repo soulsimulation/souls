@@ -2619,8 +2619,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const through = !issue && to ? (this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean | null}).walkThroughDoorV1?.(soul.entityId, probe) : false;
       const behindNP = through === true || through === null;
       const p = to && (issue || behindNP) ? this.doorPassage(soul, probe, what, behindNP) : null;
-      if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
-      if (p) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
+      // asked only because the labels are cold, a refusal is not proof the plan needs that door (#1508: the reachable shelf)
+      if (p && 'refuse' in p && (issue || through === true)) return {...refuse(p.code, p.reason), ...resolved};
+      if (p && !('refuse' in p)) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
     }
     // nav-connect/1 (lane NAV): no walk from where it stands, because it stands cut off from the walkable world (an edit
     // closed a pocket round it, a floor lost its stairs): it steps to the nearest open ground of the main area first (a

@@ -52,7 +52,9 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
     const end=actuatorPoint(c,0).root;return eng.walkFromReachesV1!(soul.entityId,[end[0],end[2]],steps)?{open,o,close,c}:null;
    };
    const mine=d.contact.plan(soul,id,'open',{},{open:false})?.params.opening;
-   const got=side()??(mine?side([wp.x-n[0]*mine.side*FAR,wp.z-n[1]*mine.side*FAR]):null);if(!got)continue;
+   // (only when the destination lies on her own side of it: a door between her and it is opened from where she is)
+   const flip=!!mine&&-mine.side*((found.goal[0]-wp.x)*n[0]+(found.goal[1]-wp.z)*n[1])<=0;
+   const got=side()??(flip?side([wp.x-n[0]*mine!.side*FAR,wp.z-n[1]*mine!.side*FAR]):null);if(!got)continue;
    const {open,o,close,c}=got;
    const name=e.name??id,denied=d.access(id,soul);
    if(denied){refusal??={refuse:true,code:denied.code,reason:`The way to ${what} goes through ${name}: ${denied.reason.replace(/[.\s]+$/,'')}. It was not opened.`};continue;}
