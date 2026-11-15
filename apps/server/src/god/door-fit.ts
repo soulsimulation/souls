@@ -164,7 +164,7 @@ function fitOps(god: GodMode, e: Entity, bodies: Vec2[], indoors: (x: number, z:
  *  cannot work, buildings left for a later boot (a resident seated inside), and buildings kept on their old revision this
  *  boot (a door the world refuses), tried again at the next. */
 export type DoorFitReport = { buildings: number; doors: number; left: string[]; kept: string[]; series: string[]; held: string[];
-  fitted: { id: string; name?: string; ref: string; doors: PlaceOp[] }[] };
+  fitted: { id: string; name?: string; ref: string; doors: PlaceOp[]; /** #2434 door-fit/2: props moved clear of a door */ moves?: Op[] }[] };
 
 /** door-fit/1 on `god`'s world: every world-root building on a replaced revision, in one engine edit when it is
  *  accepted whole, else building by building (a refused one is left, named, for a later boot). `obstacles`: the walk
@@ -213,7 +213,9 @@ function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly Ha
   const fit = doorFit(e.def, e.params as Record<string, unknown> | undefined, e.p, e.r, e.name, bodies, (n) => m.names.has(`world/${n}`), undefined, { baseY: base, existing, parent: e.id })!;
   const sub = m.subtree(e.id).map((id) => m.entities.get(id)!);
   const moves: Op[] = [];
-  const ops = () => [...moves, { op: 'remove', id: e.id, cascade: true }, ...sub.map((x, k): Op => ({ op: 'restore', entity: k === 0 ? { ...x, def: storedRef(fit.ref) } : x }) as Op), ...fit.doors] as Op[];
+  // a prop of the building's own (in its subtree) moves where it is restored; any other by a move op
+  const ownProp = (id: string) => sub.some((x) => x.id === id), outer = () => moves.filter((o) => !ownProp((o as { id: string }).id)), at = (x: Entity) => (moves.find((o) => (o as { id: string }).id === x.id) as { p?: number[] } | undefined)?.p;
+  const ops = () => [...outer(), { op: 'remove', id: e.id, cascade: true }, ...sub.map((x, k): Op => ({ op: 'restore', entity: k === 0 ? { ...x, def: storedRef(fit.ref) } : at(x) ? { ...x, p: at(x)! } : x }) as Op), ...fit.doors] as Op[];
   const held: string[] = [], flipped: string[] = [], moved: string[] = [];
   if (obstacles && fit.doors.length) {
     const own = (id: string) => id.startsWith(e.id + '#');
@@ -223,11 +225,19 @@ function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly Ha
       if (b) out.push(...next.footprint(b).map((f, i) => ({ id: `${e.id}#fit${i}`, obb: { c: f.c, half: f.half, yaw: -f.yaw }, y0: f.y0, y1: f.y1 })));
       return out;
     };
+    // one fork per state of the fit (a big world's model is costly to fork): kept until a door turns or a prop moves
+    let memo: { key: string; next: WorldModel | null; doors: { id: string; x: number; z: number }[]; solids: HandObstacle[] } | null = null;
     const tryFit = (shift: Map<string, Vec2>, k: number, hit?: { id?: string }) => {
-      const next = m.fork(), r = applyBatch(next, { ops: ops() }, 'engine', 0, { trusted: true });
-      if (!r.result.accepted) return 'refused';
-      const q = fit.at[k]!, x = [...next.entities.values()].find((y) => !m.entities.has(y.id) && opRef(y.def) === DOOR_FIT_DOOR && Math.hypot(next.worldPose(y).x - q[0], next.worldPose(y).z - q[1]) < 0.01);
-      return x ? doorHandBlocked(next, x.id, solids(next, shift), (id) => id.startsWith(e.id + '#door:'), hit) : null;
+      const key = `${JSON.stringify(moves)}|${fit.doors.map((d) => `${d.name}:${d.r}`).join(',')}`;
+      if (memo?.key !== key) {
+        const next = m.fork(), r = applyBatch(next, { ops: ops() }, 'engine', 0, { trusted: true });
+        memo = r.result.accepted
+          ? { key, next, doors: (r.diff?.upserts ?? []).filter((y) => !m.entities.has(y.id) && opRef(y.def) === DOOR_FIT_DOOR).map((y) => { const w = next.worldPose(next.entities.get(y.id)!); return { id: y.id, x: w.x, z: w.z }; }), solids: solids(next, shift) }
+          : { key, next: null, doors: [], solids: [] };
+      }
+      if (!memo.next) return 'refused';
+      const q = fit.at[k]!, x = memo.doors.find((y) => Math.hypot(y.x - q[0], y.z - q[1]) < 0.01);
+      return x ? doorHandBlocked(memo.next, x.id, memo.solids, (id) => id.startsWith(e.id + '#door:'), hit) : null;
     };
     const shift = new Map<string, Vec2>();
     for (let k = 0; k < fit.doors.length; k++) {
@@ -240,13 +250,13 @@ function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly Ha
       d.r = turned(d.r as number);
       // both ways blocked: the prop in the first swing moves the shortest legal distance that frees the door
       const prop = (hit.id ?? hit2.id ?? '').split('#')[0]!, pe = m.entities.get(prop);
-      const movable = !!pe && pe.in.parent === 'world' && prop !== e.id && opRef(pe.def) !== DOOR_FIT_DOOR && !BUILDING_REFS.has(opRef(pe.def)) && !ALL_DOORS_FROM.has(opRef(pe.def)) && ![...ALL_DOORS_FROM.values()].some((v) => v.ref === opRef(pe.def)) && !pe.shape;
+      const movable = !!pe && prop !== e.id && opRef(pe.def) !== DOOR_FIT_DOOR && !BUILDING_REFS.has(opRef(pe.def)) && !ALL_DOORS_FROM.has(opRef(pe.def)) && ![...ALL_DOORS_FROM.values()].some((v) => v.ref === opRef(pe.def)) && !pe.shape;
       let free = false;
       if (movable) {
-        const at = m.worldPose(pe!), p0 = Array.isArray(pe!.p) ? pe!.p as number[] : [at.x, at.z];
+        const at = m.worldPose(pe!), p0 = Array.isArray(pe!.p) ? pe!.p as number[] : [at.x, at.z], py = pe!.in.parent === 'world' ? 0 : m.worldPose(m.entities.get(pe!.in.parent)!).yaw, pc = Math.cos(py), ps = Math.sin(py);
         for (const [dx, dz] of MOVES) {
           const to = p0.length > 2 ? [p0[0]! + dx, p0[1]!, p0[2]! + dz] : [p0[0]! + dx, p0[1]! + dz];
-          moves.push({ op: 'move', id: prop, p: to } as Op); shift.set(prop, [dx, dz]);
+          moves.push({ op: 'move', id: prop, p: to } as Op); shift.set(prop, [dx * pc + dz * ps, -dx * ps + dz * pc]);   // a child prop moves in its parent's frame
           if (!tryFit(shift, k)) { moved.push(`${pe!.name ?? prop} moved ${Math.round(Math.hypot(dx, dz) * 100) / 100} m clear of ${label}`); free = true; break; }
           moves.pop(); shift.delete(prop);
         }
@@ -254,7 +264,7 @@ function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly Ha
       if (!free) { held.push(`${label} (${why})`); fit.doors.splice(k, 1); fit.at.splice(k, 1); k--; }
     }
   }
-  return { ...fit, held, flipped, moved, ops: ops() };
+  return { ...fit, held, flipped, moved, moves, ops: ops() };
 }
 
 /** door-fit/2 (#2434) on `god`'s world: every world-root building on a revision before its every-doorway one (a first
@@ -264,7 +274,7 @@ export function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) =
   const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && ALL_DOORS_FROM.has(opRef(e.def)));
   const out: DoorFit2Report = { buildings: 0, doors: 0, left: [], kept: [], series: [], held: [], fitted: [], flipped: [], moved: [] };
   if (!targets.length) return out;
-  const done = (e: Entity, f: ReturnType<typeof fitOps2>) => { out.buildings++; out.doors += f.doors.length; out.held.push(...f.held); out.flipped.push(...f.flipped); out.moved.push(...f.moved); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors }); };
+  const done = (e: Entity, f: ReturnType<typeof fitOps2>) => { out.buildings++; out.doors += f.doors.length; out.held.push(...f.held); out.flipped.push(...f.flipped); out.moved.push(...f.moved); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors, ...(f.moves.length ? { moves: f.moves } : {}) }); };
   const note = (n: number, d: number) => `door-fit/2 (#2434): ${n} building(s) moved to their every-doorway revision, ${d} more real door(s) set in their doorways`;
   const each = targets.map((e) => ({ e, fit: fitOps2(god, e, bodies, obstacles) }));
   const whole = god.engineAct(each.flatMap((x) => x.fit.ops), note(each.length, each.reduce((a, x) => a + x.fit.doors.length, 0)));

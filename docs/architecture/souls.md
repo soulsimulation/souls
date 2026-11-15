@@ -626,22 +626,23 @@ is checked beyond the first chunk only on the coarse ground grid, so a goal seal
 walk reaches it, and the walk then fails `route.unreachable` there.
 
 A closed, unlocked door a hand opens is a way through in every world, flat or ground (`doors-pass/1`, #2365). Reach
-checks, room goals and the connectivity audit count ONE such door on the ground as a way through, exactly what one walk
-act does: it goes to the door, opens it by hand, passes and closes it behind (entry 31). The walk graph still treats the
-shut leaf as solid. A room one closed door from the world, on any floor its stairs reach, is never `nav.disconnected` and
-a Soul inside is never stepped out. A room behind two closed doors in series, or behind a door upstairs, is not reached in one walk and counts as cut
-off, so a Soul shut in there is stepped out as below. A locked door stays a wall. A verification probe opens no door: it
-is refused `route.unreachable` naming the door.
+checks, room goals and the connectivity audit count any number of such doors in series, on any floor, as a way through,
+exactly what one walk act does (#2434): it goes to each door in turn, opens it by hand, passes and closes it behind
+(entry 31; the door chain is `Spatial.doorChain`, at most six doors, fewest first). The walk graph still treats a shut
+leaf as solid. A room closed doors away from the world is never `nav.disconnected` and a Soul inside is never stepped
+out. A locked door stays a wall: a room only past it counts as cut off, so a Soul shut in there is stepped out as below.
+A verification probe opens no door: it is refused `route.unreachable` naming the door.
 
-Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
-revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
-enclosed room. Templates carry them; a live world gets them once at boot (`door-fit/1`, the last boot rule). Inside doors,
-upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room, or into a yard
-the buildings close in all round (Eden's courtyard compounds), stays an open doorway, with no door in it, until a walk can
-pass several closed doors in a row (#2370). So does a doorway whose door a hand could not work: where something stands
-where the body steps to open it from outside or close it from inside, or the other way round (a flower pot, a laundry
-line, the building's own stairs or porch post). A building the world refuses to fit is tried again at the next boot. A
-walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its room when it has one.
+Every core building's doorways hold such doors. Door-fit/1 (#2383) moved each building to a door-fitted revision
+(`make.args.doorThings`) with a `core/door@2` in each outside ground-floor doorway, closed for an enclosed room.
+Door-fit/2 (#2434) moves each to its every-doorway revision (`doorThings: 2`): every doorway is bare, inside and upstairs
+too, an inside doorway is 1.2 m wide where its wall has room, and a `core/door@2` stands in each one that has none yet.
+An inside or upstairs door starts open; an upstairs door is the building's child. A door a hand cannot work (something
+stands where the body steps to open it from one side or close it from the other) is swung the other way; if both ways are
+blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result; a live world
+gets it once at boot (`door-fit/1`, then `door-fit/2`, the last boot rules). A building the world refuses to fit is
+tried again at the next boot. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
+room when it has one.
 
 A walk through such a door is planned from the Soul's own floor: from upstairs, the first leg walks down the stairs to
 the door. When the connectivity labels put one end of a walk behind a closed door and the other not, the walk is

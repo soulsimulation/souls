@@ -772,6 +772,8 @@ export class Spatial {
           for (const [a, b] of [sides, [sides[1], sides[0]] as [Vec2, Vec2]]) {
             const r1 = this.routeNow(world, profile, n.at, { level, p: a }, rest); if (!r1.ok) continue;
             used.add(id);
+            // a door with both faces on this side (one standing in the open) separates nothing: never a way on
+            if (this.routeNow(world, profile, n.at, { level, p: b }, { ...rest, proveUnreachable: true }).ok) break;
             next.push({ at: { level, p: b }, doors: [...n.doors, { id, level, from: a, to: b }], legs: [...n.legs, ...r1.route.legs], length: n.length + r1.route.length + hypot(b[0] - a[0], b[1] - a[1]), expanded: n.expanded + r1.route.expanded });
             break;
           }

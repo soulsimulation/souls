@@ -10,10 +10,12 @@ import { pathToFileURL } from 'node:url';
 import { DOOR_FIT_FROM } from '@souls/world-compiler';
 import { bootEden } from '../../test/eden-capabilities-timing.ts';
 import { accept } from '../../test/native-owner-fixture.ts';
-import { enableDoorFitV1 } from '../edge-runtime-rules.ts';
+import { enableDoorFitV1, enableDoorFitV2 } from '../edge-runtime-rules.ts';
 import { doorFit, doorFitted, DOOR_FIT_DOOR } from './door-fit.ts';
 
-const template = (name: string) => JSON.parse(readFileSync(new URL(`../../../../worlds/templates/${name}.json`, import.meta.url), 'utf8'));
+// #2434: door-fit/1's templates as #2383 left them (outside ground-floor doors only); worlds/templates now carry door-fit/2
+const template = (name: string) => JSON.parse(readFileSync(new URL(`../../test/fixtures/door-fit1/${name}.json`, import.meta.url), 'utf8'));
+const current = (name: string) => JSON.parse(readFileSync(new URL(`../../../../worlds/templates/${name}.json`, import.meta.url), 'utf8'));
 const fitted = template('hello-hamlet');
 const back = new Map([...DOOR_FIT_FROM].map(([from, to]) => [to.ref, from]));
 type PlaceOp = { op: string; def: string; name?: string; p?: number[]; r?: number; params?: Record<string, unknown>; state?: Record<string, unknown> };
@@ -96,3 +98,36 @@ test('door-fit/1: a refused building is tried again at the next boot', { timeout
   assert.equal(fact.payload.doorFitV1.buildings, 3, 'the next boot fits them');
   assert.equal([...w.god.model.entities.values()].filter((e) => doorFitted(e.def)).length, 0);
 });
+
+// #2434 door-fit/2: a world as door-fit/1 left it (outside ground-floor doors only) gets a real door in every other
+// doorway in one recorded edit and one logged event, the same doors the template now carries; a door both of whose
+// swings a prop blocks moves the prop (Mars Camp's living-room bench, 0.25 m); a second boot does nothing.
+for (const name of ['hello-hamlet', 'mars-camp']) {
+  test(`door-fit/2: ${name} as door-fit/1 left it gets every doorway's door, like the template`, { timeout: 300000 }, async (t) => {
+    const w = await bootEden(() => {}, new URL(`../../test/fixtures/door-fit1/${name}.json`, import.meta.url)); t.after(w.close);
+    const { god, host, soul } = w;
+    const ents = () => host.engine.world.entities as Record<string, { pose: { p: number[] } }>;
+    const pose0 = structuredClone(ents()[soul.entityId]!.pose), seq0 = god.model.editSeq;
+    const doorNames = () => [...god.model.entities.values()].filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR).map((e) => e.name).sort();
+    const before = doorNames();
+    const fact = await accept<unknown>(host, enableDoorFitV2(host, god) as Promise<never>) as { payload: { doorFitV2: { buildings: number; doors: number; moved: number; held: number }; runtimePolicy: { doorFitV2: boolean } } };
+    assert.equal(fact.payload.runtimePolicy.doorFitV2, true);
+    assert.equal(fact.payload.doorFitV2.held, 0, 'no doorway left without a door');
+    assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
+    const want = places(current(name)).filter((o) => o.def === DOOR_FIT_DOOR).map((o) => o.name).sort();
+    assert.deepEqual(doorNames(), want, 'the doors the template carries');
+    assert.equal(fact.payload.doorFitV2.doors, want.length - before.length, 'door-fit/1\'s doors kept, the rest added');
+    assert.ok([...god.model.entities.values()].filter((e) => /^core-\w[\w-]*@\d+$/.test(e.def) && e.in.parent === 'world').every((e) => !doorFitted(e.def)));
+    if (name === 'mars-camp') {
+      assert.equal(fact.payload.doorFitV2.moved, 1, 'the living-room bench moved clear');
+      const bench = [...god.model.entities.values()].find((e) => e.name === 'living-bench')!, tpl = places(current(name)).find((o) => o.name === 'living-bench')!;
+      assert.deepEqual(bench.p, tpl.p, 'where the template has it');
+    }
+    await w.settle(10);
+    assert.deepEqual(ents()[soul.entityId]!.pose.p, pose0.p, 'nobody moved');
+    assert.deepEqual(host.engine.runtime.violations, []);
+    const seq1 = god.model.editSeq;   // (a resident's own acts may edit while the world ticks)
+    assert.equal(await enableDoorFitV2(host, god), undefined, 'once: a second boot queues nothing');
+    assert.equal(god.model.editSeq, seq1, 'and edits nothing');
+  });
+}
