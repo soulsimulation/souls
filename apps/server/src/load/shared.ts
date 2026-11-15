@@ -38,7 +38,9 @@ export const S = {
   // #2440: the ms of every completed tick so far (monotonic, monitor.ts tickDone): admission subtracts the ticks that ran
   // while it timed a job, so a request is charged its own time, not the tick's
   tickSpentMs: 36,
-  size: 37,
+  // #2440: the tick service over the last ~1 s (monitor.ts sample): spare time needs the ticks on time now, not 5 s ago
+  service1s: 37,
+  size: 38,
 } as const;
 
 export type LiveJson = {

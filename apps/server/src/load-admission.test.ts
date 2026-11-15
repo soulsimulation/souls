@@ -3,8 +3,8 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
-import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, type RouteClass, type Ticket} from './load/admission.ts';
-import {S, sharedLoad, type Level} from './load/shared.ts';
+import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, ticksOnTimeNow, type RouteClass, type Ticket} from './load/admission.ts';
+import {newSharedLoad, S, sharedLoad, type Level} from './load/shared.ts';
 import {testPort} from '../test/test-port.ts';
 const TEST_PORT=await testPort();
 
@@ -423,4 +423,23 @@ test('#2440: one slow job leaves at most a frame of world debt; its own Soul pay
   assert.ok(ranB, 'another Soul\'s act runs within a few frames, not after 2 s of debt at amber\'s budget (~8 s)');
   assert.ok(!ranA, 'the slow Soul\'s next act waits for its own bucket');
   adm.close();
+});
+
+test('#2440: spare time needs the ticks on time now (1 s service >= 0.98, last tick under 100 ms old), not only over 5 s', async () => {
+  const run = async (onTime: boolean) => {
+    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.5, ticksOnTime: () => onTime});
+    adm.setLoadLevel('amber');
+    for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
+    for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
+    adm.close(); return ran;
+  };
+  assert.equal(await run(true), 50, 'ticks on time: spare time serves the crowd');
+  assert.ok(await run(false) < 10, 'ticks behind in the last second: the frame budget binds');
+  const a = newSharedLoad(), t = 1_000_000;
+  assert.equal(ticksOnTimeNow(a, t), true, 'before the first sample: on time');
+  a[S.sampledAt] = t; a[S.service1s] = 1; a[S.stallMs] = 2000; a[S.tickAt] = t - 40;
+  assert.equal(ticksOnTimeNow(a, t), true, 'service 1, last tick 40 ms ago');
+  a[S.tickAt] = t - 150; assert.equal(ticksOnTimeNow(a, t), false, 'last tick 150 ms ago: behind now');
+  a[S.stallMs] = 0; assert.equal(ticksOnTimeNow(a, t), true, 'a clock that owes no ticks is not behind');
+  a[S.stallMs] = 2000; a[S.tickAt] = t - 40; a[S.service1s] = 0.95; assert.equal(ticksOnTimeNow(a, t), false, '1 s service 0.95: behind');
 });

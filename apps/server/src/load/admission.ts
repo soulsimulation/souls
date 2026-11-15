@@ -85,7 +85,11 @@ export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>
   tickService?: () => number;
   /** #2440 review: the heap's used share of its limit, 0..1 (default: the monitor's, S.heapUsedMb / S.heapLimitMb; with an
    *  injected clock, 0). */
-  heapFrac?: () => number};
+  heapFrac?: () => number;
+  /** #2440: the ticks are on time right now: the 1 s tick service is at least SPARE_SERVICE_1S and the last tick is under
+   *  SPARE_TICK_AGE_MS old while the clock owes ticks (default: the monitor's S.service1s, S.tickAt, S.stallMs; with an
+   *  injected clock, true). */
+  ticksOnTime?: () => boolean};
 /** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
  *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
  *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
@@ -96,6 +100,16 @@ export const SPARE_IDLE = 0.2, SPARE_SERVICE = 0.9, IDLE_WINDOW_MS = 250;
 /** #2440 review: spare time also needs the heap below red's own threshold (monitor.ts: red above 0.85): a world red for
  *  heap with an idle loop and light GC must not admit unbudgeted, allocating requests. */
 export const SPARE_HEAP = 0.85;
+/** #2440: and the ticks on time now, not only over 5 s: spare time must never cost world time (at 100 Souls the 5 s gate
+ *  alone let the candidate serve 10-15 % fewer ticks than base). */
+export const SPARE_SERVICE_1S = 0.98, SPARE_TICK_AGE_MS = 100;
+/** #2440: the monitor's view of the ticks right now (before its first sample, on time). A clock that owes no ticks
+ *  (paused, stopped, rate 0: stallMs 0) is on time. */
+export function ticksOnTimeNow(a: Float64Array = sharedLoad, now = Date.now()): boolean {
+  if (!(a[S.sampledAt] > 0)) return true;
+  if (a[S.service1s] < SPARE_SERVICE_1S) return false;
+  return !(a[S.stallMs] > 0) || !(a[S.tickAt] > 0) || now - a[S.tickAt] < SPARE_TICK_AGE_MS;
+}
 /** The loop's idle share over the last IDLE_WINDOW_MS or more (event-loop utilization), refreshed when asked. */
 export function loopIdle(): () => number {
   let prev = perf.eventLoopUtilization(), at = perf.now(), idle = 0;
@@ -129,14 +143,16 @@ export class Admission {
   private idleShare: () => number;
   private tickService: () => number;
   private heapFrac: () => number;
+  private ticksOnTime: () => boolean;
   constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
     this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
     // the tick service is 1 until the monitor's first sample
     this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1);
-    this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => sharedLoad[S.heapLimitMb] > 0 ? sharedLoad[S.heapUsedMb] / sharedLoad[S.heapLimitMb] : 0); }
+    this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => sharedLoad[S.heapLimitMb] > 0 ? sharedLoad[S.heapUsedMb] / sharedLoad[S.heapLimitMb] : 0);
+    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : ticksOnTimeNow); }
   /** #2440: the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE), the heap is below red's
    *  (SPARE_HEAP) and the world is not black: queued requests are not held for budget. */
-  spare() { return this.level !== 'black' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.idleShare() >= SPARE_IDLE; }
+  spare() { return this.level !== 'black' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.ticksOnTime() && this.idleShare() >= SPARE_IDLE; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 
