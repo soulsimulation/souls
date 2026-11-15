@@ -380,7 +380,9 @@ async function sliced<T>(g: Generator<void, T>, what: string, o: FitSlices, paus
 /** door-fit/2's reach check on the live engine (review of #2438): `settle` waits until the engine holds the last edit;
  *  `front` is a standing point outside building `id`'s own ground-floor outside door, null when it has none; `reach` says
  *  whether a body walks from it to standing room near `to` at height `y` (null: no standing room there). Pure reads. */
-export type DoorReach = { settle(): Promise<boolean>; front(id: string): Vec2 | null; reach(from: Vec2, to: Vec2, y: number, base: number): boolean | null };
+export type DoorReach = { settle(): Promise<boolean>; front(id: string): Vec2 | null; reach(from: Vec2, to: Vec2, y: number, base: number): boolean | null;
+  /** #2438: the seat and berth approaches near a point test (the walk audit's targets), and whether one is reached */
+  seats?(near: (x: number, z: number) => boolean): { id: string; p: Vec2; level: number }[]; reachAt?(from: Vec2, p: Vec2, level: number): boolean };
 /** How far (m) out from a door line its two sides are probed by the reach check. */
 const REACH_FACE = 0.9;
 const faces = (w: Way): [Vec2, Vec2] => [[w.p[0] + Math.sin(w.r) * REACH_FACE, w.p[1] + Math.cos(w.r) * REACH_FACE], [w.p[0] - Math.sin(w.r) * REACH_FACE, w.p[1] - Math.cos(w.r) * REACH_FACE]];
@@ -406,12 +408,12 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: str
     let fit!: ReturnType<typeof fitOps2> extends Generator<void, infer T> ? T : never, from: Vec2 | null = null, before: boolean[][] = [], fresh = false;
     // a fit that moves a prop also probes where the building's things stand (every floor) and where the moved prop stood:
     // a prop moved onto a stair's foot cuts off the floors above, which no door's sides show (the old-town arcades)
-    let probes: { p: Vec2; y: number }[] = [], probesBefore: boolean[] = [];
+    let probes: { p: Vec2; y: number }[] = [], probesBefore: boolean[] = [], seatsBefore: string[] = [], near: (x: number, z: number) => boolean = () => false;
     for (let attempt = 0; attempt < 3 && !fresh; attempt++) {
       const cur = god.model.entities.get(id);
       if (!cur || cur.in.parent !== 'world' || !ALL_DOORS_FROM.has(opRef(cur.def))) break;
       fit = await sliced(fitOps2(god, cur, bodies, obstacles), `${id} plan`, o, pause); await pause();
-      from = null; before = []; probes = []; probesBefore = [];
+      from = null; before = []; probes = []; probesBefore = []; seatsBefore = [];
       // the reach check's baseline: each side of each new door's doorway reached from the front before the fit
       if (walk && fit.doors.length) {
         await walk.settle(); t = performance.now();
@@ -429,6 +431,10 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: str
           probes = [...sub.slice(1), ...new Set(mv)].map((x) => god.model.entities.get(x)).filter((x): x is Entity => !!x && opRef(x.def) !== DOOR_FIT_DOOR)
             .map((x) => { const q = god.model.worldPose(x); return { p: [q.x, q.z] as Vec2, y: q.y }; });
           for (const q of probes) { t = performance.now(); probesBefore.push(walk.reach(from, q.p, q.y, base) === true); o.slice?.(performance.now() - t, `${id} reach before`); await pause(); }
+          // and every seat and berth of the building reached before (a prop moved beside a chair can take its approach)
+          const bw = god.model.worldPose(cur), rad = god.model.footprint(cur).reduce((r, f) => Math.max(r, Math.hypot(f.c[0] - bw.x, f.c[1] - bw.z) + Math.hypot(f.half[0], f.half[1])), 0) || 30;
+          near = (x, z) => Math.hypot(x - bw.x, z - bw.z) < rad + 2;
+          t = performance.now(); seatsBefore = walk.seats && walk.reachAt ? walk.seats(near).filter((q) => walk.reachAt!(from!, q.p, q.level)).map((q) => q.id) : []; o.slice?.(performance.now() - t, `${id} seats before`); await pause();
         }
       }
       fresh = fit.fresh();
@@ -456,6 +462,12 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: str
       for (let k = 0; k < probes.length && !cut; k++) {
         if (!probesBefore[k]) continue;
         t = performance.now(); cut = walk.reach(from, probes[k]!.p, probes[k]!.y, base) !== true; o.slice?.(performance.now() - t, `${id} reach after`); await pause();
+      }
+      if (!cut && seatsBefore.length && walk.seats && walk.reachAt) {
+        t = performance.now();
+        const now = new Map(walk.seats(near).map((q) => [q.id, q]));
+        cut = seatsBefore.some((sid) => { const q = now.get(sid); return !q || !walk.reachAt!(from!, q.p, q.level); });
+        o.slice?.(performance.now() - t, `${id} seats after`); await pause();
       }
       for (let k = 0; k < fit.placed.length && !cut; k++) {
         const fs = faces(fit.placed[k]!);

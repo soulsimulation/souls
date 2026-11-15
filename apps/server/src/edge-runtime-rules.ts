@@ -85,7 +85,8 @@ export async function enableDoorFitV2(host: WorldHost, god: GodMode | undefined,
 
 type ReachEngine = { world: unknown; rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { levels: { id: number; y: number }[] } } } };
   standableNearV1?(at: [number, number], level?: number, except?: string, minClear?: number, maxRing?: number): [number, number] | null;
-  reachV1?(from: { p: [number, number]; level?: number }, to: { p: [number, number]; level?: number }): { ok: boolean } };
+  reachV1?(from: { p: [number, number]; level?: number }, to: { p: [number, number]; level?: number }): { ok: boolean };
+  navTargetsV1?(keep?: (at: [number, number]) => boolean): { id: string; kind: string; p: [number, number]; level?: number }[] };
 /** door-fit/2's reach check on this world's engine (review of #2438): pure reads, after the engine holds the last edit. */
 export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | undefined {
   const engine = host.engine as unknown as ReachEngine, sp = engine.rt?.services?.spatial;
@@ -115,6 +116,9 @@ export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | unde
       }
       return null;
     },
+    // #2438: the seats and berths the walk audit checks (their approach points), so a prop moved onto a seat's way is seen
+    seats: (near) => (engine.navTargetsV1?.((at) => near(at[0], at[1])) ?? []).filter((x) => x.kind !== 'region').map((x) => ({ id: x.id, p: x.p, level: x.level ?? 0 })),
+    reachAt: (from, p, level) => engine.reachV1!({ p: from, level: 0 }, { p, level }).ok,
   };
 }
 

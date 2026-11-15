@@ -21504,27 +21504,6 @@
         },
         {
           "op": "place",
-          "in": {
-            "parent": "$df211"
-          },
-          "def": "core/door@2",
-          "name": "cliff-house-27-door-1-0",
-          "p": [
-            -0.443,
-            0,
-            0
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
           "def": "core/door@2",
           "name": "cliff-house-27-door-1",
           "p": [
@@ -60452,7 +60431,7 @@
           "p": [
             0,
             0,
-            -1.238
+            0.262
           ],
           "r": 0
         },
