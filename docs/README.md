@@ -1,4 +1,4 @@
-# Soul documentation
+# Souls documentation
 
 The code is the authority. When a doc and the code disagree, the code wins: fix the doc in the same change.
 
@@ -56,7 +56,7 @@ The code is the authority. When a doc and the code disagree, the code wins: fix 
   - [agent lifecycle](process/agent-lifecycle.md), [agent workflow](process/agent-workflow.md), [review](process/review.md),
     [playtest method](process/playtest-method.md), [Modal policy](process/modal-policy.md),
     [lessons](process/lessons.md), [PROOF-POLICY.yml](process/PROOF-POLICY.yml)
-- [design/vision.md](design/vision.md): where Soul is heading
+- [design/vision.md](design/vision.md): where Souls is heading
 - [design/roadmap.md](design/roadmap.md): outcome themes and unresolved product questions
 - [design/physical-coordination.md](design/physical-coordination.md): proposed shared physical activities and reusable construction
 - [design/soul-context.md](design/soul-context.md): a durable home for Souls and god seats, one memory across worlds, relationships
