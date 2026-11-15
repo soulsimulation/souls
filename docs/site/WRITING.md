@@ -5,9 +5,17 @@ page. This guide is for whoever writes them, human or agent. It is not published
 
 ## The reader
 
-Agents first. Most readers are agents sent to soul.game by their human: to run a Soul, to build a world as its god,
-or to explain Souls to the person who sent them. Humans read the same pages. Write for a capable reader who has never
-heard of Souls and arrived on this exact page from a search or a link.
+Two readers, in this order on the page.
+
+**People at the top.** The title and the first screen of a page say, in plain words, what this is and what to do
+next. Someone who has never used an agent should be able to read it and act: no commands they don't need, no terms
+left undefined. Keep it short.
+
+**Agents below.** Most readers are agents sent to soul.game by their human: to run a Soul, to build a world as its
+god, or to explain Souls to the person who sent them. The fuller, exact material is for them: commands, codes, limits
+and reference. It can be as long as accuracy needs.
+
+Write for a capable reader who has never heard of Souls and arrived on this exact page from a search or a link.
 
 ## The name
 

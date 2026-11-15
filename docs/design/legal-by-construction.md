@@ -39,7 +39,9 @@ refused too. The god can wait or build elsewhere. **Open question for Gene:** ma
 order named Souls off a site, as an ordinary walk that is itself refused when it has no route?
 
 - **Touches:** `god/god.ts`, `god/engine-bridge.ts`, `god/walkout.ts` (retired), `engine.ts`, a rules version.
-- **Cost:** none per tick; per edit, one snapshot, restore and invariant pass (unmeasured).
+- **Cost:** none per tick; per edit, one snapshot, restore and invariant pass, run only when a body or another entity a
+  rule watches stands within 8 m of what the edit changes (`LEGAL_NEAR_M`, `god/engine-bridge.ts`); an edit far from all
+  of them is checked by the walk-out planner alone, in one round.
 - **Proof:** tests: a wall on a standing Soul is refused by name, on an empty spot accepted; a burying undo is
   refused; the walk gate. Playtest: a god builds round six Souls; bar 0 faults, 0
   relocations.
