@@ -1460,6 +1460,8 @@ export class Together {
   sharedCarrying(): Set<string> {return new Set(this.committed().filter(i => i.shared?.template.id === 'carry' && i.shared.op?.phase !== 'ended').map(i => i.shared!.load.entity));}
   /** The running hold on this load, if any. */
   holdOn(load: string): string | null {for (const i of this.committed()) {const s = i.shared; if (s && raises(s) && s.load.entity === load && s.op && s.op.phase !== 'ended') return s.op.id;} return null;}
+  /** #1239: the open hold-up of the running operation on this load, if any (what `inspect <project>` names). */
+  blockedOn(load: string): {op: string; code: string; blocker: string | null} | null {for (const i of this.committed()) {const op = i.shared?.op; if (op?.blocked && op.phase !== 'ended' && i.shared!.load.entity === load) return {op: op.id, code: op.blocked.code, blocker: op.blocked.blocker ?? null};} return null;}
   /** Why this guest could not take up this proposal now, as `accept` would say. */
   sharedAcceptProblem(soul: EdgeSoul, inv: Invite): {code: string; reason: string} | null {return this.sharedBodyProblem(soul) ?? this.sharedTooFar(soul, inv.shared!.load.entity, inv.shared!.load.name);}
   /** PC13 (#692): once, when the raised load first stands: every member's receipt and stream say it is held and how to end that. */

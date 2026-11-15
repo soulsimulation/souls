@@ -10,5 +10,7 @@ set -euo pipefail
 : "${SEAT_CONFIG_DIR:?set SEAT_CONFIG_DIR to the isolated Claude config directory}"
 here="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_CONFIG_DIR="$SEAT_CONFIG_DIR" claude auth status 2>/dev/null | grep -q '"loggedIn": true' || { echo "seat config is not signed in: stopped" >&2; exit 9; }
-exec env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LOGNAME="${LOGNAME:-}" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-dumb}" \
+# #2364: SIM_LOAD_BLACK_MS reaches the episode worlds. A world black for 60 s restarts itself for its launcher, and an
+# episode world has none: on a loaded host it then refuses every connection. Raise it there so the world stays up.
+exec env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LOGNAME="${LOGNAME:-}" LANG="${LANG:-en_US.UTF-8}" TERM="${TERM:-dumb}" SIM_LOAD_BLACK_MS="${SIM_LOAD_BLACK_MS:-}" \
   CLAUDE_CONFIG_DIR="$SEAT_CONFIG_DIR" node "$here/soul-eval.mjs" run "$@"

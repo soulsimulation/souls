@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // The merge train's decisions, for .github/workflows/merge-train.yml (the label flow is documented there).
 //
-//   node .github/scripts/merge-train.mjs next  --repo o/r [--maintainer login] [--notify-issue n] [--output file]
+//   node .github/scripts/merge-train.mjs next  --repo o/r [--maintainer login] [--notify-issue n] [--freeze <sha>] [--output file]
 //        the oldest `merge:ready` PR that can go now: pr, tier, head_ref, head_sha, base_ref, same_repo, more, and
 //        mode=nonstrict|strict (with mode_why) from landingMode(), after waiting up to 15 minutes while the head's
-//        required checks are pending and could still land it non-strict; a red main CI is reported once on --notify-issue
+//        required checks are pending and could still land it non-strict; a red main CI is reported once on --notify-issue.
+//        During a release freeze (--freeze, the RELEASE_FREEZE repo variable, default $RELEASE_FREEZE) it picks nothing:
+//        pr is empty, frozen names the pinned sha, PRs already enqueued are taken back out of the queue (they keep
+//        merge:ready), and the reason goes to the run's summary
 //   node .github/scripts/merge-train.mjs wait  --repo o/r --sha <sha> [--checks a,b] [--timeout-min 60] [--output f]
 //        polls check runs and commit statuses on <sha> until every required check concluded: result=pass|fail|timeout
 //   node .github/scripts/merge-train.mjs merge --repo o/r --pr <n> --sha <sha> [--queue true]
@@ -59,6 +62,16 @@ export function blocker({ pr, tier, approved, defaultBranch }) {
   if (pr.base?.ref && pr.base.ref !== defaultBranch) return 'not-default-branch';
   if (rank(tier) >= 3 && !approved) return 'awaiting-approval';
   return null;
+}
+
+/**
+ * The release freeze (#1838): the repo variable RELEASE_FREEZE holds the release pin's sha, optionally followed by a
+ * note, from the pin until release.yml is dispatched. While it is set the train merges and enqueues nothing, so main's
+ * HEAD stays the pinned commit. Null when unset or blank.
+ */
+export function releaseFreeze(value) {
+  const [sha, ...note] = String(value ?? '').trim().split(/\s+/).filter(Boolean);
+  return sha ? { sha, note: note.join(' ') } : null;
 }
 
 /** GitHub's merge queue is on when the default branch's rules require it. The maintainer adds that rule. */
@@ -235,12 +248,23 @@ export function readChecks(api, repo, sha) {
   };
 }
 
-export function next({ repo, maintainer, notifyIssue, api = { gh, ghAll, comment, queueState } }) {
+export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh, ghAll, comment, queueState, hold } }) {
   const repoInfo = api.gh(`repos/${repo}`);
   const defaultBranch = repoInfo.default_branch;
   const queue = queueRequired(api.ghAll(`repos/${repo}/rules/branches/${encodeURIComponent(defaultBranch)}?per_page=100`));
   const candidates = api.ghAll(`repos/${repo}/issues?state=open&labels=${encodeURIComponent(READY)}&per_page=100`)
     .filter(i => i.pull_request).map(i => i.number).sort((a, b) => a - b);
+  if (freeze) {
+    // Held, not ejected: the PRs keep merge:ready and the first run after the freeze ends takes them as usual. In queue
+    // mode a PR enqueued before the pin (in the queue, or waiting there through auto-merge) is taken back out, since
+    // it would otherwise land on main after the pin; the dequeued relay sees the freeze and does not eject it.
+    const skipped = candidates.map(pr => {
+      const held = queue ? api.hold(api.queueState(repo, pr)) : null;
+      return { pr, why: 'release-freeze', ...(held ? { held } : {}) };
+    });
+    const why = `release freeze at ${freeze.sha}${freeze.note ? ` (${freeze.note})` : ''}: nothing is merged or enqueued until RELEASE_FREEZE is cleared`;
+    return { pr: '', more: false, skipped, queue, frozen: freeze.sha, frozen_why: why };
+  }
   const policy = loadPolicy();
   const skipped = [];
   for (const [i, n] of candidates.entries()) {
@@ -336,7 +360,14 @@ async function main([mode, ...argv]) {
   const repo = opt('--repo') ?? process.env.GITHUB_REPOSITORY;
   if (!repo) { console.error('--repo is required'); return 2; }
   if (mode === 'next') {
-    out(opt('--output'), next({ repo, maintainer: opt('--maintainer') ?? process.env.MAINTAINER ?? repo.split('/')[0], notifyIssue: opt('--notify-issue') || undefined }));
+    const r = next({ repo, maintainer: opt('--maintainer') ?? process.env.MAINTAINER ?? repo.split('/')[0], notifyIssue: opt('--notify-issue') || undefined,
+      freeze: releaseFreeze(opt('--freeze') ?? process.env.RELEASE_FREEZE) });
+    out(opt('--output'), r);
+    if (r.frozen) {
+      const line = `Merge train held: ${r.frozen_why}. Waiting: ${r.skipped.map(s => `#${s.pr}${s.held ? ` (${s.held})` : ''}`).join(', ') || 'none'}.`;
+      console.error(`::notice::${line}`);
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`);
+    }
     return 0;
   }
   if (mode === 'wait') {
@@ -366,6 +397,8 @@ async function main([mode, ...argv]) {
   if (mode === 'dequeued') {
     const state = queueState(repo, opt('--pr'));
     if (!dropped(state)) { console.log(`#${opt('--pr')} merged, re-entered or was held: nothing to do`); return 0; }
+    const freeze = releaseFreeze(process.env.RELEASE_FREEZE);
+    if (freeze) { console.log(`#${opt('--pr')} left the queue during the release freeze at ${freeze.sha}: kept merge:ready, the train re-enqueues it after the freeze`); return 0; }
     hold(state); // auto-merge left on would make the next merge:ready look already queued
     eject({ repo, pr: opt('--pr'), message: `Merge queue: this PR left the queue without merging (reason: \`${opt('--reason') || 'not given'}\`), so it left the train. The failing run is on the \`gh-readonly-queue\` commit in the Actions tab.\n\nFix it and add \`merge:ready\` again.` });
     return 0;

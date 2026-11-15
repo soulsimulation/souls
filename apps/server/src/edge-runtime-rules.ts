@@ -24,7 +24,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued
  *  together would drop the earlier one's flag from the host's record and log it again at the next boot. After `after` (main's
  *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1, #1369
- *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2, legal-edits/1, board-path/1 and #2302 classroom-tv/1 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
+ *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2, legal-edits/1, #2188 legal-edits/2 (over legal-edits/1), board-path/1, #2302 classroom-tv/1 and #2155 wait-bound/3 on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
  *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
  *  already logged in that place. */
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string }): Promise<void> {
@@ -49,8 +49,10 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   // legal-edits/1 needs the off-thread preview, which rebuilds the world's factory from its descriptor: a world without one
   // (Eden core reads its history from the database) would refuse every god edit, so it keeps the rules it has
   if (factoryDescriptorV1(host.factory)) await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b
+  await enableLegalEditsV2(host, 'world').catch((e) => console.error('[world] legal-edits/2 could not be adopted:', String(e).slice(0, 300)));   // #2188 (only over legal-edits/1)
   await host.enableCarrierBoardPathV1('world').catch((e) => console.error('[world] board-path/1 could not be adopted:', String(e).slice(0, 300)));   // board-path/1
-  await host.enableClassroomTvV1('world').catch((e) => console.error('[world] classroom-tv/1 could not be adopted:', String(e).slice(0, 300)));   // #2302, last
+  await host.enableClassroomTvV1('world').catch((e) => console.error('[world] classroom-tv/1 could not be adopted:', String(e).slice(0, 300)));   // #2302
+  await host.enableWaitBoundV3('world').catch((e) => console.error('[world] wait-bound/3 could not be adopted:', String(e).slice(0, 300)));   // #2155, last
 }
 
 /** Legal by construction 1b (docs/design/legal-by-construction.md part 1): legal-edits/1, one logged rules event (prospective,
@@ -61,4 +63,13 @@ export function legalEditsV1(host: Pick<WorldHost, 'extra'>): boolean { return (
 export function enableLegalEditsV1(host: WorldHost, author = 'operator:legal-edits'): Promise<unknown> {
   if (legalEditsV1(host)) return Promise.resolve();
   return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, legalEditsV1: true }, why: 'legal-edits/1 (legal by construction 1b): a god edit that would break a rule on a Soul, or change what one uses, is refused by name, never walked out; retain historical replay before this event' });
+}
+/** #2188 legal-edits/2, one logged rules event over legal-edits/1 (prospective and host-only, like it): from it on, a god edit,
+ *  undo or redo that would leave a Soul on the ground with no walk out (sealed in a pocket nav-connect/1 would step her out
+ *  of, for example by the last wall of a ring closed round her at a distance) is refused by name before it commits
+ *  (god/seal-check.ts). Edits before the event keep legal-edits/1's verdicts. A world without legal-edits/1 does not adopt it. */
+export function legalEditsV2(host: Pick<WorldHost, 'extra'>): boolean { return legalEditsV1(host) && (host.extra.runtimePolicy as { legalEditsV2?: boolean } | undefined)?.legalEditsV2 === true; }
+export function enableLegalEditsV2(host: WorldHost, author = 'operator:legal-edits'): Promise<unknown> {
+  if (!legalEditsV1(host) || legalEditsV2(host)) return Promise.resolve();
+  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, legalEditsV2: true }, why: 'legal-edits/2 (#2188): a god edit that would leave a Soul with no walk out is refused by name before it commits; retain historical replay before this event' });
 }

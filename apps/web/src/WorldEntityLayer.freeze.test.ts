@@ -144,6 +144,19 @@ test('phone: a thing whose only child is a frame hook (no extent yet) is never c
   layer.uncull();
 });
 
+test('#1265: a thing drawn by its shader (a mesh with frustumCulled off) is never culled, on shadow and plain frames alike', async () => {
+  const { layer, put, frame } = await layerFor(true);
+  // the panorama's buffer: unit directions and heights near the origin, while the shader draws it round the camera
+  const pano = new THREE.Mesh(new THREE.BoxGeometry(2, 1800, 2)); pano.frustumCulled = false;
+  const ring = put('panorama', [0, 0, 0], 1, pano), plain = put('plain', [-170, 0, -40], 4);
+  frame();
+  assert.ok(ring.d().frozen, 'frozen'); assert.equal(ring.d().sphere, undefined, 'no box bounds what the shader draws');
+  const cam = new THREE.PerspectiveCamera(45, 1280 / 800, 0.1, 2400); cam.position.set(-170, 2.5, -96); cam.lookAt(-170, 0.6, -104);
+  const seen: boolean[] = [];
+  for (let i = 0; i < 6; i++) { layer.cull(cam, 800, i % 2 === 0); seen.push(ring.obj.visible); assert.equal(plain.obj.visible, i % 2 === 0, 'an ordinary thing behind the camera is still culled'); layer.uncull(); }
+  assert.deepEqual(seen, [true, true, true, true, true, true], 'drawn on every frame');
+});
+
 test('desktop (freezeSettled off): nothing freezes and cull is a no-op', async () => {
   const { layer, put, frame } = await layerFor(false);
   const behind = put('behind', [0, 0, 10]);

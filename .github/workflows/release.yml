@@ -142,6 +142,7 @@ jobs:
           RECEIPTS_ONLY: ${{ inputs.receipts_only }}
           FEED_ONLY: ${{ inputs.feed_only }}
           EYES_ONLY: ${{ inputs.eyes_only }}
+          RELEASE_FREEZE: ${{ vars.RELEASE_FREEZE }}
           PR_TOKEN: ${{ secrets.MERGE_TRAIN_TOKEN || github.token }}   # as publish.yml: CI runs on the stamp pull request
         run: |
           # receipts_only (#2262) and eyes_only touch no host and ship nothing, so a test cut on a branch may use them
@@ -158,6 +159,11 @@ jobs:
             echo "$([ "$FEED_ONLY" = true ] && echo "Feed item only for v$VERSION at ${SHA:0:12}" || echo "GPU-runner browser checks only, against the live build"): nothing ships" >> "$GITHUB_STEP_SUMMARY"; exit 0
           fi
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "::error::tag v$VERSION already exists"; exit 1; fi
+          # #1838: the release freeze pins the head the release owner gated; main must still be exactly that commit.
+          FROZEN=$(echo "$RELEASE_FREEZE" | awk '{print $1}')
+          if [ -n "$FROZEN" ] && [ "$RECEIPTS_ONLY" != true ] && [ "$(git rev-parse HEAD)" != "$(git rev-parse -q --verify "$FROZEN^{commit}" || echo "$FROZEN")" ]; then
+            echo "::error::release freeze: main's HEAD $(git rev-parse --short HEAD) is not the pinned $FROZEN (repo variable RELEASE_FREEZE). Something merged after the pin: gate the new head and pin it again, or revert it"; exit 1
+          fi
           [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "::error::accept_host_codes: comma-separated host codes, such as halted"; exit 1; }
           # ship.sh's label (its output folder and backup prefix pre-r<label without dots>) is the version itself
           LABEL="$VERSION"; [ "$DRY_RUN" = false ] || LABEL="$VERSION-rehearsal"

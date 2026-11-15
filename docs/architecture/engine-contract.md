@@ -153,7 +153,8 @@ handovers, social poses, shore and swim travel) and do not go through the guard 
 
 Under `wait-bound/1` (#1952), adopted at boot, a walk going nowhere off a stair flight ends `route.blocked` within a
 minute ([movement](../mars/movement.md)), and an action ended without its def (a stall release's `forceCancel`) leaves no
-walk exec behind. `wait-bound/2` (#1288), adopted after it, applies the same bound to swims and journeys through water.
+walk exec behind. `wait-bound/2` (#1288), adopted after it, applies the same bound to swims and journeys through water. `wait-bound/3`
+(#2155) applies it to a take or put's approach walk.
 
 ## Refusal
 

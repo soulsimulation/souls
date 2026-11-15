@@ -37,7 +37,7 @@ export function untagPlaces<T extends { op: string }>(tagged: T[], repairs: { op
   return tagged.map((o) => { const t = (o as { tmp?: string }).tmp; if (o.op !== 'place' || !t?.startsWith('$bs-') || used.has(t)) return o; const { tmp: _t, ...rest } = o as T & { tmp?: string }; return rest as T; });
 }
 
-class Grid {
+export class Grid {
   x0: number; z0: number; nx: number; nz: number; cnt: Uint16Array; out: Uint8Array | null = null;
   constructor(rect: [number, number, number, number]) {
     this.x0 = rect[0]; this.z0 = rect[1]; this.nx = Math.max(1, Math.ceil((rect[2] - rect[0]) / CELL)); this.nz = Math.max(1, Math.ceil((rect[3] - rect[1]) / CELL));
@@ -90,7 +90,7 @@ const gated = (def: StoredDef) => !!(def.params as Record<string, unknown> | und
 
 function groundAt(m: WorldModel, x: number, z: number) { try { return m.terrain.sample(x, z); } catch { return 0; } }
 /** The blocking boxes of one entity at ground level (solid/surface layer, reaching into the walking band). */
-function blocking(m: WorldModel, id: string, boxes?: OBB[]): OBB[] {
+export function blocking(m: WorldModel, id: string, boxes?: OBB[]): OBB[] {
   const e = m.entities.get(id); if (!e) return [];
   const def = m.resolvedDef(e.def); if (!def || (def.layer !== 'solid' && def.layer !== 'surface')) return [];
   return (boxes ?? (m.footprint(e, def) as OBB[])).filter((b) => { const g = groundAt(m, b.c[0], b.c[1]); return b.y0 < g + BAND[1] && b.y1 > g + BAND[0]; });
@@ -107,7 +107,7 @@ function rectOf(boxes: OBB[]): [number, number, number, number] {
 const inRect = (r: number[], x: number, z: number) => x >= r[0] && x <= r[2] && z >= r[1] && z <= r[3];
 /** `r` grown to hold every building (a thing with rooms) it touches, whole and 1 m round: a window edge through a
  *  building's floor would join its rooms to the surroundings and hide a blocked door. */
-function withRooms(ms: WorldModel[], r0: [number, number, number, number]): [number, number, number, number] {
+export function withRooms(ms: WorldModel[], r0: [number, number, number, number]): [number, number, number, number] {
   // one pass over what the window itself touches (no cascade: a street of buildings would grow it to the town)
   let r = r0;
   const win = { c: [(r0[0] + r0[2]) / 2, (r0[1] + r0[3]) / 2] as Vec2, half: [(r0[2] - r0[0]) / 2, (r0[3] - r0[1]) / 2], yaw: 0, y0: -1e4, y1: 1e4 };

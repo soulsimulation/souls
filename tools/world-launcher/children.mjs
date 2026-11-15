@@ -42,6 +42,9 @@ export function worldClass(world) {
 /** #2233 A1/A2: a running world's Pss is read at most this often; a still world is unloaded to make room only when its
  *  horizon is at least STILL_HORIZON_MS away; a world with no act and no visitor for QUIET_MS (o.idleMs) after those. */
 export const PSS_EVERY_MS = 30_000, STILL_HORIZON_MS = 60_000, QUIET_MS = 600_000;
+/** #2367 A2: how long a load refused for memory waits for room (a world turning still or quiet, a load finishing) before
+ *  it is refused; the still answers are read afresh every ROOM_LOOK_MS meanwhile (o.refreshStill). */
+export const ROOM_WAIT_MS = 20_000, ROOM_LOOK_MS = 5_000;
 /** #2233 A3: the one state a world is in (awake, still, unloaded, starting, failed), from its pool status and its last
  *  still answer. The old `status` stays beside it for readers that know only running and asleep. */
 export function worldState(st, still = null) {
@@ -86,6 +89,8 @@ export class ChildPool {
    * worldsMemMb (#2233 A1): the memory all worlds together may use. A world is admitted only while the running worlds'
    * Pss plus LOAD_MB for each world loading, and for itself, stays under it; maxRunning is then not a limit (the port
    * range still is). Room is made by unloadForRoom(); still(k) gives the world's last still answer ({ still, untilWallMs, at }).
+   * roomWaitMs (#2367 A2): a load with no room waits this long (ROOM_WAIT_MS) for one, calling refreshStill() (fresh still
+   * answers) every ROOM_LOOK_MS, before it is refused (code 'capacity'; the world stays unloaded, never 'failed').
    * afterRelease(slug) (#2304): asked by takeOver() once the previous process is gone; false leaves the world unloaded
    * (takeOver resolves UNLOADED; a caller that joined it then loads it through the queue as any other).
    */
@@ -211,8 +216,9 @@ export class ChildPool {
   /** This pool's canary failed (keeper.mjs hands back to the previous launcher): the world is never started here again
    *  and the pid file is the previous launcher's alone. */
   handBack(slug) { const k = this.kids.get(slug); if (k) k.handedBack = true; this.o.pidFile = null; }
-  /** The next launcher's canary failed (keeper.mjs): this pool runs its worlds again. */
-  unfence() { this.fenced = false; }
+  /** The next launcher's canary failed (keeper.mjs): this pool runs its worlds again. fence() cleared every timer: each held
+   *  world's rest is armed again (#2378), so a world held during the failed handover still ends its rest by itself. */
+  unfence() { this.fenced = false; for (const k of this.kids.values()) if (k.held?.until) this.armRest(k); }
   /** The running children, for the next launcher to adopt. */
   handoverList() { for (const k of this.kids.values()) this.thaw(k); return [...this.kids.values()].filter((k) => k.child && k.status === 'running').map((k) => ({ slug: k.slug, port: k.port, pid: k.child.pid, script: k.script, ...(k.healthPort ? { healthPort: k.healthPort } : {}), ...(k.readPorts?.length ? { readPorts: k.readPorts } : {}) })); }
 
@@ -393,8 +399,10 @@ export class ChildPool {
     if (k && !passive) k.lastUsed = Date.now();
     if (k?.frozen) this.thaw(k, { use: !passive });
     if (k && (k.status === 'running')) return Promise.resolve(k.port);
-    // held (lane L1 breaker): too many failures in a row; nothing restarts it but an operator's resume()
-    if (k?.held) { const e = new Error(`world ${world.slug} is resting after ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${k.held.reason}); an operator resumes it`); e.code = 'held'; return Promise.reject(e); }
+    // held (lane L1 breaker): too many failures in a row; it rests until held.until (#2378), then boots again: here too, so
+    // a rest whose timer was lost (a fence) never holds it for ever
+    if (k?.held?.until && k.held.until <= Date.now()) { this.log(`world ${k.slug} rested past its hold: resuming it`); this.resume(k.slug); }
+    if (k?.held) { const e = new Error(`world ${world.slug} is resting after ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${k.held.reason}); it boots again by itself${k.held.until ? ` in ${Math.max(0, Math.round((k.held.until - Date.now()) / 1000))} s` : ''}`); e.code = 'held'; return Promise.reject(e); }
     // #2304: a world waiting for a load slot moves up to the most urgent reason anyone has asked for it
     const rank = rankOf(reason);
     if (k?.ready) k.loadRank = Math.min(k.loadRank ?? rank, rank);
@@ -444,10 +452,17 @@ export class ChildPool {
   /** Make room for one more world under the memory figure (or the running cap) and the free-memory floor, unloading worlds if needed. */
   async makeRoom(slug) {
     const { maxRunning = Infinity, minFreeMb = 0, worldsMemMb = 0 } = this.o;
+    const t0 = Date.now(), waitMs = this.o.roomWaitMs ?? ROOM_WAIT_MS;
+    let looked = 0;
     for (;;) {
       const { full, room, needMb, ok } = this.roomFor(slug);
       if (ok) return;
       if (!(await this.unloadForRoom(slug))) {
+        // #2367 A2: nothing can go yet: wait briefly for a world to turn still or quiet (its still answer read afresh)
+        if (Date.now() - t0 < waitMs && !this.closing && !this.fenced) {
+          if (Date.now() - looked >= (this.o.roomLookMs ?? ROOM_LOOK_MS)) { looked = Date.now(); try { await this.o.refreshStill?.(); } catch { /* the next look */ } continue; }
+          await sleep(Math.min(500, Math.max(1, waitMs - (Date.now() - t0)))); continue;
+        }
         const e = new Error(full ? (worldsMemMb > 0 ? `the worlds' memory is full (${needMb} of ${worldsMemMb} MB with this world, and no world is still or quiet enough to unload); try again in a minute` : `all ${maxRunning} world slots are in use; try again in a minute`) : `the server is low on memory (under ${minFreeMb} MB free, or ${room ?? '?'} MB under the unit's limit); try again in a minute`);
         e.code = 'capacity'; this.capacityRefusedAt = Date.now(); throw e;
       }
@@ -497,7 +512,8 @@ export class ChildPool {
   }
   async spawnAndWait(k, timeoutMs) {
     k.status = 'starting'; this.o.onChange?.(k.slug);
-    try { await this.makeRoom(k.slug); } catch (e) { k.status = 'failed'; this.o.onChange?.(k.slug); throw e; }
+    // #2367 A2: a load refused for room is not the world's failure: it stays unloaded and loads when asked again
+    try { await this.makeRoom(k.slug); } catch (e) { k.status = e.code === 'capacity' ? 'stopped' : 'failed'; this.o.onChange?.(k.slug); throw e; }
     let port;
     try { port = await this.pickPort(k.port ?? k.world.port, k.slug); }
     catch (e) {
@@ -570,7 +586,9 @@ export class ChildPool {
 
   onExit(k, child, code, signal) {
     if (k.child !== child) return;
-    const wedged = k.wedging; k.wedging = null;
+    // #2366: the world's own watchdog ended it (stuck past its hard limit, or its heap at the limit): live.json says why
+    const killed = !k.wedging && signal === 'SIGKILL' && k.world?.dataDir ? readLive(join(k.world.dataDir, 'live.json'), child.pid)?.killed : null;
+    const wedged = k.wedging ?? (killed ? { reason: killed.reason === 'heap' ? `heap ${killed.usedMb} of ${killed.limitMb} MB (its watchdog ended it)` : `main thread stuck ${Math.round(killed.stuckMs / 1000)} s (its watchdog ended it)`, at: killed.at } : null); k.wedging = null;
     const halted = k.haltRestarting; k.haltRestarting = null;
     if (k.memSince) { (k.memSpans ??= []).push([k.memSince, Date.now()]); k.memSince = null; }   // #2233 A4
     k.child = null; k.frozen = false; k.lastExit = { code, signal, at: Date.now(), ...(wedged ? { reason: `wedged: ${wedged.reason}` } : halted ? { reason: 'halted' } : {}) }; this.savePids();
@@ -586,7 +604,7 @@ export class ChildPool {
    *  A refusal for capacity (no memory or slot) is retried the same way but is not the world's failure. */
   scheduleRestart(k, reason = 'exit') {
     const g = this.g, now = Date.now();
-    if (k.upSince && now - k.upSince > g.resetAfterMs) k.crashes = 0;
+    if (k.upSince && now - k.upSince > g.resetAfterMs) { k.crashes = 0; k.holds = 0; }
     k.upSince = null;
     if (reason === 'wedged') k.lastWedge = { at: now, reason: k.lastExit?.reason ?? 'wedged' };
     if (reason !== 'capacity' && reason !== 'planned' && this.noteFailure(k, reason)) return;
@@ -618,7 +636,23 @@ export class ChildPool {
     k.status = 'held'; k.nextTryAt = null; this.o.onChange?.(k.slug);
     const e = new Error(`world ${k.slug} is resting after ${k.held.failures} failures (last: ${reason})`); e.code = 'held';
     this.settlePending(k, e);
-    this.log(`world ${k.slug} held: ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${reason}); no more restarts until an operator resumes it`);
+    // #2378: a hold is a rest, never a terminal state: it ends by itself after holdRestMs (10 min), doubling for each hold
+    // in a row up to holdRestMaxMs (1 h), and the world boots again (no one is paged for it). resume() still ends it early.
+    const rest = Math.min(this.g.holdRestMaxMs ?? 3_600_000, (this.g.holdRestMs ?? 600_000) * 2 ** Math.min(6, k.holds ?? 0));
+    k.holds = (k.holds ?? 0) + 1; k.held.until = Date.now() + rest; k.held.restMs = rest;
+    this.armRest(k);
+    this.log(`world ${k.slug} held: ${k.held.failures} failures in ${Math.round(this.g.breakerWindowMs / 60_000)} min (last: ${reason}); it rests ${Math.round(rest / 1000)} s, then boots again`);
+  }
+  /** The timer that ends a held world's rest at held.until (now, if that has passed) and boots it again. */
+  armRest(k) {
+    if (k.timer) clearTimeout(k.timer);
+    k.timer = setTimeout(() => {
+      k.timer = null;
+      if (!k.held || this.closing || k.stopped || this.fenced || !k.world) return;
+      this.log(`world ${k.slug} rested ${Math.round((k.held.restMs ?? 0) / 1000)} s after its hold: resuming it`);
+      this.resume(k.slug); this.ensure(k.world).catch((e) => this.log(`world ${k.slug} did not come back after its rest: ${e.message}`));
+    }, Math.max(0, k.held.until - Date.now()));
+    k.timer.unref?.();
   }
   /** End a hold: the failure count starts again; the next request (or the caller's ensure) boots it. */
   resume(slug) {
