@@ -226,7 +226,9 @@ load, the meetup workload, the slopes tick profile) go to the `souls-timed` self
 `bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
 own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
 put the world on two of the runner's physical cores and the load generator on the rest (one on a three-core runner, two
-on a four-core one), the split recorded in `timed-run.json`. The runners use a dedicated, unprivileged account: the
+on a four-core one), the split recorded in `timed-run.json`. An `eval-load` artifact also carries each world's own log
+(`eval-load/n<souls>-r<repeat>/server/world.log`), and `eval-load.log` names a world that exited on its own (exit code,
+signal) and its resident memory every 30 s. The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
 
