@@ -14,6 +14,15 @@ import { dirname, join, resolve } from 'node:path';
 // (cacheCreationEphemeral1hInputTokens). Measured on #1098: these reproduce modelUsage.costUSD to within $0.000001 on all 31
 // result lines of its live runs. A turn whose reported cost differs is written to the ledger as `price-drift` (priceDriftOf).
 export const SONNET_USD_PER_MTOK = Object.freeze({ input: 2, uncachedInput: 4, cacheRead: 0.1, output: 10 });
+// #2381: Codex reports tokens and no dollars (it bills by subscription), so its turns are priced from their tokens at OpenAI's
+// published API rates for gpt-5.2-codex per million tokens: input $1.75, cached input $0.175, output $14. Its input count
+// includes the cached tokens. Reasoning tokens are priced as output beside the output count, so a turn can read high, not low.
+export const CODEX_USD_PER_MTOK = Object.freeze({ input: 1.75, cacheRead: 0.175, output: 14 });
+/** A turn's price from an adapter's token counts ({inputTokens, cachedTokens, outputTokens, reasoningTokens}). */
+export function tokensUsd(u = {}, price = CODEX_USD_PER_MTOK) {
+  const cached = u.cachedTokens ?? 0, fresh = Math.max(0, (u.inputTokens ?? 0) - cached);
+  return round((fresh * price.input + cached * price.cacheRead + ((u.outputTokens ?? 0) + (u.reasoningTokens ?? 0)) * price.output) / 1e6);
+}
 export const WORLD_BUDGET_DEFAULTS = Object.freeze({ capUsd: 0.90, turnCapUsd: 0.20, maxContextTokens: 60_000, maxOutputTokens: 4_096, maxObservationTokens: 8_000, minTurnCapUsd: 0.05 });
 const DAY_MS = 24 * 3600 * 1000;
 const ledgers = new Map();
