@@ -118,7 +118,8 @@ async function soulLoop({ folder, until, r, counts, acts = [] }) {
 
 export async function runLoad(o) {
   const sizes = String(o.souls ?? '12,24').split(',').map(Number).filter((n) => n > 0);
-  const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), actSec = o['act-sec'] != null ? Number(o['act-sec']) : null, port = Number(o.port ?? 18780);
+  const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), actSec = Number(o['act-sec'] ?? 10),   // the paced ref: one act per 10 s per Soul by default
+    port = Number(o.port ?? 18780);
   const serverRoot = resolve(o['server-root'] ?? REPO);
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
