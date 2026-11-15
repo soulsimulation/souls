@@ -1,6 +1,7 @@
 # The full Modal release gate as a dispatchable workflow, separate from shipping (#519, #1133 itinerary §2b).
 #   gate   tools/test-harness/release-gate.sh <sha> --baseline <ref> [--scope full|auto] [--dry-run]
-#          against the newest v* tag by default; uploads gate.log and receipt.json as the `gate-<sha12>` artifact
+#          against the newest v* tag by default; uploads gate.log, the JSON receipts and each driver log's last lines
+#          (Modal URLs removed) as the `gate-<sha>` artifact. The pinned campus inputs come from the asset CDN (#1303).
 #
 # Why: the laptop path is denied for agents (.claude/settings.json denies release-gate.sh, modal and ssh), so every
 # gate has needed Gene's terminal. This runs it where MODAL_TOKEN_ID/SECRET already live (repo secrets). It ships
@@ -97,6 +98,31 @@ jobs:
           restore-keys: |
             gate-cache-${{ steps.refs.outputs.baseline }}-node${{ steps.refs.outputs.node }}-
             gate-cache-
+      - name: Campus inputs
+        # remote-suite.sh stages the two pinned inputs of the full campus re-extraction (tools/test-harness/campus-assets.json)
+        # from CAMPUS_ASSETS_SRC (#1303). Media is not in the repository: fetch each from the public asset CDN at the key
+        # that carries its sha256 (tools/assets/manifest.json, or the world-scoped key in apps/web/src/cdn-manifest.json)
+        # and check bytes and sha256 before the gate. No credentials. A dry run never stages them.
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          dir="$RUNNER_TEMP/campus"; mkdir -p "$dir"
+          node --input-type=module - "$dir" <<'JS'
+          import { createHash } from 'node:crypto'; import { existsSync, readFileSync, writeFileSync } from 'node:fs'; import { join } from 'node:path';
+          const dir = process.argv[2], pins = JSON.parse(readFileSync('tools/test-harness/campus-assets.json', 'utf8')).files, urls = [];
+          if (existsSync('tools/assets/manifest.json')) urls.push(...JSON.parse(readFileSync('tools/assets/manifest.json', 'utf8')).files.map(f => f.url).filter(Boolean));
+          if (existsSync('apps/web/src/cdn-manifest.json')) urls.push(...(readFileSync('apps/web/src/cdn-manifest.json', 'utf8').match(/assets\/[a-z0-9/_-]+\.[a-z0-9]+/g) ?? []).map(k => `https://assets.eden.art/${k}`));
+          for (const [name, pin] of Object.entries(pins)) {
+            const url = urls.find(u => u.includes(pin.sha256));
+            if (!url) throw Error(`${name}: no CDN key carries sha256 ${pin.sha256}`);
+            const res = await fetch(url, { redirect: 'error' });   // fetch decodes a stored br body
+            if (!res.ok) throw Error(`${name}: ${res.status} from ${url}`);
+            const bytes = Buffer.from(await res.arrayBuffer()), sha = createHash('sha256').update(bytes).digest('hex');
+            if (bytes.length !== pin.bytes || sha !== pin.sha256) throw Error(`${name}: ${bytes.length} bytes, sha256 ${sha}; pinned ${pin.bytes}, ${pin.sha256}`);
+            writeFileSync(join(dir, name), bytes);
+            console.log(`${name}: ${bytes.length} bytes, sha256 ${sha} (${url})`);
+          }
+          JS
+          echo "CAMPUS_ASSETS_SRC=$dir" >> "$GITHUB_ENV"
       - name: Modal client
         if: ${{ inputs.dry_run != true }}
         env:
@@ -104,7 +130,8 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           MODAL_CLIENT_VERSION: ${{ vars.MODAL_CLIENT_VERSION }}
         run: |
-          python3 -m pip install --quiet "modal${MODAL_CLIENT_VERSION:+==$MODAL_CLIENT_VERSION}"
+          # The client the laptop gates use (#1303); the MODAL_CLIENT_VERSION repository variable overrides it.
+          python3 -m pip install --quiet "modal==${MODAL_CLIENT_VERSION:-1.5.2}"
           profile=$(grep -oE "MODAL_PROFILE: '[^']+'" tools/test-harness/release-gate.mjs | head -1 | cut -d"'" -f2)
           modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET" --profile "${profile:-default}" --activate --no-verify
       - name: Release gate
@@ -129,6 +156,14 @@ jobs:
           kill $beat
           grep -E '^RELEASE_GATE ' "$RUNNER_TEMP/gate.log" | tail -1 >> "$GITHUB_STEP_SUMMARY" || true
           exit $status
+      - name: Driver log tails
+        # The last lines of each remote run's driver log, so a driver error is not lost (#1303); Modal URLs removed.
+        if: always()
+        run: |
+          [ -d "$RUNNER_TEMP/gate" ] || exit 0
+          find "$RUNNER_TEMP/gate" -name gate-driver.log | while read -r f; do
+            tail -n 200 "$f" | sed -E 's#https?://[^[:space:]]*modal\.(com|run)[^[:space:]]*#<modal-url>#g' > "${f%.log}.tail.txt"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -136,4 +171,5 @@ jobs:
           path: |
             ${{ runner.temp }}/gate.log
             ${{ runner.temp }}/gate/**/*.json
+            ${{ runner.temp }}/gate/**/gate-driver.tail.txt
           if-no-files-found: ignore
