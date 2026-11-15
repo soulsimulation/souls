@@ -7,7 +7,7 @@
 // continuous (the origin is moved so the phase is unchanged). Edge minds: the brain runs nothing on a clock.
 import type { WorldHost } from '../world.ts';
 import type { GodMode } from './god.ts';
-import { config } from '../config.ts';
+import { worldConfig } from '../config.ts';
 import { defaultTimeZone, installRealClock, isTimeZone, productionWorld, realTimeEnabled } from './real-clock.ts';
 import { cutOverReminders, cutOverStamps, stampShift, type CutOver } from './clock-cutover.ts';
 
@@ -57,15 +57,15 @@ type TimeState = { dayTicks?: number; paused?: boolean; set?: { hour: number; n:
 
 export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string) => void = () => {}, o: WorldClockOptions = {}) {
   const time = () => god.model.state.time as TimeState;
-  const realTime = o.realTime ?? realTimeEnabled(), slug = o.slug ?? config.worldSlug ?? config.worldKey;
-  if (realTime) migrateWorldTime(god, slug, log);
+  const cfg = worldConfig(host), realTime = o.realTime ?? realTimeEnabled(cfg.env), slug = o.slug ?? cfg.worldSlug ?? cfg.worldKey;
+  if (realTime) migrateWorldTime(god, slug, log, cfg.env);
   else if (time()?.clock === 'real') {
     // real time turned off again (a rollback): the world goes back to the accelerated clock it runs, so nothing that reads
     // `time.clock` (weather durations, the viewer's sun) disagrees with the clock
     const r = god.engineAct([{ op: 'world', state: { time: { clock: null } } }] as never, 'world clock: real time is off (#1649 rollback)');
     log(r.accepted ? 'world clock: back on the accelerated clock (real time off)' : `world clock: rollback refused: ${JSON.stringify(r.failures ?? [])}`);
   }
-  const real = realTime ? installRealClock(host, { zone: () => worldTimeZone(god, slug), paused: () => time()?.paused === true,
+  const real = realTime ? installRealClock(host, { zone: () => worldTimeZone(god, slug, cfg.env), paused: () => time()?.paused === true,
     active: () => time()?.clock !== 'accelerated', now: o.now, checkMs: o.checkMs, log, onCutOver: (c) => cutOverWorld(host, god, c, log) }) : null;
   const want = () => {
     const t = time();
@@ -93,19 +93,19 @@ export function installWorldClock(host: WorldHost, god: GodMode, log: (m: string
 }
 
 /** The world's time zone: its own (`time.timeZone`), else its migration default. */
-export function worldTimeZone(god: GodMode, slug?: string): string {
+export function worldTimeZone(god: GodMode, slug: string, env?: Record<string, string | undefined>): string {
   const z = (god.model.state.time as TimeState)?.timeZone;
-  return isTimeZone(z) ? z : defaultTimeZone(slug ?? config.worldSlug ?? config.worldKey);
+  return isTimeZone(z) ? z : defaultTimeZone(slug, env);
 }
 
 /** #1649 migration: a world on real time for the first time is given its zone (by slug) and the real clock, as one
  *  engine edit (recorded, not the god's to undo); a later boot finds both and writes nothing. A dev world the god put
  *  on the accelerated clock keeps it. */
-export function migrateWorldTime(god: GodMode, slug: string | undefined, log: (m: string) => void = () => {}) {
+export function migrateWorldTime(god: GodMode, slug: string | undefined, log: (m: string) => void = () => {}, env?: Record<string, string | undefined>) {
   const t = god.model.state.time as TimeState, patch: Record<string, unknown> = {};
-  if (!isTimeZone(t?.timeZone)) patch.timeZone = defaultTimeZone(slug);
-  if (t?.clock !== 'real' && (t?.clock !== 'accelerated' || productionWorld())) patch.clock = 'real';
-  if (productionWorld() && (t?.set != null)) patch.set = null;
+  if (!isTimeZone(t?.timeZone)) patch.timeZone = defaultTimeZone(slug, env);
+  if (t?.clock !== 'real' && (t?.clock !== 'accelerated' || productionWorld(env))) patch.clock = 'real';
+  if (productionWorld(env) && (t?.set != null)) patch.set = null;
   if (!Object.keys(patch).length) return;
   const what = Object.entries(patch).map(([k, v]) => `${k} ${v}`).join(', ');
   const r = god.engineAct([{ op: 'world', state: { time: patch } }] as never, `world clock: ${what} (real-time migration, #1649)`);

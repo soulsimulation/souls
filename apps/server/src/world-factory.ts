@@ -1,12 +1,12 @@
 // The engine factory a world process reads its history with, chosen from its config and environment. One place, so the
 // server (main.ts) and the boot rehearsal (tools/world-launcher/deploy/boot-rehearsal.mjs) read a world the same way.
 import type {EngineFactory} from '@souls/engine-contract';
-import {KNOWN_WORLD_KEYS, type config as Config} from './config.ts';
+import {KNOWN_WORLD_KEYS, type Config} from './config.ts';
 import {edenCoreRequested, edenHistoryFactory} from './eden-bootstrap.ts';
 import {recordedToyFactory} from './toy-takes.ts';
 import type {Db} from './db.ts';
 
-type Cfg = typeof Config;
+type Cfg = Config;
 /** #1323: every Mars world reads its history with and without the repair rules; `SIM_SOULS_REPAIR=0` adopts nothing. */
 export async function repairReader(cfg: Cfg, inner: EngineFactory, env: NodeJS.ProcessEnv = process.env): Promise<EngineFactory> {
   if (cfg.engine !== 'mars') return inner;
@@ -17,8 +17,8 @@ export async function repairReader(cfg: Cfg, inner: EngineFactory, env: NodeJS.P
 export async function plainWorldFactory(cfg: Cfg, env: NodeJS.ProcessEnv = process.env): Promise<EngineFactory> {
   const mars = cfg.engine === 'mars' ? await import('@souls/engine-mars') : null;
   const accountLifecycle = cfg.worldEngine && !edenCoreRequested(cfg, env) && env.SOUL_LIFECYCLE === '1';
-  const f = mars ? await repairReader(cfg, await mars.marsFactory(cfg.worldKey === 'littlemartians' ? mars.LITTLE_MARTIANS_WORLD : cfg.worldKey === 'eden' || !KNOWN_WORLD_KEYS.includes(cfg.worldKey as never) ? (accountLifecycle ? {...mars.GREEN_FIELD_WORLD, safeCrewRemoval: true} : mars.GREEN_FIELD_WORLD) : undefined), env) : recordedToyFactory;
-  return f === recordedToyFactory ? f : describedFactoryV1(f, {kind: 'plain', cfg: {engine: cfg.engine, worldKey: cfg.worldKey, worldEngine: cfg.worldEngine}, env: {ENABLE_EDEN_CORE: env.ENABLE_EDEN_CORE, SOUL_LIFECYCLE: env.SOUL_LIFECYCLE, SIM_SOULS_REPAIR: env.SIM_SOULS_REPAIR}});
+  const f = mars ? await repairReader(cfg, await mars.marsFactory(cfg.worldKey === 'littlemartians' ? mars.LITTLE_MARTIANS_WORLD : cfg.worldKey === 'eden' || !KNOWN_WORLD_KEYS.includes(cfg.worldKey as never) ? (accountLifecycle ? {...mars.GREEN_FIELD_WORLD, safeCrewRemoval: true} : mars.GREEN_FIELD_WORLD) : undefined, env), env) : recordedToyFactory;
+  return f === recordedToyFactory ? f : describedFactoryV1(f, {kind: 'plain', cfg: {engine: cfg.engine, worldKey: cfg.worldKey, worldEngine: cfg.worldEngine}, env: {ENABLE_EDEN_CORE: env.ENABLE_EDEN_CORE, SOUL_LIFECYCLE: env.SOUL_LIFECYCLE, SIM_SOULS_REPAIR: env.SIM_SOULS_REPAIR, SIM_SHARED_CARRY: env.SIM_SHARED_CARRY}});
 }
 /** #2140: plain data another thread rebuilds the same factory from (god/edit-preview-worker.ts). `plain`: this file's
  *  plainWorldFactory with the config and environment it read; `mars`: marsFactory(world) as is. Eden core is not
