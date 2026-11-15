@@ -23,6 +23,7 @@ const places = (tpl: { batches: { ops: PlaceOp[] }[] }) => tpl.batches.flatMap((
 async function before(t: { after: (f: () => void) => void }, fitted: { batches: { ops: PlaceOp[] }[] }) {
   const before = structuredClone(fitted) as { batches: { ops: PlaceOp[] }[] };
   for (const b of before.batches) b.ops = b.ops.filter((o) => !(o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? ''))).map((o) => back.has(o.def) ? { ...o, def: back.get(o.def)! } : o);
+  before.batches = before.batches.filter((b) => b.ops.length);   // the doors' own batch (tools/worlds/fit-doors-v1.mjs)
   const file = join(mkdtempSync(join(tmpdir(), 'door-fit-')), 'before.json'); writeFileSync(file, JSON.stringify(before));
   const w = await bootEden(() => {}, pathToFileURL(file)); t.after(w.close);
   return { w, old: places(before).filter((o) => DOOR_FIT_FROM.has(o.def)) };

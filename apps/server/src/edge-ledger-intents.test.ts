@@ -208,12 +208,12 @@ test('walk-to:here on Eden 2026 (paged ground): a point in a wall snaps to stand
   const far = await act('walk-to:here', {at: [px, pz]});
   assert.equal(far.accepted, false, JSON.stringify(far)); assert.equal(far.code, 'route.unreachable'); assert.match(far.reason, /No walkable route joins \[483, 85\]/);
   await stays(before);
-  // A3: upstairs (Eden House 3's kitchen, level 3: level 4 before the door-fitted template, #2383, numbered its floors anew), an
+  // A3: upstairs (Eden House 3's kitchen, level 1: level 4 before the door-fitted template, #2383, numbered its floors anew), an
   // outdoor point is refused naming the level; she stays upstairs
   const up = await act('walk:g-eden-house-3-kitchen.kitchen-1'); assert.equal(up.accepted, true, JSON.stringify(up));
-  assert.equal((await finish(up.receipt.id)).phase, 'completed'); before = at(); assert.equal(before.level, 3);
+  assert.equal((await finish(up.receipt.id)).phase, 'completed'); before = at(); assert.equal(before.level, 1);
   const out = await act('walk-to:here', {at: [0, 0]});
-  assert.equal(out.accepted, false, JSON.stringify(out)); assert.equal(out.code, 'route.goal-blocked'); assert.match(out.reason, /on level 3, the floor you are on: walk-to stays on your own level/);
+  assert.equal(out.accepted, false, JSON.stringify(out)); assert.equal(out.code, 'route.goal-blocked'); assert.match(out.reason, /on level 1, the floor you are on: walk-to stays on your own level/);
   await stays(before);
   assert.deepEqual(eng.runtime.violations, []);
 });

@@ -644,7 +644,9 @@ is refused `route.unreachable` naming the door.
 
 Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
 revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
-enclosed room. Templates carry them, so new worlds have them. A live world keeps its drawn doorways: live-world door migration
+enclosed room. Templates carry them, so new worlds have them: `tools/worlds/fit-doors-v1.mjs` runs the live rule on each
+template and writes the doors in one batch after everything else, each at its building's settled height. A door stands at
+that height and never cuts a foundation pad into the slope (it would re-settle its building away from it). A live world keeps its drawn doorways: live-world door migration
 (`door-fit/1`, the last boot rule) is off until a fit can run in slices under 1 s, and runs only with `DOOR_FIT_BOOT=1`.
 With it on, a world gets them once at boot, one building at a time, each
 its own recorded edit, with the world serving between them; a restart part way through goes on where it stopped. Inside doors,
