@@ -80,12 +80,16 @@ export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>
   tickSpentMs?: () => number;
   /** #2440: the share of the recent loop time the thread sat idle, 0..1 (default: event-loop utilization over the last
    *  ~250-500 ms; with an injected clock, 0: a test's fake time has no real loop to measure). */
-  idleShare?: () => number};
+  idleShare?: () => number;
+  /** #2440: the tick service over the last 5 s, 0..1 (default: the monitor's, S.service5s; with an injected clock, 1). */
+  tickService?: () => number};
 /** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
  *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
  *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
- *  black never runs requests. The reserve keeps a fifth of the thread for the tick's own peaks. */
-export const SPARE_IDLE = 0.2, IDLE_WINDOW_MS = 250;
+ *  black never runs requests. The reserve keeps a fifth of the thread for the tick's own peaks, and spare time needs the
+ *  ticks served (5 s tick service >= SPARE_SERVICE, amber's own leave band): a burst that idles the loop between long
+ *  jobs yet lets ticks fall behind is held to the budgets (the harsh eval-load arm: service 0.66-0.76 for ~30 s without it). */
+export const SPARE_IDLE = 0.2, SPARE_SERVICE = 0.9, IDLE_WINDOW_MS = 250;
 /** The loop's idle share over the last IDLE_WINDOW_MS or more (event-loop utilization), refreshed when asked. */
 export function loopIdle(): () => number {
   let prev = perf.eventLoopUtilization(), at = perf.now(), idle = 0;
@@ -117,10 +121,13 @@ export class Admission {
   private quietTick: () => number;
   private tickSpent: () => number;
   private idleShare: () => number;
+  private tickService: () => number;
   constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
-    this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle()); }
-  /** #2440: the thread has spare time (SPARE_IDLE) and the world is not black: queued requests are not held for budget. */
-  spare() { return this.level !== 'black' && this.idleShare() >= SPARE_IDLE; }
+    this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
+    this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1);   // 1 until the monitor's first sample }
+  /** #2440: the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE) and the world is not black:
+   *  queued requests are not held for budget. */
+  spare() { return this.level !== 'black' && this.tickService() >= SPARE_SERVICE && this.idleShare() >= SPARE_IDLE; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 

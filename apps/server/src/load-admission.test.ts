@@ -323,9 +323,9 @@ test('strikes only for impolite requests: a Soul that honours every Retry-After 
   }
 });
 
-test('#2440 spare time: with the thread idle, a crowd of acts runs past the frame credit and the buckets; busy, the budget binds; black never', async () => {
-  const run = async (level: Level, idle: number) => {
-    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => idle});
+test('#2440 spare time: with the thread idle, a crowd of acts runs past the frame credit and the buckets; busy or ticks behind, the budget binds; black never', async () => {
+  const run = async (level: Level, idle: number, service = 1) => {
+    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => idle, tickService: () => service});
     adm.setLoadLevel(level);
     // 50 Souls, one 60 ms act each, all at once: 3 s of work against amber's 16 ms/frame (~1 s of it in 3 s)
     for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
@@ -336,6 +336,7 @@ test('#2440 spare time: with the thread idle, a crowd of acts runs past the fram
   assert.equal(await run('red', 0.4), 50, 'red with an idle thread (a single long hold) still serves');
   assert.ok(await run('amber', 0.1) < 10, 'idle 10 %: the frame budget binds as before');
   assert.equal(await run('black', 0.9), 0, 'black never runs requests on spare time');
+  assert.ok(await run('amber', 0.4, 0.8) < 10, 'idle, but the ticks fall behind (service 0.8): the frame budget binds');
 });
 
 test('#2440 an act is charged its own time, not the tick that ran while it was timed; spare time leaves no debt', async () => {
