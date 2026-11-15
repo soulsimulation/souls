@@ -141,6 +141,15 @@ export function decorateCommand({ cmd, args, env }, s) {
   return { cmd, args, env: out };
 }
 
+/** #2444: SIM_SHARDS, the worlds one shard program holds (tools/world-launcher/shard.mjs). Unset, empty or 0: off, every
+ *  world in its own process as before; 2 to 8: on (docs/design/world-cost.md: a shard holds quiet worlds, at most 8). */
+export function shardSize(v) {
+  if (v === undefined || v === null || v === '' || v === '0' || v === 0) return 0;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 2 || n > 8) throw new Error(`SIM_SHARDS must be 0 (off) or 2 to 8 worlds per shard, got ${v}`);
+  return n;
+}
+
 /** Keep one previous child log (`<slug>.log.1`) once the current one passes maxBytes. */
 export function rotateLog(file, maxBytes = 20 * 2 ** 20) {
   try { if (statSync(file).size > maxBytes) renameSync(file, `${file}.1`); } catch { /* no log yet */ }

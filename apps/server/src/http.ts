@@ -155,7 +155,7 @@ export function buildApp(d: Deps) {
   d.host.profileWorldPath=d.cfg.worldPath;
   const profiles=new SoulProfiles(d.host,d.souls);
   // resident looks v2: automatic portraits for humanoid looks (SIM_AUTO_PORTRAITS=0 turns them off)
-  const portraits=new AutoPortraits(d.host);profiles.autoBytes=(id,hash)=>portraits.bytes(id,hash);
+  const portraits=new AutoPortraits(d.host);profiles.autoBytes=(id,hash)=>portraits.bytes(id,hash);(app as unknown as {portraits?: AutoPortraits}).portraits=portraits;   // #2444: disposed when the world stops
   const bearer = (c: Context) => c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
   // P2 runaway-agent protection: overall buckets per god token and per visitor address, before anything else answers
   // (SIM_FLOOD=0 turns it off for a local experiment)
