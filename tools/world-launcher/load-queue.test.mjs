@@ -82,12 +82,13 @@ test('A6/A4/A3: a crawler fetching 50 world pages loads none; a visitor gets the
 });
 
 test('A2: an act to a world fourth in the queue is held and served; past the hold it gets world.waking, which the client retries', { timeout: 60_000 }, async () => {
-  const { L, base } = await launcher(4, { bootMs: 500, loadParallel: 1, loadHoldMs: 6000 });
+  // Each load is a node start plus the 500 ms boot: about 1–1.4 s each on a loaded machine, so four in a row passed a 6 s
+  // hold. The hold is not what this half tests (the second half does, with a short one), so it is far above four loads.
+  const { L, base } = await launcher(4, { bootMs: 500, loadParallel: 1, loadHoldMs: 30_000 });
   try {
     const acts = [];
     for (const s of slugs(4)) { acts.push(act(base, s)); await wait(30); }
-    await wait(50);
-    assert.equal(L.pool.status('w04').status, 'waiting', 'w04 is fourth: one loading, two ahead of it');
+    await until(() => L.pool.status('w04').status === 'waiting', 1000, 'w04 is fourth: one loading, two ahead of it');
     const out = await Promise.all(acts);
     for (const r of out) assert.equal(r.status, 200, JSON.stringify(r));
     assert.ok(out[3].ms >= 1400, `the fourth waited for three loads (${out[3].ms} ms)`);
