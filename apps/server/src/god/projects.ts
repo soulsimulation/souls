@@ -249,11 +249,10 @@ export class Projects {
   view(id: string, soul: EdgeSoul) {
     const row = this.rows.get(id); if (!row || !this.knows(row, soul)) return null;
     const {procedure, blueprint} = this.of(row), g = this.progress(row), ready = g.maneuvers.filter(m => m.state === 'ready'), tick = this.p.world().tick;
-    const held = g.maneuvers.filter(m => m.state === 'running').flatMap(m => {const b = row.bound[m.part] ? this.p.edge.together.blockedOn(row.bound[m.part]!) : null; return b ? [{maneuver: m.key, ...b}] : [];}).slice(0, READY_LISTED);
     const missing = [...g.problems, ...g.maneuvers.filter(m => m.state === 'waiting' && m.section === g.section).map(m => `${m.key} waits for ${(m.waitsFor ?? []).join(', ')}`)];
     return {id, kind: 'project', name: `${procedure.label} at ${row.site.name}`,
       state: {blueprint: `${blueprint.id}@${blueprint.revision}`, procedure: row.procedure, revision: row.revision, ...(row.changed ? {changed: row.changed} : {}), organizer: row.organizer.name,
-        section: g.section, checkpoint: g.checkpoint, maneuvers: {done: g.done, total: g.total, running: g.maneuvers.filter(m => m.state === 'running').map(m => m.key).slice(0, READY_LISTED), ...(held.length ? {held} : {})}, parts: g.parts, joints: g.joints,
+        section: g.section, checkpoint: g.checkpoint, maneuvers: {done: g.done, total: g.total, running: g.maneuvers.filter(m => m.state === 'running').map(m => m.key).slice(0, READY_LISTED)}, parts: g.parts, joints: g.joints,
         floor: g.floor, stairs: g.stairs, nobodyHolds: g.nobodyHolds, complete: g.complete, ready: this.readyOffers(row, ready.slice(0, READY_LISTED)), ...(ready.length > READY_LISTED ? {moreReady: ready.length - READY_LISTED} : {}),
         missing: missing.slice(0, MISSING_LISTED), ...(missing.length > MISSING_LISTED ? {moreMissing: missing.length - MISSING_LISTED} : {})},
       members: Object.entries(row.consents).map(([soulId, c]) => ({soulId, name: c.name, role: `volunteer: ${c.section}, ${c.left} left, ${Math.max(0, Math.round((c.expiresTick - tick) / 20))} s`, slot: null, accepted: true}))};

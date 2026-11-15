@@ -14,7 +14,7 @@ const pollSchema=z.object({approvalId:z.string().regex(/^ap_[a-f0-9]{32}$/),poll
 const secret=z.string().regex(/^[A-Za-z0-9_-]{43}$/),key=z.string().min(16).max(256);
 const loginSchema=z.object({agentLabel:z.string().min(1).max(120),device:z.object({id:z.string().regex(/^dev_[a-f0-9]{32}$/),name:z.string().min(1).max(60)}).strict(),idempotencyKey:key,pollSecret:secret,for:z.string().max(16).optional()}).strict();
 const requestPollSchema=z.object({requestId:z.string().regex(/^aq_[a-f0-9]{32}$/),pollSecret:secret}).strict();
-const grantPairSchema=z.object({agentLabel:z.string().min(1).max(120),idempotencyKey:key,pollSecret:secret,move:z.literal(true).optional()}).strict();
+const grantPairSchema=z.object({agentLabel:z.string().min(1).max(120),idempotencyKey:key,pollSecret:secret}).strict();
 const grantRetireSchema=z.object({idempotencyKey:key,pollSecret:secret}).strict();
 const foldName=(name:string)=>name.trim().normalize('NFC').toLowerCase();
 export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Auth;baseOf:(c:Context)=>string;limit:(c:Context,key:string,max:number,ms:number)=>void;control?:(soulId:string)=>{held:boolean;state:string;since:number|null}|null;agentOf?:(soulId:string)=>{label:string|null;since:number|null}|null;refreshMe?:(ownerId:string)=>void}){
@@ -69,13 +69,7 @@ export function mountAccountRoutes(app:Hono,deps:{accounts:WorldAccounts;auth:Au
   const souls=accounts.rows(grant.accountId).map(s=>({id:s.id,name:s.name,control:deps.control?.(s.id)??{held:false,state:'disconnected',since:null},agent:deps.agentOf?.(s.id)??null}));
   return {account:{id:grant.accountId},grant:{id:grant.id,agentLabel:grant.agentLabel,device:grant.device,createdAt:grant.createdAt},world:world(c),souls,maxSouls:accounts.souls.cfg.maxSoulsPerUser};}));
  app.post('/v1/agent/account/logout',c=>wrap(c,async()=>{accounts.logins.logout(grantOf(c).id);return {ok:true};}));
- app.post('/v1/agent/account/souls/:id/pair',c=>wrap(c,async()=>{const grant=grantOf(c);deps.limit(c,'account-grant-pair',10,60000);const {move,...p}=parse(grantPairSchema,await json(c)),soulId=c.req.param('id');
-  // #2401 (D1, decided 14 Nov): with no agent connected another device takes the Soul freely; while one is connected the
-  // take is refused and names its device, and only move (eden.mjs: --move) forces it. A retry stays the request it was.
-  // Only for the account's own Soul: anyone else gets pairByGrant's 403 or 404 and learns nothing of who holds it.
-  const row=accounts.host.db.soul(soulId);
-  if(!move&&row&&accounts.owns(grant.accountId,row)&&!accounts.store.retryOf(p.idempotencyKey)&&deps.control?.(soulId)?.state==='connected'){const label=deps.agentOf?.(soulId)?.label?.trim()||'another device';throw new ApiError(409,'soul.held-elsewhere',`This Soul's agent is connected now from ${label}. Run there, or ask again with move (eden.mjs: --move), which disconnects it.`,{heldBy:label});}
-  return {approval:shown(await accounts.pairByGrant(grant,soulId,p)),world:world(c),delivery:'account',intervalSeconds:3};}));
+ app.post('/v1/agent/account/souls/:id/pair',c=>wrap(c,async()=>{const grant=grantOf(c);deps.limit(c,'account-grant-pair',10,60000);const p=parse(grantPairSchema,await json(c));return {approval:shown(await accounts.pairByGrant(grant,c.req.param('id'),p)),world:world(c),delivery:'account',intervalSeconds:3};}));
  app.post('/v1/agent/account/souls/:id/revoke',c=>wrap(c,async()=>{const grant=grantOf(c);return {ok:true,soulId:accounts.revokeByGrant(grant,c.req.param('id'))};}));
  app.post('/v1/agent/account/souls/:id/retire',c=>wrap(c,async()=>{const grant=grantOf(c);deps.limit(c,'account-grant-retire',6,60000);const p=parse(grantRetireSchema,await json(c));return requestReply(c,accounts.startRetire(grant,c.req.param('id'),p));}));
  app.get('/v1/account/requests/:id',c=>wrap(c,async()=>{const {identity}=await verified(c);return {request:accounts.logins.view(c.req.param('id'),identity.id),world:world(c)};}));

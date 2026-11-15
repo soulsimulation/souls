@@ -150,9 +150,10 @@ export class Admission {
     this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1);
     this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => sharedLoad[S.heapLimitMb] > 0 ? sharedLoad[S.heapUsedMb] / sharedLoad[S.heapLimitMb] : 0);
     this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : ticksOnTimeNow); }
-  /** #2440: the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE), the heap is below red's
-   *  (SPARE_HEAP) and the world is not black: queued requests are not held for budget. */
-  spare() { return this.level !== 'black' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.ticksOnTime() && this.idleShare() >= SPARE_IDLE; }
+  /** #2440: the world is green, the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE over 5 s, on
+   *  time now) and the heap is below red's (SPARE_HEAP): queued requests are not held for budget. Never at amber, red or
+   *  black: with spare time at amber and red, 100 Souls on a 2-core world served 4-15 % fewer ticks than without. */
+  spare() { return this.level === 'green' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.ticksOnTime() && this.idleShare() >= SPARE_IDLE; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 

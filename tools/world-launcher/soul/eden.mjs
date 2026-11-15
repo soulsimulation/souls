@@ -4576,30 +4576,19 @@ function accountOk(r, what, a, id) {
   return ok(r, what);
 }
 /** #2246 (account-grant/1): with a login, one of the account's Souls comes here with no code and no click. The world answers
- *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. #2401 (D1): with no agent
- *  connected it comes freely; while one is connected the world refuses and names that device, and `--move` forces it. */
+ *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. The last device to ask wins. */
 async function accountPair(id, a) {
   const s = load(), was = s.pendingApproval;
   const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
     : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const { soulId, ...body } = pending.input;
-  let named = HOME?.config().souls[id]?.name;
   if (pending !== was) {   // #2257 A6: who holds it now, so the answer can say where it was taken from
     const r = await call("/v1/agent/account", { as: "account" }), it = r.status === 200 ? (r.data?.souls ?? []).find((x) => x.id === id) : null;
     if (it?.control?.held) pending.from = holderLabel(it);
-    named ??= it?.name;
   }
-  const r = await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body: MOVE ? { ...body, move: true } : body });
-  if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") throw connectedElsewhere(soulHome.plainName(named) || id, r.data);
-  const d = accountOk(r, "pair", a, id);
+  const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
-}
-/** #2401, #2050: the world refused a take while the Soul's agent is connected: name the device and the `--move` command. */
-function connectedElsewhere(who, data) {
-  const from = String(data?.heldBy ?? "").trim().slice(0, 80) || "another device";
-  const again = [CLI, ...process.argv.slice(2).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)), "--move"].join(" ");
-  return new Error(`soul.held-elsewhere: ${who}'s agent is connected now from ${from}. Run there, or add --move to take control here, which disconnects it. Next: ${again}`);
 }
 /** #2246: one of the account's Souls in this world by name, folded as the world folds names. Two with one name is the person's to choose. */
 async function accountSoulNamed(who, a, what) {
@@ -4615,7 +4604,7 @@ const pairLabel = () => (HOME ? `eden ${VERSION} on ${HOME.device().name}` : "ed
 /** #2257 A6: the device an agent holds a Soul from, as the world labels it. */
 const holderLabel = (it) => String(it.agent?.label ?? "").trim().slice(0, 80) || "another device";
 /** #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person. With no
- *  memory for it in this home, its memory stayed there: export there, import here. */
+ *  memory for it in this home, its memory stayed there: export there, import here. The last device to ask still wins. */
 function takenNotice(id, name, from) {
   if (!from) return {};
   const who = soulHome.plainName(name) || id, mem = HOME ? resolvePath(HOME.soul(id).dir, "..", "memory") : null;
@@ -4833,10 +4822,7 @@ async function seatFor(kept) {
 async function devPair(id) {
   return pairingTurn(async () => {
     if (HOME && (await connectedAlready(id)) === true) return false;
-    // #2050: the #2401 move rule: free with no agent connected; while one is, refused naming it unless --move.
-    const r = await call(`/v1/souls/${id}/pair`, { as: "dev", body: MOVE ? { move: true } : {} });
-    if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") throw connectedElsewhere(HOME?.config().souls[id]?.name ?? id, r.data);
-    const c = ok(r, "pair").code;
+    const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
     const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
     save({ token: t.token, soul: id });
     return true;
@@ -6951,7 +6937,7 @@ async function serveForeground() {
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0, heldListens = 0;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); runWake(); };
   // #1929: the wake rules, against what this process stores, every 2 s and whenever something arrives. Fired ones are queued.
   const runWake = () => {
@@ -7357,14 +7343,14 @@ async function serveForeground() {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
       return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, version: VERSION, since: start,
-        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, held: { waits: heldWaits, listens: heldListens }, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { await comeBack(); setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); if (c.wake.awayOff) await comeBack(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
     if (m.op === "http") {
       if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
-      if (path === "/v1/edge/inbox/listen") { heldListens++; try { return await localListen(m.url, m.reader); } finally { heldListens--; } }
+      if (path === "/v1/edge/inbox/listen") return localListen(m.url, m.reader);
       if (path === "/v1/edge/wait" && m.method !== "POST") { heldWaits++; try { return await heldWait(m); } finally { heldWaits--; } }
       const cached = m.method === "GET" && /^\/v1\/edge\/receipts\/([^/]+)$/.exec(path);
       const known = cached ? st.receipts[decodeURIComponent(cached[1])] : null;
@@ -7946,8 +7932,8 @@ Your person says "connect my account": steps 1 and 2. "Move my Soul to this comp
    Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
-4. \`${CLI} adopt <name|id>\` brings one here, no code, when no agent is connected for it; while one is, it is
-   refused naming that device, and \`--move\` takes it anyway. Tell your person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
+4. \`${CLI} adopt <name|id>\` brings one here, no code; the device that had it is disconnected. Tell your
+   person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
    \`retire <name|id>\` asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` ends on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.

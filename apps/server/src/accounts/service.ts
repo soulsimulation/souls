@@ -30,8 +30,7 @@ export class WorldAccounts {
  private liveHere(soulId:string){const row=this.host.db.soul(soulId);if(!row||row.world_id!==this.host.worldId||row.retired_at!==null)throw new ApiError(404,'soul-not-found',`No Soul ${soulId} lives in this world.`);return row;}
  private ownedHere(accountId:string,soulId:string){const row=this.liveHere(soulId);if(!this.owns(accountId,row))throw new ApiError(403,'forbidden','Not your Soul.');return row;}
  /** #2243 move: an already-approved repair for one of the account's own Souls. The agent connected before is disconnected
-  * (`replaced`), wherever it runs. The route refuses it first while that agent is connected, unless the ask says move
-  * (#2401, D1). The device is in the label the Soul card shows. */
+  * (`replaced`), wherever it runs: the last device to ask wins (#2242). The device is in the label the Soul card shows. */
  async pairByGrant(grant:AccountGrant,soulId:string,input:{agentLabel:string;idempotencyKey:string;pollSecret:string}){
   const row=this.ownedHere(grant.accountId,soulId),identity=this.identityFor(grant.accountId);
   const approval=this.store.startRepair(identity,row.id,{agentLabel:`${input.agentLabel} on ${grant.device.name}`.slice(0,120),name:row.name,idempotencyKey:input.idempotencyKey,pollSecret:input.pollSecret});

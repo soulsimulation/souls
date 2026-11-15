@@ -160,7 +160,5 @@ test('a live but stuck listener (lock not renewed for 60 s) is stopped and its l
   const end = await stuck.done;
   assert.ok(end.code === 143 || end.signal === 'SIGTERM', `the stuck listener was stopped (${end.code}/${end.signal})`);
   assert.equal(holder()?.pid, next.pid, 'its exit did not remove the new holder\'s lock');
-  // the heartbeat was aged 120 s before `next` started, so it reads 120 s plus however long that start took (121 s on a loaded runner)
-  const age = new RegExp(`listener pid ${stuck.pid} has not renewed its lock for (\\d+) s`).exec(next.err);
-  assert.ok(age && Number(age[1]) >= 120 && Number(age[1]) <= 130, next.err);
+  assert.match(next.err, new RegExp(`listener pid ${stuck.pid} has not renewed its lock for 120 s`));
 });

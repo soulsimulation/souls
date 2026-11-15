@@ -82,13 +82,12 @@ test('A6/A4/A3: a crawler fetching 50 world pages loads none; a visitor gets the
 });
 
 test('A2: an act to a world fourth in the queue is held and served; past the hold it gets world.waking, which the client retries', { timeout: 60_000 }, async () => {
-  // Each load is a node start plus the 500 ms boot: about 1–1.4 s each on a loaded machine, so four in a row passed a 6 s
-  // hold. The hold is not what this half tests (the second half does, with a short one), so it is far above four loads.
-  const { L, base } = await launcher(4, { bootMs: 500, loadParallel: 1, loadHoldMs: 30_000 });
+  const { L, base } = await launcher(4, { bootMs: 500, loadParallel: 1, loadHoldMs: 6000 });
   try {
     const acts = [];
     for (const s of slugs(4)) { acts.push(act(base, s)); await wait(30); }
-    await until(() => L.pool.status('w04').status === 'waiting', 1000, 'w04 is fourth: one loading, two ahead of it');
+    await wait(50);
+    assert.equal(L.pool.status('w04').status, 'waiting', 'w04 is fourth: one loading, two ahead of it');
     const out = await Promise.all(acts);
     for (const r of out) assert.equal(r.status, 200, JSON.stringify(r));
     assert.ok(out[3].ms >= 1400, `the fourth waited for three loads (${out[3].ms} ms)`);
@@ -126,22 +125,4 @@ test('A5: in a handover a world the release asks to leave unloaded is not moved;
     assert.ok(Number.isInteger(await b.ensure(w, { reason: 'act' })), 'loaded on its next request');
     assert.equal(b.status('still').status, 'running');
   } finally { await a.closeAll(); await b.closeAll(); }
-});
-
-test('#2393 A2: a page asked of a loading world gets the waking page, which asks again by itself; a JSON call still gets 503 world.waking', { timeout: 30_000 }, async () => {
-  const { L, base } = await launcher(1, { bootMs: 1500, loadHoldMs: 300 });
-  try {
-    const page = await fetch(`${base}/w/w01/`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
-    assert.equal(page.status, 503); assert.equal(page.headers.get('retry-after'), '5'); assert.equal(page.headers.get('cache-control'), 'no-store');
-    assert.match(page.headers.get('content-type'), /text\/html/);
-    const html = await page.text();
-    assert.match(html, /<h1>World w01 is waking up<\/h1>/, 'it names the world');
-    assert.match(html, /<meta http-equiv="refresh" content="5">/, 'it asks again by itself');
-    assert.doesNotMatch(html, /<script|src=|href=/, 'it loads nothing');
-    const r = await fetch(`${base}/w/w01/v1/config`, { headers: { accept: 'application/json' } });
-    assert.equal(r.status, 503); assert.equal(r.headers.get('retry-after'), '5'); assert.equal((await r.json()).code, 'world.waking');
-    await until(() => L.pool.status('w01').status === 'running', 5000, 'the load goes on');
-    const after = await fetch(`${base}/w/w01/`, { headers: { accept: 'text/html' } });
-    assert.notEqual(after.status, 503); assert.match(await after.text(), /^fake: /, 'the refresh then gets the world\'s own answer');
-  } finally { await L.close(); }
 });

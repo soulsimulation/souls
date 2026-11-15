@@ -60,15 +60,6 @@ hit, so the hard separation layer rarely fires.
 - **wait-bound/2** (#1288, adopted at boot after wait-bound/1): the same bound for a step that swims or travels through
   water (`swim_to`, `ground_travel`, `swim_in`), so a swim held behind a body treading in its way (`swim.occupied`) ends
   `route.blocked` through the swim's own cancel, leaving the swimmer treading or standing where it is.
-- **wait-bound/3** (#2155, adopted at boot last): the same bound for the approach walk a `take_item` or `put_item` runs as
-  its child. The item's own record reads `running` while it walks, so wait-bound/1 never read that walk; a held approach
-  (waiting, not named a deadlock) kept its receipt `started`. Now the bound stops only the approach walk, and the item step
-  fails `route.blocked` with the walk's reason ("wait-bound/3: the walk made no headway for a minute: ...").
-- **cede-passage/1** (#2426, adopted at boot last, after wait-bound/3): a walker at the end of its walk leg does not take up a single-file
-  passage it does not hold while the body standing there is yielding to it (W38's own test). Before it, two walkers whose
-  legs ended in one passage, each waiting for such a body, took turns holding it: one let it go for the body to make way,
-  and the other took it the same tick, so the bodies always found it held and never moved (a shared bay's joist crew
-  stalled at 22 of 32 for good). A walker whose spot is held by a body yielding to anyone else enters as before.
 
 ## Speed limits and invariants
 

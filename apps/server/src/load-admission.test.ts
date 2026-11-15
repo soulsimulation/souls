@@ -332,11 +332,12 @@ test('#2440 spare time: with the thread idle, a crowd of acts runs past the fram
     for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
     adm.close(); return ran;
   };
-  assert.equal(await run('amber', 0.4), 50, 'idle 40 %: every act runs at once');
-  assert.equal(await run('red', 0.4), 50, 'red with an idle thread (a single long hold) still serves');
-  assert.ok(await run('amber', 0.1) < 10, 'idle 10 %: the frame budget binds as before');
+  assert.equal(await run('green', 0.4), 50, 'idle 40 %: every act runs at once');
+  assert.ok(await run('amber', 0.4) < 10, 'amber: never on spare time, the frame budget binds');
+  assert.ok(await run('red', 0.4) < 10, 'red: never on spare time, the frame budget binds');
+  assert.ok(await run('green', 0.1) < 10, 'idle 10 %: the frame budget binds as before');
   assert.equal(await run('black', 0.9), 0, 'black never runs requests on spare time');
-  assert.ok(await run('amber', 0.4, 0.8) < 10, 'idle, but the ticks fall behind (service 0.8): the frame budget binds');
+  assert.ok(await run('green', 0.4, 0.8) < 10, 'idle, but the ticks fall behind (service 0.8): the frame budget binds');
 });
 
 test('#2440 an act is charged its own time, not the tick that ran while it was timed; spare time leaves no debt', async () => {
@@ -362,19 +363,19 @@ test('#2440 an act is charged its own time, not the tick that ran while it was t
 test('#2440 review: spare time is off while the heap is red, whatever the loop', async () => {
   const run = async (heap: number) => {
     let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.9, heapFrac: () => heap});
-    adm.setLoadLevel('red');
+    adm.setLoadLevel('green');
     for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
     for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
     adm.close(); return ran;
   };
-  assert.equal(await run(0.5), 50, 'red on loop delay with an idle thread: spare time serves the crowd');
-  assert.ok(await run(0.88) < 10, 'red for heap (0.88 of the limit), loop idle: the budget binds');
+  assert.equal(await run(0.5), 50, 'green with an idle thread: spare time serves the crowd');
+  assert.ok(await run(0.88) < 10, 'heap at 0.88 of the limit, loop idle: the budget binds');
 });
 
 test('#2440 review: a read over its bucket is not answered soul.slow-down while the thread has spare time', () => {
   for (const idle of [0.5, 0]) {
     const now = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => idle});
-    adm.setLoadLevel('red');   // contended: budgets bind at red
+    const hold = adm.request({key: 'B', god: false, route: route('GET', '/v1/edge/here')}); assert.ok('turn' in hold);   // contended: someone else in flight
     // A's bucket empty, the read's estimate 1.5 s: over budget
     (adm as unknown as {est: Map<string, number>}).est.set(route('GET', '/v1/edge/here').id, 1500);
     (adm as unknown as {bucket(k: string, g: boolean, n: number): {tokens: number}}).bucket('A', false, now).tokens = 0;
@@ -411,7 +412,7 @@ test('#2440 review: the inline fast path charges a lone act its own time, not a 
 test('#2440: spare time needs the ticks on time now (1 s service >= 0.98, last tick under 100 ms old), not only over 5 s', async () => {
   const run = async (onTime: boolean) => {
     let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.5, ticksOnTime: () => onTime});
-    adm.setLoadLevel('amber');
+    adm.setLoadLevel('green');
     for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
     for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
     adm.close(); return ran;
@@ -429,8 +430,8 @@ test('#2440: spare time needs the ticks on time now (1 s service >= 0.98, last t
 
 test('#2440: on spare time a Soul over its budget still runs, but after the Souls within theirs', async () => {
   let now = 0; const order: string[] = []; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.5});
-  adm.setLoadLevel('red');   // contended: buckets would bind without spare time
   (adm as unknown as {bucket(k: string, g: boolean, n: number): {tokens: number}}).bucket('F', false, now).tokens = 0;   // the flooder, spent
+  const hold = adm.request({key: 'X', god: false, route: route('GET', '/v1/edge/here')}); assert.ok('turn' in hold);   // someone in flight: the rest queue, contended
   for (const k of ['F', 'A', 'B']) { const t = adm.request({key: k, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { order.push(k); now += 5; t.done(); } }); }
   for (let i = 0; i < 5; i++) { await adm.drain(); now += 10; }
   assert.deepEqual(order, ['A', 'B', 'F'], 'the bystanders first, though the flooder asked first; the flooder still runs');
