@@ -8,7 +8,7 @@ import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
 import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
 import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
-import {worldDay} from '../../apps/server/src/god/poster-boards.ts';
+import {worldDayOf} from '../../apps/server/src/god/poster-boards.ts';
 import {strokeHands, HAND_REACH_SECONDS} from '../../mars/viewer/engine/social/hand-actuator.ts';
 import {WorldModel} from '../../packages/world-compiler/src/model.ts';
 
@@ -29,7 +29,7 @@ test('posters and wanted/offered notes', {timeout:400000}, async t=>{
  const ana=await join('ana','Ana'),ben=await join('ben','Ben'),cy=await join('cy','Cy');soul=ana;
  const here=async(s)=>{soul=s;const r=await app.request('/v1/edge/here?include=doHere');assert.equal(r.status,200);return (await r.json()).here;};
  const body=s=>f.host.engine.world.entities[s.entityId];
- const today=worldDay();
+ const today=worldDayOf(f.host);
  const absent=await here(ana);
  // 100 distant full poster walls and 100 distant full wanted boards (secret words everywhere)
  const fullWall=JSON.stringify([0,1,2,3].map(s=>({s,t:`secret show ${s}`,d:'secret detail',by:'s_z',n:'Zed',day:today-s}))),fullBoard=JSON.stringify(['w','o'].flatMap(c=>[0,1].map(r=>({c,r,t:`${c==='w'?'Wanted':'Offered'}: secret thing ${r}`,by:'s_z',n:'Zed',re:[{t:'secret reply',by:'s_y',n:'Yan'}],...(r===0?{tk:{by:'s_y',n:'Yan'}}:{})}))));

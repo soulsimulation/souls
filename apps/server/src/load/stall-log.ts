@@ -20,9 +20,6 @@ export type StallLogOpts = {
 
 const LONG_POLL = new Set(['edge:listen', 'edge:wait']);
 const SPANS = 256;
-let active: StallLog | null = null;
-/** The API answer hook (admission.ts): to the started StallLog, if any. */
-export function noteAnswer(route: string, t0: number, t1: number) { active?.answer(route, t0, t1); }
 
 export class StallLog {
   readonly lines: StallLine[] = [];
@@ -41,9 +38,8 @@ export class StallLog {
     this.last = this.o.mono(); this.seen = {tick: this.o.ticks().tick, at: this.last};
     try { this.obs = new PerformanceObserver(list => { for (const e of list.getEntries()) this.gc.push({t: e.startTime + e.duration, ms: e.duration}); if (this.gc.length > 512) this.gc.splice(0, this.gc.length - 512); }); this.obs.observe({entryTypes: ['gc']}); } catch { this.obs = null; }
     this.timer = setInterval(() => this.check(), this.o.everyMs); this.timer.unref();
-    active = this;
   }
-  stop() { if (active === this) active = null; if (this.timer) clearInterval(this.timer); this.timer = null; this.obs?.disconnect(); this.obs = null; }
+  stop() { if (this.timer) clearInterval(this.timer); this.timer = null; this.obs?.disconnect(); this.obs = null; }
   /** An API answer: its route id and its handling's monotonic start and end. O(1); never throws. */
   answer(route: string, t0: number, t1: number) {
     if (LONG_POLL.has(route)) return;

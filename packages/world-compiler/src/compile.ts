@@ -2,7 +2,7 @@
 // committed change with its inverse (spec §5). Two phases: `plan` simulates on
 // a scratch copy and never touches the model; `commit` applies a plan. The god
 // skill runs `plan` locally (dry runs); the server runs both.
-import { footprintOf, padFor, pointInPoly, settle, waterLevelAt, SKIRT_MAX_M as SKIRT_MAX, type Landform, type PadDoor } from '@souls/ground';
+import { footprintOf, influenceBounds, landformBounds, padFor, pointInPoly, settle, waterLevelAt, SKIRT_MAX_M as SKIRT_MAX, type Ground, type Landform, type PadDoor, type Water } from '@souls/ground';
 import { CREATION_LIMITS, GENERATORS, kitFootprintIssues, prepareFor, queryOf } from '@souls/generators';
 import { z } from 'zod';
 import { hashOf } from './hash.ts';
@@ -1260,6 +1260,7 @@ function resolveDependents(w: WorldModel, touched: Set<string>, removed: Set<str
   const changed: string[] = [];
   if (!touched.size && !tiles.size && !removed.size) return changed;
   const tileOfXZ = (x: number, z: number) => `${Math.floor(x / 64)},${Math.floor(z / 64)}`;
+  const padGroundChanged = before ? groundChangeNear(before.ground(), () => w.ground()) : () => true;
   for (const e of [...w.entities.values()]) {  // snapshot: re-inserting during iteration would revisit keys
     let def: StoredDef | undefined;
     try {
@@ -1284,7 +1285,8 @@ function resolveDependents(w: WorldModel, touched: Set<string>, removed: Set<str
     // roads and paths on changed tiles: a stream, river or lake added (or removed) across them since they were laid
     // gets (or loses) its bridge — the same prepare step that froze their grade, kept only when the crossings change
     if (e.in.parent === 'world' && tiles.size && !touched.has(e.id) && def.make.kind === 'gen' && ROADS.has(def.make.gen) && e.shape && 'path' in e.shape && crossesTiles(e.shape.path as [number, number][], tiles, tileOfXZ)) {
-      const prep = prepareFor(def.make.gen, queryOf(w), e.shape as never, e.params ?? {});
+      // heights by `peek` (#2443): a crossings check reads a few points per tile, not worth baking each tile the edit cooled
+      const prep = prepareFor(def.make.gen, { ...queryOf(w), height: (x: number, z: number) => w.terrain.peek(x, z) }, e.shape as never, e.params ?? {});
       const spansOf = (g: unknown) => JSON.stringify(((g as { spans?: unknown[] } | undefined)?.spans ?? []).map((s) => { const x = s as { from: number; to: number }; return [Math.round(x.from), Math.round(x.to)]; }));
       if (prep?.params.grade && spansOf(prep.params.grade) !== spansOf(e.params?.grade)) {
         const n = ((prep.params.grade as { spans?: unknown[] }).spans ?? []).length;
@@ -1302,11 +1304,12 @@ function resolveDependents(w: WorldModel, touched: Set<string>, removed: Set<str
         const baked = w.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), s = e.s ?? 1;
         const yaw = typeof e.r === 'number' ? e.r : e.r?.[0] ?? 0;
         const fp = footprintOf(x, z, baked.box[0] * s / 2, baked.box[2] * s / 2, yaw);
-        // An existing foundation masks the ground underneath it. Re-admit padded
-        // buildings with their pad removed below; visible samples cannot prove
-        // that their underlying support is unchanged.
-        const hasPad = w.ground().landforms.some(l => l.id === `${e.id}:pad`);
-        const terrainChanged = hasPad || !before || [...fp.corners, fp.center].some(([a,b]) => Math.abs(w.terrain.sample(a,b) - before.terrain.sample(a,b)) > 1e-5);
+        // An existing foundation masks the ground underneath it, so visible samples cannot prove that its underlying
+        // support is unchanged. A padded building is re-admitted (pad removed below) only when a landform, water or ground
+        // setting changed under its flat (#2443: every padded neighbour on a changed tile was re-settled). The others
+        // compare with `peek` (sample's exact height, without baking a tile the edit left cold just for five points).
+        const pad = w.ground().landforms.find(l => l.id === `${e.id}:pad`);
+        const terrainChanged = pad ? padGroundChanged(pad) : !before || [...fp.corners, fp.center].some(([a,b]) => Math.abs(w.terrain.peek(a,b) - before.terrain.peek(a,b)) > 1e-5);
         const floats = (e.anchor ?? def.anchor) === 'float' || e.constraints?.some(c => c.kind === 'float');
         const waterChanged = floats && (!before || waterLevelAt(w.ground(),x,z) !== waterLevelAt(before.ground(),x,z));
         if (terrainChanged || waterChanged) next = { ...(next ?? e), p: [x, z] };
@@ -1332,6 +1335,32 @@ function resolveDependents(w: WorldModel, touched: Set<string>, removed: Set<str
     }
   }
   return changed;
+}
+/** #2443: whether the ground under a pad's flat differs from `was`: a ground setting changed, or a water or landform
+ *  whose influence (a pad's with its bank) reaches the flat, widened by the largest smoothing brush, was added, removed or
+ *  changed. Landforms fold in canonical order (class, then id), so a pad put back as it was is no change. Changes are
+ *  listed once per Ground object. */
+function groundChangeNear(was: Ground, now: () => Ground): (pad: Landform) => boolean {
+  let seen: Ground | null = null, all = false, boxes: [number, number, number, number][] = [], reach = 0;
+  const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
+  const scan = (g: Ground) => {
+    seen = g; boxes = []; reach = 0;
+    all = g.base !== was.base || g.seaLevel !== was.seaLevel || !same([g.extent, g.noise], [was.extent, was.noise]);
+    if (all) return;
+    const water = (x: Water) => { const pts = x.area ?? x.path!, r = (x.w ?? 0) / 2; boxes.push([Math.min(...pts.map(q => q[0])) - r, Math.min(...pts.map(q => q[1])) - r, Math.max(...pts.map(q => q[0])) + r, Math.max(...pts.map(q => q[1])) + r]); };
+    for (const x of g.waters) if (!was.waters.includes(x)) water(x);
+    for (const x of was.waters) if (!g.waters.includes(x)) water(x);
+    for (const l of [...g.landforms, ...was.landforms]) if (l.kind === 'brush' && l.op === 'smooth' && l.r > reach) reach = l.r;
+    const old = new Map(was.landforms.map((l) => [l.id, l])), ids = new Set<string>();
+    for (const l of g.landforms) { ids.add(l.id); const o = old.get(l.id); if (!o || !same(o, l)) { boxes.push(influenceBounds(l)); if (o) boxes.push(influenceBounds(o)); } }
+    for (const l of was.landforms) if (!ids.has(l.id)) boxes.push(influenceBounds(l));
+  };
+  return (pad) => {
+    const g = now(); if (g !== seen) scan(g);
+    if (all) return true;
+    const b = landformBounds(pad), m = reach;
+    return boxes.some((c) => c[2] >= b[0] - m && c[0] <= b[2] + m && c[3] >= b[1] - m && c[1] <= b[3] + m);
+  };
 }
 /** Settle-and-orient only (no overlap refusal: a dependent follows its ref even into a tight spot; warnings report it). */
 function admitForResolve(w: WorldModel, e: Entity, def: StoredDef): string | null {
