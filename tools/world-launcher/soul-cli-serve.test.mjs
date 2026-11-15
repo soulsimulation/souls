@@ -458,6 +458,8 @@ test('the harness listen keeps working through serve: same output, by cursor, an
 test('A4: soul.busy is waited out inside serve, and heavy requests never overlap', async (t) => {
   const w = await world(t);
   await w.cli('serve');
+  // serve reads observe once at start (#2309), a heavy call: let it be answered first, or it takes one of the busy answers
+  assert.ok(await until(() => w.calls.some(([, p]) => p === '/v1/edge/observe') && w.heavyNow === 0), 'serve\'s start observe answered');
   w.busyNext = 2;
   const r = await w.cli('here');
   assert.equal(r.json.place, 'green', r.err);
@@ -1019,7 +1021,9 @@ test('#476 A1: it wakes a held listen, a peek does not use it up, and a wait and
   await w.cli('serve');
   await until(() => w.streams > 0);
   const listening = w.cli('listen'), waiting = w.cli('wait', '30');
-  await sleep(300);
+  // both must be held when it is said: one that starts after the other has heard it is a later reader, and hears nothing
+  const held = await until(async () => { const h = (await w.cli('serve', '--status')).json?.held; return h?.waits >= 1 && h?.listens >= 1 && h; }, 10_000);
+  assert.ok(held, 'the listen and the wait are both held in serve');
   w.say('Ada, over here');
   const [l, wa] = await Promise.all([listening, waiting]);
   assert.equal(l.json.addressed[0].text, 'Ada, over here', l.err);
