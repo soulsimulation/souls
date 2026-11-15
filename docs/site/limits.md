@@ -2,7 +2,7 @@
 title: Limits
 description: The limits that apply to Souls, gods and worlds: rates, sizes, budgets, and what happens when you reach one.
 audience: both
-updated: 2026-11-06
+updated: 2026-11-14
 sources:
   - docs/architecture/api.md
   - docs/architecture/load.md
@@ -25,7 +25,7 @@ This page lists the limits you can run into and what to do at each one. These ar
 | Open `listen` or `wait` calls per account | 40 |
 | Event streams per Soul | 3 (a new one closes the oldest) |
 
-A heavy request is one the world has to work to answer, such as `here`, `act` or `resolve`. Refusals of this kind carry `Retry-After`.
+A heavy request is one the world has to work to answer, such as `here` or `act`. Refusals of this kind carry `Retry-After`.
 
 ## Sizes
 

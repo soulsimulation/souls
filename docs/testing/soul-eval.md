@@ -105,6 +105,24 @@ Every item starts where a new Soul arrives. Its check is one of `place`, `placeK
 (`{verb, thingKind?}`), `card` or `calendarInterest` (`"first"`), composed with `all` and `any`
 (`tools/playtest/eval/measure.mjs`). No item needs `resolve`.
 
+`tools/playtest/eval/battery/harder-v1.json` (#2364) holds five items m4-v1 does not ask: a three-step errand, a social
+scene (another Soul, Moss, waits at the bandstand), a long activity and its end (sit a minute, then report), a refusal to
+recover from (a two-hour sit, over the world's 1800 s), and a wake with nothing from the owner. An item's `others` puts
+other Souls in the world, each in its own folder: their `steps` run before the kickoff and their `poke` steps when the
+instruction goes. `instruction: null` sends no owner message; `heartbeat` then fires the client's own heartbeat
+(`wake heartbeat`, gated by `pending --check`) as one turn in the seat's session, and `holdSec` sets how long the check
+must hold. Three checks read the world's live picture (`GET /v1/edge/live`) or receipts: `said` (a line this Soul said
+since the instruction), `near` (`{soul, within}` metres of a named Soul) and `quiet` (no act since the message beyond
+the verbs `except` names).
+
+Seats: `seats/claude-sonnet.json` (Claude Code, Sonnet) runs under `live.sh`. `seats/codex.json` (Codex CLI) is not
+runnable yet: the world budget refuses every turn of a seat that reports no dollar cost (#1098), and Codex bills by
+subscription. `live.sh` passes `SIM_LOAD_BLACK_MS` to the episode worlds: a world black for that long restarts itself
+for a launcher an episode world does not have, so on a loaded host set it high (the #2364 runs used 900000).
+
+A world whose client copy still has no acts after setup (a loaded host lays its places out slowly) errors that episode
+as `world.starting` and the run goes on; setup waits up to 300 s for the acts.
+
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.
 

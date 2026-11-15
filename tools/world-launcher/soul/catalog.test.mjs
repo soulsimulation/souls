@@ -81,6 +81,18 @@ test('"near" and "in" read the thing and its anchor', () => {
   assert.equal(find(ix, "bench", { inPlace: "nowhere-at-all", at }).note, 'No place called "nowhere-at-all" in the catalog.');
 });
 
+test('#2312: "sit" names seats, and "sit at" a place with none inside finds the nearest seats around it', () => {
+  assert.equal(find(ix, "sit near the pond", { at }).found[0].act, "sit:e_b1");
+  const stand = indexCatalog({ ...cat, places: [...cat.places, { id: "g-band", name: "Eden Bandstand", kind: "building", parent: "g-village", at: [40, 20] }],
+    things: [...cat.things, { id: "e_b3", name: "street-bench-9", kind: "core-bench", place: "g-village", at: [34, 20], seat: true }] });
+  const around = find(stand, "sit at the bandstand", { at });
+  assert.equal(around.found[0].act, "sit:e_b3", "no seat on its floor: the nearest bench round it");
+  assert.equal(around.near.id, "g-band");
+  const inside = find(ix, "sit at the library", { at, limit: 3 });
+  assert.ok(inside.found.every((x) => x.place === "g-library.reading") && inside.near === undefined, "a place with seats inside gives its own");
+  assert.equal(find(ix, "sit", { at }).found[0].act, "sit-ground:here", "sitting right here still comes first");
+});
+
 test("what a body does on the spot is found by its words, and comes before anything a walk away", () => {
   for (const words of ["sit floor", "sit down on the floor", "sit on the ground"]) assert.equal(find(ix, words, { at }).found[0].act, "sit-ground:here", words);
   assert.equal(find(ix, "wave", { at }).found[0].act, "wave:here");
@@ -242,4 +254,14 @@ test("a Soul not in the live copy is found nowhere; --kind soul lists Souls only
   assert.deepEqual(find(ix, "", { kind: "soul", at, souls }).found.map((x) => x.id), ["s_mira2", "s_mira", "s_oak"]);
   assert.deepEqual(find(ix, "oak", { kind: "soul", at, souls }).found.map((x) => x.type), ["soul"]);
   assert.deepEqual(query(ix, [{ kind: "soul" }, { find: "mira", kind: "soul" }], { at, souls }).map((a) => a.found.map((x) => x.id)), [["s_mira2", "s_mira", "s_oak"], ["s_mira", "s_mira2"]]);
+});
+
+test('#2381 A1: find "bench" --verb sit finds the seats --kind bench finds, each named by its sit', () => {
+  const byVerb = find(ix, "bench", { verb: "sit", at, limit: 20 }), byKind = find(ix, "bench", { kind: "bench", at, limit: 20 });
+  assert.deepEqual(byVerb.found.map((x) => x.id), ["e_b1", "e_b2"]);
+  assert.deepEqual(byVerb.found.map((x) => x.act), ["sit:e_b1", "sit:e_b2"]);
+  // where both apply, the same rows: the weight bench is a bench nobody sits on, so --kind finds it and --verb sit does not
+  assert.deepEqual(byKind.found.filter((x) => x.act?.startsWith("sit:")).map((x) => x.id), byVerb.found.map((x) => x.id));
+  assert.equal(find(ix, "", { verb: "sit", at, limit: 20 }).found.length, 14, "every seat, with no words");
+  assert.deepEqual(find(ix, "bench", { verb: "read", at }).found, [], "a seat does not offer read");
 });

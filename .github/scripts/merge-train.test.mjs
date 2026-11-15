@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -346,9 +346,9 @@ test('landing: pending head checks (merge:ready re-runs proof-ok) wait, not stri
 });
 
 // A queue-mode next(): `prs` maps number -> overrides; `state` maps number -> the PR's queue state.
-function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], approved = [] }) {
+function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type: 'merge_queue' }], files = ['docs/a.md'], approved = [], freeze = null }) {
   const pr = n => ({ number: n, title: 't', labels: [{ name: 'merge:ready' }], head: { ref: `agent/${n}-x`, sha: `h${n}`, repo: { full_name: 'o/r' } }, base: { ref: 'main' }, mergeable: true, mergeable_state: 'clean', ...prs[n] });
-  const reads = { pr: {}, checks: 0, comments: [] };
+  const reads = { pr: {}, checks: 0, comments: [], held: [] };
   const api = {
     gh: path => {
       if (path === 'repos/o/r') return { default_branch: 'main' };
@@ -365,10 +365,11 @@ function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type
       return [];
     },
     comment: (repo, n, body) => reads.comments.push({ n, body }),
-    queueState: (repo, n) => state[n] ?? {},
+    queueState: (repo, n) => ({ number: n, ...state[n] }),
+    hold: s => { const a = holdAction(s); if (a) reads.held.push(s.number); return a?.[0] ?? null; },
     pause: () => {},
   };
-  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', api }), reads };
+  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', freeze, api }), reads };
 }
 
 test('queue: the rule is read from the branch rules; without it the train picks as before', () => {
@@ -476,4 +477,39 @@ test('workflow: every gh workflow run dispatch uses github.token, not the PAT (N
     const near = lines.slice(Math.max(0, i - 8), i).join('\n');
     assert.match(near, /GH_TOKEN: \$\{\{ github\.token \}\}/, `dispatch at line ${i + 1} must set GH_TOKEN to github.token`);
   }
+});
+
+test('release freeze (#1838): the variable is the pinned sha with an optional note; blank is no freeze', () => {
+  assert.equal(releaseFreeze(undefined), null);
+  assert.equal(releaseFreeze('  '), null);
+  assert.deepEqual(releaseFreeze('abc123'), { sha: 'abc123', note: '' });
+  assert.deepEqual(releaseFreeze(' abc123  0.128 pin \n'), { sha: 'abc123', note: '0.128 pin' });
+});
+
+test('release freeze (#1838): merge:ready during a freeze is not enqueued, and is enqueued after it ends', () => {
+  const freeze = releaseFreeze('abc123 0.128');
+  // Queue mode: nothing picked, the ready PR keeps its label and is not enqueued, nothing is read past the list.
+  const frozen = queueTrain({ prs: { 20: {} }, freeze });
+  const r = frozen.run();
+  assert.equal(r.pr, '');
+  assert.equal(r.more, false);
+  assert.equal(r.frozen, 'abc123');
+  assert.match(r.frozen_why, /release freeze at abc123 \(0\.128\)/);
+  assert.deepEqual(r.skipped, [{ pr: 20, why: 'release-freeze' }]);
+  assert.deepEqual([frozen.reads.pr, frozen.reads.checks, frozen.reads.comments], [{}, 0, []]);
+  // A PR enqueued before the pin (in the queue, or waiting through auto-merge) is taken back out.
+  const state = { 20: { id: 'P20', isInMergeQueue: true }, 21: { id: 'P21', autoMergeRequest: { enabledAt: 'x' } } };
+  const before = queueTrain({ prs: { 20: {}, 21: {}, 22: {} }, state, freeze });
+  assert.deepEqual(before.run().skipped, [
+    { pr: 20, why: 'release-freeze', held: 'dequeuePullRequest' },
+    { pr: 21, why: 'release-freeze', held: 'disablePullRequestAutoMerge' },
+    { pr: 22, why: 'release-freeze' },
+  ]);
+  assert.deepEqual(before.reads.held, [20, 21]);
+  // Without the merge queue rule nothing is held either, and nothing merges.
+  const legacy = queueTrain({ prs: { 20: {} }, rules: [{ type: 'pull_request' }], freeze });
+  assert.deepEqual([legacy.run().pr, legacy.reads.held], ['', []]);
+  // The freeze ends: the same PR is picked and goes to the queue.
+  const after = queueTrain({ prs: { 20: {} } }).run();
+  assert.deepEqual([after.pr, after.mode, after.frozen], [20, 'queue', undefined]);
 });

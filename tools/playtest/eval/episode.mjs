@@ -11,7 +11,7 @@ import { sleep } from '../lib/clock.mjs';
 import { createSeat, Seat } from '../arena/seat.mjs';
 import { worldBudgetFor } from '../arena/world-budget.mjs';
 import { sendCard, cardView, publicSoul, cardSummary } from '../arena/owner.mjs';
-import { observe, judge, cardClosed, httpSince, routeStats, refusalCounts, seatStats, catalogIndex, isLongPoll, validateBattery } from './measure.mjs';
+import { observe, judge, needsLive, cardClosed, httpSince, routeStats, refusalCounts, seatStats, catalogIndex, isLongPoll, validateBattery } from './measure.mjs';
 
 export const kickoffText = (name, skillFile = 'skill.md') => `Your Soul ${name} lives in this folder; it is already set up and \`serve\` is running. Your guide is ${skillFile} in this folder: read it, then start listening for my messages as it says.`;
 
@@ -55,9 +55,9 @@ export async function prepareFolder(seat, { name }) {
   // #2157: past those 30 s the world serves its catalog as it is, and on a busy host that is before its activity spots are
   // laid out: a copy with no acts, where `find` finds nothing to eat. Such a copy is a world still starting: ask again.
   let lookFailed = null;
-  for (const until = Date.now() + 90_000; !catalogHasActs(f, soulId) && Date.now() < until; await sleep(500)) {
+  for (const until = Date.now() + 300_000; !catalogHasActs(f, soulId) && Date.now() < until; await sleep(500)) {
     const l = await cli(f, ['look']);
-    if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503/.test(lookFailed)) break; }
+    if (!l.data) { lookFailed = `look exited ${l.code}: ${(l.stderr || l.stdout).trim().slice(-240)}`; if (!/HTTP 503|no answer/.test(lookFailed)) break; }   // #2364: a loaded host's world may not answer yet
   }
   return { soulId, createdAt, lookFailed, cliVersion: /const VERSION = "([^"]+)"/.exec(cliText)?.[1] ?? null, skillVersion: /^\s*version:\s*"?([^"\s]+)/m.exec(skill)?.[1] ?? null };
 }
@@ -70,6 +70,21 @@ async function seedCalendar(dir, base, cal) {
     const r = await cli(f, s); if (r.code !== 0) throw new Error(`calendar seed ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`);
   }
 }
+/** #2364: other Souls an item puts in the world, each in its own folder: `steps` (eden.mjs args) run before the kickoff, and
+ *  `poke` steps after it, when the instruction goes (or instead of one: a wake with nothing from the owner). → their folders */
+async function seedOthers(dir, base, others) {
+  const out = [];
+  for (const o of others) {
+    const f = join(dir, `other-${o.name.toLowerCase()}`); mkdirSync(f, { recursive: true });
+    await fetchServed(base, 'eden.mjs', join(f, 'eden.mjs'));
+    for (const s of [['register', base], ['create', o.name], ...(o.steps ?? [])]) {
+      const r = await cli(f, s, 180000); if (r.code !== 0) throw new Error(`other ${o.name} ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`);
+    }
+    out.push({ ...o, folder: f });
+  }
+  return out;
+}
+const liveNow = (base) => fetch(`${base}/v1/edge/live`, { signal: AbortSignal.timeout(10000) }).then((r) => r.json()).catch(() => null);
 const calendarNow = (base, minutes = 600) => fetch(`${base}/v1/edge/calendar?withinMinutes=${minutes}`, { signal: AbortSignal.timeout(10000) }).then((r) => r.json()).then((d) => d.items ?? null).catch(() => null);
 
 /** Read the client's world copy (soul-catalog/1) from the Soul's runtime folder, or null. */
@@ -126,6 +141,8 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     // catalog (--catalog), never against nothing.
     const own = readCatalog(seat.folder, setup.soulId), catalogFrom = own ? 'client' : catalogRef ? 'reference' : null;
     if (!catalogFrom) throw new Error(`the client keeps no world copy (world-catalog.json)${setup.lookFailed ? ` (${setup.lookFailed})` : ''}; pass --catalog <a saved copy of this template's catalog>`);
+    // #2364: a copy with no acts is a world still laying out (a loaded host: 1-7 s ticks), not a battery that names wrong places
+    if (own && !own.acts?.length && !catalogRef) throw new Error(`world.starting: the world's copy still has no acts ${Math.round((Date.now() - setup.createdAt) / 1000)} s after create`);
     const catalog = catalogIndex(own ?? catalogRef);
     const bad = validateBattery({ items: [item] }, catalog);   // the battery is checked against this world's own catalog first
     if (bad.length) throw new Error(bad.join('; '));
@@ -137,6 +154,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     if (item.start && !before.placeIds.includes(item.start)) throw new Error(`${item.id}: the Soul starts at ${before.place}, not ${item.start}`);
 
     if (item.calendar) await seedCalendar(dir, base, item.calendar);
+    const others = item.others ? await seedOthers(dir, base, item.others) : [];
     const kick = await seat.chat(kickoffText(name, setup.skillFile), { reason: 'kickoff' });
     seat.wakeLoop();
     // --warm-sec: the instruction waits until the Soul is this old, so a run can show the steady state beside the cold start
@@ -144,9 +162,22 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
     const calendarFirst = item.calendar ? (await calendarNow(base, 60))?.[0]?.id ?? null : null;   // "the first thing" when it was asked
     const sentLocal = Date.now();
     const chatMode = deliver === 'chat';
-    const sent = chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
-    if (chatMode) seat.chat(item.instruction, { reason: 'chat' }).catch(() => {});
-    log(`${item.id}: sent ${chatMode ? 'as chat' : sent.messageId}`);
+    const silent = item.instruction == null;   // #2364: nothing from the owner; another Soul's poke wakes the Soul
+    const sent = silent || chatMode ? { messageId: null } : await sendCard({ base, soulId, identity: ownerId, text: item.instruction });
+    if (chatMode && !silent) seat.chat(item.instruction, { reason: 'chat' }).catch(() => {});
+    for (const o of others) for (const s of o.poke ?? []) { const r = await cli(o.folder, s); if (r.code !== 0) throw new Error(`other ${o.name} poke ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`); }
+    log(`${item.id}: sent ${silent ? 'nothing (a poke)' : chatMode ? 'as chat' : sent.messageId}`);
+    // #2364: a heartbeat as the client hands it to a scheduler (wake heartbeat): `pending --check` gates it at no token cost,
+    // and when it lets the run through, its prompt is one turn (here in the seat's own session; a scheduler starts a new one)
+    let heartbeat = null;
+    if (item.heartbeat) {
+      await sleep((item.heartbeat.afterSec ?? 5) * 1000);
+      const hb = await cli(seat.folder, ['wake', 'heartbeat']), prompt = hb.data?.heartbeat?.prompt ?? null;
+      const chk = await cli(seat.folder, ['pending', '--check']);
+      heartbeat = { checkExit: chk.code, woke: chk.code === 0 && !!prompt, prompt: !!prompt };
+      if (heartbeat.woke) seat.chat(prompt, { reason: 'wake' }).catch(() => {});
+      log(`${item.id}: heartbeat check exit ${chk.code}${heartbeat.woke ? ', one turn' : ''}`);
+    }
 
     const samples = [], deadline = sentLocal + (item.timeoutSec ?? 240) * 1000;
     let firstMotionMs = null, successAt = null, closedAt = null, verdict = { ok: false, why: 'timeout' }, card = null, endedBy = 'timeout';
@@ -161,15 +192,15 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
       const newReceipts = obs.receipts.filter((r) => !priorIds.has(r.id) || !seen.has(`${r.id}|${r.phase}`));
       const moved = obs.place !== before.place || obs.posture !== before.posture || newReceipts.some((r) => r.firstMotionTick != null);
       if (firstMotionMs == null && moved) firstMotionMs = t;
-      const calendar = item.calendar ? await calendarNow(base) : null;
-      verdict = judge(item.check, { obs, newReceipts, card: card.other ? null : card, catalog, noCard: chatMode, calendar, calendarFirst, soulId });
+      const calendar = item.calendar ? await calendarNow(base) : null, live = needsLive(item.check) ? await liveNow(base) : null;
+      verdict = judge(item.check, { obs, newReceipts, card: card.other || silent ? null : card, catalog, noCard: chatMode || silent, calendar, calendarFirst, soulId, live, sentAt: sentLocal });
       samples.push({ t, place: obs.place, posture: obs.posture, activity: obs.activity, card: card.state, ok: verdict.ok });
-      const closed = !chatMode && !card.other && cardClosed(card);
+      const closed = !chatMode && !silent && !card.other && cardClosed(card);
       if (closed && closedAt == null) closedAt = t;
       if (verdict.ok && successAt == null) successAt = t;
       if (!verdict.ok) successAt = null;   // a check must still hold at the end
       if (verdict.ok && closed) { endedBy = 'success+closed'; break; }
-      if (verdict.ok && t - successAt >= holdSec * 1000) { endedBy = 'success-held'; break; }
+      if (verdict.ok && t - successAt >= (item.holdSec ?? holdSec) * 1000) { endedBy = 'success-held'; break; }
       if (closed && !verdict.ok && t - closedAt >= graceSec * 1000) { endedBy = 'closed-unmet'; break; }
     }
     const endLocal = Date.now();
@@ -189,7 +220,7 @@ export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder 
       seat: seatStats(readJsonl(join(seat.dir, 'turns.jsonl')), readJsonl(join(seat.dir, 'transcript.jsonl')), sentLocal),
       kickoff: { costUsd: kick?.usage?.costUsd ?? null, wallMs: kick?.wallMs ?? null, refused: kick?.refused ?? null, seatCheck: seat.info.seatCheck ?? null },
       worldCalls: callsN, longPolls: http.length - callsN, routes, refusals: refusalCounts(http), clientMsPerCall: mean('durationMs'), serverMsPerCall: mean('serverMs'),
-      client: { cli: setup.cliVersion, skill: setup.skillVersion }, samples: samples.length,
+      client: { cli: setup.cliVersion, skill: setup.skillVersion }, samples: samples.length, ...(heartbeat ? { heartbeat } : {}),
     };
     writeJson(join(dir, 'episode.json'), rec);
     writeJson(join(dir, 'samples.json'), samples);
