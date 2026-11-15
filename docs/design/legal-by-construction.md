@@ -48,6 +48,29 @@ order named Souls off a site, as an ordinary walk that is itself refused when it
 - **Tasks:** 1a preview a world-edit on a copy and measure it (3 h); 1b refuse in `commitBatch` under a rules
   version (4 h); 1c the god client shows the refusal (1 h).
 
+**Sealed in, and the two moves that stay ([#2188](https://github.com/soulsimulation/souls/issues/2188)).** The preview
+judges each body by the geometry round it, and the walk-out planner sees only what an edit lands on. So under
+legal-edits/1 the last wall of a ring closed 15 m from a Soul was accepted, and nav-connect/1 then stepped her out.
+- **legal-edits/2** (a rules event adopted after legal-edits/1, at the end of the boot chain) refuses such an edit
+  by name before it commits: `body.sealed-in`, naming the Soul, her pocket and the pieces that close it
+  (`god/seal-check.ts`).
+  - The pocket rule is nav-connect/1's: free ground cut off from everything else, at most 2,500 m².
+  - The check is model-only, on BUILDSAFE's 0.1 m ground raster. It runs only for an edit that adds or moves
+    blocking geometry (its own, or a moved parent's children) within 56 m of a Soul on the ground, measured along
+    each axis. It rasters a window 56 m round those Souls, shared by Souls near each other, up to 144 m a side. It
+    rasters at most two windows per edit; Souls past them are logged and left to nav-connect/1. It floods each region
+    that holds a Soul once, after the edit, and rasters the window before the edit only when a Soul is sealed after
+    it. Measured on a workstation at load 26, per commit with 12 Souls in reach: one wall, p95 19 ms; 16 walls
+    30 m apart, p95 83 ms; 50 walls over 200 m, p95 43 ms.
+  - Edits logged before the event keep legal-edits/1's verdicts.
+- **Construction-closure walk-outs stay** (`evacuateSites`). They are not edits that break a rule on a body. They
+  are ordinary walks off a site the god has closed, each planned with a route and logged (`edge-god-walkout`), so
+  replay folds them as recorded. Refusing the closure instead would let one idle Soul hold a build site for as long
+  as she stands there.
+- **nav-connect/1's step-out stays as the fallback.** It serves worlds without legal-edits/1, and under it whatever
+  the check does not see: bodies on upper floors, a pocket of the rule's size that reaches more than 56 m from the
+  Soul, and Souls past the window cap of one edit. A frozen Soul is worse than a logged step.
+
 ## 2. One shared legality rule
 
 **Today.** "May this stand here" has eight answers: the invariant (radius less 3 cm), the step guard (the same),

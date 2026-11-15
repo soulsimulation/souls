@@ -532,8 +532,13 @@ export class EdgeLedger implements EdgeLedgerHooks {
       fail: (id, code, reason) => this.update(id, {phase: 'failed', code, reason}), complete: id => this.update(id, {phase: 'completed'}),
       running: (sid, id) => {const m = this.host.minds.get(sid), r = this.rows('receipt_id=?', id)[0]; return !!m && !!r?.program_id && this.host.engine.programOf(m.entityId) === r.program_id;},
       programOf: id => this.host.engine.programOf(id),
-      carryState: pid => {const a = this.host.engine.programAction?.(pid), d = a ? this.host.engine.runtime.records.get(a.action.id)?.diagnostic : undefined;
-        return a ? {status: a.action.status, verb: a.action.verb, ...(a.action.phase ? {phase: a.action.phase} : {}), ...(d ? {code: d.code, message: d.message, ...(d.subjects ? {subjects: [...d.subjects]} : {}), ...(d.details ? {details: {...d.details}} : {})} : {})} : null;},
+      carryState: pid => {const a = this.host.engine.programAction?.(pid), recs = this.host.engine.runtime.records; if (!a) return null;
+        let status = a.action.status, d = recs.get(a.action.id)?.diagnostic;
+        // #1239: a construction parent goes on `executing` while a crew member's child walk to their station is held up;
+        // when the parent is not blocked and says nothing itself, a blocked child speaks for it (reads only). The least code
+        // wins, so two members whose codes swap from tick to tick (a mutual hold) read as one steady hold, not a new one each tick
+        if (status !== 'blocked' && !d) for (const r of recs.values()) if (r.parent === a.action.id && r.status === 'blocked' && r.diagnostic && (!d || r.diagnostic.code < d.code)) {status = 'blocked'; d = r.diagnostic;}
+        return {status, verb: a.action.verb, ...(a.action.phase ? {phase: a.action.phase} : {}), ...(d ? {code: d.code, message: d.message, ...(d.subjects ? {subjects: [...d.subjects]} : {}), ...(d.details ? {details: {...d.details}} : {})} : {})};},
       stop: (sid, entityId, receipt) => {try {void this.host.enqueue('edge-stop', `edge:${sid}`, {soulId: sid, entityId, receipt}).catch(() => {/* best effort */});} catch {/* clock not ready */}},
       aboard: id => this.aboard(id), faded: id => this.faded.has(id), innermostPlace: id => {const m = this.host.minds.get(id); return m ? this.innermostPlace(m) : null;},
       deliver: (sid, kind, body) => {try {(this.comms as unknown as {streams?: {deliver?(s: string, k: string, t: number, b: object): void}} | undefined)?.streams?.deliver?.(sid, kind, this.host.engine.world.tick, body);} catch {/* events are best effort */}},
