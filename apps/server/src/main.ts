@@ -43,6 +43,7 @@ import { rehearseRestore, standby } from './standby.ts';
 import { coreLibrary } from '@souls/world-compiler';
 import { faultExit, faultGuard, installFaultGuard, killRule, stallConfig, startWatchdog, stoppedByFault, writeLiveNow } from './load/watchdog.ts';
 import { StallLog } from './load/stall-log.ts';
+import { noteLastExit } from './load/restart-loop.ts'; import { diskHeadroom, diskMinFreeMb } from './load/disk-headroom.ts'; import { installFaultInject } from './load/fault-inject.ts';
 import { S, sharedLoad } from './load/shared.ts';
 import { LoadMonitor } from './load/monitor.ts';
 import { Admission } from './load/admission.ts';
@@ -63,6 +64,7 @@ await standby(async () => {
 bootAt.go = performance.now();
 // srv-load (LOAD-CONTRACT §4): the watchdog thread first, before the database opens, so <DATA_DIR>/live.json reports the
 // whole boot. Not during a standby wait (the serving process still owns the file then). SIM_HEALTH_PORT: its own /healthz.
+const lastExit = process.env.SIM_WATCHDOG !== '0' ? noteLastExit(config.dataDir) : null;   // #2378 A2: before the watchdog rewrites live.json
 if (process.env.SIM_WATCHDOG !== '0') startWatchdog({ dataDir: config.dataDir, port: Number(process.env.SIM_HEALTH_PORT) || undefined, stall: stallConfig(config.dataDir), kill: killRule() });
 bootPhase('boot:restore');
 
@@ -168,6 +170,8 @@ server.on('upgrade', req => { req.url = stripWorldPath(req.url); });
 hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
 host.watched = () => hub.clients.size > 0;   // #2298 A4b
 host.listeners.push({ afterTick: () => { sharedLoad[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
+const faultInject = process.env.SIM_FAULT_INJECT === '1' ? installFaultInject(host, config.dataDir) : null;
+host.stepSlots = sharedLoad; if (lastExit?.quarantine) host.quarantinedStep = lastExit.quarantine;   // #2378 A2: a step that ended two boots in a row
 hub.brain = brain; hub.build = config.build; hub.persistTakes = config.takesPersist;
 const takes=new TakeArchive(db,host.worldId,config.archiveTakes?r2Store(config):null,`${config.r2.prefix}/takes`,config.worldEngine?Number(process.env.TAKES_LOCAL_KEEP_TICKS??72000):0); if(host.engine.takeChunks&&config.takesPersist)takes.start(host);
 // Edge worlds mount EDGE-CONTRACT-v1; PLACE_DATA names a PLACE-DATA-v1 file (else places derive from native regions).
@@ -329,7 +333,7 @@ function injectFault(kind: string, ms: number) {
 function onRequest(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   if (FAULT_INJECT && req.method === 'POST' && req.url?.startsWith('/__sim/fault?') && loopback(req.socket.remoteAddress) && req.headers['x-forwarded-for'] === undefined) {
     const q = new URL(req.url, 'http://x').searchParams, kind = q.get('kind') ?? '';
-    const ok = injectFault(kind, Number(q.get('ms')) || 600_000);
+    const ok = kind === 'disk' ? (disk.pretend(q.has('mb') ? Number(q.get('mb')) : null), true) : injectFault(kind, Number(q.get('ms')) || 600_000) || !!faultInject?.(kind, q);
     res.writeHead(ok ? 202 : 400).end(ok ? `injected ${kind}` : 'unknown kind'); return;
   }
   if (!catchingUp) { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); } }   // #2298 A4: a request first brings a still world to now
@@ -508,7 +512,7 @@ function unchangedSinceBackup(): boolean {
   return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
 }
 async function backupNow() {
-  if (unchangedSinceBackup()) return;
+  if (disk.low || unchangedSinceBackup()) return;   // #2378: no backup while the disk is under its headroom
   db.pruneBrainCalls(); db.pruneTalk();
   const changes = dbChanges();
   // (lane L5) no VACUUM here: it rewrote the whole file on the tick thread, stalling a serving world for seconds.
@@ -520,5 +524,6 @@ async function backupNow() {
 const backupWork=new Set<Promise<void>>();
 function trackedBackup(){const work=backupNow();backupWork.add(work);void work.finally(()=>backupWork.delete(work)).catch(()=>{});return work;}
 pruneBackups();
+const disk = diskHeadroom({ path: config.dataDir, minFreeMb: diskMinFreeMb(), prune: () => { pruneBackups(); db.pruneBrainCalls(); db.pruneTalk(); takes.pruneLocal(host.engine.world.tick); } }); disk.start();   // #2378
 const firstBackup=setTimeout(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 60_000);firstBackup.unref();
 const backupTimer=setInterval(() => void trackedBackup().catch((e) => console.error('[backup]', e)), 3600_000);backupTimer.unref();
