@@ -198,6 +198,38 @@ test('(c) a flapping world is held after 5 failures, refused while held, and res
   await p.closeAll();
 });
 
+test('#2378 (c2) a hold is a rest: it ends by itself and the world boots again, the rest doubling for each hold in a row', async () => {
+  const p = pool(R, { FAKE_FLAP_MS: '150' }, { guard: { ...FAST, holdRestMs: 400 } });
+  await p.ensure(world('fr')).catch(() => {});   // (a boot that fails counts toward the hold as well)
+  await until(() => p.status('fr').status === 'held', 8000, 'held');
+  await until(() => p.lines.some((l) => /fr rested 0 s after its hold: resuming it/.test(l)), 3000, 'resumed by itself');
+  await until(() => p.lines.filter((l) => /fr held: 5 failures/.test(l)).length === 2, 8000, 'held again (it still flaps)');
+  assert.ok(p.lines.some((l) => /fr held: .* it rests 1 s, then boots again/.test(l)), 'the second rest is twice the first');
+  await p.closeAll();
+});
+
+test('#2378 (c3) a world held during a failed handover is not held for ever: unfence re-arms its rest, and ensure() resumes it once the rest is over', async () => {
+  const p = pool(R, { FAKE_FLAP_MS: '150' }, { guard: { ...FAST, holdRestMs: 400 } });
+  await p.ensure(world('fh')).catch(() => {});
+  await until(() => p.status('fh').status === 'held', 8000, 'held');
+  p.fence();   // a handover begins: every timer is cleared, the rest's too
+  await new Promise((r) => setTimeout(r, 600));
+  assert.equal(p.status('fh').status, 'held', 'fenced: nothing boots');
+  p.unfence();   // the next launcher's canary failed: this pool runs its worlds again
+  await until(() => p.lines.some((l) => /fh rested 0 s after its hold: resuming it/.test(l)), 3000, 'the rest was armed again and ended');
+  await p.closeAll();
+  // and with no timer at all (lost), the first ensure() after the rest resumes it
+  const q = pool(R, { FAKE_FLAP_MS: '150' }, { guard: { ...FAST, holdRestMs: 60_000 } });
+  await q.ensure(world('fe')).catch(() => {});
+  await until(() => q.status('fe').status === 'held', 8000, 'held');
+  await assert.rejects(q.ensure(world('fe')), (e) => e.code === 'held', 'refused while it rests');
+  const k = q.kids.get('fe'); clearTimeout(k.timer); k.timer = null; k.held.until = Date.now() - 1;
+  await q.ensure(world('fe')).catch(() => {});   // (it still flaps: what matters is that it booted)
+  assert.ok(q.lines.some((l) => /fe rested past its hold: resuming it/.test(l)), 'ensure() resumed it');
+  assert.ok(q.lines.some((l) => /world fe resumed/.test(l)));
+  await q.closeAll();
+});
+
 test('exit 75 (the world asks for a planned restart): restarted at once, reason planned, never a breaker failure', async () => {
   const p = pool(R, { FAKE_PLANNED_MS: '150' });
   await p.ensure(world('pl'));

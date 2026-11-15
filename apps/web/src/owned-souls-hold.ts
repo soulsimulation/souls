@@ -5,11 +5,13 @@
 export type HeldSouls = { identity: string; souls: readonly string[] };
 export type ShownSouls = { ids: readonly string[]; owner: string | null; reconnecting: boolean; held: HeldSouls | null };
 
-/** Not signed in (or sign-in still loading, as Clerk is after a reload): who this is is unknown, so nothing is shown and
+/** Sign-in still loading (`authReady` false, as Clerk is after a reload, until it knows the account): this tab's last
+ *  list stays on screen, marked reconnecting (#2368), never an empty navbar in between. Signed out: nothing is shown and
  *  the list is kept for when the same identity is back. Another identity, or a welcome without Me, drops it. */
-export function shownOwnedSouls(held: HeldSouls | null, authed: boolean, identity: string | null, me: { userId: string; souls: readonly string[] } | null, awaitingWelcome: boolean): ShownSouls {
+export function shownOwnedSouls(held: HeldSouls | null, authed: boolean, identity: string | null, me: { userId: string; souls: readonly string[] } | null, awaitingWelcome: boolean, authReady = true): ShownSouls {
   const none = (keep: HeldSouls | null): ShownSouls => ({ ids: [], owner: null, reconnecting: false, held: keep });
   if (me) return { ids: me.souls, owner: me.userId, reconnecting: false, held: authed && identity === me.userId ? { identity, souls: [...me.souls] } : held };
+  if (!authReady && held) return { ids: held.souls, owner: held.identity, reconnecting: held.souls.length > 0, held };
   if (!authed || !identity) return none(held);
   if (held?.identity !== identity || !awaitingWelcome) return none(null);
   return { ids: held.souls, owner: held.identity, reconnecting: held.souls.length > 0, held };

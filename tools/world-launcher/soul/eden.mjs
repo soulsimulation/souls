@@ -3950,6 +3950,15 @@ export const RETRY = { tries: 6, baseMs: 1_000, capMs: 60_000, busyWaits: 3 };
 const TIME_SCALE = Number(process.env.EDEN_TIME_SCALE) > 0 ? Number(process.env.EDEN_TIME_SCALE) : 1; // tests only
 const pause = (ms) => sleep(ms * TIME_SCALE);
 const WAKE_HELD_MS = soulWake.HELD_MS * TIME_SCALE;   // #1968
+// #2380: an agent's harness kills a shell command after about 2 minutes (Claude Code: 120 s). So every command but the
+// background ones (serve, listen, dashboard) answers within COMMAND_MS, its retries and waits included: a wait that would
+// end past it is not begun, a request gets only what is left (at least 3 s), and the command answers what it has. A rerun
+// keeps the same key, so nothing runs twice.
+export const COMMAND_MS = Number(process.env.EDEN_COMMAND_MS) > 0 ? Number(process.env.EDEN_COMMAND_MS) : 75_000;   // tests set less
+export const BACKGROUND = new Set(["serve", "listen", "dashboard"]);
+let COMMAND_END = Infinity;
+/** Whether a pause of `ms` (scaled as pause scales it) would end past this command's time. */
+const pastEnd = (ms) => Date.now() + ms * TIME_SCALE > COMMAND_END;
 // How long `serve` waits for the child it starts to answer, while that child is still running (#1244).
 const SERVE_START_MS = 60_000;
 // #2084: the longest a command's request waits in serve's queue behind this Soul's other requests before serve refuses it itself
@@ -4157,6 +4166,7 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
   method ??= body ? "POST" : "GET";
   const cls = retry ? retryClass(method, path) : "none";
   timeoutMs ??= cls === "read" ? 25_000 : cls === "keyed" ? 40_000 : 90_000;
+  timeoutMs = Math.min(timeoutMs, Math.max(3_000, COMMAND_END - Date.now()));   // #2380
   const headers = { "content-type": "application/json" };
   if ((as === "soul" || as === "owner") && s.token) headers.authorization = `Bearer ${s.token}`;
   if (as === "dev" && s.identity) headers.authorization = `Bearer dev:${s.identity}`;
@@ -4167,14 +4177,14 @@ async function call(path, { method, body, as = "soul", timeoutMs, recoverRead = 
     const r = await callOnce(url, { method, headers, body, timeoutMs, recoverRead });
     if (r.load && r.load !== "green") calm(`the world is under load (${r.load}); answers may be slow`);
     worldNote(r.data);
-    const refused = r.status === 429 || r.status === 503, waitOut = (isBusy(r.status, r.data) || (isStalled(r.status, r.data) && stallRetries(cls, r.data, once))) && cls !== "none" && busy < RETRY.busyWaits && !actOverLimit(path, r.data);
-    const waitMs = waitOut ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null;
+    const refused = r.status === 429 || r.status === 503, canWait = (isBusy(r.status, r.data) || (isStalled(r.status, r.data) && stallRetries(cls, r.data, once))) && cls !== "none" && busy < RETRY.busyWaits && !actOverLimit(path, r.data);
+    const waitMs = canWait ? statedJitter(r.retryAfterMs ?? Math.max(1_000, fullJitter(busy + 2))) : null, waitOut = canWait && !pastEnd(waitMs);
     if (keepSlowed) { /* a lookup about an earlier refusal neither adds one nor clears it */ }
     else if (refused) noteRefusal(path, r, waitOut ? "retry" : slowedNext ?? (cls !== "keyed" ? "none" : once ? "check" : "verify"), waitMs ?? r.retryAfterMs);
     else if (r.status >= 200 && r.status < 500) clearSlowed(path);
     if (r.status === 0 && cls !== "none") {
-      if (++failed < RETRY.tries && !r.data.error.proxy) {
-        const ms = fullJitter(failed - 1);
+      const ms = fullJitter(failed);
+      if (++failed < RETRY.tries && !r.data.error.proxy && !pastEnd(ms)) {
         process.stderr.write(`the world did not answer (${r.data.error.message.slice(0, 80)}); trying again in ${secs(ms)} (try ${failed + 1} of ${RETRY.tries})\n`);
         if (RECORD) recordWrite("wait", { why: "unanswered", path, waitMs: ms, try: failed + 1 });
         await pause(ms); continue;
@@ -4566,19 +4576,30 @@ function accountOk(r, what, a, id) {
   return ok(r, what);
 }
 /** #2246 (account-grant/1): with a login, one of the account's Souls comes here with no code and no click. The world answers
- *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. The last device to ask wins. */
+ *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. #2401 (D1): with no agent
+ *  connected it comes freely; while one is connected the world refuses and names that device, and `--move` forces it. */
 async function accountPair(id, a) {
   const s = load(), was = s.pendingApproval;
   const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
     : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const { soulId, ...body } = pending.input;
+  let named = HOME?.config().souls[id]?.name;
   if (pending !== was) {   // #2257 A6: who holds it now, so the answer can say where it was taken from
     const r = await call("/v1/agent/account", { as: "account" }), it = r.status === 200 ? (r.data?.souls ?? []).find((x) => x.id === id) : null;
     if (it?.control?.held) pending.from = holderLabel(it);
+    named ??= it?.name;
   }
-  const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
+  const r = await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body: MOVE ? { ...body, move: true } : body });
+  if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") throw connectedElsewhere(soulHome.plainName(named) || id, r.data);
+  const d = accountOk(r, "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
+}
+/** #2401, #2050: the world refused a take while the Soul's agent is connected: name the device and the `--move` command. */
+function connectedElsewhere(who, data) {
+  const from = String(data?.heldBy ?? "").trim().slice(0, 80) || "another device";
+  const again = [CLI, ...process.argv.slice(2).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)), "--move"].join(" ");
+  return new Error(`soul.held-elsewhere: ${who}'s agent is connected now from ${from}. Run there, or add --move to take control here, which disconnects it. Next: ${again}`);
 }
 /** #2246: one of the account's Souls in this world by name, folded as the world folds names. Two with one name is the person's to choose. */
 async function accountSoulNamed(who, a, what) {
@@ -4594,7 +4615,7 @@ const pairLabel = () => (HOME ? `eden ${VERSION} on ${HOME.device().name}` : "ed
 /** #2257 A6: the device an agent holds a Soul from, as the world labels it. */
 const holderLabel = (it) => String(it.agent?.label ?? "").trim().slice(0, 80) || "another device";
 /** #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person. With no
- *  memory for it in this home, its memory stayed there: export there, import here. The last device to ask still wins. */
+ *  memory for it in this home, its memory stayed there: export there, import here. */
 function takenNotice(id, name, from) {
   if (!from) return {};
   const who = soulHome.plainName(name) || id, mem = HOME ? resolvePath(HOME.soul(id).dir, "..", "memory") : null;
@@ -4719,7 +4740,9 @@ async function ownCreate(name) {
 }
 /** Poll GET /v1/lifecycle/<requestId> (every 2 s, or the world's Retry-After) until the arrival is ready, then pair. */
 async function finishCreate(p, firstWaitMs) {
-  const path = `/v1/lifecycle/${p.requestId}`, t0 = Date.now(), deadline = t0 + LIFECYCLE_WAIT.totalMs * TIME_SCALE;
+  // #2380: the wait is the configured one, or what is left of the command's time when that is shorter; the words name it
+  const path = `/v1/lifecycle/${p.requestId}`, t0 = Date.now(), whole = LIFECYCLE_WAIT.totalMs * TIME_SCALE, span = Math.min(whole, COMMAND_END - t0);
+  const deadline = t0 + span, stated = secs(span < whole ? span : LIFECYCLE_WAIT.totalMs);
   let waitMs = Math.max(LIFECYCLE_WAIT.everyMs, firstWaitMs ?? 0), first = firstWaitMs !== undefined;
   for (;;) {
     if (!first) {
@@ -4740,9 +4763,9 @@ async function finishCreate(p, firstWaitMs) {
     first = false;
     if (Date.now() + waitMs * TIME_SCALE > deadline) {
       noteRefusal("/v1/souls", { status: 503, data: { code: "lifecycle-pending" } }, "none", null);
-      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${secs(LIFECYCLE_WAIT.totalMs)}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
+      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${stated}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
     }
-    calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${secs(LIFECYCLE_WAIT.totalMs)})`);
+    calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${stated})`);
     await pause(waitMs);
   }
 }
@@ -4810,7 +4833,10 @@ async function seatFor(kept) {
 async function devPair(id) {
   return pairingTurn(async () => {
     if (HOME && (await connectedAlready(id)) === true) return false;
-    const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
+    // #2050: the #2401 move rule: free with no agent connected; while one is, refused naming it unless --move.
+    const r = await call(`/v1/souls/${id}/pair`, { as: "dev", body: MOVE ? { move: true } : {} });
+    if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") throw connectedElsewhere(HOME?.config().souls[id]?.name ?? id, r.data);
+    const c = ok(r, "pair").code;
     const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
     save({ token: t.token, soul: id });
     return true;
@@ -4849,10 +4875,10 @@ async function approval(action = "status") {
     save({ pendingApproval: undefined });
     return publicApproval(r.approval ?? r, s.world);
   }
-  const deadline = Date.now() + (action === "wait" ? 15 * 60_000 : 0);
+  const deadline = Math.min(Date.now() + (action === "wait" ? 15 * 60_000 : 0), COMMAND_END - 3_000);   // #2380: `approval wait` again resumes
   for (;;) {
     const r = await call("/v1/agent/approval/poll", { as: "none", body, timeoutMs: 30_000 });
-    if (r.status === 0 || r.status === 429 || r.status >= 500) { await sleep(3000); continue; }
+    if ((r.status === 0 || r.status === 429 || r.status >= 500) && Date.now() + 3000 < deadline) { await sleep(3000); continue; }
     const d = ok(r, "approval"), a = d.approval ?? d, token = d.token ?? a.token;
     if (a.status === "ready" && token) {
       if (!token.startsWith(`sim_${a.soulId}_`)) throw new Error("Approval returned a credential for a different Soul; nothing saved.");
@@ -4965,6 +4991,7 @@ async function loginWait() {
     }
     if (q.status === "ready") { clear(); return { login: "ended", requestId: q.id, why: "The login was approved, but it has already ended.", next: `${CLI} login` }; }
     if (q.status && q.status !== "pending") { clear(); const end = requestEnd(q); return { login: end, requestId: q.id, ...(REQUEST_ENDED[end] ? { why: REQUEST_ENDED[end] } : {}), next: end === "replaced" ? `${CLI} login wait` : `${CLI} login` }; }
+    if (pastEnd((d ? p.interval ?? 3 : 3) * 1000)) return { login: "pending", requestId: p.requestId, next: `${CLI} login wait` };   // #2380
     await pause((d ? p.interval ?? 3 : 3) * 1000);
   }
 }
@@ -5095,6 +5122,7 @@ async function retireWait() {
       return { retire: "ready", soul, retired: true, ...(here ? { here: "marked retired in this home; its memory stays here" } : {}) };
     }
     if (q.status && q.status !== "pending") { clear(); const end = requestEnd(q); return { retire: end, soul, retired: false, why: `${REQUEST_ENDED[end] ? REQUEST_ENDED[end] + " " : ""}Nothing was retired, and nothing changed here.`, ...(end === "replaced" ? { next: `${CLI} retire wait` } : {}) }; }
+    if (pastEnd((d ? p.interval ?? 3 : 3) * 1000)) return { retire: "pending", soul, next: `${CLI} retire wait` };   // #2380
     await pause((d ? p.interval ?? 3 : 3) * 1000);
   }
 }
@@ -5535,6 +5563,15 @@ export function parseActionArgs(input) {
 // id is an id, as a plan step is: an offer with no target (`pray`) has no colon, and the world refuses an id it does not
 // offer. With --wait it then long-polls until the receipt ends or an owner/social notification interrupts.
 const OFFER_ID = /^[a-z][\w-]*(?::\S+)?$/i;
+/** #2380 A1: the owner's card after an act made for it failed without the world closing it. A rerun that failed again
+ *  (`final`) is given up: the card closes `failed` with why, so the owner sees it. Otherwise the agent may still serve it
+ *  (another id, a rerun), and an agent's close is final, so the answer carries the exact close to run if it doesn't. */
+async function cardAfter(message, why, final) {
+  const line = clipped(why.replace(/\s+/g, " ").trim()).text, step = { close: `${CLI} ack ${message} ${JSON.stringify(line)} --close failed` };
+  if (!final) return step;
+  const shut = await closing(message, "failed", line).catch(() => ({}));
+  return shut.closed ? { closed: "failed", card: line } : shut.already ? {} : step;
+}
 async function act(...argv) {
   const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
   if (!args.length) throw new Error('usage: act <offered id> [params-json] [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
@@ -5565,7 +5602,7 @@ async function act(...argv) {
   let w = await keyedWrite("/v1/edge/act", forId ? { ...body, for: forId, ...(implicit ? { forDefault: true } : {}) } : body, { key, once: true });
   // without the default link: a key of its own (the first one's answer is kept), the same clientRef, so it is still one act
   if (implicit && w.r.status === 400 && /owner message/.test(w.r.data?.error?.message ?? "")) { save({ lastAcked: undefined, lastAckedAt: undefined, lastAckedActed: undefined }); w = await keyedWrite("/v1/edge/act", body, { key: sideKey(w.key), ref: w.ref, once: true }); }
-  if (w.unconfirmed) return unconfirmed("act", w);
+  if (w.unconfirmed) { const u = unconfirmed("act", w); return { ...u, ...(forId ? await cardAfter(forId, `Couldn't do it: ${REASON[u.code] ?? "the world did not answer"}.`, w.resent) : {}) }; }
   if (actOverLimit("/v1/edge/act", w.r.data)) {   // #2107: not taken and not resent; exit 75, try later
     const e = w.r.data?.error ?? w.r.data ?? {};
     process.exitCode = 75;
@@ -5582,8 +5619,9 @@ async function act(...argv) {
   }
   if (!d.accepted) {
     noteSteerRefusal(parsed, d);
-    if (json) return d;
-    return { accepted: false, code: d.code, reason: d.reason, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
+    if (json) return { ...d, ...card };
+    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -5804,7 +5842,8 @@ async function waitRaw(asked = 45, receiptId, { untilHeld = true } = {}) {
   const s = load();
   const { seconds, capped } = waitSpan(asked);
   receiptId = /^r_/.test(String(receiptId ?? "")) ? receiptId : s.lastReceipt;
-  const t0 = Date.now(), until = t0 + seconds * 1000;
+  // #2380: within the command's time, keeping 5 s for the last long-poll's answer and the receipt read
+  const t0 = Date.now(), want = t0 + seconds * 1000, until = Math.min(want, COMMAND_END - 5_000), cut = until < want;
   let cursor = s.cursor ?? "c_0", ownerMark = s.ownerMark, ownerWrote = 0, gap = false;
   const since = cursor;
   const seen = [];
@@ -5837,7 +5876,7 @@ async function waitRaw(asked = 45, receiptId, { untilHeld = true } = {}) {
     if (seen.some((e) => /^(invite|conversation\.(invite|turn))/.test(e.kind ?? ""))) break;
     if (!receiptId && seen.length) break;
   }
-  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, ...(capped ? { waitCapped: `${capped}s, the most a wait holds; wait again while done is false` } : {}), since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
+  const out = { waited: `${Math.round((Date.now() - t0) / 1000)}s`, ...(capped || cut ? { waitCapped: cut ? `${Math.round((until - t0) / 1000)}s, the most one command waits; still going: \`wait\` again while done is false` : `${capped}s, the most a wait holds; wait again while done is false` } : {}), since, cursor, receivedAt: now(), events: seen.map(spoken), ...(gap ? {gap: true} : {}), ...(addressed ? { addressed: addressed.map((a) => ({ ...a, untrusted: true })) } : {}), ...(stalled ? { stalled } : {}) };
   if (receiptId) {
     const rec = await receipt(receiptId).catch((e) => ({ id: receiptId, error: String(e.message) }));
     out.receipt = rec;
@@ -6912,7 +6951,7 @@ async function serveForeground() {
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0, heldListens = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); runWake(); };
   // #1929: the wake rules, against what this process stores, every 2 s and whenever something arrives. Fired ones are queued.
   const runWake = () => {
@@ -7318,14 +7357,14 @@ async function serveForeground() {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
       return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, version: VERSION, since: start,
-        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, held: { waits: heldWaits, listens: heldListens }, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { await comeBack(); setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); if (c.wake.awayOff) await comeBack(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
     if (m.op === "http") {
       if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
-      if (path === "/v1/edge/inbox/listen") return localListen(m.url, m.reader);
+      if (path === "/v1/edge/inbox/listen") { heldListens++; try { return await localListen(m.url, m.reader); } finally { heldListens--; } }
       if (path === "/v1/edge/wait" && m.method !== "POST") { heldWaits++; try { return await heldWait(m); } finally { heldWaits--; } }
       const cached = m.method === "GET" && /^\/v1\/edge\/receipts\/([^/]+)$/.exec(path);
       const known = cached ? st.receipts[decodeURIComponent(cached[1])] : null;
@@ -7907,8 +7946,8 @@ Your person says "connect my account": steps 1 and 2. "Move my Soul to this comp
    Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
-4. \`${CLI} adopt <name|id>\` brings one here, no code; the device that had it is disconnected. Tell your
-   person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
+4. \`${CLI} adopt <name|id>\` brings one here, no code, when no agent is connected for it; while one is, it is
+   refused naming that device, and \`--move\` takes it anyway. Tell your person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
    \`retire <name|id>\` asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` ends on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
@@ -8297,6 +8336,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (old?.warn) process.stderr.write(`warning: ${old.warn}\n`);
   const before = FOLDER_MOVES.has(cmd) ? folderOf() : null, pendingUpdate = startUpdateCheck(cmd);
   startFeedCheck(cmd, argv);
+  if (!BACKGROUND.has(cmd)) COMMAND_END = Date.now() + COMMAND_MS;   // #2380
   fn(...argv).then(async (out) => {
     if (before !== null && folderOf() !== before && out && typeof out === "object" && !Array.isArray(out)) out = { ...out, ...(await followFolder()) };
     if (out && typeof out === "object" && !Array.isArray(out)) {
