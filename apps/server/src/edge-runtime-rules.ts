@@ -91,8 +91,11 @@ export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | unde
   const engine = host.engine as unknown as ReachEngine, sp = engine.rt?.services?.spatial;
   if (!engine.reachV1 || !engine.standableNearV1 || !sp) return undefined;
   const opRef = (d: string) => d.replace(/^core-/, 'core/');
-  // a door counts on the ground, or on the upper level nearest its height (levels are shared by height)
-  const levelAt = (y: number, base: number) => y < base + 1 ? 0 : sp.scene.levels.filter((l) => l.id !== 0 && Math.abs(l.y - y) <= 0.6).sort((a, b) => Math.abs(a.y - y) - Math.abs(b.y - y) || a.id - b.id)[0]?.id;
+  // a door counts on the ground, or on an upper level near its height. Levels are many and close in height (each
+  // building's floors), so the nearest by height may be another building's: each is tried, nearest first, and the first
+  // with standing room at the point is the one (#2438 fix: an arcade's upstairs was probed on a neighbour's level, so a
+  // prop move that cut it off went unseen)
+  const levelsAt = (y: number, base: number) => y < base + 1 ? [0] : sp.scene.levels.filter((l) => l.id !== 0 && Math.abs(l.y - y) <= 0.6).sort((a, b) => Math.abs(a.y - y) - Math.abs(b.y - y) || a.id - b.id).map((l) => l.id);
   return {
     settle: () => engineSettled(god.model, 10000),
     front(id) {
@@ -106,9 +109,11 @@ export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | unde
       return engine.standableNearV1!(Math.hypot(p[0] - bw.x, p[1] - bw.z) > Math.hypot(q[0] - bw.x, q[1] - bw.z) ? p : q, 0, undefined, HUMAN_RADIUS + 0.05, 6);
     },
     reach(from, to, y, base) {
-      const level = levelAt(y, base); if (level === undefined) return null;
-      const s = engine.standableNearV1!(to, level, undefined, HUMAN_RADIUS + 0.05, 3); if (!s) return null;
-      return engine.reachV1!({ p: from, level: 0 }, { p: s, level }).ok;
+      for (const level of levelsAt(y, base)) {
+        const s = engine.standableNearV1!(to, level, undefined, HUMAN_RADIUS + 0.05, 3);
+        if (s) return engine.reachV1!({ p: from, level: 0 }, { p: s, level }).ok;
+      }
+      return null;
     },
   };
 }
