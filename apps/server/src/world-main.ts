@@ -15,6 +15,7 @@ import { Db } from './db.ts';
 import { buildApp } from './http.ts';
 import { Hub } from './hub.ts';
 import { handleMcp } from './mcp.ts';
+import { setSecurityHeaders } from './security-headers.ts';
 import { Souls } from './souls.ts';
 import { WorldHost } from './world.ts';
 import { adoptBootRuntimePoliciesV1 } from './edge-runtime-rules.ts';
@@ -174,7 +175,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
 
   const server = createServer();
   const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, config.worldPath);
-  server.on('upgrade', req => { req.url = stripWorldPath(req.url); });
+  server.on('upgrade', req => { req.url = stripWorldPath(req.url); host.wake(); });   // #2384: a viewer wakes a sleeping still world
   hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
   host.watched = () => hub.clients.size > 0;   // #2298 A4b
   host.listeners.push({ afterTick: () => { load.shared[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
@@ -261,7 +262,8 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
       ...(readMode === 2 ? { world: { dbPath: db.path, worldId: host.worldId } } : {}), shared: load.shared, admission, init: source.init, ask: source.ask, writes: source.writes,
       inbox: (soulId) => { const ib = (app as unknown as { agentInbox?: { touch(s: object): void; view(s: object): unknown } }).agentInbox, m = host.minds.get(soulId); if (!ib || !m) return null; const scope = { scope: `soul:${soulId}`, owner: m.owner }; ib.touch(scope); return ib.view(scope); },
       auth: (token) => { const s = souls.soulFromToken(token); return s && !s.retired_at && s.world_id === host.worldId ? { soulId: s.id, account: accountTag(s.owner) } : { soulId: null }; },
-      run: async (f) => { const r = await app.fetch(new Request('http://127.0.0.1' + f.url, { method: f.method, headers: f.headers, ...(f.body && f.method !== 'GET' && f.method !== 'HEAD' ? { body: f.body } : {}) }), { simAdmitted: true });
+      run: async (f) => { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); }   // #2384: a read handed to main brings a sleeping world to now, as any request does
+        const r = await app.fetch(new Request('http://127.0.0.1' + f.url, { method: f.method, headers: f.headers, ...(f.body && f.method !== 'GET' && f.method !== 'HEAD' ? { body: f.body } : {}) }), { simAdmitted: true });
         return { status: r.status, headers: [...r.headers], body: await r.arrayBuffer() }; } }).start();
     source.onDelta((d) => pool.delta(d), () => pool.reinit());
     readPool = pool;   // #2416: the world's own (startWorld returns it; tests read pool.status())
@@ -297,7 +299,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
       // catch-up ends it with the clock never started, so a held write is refused, never applied unticked
       if (res.destroyed || req.socket.destroyed) return step();
       res.once('finish', step); res.once('close', step);
-      if (closing) res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); else serve(req, res);
+      if (closing) { setSecurityHeaders(res); res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); } else serve(req, res);
     }); }).finally(() => { held--; });
   }
   /** #2297 A5: GET /__sim/still, for the launcher only (loopback, not forwarded): the still contract of #2241. Still also
@@ -352,10 +354,11 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     }
     if (!catchingUp) { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); } }   // #2298 A4: a request first brings a still world to now
     if (req.method === 'GET' && req.url === '/__sim/still') {
+      setSecurityHeaders(res);
       if (!loopback(req.socket.remoteAddress) || req.headers['x-forwarded-for'] !== undefined) { res.writeHead(404).end(); return; }
       res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(stillAnswer())); return;
     }
-    if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
+    if(edenCore&&closing){setSecurityHeaders(res);res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}   // #1017: the shared headers, as every answer
     const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
     if (write) {
       const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
@@ -368,7 +371,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   }
   function serve(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
     req.url = stripWorldPath(req.url);
-    if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
+    if (req.url?.startsWith('/mcp')) { setSecurityHeaders(res); handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
     void listener(req, res);
   }
 
