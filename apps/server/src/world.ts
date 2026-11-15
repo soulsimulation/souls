@@ -47,6 +47,7 @@ import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { bootPhase, bootTick } from './load/boot-progress.ts';
+import { S } from './load/shared.ts';
 import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
@@ -731,6 +732,19 @@ export class WorldHost {
   onFault?: (name: string, error: unknown, step?: StepId & { tick: number }) => void;
   /** #2366: a halt was recorded by name in this process (a glitch of rung `halt`): the launcher restarts a halted world. */
   haltNamed = false;
+  /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in (its stable id) for the
+   *  watchdog. Unset: none. */
+  stepSlots?: Float64Array;
+  /** #2378 A2: a step (a listener's afterTick, by its stable id: stepIdOf) that ended the process on two boots in a row
+   *  (load/restart-loop.ts): skipped from `fromTick` until `untilTick`, named once in the log and the glitch counts
+   *  (`world.step-quarantined`), so the world comes up and runs on. By id, not by place: `listeners` changes at runtime. */
+  quarantinedStep?: { id: number; name: string; fromTick: number; untilTick: number; deaths: number };
+  private quarantineSkips = 0;
+  private skipQuarantinedStep(q: { id: number; name: string; fromTick: number; untilTick: number; deaths: number }, tick: number, step: StepId) {
+    if (this.quarantineSkips++) return;
+    console.error(`[world] step quarantined: ${step.name} skipped from tick ${tick} until tick ${q.untilTick} (it ended the world on ${q.deaths} boots in a row: ${q.name}); the rest of the tick runs`);
+    this.recordGlitch('contained', new Error(`world.step-quarantined: ${step.name}`), { rule: 'world.step-quarantined', tick, evidence: { step: step.name, id: q.id, fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths } });
+  }
   private frame() {
     if (!this.timer) return;
     if (this.paused || !this.clockAvailable) { this.cancelFrameBatch(); this.last = performance.now(); return; }
@@ -837,9 +851,15 @@ export class WorldHost {
     const tickContext = Object.freeze({ startedAtMs: t0 });
     // #2366: each listener's afterTick is its own step: one that throws is reported by its stable identity and the rest of the
     // tick (the other listeners, the broadcast, the heartbeat, the snapshot) runs on. Without onFault (tests, tools) it throws.
+    // #2378 A2: the watchdog sees which step a stuck tick is in (S.step: its id + 1), and a quarantined step is skipped.
+    const sh = this.stepSlots, q = this.quarantinedStep;
     for (const l of this.listeners) { if (!l.afterTick) continue;
+      const step = sh || q ? stepIdOf(l) : null;
+      if (q && step!.id === q.id && now >= q.fromTick && now < q.untilTick) { this.skipQuarantinedStep(q, now, step!); continue; }
+      if (sh) { sh[S.stepTick] = now; sh[S.step] = step!.id + 1; }
       try { l.afterTick(now, tickContext); }
-      catch (error) { if (!this.onFault) throw error; this.onFault('world.fault.step', error, { ...stepIdOf(l), tick: now }); } }
+      catch (error) { if (!this.onFault) throw error; this.onFault('world.fault.step', error, { ...(step ?? stepIdOf(l)), tick: now }); }
+      finally { if (sh) sh[S.step] = 0; } }
     if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
     // #2298: a jump's landing sends what the ticks it covered would have (a batch, a heartbeat, the periodic kernel view)
