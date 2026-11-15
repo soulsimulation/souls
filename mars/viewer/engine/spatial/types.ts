@@ -1,11 +1,11 @@
 // Spatial description consumed by navigation and validation. It is derived
 // from (static base geometry + current world entities) so construction changes
 // automatically change what is walkable and what blocks (spec §10).
-import type { OBB2, Vec2 } from '../core/math.ts';
+import { dcos, dsin, type OBB2, type Vec2 } from '../core/math.ts';
 
 /** doors-pass/1: the two standing points 0.75 m out from a closed door gap's faces (the gap box's thin axis). */
 export function doorSides(o: Obstacle): [Vec2, Vec2] {
-  const c = Math.cos(o.obb.yaw), s = Math.sin(o.obb.yaw), thinX = o.obb.half[0] <= o.obb.half[1];
+  const c = dcos(o.obb.yaw), s = dsin(o.obb.yaw), thinX = o.obb.half[0] <= o.obb.half[1];
   const n: Vec2 = thinX ? [c, s] : [-s, c], d = (thinX ? o.obb.half[0] : o.obb.half[1]) + 0.75, [x, z] = o.obb.c;
   return [[x + n[0] * d, z + n[1] * d], [x - n[0] * d, z - n[1] * d]];
 }

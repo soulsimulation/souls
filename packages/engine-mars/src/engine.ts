@@ -3125,12 +3125,14 @@ export class MarsEngine implements Engine {
     return {goal,doors:ids,goalDoors};
   }
   /** Soul Actions entry 31 (pure; review of #2397): does this plan's first walk_to go through a closed ground hand door, by
-   *  the connectivity labels (one end in an area joined to the world only by such a door, the other not)? Read before the
+   *  the connectivity labels as they stand (one end in an area joined to the world only by such a door, the other not)? Read before the
    *  walk is planned, so a long walk is planned as the passage's legs from the start. False when either end is not joined. */
   walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean{
     const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
-    const [a,b]=this.navCheckV1([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
+    // the labels as they stand (never a full relabel here: a stale answer only costs the old way, the walk then the passage)
+    const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return false;
+    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
     return !!a?.ok&&!!b?.ok&&!!a.door!==!!b.door;
   }
   /** Soul Actions entry 31 (pure): does a walk from `from` (level 0) reach this plan's first walk_to destination, a
