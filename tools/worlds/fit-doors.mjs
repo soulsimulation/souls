@@ -53,10 +53,12 @@ for (const name of names) {
   while (!done) await tick();
   const rep = await run;
 
-  const byName = new Map(tpl.batches.flatMap((b) => b.ops).filter((o) => o.op === 'place' && o.name).map((o) => [o.name, o]));
+  // a place op by its parent's name and its own (a prop's name repeats across buildings: storeroom-bench, living-table)
+  const key = (parent, name) => `${parent ?? 'world'}/${name}`;
+  const byName = new Map(tpl.batches.flatMap((b) => b.ops).filter((o) => o.op === 'place' && o.name).map((o) => [key(o.in?.parent, o.name), o]));
   let doors = 0, moved = 0, tmpN = 0;
   for (const f of rep.fitted) {
-    const op = byName.get(f.name); if (!op) { console.log(`[${name}] no op for ${f.name}`); continue; }
+    const op = byName.get(key(undefined, f.name)); if (!op) { console.log(`[${name}] no op for ${f.name}`); continue; }
     op.def = f.ref;
     const batch = tpl.batches.find((b) => b.ops.includes(op)), at = batch.ops.indexOf(op);
     const tmp = op.tmp ?? (op.tmp = `$df${++tmpN}`);
@@ -66,7 +68,8 @@ for (const name of names) {
     });
     batch.ops.splice(at + 1, 0, ...add); doors += add.length;
     for (const m of f.moves ?? []) {
-      const ent = w.god.model.entities.get(m.id), pop = ent?.name && byName.get(ent.name);
+      const ent = w.god.model.entities.get(m.id), up = ent && ent.in.parent !== 'world' ? w.god.model.entities.get(ent.in.parent)?.name : undefined;
+      const pop = ent?.name && byName.get(key(up, ent.name));
       if (pop) { pop.p = m.p; moved++; } else console.log(`[${name}] move: no op for ${m.id}`);
     }
   }
