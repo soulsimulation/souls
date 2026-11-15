@@ -411,6 +411,15 @@ test('#2440 review: the default tick service is 1 before the monitor\'s first sa
   } finally { [sharedLoad[S.sampledAt], sharedLoad[S.service5s], sharedLoad[S.heapUsedMb], sharedLoad[S.heapLimitMb]] = saved; }
 });
 
+test('#2470: a world\'s admission reads the spare-time signals from its own load numbers (#2416), not the program\'s', () => {
+  const mine = newSharedLoad(), adm = new Admission({idleShare: () => 0.9, quietTickMs: () => 10, shared: mine});
+  mine[S.sampledAt] = Date.now(); mine[S.service5s] = 0.5;
+  assert.equal(adm.spare(), false, 'its own monitor says the ticks are behind');
+  mine[S.service5s] = 1; mine[S.service1s] = 1; mine[S.tickSpentMs] = 0;
+  assert.equal(adm.spare(), true, 'its own numbers say on time, whatever the program\'s default array holds');
+  adm.close();
+});
+
 test('#2440 review: the inline fast path charges a lone act its own time, not a tick that ran before it answered', () => {
   let now = 0, ticks = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, tickSpentMs: () => ticks});
   const t = adm.request({key: 'A', god: false, route: route('POST', '/v1/edge/act')}); assert.ok('turn' in t);

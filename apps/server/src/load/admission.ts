@@ -90,7 +90,10 @@ export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>
    *  injected clock, true). */
   ticksOnTime?: () => boolean;
   /** #2416: this world's API times (default: the program's, for tests). */
-  api?: Float64Array};
+  api?: Float64Array;
+  /** #2416, #2470: this world's shared load numbers, which its monitor writes (default: the program's, for tests). The
+   *  #2440 signals above read their defaults from it, never from another world's. */
+  shared?: Float64Array};
 /** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
  *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
  *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
@@ -149,12 +152,12 @@ export class Admission {
   private tickService: () => number;
   private heapFrac: () => number;
   private ticksOnTime: () => boolean;
-  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
-    this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
+  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); const a = o.shared ?? sharedLoad; this.quietTick = o.quietTickMs ?? (() => a[S.quietTickMs]);
+    this.tickSpent = o.tickSpentMs ?? (() => a[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
     // the tick service is 1 until the monitor's first sample
-    this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1);
-    this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => sharedLoad[S.heapLimitMb] > 0 ? sharedLoad[S.heapUsedMb] / sharedLoad[S.heapLimitMb] : 0);
-    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : ticksOnTimeNow); }
+    this.tickService = o.tickService ?? (o.now ? () => 1 : () => a[S.sampledAt] > 0 ? a[S.service5s] : 1);
+    this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => a[S.heapLimitMb] > 0 ? a[S.heapUsedMb] / a[S.heapLimitMb] : 0);
+    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : () => ticksOnTimeNow(a)); }
   /** #2440: the world is green, the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE over 5 s, on
    *  time now) and the heap is below red's (SPARE_HEAP): queued requests are not held for budget. Never at amber, red or
    *  black: with spare time at amber and red, 100 Souls on a 2-core world served 4-15 % fewer ticks than without. */
