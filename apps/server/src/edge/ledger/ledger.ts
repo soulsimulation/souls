@@ -2586,7 +2586,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // Soul may open it (opened by hand on the way, closed behind); a locked or private door on the only way refuses here,
     // naming it, rather than walking round to the nearest point behind the wall. Before nav-connect/1: a Soul in a
     // closed room is not cut off when its door opens.
-    let passage: DoorPassage | undefined;
+    let passage: DoorPassage | undefined, doorRefusal: DoorPassageRefusal | undefined;
     // (review of #2397) a walk bound from upstairs to a ground place is a point walk (`mars:walk_to`, level 0): the same walk
     const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
     // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
@@ -2620,7 +2620,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const behindNP = through === true || through === null;
       const p = to && (issue || behindNP) ? this.doorPassage(soul, probe, what, behindNP) : null;
       // asked only because the labels are cold, a refusal is not proof the plan needs that door (#1508: the reachable shelf)
-      if (p && 'refuse' in p && (issue || through === true)) return {...refuse(p.code, p.reason), ...resolved};
+      // a pick-up's nearest source behind a locked door gives way to a reachable one first (#1508); the door refuses only
+      // when none does
+      if (p && 'refuse' in p && (issue || through === true)) {if (!/^pick-up:[a-z]+$/.test(capability)) return {...refuse(p.code, p.reason), ...resolved}; doorRefusal = p;}
       if (p && !('refuse' in p)) for (const walk of [p.steps, p.direct]) {const legs = [...walk.slice(0, -1), ...rest], again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
     }
     // nav-connect/1 (lane NAV): no walk from where it stands, because it stands cut off from the walkable world (an edit
@@ -2657,6 +2659,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
         if (!again || WAIT_CODES.has(again.code)) {steps = alt; issue = again; break;}
       }
     }
+    if (doorRefusal && issue && !WAIT_CODES.has(issue.code)) return {...refuse(doorRefusal.code, doorRefusal.reason), ...resolved};
     // GEST-LIVE: a standing spot whose exact point no walk reaches (the barn table's cook-together places sat 0.45 m into the
     // table's solid) is taken from the nearest standable point within 1 m of it; seats and berths keep their exact slot
     if (issue?.code === 'route.goal-blocked' && !/^(?:sit|sit-ground|lie|nap|read|rest):/.test(capability)) {

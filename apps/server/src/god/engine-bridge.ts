@@ -360,7 +360,9 @@ export class EngineBridge {
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
       moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
-      record:(soul,id,action,params={})=>{const act=this.edge!.comms?.objects.act;if(!act)return;   // #2383: a host without comms (the Eden test fixture) keeps no object record
+      record:(soul,id,action,params={})=>{const act=this.edge!.comms?.objects.act;
+        // #2383: a host without comms (the Eden test fixture) keeps no object record; said once, so a misconfigured host shows
+        if(!act){if(!noCommsWarned){noCommsWarned=true;console.warn('[world] contact: no comms on this host, object actions are not recorded');}return;}
         const r=act.call(this.edge!.comms!.objects,id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
@@ -2863,4 +2865,5 @@ function describeOp(op: Op, w: WorldModel): string {
 }
 
 /** Install the bridge on an entity world (main.ts). */
+let noCommsWarned=false;
 export function installEngineBridge(o: BridgeOptions): EngineBridge { return new EngineBridge(o); }

@@ -520,7 +520,7 @@ export class GodNav {
       // #2383: a door-fitted building's room is entered as an open doorway's was (no interior search from the door: the
       // listing offers buildings ~130 m out, and a route search per building there kept ~16 more ground tiles per sweep);
       // its centre's standing room when that lies in the room, else the room's own reach-checked goal
-      const c = room?.fitted ? near(room.at, room.level, 40) : null;
+      const c = room?.fitted && t.rooms?.length === 1 ? near(room.at, room.level, 40) : null;
       const inner = room ? (c && room.poly && inPoly(c.p[0], c.p[1], room.poly) ? c : this.goal(room, me, except)) : null;
       goal = inner;
       if (!inner) this.blocked.set(t.ref, `The interior of ${t.ref} is not reachable right now; its entrance or the route inside is blocked.`);
