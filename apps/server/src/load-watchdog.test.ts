@@ -49,12 +49,14 @@ test('#2444: a shard program has one watchdog thread for all its worlds; a stopp
     const wa = startWatchdog({dataDir: root + '/a', everyMs: 100, shared: a.shared, api: a.api});
     const wb = startWatchdog({dataDir: root + '/b', everyMs: 100, shared: b.shared, api: b.api});
     console.log('ONE ' + (wa === dog.worker && wb === dog.worker));
-    setTimeout(() => { dog.remove(root + '/a'); console.log('REMOVED'); }, 500);
+    // (removed once the thread has written both worlds' live.json: under load it starts slowly)
+    const {existsSync} = await import('node:fs');
+    const ready = setInterval(() => { if (!existsSync(root + '/a/live.json') || !existsSync(root + '/b/live.json')) return; clearInterval(ready); setTimeout(() => { dog.remove(root + '/a'); console.log('REMOVED'); }, 300); }, 50);
     setInterval(() => { a.shared[S.lastTurnAt] = b.shared[S.lastTurnAt] = Date.now(); }, 50);`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', script], {stdio: ['ignore', 'pipe', 'inherit']});
   t.after(() => child.kill('SIGKILL'));
   let out = ''; child.stdout!.on('data', (b: Buffer) => { out += b; });
-  for (let i = 0; i < 100 && !out.includes('REMOVED'); i++) await new Promise(r => setTimeout(r, 100));
+  for (let i = 0; i < 250 && !out.includes('REMOVED'); i++) await new Promise(r => setTimeout(r, 100));
   assert.match(out, /ONE true/, 'both worlds are watched by the program\'s one thread');
   await new Promise(r => setTimeout(r, 300));
   const live = (d: string) => JSON.parse(readFileSync(join(dir, d, 'live.json'), 'utf8'));
