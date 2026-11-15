@@ -6,7 +6,10 @@
 import {createHash} from 'node:crypto';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {performance as perf} from 'node:perf_hooks';
+import {performance as perf, PerformanceObserver} from 'node:perf_hooks';
+const M3 = ((globalThis as unknown as {__m2440?: {frameMs: number; gcMs?: number; gcN?: number}}).__m2440 ??= {frameMs: 0});
+M3.gcMs = 0; M3.gcN = 0;
+try { new PerformanceObserver(l => { for (const e of l.getEntries()) { M3.gcMs! += e.duration; M3.gcN!++; } }).observe({entryTypes: ['gc']}); } catch { /* measure only */ }
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
@@ -126,7 +129,7 @@ export class Admission {
   private tickService: () => number;
   /** MEASURE #2440 (never merged) */
   m = {jobs: 0, acts: 0, chargedMs: 0, chargedActMs: 0, charged300: 0, charged300Ms: 0, chargedMax: 0, ownMs: 0, ownN: 0, freeJobs: 0,
-    creditWaitMs: 0, bucketWaitMs: 0, sweptActs: 0, budgetMsSum: 0, budgetN: 0, creditMin: 0, spareMs: 0, noIdleMs: 0, noServiceMs: 0, blackMs: 0,
+    creditWaitMs: 0, long: [] as unknown[], longGc: 0, longFrame: 0, longTick: 0, longOwn: 0, longRest: 0, longRaw: 0, longFinFirst: 0, allGc: 0, allFrameOut: 0, allRest: 0, reqIn: 0, bucketWaitMs: 0, sweptActs: 0, budgetMsSum: 0, budgetN: 0, creditMin: 0, spareMs: 0, noIdleMs: 0, noServiceMs: 0, blackMs: 0,
     level: {green: 0, amber: 0, red: 0, black: 0} as Record<Level, number>, est: {} as Record<string, number>, idleSum: 0};
   private mAt = 0; private mStall: {kind: 'credit' | 'bucket'; at: number} | null = null;
   private mFlush(dir: string) {
@@ -311,8 +314,13 @@ export class Admission {
         if (i < 0) { this.mStallStart('bucket', now); this.later(FRAME_MS); return; }
         this.mStallEnd(now);
         const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
+        const g0 = M3.gcMs ?? 0, f0 = M3.frameMs, o0 = this.m.ownMs, r0 = this.m.reqIn; let finFirst = false;
         j.settle('run');
-        await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
+        await Promise.race([j.finished.then(() => { finFirst = true; }), this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
+        { const raw = this.now() - now, tk = this.tickSpent() - ticks, gc = (M3.gcMs ?? 0) - g0, fr = Math.max(0, M3.frameMs - f0 - tk), own = this.m.ownMs - o0, rest = Math.max(0, raw - tk) - gc - fr - own;
+          this.m.allGc += gc; this.m.allFrameOut += fr; this.m.allRest += rest;
+          if (raw - tk >= 300) { this.m.longGc += gc; this.m.longFrame += fr; this.m.longTick += tk; this.m.longOwn += own; this.m.longRest += rest; this.m.longRaw += raw; if (finFirst) this.m.longFinFirst++;
+            if (this.m.long.length < 200) this.m.long.push({id: j.route.id, raw: Math.round(raw), tick: Math.round(tk), gc: Math.round(gc), frameOut: Math.round(fr), own: Math.round(own), rest: Math.round(rest), fin: finFirst, req: this.m.reqIn - r0, q: this.queue.length}); } }
         // #2440: the turn waited on spans the next loop pass, whose timers phase runs the tick (and its long holds): those
         // are the tick's, not this job's (charged, they cost the requests ~20 s of credit after a 3 s hold)
         this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free);
@@ -380,7 +388,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   return async (c, next) => {
     const path = c.req.path, edge = path.startsWith('/v1/edge/') || path.startsWith('/v1/god/') || path.startsWith('/v1/world/');
     if (!edge) return next();
-    const t0 = performance.now();
+    const t0 = performance.now(); adm.m.reqIn++;
     const lv = level(); (c.set as (k: string, v: unknown) => void)(LOAD_KEY, lv);
     const r = classify(c.req.method, path), token = bearer(c);
     // admitted already by the MessagePort front end (a read worker's forward, admissionPort below); the env is set

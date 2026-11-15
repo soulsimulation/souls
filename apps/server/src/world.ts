@@ -545,7 +545,7 @@ export class WorldHost {
   }
   private startFrameTimer() {
     const generation = this.clockGeneration;
-    const timer = setInterval(() => { if (generation === this.clockGeneration && this.timer === timer) this.frame(); }, TICK_MS / this.pace);
+    const timer = setInterval(() => { if (generation === this.clockGeneration && this.timer === timer) { const m0 = performance.now(); try { this.frame(); } finally { const g = globalThis as unknown as {__m2440?: {frameMs: number}}; (g.__m2440 ??= {frameMs: 0}).frameMs += performance.now() - m0; } } }, TICK_MS / this.pace);
     this.timer = timer;
   }
   /** Stop/pause discard the pending tick batch, never queued inputs or accepted events; existing carry is retained. */
@@ -760,7 +760,7 @@ export class WorldHost {
     this.frameImmediate = setImmediate(() => {
       if (this.frameBatch !== batch || batch.generation !== this.clockGeneration) return;
       this.frameImmediate = null;
-      this.pumpFrame(batch);
+      const m0 = performance.now(); try { this.pumpFrame(batch); } finally { const g = globalThis as unknown as {__m2440?: {frameMs: number}}; (g.__m2440 ??= {frameMs: 0}).frameMs += performance.now() - m0; }
     });
   }
 
