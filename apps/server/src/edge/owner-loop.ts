@@ -255,8 +255,9 @@ export class OwnerLoop {
         if (!r) continue;   // dropped at the next sweep: nothing the owner sees
         if (!OPEN.includes(r.phase)) {at(l.ride?.since !== undefined && this.world?.aboard?.(soul) ? l.ride.since + RIDE_TICKS : tick + 1); continue;}
         if (l.late) continue;   // its end closes it (`ended`)
-        // #2452: a sit closes its message once seated: each sweep looks until it is (holding needs a second of the pose)
-        if (SITS.has(verbOf(r as EdgeReceipt))) {at(Math.max(tick + 1, r.acceptedTick + 20)); continue;}
+        // #2452: a started sit closes its message once seated: each sweep looks until it is (holding needs a second of the
+        // pose); a sit not started yet waits as any act does
+        if (r.phase === 'started' && SITS.has(verbOf(r as EdgeReceipt))) {at(Math.max(tick + 1, r.acceptedTick + 20)); continue;}
         at(r.acceptedTick + Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0)));
       } catch {at(tick + 1);}
     }
@@ -277,7 +278,12 @@ export class OwnerLoop {
     // end writes nothing more
     if (!l.late && SITS.has(verbOf(r as EdgeReceipt)) && this.world?.holding?.(soul, id)) {
       this.forget(id);
-      for (const one of [l, ...(l.also ?? [])]) this.report(one, r as EdgeReceipt, {text: 'Sitting now.', outcome: 'done'});
+      for (const one of [l, ...(l.also ?? [])]) {
+        // another act linked to this message still runs: it closes the message when it ends (#1295)
+        const other = this.running(one.scope, one.message, id);
+        if (other) this.inbox.serverProgress?.(one.scope, one.message, `now: sitting; ${other.capability} still going`);
+        else this.report(one, r as EdgeReceipt, {text: 'Sitting now.', outcome: 'done'});
+      }
       return;
     }
     // a timed act gets the time it asked for, and a minute more, before it counts as overlong
