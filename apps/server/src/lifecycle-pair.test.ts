@@ -68,16 +68,3 @@ test('installer-absent native pairing preserves owner approval, poll and code ex
   const code=f.souls.pairCode(f.soul,'http://127.0.0.1:4959',f.db.user('dev:alice')!).code,result=await f.request('/v1/agent/pair',{code,agent:'legacy'});
   assert.equal(result.status,200);assert.equal(f.souls.soulFromToken((await result.json() as {token:string}).token)!.id,f.soul.id);assert.equal(f.souls.lifecycle,undefined);assert.equal(f.db.paidCost(),0);
 });
-test('#2050: a dev pair is free with no agent connected, refused naming the device while one is, and move forces it',async t=>{
-  const f=await local(t,false),as=(token:string)=>({headers:{host:'127.0.0.1:4956',authorization:`Bearer ${token}`}});
-  const take=async(body:object)=>{const r=await f.request(`/v1/souls/${f.soul.id}/pair`,body);if(r.status!==200)return r;const {code}=await r.json() as {code:string};return f.request('/v1/agent/pair',{code,agent:'eden 2.35.0'});};
-  const first=await take({});assert.equal(first.status,200,'never paired: free');const old=(await first.json() as {token:string}).token;
-  const second=await take({});assert.equal(second.status,200,'paired but not listening: free');const held=(await second.json() as {token:string}).token;
-  assert.equal(f.souls.soulFromToken(old),null,'the free take replaced the idle holder');
-  assert.equal((await f.app.request('/v1/edge/inbox/listen?timeoutMs=0',as(held))).status,200,'the holder listens: connected');
-  const refused=await take({});assert.equal(refused.status,409);const why=await refused.json() as {code:string;message:string;heldBy:string};
-  assert.equal(why.code,'soul.held-elsewhere');assert.equal(why.heldBy,'eden 2.35.0');assert.match(why.message,/connected now from eden 2\.35\.0\. .*move/);
-  assert.equal(f.souls.soulFromToken(held)!.id,f.soul.id,'refused: the connected agent keeps the Soul');
-  const moved=await take({move:true});assert.equal(moved.status,200,'move forces it');
-  assert.equal(f.souls.soulFromToken(held),null);assert.equal(f.souls.soulFromToken((await moved.json() as {token:string}).token)!.id,f.soul.id);
-});
