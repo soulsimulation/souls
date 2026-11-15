@@ -638,8 +638,15 @@ revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/d
 enclosed room. Templates carry them; a live world gets them once at boot (`door-fit/1`, the last boot rule). Inside doors,
 upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room, or into a yard
 the buildings close in all round (Eden's courtyard compounds), stays an open doorway, with no door in it, until a walk can
-pass several closed doors in a row (#2370). A walk to a door-fitted building (`walk:<building>`) ends
-outside its front door, or in its room when it has one.
+pass several closed doors in a row (#2370). So does a doorway whose door a hand could not work: where something stands
+where the body steps to open it from outside or close it from inside, or the other way round (a flower pot, a laundry
+line, the building's own stairs or porch post). A building the world refuses to fit is tried again at the next boot. A
+walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its room when it has one.
+
+A walk through such a door is planned from the Soul's own floor: from upstairs, the first leg walks down the stairs to
+the door. When the connectivity labels put one end of a walk behind a closed door and the other not, the walk is
+planned as the passage's legs from the start, so a long walk across the world goes through the door rather than
+stopping short of it.
 
 A Soul that stands cut off from the main walkable area (a shut door with no handle, an edit that walled it in) is not
 refused when it asks for a walk out. The act first steps it to the nearest open ground, a logged `edge-relocate` under

@@ -57,13 +57,15 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    const intent=d.contact.prepare(soul,id,'open');if(!intent)continue;
    const passage={door:[wp.x,wp.z] as [number,number],from:o.side};
    const rest=steps[0]?.verb==='stand'?steps.slice(1):steps,openAt=actuatorPoint(o,o.from).root,closeAt=actuatorPoint(c,HAND_OPEN_ANGLE).root;
+   // the way to the door at the pace asked (a run across the world runs to it); the short legs at the door are walked
+   const gait=steps.find(s=>s.verb==='walk_to')?.params.gait;
    const walk=(p:number[]):Step=>({verb:'walk_to',params:{to:[p[0],p[2]],standoff:0,level:0}});   // the door is on the ground: from upstairs the leg walks down
    // The walk ends a step short of the door, in front of the latch side (out of the swing and of the way through); the hand
    // step takes the last metre itself once nobody else is at the door (a follower never walks into the leader's swing).
    const u=[Math.cos(wp.yaw),-Math.sin(wp.yaw)],stage=[wp.x+u[0]*STAGE[0]+n[0]*o.side*STAGE[1],0,wp.z+u[1]*STAGE[0]+n[1]*o.side*STAGE[1]];
    const queue=QUEUE.map(([a,b])=>[+(wp.x+u[0]*a+n[0]*o.side*b).toFixed(3),+(wp.z+u[1]*a+n[1]*o.side*b).toFixed(3)]);
    const turn:Step[]=unlock?[{verb:'mars:hand_actuator_v1',params:{...unlock.params,passage:{mode:'unlock',...passage}}}]:[];
-   const legs=(first:number[]):Step[]=>[{verb:'stand',params:{}},first===stage?{verb:'walk_to',params:{to:[stage[0],stage[2]],standoff:0,level:0,doorQueueV1:{door:id,from:o.side,queue}}}:walk(first),...turn,{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(closeAt),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage,...(lockedNow?{relock:true as const}:{})}}},...rest];
+   const legs=(first:number[]):Step[]=>[{verb:'stand',params:{}},first===stage?{verb:'walk_to',params:{to:[stage[0],stage[2]],standoff:0,level:0,...(gait?{gait}:{}),doorQueueV1:{door:id,from:o.side,queue}}}:walk(first),...turn,{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(closeAt),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage,...(lockedNow?{relock:true as const}:{})}}},...rest];
    const note=lockedNow?`Through ${name}: unlocked it ${inside?'with the thumb-turn inside':'with your key'}, opened it by hand on the way, and it locked again as it was shut behind (unless someone was following).`:`Through ${name}: opened it by hand on the way, and closed it behind unless someone was following.`;
    return {door:id,name,open:intent,...(unlock?{unlocked:true as const}:{}),note,steps:legs(stage),direct:legs(openAt)};
   }

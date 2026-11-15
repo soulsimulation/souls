@@ -2583,7 +2583,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // closed room is not cut off when its door opens.
     let passage: DoorPassage | undefined;
     // (review of #2397) a walk bound from upstairs to a ground place is a point walk (`mars:walk_to`, level 0): the same walk
-    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0}} : s);
+    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
     // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
     // the start: a long walk plans its far ground coarsely and would meet the shut leaf only at the end, short of it
     const plain = !!this.doorPassage && plainWalk.every(s => s.verb === 'walk_to' || s.verb === 'stand');
