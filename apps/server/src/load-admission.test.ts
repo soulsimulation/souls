@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
 import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, type RouteClass, type Ticket} from './load/admission.ts';
-import type {Level} from './load/shared.ts';
+import {S, sharedLoad, type Level} from './load/shared.ts';
 import {testPort} from '../test/test-port.ts';
 const TEST_PORT=await testPort();
 
@@ -357,4 +357,45 @@ test('#2440 an act is charged its own time, not the tick that ran while it was t
   now += 50; await adm.drain();
   assert.ok(ran, 'busy again: the next act runs within a frame, not after 4 s of debt');
   adm.close();
+});
+
+test('#2440 review: spare time is off while the heap is red, whatever the loop', async () => {
+  const run = async (heap: number) => {
+    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.9, heapFrac: () => heap});
+    adm.setLoadLevel('red');
+    for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
+    for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
+    adm.close(); return ran;
+  };
+  assert.equal(await run(0.5), 50, 'red on loop delay with an idle thread: spare time serves the crowd');
+  assert.ok(await run(0.88) < 10, 'red for heap (0.88 of the limit), loop idle: the budget binds');
+});
+
+test('#2440 review: a read over its bucket is not answered soul.slow-down while the thread has spare time', () => {
+  for (const idle of [0.5, 0]) {
+    const now = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => idle});
+    adm.setLoadLevel('red');   // contended: budgets bind at red
+    // A's bucket empty, the read's estimate 1.5 s: over budget
+    (adm as unknown as {est: Map<string, number>}).est.set(route('GET', '/v1/edge/here').id, 1500);
+    (adm as unknown as {bucket(k: string, g: boolean, n: number): {tokens: number}}).bucket('A', false, now).tokens = 0;
+    const t = adm.request({key: 'A', god: false, route: route('GET', '/v1/edge/here')});
+    if (idle > 0) assert.ok('turn' in t, 'spare: the read queues for its turn');
+    else assert.ok('refusal' in t && t.refusal.code === 'soul.slow-down', 'busy: soul.slow-down as before');
+    adm.close();
+  }
+});
+
+test('#2440 review: the default tick service is 1 before the monitor\'s first sample, then the monitor\'s 5 s service', () => {
+  const saved = [sharedLoad[S.sampledAt], sharedLoad[S.service5s], sharedLoad[S.heapUsedMb], sharedLoad[S.heapLimitMb]];
+  try {
+    sharedLoad[S.heapUsedMb] = 0; sharedLoad[S.heapLimitMb] = 0;
+    const adm = new Admission({idleShare: () => 0.9, quietTickMs: () => 10});
+    sharedLoad[S.sampledAt] = 0; sharedLoad[S.service5s] = 0;
+    assert.equal(adm.spare(), true, 'no sample yet: service counts as 1');
+    sharedLoad[S.sampledAt] = Date.now(); sharedLoad[S.service5s] = 0.5;
+    assert.equal(adm.spare(), false, 'sampled at 0.5: the ticks are behind, no spare time');
+    sharedLoad[S.service5s] = 1; sharedLoad[S.heapUsedMb] = 900; sharedLoad[S.heapLimitMb] = 1000;
+    assert.equal(adm.spare(), false, 'the default heap share (0.9 of the limit) turns spare time off');
+    adm.close();
+  } finally { [sharedLoad[S.sampledAt], sharedLoad[S.service5s], sharedLoad[S.heapUsedMb], sharedLoad[S.heapLimitMb]] = saved; }
 });
