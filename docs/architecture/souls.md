@@ -104,9 +104,7 @@ reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that acco
 the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
 folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
 A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
-the old folder from their account first. On a dev-identity world (no account approvals) `pair <soulId>` follows the same rule as a login's
-move (#2050): `POST /v1/souls/:id/pair` is free while no agent is connected and otherwise answers 409
-`soul.held-elsewhere` naming that agent (`heldBy`), unless the body says `move: true` (`--move`). Each run works inside that Soul's `runtime/`, so nothing
+the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
@@ -648,8 +646,9 @@ too, an inside doorway is 1.2 m wide where its wall has room, and a `core/door@2
 Every fitted door starts open for now (the coordinator's call until the multi-door passage is proven); a walk leaves
 each door it passes as it found it. An upstairs door is the building's child. A door a hand cannot work (something
 stands where the body steps to open it from one side or close it from the other) is swung the other way; if both ways are
-blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result; a live world
-gets it once at boot (`door-fit/1`, then `door-fit/2`, the last boot rules), one building at a time, each its own
+blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result, so new worlds have it. A live world keeps its drawn doorways: live-world door migration
+(`door-fit/1`, then `door-fit/2`, the last boot rules) is off until a fit can run in slices under 1 s, and runs only with
+`DOOR_FIT_BOOT=1`. With it on, a world gets it once at boot, one building at a time, each its own
 recorded edit, with the world serving between them; a restart part way through goes on where it stopped. A building the
 world refuses to fit is tried again at the next boot. A prop moves only where it touches no body, no other solid and no
 doorway, and leaves every door of its building workable by hand. Door-fit/2 then walks from outside each building's
@@ -681,7 +680,4 @@ ticks (10 s) on cold labels while the static world kept changing, one relabel ru
 most and at most once per 200 ticks a world. When that relabel fits in 250 ms and the Soul isn't inside its one-minute
 step-out cooldown, it is out about 10-13 s after the walk ends. The server log says
 `nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it
-(#1548). A stream of god edits re-arms the first build faster than its 20 ms slices finish; with a Soul waiting, every
-tenth tick the rescue read takes that tick instead of the slice, so the same forced relabel fires under edits every tick
-too (also after a re-warm error): when that relabel fits in 250 ms, the Soul is asked within 210 ticks of the walk ending
-(#1744).
+(#1548). A stream of god edits re-arms the first build instead, which this doesn't cover yet (#1744).

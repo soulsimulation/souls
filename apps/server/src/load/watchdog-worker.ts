@@ -18,7 +18,7 @@ let failed = false, writtenAt = 0;
 // 10 min, so the launcher's wedge line names it
 let lastStall: StallReport | null = null;
 // #2366: why this thread ended the world (live.json `killed`, read by the launcher's onExit)
-let killed: (KillVerdict & {at: number; step?: {tick: number; id: number}; top?: string}) | null = null;
+let killed: (KillVerdict & {at: number}) | null = null;
 if (stall) { try { startStallStack({a, dataDir: stall.dataDir, root: stall.root, stallMs: stall.stallMs, gapMs: stall.gapMs, onReport: r => { lastStall = r; write(); }, onEnabled: (ms, n) => parentPort?.postMessage({info: `stall stacks on (#457): debugger enabled in ${Math.round(ms)} ms, ${n} scripts announced`})}); } catch (e) { parentPort?.postMessage({error: `stall stacks off: ${(e as Error).message}`}); } }
 function write() {
   const now = Date.now(), live = apiA ? {...liveOf(a, pid, now), api: apiOf(apiA, now)} : liveOf(a, pid, now);
@@ -50,9 +50,7 @@ if (kill) {
   const look = setInterval(() => {
     const now = Date.now(), v = judge(liveOf(a, pid, now), now);
     if (!v) return;
-    // #2378 A2: the step the tick was in (a listener's afterTick, by its stable id) and the frame, so a restart loop is seen and quarantined
-    const step = a[S.step] > 0 ? {tick: a[S.stepTick], id: a[S.step] - 1} : undefined, top = lastStall && lastStall.at >= now - (v.reason === 'hang' ? v.stuckMs : 0) ? lastStall.error ?? frameText(lastStall.frames[0]) : undefined;
-    clearInterval(look); killed = {...v, at: now, ...(step ? {step} : {}), ...(top ? {top} : {})}; write();
+    clearInterval(look); killed = {...v, at: now}; write();
     const what = v.reason === 'hang' ? `main thread stuck ${Math.round(v.stuckMs / 1000)} s${lastStall && lastStall.at >= now - v.stuckMs ? ` in ${lastStall.error ?? frameText(lastStall.frames[0])}` : ''}` : `heap ${v.usedMb} of ${v.limitMb} MB for ${Math.round(v.forMs / 1000)} s, gc ${Math.round(v.gcPct10s)}% of the last 10 s`;
     try { writeSync(2, `[load] watchdog: world.killed.${v.reason}: ${what}; ending the process for the launcher to restart it\n`); } catch { /* stderr gone */ }
     process.kill(pid, 'SIGKILL');

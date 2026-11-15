@@ -74,6 +74,14 @@
       "exit": "§d engine solar frame (solar-frame-45-2x4 + install_panel; a tilted module now reads as a flat 1.18 m panel); then re-pin counts"
     },
     {
+      "step": "V3-launcher-unit",
+      "id": "a project skill copy in a read-only folder is a one-line note; SKILL.md beside it is written and no upgrade asks for it again",
+      "status": "skip",
+      "reason": "Environmental: skips when the process runs as root ('root writes anywhere'), and the gate's Modal containers run as root; CI runs it as a non-root user.",
+      "owner": "#2212 (release 0.126 gate, coordinator)",
+      "exit": "#2212: run the read-only case where the gate runs, then remove this entry"
+    },
+    {
       "step": "V5-server-full",
       "id": "equivalence: a world stopped and cold-booted, idle Souls with the edge ambient-life reflex, caught up by ticking, matches one ticked straight through",
       "status": "todo",

@@ -1,7 +1,8 @@
 // #2383 door-fit/1: every built-in doorway is a real door. A building on a core revision that draws its ground-floor
 // doors as fixed leaves moves to its door-fitted revision (DOOR_FIT_FROM; same walls, rooms and slots, bare doorways),
 // and a hand-operated core/door@2 is placed in each bare doorway (buildingDoorFits). Templates carry the result; a live
-// world gets it once, one recorded engine edit per building in slices at boot (the last rule in adoptBootRuntimePoliciesV1).
+// world gets it once, one recorded engine edit per building in slices at boot (the last rule in adoptBootRuntimePoliciesV1),
+// only with DOOR_FIT_BOOT=1: off by default until one building's edit runs well under a second (up to 15.9 s on Eden).
 //
 // It refuses nothing and moves nobody: every door is placed open (until #2434), so nobody is pushed; a
 // building with a resident's body inside its subtree (seated in it) is left as it is and fitted at a later boot; a
