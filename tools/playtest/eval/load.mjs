@@ -120,6 +120,7 @@ export async function runLoad(o) {
       if (prof) {
         writeFileSync(join(profDir, 'prof.stop'), ''); const pf = join(profDir, 'world.cpuprofile');
         for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(2000);
+        try { server.gridStats = JSON.parse(readFileSync(join(profDir, 'grid-stats.json'), 'utf8')); } catch (e) { server.gridStats = { error: String(e?.message ?? e).slice(0, 200) }; }
         try { server.profile = summarizeProfile(pf, serverRoot); } catch (e) { server.profile = { error: String(e?.message ?? e).slice(0, 200) }; }
       }
       const http = [], pairs = [];

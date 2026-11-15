@@ -13,7 +13,7 @@ export function summarizeProfile(file, repo, { turnMs = 100, top = 40 } = {}) {
   const stack = (id) => { if (stackOf.has(id)) return stackOf.get(id); const out = []; for (let x = id; x != null; x = parent.get(x)) out.push(x); stackOf.set(id, out); return out; };
   const BREAK = new Set(['(idle)', '(program)', '(root)']);
   // #2354: per named root, the time of each direct child frame under its outermost occurrence
-  const ROOTS = ['approach', 'explicitPlaceCapability', 'resolvePlaceForVerb', 'offeredWalkObject', 'walkOnDemand', 'bindsCore', 'act', 'commitBatch'], under = new Map(ROOTS.map((r) => [r, new Map()]));
+  const ROOTS = ['focusPage', 'gridsOver', 'compose', 'floorOver', 'fineTileSteps', 'enterLeg', 'syncPaged', 'navScan', 'sameGeometry', 'advance', 'reconcile'], under = new Map(ROOTS.map((r) => [r, new Map()]));
   const self = new Map(), incl = new Map(), turns = [];
   let cur = null, total = 0, busy = 0;
   const n = p.samples.length;

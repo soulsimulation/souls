@@ -14,7 +14,7 @@ if (dir && isMainThread && (process.argv[1] ?? '').endsWith('apps/server/src/mai
     if (busy) return; busy = true;
     try {
       if (!on && existsSync(join(dir, 'prof.start'))) { rmSync(join(dir, 'prof.start')); await post('Profiler.enable'); await post('Profiler.setSamplingInterval', { interval: 1000 }); await post('Profiler.start'); on = true; }
-      else if (on && existsSync(join(dir, 'prof.stop'))) { rmSync(join(dir, 'prof.stop')); const { profile } = await post('Profiler.stop'); on = false; writeFileSync(join(dir, 'world.cpuprofile'), JSON.stringify(profile)); }
+      else if (on && existsSync(join(dir, 'prof.stop'))) { rmSync(join(dir, 'prof.stop')); const { profile } = await post('Profiler.stop'); on = false; writeFileSync(join(dir, 'world.cpuprofile'), JSON.stringify(profile)); const g = globalThis; writeFileSync(join(dir, 'grid-stats.json'), JSON.stringify({ window: g.__w2404 ? { ...g.__w2404, seen: g.__w2404.seen.size, recent: undefined } : null, tiles: Object.fromEntries(Object.entries(g.__m2404 ?? {}).map(([k, v]) => [k, { ...v, keys: v.keys.size }])) })); }
     } catch (e) { process.stderr.write(`[prof-hook] ${e?.message ?? e}\n`); }
     busy = false;
   }, 250).unref();
