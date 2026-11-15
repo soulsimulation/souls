@@ -620,10 +620,16 @@ export class NavConnectivity {
         return u && c >= 0 ? u.node(c) : null;
       };
       const pairs: [string, string][] = [];
-      for (const o of this.scene.obstacles) {
+      // in ground-tile order, so a tile's fine labels are made once for all its doors (the LRU holds 8 tiles: in scene
+      // order Eden's ~650 doors re-made a tile per door side, ~45 s of each graph build)
+      const tileKey = (o: Obstacle) => [Math.floor(o.obb.c[1] / GROUND_TILE_M), Math.floor(o.obb.c[0] / GROUND_TILE_M)];
+      const doors = this.scene.obstacles.filter((o) => o.door === 'pass').map((o) => ({ o, k: tileKey(o) }))
+        .sort((x, y) => x.k[0] - y.k[0] || x.k[1] - y.k[1] || (x.o.id < y.o.id ? -1 : x.o.id > y.o.id ? 1 : 0));
+      for (const { o } of doors) {
         const level = sp.passDoorLevel(o); if (level === null) continue;
         const [a, b] = doorSides(o), na = nodeAt(level, a), nb = nodeAt(level, b);
         if (na && nb && na !== nb) pairs.push([na, nb]);
+        yield 'graph';   // a door's sides may make a tile's fine labels: a slice may end here (the build stays unpublished)
       }
       for (let more = true, group = 0; more;) {
         more = false;
