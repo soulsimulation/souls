@@ -628,16 +628,18 @@ walk reaches it, and the walk then fails `route.unreachable` there.
 A closed, unlocked door a hand opens is a way through in every world, flat or ground (`doors-pass/1`, #2365). Reach
 checks, room goals and the connectivity audit count ONE such door on the ground as a way through, exactly what one walk
 act does: it goes to the door, opens it by hand, passes and closes it behind (entry 31). The walk graph still treats the
-shut leaf as solid. A room one closed door from the world is never `nav.disconnected` and a Soul inside is never stepped
-out. A room behind two closed doors in series, or behind a door upstairs, is not reached in one walk and counts as cut
+shut leaf as solid. A room one closed door from the world, on any floor its stairs reach, is never `nav.disconnected` and
+a Soul inside is never stepped out. A room behind two closed doors in series, or behind a door upstairs, is not reached in one walk and counts as cut
 off, so a Soul shut in there is stepped out as below. A locked door stays a wall. A verification probe opens no door: it
 is refused `route.unreachable` naming the door.
 
 Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
 revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
 enclosed room. Templates carry them; a live world gets them once at boot (`door-fit/1`, the last boot rule). Inside doors,
-upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room stays an open
-doorway, with no door in it, until a walk can pass several closed doors in a row (#2370).
+upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room, or into a yard
+the buildings close in all round (Eden's courtyard compounds), stays an open doorway, with no door in it, until a walk can
+pass several closed doors in a row (#2370). A walk to a door-fitted building (`walk:<building>`) ends
+outside its front door, or in its room when it has one.
 
 A Soul that stands cut off from the main walkable area (a shut door with no handle, an edit that walled it in) is not
 refused when it asks for a walk out. The act first steps it to the nearest open ground, a logged `edge-relocate` under
