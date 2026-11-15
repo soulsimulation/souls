@@ -185,11 +185,12 @@ the launcher's own `ShardSet`, beside 50 programs of one world each. The bench's
 Eyes off, using the launcher's own command and production decoration. Shards hold 8 worlds, so 50 worlds take 7
 programs. Every world ticks (`SIM_SKIP=0`), as in #2300; a still world now jumps its clock instead (#2298). That is
 the worst case for a shared thread. Every memory reading follows a full GC of every program's heap. Runs: timed-run
-43742744860 (both forms) and 43742742507, whose baseline arm stopped at world 48 (exit 1 at boot; re-run 43744144947 is the second baseline repeat).
+43742744860 (both forms), 43742742507 (shard; its baseline arm stopped at world 48, exit 1 at boot) and 43744144947
+(the baseline again).
 
 | Form | Programs | Pss of 50 quiet worlds | Per world | Tick p50 / p99, 60,000 ticks pooled | CPU while quiet | Load, median (max) |
 |---|---|---|---|---|---|---|
-| One program per world | 50 | 11,150 MB | **223 MB** | 0.5 / 2.0 ms | 1.06 cores | 3.6 s (3.9) |
+| One program per world | 50 | 11,150 and 11,136 MB | **223 MB** | 0.5 / 2.0 ms | 1.06 cores | 3.6 s (3.9) |
 | Shards of 8 | 7 | 5,338 and 5,438 MB | **107 and 109 MB** | 0.3 / 1.6 to 1.7 ms | 0.52 to 0.54 cores | 1.2 s (4.1) |
 
 - A shard holds a small world in about half the memory of a program of its own, including its share of the shard's
@@ -204,7 +205,7 @@ the worst case for a shared thread. Every memory reading follows a full GC of ev
 
 | Form | Load to first `/healthz` | Longest gap the other worlds saw | Pss added |
 |---|---|---|---|
-| One program per world | 3.5 s | 0.27 s | 324 MB (15 s after its first answer) |
+| One program per world | 3.5 s | 0.27 s | 324 and 331 MB (15 s after its first answer) |
 | Shards of 8 | 0.6 s | 0.38 s, the 2 worlds of its own shard | 83 and 91 MB |
 
 **One world fails** (each fault watched 60 s). In the shard form, every world that exits loads again at once, as the
@@ -212,7 +213,7 @@ pool restarts a planned exit. The crash backoff of the world that ended the shar
 
 | Fault | One program per world | Shards of 8: the 7 other worlds of its shard | Shards of 8: the 43 worlds of the other shards |
 |---|---|---|---|
-| A step that throws every tick (`storm`, exit 70 at 2.5 s) | The others did not notice (0.39 s) | Down until reloaded: longest gap 4.2 to 4.4 s (81 to 84 failed polls); all serving at the end | Longest gap 2.4 s |
+| A step that throws every tick (`storm`, exit 70 at 2.5 s) | The others did not notice (0.40 s) | Down until reloaded: longest gap 4.2 to 4.4 s (81 to 84 failed polls); all serving at the end | Longest gap 2.4 s |
 | A 60 s hang (the watchdog's kill at 10.8 s) | The others did not notice (0.39 s) | Longest gap 14.2 to 14.3 s; all serving at the end | Longest gap 2.6 to 3.0 s |
 
 - A shard fails as a whole and comes back in about 4 s after a storm, or about 14 s after a hang, as #2300 expected.
