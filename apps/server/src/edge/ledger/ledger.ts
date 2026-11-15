@@ -258,7 +258,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #442 (mending.ts): what a completed repair did, read when its receipt ends, before the state changes. */
   repairEffects?: (r: EdgeReceipt) => ConfirmedEffects;
   /** Soul Actions entry 31 (god worlds, god/door-passage.ts): a plain walk a closed, permitted door walls off goes through it. */
-  doorPassage?: (soul: EdgeSoul, steps: Program['steps'], what: string) => DoorPassage | DoorPassageRefusal | null;
+  doorPassage?: (soul: EdgeSoul, steps: Program['steps'], what: string, behind?: boolean) => DoorPassage | DoorPassageRefusal | null;
   /** World-engine worlds only (god/places.ts): places walkable without being native engine regions (a god's plaza, a
    *  room of a god's house). Unset on Eden/Mars/LM, where walkability stays `id in regions` exactly. */
   placeWalkable?: (placeId: string) => boolean;
@@ -2582,9 +2582,15 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // naming it, rather than walking round to the nearest point behind the wall. Before nav-connect/1: a Soul in a
     // closed room is not cut off when its door opens.
     let passage: DoorPassage | undefined;
-    if (issue?.code === 'route.unreachable' && this.doorPassage && steps.every(s => s.verb === 'walk_to' || s.verb === 'stand')) {
+    // (review of #2397) a walk bound from upstairs to a ground place is a point walk (`mars:walk_to`, level 0): the same walk
+    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0}} : s);
+    // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
+    // the start: a long walk plans its far ground coarsely and would meet the shut leaf only at the end, short of it
+    const plain = !!this.doorPassage && plainWalk.every(s => s.verb === 'walk_to' || s.verb === 'stand');
+    const behind = plain && !issue && !this.navCold() && !!(this.host.engine as unknown as {walkThroughDoorV1?: (a: string, s: unknown[]) => boolean}).walkThroughDoorV1?.(soul.entityId, plainWalk);
+    if (plain && (issue?.code === 'route.unreachable' || behind)) {
       const what = label.replace(/^(walk|run|jog|go|head|stroll|cycle|wander)( over| back| down| up)? (to|into|onto|towards?) /i, '') || 'there';
-      const p = this.doorPassage(soul, steps, what);
+      const p = this.doorPassage!(soul, plainWalk, what, behind);
       if (p && 'refuse' in p) return {...refuse(p.code, p.reason), ...resolved};
       // doors-pass/1 (#2365): a verification probe opens no door; it is told which door the walk would go through
       if (p && isVerificationProbe(soul.soulId)) return {...refuse('route.unreachable', `The way to ${what} goes through ${p.name}, closed; a verification probe does not open doors.`), ...resolved};

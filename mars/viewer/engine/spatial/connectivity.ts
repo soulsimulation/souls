@@ -62,6 +62,8 @@ export type ConnVerdict = {
   pocket?: number;
   /** Upper floors: the floor (surface id) it stands on, when not connected. */
   floor?: string;
+  /** Connected by ONE closed ground hand door only (doors-pass/1): a walk between it and the main area goes through that door. */
+  door?: true;
 };
 
 const ALL = new Int32Array(0), NONE = new Int32Array(0);
@@ -138,6 +140,8 @@ export class NavConnectivity {
   private flatUpper = new WeakMap<LevelGrid, Int32Array>();
   /** Components joined to the main area both ways (node ids: `0:<root>` level 0, `u<cluster>:<level>:<label>` upper). */
   private good = new Set<string>();
+  /** Areas in `good` only by one ground hand door (doors-pass/1): a walk between one of these and the rest goes through it. */
+  private behind = new Set<string>();
   private fwd = new Set<string>();
   private bwd = new Set<string>();
   private graphVer = '';
@@ -188,7 +192,7 @@ export class NavConnectivity {
       work.clusterMemo = new Map(this.clusterMemo); work.linkMemo = new Map(this.linkMemo);
       work.flat = this.flat; work.flatUpper = this.flatUpper; work.ext = this.ext; work.per = this.per;
       work.parent = this.parent.slice(); work.base = new Map(this.base); work.rootSize = new Map(this.rootSize);
-      work.clusters = this.clusters; work.good = this.good; work.fwd = this.fwd; work.bwd = this.bwd;
+      work.clusters = this.clusters; work.good = this.good; work.behind = this.behind; work.fwd = this.fwd; work.bwd = this.bwd;
       work.main = this.main; work.version = this.version; work.graphVer = this.graphVer; work.dirty = this.dirty;
       const carry = this.carried; this.carried = undefined;
       if (carry && ground === carry.ground && ground.per === carry.per) {
@@ -242,7 +246,7 @@ export class NavConnectivity {
     this.tiles = w.tiles; this.ext = w.ext; this.per = w.per; this.flat = w.flat;
     this.parent = w.parent; this.base = w.base; this.rootSize = w.rootSize; this.lru = w.lru; this.mediaMemo = w.mediaMemo;
     this.dirty = w.dirty; this.clusters = w.clusters; this.clusterMemo = w.clusterMemo; this.flatUpper = w.flatUpper;
-    this.good = w.good; this.fwd = w.fwd; this.bwd = w.bwd; this.graphVer = w.graphVer; this.linkMemo = w.linkMemo;
+    this.good = w.good; this.behind = w.behind; this.fwd = w.fwd; this.bwd = w.bwd; this.graphVer = w.graphVer; this.linkMemo = w.linkMemo;
     this.main = w.main; this.version = w.version;
   }
 
@@ -599,7 +603,7 @@ export class NavConnectivity {
       while (q.length) for (const n of adj.get(q.pop()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n); }
       return seen;
     };
-    this.good = new Set();
+    this.good = new Set(); this.behind = new Set();
     if (this.main >= 0) {
       const m = `0:${this.main}`;
       this.fwd = reach(fwdAdj, m); this.bwd = reach(bwdAdj, m);
@@ -618,7 +622,7 @@ export class NavConnectivity {
       }
       for (const n of extra) {
         const f = reach(fwdAdj, n), b = reach(bwdAdj, n);
-        for (const x of f) if (b.has(x)) { this.good.add(x); this.fwd.add(x); this.bwd.add(x); }
+        for (const x of f) if (b.has(x) && !this.good.has(x)) { this.good.add(x); this.behind.add(x); this.fwd.add(x); this.bwd.add(x); }
       }
     } else { this.fwd = new Set(); this.bwd = new Set(); }
     this.linkMemo = memo;
@@ -673,7 +677,7 @@ export class NavConnectivity {
       if (u && c >= 0) { node = u.node(c); floor = u.floor; }
     }
     if (!node) return { id, level, ok: false, code: 'nav.no-standing-room' };
-    if (this.good.has(node)) return { id, level, ok: true, area: node };
+    if (this.good.has(node)) return { id, level, ok: true, area: node, ...(this.behind.has(node) ? { door: true as const } : {}) };
     const code = this.fwd.has(node) || this.bwd.has(node) ? 'nav.one-way' : 'nav.disconnected';
     return { id, level, ok: false, code, area: node, ...(level === 0 ? { pocket } : { floor }) };
   }

@@ -1249,10 +1249,11 @@ export class MarsEngine implements Engine {
     const r = def.plan(this.rt, parsed.data); return r.ok ? structuredClone((r.program as { landing?: any }).landing ?? null) : null;
   }
   /** A reachable standing point `standoff` metres from a target, on the side the actor comes from if possible. 'here' if already there. */
-  private goalNear(actor: string, to: unknown, standoff: number, stand?: unknown): { x: number; z: number; level: number } | 'here' | Diag {
+  /** `atLevel`: the floor a point goal is on (entry 31's passage legs, on the ground under a Soul upstairs); else the actor's own. */
+  private goalNear(actor: string, to: unknown, standoff: number, stand?: unknown, atLevel?: unknown): { x: number; z: number; level: number } | 'here' | Diag {
     const me = this.pos(actor)!, t = this.pointOf(to);
     if (!t) return { code: 'target.unknown', message: `nothing to walk to: ${JSON.stringify(to)}` };
-    const level = typeof to === 'string' ? (this.rt.world.regions[to]?.level ?? this.ents[to]?.human?.level ?? (this.cfg.fixtureGroundGoalsV1&&this.ents[to]?.support?.kind==='ground'?0:this.ents[actor].human.level)) : this.ents[actor].human.level;
+    const level = typeof to === 'string' ? (this.rt.world.regions[to]?.level ?? this.ents[to]?.human?.level ?? (this.cfg.fixtureGroundGoalsV1&&this.ents[to]?.support?.kind==='ground'?0:this.ents[actor].human.level)) : typeof atLevel === 'number' ? atLevel : this.ents[actor].human.level;
     const dx = me[0] - t[0], dz = me[1] - t[1], d = Math.hypot(dx, dz);
     const isBody = typeof to === 'string' && !!this.ents[to];
     const room=this.cfg.scene==='littlemartians'&&typeof to==='string'&&this.rt.world.regions[to]?.kind==='place';
@@ -1523,7 +1524,7 @@ export class MarsEngine implements Engine {
       case 'control_classroom_v1': return [{verb:'classroom_control',params:{session:a.session,intent:{kind:a.kind}},settle:'done',raw:true}];
       case 'walk_to': {
         const gaitIssue = this.gaitIssue(me, a); if (gaitIssue) return gaitIssue;
-        let g = (a.spread === 'pond/1' || a.spread === 'region/1' || a.spread === 'pond-lap/1') && typeof a.to === 'string' && this.rt.world.regions[a.to] ? this.spreadGoalV1(me, a.to, a.spread,this.sharedWaterStep(step),a.regionOutside) : this.goalNear(me, a.doorQueueV1 ? this.doorQueueGoalV1(p, a) : a.to, typeof a.standoff === 'number' ? a.standoff : 0, a.stand);
+        let g = (a.spread === 'pond/1' || a.spread === 'region/1' || a.spread === 'pond-lap/1') && typeof a.to === 'string' && this.rt.world.regions[a.to] ? this.spreadGoalV1(me, a.to, a.spread,this.sharedWaterStep(step),a.regionOutside) : this.goalNear(me, a.doorQueueV1 ? this.doorQueueGoalV1(p, a) : a.to, typeof a.standoff === 'number' ? a.standoff : 0, a.stand, a.level);
         if (g === 'here') return [];
         if ('code' in g) return g;
         if (a.free === FREE_GOAL_V1) { const f = this.freeGoalV1(me, g, a.freeWithin); if (!f) return []; g = f; }
@@ -3094,19 +3095,24 @@ export class MarsEngine implements Engine {
     const me=this.ents[p.actor]?.pose.p,taken=(q2:[number,number])=>listEntities(this.ents).some((o:any)=>!!o.human&&o.id!==p.actor&&hypot(o.pose.p[0]-q2[0],o.pose.p[2]-q2[1])<.7);
     // the first row (latch side, hinge side) before the row behind it; nearest first within a row
     const d=(x:[number,number])=>me?hypot(x[0]-me[0],x[1]-me[2]):0,spots=q.queue.map((x,i)=>({x,row:i>>1})).sort((a2,b2)=>a2.row-b2.row||d(a2.x)-d(b2.x)).map(e=>e.x);
-    for(const spot of spots)if(!taken(spot)&&!this.plan(this.movementVerb(p.actor,spot[0],spot[1]),{actor:p.actor,x:spot[0],z:spot[1],level:this.ents[p.actor]?.human?.level??0}))return spot;
+    for(const spot of spots)if(!taken(spot)&&!this.plan(this.movementVerb(p.actor,spot[0],spot[1]),{actor:p.actor,x:spot[0],z:spot[1],level:typeof a.level==='number'?a.level:this.ents[p.actor]?.human?.level??0}))return spot;
     return a.to;
   }
   /** Soul Actions entry 31 (pure): the closed doors walling this body off from its plan's first walk_to destination. Null
-   * when a walk reaches it (or it names nothing). Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
+   * when a walk reaches it (or it names nothing). From the body's own floor (review of #2397): a Soul upstairs behind the
+   * ground door plans the same passage, its first leg walking down the stairs to the door. Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
    * god engine-bridge) bordering the region the failed route exhausted; nearest to the way there first, at most `max`. */
-  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
-    const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human||(e.human.level??0)!==0)return null;
+  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
+    const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
     const t=this.pointOf(step.params?.to);if(!t)return null;
     const start=this.godWalkoutStartV1(actor);if(!start)return null;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8);if(!goal)return null;
     const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);
-    const r=spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
+    const r0=spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
+    // `behind` (walkThroughDoorV1 said so): a long walk's far ground is planned coarsely and may not meet the shut leaf, so
+    // the doors are named from the destination's side, whose search the door closes in at once (review of #2397)
+    const back=()=>spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},start,{nameObstacles:id=>id.includes('#door:')});
+    const r=r0.ok&&behind?back():r0;
     if(r.ok||r.diagnostic.code!=='route.unreachable')return null;
     const pos=(id:string)=>{const o=spatial.scene.obstacles.find(x=>x.id.startsWith(id+'#door:'));return o?o.obb.c:null;};
     const along=(c:[number,number])=>hypot(c[0]-start.p[0],c[1]-start.p[1])+hypot(c[0]-goal[0],c[1]-goal[1]);
@@ -3115,8 +3121,17 @@ export class MarsEngine implements Engine {
     const ids=named(r.diagnostic);
     // asked only when no door on this side opens the way: the doors walling the destination's own side (the same search
     // from the destination, which floods that side once), so a locked door there refuses instead of a closest approach
-    const goalDoors=()=>{const back=spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},{level:0,p:start.p},{nameObstacles:id=>id.includes('#door:')});return back.ok?[]:named(back.diagnostic);};
+    const goalDoors=()=>{const b=back();return b.ok?[]:named(b.diagnostic);};
     return {goal,doors:ids,goalDoors};
+  }
+  /** Soul Actions entry 31 (pure; review of #2397): does this plan's first walk_to go through a closed ground hand door, by
+   *  the connectivity labels (one end in an area joined to the world only by such a door, the other not)? Read before the
+   *  walk is planned, so a long walk is planned as the passage's legs from the start. False when either end is not joined. */
+  walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean{
+    const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
+    const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
+    const [a,b]=this.navCheckV1([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
+    return !!a?.ok&&!!b?.ok&&!!a.door!==!!b.door;
   }
   /** Soul Actions entry 31 (pure): does a walk from `from` (level 0) reach this plan's first walk_to destination, a
    * standing point at its standoff as the walk itself would choose (goalNear's turns), with the world as it is now? */

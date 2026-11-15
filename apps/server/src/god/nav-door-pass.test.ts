@@ -166,3 +166,32 @@ for (const kind of ['ground-unpaged', 'flat'] as Kind[]) {
     assert.ok(body().pose.p[2] < Z, 'she ends outside');
   });
 }
+
+// Review of #2397, item 4: a long walk across the world into a yard behind a closed hand door. The walk's far ground is
+// planned coarsely, so the shut leaf is met only near the end; reach says the way goes through the door, so the walk is
+// planned as the passage's legs from the start and arrives inside, on the first try.
+for (const kind of ['ground-paged'] as Kind[]) {
+  test(`a long walk into a closed yard goes through its door on the first try (${kind})`, {timeout: 300_000}, async t => {
+    const w = world(t, kind); await w.tick(2);
+    w.act([yard('yard-walls', X), {op: 'place', def: 'core/door@2', name: 'door', p: [X, Z], r: Math.PI},
+      {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: INSIDE}]);
+    await w.tick(20);
+    await invite(w, 'ana');
+    const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+    const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+    const FAR: Vec2 = [X - 120, Z - 90];
+    await accept(w.host, w.host.enqueue('edge-relocate', 'test:start', {soulId: ana.soulId, entityId: ana.entityId, to: FAR, why: 'far away'}));
+    await w.tick(6);
+    const body = () => w.E.world.entities[ana.entityId];
+    assert.ok(Math.hypot(body().pose.p[0] - FAR[0], body().pose.p[2] - FAR[1]) < 1, 'she starts 150 m away');
+    w.E.navWarmV1(Infinity);   // the labels warm, as in a running world
+    const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inside-bench', params: {gait: 'run'}}));
+    assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
+    assert.match(r.receipt.reason ?? '', /Through door/, 'planned through the door from the start');
+    let e: any;
+    for (let n = 0; n < 6000; n++) {e = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) break; await w.tick(1);}
+    assert.equal(e.phase, 'completed', JSON.stringify(e).slice(0, 600));
+    assert.ok(body().pose.p[2] > Z, 'inside the yard');
+    assert.equal((w.god.model.get('door') as any).state.open, false, 'closed behind');
+  });
+}

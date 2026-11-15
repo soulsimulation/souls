@@ -397,9 +397,10 @@ function obstaclesNear(scene: SpatialScene, g: LevelGrid, p: Vec2, grow: number,
   for (const o of scene.obstacles) if (want(o.id) && atHeight(o, g) && pointInObb(p, o.obb, grow)) out.add(o.id);
   return out.size ? [...out].sort() : undefined;
 }
-/** On a composed ground grid, at the terrain under the obstacle's centre (groundHeights), else at the grid's floor. */
-const atHeight = (o: { obb: { c: Vec2 }; y0: number; y1: number }, g: LevelGrid) => {
-  const y = groundHeights.get(g)?.(o.obb.c[0], o.obb.c[1]) ?? g.y;
+/** At the grid's floor; a hand door's gap (`door: 'pass'`) on a composed ground grid at the terrain under its centre
+ *  (groundHeights, #2383). Only those: every other obstacle is named as before, so a logged fold reads the same. */
+const atHeight = (o: { obb: { c: Vec2 }; y0: number; y1: number; door?: 'pass' }, g: LevelGrid) => {
+  const y = (o.door === 'pass' ? groundHeights.get(g)?.(o.obb.c[0], o.obb.c[1]) : undefined) ?? g.y;
   return y >= o.y0 - 0.3 && y < o.y1;
 };
 

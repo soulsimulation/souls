@@ -9,7 +9,7 @@ import {actionsOf,actuatedState} from './actuators.ts';
 import {isContactActuator,type ContactActuatorIntent,type ContactActuatorService} from './contact-actuator.ts';
 
 type Step={verb:string;params:Record<string,unknown>};
-type Engine={installDoorLockedV1?:(read:(id:string)=>boolean|null)=>void;closedDoorsOnWalkV1?:(actor:string,steps:Step[])=>{goal:[number,number];doors:string[];goalDoors?:()=>string[]}|null;walkFromReachesV1?:(actor:string,from:[number,number],steps:Step[])=>boolean};
+type Engine={installDoorLockedV1?:(read:(id:string)=>boolean|null)=>void;closedDoorsOnWalkV1?:(actor:string,steps:Step[],max?:number,behind?:boolean)=>{goal:[number,number];doors:string[];goalDoors?:()=>string[]}|null;walkFromReachesV1?:(actor:string,from:[number,number],steps:Step[])=>boolean};
 export type DoorPassage={door:string;name:string;steps:Step[];direct:Step[];open:ContactActuatorIntent;note:string;/** entry 32: the walk turns the lock first */ unlocked?:true};
 export type DoorPassageRefusal={refuse:true;code:string;reason:string};
 /** How far past the door line the close is planned from (its far side). */
@@ -25,9 +25,11 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
  /** Entry 32: a locked door refused to a walk, naming its owner (and that knocking is possible) when it has one. */
  const lockedReason=(id:string,soul:EdgeSoul,what:string,name:string)=>{const own=d.owner?.(id,soul);return own&&!own.mine?`The way to ${what} goes through ${name}, which is locked (${own.name}'s). It was not opened; knock to ask ${own.name} in.`:`The way to ${what} goes through ${name}, which is locked. It was not opened.`;};
  const lockedOf=(id:string)=>{const m=d.model(),e=m.entities.get(id),def=e&&m.resolvedDef(e.def);return e&&def?actuatedState(e,def).locked===true:null;};
- /** The passage for a plain walk (`steps`) whose destination no walk reaches now; null when no closed door explains it. */
- return (soul:EdgeSoul,steps:Step[],what:string):DoorPassage|DoorPassageRefusal|null=>{
-  const eng=d.engine(),found=eng.closedDoorsOnWalkV1?.(soul.entityId,steps);if(!found||!eng.walkFromReachesV1)return null;
+ /** The passage for a plain walk (`steps`) whose destination no walk reaches now; null when no closed door explains it.
+  *  `behind`: the walk's ends are known to lie either side of a closed door (engine walkThroughDoorV1), though the walk's
+  *  own coarse plan of far ground may not see it (review of #2397). */
+ return (soul:EdgeSoul,steps:Step[],what:string,behind=false):DoorPassage|DoorPassageRefusal|null=>{
+  const eng=d.engine(),found=eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind);if(!found||!eng.walkFromReachesV1)return null;
   // entry 32: the hand step reads whether a door is still locked (a thumb-turn nobody needs any more is skipped)
   eng.installDoorLockedV1?.(lockedOf);
   let refusal:DoorPassageRefusal|null=null;
@@ -55,13 +57,13 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    const intent=d.contact.prepare(soul,id,'open');if(!intent)continue;
    const passage={door:[wp.x,wp.z] as [number,number],from:o.side};
    const rest=steps[0]?.verb==='stand'?steps.slice(1):steps,openAt=actuatorPoint(o,o.from).root,closeAt=actuatorPoint(c,HAND_OPEN_ANGLE).root;
-   const walk=(p:number[]):Step=>({verb:'walk_to',params:{to:[p[0],p[2]],standoff:0}});
+   const walk=(p:number[]):Step=>({verb:'walk_to',params:{to:[p[0],p[2]],standoff:0,level:0}});   // the door is on the ground: from upstairs the leg walks down
    // The walk ends a step short of the door, in front of the latch side (out of the swing and of the way through); the hand
    // step takes the last metre itself once nobody else is at the door (a follower never walks into the leader's swing).
    const u=[Math.cos(wp.yaw),-Math.sin(wp.yaw)],stage=[wp.x+u[0]*STAGE[0]+n[0]*o.side*STAGE[1],0,wp.z+u[1]*STAGE[0]+n[1]*o.side*STAGE[1]];
    const queue=QUEUE.map(([a,b])=>[+(wp.x+u[0]*a+n[0]*o.side*b).toFixed(3),+(wp.z+u[1]*a+n[1]*o.side*b).toFixed(3)]);
    const turn:Step[]=unlock?[{verb:'mars:hand_actuator_v1',params:{...unlock.params,passage:{mode:'unlock',...passage}}}]:[];
-   const legs=(first:number[]):Step[]=>[{verb:'stand',params:{}},first===stage?{verb:'walk_to',params:{to:[stage[0],stage[2]],standoff:0,doorQueueV1:{door:id,from:o.side,queue}}}:walk(first),...turn,{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(closeAt),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage,...(lockedNow?{relock:true as const}:{})}}},...rest];
+   const legs=(first:number[]):Step[]=>[{verb:'stand',params:{}},first===stage?{verb:'walk_to',params:{to:[stage[0],stage[2]],standoff:0,level:0,doorQueueV1:{door:id,from:o.side,queue}}}:walk(first),...turn,{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(closeAt),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage,...(lockedNow?{relock:true as const}:{})}}},...rest];
    const note=lockedNow?`Through ${name}: unlocked it ${inside?'with the thumb-turn inside':'with your key'}, opened it by hand on the way, and it locked again as it was shut behind (unless someone was following).`:`Through ${name}: opened it by hand on the way, and closed it behind unless someone was following.`;
    return {door:id,name,open:intent,...(unlock?{unlocked:true as const}:{}),note,steps:legs(stage),direct:legs(openAt)};
   }
