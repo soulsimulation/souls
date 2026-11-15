@@ -1,8 +1,9 @@
-// Clip kit (#2383): in Eden 2026, two building types whose outside doorways now hold real doors, both closed: the A-frame
-// cottage (core/cottage@2) and the bakery (core/hall@3). Before the take, admin's Soul Clara runs to the bakery's front.
+// Clip kit (#2383): in Eden 2026, two building types whose outside doorways now hold real doors, both closed: the bakery
+// (core/hall@3) and the dome (core/roundhouse@2). (The A-frame cottage's door has a street flower pot 1.3 m from it, where
+// the hand stands to open it: refused contact.step-blocked.) Before the take, admin's Soul Clara runs to the bakery's front.
 // On camera (Ctrl+K, Enter follows Clara) she walks into the bakery's shop, opening its door by hand and closing it
-// behind her, back out through it to the bakery's front, then into the A-frame cottage's living room the same way (one
-// closed door per walk: two in a row wait for #2370's multi-door walk).
+// behind her, back out through it to the bakery's front, then into the dome the same way (one closed door per walk: two in
+// a row wait for #2370's multi-door walk).
 import { execFile, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { cast } from '../_shared/cast.mjs';
@@ -17,7 +18,7 @@ const run = (script, cwd, args, ms = 90_000) => {
   return r;
 };
 
-// the bakery (int-bakery, a hall turned east) stands at (77.5, -15.5); the A-frame cottage at (76.5, -25.5), 10 m south
+// the bakery (int-bakery, a hall turned east) stands at (77.5, -15.5); the dome (eden-dome) about 55 m north-east
 for (let i = 0; i < 30; i++) {                            // a world just up may not give its catalog yet (503)
   if (run(EDEN, DIR, ['catalog']).status === 0) break;
   spawnSync('sleep', ['2']);
@@ -42,8 +43,8 @@ export default async function steps(page, { mark }) {
   await page.waitForTimeout(3000);
   mark('walk back out through the bakery door to its front');
   await eden(['act', 'walk:int-bakery', '--wait', '60', '--json'], 70_000);
-  mark('walk into the A-frame cottage (core/cottage@2) living room, its door closed');
-  await eden(['act', 'walk:eden-a-frame/living', '--wait', '60', '--json'], 70_000);
-  mark('inside the cottage, door closed behind');
+  mark('walk into the dome (core/roundhouse@2), its doors closed');
+  await eden(['act', 'walk:eden-dome', '--wait', '75', '--json'], 85_000);
+  mark('inside the dome, door closed behind');
   await page.waitForTimeout(3000);
 }

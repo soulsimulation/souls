@@ -33,11 +33,13 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
   let refusal:DoorPassageRefusal|null=null;
   for(const id of found.doors){
    const m=d.model(),e=m.entities.get(id),def=e&&m.resolvedDef(e.def);if(!e||!def)continue;
-   // a walk to the door itself (or to a spot at it) ends at the door, on this side: it is not a walk through it
-   const at=m.worldPose(e);if(steps.some(s=>s.verb==='walk_to'&&s.params.to===id)||Math.hypot(found.goal[0]-at.x,found.goal[1]-at.z)<1.5)continue;
+   // a walk to the door itself (or to a spot at it on this side) ends at the door: it is not a walk through it
+   const at=m.worldPose(e);if(steps.some(s=>s.verb==='walk_to'&&s.params.to===id))continue;
    if(!actionsOf(def).some(a=>a.name==='open'&&isContactActuator(def,a)))continue;
    const open=d.contact.plan(soul,id,'open',{},{open:false}),o=open?.params.opening;if(!open||!o)continue;
    const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)],far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
+   // #2383: a goal near the door but past it (a small shop's floor just inside its door) is still a walk through it
+   if(Math.hypot(found.goal[0]-at.x,found.goal[1]-at.z)<1.5&&-o.side*((found.goal[0]-wp.x)*n[0]+(found.goal[1]-wp.z)*n[1])<0.3)continue;
    const close=d.contact.plan(soul,id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)continue;
    // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
    const end=actuatorPoint(c,0).root;if(!eng.walkFromReachesV1(soul.entityId,[end[0],end[2]],steps))continue;
