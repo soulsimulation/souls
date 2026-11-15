@@ -60,6 +60,10 @@ hit, so the hard separation layer rarely fires.
 - **wait-bound/2** (#1288, adopted at boot after wait-bound/1): the same bound for a step that swims or travels through
   water (`swim_to`, `ground_travel`, `swim_in`), so a swim held behind a body treading in its way (`swim.occupied`) ends
   `route.blocked` through the swim's own cancel, leaving the swimmer treading or standing where it is.
+- **wait-bound/3** (#2155, adopted at boot last): the same bound for the approach walk a `take_item` or `put_item` runs as
+  its child. The item's own record reads `running` while it walks, so wait-bound/1 never read that walk; a held approach
+  (waiting, not named a deadlock) kept its receipt `started`. Now the bound stops only the approach walk, and the item step
+  fails `route.blocked` with the walk's reason ("wait-bound/3: the walk made no headway for a minute: ...").
 
 ## Speed limits and invariants
 

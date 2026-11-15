@@ -1558,6 +1558,9 @@ export class WorldHost {
   /** #1288 wait-bound/2, one logged rules event (prospective): wait-bound/1's bound for a swim or a journey through water too
    *  (swim_to, ground_travel, swim_in), so a swim held behind a body in the water ends route.blocked. Main adopts it at boot, after wait-bound/1. */
   enableWaitBoundV2(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV2?:boolean}|undefined)?.waitBoundV2)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV2:true},why:'wait-bound/2 (#1288): a swim or a journey through water that makes no headway for a minute ends route.blocked and names what it waited for; retain historical replay before this event'});}
+  /** #2155 wait-bound/3, one logged rules event (prospective): wait-bound/1's bound for the approach walk a take_item or put_item
+   *  runs as its child, so an approach held waiting (not blocked) ends route.blocked and fails its item step. Main adopts it at boot, last. */
+  enableWaitBoundV3(author='operator:wait-bound'){if((this.extra.runtimePolicy as {waitBoundV3?:boolean}|undefined)?.waitBoundV3)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,waitBoundV3:true},why:'wait-bound/3 (#2155): a take or put whose approach walk makes no headway for a minute ends route.blocked and names what it waited for; retain historical replay before this event'});}
   /** #1454 stand-height/1, one logged rules event (prospective): a body the engine places upstairs (a restore, a settle, a stall
    *  release) stands at its floor's own height, never the height it had. History before the event replays as it was. Main adopts it at boot. */
   /** #1521 stand-height/2 (prospective): a level-0 stall release on a world with no ground field stands at its floor's height.
