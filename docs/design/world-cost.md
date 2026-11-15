@@ -162,7 +162,11 @@ hang or a memory runaway.
   clock up (#2235).
 - `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak|stop|storm`,
   and (#2378) `hang-at&tick=N&ticks=K` (a step stuck at ticks N to N+K-1 on every boot), `corrupt` (a Soul's body broken
-  in memory) and `disk&mb=N` (the headroom check reads N MB free; no `mb`: the disk again).
+  in memory) and `disk&mb=N` (the headroom check reads N MB free; no `mb`: the disk again). #2458 adds `throw` (the next
+  tick's engine step throws, recovered as an engine fault) and `throw-at&tick=N&replayMs=K` (the step from tick N throws
+  on every boot; each tick a recovery replays takes at least K ms, as on a busy world). Every recovery logs one line:
+  `[world] recovery hold <ms> ms at tick <t>: <n> replays (<ticks> ticks), …; since the last snapshot …`. The eval's
+  load mode injects `throw` with `--fault-every-sec <s>` and reports those lines (`recoveries`).
 
 **Measured** (`tools/world-launcher/crash-proof.test.mjs`): a real fake-mind Eden core world with its durable clock,
 under the launcher's `ChildPool`, a 5 s hang limit and a 768 MB heap cap. The workstation was loaded (load average 28 on
@@ -206,6 +210,7 @@ is paged. Times are from the fault to the world serving again, measured on the l
 | 3. A database wait: another process holds the write lock | Each statement waits at most 5 s (`busy_timeout`), then fails: a named halt (`durability.clock-frontier`) the guard restarts (#2133). A tick whose writes wait past the hang limit (10 s) in all ends in the watchdog's kill instead. Either way the launcher restarts the world, and it serves once the lock is gone | 12 s lock, CI runner: halted, serving again at 15.2 s. Workstation: killed at 10.8 s (hang rule), serving at 31 s | frontier tick and hash, log prefix, accepted Soul | `no-stuck-world.test.mjs` |
 | 4. The disk filling | Every minute the world reads its free space; under `SIM_DISK_MIN_FREE_MB` (1024) it logs `[load] disk.low`, prunes by the existing retention rules (the hourly backups' rule, brain calls, talk, local takes) and holds its hourly backup. Nothing beyond retention is deleted. A write that still fails is a named halt, restarted by the guard (#2133) | alert and prune at once; never down | same process | `no-stuck-world.test.mjs`, `apps/server/src/load/restart-loop.test.ts` |
 | 5. A launcher terminal state | The breaker's `held` is a rest, not an end: it boots again after 10 min, doubling for each hold in a row up to 1 h; an operator's resume ends it sooner. A handover's fence clears the rest's timer: `unfence()` arms it again, and `ensure()` resumes a world whose rest is over. A capacity refusal never ends `failed` (#2367) | the rest | as its restart | `tools/world-launcher/guard.test.mjs` (c2, c3) |
+| 6. A recovery that outlasts the hang limit (#2458): an engine error on a busy world replays from its last snapshot on the main thread, past the watchdog's 10 s | A recovery is its own step for the watchdog (`world recovery`, id `2da2deea`). A kill inside one quarantines that step after **one** death (any other step needs two), so the restart meets the same error and contains it where it happens (`[world] world.recovery-quarantined: …`, glitch `world.recovery-quarantined`, the in-place rung: what runs stops, nothing replays) instead of replaying the same stretch again. Before, every restart did, and was killed again: 10 kills, then the breaker's hold | one kill, one restart, the restart's recovery held 2 ms (workstation) | the quarantine and the in-place rung are logged events | `tools/world-launcher/recovery-loop.test.mjs`, `apps/server/src/recovery-bounded.test.ts` |
 
 What is left, named so it is not mistaken for covered:
 
