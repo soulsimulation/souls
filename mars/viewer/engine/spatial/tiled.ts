@@ -356,7 +356,6 @@ export class GroundNav {
     // keep = false reads a hit without refreshing it: the audit's sweep must not age the tiles the engine's windows use
     if (hit) { if (keep) { this.fine.delete(key); this.fine.set(key, hit); } this.stats.fineHits++; return hit; }
     this.stats.fineBuilds++;
-    const __t = performance.now();   // #2404 MEASUREMENT ONLY
     const { per, apron: A, cell } = this;
     const M = per + 2 * A, ox = tx * per - A, oz = tz * per - A;
     const blk = new Int16Array(M * M).fill(-1), ids: string[] = ['ground:outside', 'ground:steep', 'ground:water'];
@@ -373,7 +372,6 @@ export class GroundNav {
     }
     // keep = false (the connectivity audit labelling every tile once): a miss is built and handed back without evicting the
     // tiles the engine's windows are using
-    __m2404('fine', key, performance.now() - __t, keep);
     if (!keep) return t;
     this.fine.set(key, t);
     while (this.fine.size > this.fineMax) this.fine.delete(this.fine.keys().next().value!);
@@ -494,7 +492,6 @@ export class GroundNav {
     if (lat.ox !== ox || lat.oz !== oz || lat.nx !== nx || lat.nz !== nz) throw new Error('ground: tile lattice mismatch');
     const grid: LevelGrid = { level: 0, y: 0, cell, nx, nz, ox, oz, x0: ox * cell, z0: oz * cell, free, clearance, blockers: new ComposedBlockers(fillBlockers) };
     this.stats.composites++;
-    __m2404('compose', ckey, 0, true);
     gridContentKeys.set(grid, `compose|${cell}|${ckey}`);
     this.composed.set(ckey, grid);
     while (this.composed.size > this.composedMax) this.composed.delete(this.composed.keys().next().value!);
@@ -549,9 +546,7 @@ export class GroundNav {
     const same = scene.levels.filter((l) => l.id === id), bounds = rectBounds(r), key = known ?? floorKey(scene, same, id, bounds, this.cell), hit = this.floorsOver.get(key);
     if (hit) { this.floorsOver.delete(key); this.floorsOver.set(key, hit); this.stats.floorHits++; return hit.g; }
     this.stats.floorBuilds++;
-    const __t = performance.now();
     const g = buildGridsOverFloors({ ...scene, bounds, levels: same }, this.cell).levels.get(id);
-    __m2404('floor', key, performance.now() - __t, true);
     if (g) gridContentKeys.set(g, `floor|${this.serial}.${++this.floorsGen}|${r.join(',')}|${id}`);
     const bytes = g ? g.free.byteLength + g.clearance.byteLength + g.nx * g.nz * 4 : 0;
     this.floorsOver.set(key, { g, bytes }); this.floorsOverBytes += bytes;
@@ -990,11 +985,3 @@ function appendLeg(legs: Leg[], leg: Leg) {
 }
 
 export { MEDIUM_NAMES, G_WALK, G_WADE, G_SWIM, G_STEEP, G_OUTSIDE };
-
-/** #2404 MEASUREMENT BRANCH ONLY (never merged): per kind, builds, distinct keys, rebuilds of a key built before, and ms. */
-function __m2404(kind: string, key: string, ms: number, keep: boolean): void {
-  const g = globalThis as unknown as { __m2404?: Record<string, { builds: number; ms: number; rebuilds: number; rebuildMs: number; noKeep: number; keys: Set<string> }> };
-  const m = (g.__m2404 ??= {}), k = (m[kind] ??= { builds: 0, ms: 0, rebuilds: 0, rebuildMs: 0, noKeep: 0, keys: new Set() });
-  k.builds++; k.ms += ms; if (!keep) k.noKeep++;
-  if (k.keys.has(key)) { k.rebuilds++; k.rebuildMs += ms; } else k.keys.add(key);
-}

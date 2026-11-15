@@ -528,14 +528,6 @@ export class Spatial {
       const build = () => this.ground!.gridsOver(pg.rects[i], pg.all), t0 = performance.now();
       set = pg.sets[i] = this.prof ? this.prof.time('spatial.sync.grids', build) : build();
       this.stats.gridBuilds++; this.stats.gridMs += performance.now() - t0;
-      { // #2404 MEASUREMENT ONLY: window builds by (epoch, rect); a repeat is a hit a kept-by-rect cache would have had
-        const g = globalThis as unknown as { __w2404?: { builds: number; ms: number; repeats: number; repeatMs: number; seen: Set<string>; recent: string[]; lru8: number; lru8Ms: number; maxMs: number; slow: { rect: string; ms: number; repeat: boolean }[] } };
-        const w = (g.__w2404 ??= { builds: 0, ms: 0, repeats: 0, repeatMs: 0, seen: new Set(), recent: [], lru8: 0, lru8Ms: 0, maxMs: 0, slow: [] });
-        const k = `${this.epoch}|${pg.rects[i].join(',')}`, ms = performance.now() - t0, rep = w.seen.has(k);
-        w.builds++; w.ms += ms; w.maxMs = Math.max(w.maxMs, ms); if (rep) { w.repeats++; w.repeatMs += ms; } w.seen.add(k);
-        const at = w.recent.indexOf(k); if (at >= 0) { w.lru8++; w.lru8Ms += ms; w.recent.splice(at, 1); } w.recent.push(k); if (w.recent.length > 8) w.recent.shift();
-        if (ms >= 100) w.slow.push({ rect: k, ms: Math.round(ms), repeat: rep });
-      }
       if (this.planner === 'corridor') prepareCorridor(set);
     }
     this.scene = pg.scenes[i];

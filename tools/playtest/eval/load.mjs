@@ -20,6 +20,7 @@ import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
 import { summarizeProfile } from './prof-summary.mjs';
+import { bucketProfile } from './prof-buckets.mjs';
 // #2354 MEASUREMENT BRANCH ONLY (never merged): a CPU profile of the world over the first repeat of the largest arm.
 const PROF_HOOK = new URL('./prof-hook.mjs', import.meta.url).pathname;
 
@@ -91,7 +92,8 @@ export async function runLoad(o) {
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const prof = rep === first && n === Math.max(...sizes), profDir = join(dir, 'server', 'prof'), prevOpts = process.env.NODE_OPTIONS;
+    const prof = rep === first,   // #2414: every arm of the first repeat
+      profDir = join(dir, 'server', 'prof'), prevOpts = process.env.NODE_OPTIONS;
     if (prof) { mkdirSync(profDir, { recursive: true }); process.env.NODE_OPTIONS = `${prevOpts ? prevOpts + ' ' : ''}--import=${PROF_HOOK}`; process.env.SIM_PROF_DIR = profDir; }
     let w; try { w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') }); }
     finally { if (prof) { if (prevOpts === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prevOpts; delete process.env.SIM_PROF_DIR; } }
@@ -116,11 +118,12 @@ export async function runLoad(o) {
       await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts })));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
-      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      const live2414 = readLive(liveFile), server = { act: actPartsOfLive(live2414), apiRoutes: live2414?.api?.routes ?? null, read: live2414?.read ?? null, tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
       if (prof) {
         writeFileSync(join(profDir, 'prof.stop'), ''); const pf = join(profDir, 'world.cpuprofile');
         for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(2000);
         try { server.gridStats = JSON.parse(readFileSync(join(profDir, 'grid-stats.json'), 'utf8')); } catch (e) { server.gridStats = { error: String(e?.message ?? e).slice(0, 200) }; }
+        try { server.buckets = bucketProfile(pf, serverRoot); } catch (e) { server.buckets = { error: String(e?.message ?? e).slice(0, 200) }; }
         try { server.profile = summarizeProfile(pf, serverRoot); } catch (e) { server.profile = { error: String(e?.message ?? e).slice(0, 200) }; }
       }
       const http = [], pairs = [];
