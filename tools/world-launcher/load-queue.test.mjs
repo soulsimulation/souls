@@ -126,3 +126,21 @@ test('A5: in a handover a world the release asks to leave unloaded is not moved;
     assert.equal(b.status('still').status, 'running');
   } finally { await a.closeAll(); await b.closeAll(); }
 });
+
+test('#2393 A2: a page asked of a loading world gets the waking page, which asks again by itself; a JSON call still gets 503 world.waking', { timeout: 30_000 }, async () => {
+  const { L, base } = await launcher(1, { bootMs: 1500, loadHoldMs: 300 });
+  try {
+    const page = await fetch(`${base}/w/w01/`, { headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' } });
+    assert.equal(page.status, 503); assert.equal(page.headers.get('retry-after'), '5'); assert.equal(page.headers.get('cache-control'), 'no-store');
+    assert.match(page.headers.get('content-type'), /text\/html/);
+    const html = await page.text();
+    assert.match(html, /<h1>World w01 is waking up<\/h1>/, 'it names the world');
+    assert.match(html, /<meta http-equiv="refresh" content="5">/, 'it asks again by itself');
+    assert.doesNotMatch(html, /<script|src=|href=/, 'it loads nothing');
+    const r = await fetch(`${base}/w/w01/v1/config`, { headers: { accept: 'application/json' } });
+    assert.equal(r.status, 503); assert.equal(r.headers.get('retry-after'), '5'); assert.equal((await r.json()).code, 'world.waking');
+    await until(() => L.pool.status('w01').status === 'running', 5000, 'the load goes on');
+    const after = await fetch(`${base}/w/w01/`, { headers: { accept: 'text/html' } });
+    assert.notEqual(after.status, 503); assert.match(await after.text(), /^fake: /, 'the refresh then gets the world\'s own answer');
+  } finally { await L.close(); }
+});

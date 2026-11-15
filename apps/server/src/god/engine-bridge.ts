@@ -18,7 +18,8 @@ import { hashOf, applyBatch, containerClaims, containerHidden, containerInside, 
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { legalEditsV1 } from '../edge-runtime-rules.ts';
+import { legalEditsV1, legalEditsV2 } from '../edge-runtime-rules.ts';
+import { sealedBy, type SealResident, type Sealed } from './seal-check.ts';
 import { previewWorldEditOffThreadV1, type PreviewViolationV1 } from './edit-preview.ts';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
@@ -111,6 +112,10 @@ const EVACUATE_RETRY_TICKS = 400; // a closure walk-out the engine could not lan
 /** legal-edits/1: a preview verdict stands for this many ticks (30 s at 20 Hz, past the preview's own 20 s timeout); the
  *  walk-out planner re-checks residents at commit. */
 const VERDICT_TICKS = 600;
+/** legal-edits/1: an edit's preview runs only when an entity a rule watches stands within this many metres (horizontally, on
+ *  any level) of what the edit changes. Every engine invariant judges such an entity by the geometry round it (clearance,
+ *  support, step, footing), so an edit with none that near cannot make a new violation and needs no preview. */
+const LEGAL_NEAR_M = 8;
 /** `sent` marker for a thing a walk-out took out of a resident's hands: whatever the entity world says next (a place on
  *  the ground, or nothing: removed) differs from it, so it is always sent. */
 const RELEASED = '"released"';
@@ -1609,7 +1614,7 @@ export class EngineBridge {
     // that ran it; running it here would rewrite a world that a pending round throws away and leave the commit nothing to journal.
     this.flush(); this.host.drainInputs();
     const draft = this.draftFor(after, diff), failures: Failure[] = [];
-    if (draft) {
+    if (draft && this.draftNearWatched(before, draft)) {
       const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key && (dry || !this.verdict.dry) ? this.verdict : null;
       if (!dry) this.verdict = null;
       if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft, dry }; return 'pending'; }
@@ -1621,7 +1626,49 @@ export class EngineBridge {
       detail: m.released.length ? `${m.name} is using ${m.released.map(id => before.pathOf(id) || id).join(', ')}, which this edit changes (${m.reason}).` : `${m.name} is in this edit's way (${m.reason}).`,
       measured: { soul: m.soulId, at: m.from, ...(m.level ? { level: m.level } : {}) }, suggest: { p: m.to }, fix: `Wait until ${m.name} has moved on, or build elsewhere; Souls are not moved for an edit.` });
     for (const x of stuck) if (!named.has(x.body)) failures.push({ op: -1, code: 'body.in-the-way', entity: x.body, field: 'legal-edits/1', detail: `${x.name} is in this edit's way (${x.reason}).`, measured: { soul: x.soulId }, fix: `Wait until ${x.name} has moved on, or build elsewhere.` });
+    if (legalEditsV2(this.host)) failures.push(...this.sealFailures(before, after, diff, new Set([...named, ...moved.map(m => m.body), ...stuck.map(x => x.body)])));
     return failures.length ? failures : null;
+  }
+  /** legal-edits/2 (#2188): the Souls this edit would leave with no walk out (seal-check.ts), each named; `named` already are. */
+  private sealFailures(before: WorldModel, after: WorldModel, diff: Diff, named: Set<string | undefined>): Failure[] {
+    const residents: SealResident[] = [];
+    for (const m of this.host.minds.values()) { const b = this.engine.world.entities[m.entityId]; if (b && !named.has(m.entityId)) residents.push({ body: m.entityId, soulId: m.soulId, name: m.name, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0 }); }
+    if (!residents.length) return [];
+    let sealed: Sealed[];
+    try { sealed = sealedBy(before, after, diff, residents, { skipped: (souls) => this.log(`seal check: ${souls.length} Soul(s) past the window cap left to nav-connect/1`) }); } catch (e) { this.log(`seal check: ${(e as Error).message}`); return []; }
+    return sealed.map(s => ({ op: -1, code: 'body.sealed-in', entity: s.body, field: 'legal-edits/2',
+      detail: `${s.name} would have no walk out: this edit closes ${s.name} in ${s.pocket} m² at (${s.at.map(n => Math.round(n * 10) / 10).join(', ')}), shut off by ${s.by.slice(0, 2).map(id => after.pathOf(id) || id).join(' and ')}${s.by.length > 2 ? ` and ${s.by.length - 2} more` : ''}.`,
+      measured: { soul: s.soulId, at: s.at, pocket: s.pocket, by: s.by }, fix: `Leave a way out (a gap of 1 m, a door or a gate), or wait until ${s.name} has walked out.` }));
+  }
+  /** legal-edits/1: whether the draft's preview could find anything. True when an entity a rule watches (a body, an item, an
+   *  engine-native part, a vehicle, a fixture held or reserved: anything but a resting god fixture) stands within LEGAL_NEAR_M
+   *  of what the draft changes, the old geometry and the new (floors, solids, stairs, fixtures), or when the world has a ride
+   *  (a carrier or boat follows a route, not a spot). Most edits are far from every Soul: no snapshot, no worker, one round. */
+  private draftNearWatched(before: WorldModel, draft: WorldEditV1): boolean {
+    const boxes: number[][] = [], old = this.physics?.byEntity ?? {}, ents = this.engine.world.entities;
+    const pt = (x: number, z: number, r = 0) => boxes.push([x - r, z - r, x + r, z + r]);
+    // a fixture's obstacle is its asset's box (catalog-adapter.ts `size`), so it counts by its half-diagonal round its spot;
+    // an asset this side cannot see is never skipped
+    const assets = { ...this.physics?.assets, ...draft.assets } as Record<string, { size?: number[] } | undefined>;
+    let unknown = false;
+    const fixture = (def: string, x: number, z: number) => { const size = assets[def]?.size; if (!size) { unknown = true; return; } pt(x, z, Math.hypot(size[0], size[2]) / 2); };
+    const obb = (o: OBB2) => { const ca = Math.abs(Math.cos(o.yaw)), sa = Math.abs(Math.sin(o.yaw)), hx = o.half[0] * ca + o.half[1] * sa, hz = o.half[0] * sa + o.half[1] * ca; boxes.push([o.c[0] - hx, o.c[1] - hz, o.c[0] + hx, o.c[1] + hz]); };
+    const part = (b: { surfaces?: { obb: OBB2 }[]; solids?: { obb: OBB2 }[]; links?: { from: { p: Vec2 }; to: { p: Vec2 } }[] } | null | undefined) => {
+      if (!b) return; for (const x of b.surfaces ?? []) obb(x.obb); for (const x of b.solids ?? []) obb(x.obb); for (const l of b.links ?? []) { pt(l.from.p[0], l.from.p[1]); pt(l.to.p[0], l.to.p[1]); }
+    };
+    for (const [id, now] of Object.entries(draft.set)) {
+      part(now); part(old[id]);
+      if (now?.fixture) fixture(now.fixture.def, now.fixture.p[0], now.fixture.p[2]);
+      const e = ents[id]; if (e?.pose) { pt(e.pose.p[0], e.pose.p[2]); fixture(e.def, e.pose.p[0], e.pose.p[2]); }
+    }
+    if (unknown || !boxes.length) return true;
+    for (const e of Object.values(ents)) {
+      if (e.carrier || e.boat) return true;
+      if (e.kind === 'fixture' && before.entities.has(e.id) && !e.reservedBy && e.support?.kind !== 'held' && !e.human && !e.body) continue;
+      const p = e.pose?.p; if (!p) return true;
+      for (const b of boxes) if (p[0] >= b[0] - LEGAL_NEAR_M && p[0] <= b[2] + LEGAL_NEAR_M && p[2] >= b[1] - LEGAL_NEAR_M && p[2] <= b[3] + LEGAL_NEAR_M) return true;
+    }
+    return false;
   }
   /** Preview the edit the last check left pending, off the tick thread, and keep the verdict for the request's next try. A
    *  preview that could not run (no worker, a timeout, too many in flight) refuses the request with a retryable code: an edit

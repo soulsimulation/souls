@@ -42,6 +42,9 @@ export function worldClass(world) {
 /** #2233 A1/A2: a running world's Pss is read at most this often; a still world is unloaded to make room only when its
  *  horizon is at least STILL_HORIZON_MS away; a world with no act and no visitor for QUIET_MS (o.idleMs) after those. */
 export const PSS_EVERY_MS = 30_000, STILL_HORIZON_MS = 60_000, QUIET_MS = 600_000;
+/** #2367 A2: how long a load refused for memory waits for room (a world turning still or quiet, a load finishing) before
+ *  it is refused; the still answers are read afresh every ROOM_LOOK_MS meanwhile (o.refreshStill). */
+export const ROOM_WAIT_MS = 20_000, ROOM_LOOK_MS = 5_000;
 /** #2233 A3: the one state a world is in (awake, still, unloaded, starting, failed), from its pool status and its last
  *  still answer. The old `status` stays beside it for readers that know only running and asleep. */
 export function worldState(st, still = null) {
@@ -86,6 +89,8 @@ export class ChildPool {
    * worldsMemMb (#2233 A1): the memory all worlds together may use. A world is admitted only while the running worlds'
    * Pss plus LOAD_MB for each world loading, and for itself, stays under it; maxRunning is then not a limit (the port
    * range still is). Room is made by unloadForRoom(); still(k) gives the world's last still answer ({ still, untilWallMs, at }).
+   * roomWaitMs (#2367 A2): a load with no room waits this long (ROOM_WAIT_MS) for one, calling refreshStill() (fresh still
+   * answers) every ROOM_LOOK_MS, before it is refused (code 'capacity'; the world stays unloaded, never 'failed').
    * afterRelease(slug) (#2304): asked by takeOver() once the previous process is gone; false leaves the world unloaded
    * (takeOver resolves UNLOADED; a caller that joined it then loads it through the queue as any other).
    */
@@ -447,10 +452,17 @@ export class ChildPool {
   /** Make room for one more world under the memory figure (or the running cap) and the free-memory floor, unloading worlds if needed. */
   async makeRoom(slug) {
     const { maxRunning = Infinity, minFreeMb = 0, worldsMemMb = 0 } = this.o;
+    const t0 = Date.now(), waitMs = this.o.roomWaitMs ?? ROOM_WAIT_MS;
+    let looked = 0;
     for (;;) {
       const { full, room, needMb, ok } = this.roomFor(slug);
       if (ok) return;
       if (!(await this.unloadForRoom(slug))) {
+        // #2367 A2: nothing can go yet: wait briefly for a world to turn still or quiet (its still answer read afresh)
+        if (Date.now() - t0 < waitMs && !this.closing && !this.fenced) {
+          if (Date.now() - looked >= (this.o.roomLookMs ?? ROOM_LOOK_MS)) { looked = Date.now(); try { await this.o.refreshStill?.(); } catch { /* the next look */ } continue; }
+          await sleep(Math.min(500, Math.max(1, waitMs - (Date.now() - t0)))); continue;
+        }
         const e = new Error(full ? (worldsMemMb > 0 ? `the worlds' memory is full (${needMb} of ${worldsMemMb} MB with this world, and no world is still or quiet enough to unload); try again in a minute` : `all ${maxRunning} world slots are in use; try again in a minute`) : `the server is low on memory (under ${minFreeMb} MB free, or ${room ?? '?'} MB under the unit's limit); try again in a minute`);
         e.code = 'capacity'; this.capacityRefusedAt = Date.now(); throw e;
       }
@@ -500,7 +512,8 @@ export class ChildPool {
   }
   async spawnAndWait(k, timeoutMs) {
     k.status = 'starting'; this.o.onChange?.(k.slug);
-    try { await this.makeRoom(k.slug); } catch (e) { k.status = 'failed'; this.o.onChange?.(k.slug); throw e; }
+    // #2367 A2: a load refused for room is not the world's failure: it stays unloaded and loads when asked again
+    try { await this.makeRoom(k.slug); } catch (e) { k.status = e.code === 'capacity' ? 'stopped' : 'failed'; this.o.onChange?.(k.slug); throw e; }
     let port;
     try { port = await this.pickPort(k.port ?? k.world.port, k.slug); }
     catch (e) {
