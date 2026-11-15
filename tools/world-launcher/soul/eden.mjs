@@ -2475,13 +2475,36 @@ function thingAt(ix, t) {
 
 /** #1965: the acts that reach a Soul, as ids to send. The world still decides. */
 const soulActs = (id) => [`go-near:${id}`, `wave:${id}`, `face:${id}`];
+/** #2477: the world offers go-near only to a Soul in sight: within this many metres, in the same room or both outdoors. */
+const GO_NEAR_METRES = 60;
+/** #2477: the room a place lies in as far as this copy can tell: the innermost room, or building with doors, it is part of;
+ *  "" outdoors. The world's sight reads the walls themselves, so this is the copy's best guess, not the world's word. */
+function roomOf(ix, placeId) {
+  for (let p = ix.place(placeId ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "room" || p.doors?.length) return p.id;
+  return "";
+}
+/** #2477: an act that walks to where a Soul is: its place's walk when the catalog vouches for one, or else a walk to its point. */
+function soulWalk(ix, x) {
+  const p = ix.place(x?.place ?? ""), walk = p ? ix.walkId(p) : null;
+  return walk && ix.knows(walk) ? { act: walk } : Array.isArray(x?.at) ? { act: "walk-to:here", params: { at: x.at } } : null;
+}
+/** #2477: how to reach a Soul from `here` (my live place) and `at`: its acts when the world offers them, or else the act that
+ *  walks to where it is, with a note. Without my place the copy cannot tell, and the acts are listed as before. */
+function soulReach(ix, x, { here, at } = {}) {
+  const metres = dist(at, x.at), other = roomOf(ix, here) !== roomOf(ix, x.place), walk = soulWalk(ix, x);
+  if (here === undefined || !walk || (!other && !(metres > GO_NEAR_METRES))) return { acts: soulActs(x.id) };
+  const why = other ? `in another room (${whereOf(ix, x.place) ?? "out of sight"})` : `${metres} m away`;
+  return { acts: [walk.act], ...(walk.params ? { params: walk.params } : {}),
+    note: `${x.name} is ${why}: go-near, wave and face are offered only within ${GO_NEAR_METRES} m in the same room. This act walks there first; then find them again.` };
+}
 const soulWords = (x) => wordsOf(x, () => ({ name: tokensOf(x.name), id: tokensOf(x.id) }));
 
 /** find: Souls, places, acts and things the words name, best first, nearest first among equals. `at` is where the Soul stands.
  *  "a bench near the pond" and "a table in the library" are read as the thing and its anchor. `outline` adds, to each
  *  place found, `outlineOf` it. `souls` is the live copy's Souls (#1965): only those are found, and a Soul's row comes
- *  before a place or thing row of the same score. Its name is another Soul's words, so the row is marked untrusted. */
-function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline, souls = [] } = {}) {
+ *  before a place or thing row of the same score. Its name is another Soul's words, so the row is marked untrusted. `here`
+ *  is my live place (#2477): a Soul the world offers no go-near to from here gets the walk to it as its act instead. */
+function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8, states, outline, souls = [] } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   let atPlace = null;
@@ -2502,7 +2525,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
   if ((!kind || soulsOnly) && !verbs.size) for (const x of souls) {
     if (!x?.id || (scope && !scope.has(x.place ?? "")) || (around && !((dist(around.at, x.at) ?? Infinity) <= NEAR_METRES))) continue;
     const s = q.length ? score(q, soulWords(x)) : soulsOnly ? 1 : 0; if (!s) continue;
-    out.push({ s: s + 3.5, d: dist(ref, x.at), row: { type: "soul", id: x.id, name: x.name, place: x.place ?? null, at: x.at ?? null, doing: x.doing ?? null, metres: dist(ref, x.at), acts: soulActs(x.id), untrusted: true } });
+    out.push({ s: s + 3.5, d: dist(ref, x.at), row: { type: "soul", id: x.id, name: x.name, place: x.place ?? null, at: x.at ?? null, doing: x.doing ?? null, metres: dist(ref, x.at), ...soulReach(ix, x, { here, at }), untrusted: true } });
   }
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
     if (!q.length || !inScope(p.id, p.at)) continue;
@@ -2554,7 +2577,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
   const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
   // #2312: "at the bandstand" is in it, or else around it: the benches that face a bandstand stand outside its floor
-  if (atPlace && !found.length) return find(ix, text, { verb, kind, near: atPlace.id, at, limit, states, outline, souls });
+  if (atPlace && !found.length) return find(ix, text, { verb, kind, near: atPlace.id, at, here, limit, states, outline, souls });
   return { found, ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 
@@ -2589,16 +2612,16 @@ function fit(answer, budget) {
 
 /** query: several questions in one call. Each is {find, verb?, kind?, in?, near?, limit?} | {place, depth?, verbs?, things?} |
  *  {thing}, with its own `budget` in tokens (default 600). `souls` is the live copy's, for find (#1965). */
-function query(ix, questions, { at, budget = 600, states, souls } = {}) {
+function query(ix, questions, { at, here, budget = 600, states, souls } = {}) {
   return (Array.isArray(questions) ? questions : [questions]).slice(0, 12).map((qn) => {
     const b = Number.isFinite(qn?.budget) ? qn.budget : budget;
     if (qn?.place !== undefined) return fit(placeView(ix, String(qn.place), { depth: qn.depth ?? 1, verbs: qn.verbs, at, things: qn.things !== false }), b);
     if (qn?.thing !== undefined) { const t = ix.things.get(String(qn.thing)); return t ? { ...t, path: ix.pathOf(t.place), acts: [...(ix.cat.acts ?? []).filter((a) => a.thing === t.id).map((a) => a.id), ...handActs(ix, t, states).map((a) => a.id)], ...(ix.handOf(t) ? { state: thingState(ix, t, states) } : {}) } : { error: `No thing with id "${qn.thing}" in the catalog.` }; }
-    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, limit: qn.limit ?? 8, states, souls }), b);
+    if (qn?.find !== undefined || qn?.verb || qn?.kind) return fit(find(ix, qn.find ?? "", { verb: qn.verb, kind: qn.kind, inPlace: qn.in, near: qn.near, at, here, limit: qn.limit ?? 8, states, souls }), b);
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, GO_NEAR_METRES, roomOf, soulWalk, soulReach, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -5338,7 +5361,7 @@ async function findCommand(...args) {
   }
   if (!words.length && !o.verb && !o.kind) throw new Error('usage: find "<words>" [--verb <verb>] [--kind <kind>|soul] [--in <place>] [--near <place>] [--limit n] [--outline]');
   const { ix, live, me, note } = await worldCopy();
-  const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, states: live?.live?.things, souls: otherSouls(live) });
+  const r = soulCatalog.find(ix, words.join(" "), { ...o, at: me?.at, here: me?.place, states: live?.live?.things, souls: otherSouls(live) });
   return { ...r, ...(note ? { note } : {}), ...(r.found.length ? { next: `Send a row's "act" (a Soul's row: one of its "acts"): ${CLI} act <act> --wait` } : { next: 'Nothing here is called that. Try fewer words, --verb <verb>, or query \'{"place":"<id>"}\'.' }) };
 }
 // query '<json>': several layered questions in one call, each with its own depth, filters and token budget.
@@ -5346,7 +5369,7 @@ async function queryCommand(...args) {
   const text = args.filter((a) => !a.startsWith("--")).join(" "), b = args.indexOf("--budget");
   let questions; try { questions = JSON.parse(text); } catch { throw new Error('usage: query \'[{"find":"library"},{"place":"<id>","depth":2,"verbs":["read"]},{"verb":"eat","near":"<place>","limit":3}]\' [--budget tokens]'); }
   const { ix, live, me, note } = await worldCopy();
-  return { answers: soulCatalog.query(ix, questions, { at: me?.at, states: live?.live?.things, souls: otherSouls(live), ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
+  return { answers: soulCatalog.query(ix, questions, { at: me?.at, here: me?.place, states: live?.live?.things, souls: otherSouls(live), ...(b >= 0 ? { budget: Number(args[b + 1]) } : {}) }), ...(note ? { note } : {}) };
 }
 // look: where this Soul is, what can be done there, who is near, who is elsewhere, and what was said lately. From disk.
 async function look(copy) {
@@ -5401,9 +5424,21 @@ export function refusalList({ code, did_you_mean, candidates }) {
   });
   return { ...(list.length ? { did_you_mean: list } : {}), ...(choice && ids.length > keep ? { more: `--json shows all ${ids.length}` } : {}) };
 }
+const SOUL_ACT = /^(?:go-near|wave|face):(s_[A-Za-z0-9]+)$/;
+/** #2477: where the live copy on this machine has the Soul an act names, and the act that walks there; null if it has none. */
+async function soulWay(id) {
+  const m = SOUL_ACT.exec(id ?? ""), c = m ? await worldCopy({ local: true }).catch(() => null) : null;
+  const x = c?.live?.live?.souls?.find((s) => s.id === m[1]), walk = x ? soulCatalog.soulWalk(c.ix, x) : null;
+  return walk ? { ...walk, name: x.name, where: (c.ix.pathOf(x.place).slice(-2).reverse().join(", ") || (x.at ? `[${x.at.join(", ")}]` : "the world")) } : null;
+}
 /** #1948: the world refuses an id it cannot bind as it is, naming no others: this machine's catalog is searched by its words. */
-export function findNext(id, { code, did_you_mean, candidates } = {}) {
+export function findNext(id, { code, did_you_mean, candidates } = {}, way) {
   if (code !== "capability.unknown" || typeof id !== "string" || did_you_mean?.length || candidates?.length) return {};
+  // #2477: an act on another Soul is offered only in sight of it: walk to where the live copy has it, then ask again
+  if (SOUL_ACT.test(id)) {
+    if (!way) return { next: `${CLI} find --kind soul: that Soul is not in this machine's live copy` };
+    return { next: `${CLI} act ${way.act}${way.params ? ` '${JSON.stringify(way.params)}'` : ""} --wait, then ${id}: ${way.name} is in ${way.where}, and acts on a Soul need you in the same room, within ${soulCatalog.GO_NEAR_METRES} m` };
+  }
   const words = id.split(/[:._/-]+/).filter((w) => w && w !== "here").join(" ");
   return words ? { next: `${CLI} find "${words}"` } : {};
 }
@@ -5644,7 +5679,7 @@ async function act(...argv) {
     noteSteerRefusal(parsed, d);
     const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
     if (json) return { ...d, ...card };
-    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d), ...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -6888,7 +6923,10 @@ export function parsePlanSteps(text) {
   const steps = list.map((x) => {
     const s = typeof x === "string" ? { id: x } : x;
     if (!plainObject(s) || typeof s.id !== "string") throw new Error(usage);
-    if (!PLAN_STEP_ID.test(s.id)) throw new Error(`"${s.id}" is not an offered id. Ids come from find "<words>", look and here.`);
+    // #2477: an id with its params written after it as text: the step takes them as an object beside the id
+    const asText = /^(\S+)\s+(\{.*\})$/s.exec(s.id);
+    if (asText && PLAN_STEP_ID.test(asText[1])) throw new Error(`"${s.id}": a step's params go beside its id, as an object: {"id":${JSON.stringify(asText[1])},"params":${asText[2]}}`);
+    if (!PLAN_STEP_ID.test(s.id)) throw new Error(`"${s.id}" is not an offered id. Ids come from find "<words>", look and here. A step with params: {"id":"<id>","params":{…}}.`);
     if (s.params !== undefined && !plainObject(s.params)) throw new Error(`${s.id}: params must be a JSON object`);
     if (s.fixes !== undefined) { if (list.length !== 1 || !Number.isInteger(s.fixes) || s.fixes < 1) throw new Error("fixes names one refused step, by its number, in a list of one"); fixes = s.fixes; }
     return { id: s.id, ...(s.params ? { params: s.params } : {}) };

@@ -36,3 +36,14 @@ test('#2468: harder-hamlet-v1 names hello-hamlet; every harder-v1 item is ported
   assert.deepEqual([...battery.items.map((i) => i.from), ...battery.notPorted.map((n) => n.id)].sort(), harder);
   assert.ok(battery.notPorted.every((n) => n.why));
 });
+
+test('#2477: harder-hamlet-v2 is v1 with the cottage bench\'s wording and the 3600 s cap fixed; v1 stays as scored', () => {
+  const v1 = resolveInputs({ battery: 'harder-hamlet-v1', seat: 'scripted' }).battery, v2 = resolveInputs({ battery: 'harder-hamlet-v2', seat: 'claude-sonnet' }).battery;
+  assert.deepEqual(validateBattery(v2), []);
+  assert.equal(v2.world, 'hello-hamlet');
+  const item = (b, id) => b.items.find((i) => i.id === id);
+  assert.match(item(v2, 'errand-three-step').instruction, /^Sit on the cottage's bench, then/);
+  assert.match(item(v1, 'errand-three-step').instruction, /^Sit on the bench in the cottage, then/, 'v1 unchanged');
+  assert.match(item(v2, 'refused-recover').note, /at most 3600 s/);
+  assert.deepEqual(v2.items.map((i) => [i.id, i.check]), v1.items.map((i) => [i.id, i.check]), 'the same checks');
+});
