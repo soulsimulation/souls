@@ -332,7 +332,10 @@ test('#2440 spare time: with the thread idle, a crowd of acts runs past the fram
     for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
     adm.close(); return ran;
   };
-  assert.equal(await run('green', 0.4), 50, 'idle 40 %: every act runs at once');
+  assert.equal(await run('green', 0.9), 50, 'idle 90 %: the crowd runs on spare time');
+  // #2440 A4: spare time takes only the idle share above the reserve (SPARE_IDLE), so the reserve stays free
+  const some = await run('green', 0.4);
+  assert.ok(some > await run('green', 0.1) && some < 50, `idle 40 %: spare time adds the idle above the reserve, not the whole thread (${some} ran)`);
   assert.ok(await run('amber', 0.4) < 10, 'amber: never on spare time, the frame budget binds');
   assert.ok(await run('red', 0.4) < 10, 'red: never on spare time, the frame budget binds');
   assert.ok(await run('green', 0.1) < 10, 'idle 10 %: the frame budget binds as before');
@@ -340,7 +343,7 @@ test('#2440 spare time: with the thread idle, a crowd of acts runs past the fram
   assert.ok(await run('green', 0.4, 0.8) < 10, 'idle, but the ticks fall behind (service 0.8): the frame budget binds');
 });
 
-test('#2440 an act is charged its own time, not the tick that ran while it was timed; spare time leaves no debt', async () => {
+test('#2440 an act is charged its own time, not the tick that ran while it was timed; a job on spare time leaves the frame credit no debt', async () => {
   let now = 0, ticks = 0, idle = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, tickSpentMs: () => ticks, idleShare: () => idle});
   const blocker = adm.request({key: 'X', god: false, route: route('POST', '/v1/edge/act')}) as {done: () => void};
   const t = adm.request({key: 'A', god: false, route: route('POST', '/v1/edge/act')});
@@ -348,15 +351,22 @@ test('#2440 an act is charged its own time, not the tick that ran while it was t
   if ('turn' in t) void t.turn.then(() => { now += 3030; ticks += 3000; t.done(); });
   blocker.done(); await adm.drain();
   assert.equal(adm.spentMs, 30, `charged ${adm.spentMs} ms (the blocker 0, the act its own 30), not the tick's 3 s`);
-  // on spare time two 2 s jobs run with no credit left, and the credit is not left 4 s in debt when the thread is busy again
-  idle = 0.5; now += 1000;
+  // a job overdraws the frame credit; then, on spare time, a 2 s job runs with no credit left. The spare credit pays it, so
+  // the frame credit is not 2 s in debt: the next act runs on the frame credit, and so does one once the thread is busy
+  now += 1000; const x = adm.request({key: 'X', god: false, route: route('POST', '/v1/edge/act')});
+  if ('turn' in x) void x.turn.then(() => { now += 100; x.done(); });
+  await adm.drain();
+  idle = 0.5; let ranC = false, ranD = false;
   const u = adm.request({key: 'B', god: false, route: route('POST', '/v1/edge/act')}), v = adm.request({key: 'C', god: false, route: route('POST', '/v1/edge/act')});
-  for (const x of [u, v]) if ('turn' in x) void x.turn.then(() => { now += 2000; x.done(); });
-  await adm.drain(); await adm.drain();
-  idle = 0; let ran = false; const w = adm.request({key: 'D', god: false, route: route('POST', '/v1/edge/act')});
-  if ('turn' in w) void w.turn.then(() => { ran = true; now += 5; w.done(); });
+  if ('turn' in u) void u.turn.then(() => { now += 2000; u.done(); });
+  if ('turn' in v) void v.turn.then(() => { ranC = true; now += 5; v.done(); });
+  await adm.drain();
+  const spent: number = adm.spentMs;
+  assert.ok(ranC && spent === 2135, `B ran on spare time and C after it on the frame credit (${spent} ms spent)`);
+  idle = 0; const w = adm.request({key: 'D', god: false, route: route('POST', '/v1/edge/act')});
+  if ('turn' in w) void w.turn.then(() => { ranD = true; now += 5; w.done(); });
   now += 50; await adm.drain();
-  assert.ok(ran, 'busy again: the next act runs within a frame, not after 4 s of debt');
+  assert.ok(ranD, 'busy again: the next act runs within a frame, not after 2 s of debt');
   adm.close();
 });
 
@@ -411,7 +421,7 @@ test('#2440 review: the inline fast path charges a lone act its own time, not a 
 
 test('#2440: spare time needs the ticks on time now (1 s service >= 0.98, last tick under 100 ms old), not only over 5 s', async () => {
   const run = async (onTime: boolean) => {
-    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.5, ticksOnTime: () => onTime});
+    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => 0.9, ticksOnTime: () => onTime});
     adm.setLoadLevel('green');
     for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
     for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }

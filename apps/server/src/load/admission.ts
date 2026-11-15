@@ -133,6 +133,10 @@ export class Admission {
    *  budget, and every job's measured time is debited, so a job longer than the budget is paid back by the frames
    *  after it. Whatever the sum of the per-Soul budgets, requests never take more than budget/50 of the thread. */
   private credit = FRAME_BUDGET_MS.green; private creditAt = 0;
+  /** #2440: spare time's own credit: it accrues only from the idle share above the reserve (SPARE_IDLE), at most one
+   *  frame, and pays what a job run on spare time took past the frame credit, so spare time uses the idle thread and
+   *  keeps the reserve free for the tick and the bookkeeping calls (#1750 A4) instead of running acts back to back. */
+  private spareCredit = 0; private spareAt = 0;
   /** Per principal: strike times, the cool-down's end, and when the Retry-After it was last given elapses (retryUntil). */
   private strikes = new Map<string, Strikes>();
   private share = {god: 0, souls: 0};   // decaying ms spent, for the god's reserve
@@ -242,13 +246,17 @@ export class Admission {
     return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
   }
 
+  private spareNow(now: number) {
+    this.spareCredit = Math.min(FRAME_MS, this.spareCredit + Math.max(0, now - this.spareAt) * Math.max(0, this.idleShare() - SPARE_IDLE)); this.spareAt = Math.max(this.spareAt, now);
+    return this.spareCredit;
+  }
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
-  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, free = false) {
-    this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
-    // #2440: a job run on spare time leaves no debt: once the thread is busy again, the budgets start from even, not from
-    // the idle time the requests used meanwhile
-    if (free) this.credit = Math.max(0, this.credit);
+  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, free = false, onSpare = false) {
+    // #2440: a job run on spare time (the frame credit spent) is paid from the spare credit and leaves the frame credit no
+    // debt: once the thread is busy again, the budgets start from even, not from the idle time the requests used meanwhile
+    if (onSpare) { this.spareNow(startedAt); this.spareCredit -= ms; } else { this.creditNow(startedAt); this.credit -= ms; }
+    this.spentMs += ms;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
@@ -318,7 +326,12 @@ export class Admission {
         this.sweep(now);
         const budget = this.frameBudget();
         const free = this.spare();
-        if (this.creditNow(now) <= 0 && !free) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        if (!free) this.spareAt = now;   // spare time accrues only while there is spare time
+        const onSpare = this.creditNow(now) <= 0;
+        if (onSpare && !(free && this.spareNow(now) > 0)) {
+          const creditMs = budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS, rate = this.idleShare() - SPARE_IDLE;
+          this.later(free && rate > 0 ? Math.min(creditMs, FRAME_MS, -this.spareCredit / rate + 1) : creditMs); return;
+        }
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
         const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
@@ -326,11 +339,13 @@ export class Admission {
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
         // #2440: the turn waited on spans the next loop pass, whose timers phase runs the tick (and its long holds): those
         // are the tick's, not this job's (charged, they cost the requests ~20 s of credit after a 3 s hold)
-        this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free);
+        this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free, onSpare);
         // #2440: on spare time no credit spaces the jobs, and a job that finished inside its turn resumes this loop in the
         // same check phase: without a turn of the loop between them, a queue of acts ran back to back and held the C0
-        // bookkeeping routes (#1750 A4: receipt p95 265 ms against 50). Let the poll phase in before the next one.
-        if (free && this.queue.length && !this.o.yieldTurn) await new Promise<void>(r => setImmediate(r));
+        // bookkeeping routes (#1750 A4: receipt p95 265 ms against 50). Let the poll phase in before the next one: a 1 ms
+        // timer, so the poll waits for a call already on its way, then the check phase, so the timers due in that pass
+        // (a long poll's return) run before the next act, not after it.
+        if (free && this.queue.length && !this.o.yieldTurn) await new Promise<void>(r => setTimeout(() => setImmediate(r), 1));
       }
     } finally { this.draining = false; }
   }
