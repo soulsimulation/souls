@@ -755,21 +755,31 @@ export class Spatial {
     for (const o of this.scene.obstacles) { const level = this.passDoorLevel(o); if (level !== null) pass.set(o.id, { o, level }); }
     if (!pass.size) return null;
     type Node = { at: Place; doors: DoorChain['doors']; legs: DoorChain['route']['legs']; length: number; expanded: number };
-    // the naming search floods the region it starts in (an early proof of unreachability names nothing)
+    // past the first door the naming search floods the (small) region it starts in, as an early proof of unreachability
+    // there names nothing; from the start it keeps the caller's proof, as one door did (a full flood of a big world's
+    // open ground for every room reach made the menu and every act wait: m4-v1 on the runner)
     const used = new Set<string>(), { proveUnreachable: _p, ...naming } = rest;
     let frontier: Node[] = [{ at: start, doors: [], legs: [], length: 0, expanded: 0 }];
     for (let depth = 0; depth <= PASS_MAX_DOORS && frontier.length; depth++) {
       const next: Node[] = [];
       for (const n of frontier) {
-        const named = this.routeNow(world, profile, n.at, goal, { ...naming, nameObstacles: (id) => pass.has(id) && !used.has(id) });
+        // with the caller's early proof the search names the doors walling the destination in (one door's case, cheap);
+        // when there are some and none of them is reached from here (doors in series), the region here is flooded to name its own
+        const full = depth > 0 || !rest.proveUnreachable;
+        let named = this.routeNow(world, profile, n.at, goal, { ...(full ? naming : rest), nameObstacles: (id) => pass.has(id) && !used.has(id) });
         if (named.ok) {
           if (!n.doors.length) return null;
           return { doors: n.doors, route: { legs: [...n.legs, ...named.route.legs], length: n.length + named.route.length, expanded: n.expanded + named.route.expanded } };
         }
         if (depth === PASS_MAX_DOORS || named.diagnostic.code !== 'route.unreachable') continue;
         const along = (c: Vec2) => hypot(c[0] - n.at.p[0], c[1] - n.at.p[1]) + hypot(c[0] - goal.p[0], c[1] - goal.p[1]);
-        const ids = [...new Set(named.diagnostic.subjects ?? [])].filter((id) => pass.has(id) && !used.has(id))
-          .sort((a, b) => along(pass.get(a)!.o.obb.c) - along(pass.get(b)!.o.obb.c) || (a < b ? -1 : 1)).slice(0, 4);
+        const nameOf = (r: RouteResult) => (r.ok ? [] : [...new Set(r.diagnostic.subjects ?? [])].filter((id) => pass.has(id) && !used.has(id))
+          .sort((a, b) => along(pass.get(a)!.o.obb.c) - along(pass.get(b)!.o.obb.c) || (a < b ? -1 : 1)).slice(0, 4));
+        let ids = nameOf(named);
+        if (!full && ids.length && !ids.some((id) => { const { o, level } = pass.get(id)!; return doorSides(o).some((q) => this.routeNow(world, profile, n.at, { level, p: q }, rest).ok); })) {
+          named = this.routeNow(world, profile, n.at, goal, { ...naming, nameObstacles: (id) => pass.has(id) && !used.has(id) });
+          ids = nameOf(named);
+        }
         for (const id of ids) {
           const { o, level } = pass.get(id)!, sides = doorSides(o);
           for (const [a, b] of [sides, [sides[1], sides[0]] as [Vec2, Vec2]]) {
