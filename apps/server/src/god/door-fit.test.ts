@@ -10,7 +10,8 @@ import { pathToFileURL } from 'node:url';
 import { DOOR_FIT_FROM } from '@souls/world-compiler';
 import { bootEden } from '../../test/eden-capabilities-timing.ts';
 import { accept } from '../../test/native-owner-fixture.ts';
-import { adoptBootRuntimePoliciesV1, doorFitBoot, doorFitV1, enableDoorFitV1 } from '../edge-runtime-rules.ts';
+import { adoptBootRuntimePoliciesV1, doorFitV1, enableDoorFitV1 } from '../edge-runtime-rules.ts';
+import { loadConfig } from '../config.ts';
 import { doorFit, doorFitted, DOOR_FIT_DOOR } from './door-fit.ts';
 
 const template = (name: string) => JSON.parse(readFileSync(new URL(`../../../../worlds/templates/${name}.json`, import.meta.url), 'utf8'));
@@ -100,17 +101,16 @@ test('door-fit/1: a refused building is tried again at the next boot', { timeout
 // Coordinator, push of 15 Nov: live-world door migration is off until a fit can run in slices under 1 s. One building's
 // engine edit took up to 15.9 s on Eden, so the boot rule runs only with DOOR_FIT_BOOT=1; templates keep their doors.
 test('door-fit/1 at boot is opt-in: DOOR_FIT_BOOT=1, off by default', () => {
-  assert.equal(doorFitBoot({}), false, 'off when unset');
-  assert.equal(doorFitBoot({ DOOR_FIT_BOOT: '0' }), false);
-  assert.equal(doorFitBoot({ DOOR_FIT_BOOT: '1' }), true);
+  assert.equal(loadConfig({}).doorFitBoot, false, 'off when unset');
+  assert.equal(loadConfig({ DOOR_FIT_BOOT: '0' }).doorFitBoot, false);
+  assert.equal(loadConfig({ DOOR_FIT_BOOT: '1' }).doorFitBoot, true);
 });
 
 test('door-fit/1 off: booting Eden from before the fit adopts nothing and adds no door', { timeout: 600000 }, async (t) => {
-  const was = process.env.DOOR_FIT_BOOT; delete process.env.DOOR_FIT_BOOT; t.after(() => { if (was !== undefined) process.env.DOOR_FIT_BOOT = was; });
   const { w, old } = await before(t, template('eden-2026'));
   assert.ok(old.length > 0, 'buildings on their old revisions');
   const seq0 = w.god.model.editSeq, doors0 = [...w.god.model.entities.values()].filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR).length;
-  await accept<unknown>(w.host, adoptBootRuntimePoliciesV1(w.host, { edge: false, worldKey: 'eden', god: () => w.god }));
+  await accept<unknown>(w.host, adoptBootRuntimePoliciesV1(w.host, { edge: false, worldKey: 'eden', doorFit: loadConfig({}).doorFitBoot, god: () => w.god }));
   assert.equal(doorFitV1(w.host), false, 'door-fit/1 not adopted');
   assert.equal(w.god.model.editSeq, seq0, 'no edit');
   assert.equal([...w.god.model.entities.values()].filter((e) => doorFitted(e.def)).length, old.length, 'every building keeps its drawn doorways');
@@ -118,10 +118,9 @@ test('door-fit/1 off: booting Eden from before the fit adopts nothing and adds n
 });
 
 test('door-fit/1 on (DOOR_FIT_BOOT=1): the boot rules run the sliced fit', { timeout: 300000 }, async (t) => {
-  const was = process.env.DOOR_FIT_BOOT; process.env.DOOR_FIT_BOOT = '1'; t.after(() => { if (was === undefined) delete process.env.DOOR_FIT_BOOT; else process.env.DOOR_FIT_BOOT = was; });
   const { w } = await before(t, fitted);
   const seq0 = w.god.model.editSeq;
-  await accept<unknown>(w.host, adoptBootRuntimePoliciesV1(w.host, { edge: false, worldKey: 'eden', god: () => w.god }));
+  await accept<unknown>(w.host, adoptBootRuntimePoliciesV1(w.host, { edge: false, worldKey: 'eden', doorFit: loadConfig({ DOOR_FIT_BOOT: '1' }).doorFitBoot, god: () => w.god }));
   assert.equal(doorFitV1(w.host), true, 'adopted');
   assert.equal(w.god.model.editSeq, seq0 + 3, 'one recorded edit per building');
   assert.equal([...w.god.model.entities.values()].filter((e) => doorFitted(e.def)).length, 0);
