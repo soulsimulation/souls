@@ -7,7 +7,9 @@
 //  A5 two worlds at different loads in one shard: a god edit in one leaves the other as it was, and each keeps its own
 //     day, load level and state hash, saved and restored exactly
 //  review (#2445) a world dropped while it loads (a handover's settle, a stalled boot, a stop past its grace) stops alone:
-//     its program and the world beside it run on, and its next load is sent only once it has exited (one writer)
+//     its program and the world beside it run on, and its next load is sent only once it has exited (one writer).
+//     #2469 A2: whatever its boot time (here held 6 s, past the 3 s after which #2445 ended its program)
+//  #2469 A1 a failed shard's worlds reload into fresh programs, never into a running shard with room
 // On a failure the worlds' and shards' log tails are printed. The timings are printed as test diagnostics.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -164,11 +166,11 @@ test('A5: two worlds at different loads in one shard keep their own edits, day, 
   assert.equal((await status('other')).entities, d0.entities, 'and still only there');
 });
 
-test('review: a world dropped while it loads stops alone; its program and the world beside it run on; one writer per data dir', { timeout: 600_000 }, async (t) => {
-  const P0 = await testPort(6);
-  const worlds = { stay: { key: 'stay', env: {} }, drop: { key: 'drop', env: {} } };
-  // (a long drop grace: on a loaded machine a small world's boot can outlast the 3 s default, which would end the program)
-  const h = harness(t, { size: 2, worlds, range: [P0, P0 + 5], options: { shardDropGraceMs: 300_000 } });
+test('review, #2469 A2: a world dropped while it loads stops alone, whatever its boot time; its program and the world beside it run on; one writer per data dir', { timeout: 600_000 }, async (t) => {
+  const P0 = await testPort(6), HOLD_MS = 6000;
+  // drop's boot is held 6 s first (SIM_SHARD_BOOT_HOLD_MS, a step its stop cannot cut short)
+  const worlds = { stay: { key: 'stay', env: {} }, drop: { key: 'drop', env: { SIM_SHARD_BOOT_HOLD_MS: String(HOLD_MS) } } };
+  const h = harness(t, { size: 2, worlds, range: [P0, P0 + 5] });
   await h.pool.ensure(h.world('stay'), { timeoutMs: 300_000 });
   const pid0 = h.pid('stay'), tick0 = (await h.health('stay')).tick;
   const boot = h.pool.ensure(h.world('drop'), { timeoutMs: 300_000 }).catch((e) => e);
@@ -177,7 +179,7 @@ test('review: a world dropped while it loads stops alone; its program and the wo
   assert.equal(first?.pid, pid0, 'drop loads into the program of stay');
   assert.equal(first.loaded, false, 'and is still loading');
   // a handover's prepare abandons the boot (SIGKILL, as healthy() and stopChild() send too)
-  const settling = h.pool.settled({ waitMs: 0, goneMs: 300_000 });
+  const dropAt = Date.now(), settling = h.pool.settled({ waitMs: 0, goneMs: 300_000 });
   // a second load of the same data dir meanwhile is not sent to any program while the first may still write
   const port = h.pool.state('drop').port;
   const load = () => { const x = h.pool.shards.spawn('drop', h.pool.o.command(h.world('drop'), port)); x.stdout.resume(); x.stderr.resume(); return x; };
@@ -191,7 +193,10 @@ test('review: a world dropped while it loads stops alone; its program and the wo
   const abandoned = await settling;
   assert.deepEqual(abandoned.map((b) => b.slug), ['drop']);
   assert.ok(first.exitCode !== null || first.signalCode !== null, 'the dropped world exited');
-  assert.match(h.log('drop'), /\[world\] SIGTERM: snapshot saved/, 'it ended its boot and stopped, saving its snapshot');
+  assert.ok(Date.now() - dropAt >= HOLD_MS - 500, `its boot outlasted the old 3 s grace (${Date.now() - dropAt} ms)`);
+  // its boot ended at its open wait (the projection) the moment the hold was over, or it booted and stopped
+  assert.match(h.log('drop'), /boot interrupted: stop|\[world\] SIGTERM: snapshot saved/, 'it ended its boot and stopped');
+  assert.equal(first.exitCode, 0, 'as a stop, not a crash');
   assert.equal(second.pid, undefined, 'the given-up load was never sent');
   assert.equal(again.pid, pid0, 'then the third load went to the program, which ran on');
   assert.equal(h.pid('stay'), pid0, 'stay: the same program');
@@ -202,4 +207,32 @@ test('review: a world dropped while it loads stops alone; its program and the wo
   assert.equal(again.exitCode, 0);
   assert.equal(h.pid('stay'), pid0); await ticking(h, 'stay');
   await boot;
+});
+
+test('#2469 A1: a failed shard\'s worlds reload into fresh programs, never into a running shard that has room', { timeout: 900_000 }, async (t) => {
+  const P0 = await testPort(8);
+  // shards of 2: a and b share one program; c is alone in another, with room for one more
+  const worlds = Object.fromEntries(['a', 'b', 'c'].map((s) => [s, { key: s, env: {} }]));
+  // (SIM_SKIP=0: these worlds hold no Soul; stepped, each ticks, so the injected storm fires)
+  const h = harness(t, { size: 2, worlds, range: [P0, P0 + 7], program: { SIM_SKIP: '0' } });
+  await h.pool.ensure(h.world('a'), { timeoutMs: 300_000 }); await h.pool.ensure(h.world('b'), { timeoutMs: 300_000 });
+  await h.pool.ensure(h.world('c'), { timeoutMs: 300_000 });
+  const [pa, pc] = [h.pid('a'), h.pid('c')];
+  assert.equal(h.pid('b'), pa, 'a and b share a program');
+  assert.notEqual(pc, pa, 'c is in a program of its own, with room');
+  await ticking(h, 'c');
+  assert.equal(await h.fault('a', 'storm'), 202);
+  const ms = await reloaded(h, { a: pa, b: pa });
+  t.diagnostic(`storm in a: a and b serving again ${ms} ms after the fault`);
+  assert.equal(h.pool.status('a').lastExit?.code, 70, 'a exits as the crash it was');
+  assert.equal(h.pool.status('b').lastExit?.code, 75, 'b, as a planned reload');
+  assert.notEqual(h.pid('b'), pc, 'b did not reload into c\'s running program, which had room');
+  assert.notEqual(h.pid('a'), pc, 'nor did a');
+  assert.notEqual(h.pid('a'), h.pid('b'), 'a reloads in a program of its own');
+  assert.equal(h.pid('c'), pc, 'c: the same program throughout');
+  await ticking(h, 'b'); await ticking(h, 'c');
+  // once b has loaded, its fresh program takes other worlds again: a, stopped and loaded afresh, joins it
+  await h.pool.stop('a');
+  await h.pool.ensure(h.world('a'), { timeoutMs: 300_000 });
+  assert.ok([h.pid('b'), pc].includes(h.pid('a')), 'a loads afresh into a program with room');
 });
