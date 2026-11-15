@@ -67,6 +67,10 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
   client before 2.25, which keeps no world copy. Each episode records `catalogFrom` (`client` or `reference`).
 - `load --first-repeat 2` numbers a load run's repeats from 2, so a stopped load run can be finished cell by cell. Load
   setup paces Souls at 6 per 30 s, under a world's 20 pairings in any 60 s from one address.
+- `load --act-sec 10` paces each Soul like a real agent: one `find` and `act` every 10 s on average (verbs like the
+  m4-v1 battery's), instead of the default nonstop loop (`pending`, `look`, `find`, `act`, then 3 to 6 s), which runs
+  several times harder. Either way the report gives the act calls' server time and queue at p50, p95 and p99. Timed
+  runs accept it in `args` (#2437).
 - A load report also gives the world's own side from its `live.json`: an act's queue, handler, wait and commit at p50
   and p99 with the acts that waited more than three ticks, and each 10-second tick window ([load.md](../architecture/load.md)).
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
