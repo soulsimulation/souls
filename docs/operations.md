@@ -124,12 +124,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   | `engine.step-failing` | steps faulting | clock runs, acts refused, `halted` | as above |
 
   **A halt that repeats at once:** after 5 restarts in 30 min the breaker holds the world (`held`, last reason `halted`),
-  down until an operator resumes it, never a silent loop. The alert is then the only exit, so it has to be loud:
+  resting, never a silent loop. A hold ends by itself (#2378): after 10 min, doubling for each hold in a row up to 1 h,
+  the world boots again; an operator's resume ends it sooner. The alert is loud while it rests:
   - the world's `halted` problem code makes `hostOk` false;
   - `host-health.log` gets an ALERT line, and the health page shows the world as `halted`;
   - the off-box watcher (sim-watch) reads `hostOk` and `hostCodes` from `/__sim/healthz` and DMs Gene (`host-health.mjs` header).
 
-  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until it is resumed. Outside the launcher
+  A crash loop ends `held` (down, shown as resting) after 5 failures in 30 min, until its rest ends or it is resumed. A
+  world that dies in the same listener step on two boots in a row (a hang or a fault storm) comes up with that step quarantined for a window of ticks
+  (`world.step-quarantined`; docs/design/world-cost.md, "A world that never stays stuck"). Outside the launcher
   (local dev, tests), a halted process stays up with its clock stopped.
 - `GET /w/<slug>/healthz` also carries `tickAgeMs` (wall time since the last completed tick), `clockRate` and `baseRate`,
   `stalled` and, while the clock is dilated, `slowed`. A world is `stalled` when its clock owes ticks and the last one is

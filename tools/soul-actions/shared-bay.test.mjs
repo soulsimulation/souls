@@ -783,3 +783,14 @@ test('#1239: a crew held on its way to its stations says so, at yaw 2 with the p
   assert.ok(seen.project.held?.some((h) => h.op === seen.op && h.code === seen.code), JSON.stringify(seen.project));
   assert.equal(glitches(w), 0, 'no fault on the way');
 });
+
+test('#2426: at yaw 2 with each pair reversed, cede-passage/1 lets the bodies on the joist crew\'s stations make way, and the bay completes 32 of 32', {timeout: 900000}, async (t) => {
+  // Without the rule the bay stalls at 22 of 32 on set-joist-4: Dee and Cy stand at their goals inside one single-file passage,
+  // Fay and Eve stand on those goals and are asked to make way through it, and Dee and Cy take turns holding it, every tick
+  const w = await world(t), {Ada, Bo, Cy, Dee, Eve, Fay} = w.souls;
+  await accept(w.host, w.host.enableCedePassageV1('test')); await yard(w, {yaw: 2});
+  const {pj} = await build(w, Bo, [[Bo, Ada], [Dee, Cy], [Fay, Eve]], {yaw: 2});
+  const v = see(w, Ada, pj).state;
+  assert.equal(v.complete, true); assert.equal(v.maneuvers.done, 32); assert.equal(v.maneuvers.total, 32); assert.equal(v.joints.made, 29);
+  assert.equal(glitches(w), 0, 'no fault on the way');
+});
