@@ -26,7 +26,9 @@ const BASE = { PATH: process.env.PATH, DEV_AUTH: '1', WORLD_OWNER_ID: 'dev:admin
   BUILD_ID: 'shard', SIM_FAULT_INJECT: '1', SIM_BOOT_HASH: '1', SEED_NATIVES: '0', ENGINE: 'mars', MIND_DRIVER: 'central', NODE_OPTIONS: '--max-old-space-size=1024', ENABLE_LIVING_WORLD: '1' };
 // Eden core (worlds keyed eden): a durable clock frontier to compare a reload with. These are the program's settings: a
 // shard holds only worlds whose settings are equal, so every world of a harness gets the same ones
-const EDEN = { ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_CLOSED_HUMAN_GOALS: '1', ENABLE_REGISTERED_HUMAN_ACTIVITIES: '1' };
+// (SIM_SKIP=0: these worlds hold no Soul, so they are still; a still world sleeps to its horizon (#2384) and an injected
+// tick fault would wait for the next visitor. Stepped, each world ticks, and its fault fires, as a busy world's does)
+const EDEN = { ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_CLOSED_HUMAN_GOALS: '1', ENABLE_REGISTERED_HUMAN_ACTIVITIES: '1', SIM_SKIP: '0' };
 
 /** A ChildPool with shards of `size` over worlds by slug: { slug: { key, env } }. */
 function harness(t, { size, worlds, range, program = {}, options = {} }) {
