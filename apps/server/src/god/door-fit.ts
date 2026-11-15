@@ -35,16 +35,22 @@ const opRef = (def: string) => def.replace(/^core-/, 'core/'), storedRef = (ref:
 export const doorFitted = (def: string): boolean => DOOR_FIT_FROM.has(opRef(def));
 const yaw = (r: unknown): number => Array.isArray(r) ? Number(r[1] ?? 0) : typeof r === 'number' ? r : 0;
 
+/** Doors both fits hold back by name, their doorway left bare: each measured on a fresh genesis of the fitted Eden
+ *  template. Open, region-alpine-mountain-station-door-1's leaf cuts the station hall off from its entry (#2397); each
+ *  artists-studio door's frame cuts its building's upper floor or bedroom off (#2434, bc13f17b0; the reach check in
+ *  fitWorldDoorsV2 catches three of the four on its own). The template tools and the live rule read this one list. */
+export const DOOR_FIT_HELD: ReadonlySet<string> = new Set(['region-alpine-mountain-station-door-1', 'artists-studio-2-door-3', 'artists-studio-3-door-1-0', 'artists-studio-8-door-3', 'artists-studio-4-door-3']);
+
 /** The fitted revision and its doors for a building `def` placed at `p`, turned `r`; null when `def` is not replaced.
  *  `bodies` are the (x, z) of the bodies standing about; `taken(name)` says a door name is in use. */
 export function doorFit(def: string, params: Record<string, unknown> | undefined, p: unknown, r: unknown, name: string | undefined,
   bodies: Vec2[] = [], taken: (n: string) => boolean = () => false, indoors: (x: number, z: number) => boolean = () => false,
-  all?: { baseY?: number; existing?: (x: number, z: number, floor: number) => boolean; parent?: string }): { ref: string; doors: PlaceOp[]; series: string[]; at: Vec2[]; ways: Way[]; placed: Way[] } | null {
+  all?: { baseY?: number; existing?: (x: number, z: number, floor: number) => boolean; parent?: string }): { ref: string; doors: PlaceOp[]; series: string[]; named: string[]; at: Vec2[]; ways: Way[]; placed: Way[] } | null {
   // #2434 (`all`, door-fit/2): every doorway, with no door held back in series (a walk passes any number); a doorway that
   // already holds a door (door-fit/1's) keeps it; an inside or upstairs door starts open, an outside one as door-fit/1's
   const to = (all ? ALL_DOORS_FROM : DOOR_FIT_FROM).get(opRef(def)); if (!to) return null;
   // the door stands at the building's own height (its floor), not on the ground outside: on a slope that may be lower
-  const fits = buildingDoorFits(params ?? {}, to.args, { p: xz(p), r: yaw(r) }), series: string[] = [], at: Vec2[] = [];
+  const fits = buildingDoorFits(params ?? {}, to.args, { p: xz(p), r: yaw(r) }), series: string[] = [], named: string[] = [], at: Vec2[] = [];
   // #2434: an upstairs door is the building's child (`all.parent`), in its frame: a world-root thing raised to an upper
   // floor would grade the terrain under it up to its foot (a foundation pad), and the building's floors with it
   const local = all?.parent ? buildingDoorFits(params ?? {}, to.args, { p: [0, 0], r: 0 }) : [];
@@ -57,6 +63,7 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
     // an inside or upstairs door is the building's child (its ancestor's walls do not count as overlapping it)
     if (all?.parent && (f.floor > 0 || !f.exterior) && !all.existing?.(f.p[0], f.p[1], f.floor)) {
       const l = local[k]!; let n = name ? `${name}-door-${k + 1}`.slice(0, 64) : undefined; if (n && taken(n)) n = `${name}-door-${k + 1}-${f.floor}`.slice(0, 64);
+      if (n && DOOR_FIT_HELD.has(n)) { named.push(n); return []; }
       at.push(f.p); placed.push(ways[k]!);
       return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: all.parent }, ...(n && !taken(n) ? { name: n } : {}), p: [l.p[0], l.y ?? 0, l.p[1]], r: l.r, params: { sx: l.sx, sy: l.sy }, state: { open: true }, mode: 'strict' } as PlaceOp];
     }
@@ -64,6 +71,7 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
     if (all && n && taken(n)) n = `${name}-door-${k + 1}-${f.floor}`.slice(0, 64);
     if (all?.existing?.(f.p[0], f.p[1], f.floor)) return [];
     if (!all && indoors(f.p[0] + SERIES_PROBE * Math.sin(f.r), f.p[1] + SERIES_PROBE * Math.cos(f.r))) { series.push(n ?? f.opening); return []; }
+    if (n && DOOR_FIT_HELD.has(n)) { named.push(n); return []; }
     const fy = y === undefined ? undefined : Math.round((y + (f.y ?? 0)) * 1000) / 1000;
     at.push(f.p); placed.push(ways[k]!);
     // placed open (coordinator, until the multi-door passage #2434 is proven): the passage leaves a door as it found it.
@@ -73,7 +81,7 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
     return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: fy === undefined ? f.p : [f.p[0], fy, f.p[1]], r: f.r,
       ...(fy === undefined ? {} : { anchor: 'center' }), params: { sx: f.sx, sy: f.sy }, state: { open: true }, mode: 'strict' } as PlaceOp];
   });
-  return { ref: to.ref, doors, series, at, ways, placed };
+  return { ref: to.ref, doors, series, named, at, ways, placed };
 }
 
 const inside = (q: Vec2[], x: number, z: number) => { let c = false; for (let i = 0, j = q.length - 1; i < q.length; j = i++) { const [xi, zi] = q[i]!, [xj, zj] = q[j]!; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
@@ -212,7 +220,7 @@ export async function fitWorldDoorsV1(god: GodMode, bodies: Vec2[], log: (m: str
     if (e && e.in.parent === 'world' && doorFitted(e.def)) {   // (an edit between slices may have removed or refitted it)
       const fit = fitOps(god, e, bodies, indoors(e.id), obstacles);
       const r = fitAct(god, fit.ops, note(fit.doors.length));
-      if (r.accepted) { out.buildings++; out.doors += fit.doors.length; out.series.push(...fit.series); out.held.push(...fit.held); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: fit.ref, doors: fit.doors }); }
+      if (r.accepted) { out.buildings++; out.doors += fit.doors.length; out.series.push(...fit.series); out.held.push(...fit.held, ...fit.named.map((n) => `${n} (held by name, DOOR_FIT_HELD)`)); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: fit.ref, doors: fit.doors }); }
       else {
         const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
         // review of #2397: no refusal is final; a building the world refuses now is tried again at the next boot
@@ -530,7 +538,7 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: str
       }
     }
     const placed = doors.filter(Boolean) as PlaceOp[];
-    out.buildings++; out.doors += placed.length; out.held.push(...fit.held, ...fit.series.map((s) => `${s}: narrower than a door`)); out.flipped.push(...fit.flipped); out.moved.push(...fit.moved);
+    out.buildings++; out.doors += placed.length; out.held.push(...fit.held, ...fit.series.map((s) => `${s}: narrower than a door`), ...fit.named.map((n) => `${n} (held by name, DOOR_FIT_HELD)`)); out.flipped.push(...fit.flipped); out.moved.push(...fit.moved);
     out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: fit.ref, doors: placed, ...(fit.moves.length ? { moves: fit.moves } : {}) });
   }
   for (const h of out.flipped) log(`door-fit/2: swung the other way (a prop in the first swing): ${h}`);

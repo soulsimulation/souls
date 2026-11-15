@@ -18,13 +18,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setImmediate } from 'node:timers/promises';
 import { bootEden } from '../../apps/server/test/eden-capabilities-timing.ts';
-import { fitWorldDoorsV2 } from '../../apps/server/src/god/door-fit.ts';
+import { DOOR_FIT_HELD, fitWorldDoorsV2 } from '../../apps/server/src/god/door-fit.ts';
 import { engineDoorReach } from '../../apps/server/src/edge-runtime-rules.ts';
 
-/** Doors left out of the templates: their frame cuts their building off (a one-shot reach pass on a settled boot of the
- *  fitted Eden found things inside no longer reached from outside the front door with each in, #2434 bc13f17b0). The
- *  rule's own reach check compares door sides only and does not catch these, so they are named here. */
-const CUT_OFF = new Set(['artists-studio-2-door-3', 'artists-studio-3-door-1-0', 'artists-studio-8-door-3', 'artists-studio-4-door-3']);
+/** Doors left out of the templates: the rule's own list (door-fit.ts DOOR_FIT_HELD), which the rule already holds back;
+ *  kept here as a guard so a template never carries one. */
+const CUT_OFF = DOOR_FIT_HELD;
 /** #2383's head (door-fit/1 templates from tools/worlds/fit-doors-v1.mjs: its doors in a final batch at their buildings'
  *  heights, on main with #2448). */
 const DOOR_FIT1_REV = '6684fd987';
@@ -43,7 +42,7 @@ for (let i = 0; i < args.length; i++) {
 }
 if (!names.length) { console.error('usage: fit-doors.mjs [--from <rev>] [--check] <template>...'); process.exit(2); }
 
-let differs = 0;
+let differs = 0, unsettled = 0;
 for (const name of names) {
   const src = execFileSync('git', ['show', `${from}:worlds/templates/${name}.json`], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 });
   const tpl = JSON.parse(src);
@@ -91,6 +90,7 @@ for (const name of names) {
   for (let k = 0; k < rootDoors.length; k += 256) tpl.batches.push({ note: 'door-fit/2 (#2434): a real door in each outside doorway door-fit/1 left bare, at its building\'s height', ops: rootDoors.slice(k, k + 256) });
   // each outside door at its building's settled height in a fresh genesis of the result (#2397's rounds), then a sweep
   // of every fitted door against its building's height
+  let settled = false;
   for (let round = 1; round <= 4; round++) {
     const g = await boot(tpl, name), m = g.god.model;
     let n = 0;
@@ -108,15 +108,18 @@ for (const name of names) {
         if (Math.abs(dy - o) > OFF_MAX) off.push(`${e.name} ${(dy - o).toFixed(2)} m`);
       }
       console.log(`[${name}] sweep: ${off.length} door(s) more than ${OFF_MAX * 100} cm off their building${off.length ? ': ' + off.join(', ') : ''}`);
+      settled = !off.length;
     }
     g.close();
     console.log(`[${name}] round ${round}: ${n} door(s) moved to their building's height`);
     if (!n) break;
   }
+  // review of #2438: doors still moving after the last round, or any off their building, fail the run
+  if (!settled) { unsettled++; console.log(`[${name}] doors not settled at their buildings' heights after the last round`); }
   const out = JSON.stringify(tpl, null, 2) + '\n', dest = new URL(`worlds/templates/${name}.json`, root);
   console.log(`[${name}] buildings ${rep.buildings}, doors ${doors}, flipped ${rep.flipped.length}, moved ${moved}, held ${rep.held.length}, kept ${rep.kept.length}, left ${rep.left.length}`);
   if (rep.kept.length) console.log(`[${name}] kept: ${rep.kept.join(', ')}`);
   if (check) { if (readFileSync(dest, 'utf8') !== out) { differs++; console.log(`[${name}] differs from the committed template`); } }
   else writeFileSync(dest, out);
 }
-process.exit(differs ? 1 : 0);
+process.exit(differs || unsettled ? 1 : 0);
