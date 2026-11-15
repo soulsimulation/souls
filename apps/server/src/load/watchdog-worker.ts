@@ -65,14 +65,19 @@ function watch({buffer, api, file, pid, port, everyMs, stall, kill}: Watch): Wat
 // limit for kill.heapMs) is ended from here, where it is still seen: live.json says why, a line goes to stderr directly
 // (a worker's console goes through the stuck main thread), then SIGKILL. The launcher restarts it (children.mjs onExit).
 // #2444: in a shard the worlds share the thread, so a hang shows in all of them: the one named is the world whose tick was
-// running (its step slot is set), else the first judged. The one SIGKILL ends the program; the launcher reloads them all.
+// running (its step slot is set), else none: the one SIGKILL ends the program, and with no world named the launcher
+// reloads every world as the crash it was, each in a program of its own (shard.mjs).
 const look = setInterval(() => {
   const now = Date.now(), verdicts: [Watched, KillVerdict][] = [];
   for (const w of watched.values()) { const v = w.judge?.(liveOf(w.a, w.pid, now), now); if (v) verdicts.push([w, v]); }
   if (!verdicts.length) return;
-  const [w, v] = verdicts.find(([x]) => x.a[S.step] > 0) ?? verdicts[0];
-  clearInterval(look); w.kill(v, now);
-  process.kill(w.pid, 'SIGKILL');
+  clearInterval(look);
+  // a program of one world: that world. In a shard: the world whose tick was running, else none (a sibling's boot or a long
+  // request may hold the thread; naming a serving neighbour would count an innocent world and let the culprit go uncounted)
+  const named = watched.size === 1 ? verdicts[0] : verdicts.find(([x]) => x.a[S.step] > 0);
+  if (named) named[0].kill(named[1], now);
+  else { const [, v] = verdicts[0]; try { writeSync(2, `[load] watchdog: world.killed.${v.reason} in a shard of ${watched.size} with no world's tick running: ending the program, no world named\n`); } catch { /* stderr gone */ } }
+  process.kill(verdicts[0][0].pid, 'SIGKILL');
 }, 500);
 if ((workerData as {shared?: boolean}).shared) parentPort?.on('message', (m: {add?: Watch; remove?: string}) => {
   if (m.add) { watched.get(m.add.file)?.stop(); watched.set(m.add.file, watch({...m.add, stall: undefined})); }

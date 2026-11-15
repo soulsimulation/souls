@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runEpisode, runCase, prepareFolder, readCatalog } from './episode.mjs';
+import { runEpisode, runCase, prepareFolder, readCatalog, setupStep } from './episode.mjs';
 
 // A stand-in client: `serve` starts a detached process and logs its pid, `serve --stop` ends it, `listen` logs its pid and blocks.
 const FAKE_CLI = `import { spawn } from 'node:child_process';
@@ -19,6 +19,10 @@ else if (cmd === 'look') { const n = existsSync('looks.log') ? readFileSync('loo
   writeFileSync('world-catalog.json', JSON.stringify({ catalog: { places: [{ id: 'field', kind: 'walkable' }], things: [], acts } })); out({ ok: true }); }
 else if (cmd === 'listen') { appendFileSync('pids.log', 'listen ' + process.pid + '\\n'); setInterval(() => {}, 1e6); }
 else if (cmd === 'register' && process.cwd().includes('-second')) process.exit(3);
+// #2440: CREATES_LOST=n makes the first n creates get no answer, as a loaded world's reset connection does
+else if (cmd === 'create') { appendFileSync('creates.log', process.argv.slice(2).join(' ') + '\\n');
+  if (readFileSync('creates.log', 'utf8').trim().split('\\n').length <= Number(process.env.CREATES_LOST ?? 0)) { console.error('error: create: unreachable — the world did not answer (read ECONNRESET). Not retried: this write has no safe retry.'); process.exit(75); }
+  out({ created: true }); }
 else out({ ok: true });
 `;
 
@@ -95,6 +99,25 @@ test('#2157: setup asks again while the world copy has no acts, so a seat never 
     delete process.env.LOOKS_BARE;
     for (const p of pids(folder)) { try { process.kill(p.pid, 'SIGKILL'); } catch { /* gone */ } }
     server.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('#2440: a create that got no answer is asked again, moving the pairing, a bounded number of times', { timeout: 30000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'setup-step-test-')), folder = join(root, 'folder');
+  mkdirSync(folder);
+  writeFileSync(join(folder, 'eden.mjs'), FAKE_CLI);
+  const creates = () => readFileSync(join(folder, 'creates.log'), 'utf8').trim().split('\n');
+  try {
+    process.env.CREATES_LOST = '1';
+    await setupStep(folder, ['create', 'Wren'], { pauseMs: 0 });
+    assert.deepEqual(creates(), ['create Wren', 'create Wren --move']);
+    rmSync(join(folder, 'creates.log'));
+    process.env.CREATES_LOST = '9';
+    await assert.rejects(setupStep(folder, ['create', 'Wren'], { pauseMs: 0 }), /setup create exited 75: .*did not answer.*\(try 3 of 3\)/);
+    assert.equal(creates().length, 3);
+  } finally {
+    delete process.env.CREATES_LOST;
     rmSync(root, { recursive: true, force: true });
   }
 });
