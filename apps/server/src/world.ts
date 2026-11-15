@@ -1510,7 +1510,7 @@ export class WorldHost {
           if(profile.worldId!==this.worldId||!m||m.owner!==profile.owner||m.entityId!==profile.entityId||m.name!==profile.fromName
             ||(previous?.revision??0)!==profile.fromRevision||(previous?.birthName??profile.birthName)!==profile.birthName)throw Error('soul-profile.identity');
           if(profile.fromName!==profile.name){const claims=(this.extra.soulNameClaimsV1??={}) as Record<string,string[]>;const key=profile.fromName.trim().normalize('NFKC').toLowerCase();claims[key]=[...new Set([...(claims[key]??[]),profile.soulId])];}
-          m.name=profile.name;m.description=profile.description;
+          m.name=profile.name;m.description=profile.description;this.minds.set(m.soulId,m);/* #1903: set again, so a roster reader (the live picture) sees the rename */
           ((this.extra.soulProfilesV1??={}) as Record<string,SoulProfileFactV1>)[profile.soulId]=structuredClone(profile);
           this.acc.dirty.add(m.soulId);this.kernelDirty=true;
         }

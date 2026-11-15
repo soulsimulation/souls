@@ -142,6 +142,13 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
   // a thing's state and the places change at a commit, not on a tick: each is in the key, so neither waits for the next
   // bucket (a bucket lasts longer while the clock runs slow, and never ends while it is paused). The ledger's thing states
   // are a new Map at each change, so a new Map is a new version.
+  // #1903: the roster (a Soul joining or leaving, fading or coming back, renamed) is in the key too, by a counter its
+  // mutators bump: the minds map and the faded set, wherever they are written (the world, the read worker's replica, the
+  // ledger). A rename sets the Soul's entry again. Nothing is read per step but the counter.
+  let rosterVer = 0;
+  type Fn = (...a: unknown[]) => unknown;
+  const watch = (o: object | undefined, ...names: string[]) => { if (o) for (const n of names) { const f = (o as Record<string, Fn>)[n]!.bind(o); (o as Record<string, Fn>)[n] = (...a) => { rosterVer++; return f(...a); }; } };
+  watch(L.host.minds, 'set', 'delete', 'clear'); watch(L.faded, 'add', 'delete', 'clear');
   let thingsSeen: unknown = null, thingsVer = 0;
   const thingsVersion = () => { const s = L.thingStates?.() ?? null; if (s !== thingsSeen) { thingsSeen = s; thingsVer++; } return thingsVer; };
   const current = () => {
@@ -149,7 +156,7 @@ export function mountLiveRoute(app: Hono, deps: {ledger: EdgeLedger}, comms: {on
     if (nowShown !== shown) { shown = nowShown; ring.length = 0; }
     // a pause, a rate or a day set is in the key too: the tick does not move while paused (#1918)
     const h = L.host, tick = h.engine.world.tick, clockKey = `${h.paused ? 1 : 0}|${h.clockRate}|${h.living?.origin ?? ''}|${h.living?.dayTicks ?? ''}`;
-    const key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}|${clockKey}|${nowVer}`;
+    const key = `${Math.floor(tick / KEEP_TICKS)}|${speech.at(-1)?.id ?? ''}|${nowShown}|${thingsVersion()}|${clockKey}|${nowVer}|${rosterVer}`;
     if (kept?.key === key) return kept;
     const tb = performance.now(), pic = build(tick), td = performance.now(); rec(cost.build, td - tb);
     if (!kept) { kept = {key, pic, seq: 1, body: null, hash: null}; return kept; }
