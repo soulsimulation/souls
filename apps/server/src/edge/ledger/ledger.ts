@@ -2603,6 +2603,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // doors-pass/1 (#2365): a verification probe opens no door; it is told which door the walk would go through
       if (p && isVerificationProbe(soul.soulId)) return {...refuse('route.unreachable', `The way to ${what} goes through ${p.name}, closed; a verification probe does not open doors.`), ...resolved};
       if (p) for (const legs of [p.steps, p.direct]) {const again = this.host.engine.canPerform({actor: soul.entityId, label, steps: legs}); if (!again || WAIT_CODES.has(again.code)) {steps = legs; issue = again; passage = p; break;}}
+    console.error('[door-debug]', JSON.stringify({label, plain, through, behind, issue: issue?.code ?? null, navCold: this.navCold(), steps: steps.map(s => [s.verb, s.params]), plainWalk, passage: passage ? passage.note : null}).slice(0, 3000));
     } else if (!plain && this.doorPassage && issue?.code === 'route.unreachable' && !isVerificationProbe(soul.soulId)) {
       // (#2383) a walk upstairs, a sit, a craft or a use at a thing behind a closed ground door: the passage walks through
       // the door towards it (to the ground under an upstairs point), and the plan itself runs from the door's far side in

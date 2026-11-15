@@ -62,6 +62,7 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
   *  own coarse plan of far ground may not see it (review of #2397). */
  return (soul:EdgeSoul,steps:Step[],what:string,behind=false):DoorPassage|DoorPassageRefusal|null=>{
   const eng=d.engine(),found=eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind);if(!eng.walkFromReachesV1)return null;
+  console.error('[door-debug] passage found',JSON.stringify(found&&{goal:found.goal,doors:found.doors}),'chain',JSON.stringify(eng.doorChainV1?.(soul.entityId,steps)?.doors??null));
   if(!found)return chain(soul,steps,what);   // #2434: a destination upstairs, or no door named on the ground: the chain
   // entry 32: the hand step reads whether a door is still locked (a thumb-turn nobody needs any more is skipped)
   eng.installDoorLockedV1?.(lockedOf);

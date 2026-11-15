@@ -32,6 +32,9 @@ run(['act', 'walk:int-bakery', '--run', '--wait', '150', '--json']);
 const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
   (e, out, err) => { console.error(`kit: ${args.join(' ')} -> ${e ? (e.code ?? 1) : 0}: ${String(out || err).slice(0, 1200)}`); res(!e); }));
 
+import { readFileSync } from 'node:fs';
+const debug = () => { try { const t = readFileSync(join(CLIP_WORK, '..', 'world.log'), 'utf8'); console.error(t.split('\n').filter((l) => l.includes('[door-debug]') || l.includes('door-fit')).join('\n').slice(-20000)); } catch (e) { console.error('no world.log', e.message); } };
+debug();
 export default async function steps(page, { mark }) {
   await page.waitForTimeout(2000);
   await page.keyboard.press('Control+k');
@@ -43,6 +46,7 @@ export default async function steps(page, { mark }) {
   await page.waitForTimeout(1200);
   mark('one walk: run to the upstairs bedroom, through both doors');
   await eden(['act', 'walk:canal-west-home-3/bedroom', '--run', '--wait', '84', '--json'], 88_000);
+  debug();
   mark('in the upstairs bedroom, both doors closed behind');
   await page.waitForTimeout(1000);
 }
