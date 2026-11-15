@@ -42,6 +42,7 @@ export function summarizeProfile(file, repo, { turnMs = 100, top = 40 } = {}) {
     totalMs: r1(total), busyMs: r1(busy), turns: turns.length, turnHist: hist,
     overMs300: { n: over.length, ms: r1(over.reduce((s, t) => s + t.ms, 0)), appFns: [...acc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 60).map(([f, ms]) => ({ f, ms: r1(ms), turns: cnt.get(f) })) },
     under: Object.fromEntries([...under].map(([r, m]) => [r, topOf(m, 25)])),
+    named2422: topOf(new Map([...incl].filter(([f]) => /^(recutV1|finishRecorder|startRecorder|finish|finishLazy|captureFinalState|finalStateOf|takeIdOf|hashStableResumable|sample|keep|sameCopy) /.test(f))), 40),   // #2422: the recut and its parts, whatever their rank
     self: topOf(self, 60), inclusiveApp: topOf(new Map([...incl].filter(([f]) => app(f))), 80),
     longTurns: long.slice(0, 40).map((t) => ({ ms: r1(t.ms), app: [...t.fns.entries()].filter(([f]) => app(f)).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([f, ms]) => ({ f, ms: r1(ms) })), self: topOf(t.selfs, 8) })),
   };
