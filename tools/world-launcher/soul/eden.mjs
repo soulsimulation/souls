@@ -4722,7 +4722,9 @@ async function ownCreate(name) {
 }
 /** Poll GET /v1/lifecycle/<requestId> (every 2 s, or the world's Retry-After) until the arrival is ready, then pair. */
 async function finishCreate(p, firstWaitMs) {
-  const path = `/v1/lifecycle/${p.requestId}`, t0 = Date.now(), deadline = Math.min(t0 + LIFECYCLE_WAIT.totalMs * TIME_SCALE, COMMAND_END);   // #2380
+  // #2380: the wait is the configured one, or what is left of the command's time when that is shorter; the words name it
+  const path = `/v1/lifecycle/${p.requestId}`, t0 = Date.now(), whole = LIFECYCLE_WAIT.totalMs * TIME_SCALE, span = Math.min(whole, COMMAND_END - t0);
+  const deadline = t0 + span, stated = secs(span < whole ? span : LIFECYCLE_WAIT.totalMs);
   let waitMs = Math.max(LIFECYCLE_WAIT.everyMs, firstWaitMs ?? 0), first = firstWaitMs !== undefined;
   for (;;) {
     if (!first) {
@@ -4743,9 +4745,9 @@ async function finishCreate(p, firstWaitMs) {
     first = false;
     if (Date.now() + waitMs * TIME_SCALE > deadline) {
       noteRefusal("/v1/souls", { status: 503, data: { code: "lifecycle-pending" } }, "none", null);
-      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${secs(Math.min(LIFECYCLE_WAIT.totalMs, (Date.now() - t0) / TIME_SCALE))}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
+      throw Object.assign(new Error(`create: lifecycle-pending — ${ARRIVING} after ${stated}. The Soul "${p.name}" is saved in this folder: run ${CLI} create "${p.name}" again to keep waiting; do not choose another name.`), { exitCode: 75 });
     }
-    calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${secs(LIFECYCLE_WAIT.totalMs)})`);
+    calm(`${ARRIVING}; waiting for it (checking every ${secs(LIFECYCLE_WAIT.everyMs)}, up to ${stated})`);
     await pause(waitMs);
   }
 }
