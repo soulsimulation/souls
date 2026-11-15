@@ -115,12 +115,8 @@ gh workflow run gate.yml -f sha=<full sha> [-f baseline=<ref>] [-f scope=auto] [
 
 It shares release.yml's `release` concurrency group (one gate at a time), refuses a non-dry run once the day's runs of
 both workflows reach `modal_gates_per_day` (PROOF-POLICY.yml), keeps the baseline cache across runs with
-`actions/cache` keyed by baseline commit and Node version, and uploads `gate.log`, the JSON receipts and the last 200
-lines of each `gate-driver.log` (Modal URLs removed) as the `gate-<sha>` artifact. Before a non-dry run it downloads
-the two pinned campus inputs (`tools/test-harness/campus-assets.json`) from the asset CDN, checks bytes and sha256,
-and points `CAMPUS_ASSETS_SRC` at them; the laptop gate sets `CAMPUS_ASSETS_SRC` itself. It installs `modal==1.5.2`
-unless the `MODAL_CLIENT_VERSION` repository variable names another version. It ships nothing; the ship step is
-tracked by #519.
+`actions/cache` keyed by baseline commit and Node version, and uploads `gate.log` and `receipt.json` as the
+`gate-<sha>` artifact. It ships nothing; the ship step is tracked by #519.
 
 ### What blocks
 

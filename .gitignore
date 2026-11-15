@@ -66,8 +66,6 @@ deploy.env
 *.7z
 *.pdf
 /mars/viewer/public/engine/takes/
-# the campus component manifest, a pinned gate input (tools/test-harness/campus-assets.json; on the CDN as repo media)
-/mars/viewer/public/modular/components.json
 /worlds/littlemartians/buildings/previews/
 /mars/scripts/reconstruct
 /mars/docs/engineering/data/campus-2026-frames.svg
