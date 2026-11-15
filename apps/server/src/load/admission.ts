@@ -124,7 +124,8 @@ export class Admission {
   private tickService: () => number;
   constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
     this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
-    this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1);   // 1 until the monitor's first sample }
+    // the tick service is 1 until the monitor's first sample
+    this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1); }
   /** #2440: the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE) and the world is not black:
    *  queued requests are not held for budget. */
   spare() { return this.level !== 'black' && this.tickService() >= SPARE_SERVICE && this.idleShare() >= SPARE_IDLE; }
