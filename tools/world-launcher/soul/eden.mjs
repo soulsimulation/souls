@@ -2523,18 +2523,20 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
     if (s) out.push({ s, d: 0, row: { type: "act", act: a.id, verb: a.verb, label: a.label, in: "right here" } });
   }
   for (const t of soulsOnly ? [] : ix.cat.things) {
-    const h = ix.handOf(t); if (verbs.size && !h) continue;
+    const h = ix.handOf(t); if (verbs.size && !h && !t.seat) continue;
     if (!inScope(t.place, t.at)) continue;
     if (kind && !hit(stem(kind.toLowerCase()), thingWords(t, h).kind)) continue;
     // #1751: a thing worked by hand comes with its state and the acts that state allows (a lamp that is on: switch-off)
     const can = h ? handActs(ix, t, states) : [];
+    // #2381: a seat offers sit, as its row's act says, so --verb sit finds the benches --kind bench finds
+    const offers = verbs.size && t.seat && !can.some((a) => a.verb === "sit") ? [...can, { id: `sit:${t.id}`, verb: "sit" }] : can;
     let s;
-    if (verbs.size) { const v = Math.max(0, ...can.map((a) => verbs.get(a.verb) ?? 0)); s = v && rest.every((w) => hit(w, [...thingWords(t, h).name, ...thingWords(t, h).kind])) ? v : 0; }
+    if (verbs.size) { const v = Math.max(0, ...offers.map((a) => verbs.get(a.verb) ?? 0)); s = v && rest.every((w) => hit(w, [...thingWords(t, h).name, ...thingWords(t, h).kind])) ? v : 0; }
     else s = q.length ? score(q, thingWords(t, h)) : kind ? 1 : 0;
     if (!s) continue;
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
-    const pick = [...can].sort((a, b) => named(b) - named(a));
+    const pick = [...offers].sort((a, b) => named(b) - named(a));
     out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }

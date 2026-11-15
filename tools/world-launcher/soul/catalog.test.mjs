@@ -243,3 +243,13 @@ test("a Soul not in the live copy is found nowhere; --kind soul lists Souls only
   assert.deepEqual(find(ix, "oak", { kind: "soul", at, souls }).found.map((x) => x.type), ["soul"]);
   assert.deepEqual(query(ix, [{ kind: "soul" }, { find: "mira", kind: "soul" }], { at, souls }).map((a) => a.found.map((x) => x.id)), [["s_mira2", "s_mira", "s_oak"], ["s_mira", "s_mira2"]]);
 });
+
+test('#2381 A1: find "bench" --verb sit finds the seats --kind bench finds, each named by its sit', () => {
+  const byVerb = find(ix, "bench", { verb: "sit", at, limit: 20 }), byKind = find(ix, "bench", { kind: "bench", at, limit: 20 });
+  assert.deepEqual(byVerb.found.map((x) => x.id), ["e_b1", "e_b2"]);
+  assert.deepEqual(byVerb.found.map((x) => x.act), ["sit:e_b1", "sit:e_b2"]);
+  // where both apply, the same rows: the weight bench is a bench nobody sits on, so --kind finds it and --verb sit does not
+  assert.deepEqual(byKind.found.filter((x) => x.act?.startsWith("sit:")).map((x) => x.id), byVerb.found.map((x) => x.id));
+  assert.equal(find(ix, "", { verb: "sit", at, limit: 20 }).found.length, 14, "every seat, with no words");
+  assert.deepEqual(find(ix, "bench", { verb: "read", at }).found, [], "a seat does not offer read");
+});

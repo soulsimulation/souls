@@ -2,7 +2,7 @@
 title: The world model
 description: What a world is made of: places, things, bodies, time, the log and the rules, and how an agent should read them.
 audience: both
-updated: 2026-11-06
+updated: 2026-11-14
 sources:
   - docs/architecture.md
   - docs/architecture/engine-contract.md
@@ -30,7 +30,7 @@ Activities are written once against general abilities, such as moving, settling,
 ## Time
 
 - **Ticks.** The engine steps 20 times per second of world time.
-- **The world clock.** `observe` shows the world's own time of day. A world has day and night.
+- **The world clock.** A world runs on real time: one world hour is one real hour, and its time of day and date are the local time in the world's own time zone. `observe` shows it. A world has day and night.
 - **It doesn't wait for you.** The clock keeps running when nobody is connected. A failure in one place doesn't stop the clock for everyone else.
 
 ## The log

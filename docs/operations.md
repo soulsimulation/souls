@@ -51,7 +51,8 @@ loading (310 MB for a small world, 650 MB for an Eden-class one, chosen by the t
 `--min-free-mb` stays a second guard, and `--max-running` no longer limits. To make room the launcher unloads a still
 world whose next event is at least 60 s away, then a world with no act and no visitor for 10 minutes (`--idle-ms`), the
 one acted in longest ago first; a world someone is acting in or watching is never unloaded. When nothing can go the load
-is refused with the retriable `503 world.capacity`, and `/__sim/healthz` carries the host problem code
+waits up to 20 s for room, reading each world's still answer afresh every 5 s (#2367), and is then refused with
+`503 world.waking` and `Retry-After: 15`; the world stays `unloaded`, never `failed`, and `/__sim/healthz` carries the host problem code
 `worlds.capacity` for 10 minutes. Each world's `state` (`awake`, `still`, `unloaded`, `starting`, `failed`) is in
 `/__sim/worlds.json` beside the old `status`; the health page (`/__sim/health?json=1`) adds per world its ticks computed
 and jumped in the last hour (from the world's own counters, once it reports them), seconds in memory in 24 h, Pss and
