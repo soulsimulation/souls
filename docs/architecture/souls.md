@@ -647,8 +647,12 @@ Every fitted door starts open for now (the coordinator's call until the multi-do
 each door it passes as it found it. An upstairs door is the building's child. A door a hand cannot work (something
 stands where the body steps to open it from one side or close it from the other) is swung the other way; if both ways are
 blocked by a prop, the prop moves the shortest legal distance that frees it. Templates carry the result; a live world
-gets it once at boot (`door-fit/1`, then `door-fit/2`, the last boot rules). A building the world refuses to fit is
-tried again at the next boot. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
+gets it once at boot (`door-fit/1`, then `door-fit/2`, the last boot rules), one building at a time, each its own
+recorded edit, with the world serving between them; a restart part way through goes on where it stopped. A building the
+world refuses to fit is tried again at the next boot. A prop moves only where it touches no body, no other solid and no
+doorway, and leaves every door of its building workable by hand. Door-fit/2 then walks from outside each building's
+front door to both sides of each new door: a door whose frame cuts off a side that was reached before its fit is taken
+out again, its doorway left bare. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
 room when it has one.
 
 A walk through such a door is planned from the Soul's own floor: from upstairs, the first leg walks down the stairs to

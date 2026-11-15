@@ -1,7 +1,7 @@
 // #2383 door-fit/1: every built-in doorway is a real door. A building on a core revision that draws its ground-floor
 // doors as fixed leaves moves to its door-fitted revision (DOOR_FIT_FROM; same walls, rooms and slots, bare doorways),
 // and a hand-operated core/door@2 is placed in each bare doorway (buildingDoorFits). Templates carry the result; a live
-// world gets it once, as one recorded engine edit at boot (the last rule in adoptBootRuntimePoliciesV1).
+// world gets it once, one recorded engine edit per building in slices at boot (the last rule in adoptBootRuntimePoliciesV1).
 //
 // It refuses nothing and moves nobody: every door is placed open (until #2434), so nobody is pushed; a
 // building with a resident's body inside its subtree (seated in it) is left as it is and fitted at a later boot; a
@@ -25,6 +25,8 @@ const SERIES_PROBE = 0.6;
 
 type Vec2 = [number, number];
 type PlaceOp = Extract<Op, { op: 'place' }>;
+/** A doorway in world terms: its middle (x, z), the door's yaw, the height of its floor (m), its width and floor index. */
+type Way = { p: Vec2; r: number; y: number; width: number; floor: number };
 const xz = (p: unknown): Vec2 => { const a = Array.isArray(p) ? p as number[] : [0, 0]; return a.length > 2 ? [a[0]!, a[2]!] : [a[0] ?? 0, a[1] ?? 0]; };
 /** A model stores a core ref as `core-cottage@1`; ops and templates write `core/cottage@1`. */
 const opRef = (def: string) => def.replace(/^core-/, 'core/'), storedRef = (ref: string) => ref.replace(/^core\//, 'core-');
@@ -35,7 +37,7 @@ const yaw = (r: unknown): number => Array.isArray(r) ? Number(r[1] ?? 0) : typeo
  *  `bodies` are the (x, z) of the bodies standing about; `taken(name)` says a door name is in use. */
 export function doorFit(def: string, params: Record<string, unknown> | undefined, p: unknown, r: unknown, name: string | undefined,
   bodies: Vec2[] = [], taken: (n: string) => boolean = () => false, indoors: (x: number, z: number) => boolean = () => false,
-  all?: { baseY?: number; existing?: (x: number, z: number, floor: number) => boolean; parent?: string }): { ref: string; doors: PlaceOp[]; series: string[]; at: Vec2[] } | null {
+  all?: { baseY?: number; existing?: (x: number, z: number, floor: number) => boolean; parent?: string }): { ref: string; doors: PlaceOp[]; series: string[]; at: Vec2[]; ways: Way[]; placed: Way[] } | null {
   // #2434 (`all`, door-fit/2): every doorway, with no door held back in series (a walk passes any number); a doorway that
   // already holds a door (door-fit/1's) keeps it; an inside or upstairs door starts open, an outside one as door-fit/1's
   const to = (all ? ALL_DOORS_FROM : DOOR_FIT_FROM).get(opRef(def)); if (!to) return null;
@@ -45,13 +47,15 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
   // floor would grade the terrain under it up to its foot (a foundation pad), and the building's floors with it
   const local = all?.parent ? buildingDoorFits(params ?? {}, to.args, { p: [0, 0], r: 0 }) : [];
   const y = Array.isArray(p) && p.length > 2 ? Math.round(Number(p[1]) * 1000) / 1000 : all?.baseY;
+  // review of #2438: every doorway in world terms (its middle, yaw, height and width), and those a door is placed in
+  const ways: Way[] = fits.map((f) => ({ p: f.p, r: f.r, y: (y ?? 0) + (f.y ?? 0), width: f.width, floor: f.floor })), placed: Way[] = [];
   const doors = fits.flatMap((f, k) => {
     // a doorway narrower than the door's narrowest frame (its wall had no room to widen it) stays bare, named
     if (all && f.width < NARROWEST && !all.existing?.(f.p[0], f.p[1], f.floor)) { series.push(`${name ?? f.opening} ${f.opening} (${f.width} m wide)`); return []; }
     // an inside or upstairs door is the building's child (its ancestor's walls do not count as overlapping it)
     if (all?.parent && (f.floor > 0 || !f.exterior) && !all.existing?.(f.p[0], f.p[1], f.floor)) {
       const l = local[k]!; let n = name ? `${name}-door-${k + 1}`.slice(0, 64) : undefined; if (n && taken(n)) n = `${name}-door-${k + 1}-${f.floor}`.slice(0, 64);
-      at.push(f.p);
+      at.push(f.p); placed.push(ways[k]!);
       return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: all.parent }, ...(n && !taken(n) ? { name: n } : {}), p: [l.p[0], l.y ?? 0, l.p[1]], r: l.r, params: { sx: l.sx, sy: l.sy }, state: { open: true }, mode: 'strict' } as PlaceOp];
     }
     let n = name ? `${name}-door-${k + 1}`.slice(0, 64) : undefined;
@@ -59,12 +63,12 @@ export function doorFit(def: string, params: Record<string, unknown> | undefined
     if (all?.existing?.(f.p[0], f.p[1], f.floor)) return [];
     if (!all && indoors(f.p[0] + SERIES_PROBE * Math.sin(f.r), f.p[1] + SERIES_PROBE * Math.cos(f.r))) { series.push(n ?? f.opening); return []; }
     const fy = y === undefined ? undefined : Math.round((y + (f.y ?? 0)) * 1000) / 1000;
-    at.push(f.p);
+    at.push(f.p); placed.push(ways[k]!);
     return [{ op: 'place', def: DOOR_FIT_DOOR, in: { parent: 'world' }, ...(n && !taken(n) ? { name: n } : {}), p: fy === undefined ? f.p : [f.p[0], fy, f.p[1]], r: f.r, params: { sx: f.sx, sy: f.sy },
       // placed open (coordinator, until the multi-door passage #2434 is proven): the passage leaves a door as it found it
       state: { open: true }, mode: 'strict' } as PlaceOp];
   });
-  return { ref: to.ref, doors, series, at };
+  return { ref: to.ref, doors, series, at, ways, placed };
 }
 
 const inside = (q: Vec2[], x: number, z: number) => { let c = false; for (let i = 0, j = q.length - 1; i < q.length; j = i++) { const [xi, zi] = q[i]!, [xj, zj] = q[j]!; if ((zi > z) !== (zj > z) && x < (xj - xi) * (z - zi) / (zj - zi) + xi) c = !c; } return c; };
@@ -169,27 +173,40 @@ function fitOps(god: GodMode, e: Entity, bodies: Vec2[], indoors: (x: number, z:
 export type DoorFitReport = { buildings: number; doors: number; left: string[]; kept: string[]; series: string[]; held: string[];
   fitted: { id: string; name?: string; ref: string; doors: PlaceOp[]; /** #2434 door-fit/2: props moved clear of a door */ moves?: Op[] }[] };
 
-/** door-fit/1 on `god`'s world: every world-root building on a replaced revision, in one engine edit when it is
- *  accepted whole, else building by building (a refused one is left, named, for a later boot). `obstacles`: the walk
- *  graph's solids now, for the hand check (without them every door is placed). */
-export function fitWorldDoorsV1(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[]): DoorFitReport {
-  const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && doorFitted(e.def));
+/** Review of #2438: the boot fits run while the world serves, so a fit is cut in slices, one building each (its own
+ *  recorded edit), and the event loop turns between slices (the ticks, the hub and the watchdog's heartbeat run there).
+ *  `pause` waits for the next turn; `slice` hears how long each slice held the thread. */
+export type FitSlices = { pause?: () => Promise<void>; slice?: (ms: number, what: string) => void };
+const nextTurn = () => new Promise<void>((r) => setImmediate(r));
+
+/** door-fit/1 on `god`'s world: every world-root building on a replaced revision, building by building, one recorded edit
+ *  and one slice each (a refused one is left, named, for a later boot). A building fitted already (a restart part way
+ *  through) is on its fitted revision and is skipped. `obstacles`: the walk graph's solids now, for the hand check
+ *  (without them every door is placed). */
+export async function fitWorldDoorsV1(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[], o: FitSlices = {}): Promise<DoorFitReport> {
+  const pause = o.pause ?? nextTurn;
+  const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && doorFitted(e.def)).map((e) => e.id);
   const out: DoorFitReport = { buildings: 0, doors: 0, left: [], kept: [], series: [], held: [], fitted: [] };
   if (!targets.length) return out;
+  let t = performance.now();
   const indoors = indoorsOf(god);
-  const done = (e: Entity, f: ReturnType<typeof fitOps>) => { out.buildings++; out.doors += f.doors.length; out.series.push(...f.series); out.held.push(...f.held); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors }); };
-  const note = (n: number, d: number) => `door-fit/1 (#2383): ${n} building(s) moved to their door-fitted revision, ${d} real door(s) set in their doorways`;
-  const each = targets.map((e) => ({ e, fit: fitOps(god, e, bodies, indoors(e.id), obstacles) }));
-  const whole = god.engineAct(each.flatMap((x) => x.fit.ops), note(each.length, each.reduce((a, x) => a + x.fit.doors.length, 0)));
-  if (whole.accepted) for (const { e, fit } of each) done(e, fit);
-  else for (const { e } of each) {
-    const fit = fitOps(god, e, bodies, indoors(e.id), obstacles);   // names taken by an earlier building's doors are seen afresh
-    const r = god.engineAct(fit.ops, note(1, fit.doors.length));
-    if (r.accepted) { done(e, fit); continue; }
-    const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
-    // review of #2397: no refusal is final; a building the world refuses now is tried again at the next boot
-    (seated ? out.left : out.kept).push(e.id);
-    log(`door-fit/1: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its old revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+  o.slice?.(performance.now() - t, 'rooms'); await pause();
+  const note = (d: number) => `door-fit/1 (#2383): 1 building moved to its door-fitted revision, ${d} real door(s) set in its doorways`;
+  for (const id of targets) {
+    t = performance.now();
+    const e = god.model.entities.get(id);
+    if (e && e.in.parent === 'world' && doorFitted(e.def)) {   // (an edit between slices may have removed or refitted it)
+      const fit = fitOps(god, e, bodies, indoors(e.id), obstacles);
+      const r = god.engineAct(fit.ops, note(fit.doors.length));
+      if (r.accepted) { out.buildings++; out.doors += fit.doors.length; out.series.push(...fit.series); out.held.push(...fit.held); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: fit.ref, doors: fit.doors }); }
+      else {
+        const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
+        // review of #2397: no refusal is final; a building the world refuses now is tried again at the next boot
+        (seated ? out.left : out.kept).push(e.id);
+        log(`door-fit/1: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its old revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+      }
+    }
+    o.slice?.(performance.now() - t, id); await pause();
   }
   for (const h of out.held) log(`door-fit/1: held back, a hand cannot work it: ${h}`);
   log(`door-fit/1: ${out.buildings} building(s) fitted, ${out.doors} door(s) placed, ${out.series.length} door(s) in series held back, ${out.held.length} a hand cannot work held back${out.kept.length ? `, ${out.kept.length} refused this boot` : ''}${out.left.length ? `, ${out.left.length} left for a later boot` : ''}`);
@@ -205,50 +222,105 @@ const turned = (r: number) => { let v = r + Math.PI; while (v > Math.PI + 1e-6) 
 /** Prop moves tried, nearest first: 0.25 m to 2.5 m in eight directions. */
 const MOVES: Vec2[] = Array.from({ length: 10 }, (_, i) => (i + 1) * 0.25).flatMap((d) => Array.from({ length: 8 }, (_, k): Vec2 => [Math.round(Math.cos(k * Math.PI / 4) * d * 1000) / 1000, Math.round(Math.sin(k * Math.PI / 4) * d * 1000) / 1000]));
 
+/** A rectangle on the ground (x, z): its middle, two unit axes and the half extents along them, and its height span. */
+type Rect = { c: Vec2; u: Vec2; v: Vec2; h: Vec2; y0: number; y1: number };
+const rectOf = (o: HandObstacle, d: Vec2 = [0, 0]): Rect => { const c = Math.cos(o.obb.yaw), s = Math.sin(o.obb.yaw); return { c: [o.obb.c[0] + d[0], o.obb.c[1] + d[1]], u: [c, s], v: [-s, c], h: o.obb.half, y0: o.y0, y1: o.y1 }; };
+/** The gap (m) between two rectangles on the ground, 0 when they overlap (separating axes). */
+function rectGap(a: Rect, b: Rect): number {
+  let gap = 0;
+  for (const ax of [a.u, a.v, b.u, b.v]) {
+    const proj = (r: Rect) => Math.abs(r.u[0] * ax[0] + r.u[1] * ax[1]) * r.h[0] + Math.abs(r.v[0] * ax[0] + r.v[1] * ax[1]) * r.h[1];
+    const d = Math.abs((b.c[0] - a.c[0]) * ax[0] + (b.c[1] - a.c[1]) * ax[1]) - proj(a) - proj(b);
+    gap = Math.max(gap, d);
+  }
+  return gap;
+}
+const pointGap = (r: Rect, x: number, z: number) => { const dx = x - r.c[0], dz = z - r.c[1]; return Math.hypot(Math.max(0, Math.abs(dx * r.u[0] + dz * r.u[1]) - r.h[0]), Math.max(0, Math.abs(dx * r.v[0] + dz * r.v[1]) - r.h[1])); };
+/** How far (m) to each side of a doorway its opening is kept clear of a moved prop (a body standing in it). */
+const WAY_DEPTH = 0.5;
+
 /** The ops that move one world-root building `e` onto its every-doorway revision (ALL_DOORS_FROM) with a real door in each
  *  doorway that has none yet. A door a hand cannot work (doorHandBlocked, against the walk graph's solids with the
  *  building's own walls as the fit leaves them) is swung the other way; if both ways are blocked by a prop, the prop moves
- *  the shortest legal distance that frees the door. A door blocked by walls alone is held back, named. */
-function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly HandObstacle[] | undefined) {
-  const m = god.model, base = m.worldPose(e).y;
-  const doorThings = [...m.entities.values()].filter((x) => (x.in.parent === 'world' || x.in.parent === e.id) && opRef(x.def) === DOOR_FIT_DOOR).map((x) => m.worldPose(x));
-  const existing = (x: number, z: number, floor: number) => doorThings.some((w) => Math.hypot(w.x - x, w.z - z) < 0.15 && (floor === 0 ? Math.abs(w.y - base) < 1 : w.y > base + 1));
+ *  the shortest legal distance that frees the door. A door blocked by walls alone is held back, named. A prop moves only
+ *  where it touches no body (with the body's radius), no other solid and no doorway of the building, and where every door
+ *  of the building a hand could work before the move still can (review of #2438). */
+function* fitOps2(god: GodMode, e: Entity, bodies: Vec2[], all: readonly HandObstacle[] | undefined) {
+  const m = god.model, wp = m.worldPose(e), base = wp.y;
+  // review of #2438: only what stands near the building counts (its doors' hand checks reach 4 m out, a prop moves 2.5 m)
+  const reachR = m.footprint(e).reduce((r, f) => Math.max(r, Math.hypot(f.c[0] - wp.x, f.c[1] - wp.z) + Math.hypot(f.half[0], f.half[1])), 0) || 30;
+  const nearBuilding = (x: number, z: number, pad: number) => Math.hypot(x - wp.x, z - wp.z) < reachR + 8 + pad;
+  const obstacles = all?.filter((o) => nearBuilding(o.obb.c[0], o.obb.c[1], Math.hypot(o.obb.half[0], o.obb.half[1])));
+  bodies = bodies.filter(([x, z]) => nearBuilding(x, z, 1));
+  const doorThings = [...m.entities.values()].filter((x) => (x.in.parent === 'world' || x.in.parent === e.id) && opRef(x.def) === DOOR_FIT_DOOR && (x.in.parent === e.id || (() => { const w = m.worldPose(x); return nearBuilding(w.x, w.z, 1); })()));
+  const existingAt = (x: number, z: number, floor: number) => doorThings.find((t) => { const w = m.worldPose(t); return Math.hypot(w.x - x, w.z - z) < 0.15 && (floor === 0 ? Math.abs(w.y - base) < 1 : w.y > base + 1); });
+  const existing = (x: number, z: number, floor: number) => !!existingAt(x, z, floor);
   const fit = doorFit(e.def, e.params as Record<string, unknown> | undefined, e.p, e.r, e.name, bodies, (n) => m.names.has(`world/${n}`), undefined, { baseY: base, existing, parent: e.id })!;
+  // the doors the building already has (door-fit/1's), in its doorways: a moved prop must leave them as a hand found them
+  const kept = fit.ways.flatMap((w) => { const t = existingAt(w.p[0], w.p[1], w.floor); return t ? [t.id] : []; });
   const sub = m.subtree(e.id).map((id) => m.entities.get(id)!);
   const moves: Op[] = [];
-  // a prop of the building's own (in its subtree) moves where it is restored; any other by a move op
-  const ownProp = (id: string) => sub.some((x) => x.id === id), outer = () => moves.filter((o) => !ownProp((o as { id: string }).id)), at = (x: Entity) => (moves.find((o) => (o as { id: string }).id === x.id) as { p?: number[] } | undefined)?.p;
-  const ops = () => [...outer(), { op: 'remove', id: e.id, cascade: true }, ...sub.map((x, k): Op => ({ op: 'restore', entity: k === 0 ? { ...x, def: storedRef(fit.ref) } : at(x) ? { ...x, p: at(x)! } : x }) as Op), ...fit.doors] as Op[];
+  // a prop of the building's own (in its subtree) moves after it is restored; any other before the building is
+  const ownProp = (id: string) => sub.some((x) => x.id === id), outer = () => moves.filter((o) => !ownProp((o as { id: string }).id));
+  // (review of #2438: a building's own prop is restored where it stood and then moved, so the engine takes the move in)
+  const ops = () => [...outer(), { op: 'remove', id: e.id, cascade: true }, ...sub.map((x, k): Op => ({ op: 'restore', entity: k === 0 ? { ...x, def: storedRef(fit.ref) } : x }) as Op), ...moves.filter((o) => ownProp((o as { id: string }).id)), ...fit.doors] as Op[];
   const held: string[] = [], flipped: string[] = [], moved: string[] = [];
   if (obstacles && fit.doors.length) {
-    const own = (id: string) => id.startsWith(e.id + '#');
+    const own = (id: string) => id.startsWith(e.id + '#'), skipOwn = (id: string) => id.startsWith(e.id + '#door:');
+    const shift = new Map<string, Vec2>();
     // the walk graph's solids with the building's walls as the fit leaves them, and a moved prop where it is moved to
-    const solids = (next: WorldModel, shift: Map<string, Vec2>): HandObstacle[] => {
+    const solids = (next: WorldModel): HandObstacle[] => {
       const b = next.entities.get(e.id), out = obstacles.filter((o) => !own(o.id)).map((o) => { const d = shift.get(o.id.split('#')[0]!); return d ? { ...o, obb: { ...o.obb, c: [o.obb.c[0] + d[0], o.obb.c[1] + d[1]] as Vec2 } } : o; });
       if (b) out.push(...next.footprint(b).map((f, i) => ({ id: `${e.id}#fit${i}`, obb: { c: f.c, half: f.half, yaw: -f.yaw }, y0: f.y0, y1: f.y1 })));
       return out;
     };
-    // one fork per state of the fit (a big world's model is costly to fork): kept until a door turns or a prop moves
-    let memo: { key: string; next: WorldModel | null; doors: { id: string; x: number; z: number }[]; solids: HandObstacle[] } | null = null;
-    const tryFit = (shift: Map<string, Vec2>, k: number, hit?: { id?: string }) => {
-      const key = `${JSON.stringify(moves)}|${fit.doors.map((d) => `${d.name}:${d.r}`).join(',')}`;
+    // one fork per way the doors swing (a big world's model is costly to fork): a moved prop changes only the solids a hand
+    // meets, never where a door stands, so a prop's trial moves share the fork
+    let memo: { key: string; next: WorldModel | null; doors: { id: string; x: number; z: number }[]; solids: HandObstacle[]; moves: string } | null = null, forked = false;
+    const state = () => {
+      const key = fit.doors.map((d) => `${d.name}:${d.r}`).join(',');
       if (memo?.key !== key) {
+        forked = true;
         const next = m.fork(), r = applyBatch(next, { ops: ops() }, 'engine', 0, { trusted: true });
         memo = r.result.accepted
-          ? { key, next, doors: (r.diff?.upserts ?? []).filter((y) => !m.entities.has(y.id) && opRef(y.def) === DOOR_FIT_DOOR).map((y) => { const w = next.worldPose(next.entities.get(y.id)!); return { id: y.id, x: w.x, z: w.z }; }), solids: solids(next, shift) }
-          : { key, next: null, doors: [], solids: [] };
+          ? { key, next, doors: (r.diff?.upserts ?? []).filter((y) => !m.entities.has(y.id) && opRef(y.def) === DOOR_FIT_DOOR).map((y) => { const w = next.worldPose(next.entities.get(y.id)!); return { id: y.id, x: w.x, z: w.z }; }), solids: [], moves: '' }
+          : { key, next: null, doors: [], solids: [], moves: '' };
+        if (memo.next) memo.solids = solids(memo.next);
       }
-      if (!memo.next) return 'refused';
-      const q = fit.at[k]!, x = memo.doors.find((y) => Math.hypot(y.x - q[0], y.z - q[1]) < 0.01);
-      return x ? doorHandBlocked(memo.next, x.id, memo.solids, (id) => id.startsWith(e.id + '#door:'), hit) : null;
+      const mk = JSON.stringify([...shift]);
+      if (memo.next && memo.moves !== mk) { memo.solids = solids(memo.next); memo.moves = mk; }
+      return memo;
     };
-    const shift = new Map<string, Vec2>();
+    const doorId = (k: number) => { const q = fit.at[k]!; return state().doors.find((y) => Math.hypot(y.x - q[0], y.z - q[1]) < 0.01)?.id; };
+    const tryFit = (k: number, hit?: { id?: string }) => {
+      const s = state(); if (!s.next) return 'refused';
+      const id = doorId(k);
+      return id ? doorHandBlocked(s.next, id, s.solids, skipOwn, hit) : null;
+    };
+    // the building's doorways as rectangles a moved prop keeps clear of: the opening and a body's stand to each side
+    const wayRects = fit.ways.map((w): Rect & { w: Way } => ({ w, c: w.p, u: [Math.cos(w.r), -Math.sin(w.r)], v: [Math.sin(w.r), Math.cos(w.r)], h: [w.width / 2, WAY_DEPTH], y0: w.y, y1: w.y + 2 }));
+    /** Why prop `prop` may not stand shifted by world `d`: a body, another solid or a doorway it would touch (but the
+     *  doorway of the door it is moved for, whose hand check is the judge there). */
+    const propBlocked = (prop: string, d: Vec2, mine0: Way): string | null => {
+      const mine = obstacles.filter((o) => o.id === prop || o.id.startsWith(prop + '#')).map((o) => rectOf(o, d));
+      if (!mine.length) return null;
+      for (const r of mine) {
+        if (bodies.some(([x, z]) => pointGap(r, x, z) < HUMAN_RADIUS)) return 'a body';
+        for (const o of state().solids) if (o.id !== prop && !o.id.startsWith(prop + '#') && o.y0 < r.y1 - 0.05 && r.y0 < o.y1 - 0.05 && rectGap(r, rectOf(o)) <= 0) return o.label ?? o.id;
+        for (const w of wayRects) if (w.w !== mine0 && w.y0 < r.y1 - 0.05 && r.y0 < w.y1 && rectGap(r, w) <= 0) return 'a doorway';
+      }
+      return null;
+    };
+    // the driver may turn the event loop at each yield (review of #2438: a fork of a big world is costly)
+    yield;
     for (let k = 0; k < fit.doors.length; k++) {
       const d = fit.doors[k]!, label = d.name ?? `${e.name ?? e.id} door ${k + 1}`;
-      const hit: { id?: string } = {}, why = tryFit(shift, k, hit);
+      const hit: { id?: string } = {}, why = tryFit(k, hit);
+      yield;
       if (!why || why === 'refused') continue;
       d.r = turned(d.r as number);   // swung the other way
-      const hit2: { id?: string } = {}, why2 = tryFit(shift, k, hit2);
+      const hit2: { id?: string } = {}, why2 = tryFit(k, hit2);
+      yield;
       if (!why2 || why2 === 'refused') { flipped.push(label); continue; }
       d.r = turned(d.r as number);
       // both ways blocked: the prop in the first swing moves the shortest legal distance that frees the door
@@ -256,43 +328,137 @@ function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly Ha
       const movable = !!pe && prop !== e.id && opRef(pe.def) !== DOOR_FIT_DOOR && !BUILDING_REFS.has(opRef(pe.def)) && !ALL_DOORS_FROM.has(opRef(pe.def)) && ![...ALL_DOORS_FROM.values()].some((v) => v.ref === opRef(pe.def)) && !pe.shape;
       let free = false;
       if (movable) {
-        const at = m.worldPose(pe!), p0 = Array.isArray(pe!.p) ? pe!.p as number[] : [at.x, at.z], py = pe!.in.parent === 'world' ? 0 : m.worldPose(m.entities.get(pe!.in.parent)!).yaw, pc = Math.cos(py), ps = Math.sin(py);
+        // the doors placed so far and the building's own doors, as a hand finds them before the move
+        const s0 = state(); yield;
+        const others = [...Array.from({ length: k }, (_, j) => doorId(j)), ...kept].filter((x): x is string => !!x);
+        const workable = s0.next ? others.filter((id) => !doorHandBlocked(s0.next!, id, s0.solids, skipOwn)) : [];
+        const at0 = m.worldPose(pe!), p0 = Array.isArray(pe!.p) ? pe!.p as number[] : [at0.x, at0.z], py = pe!.in.parent === 'world' ? 0 : m.worldPose(m.entities.get(pe!.in.parent)!).yaw, pc = Math.cos(py), ps = Math.sin(py);
         for (const [dx, dz] of MOVES) {
+          const dw: Vec2 = [dx * pc + dz * ps, -dx * ps + dz * pc];   // a child prop moves in its parent's frame
+          if (propBlocked(prop, dw, fit.placed[k]!)) continue;
           const to = p0.length > 2 ? [p0[0]! + dx, p0[1]!, p0[2]! + dz] : [p0[0]! + dx, p0[1]! + dz];
-          moves.push({ op: 'move', id: prop, p: to } as Op); shift.set(prop, [dx * pc + dz * ps, -dx * ps + dz * pc]);   // a child prop moves in its parent's frame
-          if (!tryFit(shift, k)) { moved.push(`${pe!.name ?? prop} moved ${Math.round(Math.hypot(dx, dz) * 100) / 100} m clear of ${label}`); free = true; break; }
+          moves.push({ op: 'move', id: prop, p: to } as Op); shift.set(prop, dw);
+          const s = state();
+          yield;
+          if (!tryFit(k) && workable.every((id) => !doorHandBlocked(s.next!, id, s.solids, skipOwn))) { moved.push(`${pe!.name ?? prop} moved ${Math.round(Math.hypot(dx, dz) * 100) / 100} m clear of ${label}`); free = true; break; }
           moves.pop(); shift.delete(prop);
         }
       }
-      if (!free) { held.push(`${label} (${why})`); fit.doors.splice(k, 1); fit.at.splice(k, 1); k--; }
+      if (!free) { held.push(`${label} (${why})`); fit.doors.splice(k, 1); fit.at.splice(k, 1); fit.placed.splice(k, 1); k--; }
     }
   }
-  return { ...fit, held, flipped, moved, moves, ops: ops() };
+  // what the plan read: the edit is made only while these stand as they were (the world serves between slices)
+  const read = [...sub, ...moves.map((o) => m.entities.get((o as { id: string }).id)!)];
+  return { ...fit, held, flipped, moved, moves, ops: ops(), fresh: () => read.every((x) => m.entities.get(x.id) === x) && m.subtree(e.id).length === sub.length };
 }
 
+/** How long (ms) a slice of a boot fit may hold the thread before it turns the event loop. */
+const SLICE_MS = 100;
+/** Runs generator `g` to its end, turning the event loop whenever a slice has held the thread `SLICE_MS`. */
+async function sliced<T>(g: Generator<void, T>, what: string, o: FitSlices, pause: () => Promise<void>): Promise<T> {
+  let t = performance.now();
+  for (;;) {
+    const r = g.next();
+    if (r.done) { o.slice?.(performance.now() - t, what); return r.value; }
+    if (performance.now() - t >= SLICE_MS) { o.slice?.(performance.now() - t, what); await pause(); t = performance.now(); }
+  }
+}
+
+/** door-fit/2's reach check on the live engine (review of #2438): `settle` waits until the engine holds the last edit;
+ *  `front` is a standing point outside building `id`'s own ground-floor outside door, null when it has none; `reach` says
+ *  whether a body walks from it to standing room near `to` at height `y` (null: no standing room there). Pure reads. */
+export type DoorReach = { settle(): Promise<boolean>; front(id: string): Vec2 | null; reach(from: Vec2, to: Vec2, y: number, base: number): boolean | null };
+/** How far (m) out from a door line its two sides are probed by the reach check. */
+const REACH_FACE = 0.9;
+const faces = (w: Way): [Vec2, Vec2] => [[w.p[0] + Math.sin(w.r) * REACH_FACE, w.p[1] + Math.cos(w.r) * REACH_FACE], [w.p[0] - Math.sin(w.r) * REACH_FACE, w.p[1] - Math.cos(w.r) * REACH_FACE]];
+
 /** door-fit/2 (#2434) on `god`'s world: every world-root building on a revision before its every-doorway one (a first
- *  revision, or door-fit/1's) moves onto it, with a real door in each doorway that has none, in one engine edit when it is
- *  accepted whole, else building by building (a refused one is left, named, for a later boot). */
-export function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[]): DoorFit2Report {
-  const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && ALL_DOORS_FROM.has(opRef(e.def)));
+ *  revision, or door-fit/1's) moves onto it, with a real door in each doorway that has none, building by building, one
+ *  recorded edit and a few slices each (review of #2438; a refused one is left, named, for a later boot; a building fitted
+ *  already is skipped, so a restart part way through goes on where it stopped). With `walk`, each side of a new door that
+ *  was reached from outside the building's front door before its fit must be reached after it: a door whose frame cuts a
+ *  side off is taken out again, nearest the front first, one recorded edit each, before the next building. */
+export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[], o: FitSlices & { walk?: DoorReach } = {}): Promise<DoorFit2Report> {
+  const pause = o.pause ?? nextTurn, walk = o.walk;
+  const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && ALL_DOORS_FROM.has(opRef(e.def))).map((e) => e.id);
   const out: DoorFit2Report = { buildings: 0, doors: 0, left: [], kept: [], series: [], held: [], fitted: [], flipped: [], moved: [] };
   if (!targets.length) return out;
-  const done = (e: Entity, f: ReturnType<typeof fitOps2>) => { out.buildings++; out.doors += f.doors.length; out.held.push(...f.held, ...f.series.map((s) => `${s}: narrower than a door`)); out.flipped.push(...f.flipped); out.moved.push(...f.moved); out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: f.ref, doors: f.doors, ...(f.moves.length ? { moves: f.moves } : {}) }); };
-  const note = (n: number, d: number) => `door-fit/2 (#2434): ${n} building(s) moved to their every-doorway revision, ${d} more real door(s) set in their doorways`;
-  const each = targets.map((e) => ({ e, fit: fitOps2(god, e, bodies, obstacles) }));
-  const whole = god.engineAct(each.flatMap((x) => x.fit.ops), note(each.length, each.reduce((a, x) => a + x.fit.doors.length, 0)));
-  if (whole.accepted) for (const { e, fit } of each) done(e, fit);
-  else for (const { e } of each) {
-    const fit = fitOps2(god, e, bodies, obstacles);
-    const r = god.engineAct(fit.ops, note(1, fit.doors.length));
-    if (r.accepted) { done(e, fit); continue; }
-    const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
-    (seated ? out.left : out.kept).push(e.id);
-    log(`door-fit/2: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+  const note = (d: number) => `door-fit/2 (#2434): 1 building moved to its every-doorway revision, ${d} more real door(s) set in its doorways`;
+  for (const id of targets) {
+    let t = performance.now();
+    const e = god.model.entities.get(id);
+    if (!e || e.in.parent !== 'world' || !ALL_DOORS_FROM.has(opRef(e.def))) { o.slice?.(performance.now() - t, id); await pause(); continue; }
+    // planned, the reach check's baseline taken, then the edit; planned again (up to three times) when the building or a
+    // prop it moves changed in between (a resident took a thing, the god moved it: the world serves between slices)
+    let fit!: ReturnType<typeof fitOps2> extends Generator<void, infer T> ? T : never, from: Vec2 | null = null, before: boolean[][] = [], fresh = false;
+    for (let attempt = 0; attempt < 3 && !fresh; attempt++) {
+      const cur = god.model.entities.get(id);
+      if (!cur || cur.in.parent !== 'world' || !ALL_DOORS_FROM.has(opRef(cur.def))) break;
+      fit = await sliced(fitOps2(god, cur, bodies, obstacles), `${id} plan`, o, pause); await pause();
+      from = null; before = [];
+      // the reach check's baseline: each side of each new door's doorway reached from the front before the fit
+      if (walk && fit.doors.length) {
+        await walk.settle(); t = performance.now();
+        from = walk.front(id);
+        const base = god.model.worldPose(cur).y;
+        o.slice?.(performance.now() - t, `${id} front`); await pause();
+        // one walk per slice: a long one across a big world takes a while
+        if (from) for (const w of fit.placed) {
+          const row: boolean[] = [];
+          for (const f of faces(w)) { t = performance.now(); row.push(walk.reach(from, f, w.y, base) === true); o.slice?.(performance.now() - t, `${id} reach before`); await pause(); }
+          before.push(row);
+        }
+      }
+      fresh = fit.fresh();
+    }
+    t = performance.now();
+    if (!fresh) { out.kept.push(id); log(`door-fit/2: ${god.model.pathOf(id)} kept changing while it was planned, tried again at the next boot`); o.slice?.(performance.now() - t, id); await pause(); continue; }
+    const r = god.engineAct(fit.ops, note(fit.doors.length));
+    o.slice?.(performance.now() - t, `${id} edit`); await pause();
+    if (!r.accepted) {
+      const seated = (r.failures ?? []).some((x) => x.code === 'body.protected');
+      (seated ? out.left : out.kept).push(e.id);
+      log(`door-fit/2: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
+      continue;
+    }
+    const doors = [...fit.doors];
+    // the reach check: a side reached before the fit and not after names its door; the one nearest the front goes first
+    if (walk && from && before.some((b) => b.some(Boolean))) {
+      const base = god.model.worldPose(god.model.entities.get(id)!).y, dist = (k: number) => Math.hypot(fit.placed[k]!.p[0] - from![0], fit.placed[k]!.p[1] - from![1]);
+      const order = doors.map((_, k) => k).sort((a, b) => dist(a) - dist(b) || a - b);
+      for (;;) {
+        await walk.settle();
+        let cut = -1;
+        for (const k of order) {
+          if (!doors[k] || !before[k]!.some(Boolean)) continue;
+          const fs = faces(fit.placed[k]!);
+          for (let s = 0; s < 2 && cut < 0; s++) {
+            if (!before[k]![s]) continue;
+            t = performance.now();
+            if (walk.reach(from, fs[s]!, fit.placed[k]!.y, base) !== true) cut = k;
+            o.slice?.(performance.now() - t, `${id} reach after`); await pause();
+          }
+          if (cut >= 0) break;
+        }
+        if (cut < 0) break;
+        const d = doors[cut]!, q = fit.placed[cut]!.p;
+        t = performance.now();
+        const x = [...god.model.subtree(id).map((y) => god.model.entities.get(y)!), ...[...god.model.entities.values()].filter((y) => y.in.parent === 'world')]
+          .find((y) => opRef(y.def) === DOOR_FIT_DOOR && (d.name ? y.name === d.name : (() => { const w = god.model.worldPose(y); return Math.hypot(w.x - q[0], w.z - q[1]) < 0.01; })()));
+        const rr = x ? god.engineAct([{ op: 'remove', id: x.id } as Op], `door-fit/2 (#2434): ${d.name ?? x.id} taken out again, its frame cuts off a way reached before`) : { accepted: false };
+        o.slice?.(performance.now() - t, `${id} take out`); await pause();
+        if (!rr.accepted) { log(`door-fit/2: ${d.name ?? '?'} cuts off a way but could not be taken out: ${JSON.stringify((rr as { failures?: unknown }).failures ?? []).slice(0, 300)}`); break; }
+        fit.held.push(`${d.name ?? x!.id} (its frame cuts off a way reached before)`);
+        (doors as (PlaceOp | null)[])[cut] = null;
+      }
+    }
+    const placed = doors.filter(Boolean) as PlaceOp[];
+    out.buildings++; out.doors += placed.length; out.held.push(...fit.held, ...fit.series.map((s) => `${s}: narrower than a door`)); out.flipped.push(...fit.flipped); out.moved.push(...fit.moved);
+    out.fitted.push({ id: e.id, ...(e.name ? { name: e.name } : {}), ref: fit.ref, doors: placed, ...(fit.moves.length ? { moves: fit.moves } : {}) });
   }
   for (const h of out.flipped) log(`door-fit/2: swung the other way (a prop in the first swing): ${h}`);
   for (const h of out.moved) log(`door-fit/2: ${h}`);
-  for (const h of out.held) log(`door-fit/2: held back, a hand cannot work it either way and no prop can move: ${h}`);
+  for (const h of out.held) log(`door-fit/2: held back: ${h}`);
   log(`door-fit/2: ${out.buildings} building(s) fitted, ${out.doors} door(s) placed, ${out.flipped.length} swung the other way, ${out.moved.length} prop(s) moved, ${out.held.length} held back${out.kept.length ? `, ${out.kept.length} refused this boot` : ''}${out.left.length ? `, ${out.left.length} left for a later boot` : ''}`);
   return out;
 }

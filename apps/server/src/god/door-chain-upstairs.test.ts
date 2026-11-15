@@ -29,7 +29,7 @@ test('upstairs room behind two closed doors: one walk in and one walk out, every
   const r0: any = god.engineAct([{op: 'place', def: 'core/cottage@1', name: 'house', p: AT, r: 0, params: PARAMS}, {op: 'place', def: 'core/floor-lamp@2', name: 'outside-lamp', p: [AT[0] + 2, AT[1] - 14]}] as any, 'test: a house as it was');
   assert.equal(r0.accepted, true, JSON.stringify(r0).slice(0, 600));
   // door-fit/2 before the first tick, as a boot rule runs before the engine is sent the world (no hand check: no walk graph yet)
-  const rep = fitWorldDoorsV2(god, [], () => {});
+  const rep = await fitWorldDoorsV2(god, [], () => {});
   assert.equal(rep.buildings, 1, JSON.stringify(rep).slice(0, 600));
   await tick(20);
   const house = [...god.model.entities.values()].find((e: any) => e.name === 'house')!;

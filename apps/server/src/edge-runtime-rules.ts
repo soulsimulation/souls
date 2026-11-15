@@ -1,7 +1,9 @@
 import type {WorldHost} from './world.ts';
 import { factoryDescriptorV1 } from './world-factory.ts';
 import type { GodMode } from './god/god.ts';
-import { fitWorldDoorsV1, fitWorldDoorsV2, type HandObstacle } from './god/door-fit.ts';
+import { DOOR_FIT_DOOR, fitWorldDoorsV1, fitWorldDoorsV2, type DoorReach, type HandObstacle } from './god/door-fit.ts';
+import { engineSettled } from './god/query.ts';
+import { HUMAN_RADIUS } from '../../../mars/viewer/engine/world/catalog.ts';
 
 /** Little Martians scene worlds: the old world (WORLD_KEY `littlemartians`, also its launcher fork) and the launcher's
  *  arium (slug `little-martians-arium`, as tools/world-launcher/op-souls.mjs names it). They are excluded from Soul
@@ -69,14 +71,45 @@ export async function enableDoorFitV2(host: WorldHost, god: GodMode | undefined,
     .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
   const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
   spatial?.sync(host.engine.world);
-  const r = fitWorldDoorsV2(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
+  // review of #2438: in slices, one building at a time, while the world serves; the rules event once it is all done
+  const r = await fitWorldDoorsV2(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles, { walk: engineDoorReach(host, god) });
   if (r.left.length || r.kept.length) return;
   return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV2: true }, doorFitV2: { buildings: r.buildings, doors: r.doors, flipped: r.flipped.length, moved: r.moved.length, held: r.held.length },
     why: 'door-fit/2 (#2434): every remaining building doorway (inside, upstairs, in series, by a prop) holds a real door a Soul opens by hand; fitted by a recorded engine edit just before this event' });
 }
 
+type ReachEngine = { world: unknown; rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { levels: { id: number; y: number }[] } } } };
+  standableNearV1?(at: [number, number], level?: number, except?: string, minClear?: number, maxRing?: number): [number, number] | null;
+  reachV1?(from: { p: [number, number]; level?: number }, to: { p: [number, number]; level?: number }): { ok: boolean } };
+/** door-fit/2's reach check on this world's engine (review of #2438): pure reads, after the engine holds the last edit. */
+export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | undefined {
+  const engine = host.engine as unknown as ReachEngine, sp = engine.rt?.services?.spatial;
+  if (!engine.reachV1 || !engine.standableNearV1 || !sp) return undefined;
+  const opRef = (d: string) => d.replace(/^core-/, 'core/');
+  // a door counts on the ground, or on the upper level nearest its height (levels are shared by height)
+  const levelAt = (y: number, base: number) => y < base + 1 ? 0 : sp.scene.levels.filter((l) => l.id !== 0 && Math.abs(l.y - y) <= 0.6).sort((a, b) => Math.abs(a.y - y) - Math.abs(b.y - y) || a.id - b.id)[0]?.id;
+  return {
+    settle: () => engineSettled(god.model, 10000),
+    front(id) {
+      const b = god.model.entities.get(id); if (!b?.name) return null;
+      const bw = god.model.worldPose(b);
+      const d = [...god.model.entities.values()].filter((x) => x.in.parent === 'world' && opRef(x.def) === DOOR_FIT_DOOR && (x.name ?? '').startsWith(`${b.name}-door-`))
+        .sort((x, y) => (x.name! < y.name! ? -1 : 1))[0];
+      if (!d) return null;
+      const w = god.model.worldPose(d), n: [number, number] = [Math.sin(w.yaw) * 1.3, Math.cos(w.yaw) * 1.3];
+      const p: [number, number] = [w.x + n[0], w.z + n[1]], q: [number, number] = [w.x - n[0], w.z - n[1]];
+      return engine.standableNearV1!(Math.hypot(p[0] - bw.x, p[1] - bw.z) > Math.hypot(q[0] - bw.x, q[1] - bw.z) ? p : q, 0, undefined, HUMAN_RADIUS + 0.05, 6);
+    },
+    reach(from, to, y, base) {
+      const level = levelAt(y, base); if (level === undefined) return null;
+      const s = engine.standableNearV1!(to, level, undefined, HUMAN_RADIUS + 0.05, 3); if (!s) return null;
+      return engine.reachV1!({ p: from, level: 0 }, { p: s, level }).ok;
+    },
+  };
+}
+
 /** #2383 door-fit/1, once per world: its buildings on a revision that draws fixed door leaves move to their door-fitted
- *  revision with a real hand-operated door in each ground-floor doorway (god/door-fit.ts; one recorded engine edit),
+ *  revision with a real hand-operated door in each ground-floor doorway (god/door-fit.ts; one recorded engine edit per building, in slices),
  *  then one logged rules event marks it done. A building left (a resident seated in it) or refused keeps the event back,
  *  so the next boot fits what is left. A world without a god (no entity world) has nothing to fit and logs nothing. */
 export function doorFitV1(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { doorFitV1?: boolean } | undefined)?.doorFitV1 === true; }
@@ -88,7 +121,8 @@ export async function enableDoorFitV1(host: WorldHost, god: GodMode | undefined,
   // the walk graph's solids as they stand: a door a hand cannot work for one of them is held back (door-fit.ts)
   const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
   spatial?.sync(host.engine.world);
-  const r = fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
+  // review of #2438: in slices, one building at a time, while the world serves; the rules event once it is all done
+  const r = await fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
   // a building left (seated in) or refused this boot is tried again at the next: the event waits for both
   if (r.left.length || r.kept.length) return;
   return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors, series: r.series.length, held: r.held.length },

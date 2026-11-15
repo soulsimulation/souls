@@ -2,6 +2,7 @@
 // revisions mapped back, their doors left out) boots, the boot rule fits it in one recorded edit and logs one rules event,
 // the result equals the fitted template's own buildings and doors, nobody moves, and a second boot does nothing.
 import test from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,9 +10,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DOOR_FIT_FROM } from '@souls/world-compiler';
 import { bootEden } from '../../test/eden-capabilities-timing.ts';
-import { accept } from '../../test/native-owner-fixture.ts';
 import { enableDoorFitV1, enableDoorFitV2 } from '../edge-runtime-rules.ts';
-import { doorFit, doorFitted, DOOR_FIT_DOOR } from './door-fit.ts';
+import { doorFit, doorFitted, doorHandBlocked, fitWorldDoorsV2, DOOR_FIT_DOOR, type HandObstacle } from './door-fit.ts';
+import { accept, fixture, factory } from '../../test/native-owner-fixture.ts';
+import { EdgeLedger } from '../edge/ledger/ledger.ts';
+import { GodMode } from './god.ts';
+import { installEngineBridge } from './engine-bridge.ts';
+import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
 
 // #2434: door-fit/1's templates as #2383 left them (outside ground-floor doors only); worlds/templates now carry door-fit/2
 const template = (name: string) => JSON.parse(readFileSync(new URL(`../../test/fixtures/door-fit1/${name}.json`, import.meta.url), 'utf8'));
@@ -20,6 +25,14 @@ const fitted = template('hello-hamlet');
 const back = new Map([...DOOR_FIT_FROM].map(([from, to]) => [to.ref, from]));
 type PlaceOp = { op: string; def: string; name?: string; p?: number[]; r?: number; params?: Record<string, unknown>; state?: Record<string, unknown> };
 const places = (tpl: { batches: { ops: PlaceOp[] }[] }) => tpl.batches.flatMap((b) => b.ops).filter((o) => o.op === 'place');
+
+/** Runs a boot rule while the world ticks, as a serving world does between the rule's slices (door-fit/2's reach check
+ *  waits for the engine to take each edit in). */
+async function ticking<T>(host: { tickOnce(): void; drainInputs(): void }, p: Promise<T>): Promise<T> {
+  let done = false; p.then(() => done = true, () => done = true);
+  while (!done) { host.tickOnce(); await setImmediate(); host.drainInputs(); }
+  return p;
+}
 
 /** A template as it was before door-fit (the fitted revisions mapped back, their doors left out), booted. */
 async function before(t: { after: (f: () => void) => void }, fitted: { batches: { ops: PlaceOp[] }[] }) {
@@ -42,7 +55,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   const fact = await accept<unknown>(host, enableDoorFitV1(host, god) as Promise<never>) as { payload: { doorFitV1: unknown; runtimePolicy: { doorFitV1: boolean } } };
   assert.deepEqual(fact.payload.doorFitV1, { buildings: 3, doors: 3, series: 0, held: 0 }, 'logged with what it fitted');
   assert.equal(fact.payload.runtimePolicy.doorFitV1, true);
-  assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
+  assert.equal(god.model.editSeq, seq0 + 3, 'one recorded edit per building (review of #2438: in slices)');
   await w.settle(10);
 
   // the same ids and contents, on the fitted revisions; the doors the fitted template places, open (until #2434)
@@ -57,7 +70,7 @@ test('door-fit/1: a template world from before is fitted once, like the fitted t
   assert.deepEqual(host.engine.runtime.violations, []);
 
   assert.equal(await enableDoorFitV1(host, god), undefined, 'once: a second boot queues nothing');
-  assert.equal(god.model.editSeq, seq0 + 1, 'and edits nothing');
+  assert.equal(god.model.editSeq, seq0 + 3, 'and edits nothing');
 });
 
 test('door-fit/1: every door is placed open (until #2434), a body in its doorway or not', () => {
@@ -106,13 +119,16 @@ for (const name of ['hello-hamlet', 'mars-camp']) {
     const w = await bootEden(() => {}, new URL(`../../test/fixtures/door-fit1/${name}.json`, import.meta.url)); t.after(w.close);
     const { god, host, soul } = w;
     const ents = () => host.engine.world.entities as Record<string, { pose: { p: number[] } }>;
-    const pose0 = structuredClone(ents()[soul.entityId]!.pose), seq0 = god.model.editSeq;
+    const pose0 = structuredClone(ents()[soul.entityId]!.pose);
     const doorNames = () => [...god.model.entities.values()].filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR).map((e) => e.name).sort();
     const before = doorNames();
-    const fact = await accept<unknown>(host, enableDoorFitV2(host, god) as Promise<never>) as { payload: { doorFitV2: { buildings: number; doors: number; moved: number; held: number }; runtimePolicy: { doorFitV2: boolean } } };
+    // its own edits, counted (a resident's acts may edit too while the world ticks)
+    let edits = 0; const act = god.engineAct.bind(god);
+    god.engineAct = ((ops, note, ...rest) => { const x = act(ops, note, ...rest); if (x.accepted && note.startsWith('door-fit/2')) edits++; return x; }) as typeof god.engineAct;
+    const fact = await ticking(host, enableDoorFitV2(host, god) as Promise<never>) as { payload: { doorFitV2: { buildings: number; doors: number; moved: number; held: number }; runtimePolicy: { doorFitV2: boolean } } };
     assert.equal(fact.payload.runtimePolicy.doorFitV2, true);
     assert.equal(fact.payload.doorFitV2.held, 0, 'no doorway left without a door');
-    assert.equal(god.model.editSeq, seq0 + 1, 'one recorded edit');
+    assert.equal(edits, fact.payload.doorFitV2.buildings, 'one recorded edit per building (review of #2438: in slices)');
     const want = places(current(name)).filter((o) => o.def === DOOR_FIT_DOOR).map((o) => o.name).sort();
     assert.deepEqual(doorNames(), want, 'the doors the template carries');
     assert.equal(fact.payload.doorFitV2.doors, want.length - before.length, 'door-fit/1\'s doors kept, the rest added');
@@ -125,8 +141,56 @@ for (const name of ['hello-hamlet', 'mars-camp']) {
     await w.settle(10);
     assert.deepEqual(ents()[soul.entityId]!.pose.p, pose0.p, 'nobody moved');
     assert.deepEqual(host.engine.runtime.violations, []);
-    const seq1 = god.model.editSeq;   // (a resident's own acts may edit while the world ticks)
-    assert.equal(await enableDoorFitV2(host, god), undefined, 'once: a second boot queues nothing');
-    assert.equal(god.model.editSeq, seq1, 'and edits nothing');
+    const edits1 = edits;
+    assert.equal(await ticking(host, enableDoorFitV2(host, god)), undefined, 'once: a second boot queues nothing');
+    assert.equal(edits, edits1, 'and edits nothing');
   });
 }
+
+// Review of #2438: a prop moved clear of a door touches no body, no other solid and no doorway, and every door of its
+// building a hand could work before still works. A two-floor cottage with a bench between its two inside doorways (0.6 m
+// from the second, turned across the way): door-fit/2 moves it 0.75 m clear of house-door-2, towards house-door-1.
+async function cottageWithBench(t: { after: (f: () => void) => void }) {
+  const w = fixture(':memory:', factory, { durableClockV1: true }); w.brain.quiesce();
+  const god = new GodMode(w.db, { worldId: w.host.worldId, ownerId: 'dev:admin', tick: () => w.host.engine.world.tick, emit() {} });
+  installEngineBridge({ host: w.host, god, edge: new EdgeLedger(w.host, w.db, undefined, { ambient: false }), log() {}, worldClock: false, worldLore: false });
+  t.after(() => { w.brain.quiesce(); w.host.stop(); w.db.close(); });
+  const tick = async (n = 4) => { for (let i = 0; i < n; i++) { w.host.tickOnce(); await setImmediate(); w.host.drainInputs(); } };
+  assert.equal((god.engineAct([{ op: 'place', def: 'core/cottage@1', name: 'house', p: [10, 10], r: 0, params: { floors: 2 } }] as never, 'test: a house') as { accepted: boolean }).accepted, true);
+  const house = [...god.model.entities.values()].find((e) => e.name === 'house')!;
+  assert.equal((god.engineAct([{ op: 'place', def: 'core/bench-seat@1', name: 'prop', in: { parent: house.id }, p: [-1.1, 0, 0.6], r: 1.571 }] as never, 'test: a bench') as { accepted: boolean }).accepted, true);
+  await tick(6);
+  // the engine's walk graph as it stands now (synced; the service may be replaced after an edit)
+  const solidsNow = () => { const sp = (w.host.engine as unknown as { rt: { services: { spatial: { sync(x: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt.services.spatial; sp.sync(w.host.engine.world); return sp.scene.obstacles; };
+  return { w, god, house, tick, solidsNow };
+}
+const rectGapTo = (o: HandObstacle, x: number, z: number) => { const c = Math.cos(o.obb.yaw), s = Math.sin(o.obb.yaw), dx = x - o.obb.c[0], dz = z - o.obb.c[1]; return Math.hypot(Math.max(0, Math.abs(dx * c + dz * s) - o.obb.half[0]), Math.max(0, Math.abs(-dx * s + dz * c) - o.obb.half[1])); };
+
+test('door-fit/2: a prop between two doors moves clear of one and leaves the other workable and its doorway clear', { timeout: 300000 }, async (t) => {
+  const { god, house, tick, solidsNow } = await cottageWithBench(t);
+  const before = solidsNow(), prop = [...god.model.entities.values()].find((e) => e.name === 'prop')!, p0 = god.model.worldPose(prop);
+  const rep = await fitWorldDoorsV2(god, [], () => {}, before, { pause: () => tick(1) });
+  assert.deepEqual(rep.moved, ['prop moved 0.75 m clear of house-door-2']);
+  // the walk graph's solids with the bench where the model now has it (as the fit judged it)
+  const p1 = god.model.worldPose(god.model.entities.get(prop.id)!), mine = (o: HandObstacle) => o.id === prop.id || o.id.startsWith(prop.id + '#');
+  const after = before.filter((o) => !o.id.startsWith(house.id + '#')).map((o) => mine(o) ? { ...o, obb: { ...o.obb, c: [o.obb.c[0] + p1.x - p0.x, o.obb.c[1] + p1.z - p0.z] as [number, number] } } : o);
+  const doors = god.model.subtree(house.id).map((id) => god.model.entities.get(id)!).filter((e) => e.def.replace('core-', 'core/') === DOOR_FIT_DOOR);
+  assert.ok(doors.length >= 4, 'the inside and upstairs doors');
+  // no door's hand is stopped by the bench where it now stands
+  for (const d of doors) { const hit: { id?: string } = {}, why = doorHandBlocked(god.model, d.id, after, () => false, hit); assert.notEqual(hit.id?.split('#')[0], prop.id, `${d.name}: not the bench: ${why}`); }
+  // the bench stands clear of every doorway's opening
+  const ways = doorFit('core/cottage@1', { floors: 2 }, [10, 0, 10], 0, 'house', [], () => false, undefined, { baseY: 0, existing: () => false, parent: house.id })!.ways.filter((w) => w.floor === 0);
+  for (const w of ways) assert.ok(after.filter(mine).every((o) => rectGapTo(o, w.p[0], w.p[1]) > 0.3), `clear of the doorway at ${w.p}`);
+});
+
+test('door-fit/2: a prop never moves onto a Soul standing beside it', { timeout: 300000 }, async (t) => {
+  const { god, tick, solidsNow } = await cottageWithBench(t);
+  // she stands beside the bench's end, clear of it, where it goes without her (0.75 m along -z)
+  const body: [number, number] = [8.9, 9.4];
+  const prop0 = [...god.model.entities.values()].find((e) => e.name === 'prop')!, start = solidsNow();
+  for (const o of start.filter((x) => x.id === prop0.id || x.id.startsWith(prop0.id + '#'))) assert.ok(rectGapTo(o, body[0], body[1]) >= HUMAN_RADIUS, 'beside it, clear: ' + JSON.stringify(o.obb));
+  const rep = await fitWorldDoorsV2(god, [body], () => {}, start, { pause: () => tick(1) });
+  assert.ok(!rep.moved.includes('prop moved 0.75 m clear of house-door-2'), 'not onto her: ' + JSON.stringify(rep.moved));
+  const p0 = god.model.worldPose(prop0), p1 = god.model.worldPose(god.model.entities.get(prop0.id)!);
+  for (const o of start.filter((x) => x.id === prop0.id || x.id.startsWith(prop0.id + '#'))) assert.ok(rectGapTo(o, body[0] - (p1.x - p0.x), body[1] - (p1.z - p0.z)) >= HUMAN_RADIUS, 'a body radius clear of her');
+});
