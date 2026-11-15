@@ -16,6 +16,7 @@ import { Db } from './db.ts';
 import { buildApp } from './http.ts';
 import { Hub } from './hub.ts';
 import { handleMcp } from './mcp.ts';
+import { setSecurityHeaders } from './security-headers.ts';
 import { Souls } from './souls.ts';
 import { WorldHost } from './world.ts';
 import { adoptBootRuntimePoliciesV1 } from './edge-runtime-rules.ts';
@@ -285,7 +286,7 @@ function hold(req: import('node:http').IncomingMessage, res: import('node:http')
     // catch-up ends it with the clock never started, so a held write is refused, never applied unticked
     if (res.destroyed || req.socket.destroyed) return step();
     res.once('finish', step); res.once('close', step);
-    if (closing) res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); else serve(req, res);
+    if (closing) { setSecurityHeaders(res); res.writeHead(503, { 'Cache-Control': 'no-store', 'Retry-After': '5' }).end('Server restarting.'); } else serve(req, res);
   }); }).finally(() => { held--; });
 }
 /** #2297 A5: GET /__sim/still, for the launcher only (loopback, not forwarded): the still contract of #2241. Still also
@@ -339,10 +340,11 @@ function onRequest(req: import('node:http').IncomingMessage, res: import('node:h
   }
   if (!catchingUp) { try { host.settle(); } catch (e) { console.error('[clock] settle failed:', e); } }   // #2298 A4: a request first brings a still world to now
   if (req.method === 'GET' && req.url === '/__sim/still') {
+    setSecurityHeaders(res);
     if (!loopback(req.socket.remoteAddress) || req.headers['x-forwarded-for'] !== undefined) { res.writeHead(404).end(); return; }
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(stillAnswer())); return;
   }
-  if(edenCore&&closing){res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}
+  if(edenCore&&closing){setSecurityHeaders(res);res.writeHead(503,{'Cache-Control':'no-store'}).end('Server restarting.');return;}   // #1017: the shared headers, as every answer
   const write = req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS';
   if (write) {
     const done = new Promise<void>((r) => res.once('close', r)); writesInFlight.add(done);
@@ -355,7 +357,7 @@ function onRequest(req: import('node:http').IncomingMessage, res: import('node:h
 }
 function serve(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) {
   req.url = stripWorldPath(req.url);
-  if (req.url?.startsWith('/mcp')) { handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
+  if (req.url?.startsWith('/mcp')) { setSecurityHeaders(res); handleMcp(req, res, souls, intentV2, edge ? (method: 'GET'|'POST', path: string, token: string, body?: unknown)=>Promise.resolve(app.request(path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body!==undefined?{body:JSON.stringify(body)}:{})})).then(r=>r.json()) : undefined).catch((e) => { console.error('[mcp]', e); if (!res.headersSent) res.writeHead(500).end(); }); return; }
   void listener(req, res);
 }
 
