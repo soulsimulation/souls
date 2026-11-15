@@ -43,8 +43,12 @@ export default async function steps(page, { mark }) {
   await page.waitForTimeout(3000);
   mark('walk back out through the bakery door to its front');
   await eden(['act', 'walk:int-bakery', '--wait', '60', '--json'], 70_000);
-  mark('walk into the dome (core/roundhouse@2), its doors closed');
-  await eden(['act', 'walk:eden-dome', '--wait', '75', '--json'], 85_000);
+  // a long walk plans the far ground coarsely and meets the shut door only on arrival (route.unreachable at 8 m): walk to
+  // the dome's south door first, then in, so the walk that goes through the door starts beside it
+  mark('walk to the dome (core/roundhouse@2), its doors closed');
+  await eden(['act', 'walk:street-bicycle-bike-9', '--wait', '75', '--json'], 85_000);
+  mark('walk into the dome');
+  await eden(['act', 'walk:eden-dome', '--wait', '30', '--json'], 40_000);
   mark('inside the dome, door closed behind');
   await page.waitForTimeout(3000);
 }
