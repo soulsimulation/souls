@@ -70,6 +70,18 @@ test('stage: only allowlisted files, scrubbed; a Soul token refuses the whole up
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
+test('stage: eval-load publishes each world\'s own log, never its data or the Soul folders', () => {
+  const d = mkdtempSync(join(tmpdir(), 'timed-')), out = join(d, 'out'), dest = join(d, 'art');
+  try {
+    for (const p of ['eval-load/n100-r1/server/data', 'eval-load/n100-r1/souls/s0']) mkdirSync(join(out, p), { recursive: true });
+    writeFileSync(join(out, 'eval-load', 'n100-r1', 'server', 'world.log'), '[load] amber→red');
+    writeFileSync(join(out, 'eval-load', 'n100-r1', 'server', 'data', 'live.json'), '{}');
+    writeFileSync(join(out, 'eval-load', 'n100-r1', 'souls', 's0', 'credentials.json'), '{"token":"tok-FAKE-fixture-0001"}');
+    assert.deepEqual(stage({ out, dest, command: 'eval-load', scrubWith: { paths: [], names: [] } }), ['eval-load/n100-r1/server/world.log']);
+    assert.equal(readFileSync(join(dest, 'eval-load', 'n100-r1', 'server', 'world.log'), 'utf8'), '[load] amber→red');
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
 test('strays: entries new since the start snapshot, outside allowed dirs, runner installs and excluded globs', () => {
   const d = mkdtempSync(join(tmpdir(), 'timed-')), touch = (p) => { mkdirSync(join(d, p, '..'), { recursive: true }); writeFileSync(join(d, p), ''); };
   try {

@@ -503,7 +503,7 @@ nothing was written. Keys and clientRefs must be unique per act: a receipt keeps
 | `GET`/`PUT /v1/edge/body`, `POST /v1/edge/body/uploads` | The Soul's body look; uploaded models (moderated) |
 | `POST`/`GET /v1/edge/reminders`, `DELETE /v1/edge/reminders/:id` | Personal reminders |
 | `GET /v1/edge/view` | Eyes |
-| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running |
+| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running. An instruction to sit is done once the Soul is seated: a linked sit (`sit`, `sit-ground`), timed or not, closes its message `done` ("Sitting now.") when the body holds the seat, and its later end writes nothing more. Every answer to the Soul's agent carries `inbox.waiting`, the ids of its messages not yet acknowledged, so the CLI's `OWNER: n message(s) waiting` line leaves out the ones its agent already holds |
 | `GET`/`POST /v1/edge/travel` | Travel between worlds of one site ([worlds](worlds.md#travel-between-worlds)) |
 
 Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. No place is secret (#1262, from November 2026): a mark a world's creator once set is ignored, so a Soul's public record names every place it has been, as its receipts and timeline do.
@@ -644,7 +644,9 @@ is refused `route.unreachable` naming the door.
 
 Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
 revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
-enclosed room. Templates carry them, so new worlds have them. A live world keeps its drawn doorways: live-world door migration
+enclosed room. Templates carry them, so new worlds have them: `tools/worlds/fit-doors-v1.mjs` runs the live rule on each
+template and writes the doors in one batch after everything else, each at its building's settled height. A door stands at
+that height and never cuts a foundation pad into the slope (it would re-settle its building away from it). A live world keeps its drawn doorways: live-world door migration
 (`door-fit/1`, the last boot rule) is off until a fit can run in slices under 1 s, and runs only with `DOOR_FIT_BOOT=1`.
 With it on, a world gets them once at boot, one building at a time, each
 its own recorded edit, with the world serving between them; a restart part way through goes on where it stopped. Inside doors,

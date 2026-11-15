@@ -213,6 +213,10 @@ screenshots or transcripts. Machines without the original run folders can then r
 - **Use a quiet machine.** The machine gate requires a 1-minute load under 10 and at least 6 GB of reclaimable memory.
   A loaded machine produces slow client calls and false failures. `replay-set` waits for the gate (`--gate-wait-min`,
   default 30) and stops if it never clears. `--force-machine` continues and records the breach.
+- **On a busy machine, use the hamlet battery.** Eden 2026 takes minutes to boot on a loaded host, so the m4-v1 score
+  then measures the host. `soul-eval.mjs run --battery m4-hamlet-v1 --seat <seat>` runs the m4-v1 items that have a
+  place of their kind in `hello-hamlet`, which boots in seconds; the battery file lists the items it leaves out and
+  why. Each episode's world boot time is in the report. Use m4-v1 on Eden 2026 for the full score on a quiet host.
 - **Two repeats per arm.** Compare arms only on like-for-like repeats (scripted replay against scripted replay),
   and fix acceptance bars and budgets before the baseline is measured.
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the
@@ -226,7 +230,9 @@ load, the meetup workload, the slopes tick profile) go to the `souls-timed` self
 `bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
 own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
 put the world on two of the runner's physical cores and the load generator on the rest (one on a three-core runner, two
-on a four-core one), the split recorded in `timed-run.json`. The runners use a dedicated, unprivileged account: the
+on a four-core one), the split recorded in `timed-run.json`. An `eval-load` artifact also carries each world's own log
+(`eval-load/n<souls>-r<repeat>/server/world.log`), and `eval-load.log` names a world that exited on its own (exit code,
+signal) and its resident memory every 30 s. The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
 

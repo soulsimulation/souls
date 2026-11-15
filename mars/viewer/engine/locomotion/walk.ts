@@ -175,13 +175,6 @@ const walkSchemaWithin = (reach: number) => z.strictObject({
   gait: z.enum(['walk', 'jog', 'run', 'cycle']).optional(),
 }).refine(p => p.speed === undefined || p.speed <= GAIT_SPEED_CAPS[p.gait ?? 'walk'], { message: 'speed exceeds the selected gait cap', path: ['speed'] });
 const walkSchema500 = walkSchemaWithin(500);
-let walkSchemaWide: typeof walkSchema500 | null = null;
-/** GOD-ENV: a god's (entity) world can grow past ±500 m ("extend the world east"); its server widens the reach of
- *  walk_to to the world's bounds. Worlds that never call this (the old worlds) parse with the same ±500 schema as before. */
-export function setWalkReach(metres: number) { walkSchemaWide = metres > 500 ? walkSchemaWithin(Math.min(16000, metres)) : null; }
-/** The walk_to schema now (lane NAV: read on every use — a `z.lazy` memoises its first schema, so a world widened after the
- *  process's first walk kept ±500 m). */
-export const walkSchemaNow = () => walkSchemaWide ?? walkSchema500;
 
 const spatial = bodySpatial;
 
@@ -274,7 +267,7 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
   navPure: true,
   description:
     'Walk a person to (x, z) on a level (default: current level) along a planned corridor route, using completed stairs between levels. Fails with a diagnostic if no route exists.',
-  get schema() { return walkSchemaNow(); },
+  schema: walkSchema500,
   reservations: (_w, p) => [{ resource: `actor:${p.actor}`, mode: 'exclusive' }],
   plan(rt, p) {
     const a = actorOf(rt, p.actor);
@@ -1989,4 +1982,19 @@ function remainingValid(rt: Runtime, ex: Exec): boolean {
     for (let i = 1; i < pts.length; i++) if (segmentClearance(g, pts[i - 1], pts[i]) < ex.profile.radius) return false;
   }
   return true;
+}
+
+/** GOD-ENV: a god's (entity) world can grow past ±500 m ("extend the world east"); its registry carries walk_to with the
+ *  reach widened to the world's bounds (#2416: per world, in the world's own registry; never a module-wide switch).
+ *  Worlds that never widen (the old worlds) keep `walkTo` itself, the same ±500 m schema as before. The widened defs are
+ *  immutable and keyed by their reach, so worlds of the same size share one. */
+const walkToByReach = new Map<number, typeof walkTo>();
+/** Whether `d` is walk_to as this module makes it (plain or widened), not a wrapper some runtime installed. */
+export const isWalkToDef = (d: unknown) => d === walkTo || [...walkToByReach.values()].includes(d as typeof walkTo);
+export function walkToWithin(metres: number): typeof walkTo {
+  const reach = Math.min(16000, metres);
+  if (!(reach > 500)) return walkTo;
+  let d = walkToByReach.get(reach);
+  if (!d) walkToByReach.set(reach, (d = { ...walkTo, schema: walkSchemaWithin(reach) }));
+  return d;
 }

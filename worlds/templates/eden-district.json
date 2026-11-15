@@ -392,24 +392,6 @@
     },
     {
      "op": "place",
-     "def": "core/door@2",
-     "name": "eden-house-1-door-1",
-     "p": [
-      35.175,
-      0,
-      17.89
-     ],
-     "r": 0,
-     "params": {
-      "sx": 1.01,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
-     }
-    },
-    {
-     "op": "place",
      "def": "core/cottage@2",
      "name": "eden-house-2",
      "p": [
@@ -425,24 +407,6 @@
       "roof": "flat",
       "wall": "#e8dcc6",
       "roofColor": "#5e5a57"
-     }
-    },
-    {
-     "op": "place",
-     "def": "core/door@2",
-     "name": "eden-house-2-door-1",
-     "p": [
-      53.175,
-      0,
-      17.89
-     ],
-     "r": 0,
-     "params": {
-      "sx": 1.01,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
      }
     },
     {
@@ -466,24 +430,6 @@
     },
     {
      "op": "place",
-     "def": "core/door@2",
-     "name": "eden-house-3-door-1",
-     "p": [
-      32.244,
-      0,
-      25.11
-     ],
-     "r": -3.141,
-     "params": {
-      "sx": 1.01,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
-     }
-    },
-    {
-     "op": "place",
      "def": "core/cottage@2",
      "name": "eden-house-4",
      "p": [
@@ -503,24 +449,6 @@
     },
     {
      "op": "place",
-     "def": "core/door@2",
-     "name": "eden-house-4-door-1",
-     "p": [
-      52.244,
-      0,
-      25.11
-     ],
-     "r": -3.141,
-     "params": {
-      "sx": 1.01,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
-     }
-    },
-    {
-     "op": "place",
      "def": "core/hall@3",
      "name": "eden-library-1",
      "p": [
@@ -533,24 +461,6 @@
       "front": "s",
       "wall": "#efe6d4",
       "windows": 0.8
-     }
-    },
-    {
-     "op": "place",
-     "def": "core/door@2",
-     "name": "eden-library-1-door-1",
-     "p": [
-      74,
-      0,
-      -2.91
-     ],
-     "r": 0,
-     "params": {
-      "sx": 1.35,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
      }
     }
    ]
@@ -2849,6 +2759,106 @@
         "region-old-town.plaza"
        ]
       }
+     }
+    }
+   ]
+  },
+  {
+   "note": "door-fit/1 (#2383): a real door in each fitted outside doorway, at its building's height",
+   "ops": [
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "eden-house-1-door-1",
+     "p": [
+      35.175,
+      0,
+      17.89
+     ],
+     "r": 0,
+     "anchor": "center",
+     "params": {
+      "sx": 1.01,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "eden-house-2-door-1",
+     "p": [
+      53.175,
+      0,
+      17.89
+     ],
+     "r": 0,
+     "anchor": "center",
+     "params": {
+      "sx": 1.01,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "eden-house-3-door-1",
+     "p": [
+      32.244,
+      0,
+      25.11
+     ],
+     "r": -3.141,
+     "anchor": "center",
+     "params": {
+      "sx": 1.01,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "eden-house-4-door-1",
+     "p": [
+      52.244,
+      0,
+      25.11
+     ],
+     "r": -3.141,
+     "anchor": "center",
+     "params": {
+      "sx": 1.01,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "eden-library-1-door-1",
+     "p": [
+      74,
+      0,
+      -2.91
+     ],
+     "r": 0,
+     "anchor": "center",
+     "params": {
+      "sx": 1.35,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
      }
     }
    ]

@@ -1498,24 +1498,6 @@
     },
     {
      "op": "place",
-     "def": "core/door@2",
-     "name": "kitchen-door-1",
-     "p": [
-      -14,
-      0,
-      -8.11
-     ],
-     "r": 0,
-     "params": {
-      "sx": 1.18,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
-     }
-    },
-    {
-     "op": "place",
      "def": "core/hall@3",
      "name": "living-room",
      "p": [
@@ -1609,24 +1591,6 @@
         }
        ]
       }
-     }
-    },
-    {
-     "op": "place",
-     "def": "core/door@2",
-     "name": "bunkhouse-door-1",
-     "p": [
-      16.5,
-      0,
-      -8.11
-     ],
-     "r": 0,
-     "params": {
-      "sx": 1.18,
-      "sy": 0.9
-     },
-     "state": {
-      "open": true
      }
     }
    ]
@@ -2737,6 +2701,49 @@
         "living-room"
        ]
       }
+     }
+    }
+   ]
+  },
+  {
+   "note": "door-fit/1 (#2383): a real door in each fitted outside doorway, at its building's height",
+   "ops": [
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "kitchen-door-1",
+     "p": [
+      -14,
+      0,
+      -8.11
+     ],
+     "r": 0,
+     "anchor": "center",
+     "params": {
+      "sx": 1.18,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
+     }
+    },
+    {
+     "op": "place",
+     "def": "core/door@2",
+     "name": "bunkhouse-door-1",
+     "p": [
+      16.5,
+      0,
+      -8.11
+     ],
+     "r": 0,
+     "anchor": "center",
+     "params": {
+      "sx": 1.18,
+      "sy": 0.9
+     },
+     "state": {
+      "open": true
      }
     }
    ]

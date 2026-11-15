@@ -41,6 +41,20 @@ export function planNativeBirth(host: WorldHost, who: BirthIdentity): BirthPlan 
   return { probe: probeNativeHumanBirth(host.engine, host.factory, { ...who, near: near satisfies BirthNearV1 }), near };
 }
 
+/** A direct create's birth-near/1 hint at the arrival point itself, without `first` (MarsEngine.arrivalCrowdV1): in a world
+ *  with arrival-clearance/1 always, else once bodies and solids leave fewer than 24 ring spots, counting the births queued
+ *  and not yet applied. Rings first as before; once bodies fill them, the nearest free standing ground, never a throw. */
+export function crowdedArrivalNear(host: WorldHost): { at: [number, number] } | undefined {
+  const at = (host.engine as unknown as { arrivalCrowdV1?(queued?: number): [number, number] | null }).arrivalCrowdV1?.(host.queuedBirthsV1());
+  return at ? { at: [at[0], at[1]] } : undefined;
+}
+
+/** birth-near/1 at the arrival point whatever the crowd (a birth again after one that failed). */
+export function arrivalPointNear(host: WorldHost): { at: [number, number] } | undefined {
+  const at = (host.engine as unknown as { arrivalCrowdV1?(queued?: number, free?: number): [number, number] | null }).arrivalCrowdV1?.(0, Infinity);
+  return at ? { at: [at[0], at[1]] } : undefined;
+}
+
 /** The cheap form for a direct (non-lifecycle) Soul create: the search's spot only when the world itself blocks the
  *  arrival point (built over, deep water, walled off), else nothing. No detached birth probe, so a create stays as cheap
  *  as it was; a crowd on a clear arrival point is left to the birth's own rings, as before. */

@@ -263,6 +263,17 @@ export function buildGridsOverFloors(scene: SpatialScene, cell = 0.1): GridSet {
   return { cell, levels };
 }
 
+/**
+ * #2433: one level's raster and transform over the lattice rect `lat` exactly as `buildGridsOverFloors` stamps it (its
+ * surfaces, then the obstacles in the level's body band, in list order), out of `lat` = blocked. A piece of a floor
+ * crop: GroundNav.floorOver assembles a crop from pieces that cannot see each other (spatial/tiled.ts floorPieces).
+ */
+export function floorPieceRaster(scene: Pick<SpatialScene, 'surfaces' | 'obstacles'>, lv: Level, cell: number, lat: Lattice): { free: Uint8Array; clearance: Float32Array; blockers: BlockerMap } {
+  const free = new Uint8Array(lat.nx * lat.nz), blockers = new BlockerMap(lat.nx * lat.nz);
+  stampLevel(scene as SpatialScene, lv, cell, lat, undefined, free, blockers);
+  return { free, clearance: edt(free, lat.nx, lat.nz, cell), blockers };
+}
+
 // Only immutable raster/EDT products are retained, never a Spatial, world, route,
 // body, reservation or permission. Every caller receives independent storage.
 const STATIC_GRID_CACHE_LIMIT = 64 * 1024 * 1024;
