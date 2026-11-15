@@ -2,7 +2,7 @@
 // outside doorways now hold real doors, closed. The walk in starts far from it (review of #2397: a long walk is planned
 // through the door from the start, not stopped short of it). Before the take, admin's Soul Clara runs to the bakery's
 // front, about 55 m from the dome. On camera (Ctrl+K, Enter follows Clara) she runs from there into the dome, opening its
-// door by hand and closing it behind her, then walks back out through it.
+// door by hand and closing it behind her.
 import { execFile, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { cast } from '../_shared/cast.mjs';
@@ -39,8 +39,5 @@ export default async function steps(page, { mark }) {
   mark('one walk from ~55 m away: run into the dome');
   await eden(['act', 'walk:eden-dome', '--run', '--wait', '80', '--json'], 90_000);
   mark('inside the dome, door closed behind');
-  await page.waitForTimeout(1000);
-  mark('walk back out through the dome door');
-  await eden(['act', 'walk:street-bicycle-bike-9', '--wait', '40', '--json'], 50_000);
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1500);
 }

@@ -3108,11 +3108,10 @@ export class MarsEngine implements Engine {
     const start=this.godWalkoutStartV1(actor);if(!start)return null;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8);if(!goal)return null;
     const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);
-    const r0=spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
     // `behind` (walkThroughDoorV1 said so): a long walk's far ground is planned coarsely and may not meet the shut leaf, so
     // the doors are named from the destination's side, whose search the door closes in at once (review of #2397)
     const back=()=>spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},start,{nameObstacles:id=>id.includes('#door:')});
-    const r=r0.ok&&behind?back():r0;
+    const r=behind?back():spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
     if(r.ok||r.diagnostic.code!=='route.unreachable')return null;
     const pos=(id:string)=>{const o=spatial.scene.obstacles.find(x=>x.id.startsWith(id+'#door:'));return o?o.obb.c:null;};
     const along=(c:[number,number])=>hypot(c[0]-start.p[0],c[1]-start.p[1])+hypot(c[0]-goal[0],c[1]-goal[1]);
