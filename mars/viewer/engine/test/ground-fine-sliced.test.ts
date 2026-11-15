@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GroundNav, deckedField, boxesOf } from '../spatial/tiled.ts';
-import { BODY_HEIGHT, STEP, edt, latticeCentre, rasterObb } from '../spatial/grid.ts';
+import { BODY_HEIGHT, STEP, edt, edtSteps, latticeCentre, rasterObb } from '../spatial/grid.ts';
 import { coarseMedium, G_OUTSIDE, G_STEEP, G_SWIM, G_WADE, G_WALK, type GroundField } from '../spatial/ground.ts';
 import { CONNECT_CLEAR, labelComponents } from '../spatial/connectivity.ts';
 import { pointInObb, rot2, type Vec2 } from '../core/math.ts';
@@ -151,4 +151,15 @@ test('deck basis: legacy point predicates at rotated boundaries, overlaps and mu
   assert.notEqual(nav.field, before); assert.notEqual(nav.field.id, before.id);
   assert.notEqual(nav.field.mediaTile(0, 0), media, 'setFloors replaces the overlay and its media cache');
   assert.equal(nav.field.height(20, 20), 1);
+});
+
+test('#2405 A1: the fine tile EDT runs in resumable pieces of at most 64 lines, byte-identical to edt', () => {
+  const M = 680, free = new Uint8Array(M * M);
+  for (let k = 0; k < free.length; k++) free[k] = (Math.imul(k, 2654435761) >>> 0) % 97 < 90 ? 1 : 0;
+  const it = edtSteps(free, M, M, .1);
+  let step = it.next(), pieces = 1;
+  while (!step.done) { pieces++; step = it.next(); }
+  assert.equal(pieces, 2 * Math.ceil(M / 64), 'one piece per 64 columns, then per 64 rows');
+  const want = edt(free, M, M, .1);
+  assert.deepEqual(Buffer.from(step.value.buffer), Buffer.from(want.buffer));
 });

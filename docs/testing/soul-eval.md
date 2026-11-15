@@ -67,6 +67,10 @@ node tools/playtest/eval/soul-eval.mjs load --server-root <checkout> --souls 12,
   client before 2.25, which keeps no world copy. Each episode records `catalogFrom` (`client` or `reference`).
 - `load --first-repeat 2` numbers a load run's repeats from 2, so a stopped load run can be finished cell by cell. Load
   setup paces Souls at 6 per 30 s, under a world's 20 pairings in any 60 s from one address.
+- `load --act-sec 10` paces each Soul like a real agent: one `find` and `act` every 10 s on average (verbs like the
+  m4-v1 battery's), instead of the default nonstop loop (`pending`, `look`, `find`, `act`, then 3 to 6 s), which runs
+  several times harder. Either way the report gives the act calls' server time and queue at p50, p95 and p99. Timed
+  runs accept it in `args` (#2437).
 - A load report also gives the world's own side from its `live.json`: an act's queue, handler, wait and commit at p50
   and p99 with the acts that waited more than three ticks, and each 10-second tick window ([load.md](../architecture/load.md)).
 - `--warm-sec 40` holds each instruction until the Soul is 40 s old, so a run can show the steady state beside the cold start (`sinceCreateMs` is recorded either way).
@@ -104,6 +108,24 @@ world appears as `local:<template>`.
 Every item starts where a new Soul arrives. Its check is one of `place`, `placeKind`, `posture`, `receipt`
 (`{verb, thingKind?}`), `card` or `calendarInterest` (`"first"`), composed with `all` and `any`
 (`tools/playtest/eval/measure.mjs`). No item needs `resolve`.
+
+`tools/playtest/eval/battery/harder-v1.json` (#2364) holds five items m4-v1 does not ask: a three-step errand, a social
+scene (another Soul, Moss, waits at the bandstand), a long activity and its end (sit a minute, then report), a refusal to
+recover from (a two-hour sit, over the world's 1800 s), and a wake with nothing from the owner. An item's `others` puts
+other Souls in the world, each in its own folder: their `steps` run before the kickoff and their `poke` steps when the
+instruction goes. `instruction: null` sends no owner message; `heartbeat` then fires the client's own heartbeat
+(`wake heartbeat`, gated by `pending --check`) as one turn in the seat's session, and `holdSec` sets how long the check
+must hold. Three checks read the world's live picture (`GET /v1/edge/live`) or receipts: `said` (a line this Soul said
+since the instruction), `near` (`{soul, within}` metres of a named Soul) and `quiet` (no act since the message beyond
+the verbs `except` names).
+
+Seats: `seats/claude-sonnet.json` (Claude Code, Sonnet) runs under `live.sh`. `seats/codex.json` (Codex CLI) is not
+runnable yet: the world budget refuses every turn of a seat that reports no dollar cost (#1098), and Codex bills by
+subscription. `live.sh` passes `SIM_LOAD_BLACK_MS` to the episode worlds: a world black for that long restarts itself
+for a launcher an episode world does not have, so on a loaded host set it high (the #2364 runs used 900000).
+
+A world whose client copy still has no acts after setup (a loaded host lays its places out slowly) errors that episode
+as `world.starting` and the run goes on; setup waits up to 300 s for the acts.
 
 `tools/playtest/eval/seats/scripted-m4-v1.json` is the scripted owner for the $0 dry run. It proves the measuring, not an
 agent.

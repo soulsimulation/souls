@@ -14,7 +14,7 @@
 //    Each hop is planned with the existing planner (findRoute) on a composite of
 //    just that hop's tiles, so a route never depends on how far the window has grown.
 import { datan2, dcos, dsin, hypot, obbCorners, pointInObb, type Vec2 } from '../core/math.ts';
-import { BODY_HEIGHT, BlockerMap, STEP, buildGrids, buildGridsOverFloors, edt, floorPieceRaster, gridContentKeys, latticeCentre, latticeIndex, latticeOf, obbRange, rasterObb, type GridSet, type LevelGrid } from './grid.ts';
+import { BODY_HEIGHT, BlockerMap, STEP, buildGrids, buildGridsOverFloors, edtSteps, floorPieceRaster, gridContentKeys, latticeCentre, latticeIndex, latticeOf, obbRange, rasterObb, type GridSet, type LevelGrid } from './grid.ts';
 import { PLAN_MARGIN, findRoute, linkApproach, snap, type Leg, type Place, type RouteOpts, type RouteResult, type WalkLeg } from './path.ts';
 import type { AgentProfile, Obstacle, SpatialScene, Surface } from './types.ts';
 import { GROUND_TILE_M, G_OUTSIDE, G_STEEP, G_SWIM, G_WADE, G_WALK, MEDIUM_NAMES, coarseMedium, type GroundField } from './ground.ts';
@@ -352,7 +352,8 @@ export class GroundNav {
   }
   /** A resumable cold tile. No partial raster enters the cache; synchronous callers drain the same builder.
    * The caller must abandon an unfinished iterator if its field or obstacle inputs change (NavConnectivity checks epochs).
-   * EDT, crop and a cold GroundField.mediaTile remain atomic, so this is not a hard wall-time bound. */
+   * The EDT runs in pieces of 64 lines (edtSteps). The crop and a cold GroundField.mediaTile remain atomic, so this is not
+   * a hard wall-time bound. */
   *fineTileSteps(tx: number, tz: number, rel: Obstacle[], key = this.keyOf(tx, tz, rel), keep = true): Generator<void, FineTile> {
     const hit = this.fine.get(key);
     // keep = false reads a hit without refreshing it: the audit's sweep must not age the tiles the engine's windows use
@@ -362,7 +363,7 @@ export class GroundNav {
     const M = per + 2 * A, ox = tx * per - A, oz = tz * per - A;
     const blk = new Int16Array(M * M).fill(-1), ids: string[] = ['ground:outside', 'ground:steep', 'ground:water'];
     const free = yield* this.classifySteps(ox, oz, M, rel, 0, 0, M, M, blk, ids);
-    const clear = edt(free, M, M, cell);
+    const clear = yield* edtSteps(free, M, M, cell);
     yield;
     // crop to the tile
     const t: FineTile = { key, free: new Uint8Array(per * per), clearance: new Float32Array(per * per), blk: new Int16Array(per * per), ids };

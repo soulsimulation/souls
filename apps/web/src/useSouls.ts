@@ -29,19 +29,12 @@ export type Souls = {
 /** One `{type:'edge', …}` viewer message (EDGE-CONTRACT-v1 §7). Open shape: renderers read only what they know. */
 export type EdgeMsg = { type: 'edge'; kind?: string; [k: string]: unknown };
 
-/** This page runs an older bundle than the server's build: reload now if the protocol changed, else the next time the
- *  page has stayed hidden for a minute (a quick tab switch never reloads). Once per build. */
-let staleWatch: string | null = null;
-export function staleBundle(build: string, incompatible: boolean, hiddenMs = 60_000) {
-  const reload = () => { sessionStorage.setItem('sim.reloaded', build); location.reload(); };
-  if (incompatible) { reload(); return; }
-  if (staleWatch === build) return; staleWatch = build;
-  let t: ReturnType<typeof setTimeout> | null = null;
-  const check = () => {
-    if (document.visibilityState === 'hidden') { t ??= setTimeout(reload, hiddenMs); }
-    else if (t) { clearTimeout(t); t = null; }
-  };
-  document.addEventListener('visibilitychange', check); check();
+/** This page runs an older bundle than the server's build: reload now, once per build, only if the protocol changed. A
+ *  compatible release never reloads the page (#2368: the reload after a minute hidden was the page "refreshing by
+ *  itself" and losing its account state on return); the next page load takes the new bundle. */
+export function staleBundle(build: string, incompatible: boolean): boolean {
+  if (!incompatible) return false;
+  sessionStorage.setItem('sim.reloaded', build); location.reload(); return true;
 }
 
 /** One connection for the page. Re-renders about 5 times a second while the world runs. */
@@ -83,8 +76,7 @@ export function useSouls(getToken: () => Promise<string | null>, authed: boolean
         st.takeEpoch = w.epoch;
         acceptPrivateAuthority(st,authedRef.current,identityRef.current,me);
         // after a deploy, a page still running the old bundle: a new protocol needs the new bundle now (reload once); a
-        // compatible release keeps this viewer running (it reconnected and resumed) and swaps the bundle unseen, once the
-        // page has been hidden for a minute (lane C4: releases without visible downtime)
+        // compatible release keeps this viewer running (it reconnected and resumed) and never reloads it (#2368)
         if (w.build && w.build !== 'dev' && __BUILD__ !== 'dev' && w.build !== __BUILD__ && sessionStorage.getItem('sim.reloaded') !== w.build) staleBundle(w.build, w.proto !== undefined && w.proto !== PROTO);
       },
       onLog: (ev) => { const seen = new Set(st.log.map((e) => e.seq)); st.log = [...st.log, ...ev.filter((e) => !seen.has(e.seq))].slice(-400); },

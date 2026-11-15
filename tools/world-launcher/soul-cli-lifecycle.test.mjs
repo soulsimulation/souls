@@ -30,13 +30,14 @@ async function fixture(t, world) {
   writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({ world: `http://127.0.0.1:${server.address().port}`, identity: 'bench7' }), { mode: 0o600 });
   t.after(() => { server.closeAllConnections(); server.close(); rmSync(dir, { recursive: true, force: true }); });
   const run = (...args) => new Promise((resolve) => {
-    const child = spawn(process.execPath, [cli, ...args], { cwd: dir, env: { ...process.env, EDEN_TIME_SCALE: String(SCALE) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [cli, ...args], { cwd: dir, env: { ...process.env, EDEN_TIME_SCALE: String(SCALE), ...f.env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = ''; child.stdout.on('data', c => { out += c; }); child.stderr.on('data', c => { err += c; });
     child.on('exit', (code) => { let d = null; try { d = JSON.parse(out); } catch { /* not JSON */ } resolve({ code, d, stderr: err }); });
   });
   const state = () => JSON.parse(readFileSync(join(dir, '.eden-agent.json'), 'utf8'));
   const creates = () => seen.filter(x => x.m === 'POST' && x.u === '/v1/souls').length;
-  return { seen, run, state, creates };
+  const f = { seen, run, state, creates, env: {} };
+  return f;
 }
 /** Pairing a dev Soul (devPair): the code, then the token. */
 function pairRoutes(req, res) {
@@ -88,6 +89,28 @@ test('still pending after 120 s: exit 75 with the words; the same create again r
   assert.equal(b.code, 0, b.stderr);
   assert.equal(f.creates(), 1, 'the re-run resumed the wait instead of creating');
   assert.equal(b.d.soul.id, SOUL); assert.equal(f.state().token, `sim_${SOUL}_synthetic`); assert.equal(f.state().pendingCreate, undefined);
+});
+
+// #2380: a command answers within its own time, so a wait longer than what is left of it stops there and says so; the same
+// create again resumes it, as after the full wait
+test('a command time shorter than the wait: exit 75 after the command time, said in words; the same create resumes', async (t) => {
+  let ready = false;
+  const f = await fixture(t, (req, res) => {
+    if (pairRoutes(req, res)) return;
+    if (req.method === 'POST' && req.url === '/v1/souls') return pending503(res);
+    if (req.method === 'GET' && req.url === `/v1/lifecycle/${REQ}`) return json(res, 200, { lifecycle: ready ? receipt('admitted', true) : receipt('pending') });
+    json(res, 404, { code: 'not-found' });
+  });
+  f.env = { EDEN_TIME_SCALE: '0.1', EDEN_COMMAND_MS: '3000' };   // the 120 s wait scales to 12 s, past the 3 s command time
+  const a = await f.run('create', NAME);
+  assert.equal(a.code, 75, a.stderr);
+  assert.match(a.stderr, /waiting for it \(checking every 2 s, up to 3 s\)/);
+  assert.match(a.stderr, /error: create: lifecycle-pending — the world is still finishing my arrival after 3 s\. The Soul "Bench7" is saved in this folder: run node eden\.mjs create "Bench7" again to keep waiting/);
+  assert.deepEqual(f.state().pendingCreate, { name: NAME, requestId: REQ, soulId: SOUL });
+  ready = true; f.env = {};
+  const b = await f.run('create', NAME);
+  assert.equal(b.code, 0, b.stderr);
+  assert.equal(f.creates(), 1, 'resumed, never a second create');
 });
 
 test('a lost create answer: 409 name-taken by this identity\'s own pending create resumes it from the lifecycle history', async (t) => {
