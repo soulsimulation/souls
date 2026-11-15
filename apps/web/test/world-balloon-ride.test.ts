@@ -124,3 +124,21 @@ test('a balloon rider stands with both hands on the rim (carrier activity "ride"
   assert.ok(ACTIVITY_OVERLAYS.has('ride')); assert.equal(activityBase('ride'), 'idle');
   for (const s of [0, 7, 31]) { const f = activityFrame('ride', 'idle', s, 'soul-a')!; assert.ok(f.hands?.[0] && f.hands[1], 'both hands placed'); assert.ok(f.hands[0][2] < -0.3, 'hands down at the rim'); }
 });
+
+test('#1977: both riders\' hands stay inside the basket, resting on its front rim (both seats, both hands, any time)', async () => {
+  const {activityFrame} = await import('../../../mars/viewer/app/engine-view/activity-poses.ts');
+  const {CATALOG} = await import('../../../mars/viewer/engine/world/catalog.ts');
+  const seats = (CATALOG['hot-air-balloon'] as unknown as {capabilities: {carrier: {seats: {local: [number, number]; yaw: number}[]}}}).capabilities.carrier.seats;
+  // core/balloon's basket (core-kit transport.mjs): walls 0.65 m out from its centre, rim 0.98-1.06 m up; Eden's is larger
+  const WALL = 0.65, RIM = [0.98, 1.06];
+  assert.equal(seats.length, 2);
+  for (const s of [0, 7, 31]) { const f = activityFrame('ride', 'idle', s, 'soul-a')!;
+    for (const seat of seats) for (const [i, side] of [[0, -1], [1, 1]] as const) {
+      const g = f.rootHands?.[i]; assert.ok(g, 'the hand is placed from the body root, at the rim\'s own height');
+      // facing (cos yaw, sin yaw) in the basket's frame (Core); outward either way across it
+      const fx = Math.cos(seat.yaw), fz = Math.sin(seat.yaw), x = seat.local[0] + fx * g[0] - side * fz * g[1], z = seat.local[1] + fz * g[0] + side * fx * g[1];
+      assert.ok(Math.abs(x) < WALL - 0.005 && Math.abs(z) < WALL - 0.005, `inside the walls: ${x.toFixed(3)}, ${z.toFixed(3)}`);
+      assert.ok(x > WALL - 0.15, `forward at the front rim, not mid-basket: ${x.toFixed(3)}`);
+      assert.ok(g[2] >= RIM[0] && g[2] <= RIM[1], `at the rim's height: ${g[2]}`);
+    } }
+});
