@@ -4590,14 +4590,16 @@ async function accountPair(id, a) {
     named ??= it?.name;
   }
   const r = await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body: MOVE ? { ...body, move: true } : body });
-  if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") {
-    const who = soulHome.plainName(named) || id, from = String(r.data?.heldBy ?? "").trim().slice(0, 80) || "another device";
-    const again = [CLI, ...process.argv.slice(2).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)), "--move"].join(" ");
-    throw new Error(`soul.held-elsewhere: ${who}'s agent is connected now from ${from}. Run there, or add --move to take control here, which disconnects it. Next: ${again}`);
-  }
+  if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") throw connectedElsewhere(soulHome.plainName(named) || id, r.data);
   const d = accountOk(r, "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
+}
+/** #2401, #2050: the world refused a take while the Soul's agent is connected: name the device and the `--move` command. */
+function connectedElsewhere(who, data) {
+  const from = String(data?.heldBy ?? "").trim().slice(0, 80) || "another device";
+  const again = [CLI, ...process.argv.slice(2).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)), "--move"].join(" ");
+  return new Error(`soul.held-elsewhere: ${who}'s agent is connected now from ${from}. Run there, or add --move to take control here, which disconnects it. Next: ${again}`);
 }
 /** #2246: one of the account's Souls in this world by name, folded as the world folds names. Two with one name is the person's to choose. */
 async function accountSoulNamed(who, a, what) {
@@ -4831,7 +4833,10 @@ async function seatFor(kept) {
 async function devPair(id) {
   return pairingTurn(async () => {
     if (HOME && (await connectedAlready(id)) === true) return false;
-    const c = ok(await call(`/v1/souls/${id}/pair`, { as: "dev", body: {} }), "pair").code;
+    // #2050: the #2401 move rule: free with no agent connected; while one is, refused naming it unless --move.
+    const r = await call(`/v1/souls/${id}/pair`, { as: "dev", body: MOVE ? { move: true } : {} });
+    if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") throw connectedElsewhere(HOME?.config().souls[id]?.name ?? id, r.data);
+    const c = ok(r, "pair").code;
     const t = ok(await call("/v1/agent/pair", { as: "none", body: { code: c, agent: "eden " + VERSION } }), "pair");
     save({ token: t.token, soul: id });
     return true;

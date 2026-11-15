@@ -104,7 +104,9 @@ reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that acco
 the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
 folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
 A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
-the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
+the old folder from their account first. On a dev-identity world (no account approvals) `pair <soulId>` follows the same rule as a login's
+move (#2050): `POST /v1/souls/:id/pair` is free while no agent is connected and otherwise answers 409
+`soul.held-elsewhere` naming that agent (`heldBy`), unless the body says `move: true` (`--move`). Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
