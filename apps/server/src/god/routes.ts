@@ -18,7 +18,7 @@ import { godBodyLimit } from './ingestion.ts';
 import { godVersions } from './versions.ts';
 import { SnapshotCache, SNAPSHOT_FILTERED_HEADER } from './snapshot-cache.ts';
 import { SnapshotParts, mountSnapshotParts } from './snapshot-wire.ts';
-import { moderationFor } from '../moderation/store.ts';
+import { defaultSiteLog, moderationFor } from '../moderation/store.ts';
 import { withoutHidden } from '../moderation/routes.ts';
 import { entitiesWithoutPrivateWords, withoutPrivateWords } from './private-words.ts';
 import { mountLandRoutes } from './land.ts';
@@ -157,7 +157,7 @@ export function mountGodRoutes(app: Hono, d: GodDeps): { partRefs: () => { defs:
 
   // ---- public reads (the renderer's view of the world; Gene: topology and placements are public)
   // lane W1: built once per state of the world and served precompressed (snapshot-cache.ts), hidden entities already out
-  const moderation = moderationFor(d.god.db.db, d.god.opts.worldId);
+  const moderation = moderationFor(d.god.db.db, d.god.opts.worldId, defaultSiteLog(d.god.opts.env));
   // #1223: what anyone may read, so a private notebook's words are out of all three forms
   const viewerSnapshot = () => { const snap = d.god.publicSnapshot(); return { ...snap, entities: entitiesWithoutPrivateWords(d.god.model, snap.entities) }; };
   const snapshots = new SnapshotCache({ build: viewerSnapshot,

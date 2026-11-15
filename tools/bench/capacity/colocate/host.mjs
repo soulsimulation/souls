@@ -33,9 +33,9 @@ async function loadOneThread(m) {
   for (const k of Object.keys(process.env)) if (!(k in baseEnv)) delete process.env[k];
   Object.assign(process.env, m.env);
   armFaults(m.env.DATA_DIR);
-  // config.ts is one object per program, read from process.env once (A4). For the trial it is refilled in place with
-  // this world's values before its main.ts runs, so the world boots with its own port and data directory; whatever reads
-  // `config` later, after the next world has loaded, sees that next world's values.
+  // Since #2389 main.ts boots its world with startWorld(loadConfig(process.env)), so each world reads its own config from
+  // the env set above, and its server code reads that config after boot. The module-level `config` is still one object
+  // per program (the default for tests and tools); it is refilled in place so it matches the world being loaded.
   const shared = (await import(CONFIG)).config, own = (await import(`${CONFIG}?world=${encodeURIComponent(m.id)}`)).config;
   Object.assign(shared, own);
   try { await import(`${MAIN}?world=${encodeURIComponent(m.id)}`); send({ op: 'loaded', id: m.id, ms: Math.round(performance.now() - t0) }); }

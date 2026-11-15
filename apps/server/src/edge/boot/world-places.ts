@@ -41,8 +41,20 @@ export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,ver
   if(named.ok&&places.find(p=>p.id===named.chosen.place)?.access==='admitted'&&L.walkOnDemand(soul,named.chosen.place,more,new Map())){const again=resolveBootPlace(input,places,destinationOffers(more,verb),'auto',false);if(again.ok)resolved=again;}
  }
  if(!resolved.ok)resolved=resolveBootPlace(input,places,offers);
- if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable')return {...resolved,reason:resolved.reason+' no walk reaches it in the current offered destinations.'};
+ // #2452: refreshing changes nothing here (the world just said what it offers now): the refusal names the nearest place a walk
+ // reaches instead, as `next`; a client whose copy is stale says to refresh itself
+ if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable'){
+  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),near=named.ok?nearestOffer(L,named.chosen.place,offers):null;
+  return {...resolved,reason:resolved.reason.replace(/; refresh capabilities\.$/,'.')+` No walk reaches it from the destinations offered now${near?`; the nearest place one reaches is ${near.label} (${near.id})`:''}.`,...(near?{next:near.id}:{})};
+ }
  return resolved;
+}
+/** #2452: the offered walk whose place lies nearest the asked one (centre to centre), not the place itself. */
+function nearestOffer(L:EdgeLedger,placeId:string,offers:readonly DestinationCapability[]){
+ const centre=(id:string)=>{const p=L.places.byId.get(id)?.polygon;return p?.length?[p.reduce((s,v)=>s+v[0],0)/p.length,p.reduce((s,v)=>s+v[1],0)/p.length] as const:null;},at=centre(placeId);if(!at)return null;
+ let best:{id:string;label:string;d:number}|null=null;
+ for(const o of offers){if(o.placeId===placeId||!o.available)continue;const c=centre(o.placeId);if(!c)continue;const d=Math.hypot(c[0]-at[0],c[1]-at[1]);if(!best||d<best.d)best={id:o.id,label:L.places.byId.get(o.placeId)!.name,d};}
+ return best;
 }
 /** Identity only: for a room/waypoint whose separate native seat/route check
  * follows. It grants no action or geometric admission. */

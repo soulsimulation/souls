@@ -57,13 +57,12 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   await host.enableWaitBoundV3('world').catch((e) => console.error('[world] wait-bound/3 could not be adopted:', String(e).slice(0, 300)));   // #2155
   await host.enableCedePassageV1('world').catch((e) => console.error('[world] cede-passage/1 could not be adopted:', String(e).slice(0, 300)));   // #2426
   // #2383, off unless asked for (DOOR_FIT_BOOT=1): live-world door migration is off until a fit can run in slices under 1 s
-  if (opts.doorFit ?? doorFitBoot()) await enableDoorFitV1(host, opts.god?.()).catch((e) => console.error('[world] door-fit/1 could not be adopted:', String(e).slice(0, 300)));
+  // #2383 door-fit/1 at boot is opt-in (`doorFit`: the world config's doorFitBoot, DOOR_FIT_BOOT=1). Off by default, because
+  // one building's fit edit can hold the world's thread for seconds (up to 15.9 s on Eden, past the serving watchdog), so a
+  // live world keeps its drawn doorways; templates, and so new worlds, carry the real doors already.
+  if (opts.doorFit) await enableDoorFitV1(host, opts.god?.()).catch((e) => console.error('[world] door-fit/1 could not be adopted:', String(e).slice(0, 300)));
 }
 
-/** #2383 door-fit/1 at boot is opt-in: `DOOR_FIT_BOOT=1`. Off by default, because one building's fit edit can hold the world's
- *  thread for seconds (up to 15.9 s measured on Eden, past the serving watchdog), so a live world keeps its drawn doorways;
- *  templates, and so new worlds, carry the real doors already. */
-export const doorFitBoot = (env: NodeJS.ProcessEnv = process.env): boolean => env.DOOR_FIT_BOOT === '1';
 
 /** #2383 door-fit/1, once per world: its buildings on a revision that draws fixed door leaves move to their door-fitted
  *  revision with a real hand-operated door in each ground-floor doorway (god/door-fit.ts; one recorded engine edit per building, in slices),

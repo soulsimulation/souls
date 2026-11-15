@@ -58,8 +58,8 @@ export function renderReport(a, b = null) {
     const y = other.get(x.item);
     if (y) L.push(`| ↳ against | ${y.succeeded}/${y.episodes} | ${f(y.modelTurns)} | ${f(y.apiCalls)} | ${f(y.worldCalls)} | ${f(y.cliCalls)} | ${sec(y.firstMotionMs)} | ${sec(y.successMs)} | ${f(y.clientMsPerCall)} | ${f(y.serverMsPerCall)} | ${codes(y.refusals)} | ${f(y.tokensIn)} / ${f(y.tokensOut)} | ${usd(y.costUsd)} |`);
   }
-  L.push('', '## Episodes', '', '| # | item | repeat | ok | why | ended by | card | CLI commands |', '|---|---|---|---|---|---|---|---|');
-  (a.episodes ?? []).forEach((e, i) => L.push(`| ${i + 1} | ${e.item} | ${e.repeat} | ${e.error ? 'error' : e.succeeded ? 'yes' : 'no'} | ${(e.error ?? e.why ?? '').replace(/\|/g, '/')} | ${e.endedBy ?? ''} | ${e.card ? `${e.card.outcome ?? e.card.state}` : ''} | ${codes(e.seat?.cliCalls)} |`));
+  L.push('', '## Episodes', '', '| # | item | repeat | ok | why | ended by | card | CLI commands | world boot |', '|---|---|---|---|---|---|---|---|---|');
+  (a.episodes ?? []).forEach((e, i) => L.push(`| ${i + 1} | ${e.item} | ${e.repeat} | ${e.error ? 'error' : e.succeeded ? 'yes' : 'no'} | ${(e.error ?? e.why ?? '').replace(/\|/g, '/')} | ${e.endedBy ?? ''} | ${e.card ? `${e.card.outcome ?? e.card.state}` : ''} | ${codes(e.seat?.cliCalls)} | ${e.bootMs == null ? 'n/a' : `${r(e.bootMs / 1000)} s`} |`));
   L.push('', '## World calls by route (server time from `Server-Timing`)', '', 'Levels from #1750 (p99.9 server-side): bookkeeping 50 ms, reads 100 ms, an act\'s acknowledgment 150 ms. Long polls hold their answer by design and have no level.', '',
     '| route | calls | client p50 ms (median of episodes) | server p50 ms (median of episodes) | server max ms | level |', '|---|---|---|---|---|---|', ...routeTable(a));
   L.push('', 'Success is read from the public Soul view (place, posture, receipts) and the owner card\'s state, never from the agent\'s words. Tokens in count input, cache reads and cache writes.');

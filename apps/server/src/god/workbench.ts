@@ -39,7 +39,7 @@ export function admitWorkbench(god: GodMode, raw: unknown) {
 export function mountWorkbenchRoutes(app: Hono, d: { god: GodMode; requireGod(c: Context): unknown; limitGod(c: Context, bucket: string, max: number): void; asGod<T>(c: Context, fn: () => T): T }) {
   const headers = { 'cache-control': 'no-store' };
   app.get('/god/workbench', c => {
-    const path = resolve(process.env.WEB_DIR ?? new URL('../../../web/dist/', import.meta.url).pathname, 'workbench.html');
+    const path = resolve((d.god.opts.env ?? process.env).WEB_DIR ?? new URL('../../../web/dist/', import.meta.url).pathname, 'workbench.html');
     try { return c.html(readFileSync(path, 'utf8'), 200, headers); } catch { throw new ApiError(404, 'not-found', 'Build the web app to serve the kit workbench'); }
   });
   app.post('/v1/god/kit/render', async c => {

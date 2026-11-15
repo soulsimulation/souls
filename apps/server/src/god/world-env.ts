@@ -125,7 +125,7 @@ export function envPatch(state: WorldState, env: EnvInput, journalSeq: number, c
 
 /** Apply an env request as one `world` op (in the ledger, undoable). */
 export function setEnv(god: GodMode, env: EnvInput, note = 'environment') {
-  const patch = envPatch(god.model.state, env, god.model.editSeq + 1, clockContext());
+  const patch = envPatch(god.model.state, env, god.model.editSeq + 1, clockContext(god.opts.env));
   if (!patch.time && !patch.weather) throw new ApiError(400, 'invalid', 'give timeOfDay, timeScale, realTime, timeZone and/or weather');
   return god.act({ ops: [{ op: 'world', state: patch }] }, note);
 }
@@ -147,7 +147,7 @@ export function weatherNow(state: WorldState, datetime: string | null, tick = Na
 export function envView(host: WorldHost, god: GodMode) {
   const datetime = (host.engine.world as { env?: { datetime?: string } }).env?.datetime ?? null;
   const t = god.model.state.time as WorldState['time'] & { set?: { hour: number; n: number } | null; paused?: boolean };
-  const mode = clockMode(t as { clock?: string | null }), tz = (t as { timeZone?: string | null }).timeZone ?? null;
+  const mode = clockMode(t as { clock?: string | null }, god.opts.env), tz = (t as { timeZone?: string | null }).timeZone ?? null;
   const paused = t.paused === true, dayTicks = mode === 'real' ? 1_728_000 : Number(t.dayTicks) || 72000;
   return {
     contract: 'world-env/1',

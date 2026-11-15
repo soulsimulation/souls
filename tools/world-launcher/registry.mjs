@@ -37,6 +37,10 @@ export function slugFor(name, taken = new Set()) {
  *  `--world-heap-mb` (a default only), else 1536 MB. Eden-2026-class worlds (its template, or > 3,000 entities last seen)
  *  get at least 2048 MB: the 768 MB launcher-wide cap was what Eden 2026 hit on 10-31. */
 export const DEFAULT_WORLD_HEAP_MB = 1536, BIG_WORLD_HEAP_MB = 2048, BIG_WORLD_ENTITIES = 3000;
+/** #2444: a world may share a program with others (a shard, tools/world-launcher/shard.mjs) unless it is a fork of an old
+ *  world (its own entry point) or its registry entry says `shard: false` (the operator keeps it in a process of its own). */
+export const shardable = (w) => !!w && !w.fork && w.shard !== false;
+
 export function worldHeapMb(w, fallback = 0) {
   if (Number.isInteger(w?.worldHeapMb) && w.worldHeapMb >= 256) return w.worldHeapMb;
   const base = Number.isInteger(fallback) && fallback >= 256 ? fallback : DEFAULT_WORLD_HEAP_MB;
