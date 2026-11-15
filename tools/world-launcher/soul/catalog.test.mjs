@@ -81,6 +81,18 @@ test('"near" and "in" read the thing and its anchor', () => {
   assert.equal(find(ix, "bench", { inPlace: "nowhere-at-all", at }).note, 'No place called "nowhere-at-all" in the catalog.');
 });
 
+test('#2312: "sit" names seats, and "sit at" a place with none inside finds the nearest seats around it', () => {
+  assert.equal(find(ix, "sit near the pond", { at }).found[0].act, "sit:e_b1");
+  const stand = indexCatalog({ ...cat, places: [...cat.places, { id: "g-band", name: "Eden Bandstand", kind: "building", parent: "g-village", at: [40, 20] }],
+    things: [...cat.things, { id: "e_b3", name: "street-bench-9", kind: "core-bench", place: "g-village", at: [34, 20], seat: true }] });
+  const around = find(stand, "sit at the bandstand", { at });
+  assert.equal(around.found[0].act, "sit:e_b3", "no seat on its floor: the nearest bench round it");
+  assert.equal(around.near.id, "g-band");
+  const inside = find(ix, "sit at the library", { at, limit: 3 });
+  assert.ok(inside.found.every((x) => x.place === "g-library.reading") && inside.near === undefined, "a place with seats inside gives its own");
+  assert.equal(find(ix, "sit", { at }).found[0].act, "sit-ground:here", "sitting right here still comes first");
+});
+
 test("what a body does on the spot is found by its words, and comes before anything a walk away", () => {
   for (const words of ["sit floor", "sit down on the floor", "sit on the ground"]) assert.equal(find(ix, words, { at }).found[0].act, "sit-ground:here", words);
   assert.equal(find(ix, "wave", { at }).found[0].act, "wave:here");
