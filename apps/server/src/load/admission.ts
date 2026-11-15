@@ -4,6 +4,7 @@
 // bucket under contention (`soul.slow-down`); a job whose deadline passes is answered `world.busy` unrun, and a job
 // whose client went away is dropped. It queues, delays and refuses; it never chooses or retries an act for a Soul.
 import {createHash} from 'node:crypto';
+import {performance as perf} from 'node:perf_hooks';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
@@ -74,7 +75,26 @@ export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Ref
 
 export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>;
   /** The quiet tick ms (default: the monitor's, from the process's shared numbers, S.quietTickMs). */
-  quietTickMs?: () => number};
+  quietTickMs?: () => number;
+  /** #2440: monotonic ms of completed ticks (default: the monitor's, S.tickSpentMs). */
+  tickSpentMs?: () => number;
+  /** #2440: the share of the recent loop time the thread sat idle, 0..1 (default: event-loop utilization over the last
+   *  ~250-500 ms; with an injected clock, 0: a test's fake time has no real loop to measure). */
+  idleShare?: () => number};
+/** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
+ *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
+ *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
+ *  black never runs requests. The reserve keeps a fifth of the thread for the tick's own peaks. */
+export const SPARE_IDLE = 0.2, IDLE_WINDOW_MS = 250;
+/** The loop's idle share over the last IDLE_WINDOW_MS or more (event-loop utilization), refreshed when asked. */
+export function loopIdle(): () => number {
+  let prev = perf.eventLoopUtilization(), at = perf.now(), idle = 0;
+  return () => {
+    const now = perf.now(); if (now - at < IDLE_WINDOW_MS) return idle;
+    const cur = perf.eventLoopUtilization(); idle = 1 - perf.eventLoopUtilization(cur, prev).utilization; prev = cur; at = now;
+    return idle;
+  };
+}
 export class Admission {
   level: Level = 'green';
   readonly queue: Job[] = [];
@@ -95,7 +115,12 @@ export class Admission {
   private now: () => number;
   private o: AdmissionOpts;
   private quietTick: () => number;
-  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]); }
+  private tickSpent: () => number;
+  private idleShare: () => number;
+  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
+    this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle()); }
+  /** #2440: the thread has spare time (SPARE_IDLE) and the world is not black: queued requests are not held for budget. */
+  spare() { return this.level !== 'black' && this.idleShare() >= SPARE_IDLE; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 
@@ -144,7 +169,7 @@ export class Admission {
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
     if (read && this.level === 'black') { this.shed.reads++; return this.told(r.key, r.god, now, busyRefusal(this.level)); }
-    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key)) {
+    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key) && !this.spare()) {
       // §2b strike only for an impolite request: one that came back before the Retry-After it was last given had
       // elapsed. A Soul that waited and is still over budget is refused again with a Retry-After, but not struck
       // (eden2, 2026-10-31: honest Souls collected 3 strikes and a 60 s cool-down, 45-59 % of all read wall time)
@@ -181,10 +206,13 @@ export class Admission {
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
-  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number) {
+  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, free = false) {
     this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
+    // #2440: a job run on spare time leaves no debt: once the thread is busy again, the budgets start from even, not from
+    // the idle time the requests used meanwhile
+    if (free) this.credit = Math.max(0, this.credit);
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
-    const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
+    const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
   }
   /** §2b cool-down: over budget impolitely 3× (or 20 refusals for overlapping requests) in a minute → 60 s of slow-down.
@@ -219,14 +247,14 @@ export class Admission {
   }
   /** Next job: writes before reads, FIFO across Souls (each Soul has at most one), the god's reserve under contention. */
   private pick(now: number): number {
-    const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls);
+    const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls), spare = this.spare();
     let best = -1, bestScore = Infinity;
     for (let i = 0; i < this.queue.length; i++) {
       const j = this.queue[i];
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key) && !spare) continue;   // short of budget: the act waits (#2440: unless the thread has spare time)
       }
       const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
@@ -248,13 +276,16 @@ export class Admission {
         let now = this.now();
         this.sweep(now);
         const budget = this.frameBudget();
-        if (this.creditNow(now) <= 0) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        const free = this.spare();
+        if (this.creditNow(now) <= 0 && !free) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
-        const [j] = this.queue.splice(i, 1);
+        const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
         j.settle('run');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
-        this.charge(j.key, j.god, j.route.id, this.now() - now, now);
+        // #2440: the turn waited on spans the next loop pass, whose timers phase runs the tick (and its long holds): those
+        // are the tick's, not this job's (charged, they cost the requests ~20 s of credit after a 3 s hold)
+        this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free);
       }
     } finally { this.draining = false; }
   }

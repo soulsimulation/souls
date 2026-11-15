@@ -322,3 +322,38 @@ test('strikes only for impolite requests: a Soul that honours every Retry-After 
     else { assert.ok(adm.shed.cooled > 0, 'impolite: cooled'); assert.equal(strikesBeforeCool, 4, 'one polite refusal, then 3 impolite → the cool-down'); }
   }
 });
+
+test('#2440 spare time: with the thread idle, a crowd of acts runs past the frame credit and the buckets; busy, the budget binds; black never', async () => {
+  const run = async (level: Level, idle: number) => {
+    let now = 0, ran = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, idleShare: () => idle});
+    adm.setLoadLevel(level);
+    // 50 Souls, one 60 ms act each, all at once: 3 s of work against amber's 16 ms/frame (~1 s of it in 3 s)
+    for (let i = 0; i < 50; i++) { const t = adm.request({key: `S${i}`, god: false, route: route('POST', '/v1/edge/act')}); if ('turn' in t) void t.turn.then(v => { if (v === 'run') { now += 60; ran++; t.done(); } }); }
+    for (let step = 0; step < 20; step++) { await adm.drain(); now += 10; }
+    adm.close(); return ran;
+  };
+  assert.equal(await run('amber', 0.4), 50, 'idle 40 %: every act runs at once');
+  assert.equal(await run('red', 0.4), 50, 'red with an idle thread (a single long hold) still serves');
+  assert.ok(await run('amber', 0.1) < 10, 'idle 10 %: the frame budget binds as before');
+  assert.equal(await run('black', 0.9), 0, 'black never runs requests on spare time');
+});
+
+test('#2440 an act is charged its own time, not the tick that ran while it was timed; spare time leaves no debt', async () => {
+  let now = 0, ticks = 0, idle = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, tickSpentMs: () => ticks, idleShare: () => idle});
+  const blocker = adm.request({key: 'X', god: false, route: route('POST', '/v1/edge/act')}) as {done: () => void};
+  const t = adm.request({key: 'A', god: false, route: route('POST', '/v1/edge/act')});
+  // the act's own 30 ms, then a 3 s hold in the tick before its turn ends
+  if ('turn' in t) void t.turn.then(() => { now += 3030; ticks += 3000; t.done(); });
+  blocker.done(); await adm.drain();
+  assert.equal(adm.spentMs, 30, `charged ${adm.spentMs} ms (the blocker 0, the act its own 30), not the tick's 3 s`);
+  // on spare time two 2 s jobs run with no credit left, and the credit is not left 4 s in debt when the thread is busy again
+  idle = 0.5; now += 1000;
+  const u = adm.request({key: 'B', god: false, route: route('POST', '/v1/edge/act')}), v = adm.request({key: 'C', god: false, route: route('POST', '/v1/edge/act')});
+  for (const x of [u, v]) if ('turn' in x) void x.turn.then(() => { now += 2000; x.done(); });
+  await adm.drain(); await adm.drain();
+  idle = 0; let ran = false; const w = adm.request({key: 'D', god: false, route: route('POST', '/v1/edge/act')});
+  if ('turn' in w) void w.turn.then(() => { ran = true; now += 5; w.done(); });
+  now += 50; await adm.drain();
+  assert.ok(ran, 'busy again: the next act runs within a frame, not after 4 s of debt');
+  adm.close();
+});

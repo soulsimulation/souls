@@ -359,6 +359,7 @@ export class LoadMonitor {
       w.prevDue = due; if (gap > w.maxGap) w.maxGap = gap;
     } else { w.prevLate = false; w.prevDue = start; }
     w.prevStart = start; w.prevTick = h.engine.world.tick; w.ms.push(own);
+    this.a[S.tickSpentMs] += own;   // #2440: admission's job timing leaves the ticks out
   }
   /** #1944 A3: count the time since the last sample at the level it was at; close and publish a full window. */
   private tickWindowSample(now: number, owing: boolean) {
