@@ -713,7 +713,7 @@ const boxesMemo = new WeakMap<Obstacle[], { n: number; b: Float64Array }>();
 /** Grid-relevant identity of an obstacle / a surface (what a floor's raster reads), memoised per (never mutated) object. */
 const inputKeys = new WeakMap<object, string>();
 const obbKey = (o: Obstacle['obb']) => `${o.c[0]},${o.c[1]},${o.half[0]},${o.half[1]},${o.yaw}`;
-const obstacleInput = (o: Obstacle) => { let k = inputKeys.get(o); if (k === undefined) inputKeys.set(o, (k = `${o.id}|${obbKey(o.obb)}|${o.y0},${o.y1}`)); return k; };
+const obstacleInput = (o: Obstacle) => { let k = inputKeys.get(o); if (k === undefined) inputKeys.set(o, (k = `${o.id}|${obbKey(o.obb)}|${o.y0},${o.y1}|${o.raster ?? ''}`)); return k; };
 const surfaceInput = (s: Surface) => { let k = inputKeys.get(s); if (k === undefined) inputKeys.set(s, (k = `${s.id}|${s.level}|${obbKey(s.obb)}`)); return k; };
 /**
  * S2: everything `buildGridsOverFloors({ ...scene, bounds, levels: same }, cell).levels.get(id)` reads, as a string. That

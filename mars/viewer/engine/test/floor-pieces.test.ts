@@ -73,3 +73,19 @@ test('#2433: a window that takes in one more building rebuilds that building onl
   assert.equal(nav.stats.pieceBuilds - before, 1, 'the wider window builds only the far building');
   sameGrid(g, buildGridsOverFloors({ ...scene, bounds: [0, 0, 128, 64], levels: [scene.levels[1]] }, 0.1).levels.get(1), 'wider window');
 });
+
+test('#2433 review: an obstacle whose raster mode alone changes is not served from a kept piece', () => {
+  const lv = { id: 1, y: 3, label: 'floor 1' };
+  const door = (raster?: 'centre'): Obstacle => ({ id: 'door', kind: 'component', obb: { c: [10.03, 10.03], half: [1, 0.04], yaw: 0.7 }, y0: 3, y1: 5, ...(raster ? { raster } : {}) } as Obstacle);
+  const scene = (farX: number, raster?: 'centre'): SpatialScene => ({
+    bounds: [-256, -256, 256, 256], levels: [{ id: 0, y: 0, label: 'ground' }, lv],
+    surfaces: [{ id: 'a', level: 1, y: 3, obb: { c: [10, 10], half: [3, 3], yaw: 0 } }, { id: 'far', level: 1, y: 3, obb: { c: [farX, 10], half: [3, 3], yaw: 0 } }],
+    obstacles: [door(raster)], links: [],
+  });
+  // `far` moves, so the whole-window floor misses; the piece of `a` would hit if its key left the raster mode out
+  const nav = new GroundNav(flat, 0.1, { paged: true }); nav.setFloors([]);
+  const s1 = scene(40, 'centre'), s2 = scene(41);
+  nav.setSolids(s1.obstacles); nav.levelOver([0, 0, 0, 0], 1, s1);
+  nav.setSolids(s2.obstacles);
+  sameGrid(nav.levelOver([0, 0, 0, 0], 1, s2), buildGridsOverFloors({ ...s2, bounds: bounds([0, 0, 0, 0]), levels: [lv] }, 0.1).levels.get(1), 'raster mode changed');
+});
