@@ -1601,6 +1601,10 @@ export class WorldHost {
    *  the engine reads whether the world is still and until which tick. History before the event replays as it was. Main adopts it at boot. */
   /** #2302 classroom-tv/1: the installed lecture screen becomes a TV (on or off; a picture or the lesson), once, at this event;
    *  the screens it marks are logged with it. A world without a lecture adopts the flag and changes nothing. */
+  /** #2426 cede-passage/1, one logged rules event (prospective): a walker at the end of its walk leg does not take up a
+   *  single-file passage it does not hold while the body standing there yields to it, so that body can walk out through it.
+   *  Main adopts it at boot, last. */
+  enableCedePassageV1(author='operator:cede-passage'){if((this.extra.runtimePolicy as {cedePassageV1?:boolean}|undefined)?.cedePassageV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,cedePassageV1:true},why:'cede-passage/1 (#2426): a walker at the end of its walk leg leaves a single-file passage to the body standing there while that body yields to it, so it can make way; retain historical replay before this event'});}
   enableClassroomTvV1(author='operator:classroom-tv'){
     if((this.extra.runtimePolicy as {classroomTvV1?:boolean}|undefined)?.classroomTvV1)return Promise.resolve();
     const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,classroomTvV1:true},why:'classroom-tv/1 (#2302): the lecture screen is a TV a Soul in the room switches on or off and changes the picture of (garden, sea, stars, test card, or the lesson); a running class still puts its lesson on it; retain historical replay before this event'};
