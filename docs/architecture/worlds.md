@@ -145,7 +145,8 @@ switch independent. A previously saved master mute migrates to both switches off
     connected (so batches and the sky go out as before); inputs drain at the landing tick. A landing sends the batch, heartbeat and
     kernel view the ticks it covered would have, and the load monitor counts it as due that many intervals on. At a landing with nothing logged since, the durable clock frontier and the periodic snapshot are not written
     again, and the wall anchor is not re-saved while still (the last pair still gives the ticks owed); all are written as
-    the stillness ends or the world stops. `GET /__sim/still` also reports `ticksComputed`, `ticksJumped`, `jumps` and
+    the stillness ends or the world stops. A periodic snapshot a landing owes is captured on the next turn, at the same
+    tick, never skipped (#2406): the landing's own turn stays short. `GET /__sim/still` also reports `ticksComputed`, `ticksJumped`, `jumps` and
     `lastHorizon`. A Soul whose needs still add up every tick (before need-anchor/1, #2296) keeps its world ticking.
   - **A silent world's timers do nothing (#2303).** A world is silent while it has been still since its last jump and no
     viewer is connected (`WorldHost.silent()`). Then the wall timers around it return at once: the plan runner, the

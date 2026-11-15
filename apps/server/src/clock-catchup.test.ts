@@ -305,3 +305,32 @@ test('#2298 A4a, #2384 A1: a still world sleeps to its horizon, never reads as s
   assert.ok(bgap < 800, `watched: the longest gap between batches was ${Math.round(bgap)} ms`);
   assert.ok(batches.length >= Math.floor((h.engine.world.tick - wt) / 10) - 2);
 });
+
+// #2406 A1: a landing after a long sleep is a long turn; the periodic snapshot it owes is captured on the next turn, at the
+// landing tick's boundary, never skipped, and a cold boot from it is the world exact. An ordinary tick that comes first takes it.
+test('#2406 A1: a landing defers the snapshot it owes to the next turn; a cold boot from it is exact', { timeout: 120_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'land-snap-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { f } = await godWorld(t, join(dir, 'world.db'), 0, 1_728_000), h = f.host;
+  const hi = h as unknown as { lastSnapshotTick: number; periodicSnapshot: unknown };
+  const persisted = async () => { for (let i = 0; i < 200 && hi.periodicSnapshot; i++) await turn(); assert.equal(hi.periodicSnapshot, null, 'the snapshot finished'); };
+  await h.catchUp(72_000, turn); await persisted();
+  const jumpOwing = async () => {   // something new since the last snapshot, one due, and a long jump
+    await accept(h, h.enqueue('rules', 'world', { why: 'test: something new since the last snapshot' })); await persisted();
+    h.requestSnapshot('test'); const from = h.engine.world.tick, j = h.skipStats.jumps;
+    h.advanceStep(from + 10_000, { inputsAtTarget: true });
+    assert.equal(h.skipStats.jumps, j + 1, 'it jumped'); assert.ok(h.engine.world.tick > from + 1_000, `a long jump (${h.engine.world.tick - from} ticks)`);
+    return h.engine.world.tick;
+  };
+  const landed = await jumpOwing(), before = f.db.latestSnapshot(h.worldId)?.tick ?? -1;
+  assert.ok(hi.lastSnapshotTick < landed && before < landed, 'not captured in the landing\'s own turn');
+  await turn();
+  assert.equal(hi.lastSnapshotTick, landed, 'captured on the next turn, at the landing tick'); await persisted();
+  assert.equal(f.db.latestSnapshot(h.worldId)?.tick, landed, 'and persisted');
+  const copy = join(dir, 'landed.db'); f.db.db.exec(`VACUUM INTO '${copy}'`);
+  const b = await godWorld(t, copy, null);
+  assert.deepEqual(state(b.f), state(f), 'a cold boot from it is the world exact: state hash and full log');
+  // an ordinary tick before the deferred turn takes the snapshot itself; the deferred turn then has nothing to do
+  const landed2 = await jumpOwing(); h.tickOnce();
+  assert.equal(hi.lastSnapshotTick, landed2 + 1, 'the ordinary tick took it'); await turn(); assert.equal(hi.lastSnapshotTick, landed2 + 1, 'not taken twice');
+  await persisted();
+});

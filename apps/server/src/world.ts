@@ -877,7 +877,8 @@ export class WorldHost {
     if (crossed(BATCH_TICKS)) this.flush();
     if (crossed(HEARTBEAT_TICKS)) this.heartbeat();
     if (span) span[4] = performance.now() - ts;
-    if (this.snapshotDue(now) && !(this.landing && this.seq === this.snapshotSeq)) { if (span) span[5] = 1; this.schedulePeriodicSnapshot(); }   // #2298 A4: nothing new since the last
+    // #2298 A4: nothing new since the last. #2406: a landing's snapshot is taken on the next turn, not in the landing's own
+    if (this.snapshotDue(now) && !(this.landing && this.seq === this.snapshotSeq)) { if (span) span[5] = 1; if (this.landing) this.deferLandingSnapshot(); else this.schedulePeriodicSnapshot(); }
     this.tickMs.push(performance.now() - t0);
     if (this.tickMs.length > 400) this.tickMs.splice(0, 200);
     if (this.splitTap) this.splitTap(now, out); // never throws (DeltaTap.onTick); reads only
@@ -2580,6 +2581,21 @@ export class WorldHost {
     if (sync) persist(); else setImmediate(persist);
     return { tick: runtime.tick, stateHash: runtime.stateHash };
   }
+  /** #2406: the turn after a landing that owed the periodic snapshot (null: none pending). */
+  private landingSnapshot: NodeJS.Immediate | null = null;
+  /** #2406: a landing after a long sleep is a long turn (the jump's catch-up work and its garbage); the periodic snapshot it
+   *  owes is captured on the next turn, at the same tick boundary, never skipped. An ordinary tick that comes first takes it
+   *  as usual, and a landing before that turn leaves this one pending; a turn with an input queued leaves it to the tick that
+   *  input wakes, so an input is never accepted outside a tick. Stop and recovery cancel it with the periodic snapshot. */
+  private deferLandingSnapshot(): void {
+    if (this.landingSnapshot || this.periodicSnapshot) return;
+    const engine = this.engine;
+    this.landingSnapshot = setImmediate(() => {
+      this.landingSnapshot = null;
+      if (this.engine !== engine || !this.clockAvailable || this.queue.length || !this.snapshotDue()) return;
+      try { this.schedulePeriodicSnapshot(); } catch (error) { this.failCheckpoint(error); }   // off the tick: fail closed, as its continuations do
+    });
+  }
   /** Periodic checkpoints own a complete boundary before yielding. Only emission
    * and persistence use continuations; ordinary/manual snapshots keep their API. */
   private schedulePeriodicSnapshot(): void {
@@ -2686,6 +2702,7 @@ export class WorldHost {
    * against an old engine or a database the owner may close next. */
   private cancelPeriodicSnapshot(): void {
     this.snapshotGeneration++;
+    if (this.landingSnapshot) { clearImmediate(this.landingSnapshot); this.landingSnapshot = null; }
     const job = this.periodicSnapshot;
     if (!job) return;
     if (job.immediate) clearImmediate(job.immediate);
