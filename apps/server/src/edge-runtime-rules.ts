@@ -1,7 +1,7 @@
 import type {WorldHost} from './world.ts';
 import { factoryDescriptorV1 } from './world-factory.ts';
 import type { GodMode } from './god/god.ts';
-import { engineDoorWalk, fitWorldDoorsV1, fitWorldDoorsV2, type HandObstacle } from './god/door-fit.ts';
+import { fitWorldDoorsV1, fitWorldDoorsV2, type HandObstacle } from './god/door-fit.ts';
 
 /** Little Martians scene worlds: the old world (WORLD_KEY `littlemartians`, also its launcher fork) and the launcher's
  *  arium (slug `little-martians-arium`, as tools/world-launcher/op-souls.mjs names it). They are excluded from Soul
@@ -68,9 +68,7 @@ export async function enableDoorFitV2(host: WorldHost, god: GodMode | undefined,
     .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
   const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
   spatial?.sync(host.engine.world);
-  const engine = host.engine as unknown as Parameters<typeof engineDoorWalk>[0];
-  const walk = typeof engine.reachV1 === 'function' && typeof engine.standableNearV1 === 'function' ? engineDoorWalk(engine, god.model, () => host.drainInputs()) : undefined;
-  const r = fitWorldDoorsV2(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles, walk);
+  const r = fitWorldDoorsV2(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
   if (r.left.length || r.kept.length) return;
   return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV2: true }, doorFitV2: { buildings: r.buildings, doors: r.doors, flipped: r.flipped.length, moved: r.moved.length, held: r.held.length },
     why: 'door-fit/2 (#2434): every remaining building doorway (inside, upstairs, in series, by a prop) holds a real door a Soul opens by hand; fitted by a recorded engine edit just before this event' });

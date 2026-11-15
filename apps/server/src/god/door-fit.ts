@@ -273,7 +273,7 @@ function fitOps2(god: GodMode, e: Entity, bodies: Vec2[], obstacles: readonly Ha
 /** door-fit/2 (#2434) on `god`'s world: every world-root building on a revision before its every-doorway one (a first
  *  revision, or door-fit/1's) moves onto it, with a real door in each doorway that has none, in one engine edit when it is
  *  accepted whole, else building by building (a refused one is left, named, for a later boot). */
-export function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[], walk?: DoorWalkCheck): DoorFit2Report {
+export function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) => void = () => {}, obstacles?: readonly HandObstacle[]): DoorFit2Report {
   const targets = [...god.model.entities.values()].filter((e) => e.in.parent === 'world' && ALL_DOORS_FROM.has(opRef(e.def)));
   const out: DoorFit2Report = { buildings: 0, doors: 0, left: [], kept: [], series: [], held: [], fitted: [], flipped: [], moved: [] };
   if (!targets.length) return out;
@@ -290,62 +290,9 @@ export function fitWorldDoorsV2(god: GodMode, bodies: Vec2[], log: (m: string) =
     (seated ? out.left : out.kept).push(e.id);
     log(`door-fit/2: ${god.model.pathOf(e.id)} ${seated ? 'left for a later boot (seated in)' : 'keeps its revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
   }
-  // the walk check: a new door whose frame closes the way to one of its sides (a frame narrowing a landing by the stairs,
-  // or a doorway beside an armchair) is taken out again in one more recorded edit; its doorway stays as it was
-  if (walk && out.fitted.length) {
-    const doors = out.fitted.flatMap((f) => f.doors.flatMap((d) => { const x = [...god.model.entities.values()].find((y) => y.name === d.name && y.in.parent === f.id); return x ? [{ id: x.id, building: f.id }] : []; }));
-    const cut = walk(doors);
-    if (cut.size) {
-      const r = god.engineAct([...cut.keys()].map((id) => ({ op: 'remove', id }) as Op), `door-fit/2 (#2434): ${cut.size} door(s) whose frame closes the way to one side taken out again`);
-      if (r.accepted) {
-        for (const [id, why] of cut) {
-          const f = out.fitted.find((x) => doors.some((d) => d.id === id && d.building === x.id))!, name = god.model.entities.get(id)?.name ?? id;
-          f.doors = f.doors.filter((d) => d.name !== name); out.doors--; out.held.push(`${name} (${why})`);
-        }
-      } else log(`door-fit/2: the walk check's edit was refused: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
-    }
-  }
   for (const h of out.flipped) log(`door-fit/2: swung the other way (a prop in the first swing): ${h}`);
   for (const h of out.moved) log(`door-fit/2: ${h}`);
-  for (const h of out.held) log(`door-fit/2: held back: ${h}`);
+  for (const h of out.held) log(`door-fit/2: held back, a hand cannot work it either way and no prop can move: ${h}`);
   log(`door-fit/2: ${out.buildings} building(s) fitted, ${out.doors} door(s) placed, ${out.flipped.length} swung the other way, ${out.moved.length} prop(s) moved, ${out.held.length} held back${out.kept.length ? `, ${out.kept.length} refused this boot` : ''}${out.left.length ? `, ${out.left.length} left for a later boot` : ''}`);
   return out;
-}
-
-/** door-fit/2's walk check: of the doors it placed, those whose frame closes the way to one of its sides, with why. */
-export type DoorWalkCheck = (doors: { id: string; building: string }[]) => Map<string, string>;
-type WalkEngine = { world: unknown; rt: { services: { spatial: { sync(w: unknown): void; scene: { levels: { id: number; y: number }[] } } } };
-  standableNearV1(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null;
-  reachV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }): { ok: boolean; code?: string } };
-/** How far (m) out from a door line its sides are probed by the walk check. */
-const WALK_FACE = 0.9;
-/** The walk check on a live engine (after `drain` has applied the fit): each side of a door with standing room must be
- *  walked to from outside the building's front door (closed hand doors pass, as one walk act passes them). A building
- *  with no outside door of its own is not judged. Pure reads. */
-export function engineDoorWalk(engine: WalkEngine, model: WorldModel, drain: () => void): DoorWalkCheck {
-  return (doors) => {
-    drain();
-    const sp = engine.rt.services.spatial; sp.sync(engine.world);
-    const out = new Map<string, string>(), fronts = new Map<string, Vec2 | null>();
-    const face = (w: { x: number; z: number; yaw: number }, k: number): Vec2 => [w.x + Math.sin(w.yaw) * k * WALK_FACE, w.z + Math.cos(w.yaw) * k * WALK_FACE];
-    for (const d of doors) {
-      const b = model.entities.get(d.building), e = model.entities.get(d.id); if (!b || !e) continue;
-      if (!fronts.has(b.id)) {   // outside the building's own front door, on the ground
-        const bw = model.worldPose(b), fd = [...model.entities.values()].find((x) => x.in.parent === 'world' && opRef(x.def) === DOOR_FIT_DOOR && !!b.name && (x.name ?? '').startsWith(`${b.name}-door`));
-        let at: Vec2 | null = null;
-        if (fd) { const w = model.worldPose(fd), [p, q] = [face(w, 1.3), face(w, -1.3)]; const out2 = Math.hypot(p[0] - bw.x, p[1] - bw.z) > Math.hypot(q[0] - bw.x, q[1] - bw.z) ? p : q; at = engine.standableNearV1(out2, 0, undefined, HUMAN_RADIUS + 0.05, 6); }
-        fronts.set(b.id, at);
-      }
-      const from = fronts.get(b.id); if (!from) continue;
-      const w = model.worldPose(e), base = model.worldPose(b).y;
-      const level = w.y < base + 1 ? 0 : sp.scene.levels.filter((l) => l.id !== 0 && Math.abs(l.y - w.y) <= 0.6).sort((a, c) => Math.abs(a.y - w.y) - Math.abs(c.y - w.y) || a.id - c.id)[0]?.id;
-      if (level === undefined) continue;
-      for (const k of [1, -1]) {
-        const s = engine.standableNearV1(face(w, k), level, undefined, HUMAN_RADIUS + 0.05, 3); if (!s) continue;
-        const r = engine.reachV1({ p: from, level: 0 }, { p: s, level });
-        if (!r.ok) { out.set(d.id, `its frame closes the way to its ${k > 0 ? 'front' : 'back'} side: ${r.code ?? 'route.unreachable'}`); break; }
-      }
-    }
-    return out;
-  };
 }
