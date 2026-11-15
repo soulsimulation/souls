@@ -301,7 +301,8 @@ const loopback = (a: string | undefined) => a === '127.0.0.1' || a === '::1' || 
 const faults = faultGuard({ onStorm: (n, step) => { if (!closing) faultExit(config.dataDir, `world.fault.storm: ${n} faults in a minute`, step); } });
 host.onFault = (name, error, step) => {
   faults.note(name, error, step);
-  const stopped = stoppedByFault(host, closing); if (stopped) faultExit(config.dataDir, stopped, null);
+  // (not during the boot catch-up: its clock has not started yet, and a stop there ends the catch-up and starts the clock)
+  const stopped = catchingUp ? null : stoppedByFault(host, closing); if (stopped) faultExit(config.dataDir, stopped, null);
 };
 server.on('request', (req, res) => {
   try { onRequest(req, res); }
