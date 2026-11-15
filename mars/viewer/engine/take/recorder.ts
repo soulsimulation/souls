@@ -432,7 +432,13 @@ export class TakeRecorder implements RuntimeObserver {
       if (lazy) { lazyField(body, k, v as () => string); lazyField(take, k, () => body[k] as string); }
       else body[k] = take[k] = v;
     }
-    lazyField(take, 'id', () => takeIdOf(body as Omit<Take, 'id'>, KNOWN));
+    const world = this.rt.world;
+    lazyField(take, 'id', () => {
+      const id = takeIdOf(body as Omit<Take, 'id'>, KNOWN), table = (finalState as unknown as { entities?: object }).entities;
+      // hashed for good: an old table's text (~1.5 MB on Eden 2026) is not kept for each of the engine's 12 chunks
+      if (table && table !== COPIES.get(world)?.table) TEXT.delete(table);
+      return id;
+    });
     return { take: take as Take, finalStateHash: () => body.finalStateHash as string };
   }
 }
