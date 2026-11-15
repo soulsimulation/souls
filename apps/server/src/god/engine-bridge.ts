@@ -259,6 +259,8 @@ type WriteBackBody = { pose: string; entity: Entity | undefined };
 
 const listed2 = (n: [string, string]) => n[0] === n[1] ? `two ${n[0]}s` : `${n[0]} and ${n[1]}`;
 export class EngineBridge {
+  /** #2383: the no-comms warning is said once per world (#2416: per bridge, not module state). */
+  private noCommsWarned = false;
   readonly host: WorldHost; readonly god: GodMode; readonly edge?: EdgeLedger;
   /** B-facade: the read worker's bridge (BridgeOptions.read) */
   private readonly readSide: boolean;
@@ -362,7 +364,7 @@ export class EngineBridge {
       moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
       record:(soul,id,action,params={})=>{const act=this.edge!.comms?.objects.act;
         // #2383: a host without comms (the Eden test fixture) keeps no object record; said once, so a misconfigured host shows
-        if(!act){if(!noCommsWarned){noCommsWarned=true;console.warn('[world] contact: no comms on this host, object actions are not recorded');}return;}
+        if(!act){if(!this.noCommsWarned){this.noCommsWarned=true;console.warn('[world] contact: no comms on this host, object actions are not recorded');}return;}
         const r=act.call(this.edge!.comms!.objects,id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
@@ -2880,5 +2882,4 @@ function describeOp(op: Op, w: WorldModel): string {
 }
 
 /** Install the bridge on an entity world (main.ts). */
-let noCommsWarned=false;
 export function installEngineBridge(o: BridgeOptions): EngineBridge { return new EngineBridge(o); }
