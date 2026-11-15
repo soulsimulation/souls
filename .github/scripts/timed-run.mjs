@@ -212,7 +212,8 @@ export function soulTokens(out) {
 export const PUBLISH = {
   walk: [1, 2, 3].map((k) => `walk-r${k}.log`),
   'eval-scripted': ['eval/result.json', 'eval/REPORT.md', 'eval.log'],
-  'eval-load': ['eval-load/load-result.json', 'eval-load/LOAD.md', 'eval-load.log'],
+  // each world's own log (why a world exited, its load levels and heap), scrubbed like every text file
+  'eval-load': ['eval-load/load-result.json', 'eval-load/LOAD.md', 'eval-load/*/server/world.log', 'eval-load.log'],
   'bench-client': ['bench/receipt.json', 'bench/REPORT.md', 'bench/*/result.json', 'bench-client.log'],
   meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
