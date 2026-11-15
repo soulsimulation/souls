@@ -155,6 +155,11 @@ export class QuietTick {
     if (!Number.isFinite(avgMs) || avgMs < 0) return this.value;
     if (quiet && !this.quietSeen) { this.quietSeen = true; this.value = avgMs; return this.value; }
     if (quiet || (!this.quietSeen && served)) this.value = this.value > 0 ? this.value + QUIET_TICK_ALPHA * (avgMs - this.value) : avgMs;
+    // #2470: a served loaded window whose own ticks averaged less than the learned value shows that value is stale-high (load
+    // only adds to a tick, so the quiet tick is at most this): it moves down by alpha. A world busy since its boot learned its
+    // quiet tick from the heavy setup ticks (47 ms at 50 Souls, while its loaded ticks averaged ~16), which left requests a
+    // 2 ms frame budget on a thread 55 % idle and answered 91-94 % of acts world.busy at the deadline. Never moves it up.
+    else if (this.quietSeen && served && avgMs < this.value) this.value += QUIET_TICK_ALPHA * (avgMs - this.value);
     return this.value;
   }
 }
