@@ -9,7 +9,7 @@ import {actionsOf,actuatedState} from './actuators.ts';
 import {isContactActuator,type ContactActuatorIntent,type ContactActuatorService} from './contact-actuator.ts';
 
 type Step={verb:string;params:Record<string,unknown>};
-type Engine={installDoorLockedV1?:(read:(id:string)=>boolean|null)=>void;closedDoorsOnWalkV1?:(actor:string,steps:Step[],max?:number,behind?:boolean)=>{goal:[number,number];doors:string[];goalDoors?:()=>string[]}|null;walkFromReachesV1?:(actor:string,from:[number,number],steps:Step[])=>boolean;
+type Engine={installDoorLockedV1?:(read:(id:string)=>boolean|null)=>void;closedDoorsOnWalkV1?:(actor:string,steps:Step[],max?:number,behind?:boolean,out?:{reaches?:boolean})=>{goal:[number,number];doors:string[];goalDoors?:()=>string[]}|null;walkFromReachesV1?:(actor:string,from:[number,number],steps:Step[])=>boolean;
  doorChainV1?:(actor:string,steps:Step[])=>{goal:[number,number];level:number;doors:{id:string;level:number;from:[number,number];to:[number,number]}[]}|null};
 export type DoorPassage={door:string;/** #2434: every door of a chain, in order (the first is `door`) */ doors?:string[];name:string;steps:Step[];direct:Step[];open:ContactActuatorIntent;note:string;/** entry 32: the walk turns the lock first */ unlocked?:true};
 export type DoorPassageRefusal={refuse:true;code:string;reason:string};
@@ -65,7 +65,10 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
   // the one-door search judges only the first leg, and would plan the door out of here and then meet the house's shut
   // front door at its stand (the served clip world: "Through int-bakery-door-1", then route.unreachable at the front door)
   const walks=steps.filter(s=>s.verb==='walk_to'),last=walks.at(-1)?.params.level,up=walks.length>1&&typeof last==='number'&&last!==0;
-  const eng=d.engine(),found=up?null:eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind);if(!eng.walkFromReachesV1)return null;
+  const plain:{reaches?:boolean}={},eng=d.engine(),found=up?null:eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind,plain);if(!eng.walkFromReachesV1)return null;
+  // #2438 review: a walk that reaches as it is needs no door, and searches no chain (it paid two more whole routes, on every
+  // walk while the labels were cold after a boot: m4-v1's median server time per call 1377 -> 2971 ms)
+  if(plain.reaches)return null;
   if(!found)return chain(soul,steps,what);   // #2434: a destination upstairs, or no door named on the ground: the chain
   // entry 32: the hand step reads whether a door is still locked (a thumb-turn nobody needs any more is skipped)
   eng.installDoorLockedV1?.(lockedOf);

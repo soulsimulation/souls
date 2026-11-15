@@ -3136,7 +3136,7 @@ export class MarsEngine implements Engine {
    * when a walk reaches it (or it names nothing). From the body's own floor (review of #2397): a Soul upstairs behind the
    * ground door plans the same passage, its first leg walking down the stairs to the door. Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
    * god engine-bridge) bordering the region the failed route exhausted; nearest to the way there first, at most `max`. */
-  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
+  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false,out?:{reaches?:boolean}):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
     const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
     if((typeof step.params?.level==='number'?step.params.level:0)!==0)return null;   // #2434: a goal upstairs is the door chain's (doorChainV1)
     const t=this.pointOf(step.params?.to);if(!t)return null;
@@ -3147,7 +3147,9 @@ export class MarsEngine implements Engine {
     // the doors are named from the destination's side, whose search the door closes in at once (review of #2397)
     const back=()=>spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},start,{nameObstacles:id=>id.includes('#door:')});
     const r=behind?back():spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
-    if(r.ok||r.diagnostic.code!=='route.unreachable')return null;
+    // `out.reaches` (#2438 review): the walk reaches as it is, so no door chain need be searched either
+    if(r.ok){if(out)out.reaches=true;return null;}
+    if(r.diagnostic.code!=='route.unreachable')return null;
     const pos=(id:string)=>{const o=spatial.scene.obstacles.find(x=>x.id.startsWith(id+'#door:'));return o?o.obb.c:null;};
     const along=(c:[number,number])=>hypot(c[0]-start.p[0],c[1]-start.p[1])+hypot(c[0]-goal[0],c[1]-goal[1]);
     const named=(d:{subjects?:string[]})=>[...new Set((d.subjects??[]).filter(s=>s.includes('#door:')).map(s=>s.split('#')[0]))].map(id=>({id,c:pos(id)})).filter((x):x is {id:string;c:[number,number]}=>!!x.c)
@@ -3189,8 +3191,10 @@ export class MarsEngine implements Engine {
     const ent=(id:string)=>id.split('#')[0];
     // from the destination first: its side is usually the small one (a room), searched exactly, and a long walk's far
     // ground is planned coarsely and may not meet a shut leaf on the way
-    const back=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,{level,p:goal},start);
+    const plain:{reaches?:boolean}={};
+    const back=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,{level,p:goal},start,{},plain);
     if(back)return {goal,level,doors:back.doors.reverse().map(d=>({id:ent(d.id),level:d.level,from:d.to,to:d.from}))};
+    if(plain.reaches)return null;   // #2438 review: the walk needs no door; the second search would only repeat the route
     const fwd=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,start,{level,p:goal});
     return fwd?{goal,level,doors:fwd.doors.map(d=>({...d,id:ent(d.id)}))}:null;
   }

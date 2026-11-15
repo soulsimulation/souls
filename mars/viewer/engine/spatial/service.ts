@@ -750,9 +750,20 @@ export class Spatial {
    * chain of at most PASS_MAX_DOORS reaches it. Breadth first (fewest doors first) over the doors each failed search names,
    * nearest to the way first, at most 4 per region, never one door twice.
    */
-  doorChain(world: WorldState, profile: AgentProfile, start: Place, goal: Place, rest: RouteOpts = {}): DoorChain | null {
-    const pass = new Map<string, { o: Obstacle; level: number }>();
-    for (const o of this.scene.obstacles) { const level = this.passDoorLevel(o); if (level !== null) pass.set(o.id, { o, level }); }
+  /** doors-pass/1: every closed, unlocked hand door with its floor, made once per navigation epoch and scene (#2438
+   *  review: it was made for every chain search, a clearance read per upstairs door, on every walk while the labels were
+   *  cold after a boot). */
+  private passCache: { epoch: number; obstacles: readonly Obstacle[]; map: Map<string, { o: Obstacle; level: number }> } | null = null;
+  passDoors(): Map<string, { o: Obstacle; level: number }> {
+    const c = this.passCache;
+    if (c && c.epoch === this.epoch && c.obstacles === this.scene.obstacles) return c.map;
+    const map = new Map<string, { o: Obstacle; level: number }>();
+    for (const o of this.scene.obstacles) { const level = this.passDoorLevel(o); if (level !== null) map.set(o.id, { o, level }); }
+    this.passCache = { epoch: this.epoch, obstacles: this.scene.obstacles, map };
+    return map;
+  }
+  doorChain(world: WorldState, profile: AgentProfile, start: Place, goal: Place, rest: RouteOpts = {}, out?: { reaches?: boolean }): DoorChain | null {
+    const pass = this.passDoors();
     if (!pass.size) return null;
     type Node = { at: Place; doors: DoorChain['doors']; legs: DoorChain['route']['legs']; length: number; expanded: number };
     // past the first door the naming search floods the (small) region it starts in, as an early proof of unreachability
@@ -768,7 +779,7 @@ export class Spatial {
         const full = depth > 0 || !rest.proveUnreachable;
         let named = this.routeNow(world, profile, n.at, goal, { ...(full ? naming : rest), nameObstacles: (id) => pass.has(id) && !used.has(id) });
         if (named.ok) {
-          if (!n.doors.length) return null;
+          if (!n.doors.length) { if (out) out.reaches = true; return null; }
           return { doors: n.doors, route: { legs: [...n.legs, ...named.route.legs], length: n.length + named.route.length, expanded: n.expanded + named.route.expanded } };
         }
         if (depth === PASS_MAX_DOORS || named.diagnostic.code !== 'route.unreachable') continue;
