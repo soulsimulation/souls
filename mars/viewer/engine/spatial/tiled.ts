@@ -248,6 +248,13 @@ export class GroundNav {
     if (l) { const g = h; for (const s of l) if (s.y > h && s.y >= g - 0.05 && s.y <= g + GroundNav.FLOOR_RISE && pointInObb([x, z], s.obb)) h = s.y; }
     return h;
   }
+  /** Whether (x, z) lies on a floor slab laid on the ground (a building's ground floor, as standY reads it). */
+  onFloor(x: number, z: number): boolean {
+    const l = this.floors.size ? this.floors.get(`${Math.floor(x / 8)},${Math.floor(z / 8)}`) : undefined;
+    if (!l) return false;
+    const g = this.field.height(x, z);
+    return l.some((s) => s.y >= g - 0.05 && s.y <= g + GroundNav.FLOOR_RISE && pointInObb([x, z], s.obb));
+  }
 
   /** Grow the window to cover `r`: 'same' | 'grown' | 'too-big' (then nothing changes). */
   include(r: TileRect): 'same' | 'grown' | 'too-big' {
@@ -765,7 +772,7 @@ export function groundRoute(nav: GroundNav, scene: SpatialScene, profile: AgentP
   let acc = 0;
   for (let k = 1; k < path.length; k++) {
     acc += hypot(path[k][0] - path[k - 1][0], path[k][1] - path[k - 1][1]);
-    if (acc >= HOP_M && k < path.length - 4) { ends.push(k); acc = 0; }
+    if (acc >= HOP_M && k < path.length - 4) { k = hopOutdoors(nav, path, k); if (k >= path.length) break; ends.push(k); acc = 0; }
   }
   ends.push(path.length);
   const legs: Leg[] = [];
@@ -879,6 +886,7 @@ export function pagedRoute(nav: GroundNav, scene: SpatialScene, profile: AgentPr
   // the first hop (as groundRoute cuts them); the last one ends at the goal itself
   let acc = 0, k0 = 1;
   for (; k0 < path.length; k0++) { acc += hypot(path[k0][0] - path[k0 - 1][0], path[k0][1] - path[k0 - 1][1]); if (acc >= HOP_M && k0 < path.length - 4) break; }
+  if (k0 < path.length) k0 = hopOutdoors(nav, path, k0);
   const hop = (k: number, margin = WINDOW_MARGIN_M, maxExpand?: number) => {
     const last = k >= path.length && goal.level === 0, target: Vec2 = last ? goal.p : path[Math.min(k, path.length - 1)];
     const r = rectOf([start.p, target, ...path.slice(1, k + 1)], margin);
@@ -959,6 +967,20 @@ function upperChunk(nav: GroundNav, scene: SpatialScene, profile: AgentProfile, 
     return { ok: true, route: { ...res.route, length: res.route.length + hypot(goal.p[0] - p[0], goal.p[1] - p[1]), rest: goal } };
   }
   return null;
+}
+
+/** Coarse cells a hop's waypoint may move on along the path to leave a building. */
+const HOP_OUT_M = 12;
+/** #2383 (the bakery walk through the library): the coarse path runs through enterable buildings, so a hop's waypoint can
+ *  lie on a building's floor that has an open door: the fine hop walks in through it and the next one walks back out. The
+ *  waypoint moves on along the coarse path to the first cell off any floor (the goal itself when that is near the end);
+ *  none within HOP_OUT_M: it stays. */
+export function hopOutdoors(nav: GroundNav, path: Vec2[], k: number): number {
+  for (let j = k; j < k + HOP_OUT_M; j++) {
+    if (j >= path.length - 4) return path.length;
+    if (!nav.onFloor(path[j][0], path[j][1])) return j;
+  }
+  return k;
 }
 
 /** BS3 (b): a fine hop to coarse waypoint `k` failed with `code`: the other waypoint indices to try, nearest first (one
