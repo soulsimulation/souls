@@ -38,13 +38,22 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    // a walk to the door itself (or to a spot at it on this side) ends at the door: it is not a walk through it
    const at=m.worldPose(e);if(steps.some(s=>s.verb==='walk_to'&&s.params.to===id))continue;
    if(!actionsOf(def).some(a=>a.name==='open'&&isContactActuator(def,a)))continue;
-   const open=d.contact.plan(soul,id,'open',{},{open:false}),o=open?.params.opening;if(!open||!o)continue;
-   const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)],far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
-   // #2383: a goal near the door but past it (a small shop's floor just inside its door) is still a walk through it
-   if(Math.hypot(found.goal[0]-at.x,found.goal[1]-at.z)<1.5&&-o.side*((found.goal[0]-wp.x)*n[0]+(found.goal[1]-wp.z)*n[1])<0.3)continue;
-   const close=d.contact.plan(soul,id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)continue;
-   // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
-   const end=actuatorPoint(c,0).root;if(!eng.walkFromReachesV1(soul.entityId,[end[0],end[2]],steps))continue;
+   const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)];
+   // the side it is opened from: the Soul's own, else (#1964 A3: the kitchen's door faces away from her) the other one,
+   // walked round to; the first whose far side reaches the destination
+   type Side={open:NonNullable<ReturnType<typeof d.contact.plan>>;o:any;close:NonNullable<ReturnType<typeof d.contact.plan>>;c:any};
+   const side=(from?:[number,number]):Side|null=>{
+    const open=d.contact.plan(soul,id,'open',{},from?{open:false,from}:{open:false}),o=open?.params.opening;if(!open||!o)return null;
+    const far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
+    // #2383: a goal near the door but past it (a small shop's floor just inside its door) is still a walk through it
+    if(Math.hypot(found.goal[0]-at.x,found.goal[1]-at.z)<1.5&&-o.side*((found.goal[0]-wp.x)*n[0]+(found.goal[1]-wp.z)*n[1])<0.3)return null;
+    const close=d.contact.plan(soul,id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)return null;
+    // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
+    const end=actuatorPoint(c,0).root;return eng.walkFromReachesV1!(soul.entityId,[end[0],end[2]],steps)?{open,o,close,c}:null;
+   };
+   const mine=d.contact.plan(soul,id,'open',{},{open:false})?.params.opening;
+   const got=side()??(mine?side([wp.x-n[0]*mine.side*FAR,wp.z-n[1]*mine.side*FAR]):null);if(!got)continue;
+   const {open,o,close,c}=got;
    const name=e.name??id,denied=d.access(id,soul);
    if(denied){refusal??={refuse:true,code:denied.code,reason:`The way to ${what} goes through ${name}: ${denied.reason.replace(/[.\s]+$/,'')}. It was not opened.`};continue;}
    // Entry 32, the safe way out: from inside (the back), a lockable door's thumb-turn opens for anyone, and its owner's
