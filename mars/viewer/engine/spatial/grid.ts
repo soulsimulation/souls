@@ -598,13 +598,13 @@ function patchClearance(old: LevelGrid, free: Uint8Array, oldCols: Float64Array,
 }
 
 /**
- * The clearance of `old` lowered for cells it newly blocks (`added`, all inside `box` = [i0, i1, j0, j1]), in place.
+ * Lowering clearance for newly blocked cells (`added`, all inside `box` = [i0, i1, j0, j1]; lowerAll, lowerClearance).
  * Blocking cells only shortens distances: a cell's new squared distance is the smaller of its old one and its nearest
  * added cell's, and clearance is a monotone function of it (edtRows' expression, rounded to float32), so the smaller
  * clearance is the exact one. Only cells inside B_r (the box grown by r cells, r as in patchClearance: past it the old
- * distance is shorter than the way to the box) can change; they are the only ones visited.
+ * distance is shorter than the way to the box) can change; they are the only ones visited. This returns r.
  */
-function lowerClearance(old: LevelGrid, oldClear: Float32Array, clearance: Float32Array, added: number[], box: Rect) {
+function reachOf(old: LevelGrid, oldClear: Float32Array, box: Rect): number {
   const { nx, nz, cell } = old;
   const [i0, i1, j0, j1] = box;
   const d = (c: number) => (old.free[c] ? (oldClear[c] / cell + 0.5) * (1 + 1e-5) + 1e-6 : 0);
@@ -619,21 +619,76 @@ function lowerClearance(old: LevelGrid, oldClear: Float32Array, clearance: Float
     if (m < r) break;
     r = Math.max(r + 1, Math.ceil(m));
   }
-  const n = added.length, ai = new Int32Array(n), aj = new Int32Array(n);
-  for (let k = 0; k < n; k++) { ai[k] = added[k] % nx; aj[k] = (added[k] - ai[k]) / nx; clearance[added[k]] = 0; }
-  const a0 = Math.max(0, i0 - r), a1 = Math.min(nx - 1, i1 + r), b0 = Math.max(0, j0 - r), b1 = Math.min(nz - 1, j1 + r);
-  for (let j = b0; j <= b1; j++) {
-    const bz = j < j0 ? j0 - j : j > j1 ? j - j1 : 0;
+  return r;
+}
+
+/** Cells of the box grown by r, clipped to the grid. */
+const areaOf = (g: LevelGrid, [i0, i1, j0, j1]: Rect, r: number) =>
+  (Math.min(g.nx - 1, i1 + r) - Math.max(0, i0 - r) + 1) * (Math.min(g.nz - 1, j1 + r) - Math.max(0, j0 - r) + 1);
+
+/**
+ * `clearance` (a copy of `oldClear`, the exact EDT of `old`) lowered for the cells each group newly blocks: one pass per
+ * group (lowerClearance), or one over all of them at once when the groups' regions together cover more cells than that
+ * (people spread over open ground). Either way the result is the exact min, so the choice never changes a bit.
+ */
+function lowerAll(old: LevelGrid, oldClear: Float32Array, clearance: Float32Array, groups: { added: number[]; box: Rect }[], free: Uint8Array) {
+  const rs = groups.map((x) => reachOf(old, oldClear, x.box));
+  if (groups.length > 1) {
+    const box: Rect = [Math.min(...groups.map((x) => x.box[0])), Math.max(...groups.map((x) => x.box[1])), Math.min(...groups.map((x) => x.box[2])), Math.max(...groups.map((x) => x.box[3]))];
+    const r = reachOf(old, oldClear, box);
+    let sum = 0;
+    for (let k = 0; k < groups.length; k++) sum += areaOf(old, groups[k].box, rs[k]);
+    if (sum > areaOf(old, box, r)) {
+      // a grid with its column pass: patchClearance's windowed EDT over the union (as before #2405) is the cheaper exact pass
+      const cols = COLUMNS.get(old);
+      if (cols) clearance.set(patchClearance(old, free, cols, box).clearance);
+      else lowerClearance(old, clearance, groups.flatMap((x) => x.added), box, r);
+      return;
+    }
+  }
+  for (let k = 0; k < groups.length; k++) lowerClearance(old, clearance, groups[k].added, groups[k].box, rs[k]);
+}
+
+/** lowerClearance's pass over B_r (see reachOf). */
+function lowerClearance(old: LevelGrid, clearance: Float32Array, added: number[], box: Rect, r: number) {
+  const { nx, nz, cell } = old;
+  const [i0, i1, j0, j1] = box;
+  // Exact squared distance to the nearest added cell over B_r, in O(|B_r|): per box column, the vertical distance to its
+  // nearest added cell (two sweeps); per row, the lower envelope of those columns' parabolas (edtRows' envelope, over the
+  // box's columns only). All values are exact integers, as in edt.
+  const W = i1 - i0 + 1, a0 = Math.max(0, i0 - r), a1 = Math.min(nx - 1, i1 + r), b0 = Math.max(0, j0 - r), b1 = Math.min(nz - 1, j1 + r), H = b1 - b0 + 1;
+  const mark = new Uint8Array(W * H), has = new Uint8Array(W);
+  for (const c of added) { const i = c % nx, j = (c - i) / nx; mark[(j - b0) * W + i - i0] = 1; has[i - i0] = 1; clearance[c] = 0; }
+  const g = new Float64Array(W * H);
+  for (let k = 0; k < W; k++) {
+    if (!has[k]) continue;
+    let last = -Infinity;
+    for (let y = 0; y < H; y++) { if (mark[y * W + k]) last = y; g[y * W + k] = last === -Infinity ? Infinity : (y - last) * (y - last); }
+    last = Infinity;
+    for (let y = H - 1; y >= 0; y--) { if (mark[y * W + k]) last = y; const q = last === Infinity ? Infinity : (last - y) * (last - y); if (q < g[y * W + k]) g[y * W + k] = q; }
+  }
+  const cols: number[] = [];
+  for (let k = 0; k < W; k++) if (has[k]) cols.push(k);
+  const m = cols.length, v = new Int32Array(m), zb = new Float64Array(m + 1);
+  for (let y = 0; y < H; y++) {
+    const row = y * W, f = (k: number) => g[row + k] + k * k;
+    let t = 0;
+    v[0] = cols[0]; zb[0] = -INF; zb[1] = INF;
+    for (let n = 1; n < m; n++) {
+      const q = cols[n];
+      let sx = (f(q) - f(v[t])) / (2 * (q - v[t]));
+      while (sx <= zb[t]) { t--; sx = (f(q) - f(v[t])) / (2 * (q - v[t])); }
+      t++; v[t] = q; zb[t] = sx; zb[t + 1] = INF;
+    }
+    t = 0;
+    const j = b0 + y;
     for (let i = a0; i <= a1; i++) {
+      while (zb[t + 1] < i - i0) t++;
       const c = j * nx + i, now = clearance[c];
       if (!now) continue;
-      // no added cell is nearer than the box: skip unless the box could beat the current clearance
-      const bx = i < i0 ? i0 - i : i > i1 ? i - i1 : 0, lb = bx * bx + bz * bz;
-      if (Math.max(0, Math.sqrt(lb) * cell - cell / 2) >= now) continue;
-      let best = Infinity;
-      for (let k = 0; k < n; k++) { const dx = i - ai[k], dz = j - aj[k], q = dx * dx + dz * dz; if (q < best) best = q; }
-      const v = Math.fround(Math.max(0, Math.sqrt(best) * cell - cell / 2));
-      if (v < now) clearance[c] = v;
+      const dx = i - i0 - v[t], best = dx * dx + g[row + v[t]];
+      const val = Math.fround(Math.max(0, Math.sqrt(best) * cell - cell / 2));
+      if (val < now) clearance[c] = val;
     }
   }
 }
@@ -661,6 +716,7 @@ export function gridsWithObstacles(base: GridSet, extra: Obstacle[]): GridSet {
   for (const [id, g] of base.levels) {
     let free: Uint8Array | null = null, clearance: Float32Array | null = null;
     let blockers = g.blockers;
+    const groups: { added: number[]; box: Rect }[] = [];
     for (const o of extra) {
       if (o.y1 <= g.y + STEP || o.y0 >= g.y + BODY_HEIGHT) continue;
       const added: number[] = [];
@@ -674,9 +730,11 @@ export function gridsWithObstacles(base: GridSet, extra: Obstacle[]): GridSet {
         const ci = i % g.nx, cj = (i - ci) / g.nx;
         if (ci < ci0) ci0 = ci; if (ci > ci1) ci1 = ci; if (cj < cj0) cj0 = cj; if (cj > cj1) cj1 = cj;
       }, o.raster !== 'centre');
-      if (added.length) { const exact = exactClearance(g); lowerClearance(g, exact, (clearance ??= exact.slice()), added, [ci0, ci1, cj0, cj1]); }
+      if (added.length) groups.push({ added, box: [ci0, ci1, cj0, cj1] });
     }
     if (!free) { levels.set(id, g); continue; }
+    const exact = exactClearance(g);
+    lowerAll(g, exact, (clearance = exact.slice()), groups, free);
     levels.set(id, { ...g, free, blockers, clearance: clearance! });
   }
   return { cell: base.cell, levels };
