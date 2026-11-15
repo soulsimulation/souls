@@ -11,6 +11,8 @@ export const UPGRADE_RUN = 'node eden.mjs upgrade';
 export const UPGRADE_MESSAGE = `This Soul client is too old for this world. Run: ${UPGRADE_RUN}`;
 /** A request with no `x-soul-client` came from a client older than the header (2.32.0 was the first to send it). */
 export const UNNAMED_CLIENT = '2.32.0';
+/** The retired resolve route's answer (#1910). Only a client from before `find` still calls it, so it names the upgrade. */
+export const RESOLVE_GONE = {ok: false, code: 'gone', message: `resolve was removed, and this Soul client still uses it. Run: ${UPGRADE_RUN}`, run: UPGRADE_RUN} as const;
 const BARE = /^\d+\.\d+\.\d+$/, GUARDED = /^\/v1\/(edge|agent)(\/|$)/;
 
 const parts = (v: string) => v.split('.').map(Number);

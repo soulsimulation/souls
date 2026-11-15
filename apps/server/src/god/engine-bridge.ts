@@ -18,7 +18,8 @@ import { hashOf, applyBatch, containerClaims, containerHidden, containerInside, 
 import { beamBays, joistBays, sheetBays, flightBays, flightUnfit, treadTarget, treadsPhrase, assetFromDef, assetIdFor, isFixtureDef, isFloatingDef, nearestSurfaceSlot, buildWorldEditPhysics, withLinkApproaches, type DefFacts, type EntityPhysicsV1, type FixtureSpecV1, type WorldEditV1 } from '@souls/engine-mars';
 import { createHash } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { legalEditsV1 } from '../edge-runtime-rules.ts';
+import { legalEditsV1, legalEditsV2 } from '../edge-runtime-rules.ts';
+import { sealedBy, type SealResident, type Sealed } from './seal-check.ts';
 import { previewWorldEditOffThreadV1, type PreviewViolationV1 } from './edit-preview.ts';
 import { Projects } from './projects.ts';
 import type { WorldHost } from '../world.ts';
@@ -41,7 +42,7 @@ import { createTea, type Tea } from './tea.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService, isContactActuator } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
-import { setWorldDaySource } from './poster-boards.ts';
+import { worldDayOf } from './poster-boards.ts';
 import { actionsOf, actuatedState, catalogActs, keepsLeftBy, leftByOf, stateDefaults, stateDiff } from './actuators.ts';
 import { GodPerceive } from './perceive.ts';
 import { GodPlaces, inPoly } from './places.ts';
@@ -56,7 +57,7 @@ import { installWorldLore } from './world-lore.ts';
 import { installLecternBooks } from './lectern-books.ts';
 import { installHeld } from './held.ts';
 import { installWorldClock } from './world-clock.ts';
-import { config, KNOWN_WORLD_KEYS } from '../config.ts';
+import { KNOWN_WORLD_KEYS, worldConfig } from '../config.ts';
 import { floorPlatesOf, plateIsStep } from './floor-plates.ts';
 import { isVerificationProbe } from '../verification-probe.ts';
 import { planWalkouts, dropReleased, unhand, stuckWarning, type StuckResident } from './walkout.ts';
@@ -111,6 +112,10 @@ const EVACUATE_RETRY_TICKS = 400; // a closure walk-out the engine could not lan
 /** legal-edits/1: a preview verdict stands for this many ticks (30 s at 20 Hz, past the preview's own 20 s timeout); the
  *  walk-out planner re-checks residents at commit. */
 const VERDICT_TICKS = 600;
+/** legal-edits/1: an edit's preview runs only when an entity a rule watches stands within this many metres (horizontally, on
+ *  any level) of what the edit changes. Every engine invariant judges such an entity by the geometry round it (clearance,
+ *  support, step, footing), so an edit with none that near cannot make a new violation and needs no preview. */
+const LEGAL_NEAR_M = 8;
 /** `sent` marker for a thing a walk-out took out of a resident's hands: whatever the entity world says next (a place on
  *  the ground, or nothing: removed) differs from it, so it is always sent. */
 const RELEASED = '"released"';
@@ -254,6 +259,8 @@ type WriteBackBody = { pose: string; entity: Entity | undefined };
 
 const listed2 = (n: [string, string]) => n[0] === n[1] ? `two ${n[0]}s` : `${n[0]} and ${n[1]}`;
 export class EngineBridge {
+  /** #2383: the no-comms warning is said once per world (#2416: per bridge, not module state). */
+  private noCommsWarned = false;
   readonly host: WorldHost; readonly god: GodMode; readonly edge?: EdgeLedger;
   /** B-facade: the read worker's bridge (BridgeOptions.read) */
   private readonly readSide: boolean;
@@ -313,7 +320,7 @@ export class EngineBridge {
     engineBridges.set(this.god.model, this);
     if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
     this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
-    this.layers = new GodLayers({ model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
+    this.layers = new GodLayers({ env: worldConfig(o.host).env, model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
       return typeof ref==='string'&&this.places.forRef(ref)?.id===id?ref:undefined;
@@ -332,8 +339,6 @@ export class EngineBridge {
     };
     // Soul Actions entry 32: a thing's owner for its lock, and who hears a knock on a door
     const owner=(id:string,soul:EdgeSoul)=>{const o=this.layers.ownership(id);return o?.owner?{name:this.layers.nameOf(o.owner),mine:this.layers.isOf(o.owner,soul)}:null;};
-    // Entry 38: posters know the world day they went up (age on demand; no per-day pass)
-    setWorldDaySource(()=>{const l=this.host.living;return l&&l.dayTicks>0?Math.floor(Math.max(0,this.host.engine.world.tick-l.origin)/l.dayTicks):0;});
     if(this.edge){
       // CTRL-2 (#1094): `inspect` shows what the offers show: a kept thing only while its container is open and not a hiding place
       this.edge.concealedThing=(id)=>{const x=this.engine.world.entities[id] as {support?:{kind:string;on?:string;slot?:string}}|undefined;if(x?.support?.kind!=='resting-on')return false;const box=this.keptIn(x);return !!box&&(box.hidden||!box.open);};
@@ -351,12 +356,16 @@ export class EngineBridge {
       this.edge.seatThing=(id)=>{const x=this.engine.world.entities[id] as {def?:string;tags?:string[]}|undefined;return !!x?.def&&!!x.tags?.includes('entity-world')&&!!(this.physics?.assets[x.def] as {slots?:{kind:string}[]}|undefined)?.slots?.some((s)=>s.kind==='seat');};
     }
     if(this.edge)this.edge.thingAbout=(id)=>{try{const e=this.model.entities.get(id)??this.model.get(id);return (e as {about?:{title?:string;what?:string;aliases?:string[]}}|undefined)?.about??null;}catch{return null;}};
-    if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,levelAt:(x,z,y)=>this.levelAt(x,z,y),
+    if(this.edge)this.edge.contactActuator=createContactActuatorService({model:()=>this.god.model,worldDay:()=>worldDayOf(this.host),   // entry 38: posters know the world day they went up (#2416: this world's)
+      levelAt:(x,z,y)=>this.levelAt(x,z,y),
       clearance:(x,z,level)=>(this.host.engine as unknown as {clearanceAtV1?:(x:number,z:number,level?:number)=>number}).clearanceAtV1?.(x,z,level)??Infinity,
       settle:(actor,target,to,level)=>{const gaps=this.shutGaps(target);return gaps.length?(this.host.engine as unknown as {settleBesideV1?:(a:string,p:[number,number],s:typeof gaps,level:number)=>[number,number]|null|undefined}).settleBesideV1?.(actor,to,gaps,level):undefined;},
       body:id=>this.host.engine.world.entities[id] as never,access:(id,soul)=>this.layers.refusal(id,soul),owner,knock:(soul,id)=>this.knockHeard(soul,id),
       moreFacts:id=>this.tea?.facts(id)??this.mending?.facts(id)??this.harvest?.facts(id)??null,keptNote:(box,item,soul)=>this.keptNote(box,item,soul),searchOutcome:(soul,spot,failed,overlapped)=>this.searchOutcome(soul,spot,failed,overlapped),
-      record:(soul,id,action,params={})=>{const r=this.edge!.comms?.objects.act?.(id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
+      record:(soul,id,action,params={})=>{const act=this.edge!.comms?.objects.act;
+        // #2383: a host without comms (the Eden test fixture) keeps no object record; said once, so a misconfigured host shows
+        if(!act){if(!this.noCommsWarned){this.noCommsWarned=true;console.warn('[world] contact: no comms on this host, object actions are not recorded');}return;}
+        const r=act.call(this.edge!.comms!.objects,id,soul,{action,params}) as {accepted?:boolean}|undefined;if(!r?.accepted)throw Error('switch.object-record-refused');},
       commit:(ops,note,done)=>this.god.engineAct(ops,note,done)});
     if(this.edge?.contactActuator)this.edge.doorPassage=createDoorPassage({engine:()=>this.host.engine as never,model:()=>this.god.model,contact:this.edge.contactActuator,access:(id,soul)=>this.layers.refusal(id,soul),owner});
     // #442: repair with a tool in hand (mending.ts): the world changes when the receipt completes, no tick work
@@ -367,10 +376,10 @@ export class EngineBridge {
     // Entry 34: the watering-can act (watering.ts): planned for perceive's offers, its moments committed per tick
     this.watering = createWatering({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m) });
     // Entry 43: the tea acts (tea.ts), the same way
-    this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul) });
+    this.tea = createTea({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false });
     // #438: the picking acts (harvest.ts), the same way
     this.harvest = createHarvest({ model: this.god.model, version: () => this.version, get engine() { return o.host.engine as never; }, commit: (ops, note) => this.god.engineAct(ops as never, note), log: (m) => this.log(m), access: (id, soul) => this.layers.refusal(id, soul), denied: (id, soul) => this.layers.takeRefusal(id, soul) ?? this.claimRefusal(id, soul as never), actOpen: (body, capability) => this.edge?.actOpen(body, capability) ?? false, actFail: (body, capability, why) => this.edge?.actFail(body, capability, why), actApplied: (body, capability) => this.edge?.actApplied(body, capability) });
-    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
+    this.perceive = new GodPerceive({ mending: this.mending, model: this.god.model, worldDay: () => worldDayOf(o.host), version: () => this.version, edge: this.edge, get engine() { return o.host.engine as never; }, engineOwned: (e) => this.engineOwned(e), namesNear: (at, except) => this.nav.namesNear(at, except), things: () => this.nav.things(), places: this.places, levelAt: (x, z, y) => this.levelAt(x, z, y), log: (m) => this.log(m), commit: (ops, note) => this.god.engineAct(ops as never, note), layers: this.layers, watering: this.watering, tea: this.tea, harvest: this.harvest, claim: (id, soul) => this.claimRefusal(id, soul) });
     // L3 (server reliability): kept Soul menus read god state the ledger does not version (ownership, construction sites)
     // the bridge runs without an edge ledger too (toy/engine-only hosts): guard the ledger, not only the method
     if (!R) (this.edge as { addMenuInput?(f: () => string): void } | undefined)?.addMenuInput?.(() => `${this.version}|${this.god.builds.closingSites().map((x) => x.id).join(',')}`);
@@ -432,9 +441,9 @@ export class EngineBridge {
     // F3: a god thing in a Soul's hand shows as held (observe, receipts) and can be put down (held.ts)
     if (this.edge) installHeld(this.edge, { get engine() { return o.host.engine as never; }, model: this.model, minds: this.host.minds });
     // F3: a god's world keeps time like the live worlds (a logged dayConfig; world-clock.ts)
-    if (!R && (o.worldClock ?? (!config.livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey)))) installWorldClock(this.host, this.god, this.log);
+    if (!R && (o.worldClock ?? (!worldConfig(this.host).livingWorld && !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(this.host).worldKey)))) installWorldClock(this.host, this.god, this.log);
     // F3: a god's new world serves its constitution (or a neutral line) as lore, never Eden's (world-lore.ts)
-    if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey))) installWorldLore(this.edge, this.god);
+    if (this.edge && (o.worldLore ?? !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(this.host).worldKey))) installWorldLore(this.edge, this.god);
     // #428: a lectern holding a catalogue book reads that book, in every world (lectern-books.ts; after world lore)
     if (this.edge) installLecternBooks(this.edge, this.god);
   }
@@ -1247,7 +1256,10 @@ export class EngineBridge {
     if (tick % 5 === 4 || this.activitySpots.deriving()) { this.spotsStep(); if (S) t = S.add('spots', t); }
     if (tick % 40 === 7 || this.layerPlacesPending !== null) { this.layersStep(tick % 40 === 7); if (S) t = S.add('layers', t); }
     if (tick % 20 === 13) { this.flushMapNotices(); if (S) t = S.add('mapNotices', t); }
-    if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
+    // #1744: edits every tick or two re-arm the first build faster than it finishes, so with Souls waiting the rescue read takes
+    // its tick (a poll, or #1548's one forced relabel per NAV_STUCK_TICKS) in place of the slice, or no read would ever come
+    if (this.navPending && tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
+    else if (!this.navWarm || this.navPending) { this.navStep(startedAtMs); if (S) t = S.add('nav', t); }
     else if (this.navHeld && tick % 10 === 3) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }   // held, the rescue still reads: a Soul that left lets the hold go, and #1548's forced relabel can fire
     else if ((this.navCold && (this.navColdSlices < NAV_REWARM_BURST || this.navHeld)) || tick % NAV_REWARM_POLL_TICKS === NAV_REWARM_POLL_AT) { this.navRewarmStep(startedAtMs); if (S) t = S.add('navRewarm', t); }
     else if (tick % 10 === 3 && this.navWaiting.size) { this.navRescueWaiting(); if (S) t = S.add('nav', t); }
@@ -1445,7 +1457,7 @@ export class EngineBridge {
       // re-warm error (navCold null) nothing else relabels, so the first-build path does it, as before; its completion steps the
       // waiting Souls out and re-arms the re-warm.
       if (!E.navWarmV1?.(0)) {
-        if (this.navCold === null) { this.navWarm = false; this.navPending = true; return; }
+        if (this.navCold === null && !this.navPending) { this.navWarm = false; this.navPending = true; return; }   // #1744: already pending (edits keep cancelling it), the forced relabel below still applies
         this.navCold = true; this.navHeld = true;
         if (!this.navForceRelabel(E, souls.length)) return;
         this.navHeld = false;
@@ -1611,7 +1623,7 @@ export class EngineBridge {
     // that ran it; running it here would rewrite a world that a pending round throws away and leave the commit nothing to journal.
     this.flush(); this.host.drainInputs();
     const draft = this.draftFor(after, diff), failures: Failure[] = [];
-    if (draft) {
+    if (draft && this.draftNearWatched(before, draft)) {
       const key = hashOf({ base: this.physics?.hash ?? null, levels: draft.levels, set: draft.set, assets: draft.assets ?? null }), v = this.verdict?.key === key && (dry || !this.verdict.dry) ? this.verdict : null;
       if (!dry) this.verdict = null;
       if (!v || this.engine.world.tick - v.tick > VERDICT_TICKS) { this.wanted = { key, draft, dry }; return 'pending'; }
@@ -1623,7 +1635,49 @@ export class EngineBridge {
       detail: m.released.length ? `${m.name} is using ${m.released.map(id => before.pathOf(id) || id).join(', ')}, which this edit changes (${m.reason}).` : `${m.name} is in this edit's way (${m.reason}).`,
       measured: { soul: m.soulId, at: m.from, ...(m.level ? { level: m.level } : {}) }, suggest: { p: m.to }, fix: `Wait until ${m.name} has moved on, or build elsewhere; Souls are not moved for an edit.` });
     for (const x of stuck) if (!named.has(x.body)) failures.push({ op: -1, code: 'body.in-the-way', entity: x.body, field: 'legal-edits/1', detail: `${x.name} is in this edit's way (${x.reason}).`, measured: { soul: x.soulId }, fix: `Wait until ${x.name} has moved on, or build elsewhere.` });
+    if (legalEditsV2(this.host)) failures.push(...this.sealFailures(before, after, diff, new Set([...named, ...moved.map(m => m.body), ...stuck.map(x => x.body)])));
     return failures.length ? failures : null;
+  }
+  /** legal-edits/2 (#2188): the Souls this edit would leave with no walk out (seal-check.ts), each named; `named` already are. */
+  private sealFailures(before: WorldModel, after: WorldModel, diff: Diff, named: Set<string | undefined>): Failure[] {
+    const residents: SealResident[] = [];
+    for (const m of this.host.minds.values()) { const b = this.engine.world.entities[m.entityId]; if (b && !named.has(m.entityId)) residents.push({ body: m.entityId, soulId: m.soulId, name: m.name, p: [b.pose.p[0], b.pose.p[2]], level: b.human?.level ?? 0 }); }
+    if (!residents.length) return [];
+    let sealed: Sealed[];
+    try { sealed = sealedBy(before, after, diff, residents, { skipped: (souls) => this.log(`seal check: ${souls.length} Soul(s) past the window cap left to nav-connect/1`) }); } catch (e) { this.log(`seal check: ${(e as Error).message}`); return []; }
+    return sealed.map(s => ({ op: -1, code: 'body.sealed-in', entity: s.body, field: 'legal-edits/2',
+      detail: `${s.name} would have no walk out: this edit closes ${s.name} in ${s.pocket} m² at (${s.at.map(n => Math.round(n * 10) / 10).join(', ')}), shut off by ${s.by.slice(0, 2).map(id => after.pathOf(id) || id).join(' and ')}${s.by.length > 2 ? ` and ${s.by.length - 2} more` : ''}.`,
+      measured: { soul: s.soulId, at: s.at, pocket: s.pocket, by: s.by }, fix: `Leave a way out (a gap of 1 m, a door or a gate), or wait until ${s.name} has walked out.` }));
+  }
+  /** legal-edits/1: whether the draft's preview could find anything. True when an entity a rule watches (a body, an item, an
+   *  engine-native part, a vehicle, a fixture held or reserved: anything but a resting god fixture) stands within LEGAL_NEAR_M
+   *  of what the draft changes, the old geometry and the new (floors, solids, stairs, fixtures), or when the world has a ride
+   *  (a carrier or boat follows a route, not a spot). Most edits are far from every Soul: no snapshot, no worker, one round. */
+  private draftNearWatched(before: WorldModel, draft: WorldEditV1): boolean {
+    const boxes: number[][] = [], old = this.physics?.byEntity ?? {}, ents = this.engine.world.entities;
+    const pt = (x: number, z: number, r = 0) => boxes.push([x - r, z - r, x + r, z + r]);
+    // a fixture's obstacle is its asset's box (catalog-adapter.ts `size`), so it counts by its half-diagonal round its spot;
+    // an asset this side cannot see is never skipped
+    const assets = { ...this.physics?.assets, ...draft.assets } as Record<string, { size?: number[] } | undefined>;
+    let unknown = false;
+    const fixture = (def: string, x: number, z: number) => { const size = assets[def]?.size; if (!size) { unknown = true; return; } pt(x, z, Math.hypot(size[0], size[2]) / 2); };
+    const obb = (o: OBB2) => { const ca = Math.abs(Math.cos(o.yaw)), sa = Math.abs(Math.sin(o.yaw)), hx = o.half[0] * ca + o.half[1] * sa, hz = o.half[0] * sa + o.half[1] * ca; boxes.push([o.c[0] - hx, o.c[1] - hz, o.c[0] + hx, o.c[1] + hz]); };
+    const part = (b: { surfaces?: { obb: OBB2 }[]; solids?: { obb: OBB2 }[]; links?: { from: { p: Vec2 }; to: { p: Vec2 } }[] } | null | undefined) => {
+      if (!b) return; for (const x of b.surfaces ?? []) obb(x.obb); for (const x of b.solids ?? []) obb(x.obb); for (const l of b.links ?? []) { pt(l.from.p[0], l.from.p[1]); pt(l.to.p[0], l.to.p[1]); }
+    };
+    for (const [id, now] of Object.entries(draft.set)) {
+      part(now); part(old[id]);
+      if (now?.fixture) fixture(now.fixture.def, now.fixture.p[0], now.fixture.p[2]);
+      const e = ents[id]; if (e?.pose) { pt(e.pose.p[0], e.pose.p[2]); fixture(e.def, e.pose.p[0], e.pose.p[2]); }
+    }
+    if (unknown || !boxes.length) return true;
+    for (const e of Object.values(ents)) {
+      if (e.carrier || e.boat) return true;
+      if (e.kind === 'fixture' && before.entities.has(e.id) && !e.reservedBy && e.support?.kind !== 'held' && !e.human && !e.body) continue;
+      const p = e.pose?.p; if (!p) return true;
+      for (const b of boxes) if (p[0] >= b[0] - LEGAL_NEAR_M && p[0] <= b[2] + LEGAL_NEAR_M && p[2] >= b[1] - LEGAL_NEAR_M && p[2] <= b[3] + LEGAL_NEAR_M) return true;
+    }
+    return false;
   }
   /** Preview the edit the last check left pending, off the tick thread, and keep the verdict for the request's next try. A
    *  preview that could not run (no worker, a timeout, too many in flight) refuses the request with a retryable code: an edit
@@ -2198,7 +2252,7 @@ export class EngineBridge {
     const priorUseRefusal = L.nativeUseRefusal;
     L.nativeUseRefusal = (capability, steps) => priorUseRefusal?.(capability, steps) ?? this.bedUseRefusal(capability, steps);
     L.signClosed = (id, soulId) => !!this.layers.refusal(id, { soulId, name: this.host.minds.get(soulId)?.name ?? '' });
-    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? null;
+    L.actOutcome = (capability, entityId, finished) => this.harvest?.outcome(capability, entityId, finished) ?? this.perceive?.farOutcome(capability, entityId, finished) ?? this.tea?.outcome(capability, entityId, finished) ?? null;
     // R4-INFO: god-built places are walkable (map, plain-words resolution, `via`), and the map follows the god's edits
     L.placeWalkable = (id) => this.readSide ? this.readWalkable.has(id) : this.places.walkable(id);
     // On-demand plans are appended after the full profile's layer pass. Apply

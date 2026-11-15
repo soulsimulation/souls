@@ -34,7 +34,7 @@ test('strict: invented ids refuse with a reason and change nothing; real ids and
   // a real place in the map that no walk reaches: a reason, never a different place (intent form, read by the ledger:
   // #1911 refuses intents over HTTP)
   const park: any = await accept(w.f.host, w.ledger.act(a, {verb: 'go', target: {place: 'region-park.pond'}} as never));
-  assert.equal(park.accepted, false); assert.equal(park.code, 'place.unwalkable'); assert.match(park.reason, /no walk reaches it/);
+  assert.equal(park.accepted, false); assert.equal(park.code, 'place.unwalkable'); assert.match(park.reason, /no walk reaches it/i);
   // real ids and plain words keep working
   for (const ok of ['walk:shore-bank', 'walk:pond', 'walk to the campfire', 'sit:here', `go-near:${b.soulId}`]) {
     const out: any = await w.act(a, ok); assert.equal(out.accepted, true, ok + ' ' + JSON.stringify(out));

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { unmeasured } from './soul-eval.mjs';
+import { unmeasured, GENESIS, resolveInputs } from './soul-eval.mjs';
+import { validateBattery } from './measure.mjs';
+import { validateScript } from '../arena/adapters/scripted-owner.mjs';
 
 test('#2047: a run passes only when it measured; every episode or over 20% errored fails it', () => {
   const ok = { item: 'a', succeeded: false }, err = { item: 'b', error: 'the client keeps no world copy' };
@@ -9,4 +11,16 @@ test('#2047: a run passes only when it measured; every episode or over 20% error
   assert.match(unmeasured([err, err, ok, ok, ok]), /2 of 5 episodes errored, over the declared 20%.*no world copy/);
   assert.match(unmeasured([err, err]), /measured nothing: all 2 episode\(s\) errored/);
   assert.match(unmeasured([]), /measured nothing: no episode ran/);
+});
+
+test('#2446: m4-hamlet-v1 names hello-hamlet, which the eval can boot; every m4-v1 item is ported or listed as not', () => {
+  const { battery, seatCfg } = resolveInputs({ battery: 'm4-hamlet-v1', seat: 'scripted' });
+  assert.equal(battery.world, 'hello-hamlet');
+  assert.ok(GENESIS[battery.world]);
+  assert.deepEqual(validateBattery(battery), []);
+  assert.deepEqual(validateScript(seatCfg.script), []);
+  for (const it of battery.items) assert.ok(seatCfg.script.rules.some((r) => new RegExp(r.match).test(it.instruction)), `no scripted rule for ${it.id}`);
+  const m4 = resolveInputs({ battery: 'm4-v1', seat: 'scripted' }).battery.items.map((i) => i.id).sort();
+  assert.deepEqual([...battery.items.map((i) => i.from), ...battery.notPorted.map((n) => n.id)].sort(), m4);
+  assert.ok(battery.notPorted.every((n) => n.why));
 });

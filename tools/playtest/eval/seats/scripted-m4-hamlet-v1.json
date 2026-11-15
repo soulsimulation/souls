@@ -1,0 +1,17 @@
+{
+ "adapter": "scripted-owner",
+ "note": "$0 dry run of battery m4-hamlet-v1 (#2446) through the client's look/find/act, one rule per instruction, as scripted-m4-v1 does on Eden 2026. It proves the measuring, not an agent.",
+ "script": {
+  "rules": [
+   { "match": "^Walk to the presentation hall", "do": [ ["act", "walk:lab-presentation-hall", "--wait", "60"] ] },
+   { "match": "^Sit down\\.?$", "do": [ ["act", "sit-ground:here"] ] },
+   { "match": "^Go to the cottage, then sit", "do": [ ["plan", "[\"walk:cottage\",\"sit-ground:here\"]", "--for", "{id}"] ] },
+   { "match": "^Fly to the cottage", "do": [ ["act", "walk:cottage", "--wait", "60"] ] },
+   { "match": "^Sit on a bench", "do": [ ["look"], ["find", "bench"], ["act", "{{prev.found[0].act}}"] ] },
+   { "match": "^Walk to the waterside hall", "do": [ ["act", "walk:lab-pond-hall", "--wait", "60"] ] },
+   { "match": "^What is on in the next hour", "do": [ ["whatson", "--hours", "1"], ["calendar", "interest", "{{prev.on[0].id}}"] ] },
+   { "match": "^Go into the pond", "do": [ ["act", "walk:pond"] ] }
+  ],
+  "unmatched": "No scripted response."
+ }
+}

@@ -93,3 +93,17 @@ test('summarize gives n/N and spread over repeats', () => {
   assert.deepEqual(a.modelTurns, { median: 1, min: 1, max: 3, n: 2 });
   assert.deepEqual(a.refusals, { 'x.y': 2 });
 });
+
+test('#2364: said, near and quiet read the live picture and the receipts, never the words', () => {
+  const live = { souls: [{ id: 's_me', name: 'Wren', at: [0, 0] }, { id: 's_moss', name: 'Moss', at: [3, 4] }], speech: [{ soul: 's_me', at: 2000, text: 'hello' }, { soul: 's_moss', at: 3000, text: 'hi' }] };
+  const ctx = (o = {}) => ({ obs: observe(null), newReceipts: [], catalog: cat, soulId: 's_me', live, sentAt: 1000, ...o });
+  assert.equal(judge({ said: {} }, ctx()).ok, true);
+  assert.equal(judge({ said: {} }, ctx({ sentAt: 2500 })).ok, false);
+  assert.equal(judge({ near: { soul: 'Moss', within: 5 } }, ctx()).ok, true);
+  assert.equal(judge({ near: { soul: 'Moss', within: 4 } }, ctx()).ok, false);
+  assert.equal(judge({ near: { soul: 'Ash', within: 4 } }, ctx()).ok, false);
+  assert.equal(judge({ quiet: { except: ['face'] } }, ctx({ newReceipts: [{ capability: 'face:s_moss', phase: 'completed' }] })).ok, true);
+  assert.equal(judge({ quiet: { except: ['face'] } }, ctx({ newReceipts: [{ capability: 'walk:g-eden-windmill', phase: 'started' }] })).ok, false);
+  assert.deepEqual(validateBattery({ items: [{ id: 'w', instruction: null, check: { quiet: {} } }] }), ['items[0] (w).instruction required (null only with another Soul\'s poke)']);
+  assert.deepEqual(validateBattery({ items: [{ id: 'w', instruction: null, others: [{ name: 'Moss', poke: [['say', 'hi Wren']] }], check: { quiet: {} } }] }), []);
+});

@@ -32,7 +32,7 @@ function HomeWith({ list, session }: { list: LauncherList; session: Session }) {
 function HomeClerk({ list }: { list: LauncherList }) {
   const session = useAuth(), clerk = useClerk(), profile = useUser();
   const signingOut = useRef(false);
-  return <HomeWith list={list} session={{ mode: 'clerk', ready: session.isLoaded, authed: session.isLoaded && !!session.isSignedIn, label: profile.user?.primaryEmailAddress?.emailAddress ?? profile.user?.firstName ?? null,
+  return <HomeWith list={list} session={{ mode: 'clerk', ready: session.isLoaded, authed: session.isLoaded && !!session.isSignedIn, label: profile.user?.primaryEmailAddress?.emailAddress ?? profile.user?.firstName ?? null, avatarUrl: profile.user?.imageUrl ?? null,
     getToken: async () => session.isLoaded && session.isSignedIn ? session.getToken({ skipCache: true }) : null,
     login: () => { if (!signingOut.current) startClerkSignIn(clerk, list.auth?.clerkSatellite, location.href, url => location.assign(url)); },
     logout: async () => { if (signingOut.current) return; signingOut.current = true; try { await signOutAndReturn(clerk); } catch (error) { signingOut.current = false; throw error; } } }} />;

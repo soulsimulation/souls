@@ -119,7 +119,7 @@ type ClockHost = {
   engine: { world: { tick: number } };
   living?: { origin: number; dayTicks: number; customs?: string[] } | undefined;
   enqueue(kind: 'rules', author: string, payload: unknown): Promise<unknown>;
-  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number; silent?(): boolean;
+  pace?: number; paused?: boolean; running?: boolean; owedTicks?: number; silent?(): boolean; wallTick?(): number;
   /** #2297: the keeper reports the zone's next daylight-saving change as a deadline (WorldHost.stillUntil). */
   listeners?: { stillness?(tick: number): { name: string; tick?: number | null }[] }[];
 };
@@ -135,9 +135,11 @@ export type RealClockOptions = {
    *  or a restart, so it must be idempotent; a failure is logged and never stops the clock. */
   onCutOver?: (c: { tick: number; from: { origin: number; dayTicks: number }; to: { origin: number; dayTicks: number } }) => void;
 };
-const kept = new WeakSet<object>();
+const kept = new WeakMap<object, () => void>();
 /** Whether a real-time keeper already runs this host's clock. */
 export function hasRealClock(host: object): boolean { return kept.has(host); }
+/** #2444: a stopped world's keeper stops checking its clock (in a shard, the program runs on). */
+export function stopRealClock(host: object): void { kept.get(host)?.(); }
 
 /** #2297: the next instant (UTC ms, to the minute) after `utcMs` at which `timeZone`'s offset changes (a daylight-saving
  *  change), within `horizonDays`; null when none (UTC, or a zone without one). */
@@ -157,7 +159,7 @@ export function nextOffsetChangeMs(utcMs: number, timeZone: string, horizonDays 
  *  REALIGN_MS from the wall (checked every `checkMs`, default 15 s). A world nobody watches (pace < 1) or an
  *  admin-paused one is left alone until it runs at full pace again. Customs carry over. */
 export function installRealClock(host: ClockHost, o: RealClockOptions) {
-  kept.add(host);
+  kept.set(host, () => clearInterval(timer));
   const now = o.now ?? Date.now, active = o.active ?? (() => true);
   let pending: Promise<void> | undefined;
   type Cut = { tick: number; from: { origin: number; dayTicks: number }; to: { origin: number; dayTicks: number } };
@@ -172,7 +174,7 @@ export function installRealClock(host: ClockHost, o: RealClockOptions) {
     if (!active()) return Promise.resolve();
     if (pending) return pending.then(sync);
     // #2235: during a boot catch-up the clock is read as caught up (the event applies after the owed ticks)
-    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.engine.world.tick + (host.owedTicks ?? 0), zone = o.zone();
+    const l = host.living as (ClockHost['living'] & { zone?: string; cutOver?: Cut }) | undefined, tick = host.wallTick?.() ?? host.engine.world.tick + (host.owedTicks ?? 0), zone = o.zone();
     mapCut(l?.cutOver);
     let payload: { dayConfig: Record<string, unknown>; why: string };
     if (o.paused?.()) {

@@ -104,7 +104,9 @@ reads `control: {held, state, since}` from `/v1/agent/approval/souls` (that acco
 the folder when this machine knows it, or say the world still has the Soul connected from an older copy of this
 folder. `--move` sends `move` and says the other folder is disconnected, in the request's answer and in `approval wait`.
 A dead or revoked token needs no `--move`. A client without `--move` (1.9) gets the same refusal; the owner can revoke
-the old folder from their account first. Each run works inside that Soul's `runtime/`, so nothing
+the old folder from their account first. On a dev-identity world (no account approvals) `pair <soulId>` follows the same rule as a login's
+move (#2050): `POST /v1/souls/:id/pair` is free while no agent is connected and otherwise answers 409
+`soul.held-elsewhere` naming that agent (`heldBy`), unless the body says `move: true` (`--move`). Each run works inside that Soul's `runtime/`, so nothing
 collides. `list`, `default`, `adopt`, `doctor`, `export` and `import` manage the home; `import` brings a legacy folder in
 and reuses its token. Everything but `credentials.json` is safe to read or back up, apart from a god seat's relay secret below.
 
@@ -139,8 +141,13 @@ With a login (#2246), `adopt <name|id>` and `pair <id>` need no window code and 
 the Soul token. A name is looked up in `GET /v1/agent/account` (folded as the world folds names; two Souls with one
 name is an error listing both ids). A Soul paired this way is tagged with its account (`config.souls.<id>.account`),
 and every later move, revoke or retire of it uses that account's login whatever `--as` says; an untagged Soul uses
-`--as`, else the origin's active login. The last device to ask wins: the world disconnects the one before
-(`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
+`--as`, else the origin's active login. Moving follows #2401 (D1, decided 14 November): while no agent is connected
+for the Soul (its link is not `connected`), another device takes it freely; while one is connected, the pair route
+answers 409 `soul.held-elsewhere` naming that device (`heldBy`, its `agent.label`) and the client prints it with the
+same command plus `--move` as `next`; `--move` (body `move: true`) forces it. Only the account's own Soul gets that
+answer, and a retry of an already made request is not refused. A browser click never takes a Soul. When the home
+taking it has no memory for it, the answer says so in `memory`, naming `export` there and `import` here. A take
+disconnects the device before (`control.revoked`, reason `replaced`). On that device `status` says control moved, names where the Soul runs now
 (`runs`, the `agent.label` from one account read, when that home is logged in) and gives `adopt <name>` as `next`;
 the Soul becomes `unpaired` there and its dead token is removed, its memory untouched, so it no longer makes a bare
 command ambiguous. A `revoked` token is treated the same. No resident process (`serve`, `listen`) ever pairs again by
@@ -345,7 +352,8 @@ withholds. Owner messages and credentials are never in it.
   and place. The answer carries
   `epoch` and `seq`, the number of the picture's latest change. A Soul's row carries, each only when set, its status
   line `now` (at most 140 characters) and `about`, the first 200 characters of its profile, on one line (#1978). A
-  change to `now` is pushed at once as a change to that row; a change to `about` goes with the next build, as a name does.
+  change to `now` is pushed at once as a change to that row, and so is a Soul joining, leaving, fading, coming back or
+  renamed (with its `about`), a paused clock too (#1903).
   A changed row's frame carries `now` and `about` only when one of them changed (`null` when cleared), and the client
   merges it over the row it holds.
   `clock` (#1918) is the world clock from `freshBootClock` as sampled with the build: `worldDateTime`, `time`,
@@ -379,7 +387,8 @@ withholds. Owner messages and credentials are never in it.
   `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
-  its anchor. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
+  its anchor. "sit" and "seat" name seats, and "sit at the bandstand" finds the seats in it, or, when it has none of its
+  own, the nearest within 80 m around it. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
   door of Eden House 3 Kitchen"); a place row's `also` names the places beside it whose names share its own as a prefix
   (Eden House 3, Eden House 3 Kitchen). `query` takes several questions in one call, each with its own depth, filters and token budget, and says
   what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
@@ -484,7 +493,7 @@ nothing was written. Keys and clientRefs must be unique per act: a receipt keeps
 | `GET /v1/edge/here?include=doHere` | First-person frame: where the Soul is, who and what is near, exits, and the actions offered here with exact parameters. A `far` line ends with the walk to that place when one would go and `exits` doesn't already give it; `flags` lists the nearest four named flags, each with its walk when a route reaches it, leaving out any in a place the Soul doesn't know |
 | `GET /v1/edge/observe`, `GET /v1/edge/capabilities`, `GET /v1/edge/around` | Wider views: state and open receipts, all offers, nearby with a route. `capabilities` lists a page; `?all=1` lists the whole menu. `?search=<words>` lists the whole menu (as `?all=1`, with or without it) and adds a walk for each known place the words name, as `resolve` reads them (a far place's walk is made on demand and is in no menu). It also answers `search: {query, places, placesMatched, truncated, note?}`, with `places` the walk ids, best first, at most 12. A search has its own rate limit, 30 a minute, as `around` does. `around?to=` also finds a named god flag ("orchard", "the orchard flag") and answers with its distance, direction and `walk:flag-<name>`; an exact place name still wins over a flag |
 | `GET /v1/edge/map` | Public map: the places, and the named god flags as `flags: [{name, walk, at}]` |
-| `POST /v1/edge/resolve` | Gone (#1910): 410 `{ok: false, code: "gone"}`; a client finds ids with its own `find` |
+| `POST /v1/edge/resolve` | Gone (#1910): 410 `{ok: false, code: "gone", message, run}`, naming `node eden.mjs upgrade`, since only a client from before `find` calls it (#1937); a client finds ids with its own `find` |
 | `POST /v1/edge/act` | `{capability, params?, clientRef?}`: an action; answered with a receipt, or a refusal (`code`, `reason`, `did_you_mean`; when nothing matched, or when no walk reaches the offer now (route-dead: `route.unreachable`, `route.goal-blocked`, `route.link-unusable`, `route.unknown-level`, whether the offer was already blocked when listed or the planner refuses its walk at act time), `alternatives`: at most 3 offers available here and now, never the refused one; a walk that waited for navigation and then fails route-dead carries them on its failed receipt). An ongoing body act (a walk, sit, rest or read; `REPEATABLE` in `ledger.ts`) sent again by id with the same params while its receipt is open returns that receipt with `repeat: true` and starts nothing (#1272). `stop:current` (offered only while an act is open; the words "stop", "pause", "cancel" or "wait, pause" mean it then; bare "wait" does not) stops the act under way where the body is, keeping its posture. That act's receipt ends `failed` with `act.stopped`. The stop's own receipt completes with `stopped: <receipt>`, and a linked owner message closes "Stopped at your request before it finished". `params.receipt` stops only that act. Nothing running is refused `act.none-running`, naming the last act and how it ended; nothing is written. An ended act is refused `act.already-ended`, and a shared carry `act.shared`, which names `stop-carry:<op>` (#1381) |
 | `GET /v1/edge/receipts/:id` | A receipt: accepted, started (the program began), completed, failed or replaced, with the reason; `firstMotionTick` once the body visibly began |
 | `POST /v1/edge/say`, `POST /v1/edge/converse`, `GET /v1/edge/conversations` | Speech and conversations (consent-based membership). A conversation is held out loud by default: the world page's viewers see its turns, live and in the join replay. `converse` `start` with `private: true` keeps the turns to its members; viewers then see only who is talking with whom (`conversation.talking`), never the words (#2269) |
@@ -494,7 +503,7 @@ nothing was written. Keys and clientRefs must be unique per act: a receipt keeps
 | `GET`/`PUT /v1/edge/body`, `POST /v1/edge/body/uploads` | The Soul's body look; uploaded models (moderated) |
 | `POST`/`GET /v1/edge/reminders`, `DELETE /v1/edge/reminders/:id` | Personal reminders |
 | `GET /v1/edge/view` | Eyes |
-| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running |
+| `GET /v1/edge/inbox/listen`, `POST /v1/edge/inbox/:id/{ack,result}` | Owner messages. An act sent `for` a message closes it when the act ends, with its outcome. While a linked act runs, a `result` (or an `ack` with `outcome`) is refused with 409 `message.act-running`, writes nothing, and the world closes the message when the act ends. A linked act that ends while another linked act runs posts progress, and the last to end closes the message. Every message still reaches a close: a linked act replaced with nothing else serving the message closes it `failed`, as does one still running after 15 minutes (or a timed act past its own time plus a minute; `SIM_OWNER_HOLD_S` shortens the limit for tests), until its real end replaces that line. A held open-ended sit, lie or nap, or a follow, doesn't count as running. An instruction to sit is done once the Soul is seated: a linked sit (`sit`, `sit-ground`), timed or not, closes its message `done` ("Sitting now.") when the body holds the seat, and its later end writes nothing more. Every answer to the Soul's agent carries `inbox.waiting`, the ids of its messages not yet acknowledged, so the CLI's `OWNER: n message(s) waiting` line leaves out the ones its agent already holds |
 | `GET`/`POST /v1/edge/travel` | Travel between worlds of one site ([worlds](worlds.md#travel-between-worlds)) |
 
 Public reads (`/v1/edge/public/souls/:id`, `/map`, `/calendar`, `/schema`, `/content/catalogue`, …) need no token. No place is secret (#1262, from November 2026): a mark a world's creator once set is ignored, so a Soul's public record names every place it has been, as its receipts and timeline do.
@@ -628,10 +637,30 @@ walk reaches it, and the walk then fails `route.unreachable` there.
 A closed, unlocked door a hand opens is a way through in every world, flat or ground (`doors-pass/1`, #2365). Reach
 checks, room goals and the connectivity audit count ONE such door on the ground as a way through, exactly what one walk
 act does: it goes to the door, opens it by hand, passes and closes it behind (entry 31). The walk graph still treats the
-shut leaf as solid. A room one closed door from the world is never `nav.disconnected` and a Soul inside is never stepped
-out. A room behind two closed doors in series, or behind a door upstairs, is not reached in one walk and counts as cut
+shut leaf as solid. A room one closed door from the world, on any floor its stairs reach, is never `nav.disconnected` and
+a Soul inside is never stepped out. A room behind two closed doors in series, or behind a door upstairs, is not reached in one walk and counts as cut
 off, so a Soul shut in there is stepped out as below. A locked door stays a wall. A verification probe opens no door: it
 is refused `route.unreachable` naming the door.
+
+Every core building's outside ground-floor doorway holds such a door (#2383): each building def has a door-fitted
+revision (`make.args.doorThings`) whose outside doorways are bare, and a `core/door@2` stands in each, closed for an
+enclosed room. Templates carry them, so new worlds have them: `tools/worlds/fit-doors-v1.mjs` runs the live rule on each
+template and writes the doors in one batch after everything else, each at its building's settled height. A door stands at
+that height and never cuts a foundation pad into the slope (it would re-settle its building away from it). A live world keeps its drawn doorways: live-world door migration
+(`door-fit/1`, the last boot rule) is off until a fit can run in slices under 1 s, and runs only with `DOOR_FIT_BOOT=1`.
+With it on, a world gets them once at boot, one building at a time, each
+its own recorded edit, with the world serving between them; a restart part way through goes on where it stopped. Inside doors,
+upper floors keep their drawn leaf for now; an outside doorway that opens into another building's room, or into a yard
+the buildings close in all round (Eden's courtyard compounds), stays an open doorway, with no door in it, until a walk can
+pass several closed doors in a row (#2370). So does a doorway whose door a hand could not work: where something stands
+where the body steps to open it from outside or close it from inside, or the other way round (a flower pot, a laundry
+line, the building's own stairs or porch post). A building the world refuses to fit is tried again at the next boot. A
+walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its room when it has one.
+
+A walk through such a door is planned from the Soul's own floor: from upstairs, the first leg walks down the stairs to
+the door. When the connectivity labels put one end of a walk behind a closed door and the other not, the walk is
+planned as the passage's legs from the start, so a long walk across the world goes through the door rather than
+stopping short of it.
 
 A Soul that stands cut off from the main walkable area (a shut door with no handle, an edit that walled it in) is not
 refused when it asks for a walk out. The act first steps it to the nearest open ground, a logged `edge-relocate` under
@@ -652,4 +681,7 @@ ticks (10 s) on cold labels while the static world kept changing, one relabel ru
 most and at most once per 200 ticks a world. When that relabel fits in 250 ms and the Soul isn't inside its one-minute
 step-out cooldown, it is out about 10-13 s after the walk ends. The server log says
 `nav rescue: forced relabel <ms> ms, warm|still cold, <n> waiting`. A world whose static world is quiet never takes it
-(#1548). A stream of god edits re-arms the first build instead, which this doesn't cover yet (#1744).
+(#1548). A stream of god edits re-arms the first build faster than its 20 ms slices finish; with a Soul waiting, every
+tenth tick the rescue read takes that tick instead of the slice, so the same forced relabel fires under edits every tick
+too (also after a re-warm error): when that relabel fits in 250 ms, the Soul is asked within 210 ticks of the walk ending
+(#1744).

@@ -1,6 +1,6 @@
-# Contributing to Soul
+# Contributing to Souls
 
-Thanks for helping. Soul is developed mostly by coding agents working with the maintainer, and agents are welcome
+Thanks for helping. Souls is developed mostly by coding agents working with the maintainer, and agents are welcome
 contributors here: the same rules apply to everyone, and they are written down in [AGENTS.md](AGENTS.md).
 
 ## Setup

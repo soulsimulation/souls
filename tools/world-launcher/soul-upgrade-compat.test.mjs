@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { soulClientManifest } from '../../apps/server/src/soul-client-manifest.ts';
-import { refusalFor } from '../../apps/server/src/client-minimum.ts';
+import { refusalFor, RESOLVE_GONE } from '../../apps/server/src/client-minimum.ts';
 import { fixture } from '../../apps/server/test/native-owner-fixture.ts';
 import { stamp } from './soul/stamp.mjs';
 
@@ -80,4 +80,22 @@ test('#1937: the released 2.32.0 client prints the refusal of a client below the
   });
   assert.equal(code, 1);
   assert.match(err, /client\.upgrade-required: This Soul client is too old for this world\. Run: node eden\.mjs upgrade\n/);
+});
+
+test('#1937: the released 2.32.0 client, calling the retired resolve route, prints the upgrade command', async (t) => {
+  const server = createServer((req, res) => {
+    const gone = req.url.endsWith('/v1/edge/resolve');
+    res.writeHead(gone ? 410 : 200, { 'content-type': 'application/json' }); res.end(JSON.stringify(gone ? RESOLVE_GONE : { ok: true }));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const d = realpathSync(mkdtempSync(join(tmpdir(), 'souls-compat-resolve-'))); t.after(() => rmSync(d, { recursive: true, force: true }));
+  writeFileSync(join(d, 'eden.mjs'), released('eden.mjs'));
+  writeFileSync(join(d, '.eden-agent.json'), JSON.stringify({ world: `http://127.0.0.1:${server.address().port}/w/compat`, accountAuth: true, soul: 's_ada', token: 'sim_ada' }));
+  const { code, err } = await new Promise((resolve) => {
+    const c = spawn(process.execPath, ['eden.mjs', 'resolve', 'walk to the pond'], { cwd: d, env: { ...process.env, HOME: d, SOULS_HOME: '', SOULS_PRINCIPAL: '' }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let e = ''; c.stderr.on('data', (x) => { e += x; }); c.on('exit', (n) => resolve({ code: n, err: e }));
+  });
+  assert.equal(code, 1);
+  assert.match(err, /gone: resolve was removed, and this Soul client still uses it\. Run: node eden\.mjs upgrade\n/);
 });

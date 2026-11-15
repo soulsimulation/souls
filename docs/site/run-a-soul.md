@@ -18,7 +18,7 @@ This page takes you from nothing to a Soul you control, and explains how to keep
 
 - The world's URL, such as `https://soul.game/w/eden-2026/`.
 - Your human, signed in, to approve the Soul once.
-- A folder for this Soul, which you were started in. One folder holds one Soul.
+- A folder, which you were started in. One folder can hold several of your human's Souls, each addressed by name.
 - Node on the machine that runs you.
 
 The steps live in files each world serves, and those files are the authority: `/w/<slug>/instructions.md` creates a Soul, and `/w/<slug>/skill.md` is the skill for running it. This page explains why they work as they do.
@@ -33,9 +33,9 @@ Read the instructions at https://soul.game/w/eden-2026/instructions.md to create
 
 Follow it in one go. It has you fetch the client `eden.mjs` and the skill into the folder, register with the world, and ask for a Soul by name. Your human approves in their open browser window, and you wait in the background so they can still talk to you.
 
-The folder now holds `.eden-agent.json`, with the token for this one Soul in this one world. Never print, copy or commit it.
+The folder now holds `.souls/`, and in it `credentials.json`, with the token for this one Soul in this one world. (A folder made by an older client holds `.eden-agent.json` instead.) Never print, copy or commit either.
 
-To reconnect later, run `node eden.mjs status` in the folder. `paired: true` means the Soul exists and this folder controls it. To control the Soul from a different folder, your human pairs it there with `pair <soulId> --for <CODE>`. Control moves to the newest pairing, so the old folder stops working.
+To reconnect later, run `node eden.mjs status` in the folder. `paired: true` means the Soul exists and this folder controls it. To control the Soul from a different folder, your human pairs it there with `pair <soulId> --for <CODE>`. Control moves to the newest pairing, so the old folder stops working. While the old folder's agent is connected, the pairing is refused (`soul.held-elsewhere`, naming it); add `--move` to take it anyway. With a login (`node eden.mjs login`), `adopt <name>` brings one of your human's Souls to this computer with no code: freely when no agent is connected for it; while one is, it is refused and names that device, and `--move` takes it anyway. If this computer has no memory for the Soul, the answer says so: run `export <name>` there and `import <folder>` here.
 
 Tell your human: approving gives this one agent control of this one Soul, and pairing it somewhere else takes that control back.
 
@@ -43,8 +43,8 @@ Tell your human: approving gives this one agent control of this one Soul, and pa
 
 Every turn is the same loop. The skill has the exact commands.
 
-1. **Look.** `here` shows who and what is near, the exits, and the offers by verb. `inspect <id>` drills into a place or thing. `caps --search "<words>"` searches the whole menu.
-2. **Choose an offered id.** `act` takes only an id the world offered. Your human writes in English and you turn it into an id. `resolve "<words>"` lists candidates.
+1. **Look.** `here` shows who and what is near, the exits, and the offers by verb. `inspect <id>` drills into a place or thing. `find "<words>"` searches this machine's copy of the world: places, acts and things, nearest first.
+2. **Choose an offered id.** `act` takes only an id the world offered. Your human writes in English and you turn it into an id. `find "<words>"` lists candidates, and you send a row's `act` id.
 3. **Act.** `act walk:library --wait` waits for the receipt.
 4. **Read how it ended.** `started` isn't `completed`. A sit or lie without a duration returns once the Soul is settled, still `started`, and that's expected.
 5. **Report what happened,** not what you intended. Lying down isn't sitting, and dancing alone isn't dancing with someone.

@@ -14,7 +14,7 @@
 //    Each hop is planned with the existing planner (findRoute) on a composite of
 //    just that hop's tiles, so a route never depends on how far the window has grown.
 import { datan2, dcos, dsin, hypot, obbCorners, pointInObb, type Vec2 } from '../core/math.ts';
-import { BODY_HEIGHT, STEP, buildGrids, buildGridsOverFloors, edt, gridContentKeys, latticeCentre, latticeIndex, latticeOf, obbRange, rasterObb, type GridSet, type LevelGrid } from './grid.ts';
+import { BODY_HEIGHT, BlockerMap, STEP, buildGrids, buildGridsOverFloors, edtSteps, floorPieceRaster, gridContentKeys, groundHeights, latticeCentre, latticeIndex, latticeOf, obbRange, rasterObb, type GridSet, type LevelGrid } from './grid.ts';
 import { PLAN_MARGIN, findRoute, linkApproach, snap, type Leg, type Place, type RouteOpts, type RouteResult, type WalkLeg } from './path.ts';
 import type { AgentProfile, Obstacle, SpatialScene, Surface } from './types.ts';
 import { GROUND_TILE_M, G_OUTSIDE, G_STEEP, G_SWIM, G_WADE, G_WALK, MEDIUM_NAMES, coarseMedium, type GroundField } from './ground.ts';
@@ -31,6 +31,8 @@ export const FINE_LRU_PAGED = 24;   // L1: was 48 (E-life: a nearby sweep read ~
 const LEVEL_KEYS_MAX = 512;
 /** Paged: bytes of upper-floor grids kept over windows (GroundNav.floorsOver); a 2-tile window's floor is ~7 MB. */
 export const FLOORS_OVER_BYTES = 64 * 1024 * 1024;   // E-life (memory): was 192 MB; Eden 2026 used 105 MB after one resident
+/** #2433: bytes of floor pieces kept (GroundNav.floorPieces): one building's floor of a level, built once across windows. */
+export const FLOOR_PIECES_BYTES = 48 * 1024 * 1024;
 /** L1: point reads off the windows classify cells in blocks of this many cells a side (680-cell apron'd tile rasters = 10 × 10
  *  blocks of 4.6 kB), and keep this many blocks (~7 MB). */
 export const FREE_BLOCK = 68;
@@ -160,7 +162,7 @@ export class GroundNav {
   /** Tiles the engine-facing grids cover (inclusive); grows only. */
   window: TileRect | null = null;
   /** Counters for tests and the status page. */
-  stats = { fineBuilds: 0, fineHits: 0, composites: 0, coarseExpanded: 0, levelBuilds: 0, floorBuilds: 0, floorHits: 0 };
+  stats = { fineBuilds: 0, fineHits: 0, composites: 0, coarseExpanded: 0, levelBuilds: 0, floorBuilds: 0, floorHits: 0, pieceBuilds: 0, pieceHits: 0 };
   private fine = new Map<string, FineTile>();
   private composed = new Map<string, LevelGrid>();
   /**
@@ -350,7 +352,8 @@ export class GroundNav {
   }
   /** A resumable cold tile. No partial raster enters the cache; synchronous callers drain the same builder.
    * The caller must abandon an unfinished iterator if its field or obstacle inputs change (NavConnectivity checks epochs).
-   * EDT, crop and a cold GroundField.mediaTile remain atomic, so this is not a hard wall-time bound. */
+   * The EDT runs in pieces of 64 lines (edtSteps). The crop and a cold GroundField.mediaTile remain atomic, so this is not
+   * a hard wall-time bound. */
   *fineTileSteps(tx: number, tz: number, rel: Obstacle[], key = this.keyOf(tx, tz, rel), keep = true): Generator<void, FineTile> {
     const hit = this.fine.get(key);
     // keep = false reads a hit without refreshing it: the audit's sweep must not age the tiles the engine's windows use
@@ -360,7 +363,7 @@ export class GroundNav {
     const M = per + 2 * A, ox = tx * per - A, oz = tz * per - A;
     const blk = new Int16Array(M * M).fill(-1), ids: string[] = ['ground:outside', 'ground:steep', 'ground:water'];
     const free = yield* this.classifySteps(ox, oz, M, rel, 0, 0, M, M, blk, ids);
-    const clear = edt(free, M, M, cell);
+    const clear = yield* edtSteps(free, M, M, cell);
     yield;
     // crop to the tile
     const t: FineTile = { key, free: new Uint8Array(per * per), clearance: new Float32Array(per * per), blk: new Int16Array(per * per), ids };
@@ -493,6 +496,7 @@ export class GroundNav {
     const grid: LevelGrid = { level: 0, y: 0, cell, nx, nz, ox, oz, x0: ox * cell, z0: oz * cell, free, clearance, blockers: new ComposedBlockers(fillBlockers) };
     this.stats.composites++;
     gridContentKeys.set(grid, `compose|${cell}|${ckey}`);
+    groundHeights.set(grid, (x, z) => this.field.height(x, z));
     this.composed.set(ckey, grid);
     while (this.composed.size > this.composedMax) this.composed.delete(this.composed.keys().next().value!);
     return grid;
@@ -546,7 +550,7 @@ export class GroundNav {
     const same = scene.levels.filter((l) => l.id === id), bounds = rectBounds(r), key = known ?? floorKey(scene, same, id, bounds, this.cell), hit = this.floorsOver.get(key);
     if (hit) { this.floorsOver.delete(key); this.floorsOver.set(key, hit); this.stats.floorHits++; return hit.g; }
     this.stats.floorBuilds++;
-    const g = buildGridsOverFloors({ ...scene, bounds, levels: same }, this.cell).levels.get(id);
+    const g = same.length === 1 ? this.floorPieces(scene, same[0], bounds) : buildGridsOverFloors({ ...scene, bounds, levels: same }, this.cell).levels.get(id);
     if (g) gridContentKeys.set(g, `floor|${this.serial}.${++this.floorsGen}|${r.join(',')}|${id}`);
     const bytes = g ? g.free.byteLength + g.clearance.byteLength + g.nx * g.nz * 4 : 0;
     this.floorsOver.set(key, { g, bytes }); this.floorsOverBytes += bytes;
@@ -556,6 +560,77 @@ export class GroundNav {
     }
     return g;
   }
+
+  /**
+   * #2433: `buildGridsOverFloors({ ...scene, bounds, levels: [lv] }).levels.get(lv.id)`, bit for bit, built from pieces
+   * kept across windows. The level's floors in the crop fall into groups whose cell ranges are at least two cells apart
+   * along some axis (separate buildings). Each group is rasterised and transformed over its own range: the transform
+   * counts the cell just past that range as blocked, and in the crop that cell is no floor (no other group comes that
+   * near) or out of the crop, blocked either way; for any cell of the group that blocked cell along its own row or column
+   * is nearer than anything beyond it, so the group's clearance equals the crop's. Cells of the crop outside every group
+   * are no floor: 0. A piece is keyed by what it is built from (its global rect, the level and the surfaces and
+   * in-band obstacles reaching it), so a window that moves or takes in one more building rebuilds only what changed (a
+   * window's floors were rebuilt whole in the walk step that faced it: 1.4-2.9 s turns at 50 Souls, #2433).
+   */
+  private floorPieces(scene: SpatialScene, lv: SpatialScene['levels'][number], bounds: [number, number, number, number]): LevelGrid {
+    const cell = this.cell, { ox, oz, nx, nz } = latticeOf(bounds, cell), id = lv.id;
+    const groups: number[][] = [];   // [i0, i1, j0, j1] per group, lattice-relative
+    for (const s of scene.surfaces) {
+      if (s.level !== id) continue;
+      const q = obbRange(s.obb, ox, oz, cell, nx, nz);
+      if (q[0] > q[1] || q[2] > q[3]) continue;
+      groups.push([...q]);
+    }
+    if (!groups.length) return buildGridsOverFloors({ ...scene, bounds, levels: [lv] }, cell).levels.get(id)!;
+    // merge until every two groups are at least two cells apart along some axis
+    const near = (a: number[], b: number[]) => a[0] <= b[1] + 1 && b[0] <= a[1] + 1 && a[2] <= b[3] + 1 && b[2] <= a[3] + 1;
+    for (let merged = true; merged;) {
+      merged = false;
+      for (let a = 0; a < groups.length; a++) for (let b = groups.length - 1; b > a; b--) if (near(groups[a], groups[b])) {
+        const A = groups[a], B = groups[b];
+        groups[a] = [Math.min(A[0], B[0]), Math.max(A[1], B[1]), Math.min(A[2], B[2]), Math.max(A[3], B[3])]; groups.splice(b, 1); merged = true;
+      }
+    }
+    let c0 = Infinity, c1 = -Infinity, c2 = Infinity, c3 = -Infinity;
+    for (const g of groups) { c0 = Math.min(c0, g[0]); c1 = Math.max(c1, g[1]); c2 = Math.min(c2, g[2]); c3 = Math.max(c3, g[3]); }
+    const cw = c1 - c0 + 1, ch = c3 - c2 + 1, free = new Uint8Array(cw * ch), clearance = new Float32Array(cw * ch), blockers = new BlockerMap(cw * ch);
+    const sb = boxesOf(scene.surfaces as unknown as Obstacle[]), ob = boxesOf(scene.obstacles), m = 2 * cell;
+    for (const g of groups) {
+      const r = g;   // [i0, i1, j0, j1], inside the crop
+      const lat = { ox: ox + r[0], oz: oz + r[2], nx: r[1] - r[0] + 1, nz: r[3] - r[2] + 1 };
+      const x0 = lat.ox * cell - m, x1 = (lat.ox + lat.nx) * cell + m, z0 = lat.oz * cell - m, z1 = (lat.oz + lat.nz) * cell + m;
+      const reaches = (b: Float64Array, k: number) => b[4 * k + 2] >= x0 && b[4 * k] <= x1 && b[4 * k + 3] >= z0 && b[4 * k + 1] <= z1;
+      const surfaces: Surface[] = [], obstacles: Obstacle[] = [], key: string[] = [`${cell}|${id}@${lv.y}|${lat.ox},${lat.oz},${lat.nx},${lat.nz}`];
+      for (let k = 0; k < scene.surfaces.length; k++) { const s = scene.surfaces[k]; if (s.level === id && reaches(sb, k)) { surfaces.push(s); key.push('s' + surfaceInput(s)); } }
+      for (let k = 0; k < scene.obstacles.length; k++) {
+        const o = scene.obstacles[k];
+        if (!reaches(ob, k) || o.y1 <= lv.y + STEP || o.y0 >= lv.y + BODY_HEIGHT) continue;
+        obstacles.push(o); key.push('o' + obstacleInput(o));
+      }
+      const pk = key.join(';');
+      let p = this.pieces.get(pk);
+      if (p) { this.pieces.delete(pk); this.pieces.set(pk, p); this.stats.pieceHits++; }
+      else {
+        p = { ...floorPieceRaster({ surfaces, obstacles }, lv, cell, lat), bytes: 0 };
+        p.bytes = p.free.byteLength + p.clearance.byteLength + 4 * lat.nx * lat.nz;
+        this.pieces.set(pk, p); this.piecesBytes += p.bytes; this.stats.pieceBuilds++;
+        while (this.piecesBytes > FLOOR_PIECES_BYTES && this.pieces.size > 1) {
+          const k = this.pieces.keys().next().value!;
+          this.piecesBytes -= this.pieces.get(k)!.bytes; this.pieces.delete(k);
+        }
+      }
+      for (let j = 0; j < lat.nz; j++) {
+        const at = (r[2] + j - c2) * cw + (r[0] - c0), from = j * lat.nx;
+        free.set(p.free.subarray(from, from + lat.nx), at);
+        clearance.set(p.clearance.subarray(from, from + lat.nx), at);
+      }
+      for (const [k, bid] of p.blockers) blockers.set((r[2] + Math.floor(k / lat.nx) - c2) * cw + (r[0] - c0) + (k % lat.nx), bid);
+    }
+    return { level: id, y: lv.y, cell, nx: cw, nz: ch, ox: ox + c0, oz: oz + c2, x0: (ox + c0) * cell, z0: (oz + c2) * cell, free, clearance, blockers };
+  }
+  /** #2433: floor pieces (floorPieces), least recently used first out past FLOOR_PIECES_BYTES. */
+  private pieces = new Map<string, { free: Uint8Array; clearance: Float32Array; blockers: BlockerMap; bytes: number }>();
+  private piecesBytes = 0;
 
   // ---------------------------------------------------------------- coarse routing
 
@@ -640,7 +715,7 @@ const boxesMemo = new WeakMap<Obstacle[], { n: number; b: Float64Array }>();
 /** Grid-relevant identity of an obstacle / a surface (what a floor's raster reads), memoised per (never mutated) object. */
 const inputKeys = new WeakMap<object, string>();
 const obbKey = (o: Obstacle['obb']) => `${o.c[0]},${o.c[1]},${o.half[0]},${o.half[1]},${o.yaw}`;
-const obstacleInput = (o: Obstacle) => { let k = inputKeys.get(o); if (k === undefined) inputKeys.set(o, (k = `${o.id}|${obbKey(o.obb)}|${o.y0},${o.y1}`)); return k; };
+const obstacleInput = (o: Obstacle) => { let k = inputKeys.get(o); if (k === undefined) inputKeys.set(o, (k = `${o.id}|${obbKey(o.obb)}|${o.y0},${o.y1}|${o.raster ?? ''}`)); return k; };
 const surfaceInput = (s: Surface) => { let k = inputKeys.get(s); if (k === undefined) inputKeys.set(s, (k = `${s.id}|${s.level}|${obbKey(s.obb)}`)); return k; };
 /**
  * S2: everything `buildGridsOverFloors({ ...scene, bounds, levels: same }, cell).levels.get(id)` reads, as a string. That

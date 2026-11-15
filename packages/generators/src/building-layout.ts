@@ -22,6 +22,7 @@ export type LOpening = {
   s: number; at: Vec2; width: number; height: number; sill: number;
   /** Rooms (or 'outside' / 'balcony' / 'porch') joined by a door. */
   from?: string; to?: string; exterior: boolean;
+  /** false: a bare doorway, no leaf drawn (PExt.leaf). */ leaf?: false;
 };
 export type LStair = {
   id: string; kind: 'straight' | 'spiral'; from: number; to: number; room: string; width: number; risers: number; y0: number; y1: number;
@@ -194,7 +195,7 @@ export function realize(p: Plan): Layout {
     const sc = lo > hi ? (s0 + s1) / 2 : lo + (hi - lo) * (e.at ?? 0.5);
     if (s1 - s0 < width + 0.3 || !claim(i, sc - width / 2, sc + width / 2)) { L.warnings.push(`exterior ${e.kind} on ${e.room} (${e.side}): no room on the wall`); return; }
     const id = door ? (e.to === 'balcony' ? (nDoor++, 'balcony-door') : nDoor++ === 0 ? 'front-door' : `door-${nDoor}`) : `window-${++nWin}`;
-    L.openings.push({ id, kind: 'door' === e.kind ? 'door' : 'window', floor: e.floor, wall: i, wallId: w.id, s: sc, at: lerp2(w.a, w.b, sc), width, height, sill, exterior: true, ...(door ? { from: r.id, to: e.to ?? 'outside' } : {}) });
+    L.openings.push({ id, kind: 'door' === e.kind ? 'door' : 'window', floor: e.floor, wall: i, wallId: w.id, s: sc, at: lerp2(w.a, w.b, sc), width, height, sill, exterior: true, ...(door ? { from: r.id, to: e.to ?? 'outside' } : {}), ...(door && e.leaf === false ? { leaf: false as const } : {}) });
   };
   for (const e of p.ext.filter((x) => x.kind === 'door')) extOn(e);
   for (const e of p.ext.filter((x) => x.kind === 'window')) extOn(e);

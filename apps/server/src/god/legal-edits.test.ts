@@ -141,10 +141,15 @@ test('legal-edits/1: a preview that times out refuses the edit with a retryable 
   const real = previewWorkerScriptV1(new URL(`data:text/javascript,${encodeURIComponent('import { parentPort } from "node:worker_threads";\nparentPort.on("message", () => {});')}`));
   t.after(() => { previewWorkerScriptV1(real); cleanup(w)(); });
   await w.settle(2);
+  const bo = await w.soul('bo', 'Bo');
   await accept(w.host, enableLegalEditsV1(w.host, 'test:legal-edits') as never); await w.settle(2);
   w.bridge.legalTimeoutMs = 300;
+  // an edit with nothing a rule watches within 8 m needs no preview: it goes through without one (the worker never answers)
+  const [bx, bz] = w.at(bo.entityId), near: [number, number] = [bx, bz + 3];
+  const far: any = await w.god.checked(() => w.god.act(wall('far-wall', [bx + 30, bz + 30])));
+  assert.equal(far.accepted, true, JSON.stringify(far));
   const seq = w.god.model.editSeq;
-  const r: any = await w.god.checked(() => w.god.act(wall('wall', [5, 5])));
+  const r: any = await w.god.checked(() => w.god.act(wall('wall', near)));
   assert.equal(r.accepted, false, JSON.stringify(r));
   assert.equal(r.failures[0].code, 'edit-preview.worker-unavailable');
   assert.equal(r.failures[0].measured.retryable, true); assert.equal(r.ok, false, 'a build rewind client reads ok');
@@ -152,9 +157,65 @@ test('legal-edits/1: a preview that times out refuses the edit with a retryable 
   assert.equal(w.god.model.get('wall'), undefined); assert.equal(w.god.model.editSeq, seq, 'nothing committed');
   // with a working preview the same request goes through
   previewWorkerScriptV1(real); w.bridge.legalTimeoutMs = undefined;
-  const ok: any = await w.god.checked(() => w.god.act(wall("wall", [5, 5])));
+  const ok: any = await w.god.checked(() => w.god.act(wall("wall", near)));
   assert.equal(ok.accepted, true, JSON.stringify(ok));
-  // a land edit (POST /v1/god/land) waits for its preview the same way
+  // a land edit (POST /v1/god/land) goes through `checked` too
   const raised: any = await w.god.checked(() => land(w.god, { verb: 'raise', at: [30, 30], radius: 6, amount: 0.5, force: true } as never));
   assert.equal(raised.accepted, true, JSON.stringify(raised).slice(0, 400));
+});
+
+// #2377: the preview runs only near what a rule watches. A ring of walls closed 15 m from a Soul gets the same verdict as
+// with the preview forced on every edit (main before #2377), on the dry run and the commit; a ride anywhere, a carried or
+// engine part near the edit, a big fixture whose box reaches a Soul, and an asset the bridge cannot see force the preview.
+test('legal-edits/1: a ring closed far from a Soul is judged as with the preview on every edit; rides, parts and big fixtures force it', { timeout: 300000 }, async t => {
+  const w = await world(); w.brain.quiesce(); t.after(cleanup(w));
+  await w.settle(2);
+  const bo = await w.soul('bo', 'Bo');
+  await accept(w.host, enableLegalEditsV1(w.host, 'test:legal-edits') as never); await w.settle(2);
+  const [x, z] = w.at(bo.entityId), R = 15, W = 6;
+  const seg = (name: string, p: [number, number], r: number) => ({ op: 'place', def: coreRef('wall'), params: { w: W, h: 2.6, d: 0.5 }, name, p, r });
+  // a square ring of side 2R round Bo, five 6 m walls a side (the sides 5 cm clear of the ends); the gap is the middle of the north side, 15 m from Bo
+  const ring: any[] = [];
+  for (let i = 0; i < 5; i++) {
+    const o = -R + W / 2 + i * W;
+    ring.push(seg(`s-${i}`, [x + o, z + R], 0), seg(`w-${i}`, [x - R - 0.3, z + o], Math.PI / 2), seg(`e-${i}`, [x + R + 0.3, z + o], Math.PI / 2));
+    if (i !== 2) ring.push(seg(`n-${i}`, [x + o, z - R], 0));
+  }
+  const open: any = await w.god.checked(() => w.god.act({ ops: ring }));
+  assert.equal(open.accepted, true, JSON.stringify(open).slice(0, 600));
+  await w.settle(4);
+  const close = { ops: [seg('n-2', [x, z - R], 0)] };
+  const real = w.bridge.draftNearWatched;
+  const verdict = async (always: boolean) => {
+    if (always) w.bridge.draftNearWatched = () => true;
+    try { return await w.god.checked(() => w.god.dryrun(close)); } finally { w.bridge.draftNearWatched = real; }
+  };
+  const forced: any = await verdict(true), skipped: any = await verdict(false);
+  const shape = (r: any) => ({ accepted: r.accepted, failures: (r.failures ?? []).map((f: any) => ({ code: f.code, entity: f.entity, rule: f.measured?.rule, detail: f.detail })) });
+  t.diagnostic(`closing the ring 15 m from Bo, forced: ${JSON.stringify({ ...shape(forced), warnings: forced.warnings, wouldMove: forced.wouldMove }).slice(0, 700)}`);
+  assert.deepEqual(shape(skipped), shape(forced), 'the same verdict with and without the preview forced');
+  const committed: any = await w.god.checked(() => w.god.act(close));
+  assert.deepEqual(shape(committed).failures, shape(forced).failures, 'the commit answers as the dry run');
+  assert.deepEqual(w.at(bo.entityId), [x, z], 'Bo never moves');
+
+  // the near test itself, on synthetic drafts 40 m from Bo
+  const draft = (c: [number, number]) => ({ contract: 'world-edit/1', seq: 0, hash: '', levels: [], set: { 'probe-wall': { solids: [{ id: 'probe-wall', obb: { c, half: [3, 0.25], yaw: 0 }, y0: 0, y1: 2.6 }] } } });
+  const far: [number, number] = [x + 40, z + 40], ents = w.E.world.entities;
+  assert.equal(w.bridge.draftNearWatched(w.god.model, draft(far)), false, 'nothing watched near: no preview');
+  assert.equal(w.bridge.draftNearWatched(w.god.model, draft([x + 5, z])), true, 'a Soul within 8 m: preview');
+  const add = (id: string, e: any) => { ents[id] = { id, def: 'probe', provenance: { origin: 'design-edit', confidence: 'hypothetical' }, ...e }; };
+  try {
+    add('probe-ride', { kind: 'fixture', pose: { p: [x - 200, 0, z - 200], yaw: 0 }, carrier: {} });
+    assert.equal(w.bridge.draftNearWatched(w.god.model, draft(far)), true, 'a ride anywhere: preview');
+    delete ents['probe-ride'];
+    add('probe-item', { kind: 'component', pose: { p: [far[0] + 2, 0.9, far[1]], yaw: 0 }, support: { kind: 'held' } });
+    assert.equal(w.bridge.draftNearWatched(w.god.model, draft(far)), true, 'a carried or engine part within 8 m: preview');
+    delete ents['probe-item'];
+    // a fixture counts by its asset's box, not its spot: a 40 m stand 18 m from Bo covers him
+    const stand = { def: 'probe-stand', kind: 'fixture', label: 'stand', p: [x + 18, 0, z], yaw: 0 };
+    const big = { contract: 'world-edit/1', seq: 0, hash: '', levels: [], assets: { 'probe-stand': { size: [40, 3, 40] } }, set: { 'probe-stand': { fixture: stand } } };
+    assert.equal(w.bridge.draftNearWatched(w.god.model, big), true, 'a big fixture whose box covers Bo: preview');
+    const unseen = { ...big, assets: {}, set: { 'probe-stand': { fixture: { ...stand, def: 'probe-unseen', p: [far[0], 0, far[1]] } } } };
+    assert.equal(w.bridge.draftNearWatched(w.god.model, unseen), true, 'an asset the bridge cannot see: preview');
+  } finally { delete ents['probe-ride']; delete ents['probe-item']; }
 });

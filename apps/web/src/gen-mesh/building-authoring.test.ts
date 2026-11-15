@@ -56,7 +56,7 @@ function triangles(g: THREE.Object3D) {
 }
 
 test('all 40 library buildings retain exact pre-XP3 positions, normals, colours and draw counts', () => {
-  assert.equal(defaults.length, CORE_KIT.filter(d => d.make.kind === 'gen' && d.make.gen === 'building/1').length);
+  assert.equal(defaults.length, new Set(CORE_KIT.filter(d => d.make.kind === 'gen' && d.make.gen === 'building/1').map(d => d.name)).size);   // types, not revisions (door-fitted @2s, #2383)
   for (const { name, hash, ...expected } of defaults) {
     const { hash: actual, ...rest } = stats(draw(name.replace(/^core-/, '')));
     assert.deepEqual(rest, expected, name);
