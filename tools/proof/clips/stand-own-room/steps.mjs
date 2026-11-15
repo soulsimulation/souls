@@ -43,6 +43,8 @@ export default async function steps(page, { mark }) {
   mark(`walk to ${STOOL}`);
   const a = await eden(['act', STOOL, '--wait', '80', '--json'], 90_000);
   said('Ana to the stool', a);
+  const i = a.out.indexOf('"endedAt"');   // where the walk ended (x, z), for the kitchen's outline
+  console.error(`kit: ended ${i < 0 ? 'unknown' : a.out.slice(i, i + 200).replace(/\s+/g, ' ')}`);
   mark(a.code === 0 ? 'arrived' : 'act ended');
   said('Ana here', await eden(['here', '--json'], 60_000));
   await page.waitForTimeout(4000);
