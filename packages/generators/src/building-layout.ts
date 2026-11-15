@@ -161,7 +161,9 @@ export function realize(p: Plan): Layout {
     const ra = rect(d.a, d.floor), rb = rect(d.b, d.floor);
     if (!ra || !rb) { L.warnings.push(`door ${d.a}↔${d.b} (floor ${d.floor}): no such room`); continue; }
     const shared = sharedEdge(ra, rb);
-    const w = Math.max(0.6, Math.min(2.4, d.width ?? DOOR_W));
+    const w0 = Math.max(0.6, Math.min(2.4, d.width ?? DOOR_W));
+    // #2434: widened toward minDoorW as far as the shared wall leaves 0.35 m at each end (never narrower than asked)
+    const w = shared && p.minDoorW ? Math.max(w0, Math.min(p.minDoorW, shared.s1 - shared.s0 - 0.7)) : w0;
     if (!shared || shared.s1 - shared.s0 < w + 0.3) { if (d.width !== undefined || d.at !== undefined) L.warnings.push(`door ${d.a}↔${d.b} (floor ${d.floor}): rooms do not share a wall long enough`); continue; }
     doorsTried.add(key);
     const at = d.at ?? 0.5, lo = shared.s0 + w / 2 + 0.2, hi = shared.s1 - w / 2 - 0.2;

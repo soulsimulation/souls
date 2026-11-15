@@ -152,14 +152,7 @@ for (const kind of ['ground-unpaged', 'flat'] as Kind[]) {
     const r1: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inner-bench'}));
     assert.equal(r1.accepted, true, JSON.stringify(r1).slice(0, 600));
     assert.match(r1.receipt.reason ?? '', /Through door-a, door-b and door-c/, 'one walk through all three doors');
-    if (process.env.DOOR_DEBUG) {
-      const prog = () => [...w.E.programs.values()].find((p: any) => p.actor === ana.entityId);
-      console.log('STEPS', JSON.stringify(prog()?.steps.map((s: any) => [s.verb, s.params?.to ?? s.params?.target, s.params?.passage?.mode])));
-      let last = '';
-      for (let n = 0; n < 2000; n++) {const p = prog(); const k = `${p?.index} ${open()} ${body().pose.p.map((v: number) => v.toFixed(1))}`; if (k.split(' ').slice(0, 2).join() !== last) {console.log('T', w.E.world.tick, k); last = k.split(' ').slice(0, 2).join();} if (!p) break; await w.tick(1);}
-    }
     const e1 = await finish(r1);
-    if (process.env.DOOR_DEBUG) console.log('E1', JSON.stringify(e1), open(), JSON.stringify((w.E.runtime.events ?? []).filter((m: any) => m.type === 'mark' && /hand|walk/.test(m.name)).slice(-30)));
     assert.equal(e1.phase, 'completed', JSON.stringify(e1).slice(0, 600));
     assert.ok(inInner(body().pose.p), 'she ends in the inner yard');
     assert.deepEqual(open(), [false, false, false], 'each door closed behind');
@@ -189,7 +182,6 @@ test('a refused passage while shut in: the middle door locked, she is stepped ou
   assert.ok(inInner(body().pose.p), 'shut in the inner yard');
   assert.ok(w.E.navRescueV1(ana.entityId, Infinity), 'shut in: the step-out applies');
   const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:outside-lamp'}));
-  if (process.env.DOOR_DEBUG) console.log('REFUSED-CASE', JSON.stringify(r).slice(0, 800));
   assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
   let e: any;
   for (let n = 0; n < 4000; n++) {e = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) break; await w.tick(1);}

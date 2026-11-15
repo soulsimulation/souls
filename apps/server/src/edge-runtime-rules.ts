@@ -1,7 +1,7 @@
 import type {WorldHost} from './world.ts';
 import { factoryDescriptorV1 } from './world-factory.ts';
 import type { GodMode } from './god/god.ts';
-import { fitWorldDoorsV1, type HandObstacle } from './god/door-fit.ts';
+import { fitWorldDoorsV1, fitWorldDoorsV2, type HandObstacle } from './god/door-fit.ts';
 
 /** Little Martians scene worlds: the old world (WORLD_KEY `littlemartians`, also its launcher fork) and the launcher's
  *  arium (slug `little-martians-arium`, as tools/world-launcher/op-souls.mjs names it). They are excluded from Soul
@@ -26,7 +26,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
 /** The runtime-policy events a world adopts at boot, one after another: each event copies the policy before it, so two queued
  *  together would drop the earlier one's flag from the host's record and log it again at the next boot. After `after` (main's
  *  quiet-seat courtesy event, when it queued one): the edge rules on an edge world, then #1332 body-step-guard/1, #1369
- *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2, legal-edits/1, board-path/1, #2302 classroom-tv/1 and #2383 door-fit/1 (last; #2382 wait-bound/3 goes before it) on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
+ *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2, legal-edits/1, board-path/1, #2302 classroom-tv/1, #2383 door-fit/1 and #2434 door-fit/2 (last; #2382 wait-bound/3 goes before them) on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
  *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
  *  already logged in that place. */
 export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string; god?: () => GodMode | undefined }): Promise<void> {
@@ -53,7 +53,25 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   if (factoryDescriptorV1(host.factory)) await enableLegalEditsV1(host, 'world').catch((e) => console.error('[world] legal-edits/1 could not be adopted:', String(e).slice(0, 300)));   // legal by construction 1b
   await host.enableCarrierBoardPathV1('world').catch((e) => console.error('[world] board-path/1 could not be adopted:', String(e).slice(0, 300)));   // board-path/1
   await host.enableClassroomTvV1('world').catch((e) => console.error('[world] classroom-tv/1 could not be adopted:', String(e).slice(0, 300)));   // #2302
-  await enableDoorFitV1(host, opts.god?.()).catch((e) => console.error('[world] door-fit/1 could not be adopted:', String(e).slice(0, 300)));   // #2383, last (#2382 wait-bound/3 goes above it)
+  await enableDoorFitV1(host, opts.god?.()).catch((e) => console.error('[world] door-fit/1 could not be adopted:', String(e).slice(0, 300)));   // #2383 (#2382 wait-bound/3 goes above it)
+  await enableDoorFitV2(host, opts.god?.()).catch((e) => console.error('[world] door-fit/2 could not be adopted:', String(e).slice(0, 300)));   // #2434, last
+}
+
+/** #2434 door-fit/2, once per world, after door-fit/1: its buildings move to their every-doorway revision with a real
+ *  hand-operated door in every doorway that has none (inside, upstairs, the courtyard doors door-fit/1 held back in
+ *  series, and those a hand could not work: swung the other way, or a prop moved clear), one recorded engine edit, then
+ *  one logged rules event. A building left or refused keeps the event back for the next boot, as door-fit/1. */
+export function doorFitV2(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { doorFitV2?: boolean } | undefined)?.doorFitV2 === true; }
+export async function enableDoorFitV2(host: WorldHost, god: GodMode | undefined, author = 'operator:door-fit'): Promise<unknown> {
+  if (doorFitV2(host) || !god) return;
+  const bodies = Object.values((host.engine.world as unknown as { entities: Record<string, { human?: unknown; pose?: { p?: number[] } }> }).entities)
+    .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
+  const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
+  spatial?.sync(host.engine.world);
+  const r = fitWorldDoorsV2(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
+  if (r.left.length || r.kept.length) return;
+  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV2: true }, doorFitV2: { buildings: r.buildings, doors: r.doors, flipped: r.flipped.length, moved: r.moved.length, held: r.held.length },
+    why: 'door-fit/2 (#2434): every remaining building doorway (inside, upstairs, in series, by a prop) holds a real door a Soul opens by hand; fitted by a recorded engine edit just before this event' });
 }
 
 /** #2383 door-fit/1, once per world: its buildings on a revision that draws fixed door leaves move to their door-fitted

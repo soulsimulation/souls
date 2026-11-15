@@ -3131,11 +3131,12 @@ export class MarsEngine implements Engine {
    *  Eden boot, after door-fit/1's edit, a check here drained the whole world's relabel inside one act, ~25 s on a runner);
    *  the caller then asks the destination's side itself (closedDoorsOnWalkV1 with `behind`). */
   walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean|null{
-    const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
+    // #2434: the destination is the plan's last walk_to (a walk upstairs goes to the front door's stand first)
+    const step=[...steps].reverse().find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
     if(!this.navWarmV1(0))return null;
-    const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
+    const level=typeof step!.params?.level==='number'?step!.params.level:0,goal=level?[t[0],t[1]] as [number,number]:this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
     const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return null;
-    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:typeof step!.params?.level==='number'?step!.params.level:0,tol:.6}]);
+    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level,tol:.6}]);
     // #2434: either end behind doors, and not both in the same door group (the areas a walk joins without a door)
     return !!a?.ok&&!!b?.ok&&(!!a.door||!!b.door)&&(a.door!==b.door||a.group!==b.group);
   }
