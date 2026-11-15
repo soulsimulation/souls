@@ -73,6 +73,28 @@ in `release.sh`; ship.sh does not use it. See [operations](operations.md) for th
 9. **Rollback on failure.** A failed handover or health check rolls back on its own; any later failure stops the run
    and prints the exact rollback commands. Code is rolled back; data never is.
 
+## Release freeze
+
+`release.yml` ships main's HEAD, and its receipt must be for exactly that commit, so nothing may merge between the pin
+and the real ship's dispatch (#1838). The freeze is the repository variable `RELEASE_FREEZE`, holding the pinned sha
+(optionally followed by a note). The release owner sets it at the pin and clears it once the real ship has started:
+
+```sh
+# pin: freeze main at its current head, and let the train take enqueued PRs back out of the queue
+gh variable set RELEASE_FREEZE --body "$(gh api repos/{owner}/{repo}/commits/main --jq .sha) 0.128" && gh workflow run merge-train.yml --ref main
+# after the real ship's preflight job has passed: lift it, and let the train pick up what waited
+gh variable delete RELEASE_FREEZE && gh workflow run merge-train.yml --ref main
+```
+
+While it is set, the [merge train](../.github/workflows/merge-train.yml) merges and enqueues nothing: every
+`merge:ready` PR keeps its label and waits, a PR already in GitHub's merge queue or waiting for it through auto-merge
+is taken back out (that dequeue does not eject it), and the train's run summary names the freeze. Lanes need no
+message and labels need no removal. Every `release.yml` dispatch except `receipts_only`, `feed_only` and `eyes_only`
+refuses while `RELEASE_FREEZE` names anything but main's HEAD; if that happens, gate the new head and pin again, or
+revert what merged. A release PR that must land during the freeze (a client stamp, a revert) means a new pin:
+clear the freeze, merge it, gate the new head and set the freeze to it. Check `gh run list --workflow merge-train.yml
+--status in_progress` after pinning: a train run that picked before the variable was set can still land one PR.
+
 ## The release workflow
 
 [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs [`ship.sh`](#shipsh) on a GitHub runner,
@@ -511,8 +533,8 @@ that world moves and reconnects by itself; "Reconnecting…" appears only after 
 The page tries again 50 to 150 ms after the 1001 close, and the launcher holds that upgrade until the new world
 answers, so the pause is the world's boot: 3.6 to 5.1 s on 0.123, 4.17 and 4.18 (#1583). The release probe's bar is
 6500 ms. Each drop carries both parts (`retryMs`, `heldMs`), and the probe's report keeps the probe machine's load.
-A page running the previous bundle reloads at once only if the protocol changed; otherwise it swaps bundles after
-the tab has been hidden for a minute (`useSouls.ts`).
+A page running the previous bundle reloads at once only if the protocol changed; otherwise it keeps running and never
+reloads by itself (#2368); its next page load takes the new bundle (`useSouls.ts`).
 
 ## Rollback
 

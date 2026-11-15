@@ -20,14 +20,17 @@ function Bridge({ satellite, issuer, onAuth, takePendingLogin }: ClerkBridgeProp
   const [binding, setBinding] = useState<{ accountId: string; issuer: string; subject: string } | null>(null);
   const subject = session.userId, sessionId = session.sessionId;
   const [resolveAttempt, setResolveAttempt] = useState(0);
+  // #2368: the subject whose account lookup has finished (found or given up). Until then the page is "Signing in…" and
+  // keeps its last account state; a lookup run again for the same subject keeps the binding it has (never null between).
+  const [resolved, setResolved] = useState<string | null>(null);
   useEffect(() => {
-    setBinding(null); if (!session.isLoaded || !session.isSignedIn || !subject) return;
+    if (!session.isLoaded || !session.isSignedIn || !subject) return;
     let active = true; const abort = new AbortController();
     void (async () => { for (let attempt = 0; active && attempt < 5; attempt++) { try { const token: string | null = await session.getToken(); if (!active || !token) return;
       const response: Response = await fetch(apiPath('/v1/account/session'), { headers: { authorization: 'Bearer ' + token }, signal: abort.signal, cache: 'no-store' });
       const value: unknown = await response.json();
       if (active && response.ok && value !== null && typeof value === 'object') { const candidate = value as Record<string, unknown>; if (candidate.subject === subject && typeof candidate.issuer === 'string' && candidate.issuer === issuer && typeof candidate.accountId === 'string' && candidate.accountId.startsWith('acct_')) { setBinding({ accountId: candidate.accountId, issuer: candidate.issuer, subject }); return; } }
-    } catch { /* retried */ } if (active) await new Promise<void>(yes => setTimeout(yes, 1000)); } })(); return () => { active = false; abort.abort(); };
+    } catch { /* retried */ } if (active) await new Promise<void>(yes => setTimeout(yes, 1000)); } })().finally(() => { if (active) setResolved(subject); }); return () => { active = false; abort.abort(); };
   }, [session.isLoaded, session.isSignedIn, subject, sessionId, issuer, resolveAttempt]);
   const accountId = binding && binding.subject === subject && binding.issuer === issuer ? binding.accountId : null;
   const currentProfile = profile.user?.id === subject ? profile.user : null;
@@ -35,15 +38,17 @@ function Bridge({ satellite, issuer, onAuth, takePendingLogin }: ClerkBridgeProp
   const live = useRef({ session, clerk }); live.current = { session, clerk };
   // Clerk can emit signed-out before signOut settles. Keep its modal closed until the document returns.
   const signingOut = useRef(false);
-  const ready = session.isLoaded, signedIn = !!session.isSignedIn, authed = ready && signedIn && !!accountId;
+  const signedIn = !!session.isSignedIn, ready = session.isLoaded && (!signedIn || !subject || !!accountId || resolved === subject), authed = ready && signedIn && !!accountId;
   const label = currentProfile?.primaryEmailAddress?.emailAddress ?? currentProfile?.firstName ?? null, avatarUrl = currentProfile?.imageUrl ?? null;
   const auth = useMemo<AuthCtx>(() => ({ mode: 'clerk', ready, authed, label, avatarUrl,
     login: () => { if (signingOut.current) return; const { session: s, clerk: c } = live.current; if (s.isSignedIn) setResolveAttempt(n => n + 1); else startClerkSignIn(c, satellite, location.href, url => location.assign(url)); },
     logout: async (returnUrl) => { if (signingOut.current) return; signingOut.current = true; try { await signOutAndReturn(live.current.clerk, returnUrl); } catch (error) { signingOut.current = false; throw error; } },
     getToken: async () => { const s = live.current.session; return s.isLoaded && s.isSignedIn ? s.getToken() : null; },
     debug: { privyUserId: null, accountIdentity: accountId, wallet: null, linked: [] } }), [ready, authed, label, avatarUrl, accountId, satellite]);
-  // Published once Clerk has loaded: the placeholder before it (signed-out controls, or "Signing in…") stays until then.
-  useEffect(() => { if (auth.ready) onAuth(auth); }, [auth, onAuth]);
+  // Published once Clerk has loaded and knows the account: the placeholder before it (signed-out controls, or "Signing
+  // in…") stays until then. After that every change is published, a new subject's lookup as not ready.
+  const published = useRef(false);
+  useEffect(() => { if (auth.ready || published.current) { published.current = true; onAuth(auth); } }, [auth, onAuth]);
   // A sign-in asked for before Clerk had loaded (the Shell's placeholder login) opens once it has.
   useEffect(() => { if (ready && takePendingLogin()) auth.login(); }, [ready, auth, takePendingLogin]);
   return null;

@@ -190,7 +190,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   const ownedIds=currentMe?.souls??[];
   // #2280: the navbar keeps this identity's last list through a reconnect, quietly marked, never an empty list
   const heldKey='sim.navbar-souls.'+worldKey,heldSouls=useRef<HeldSouls|null>(null);heldSouls.current??=readHeldSouls(heldKey);
-  const shown=shownOwnedSouls(heldSouls.current,auth.authed,authIdentity(auth),currentMe,sim.awaitingWelcome);
+  const shown=shownOwnedSouls(heldSouls.current,auth.authed,authIdentity(auth),currentMe,sim.awaitingWelcome,auth.ready);
   if(JSON.stringify(shown.held)!==JSON.stringify(heldSouls.current)){heldSouls.current=shown.held;writeHeldSouls(heldKey,shown.held);}
   const signinEnabled=AUTH_UI&&configuredSignIn(cfg,launcherWorld);  // new worlds: local dev sign-in too
   const newSoulAvailable=(!signinEnabled||auth.ready)&&(signinEnabled||cfg.accountAuthRequired!==true);

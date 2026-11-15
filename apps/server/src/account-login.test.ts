@@ -118,6 +118,29 @@ test('A2 the grant lists Souls, ends on logout, revoke and a newer login of the 
  assert.equal((lone.resolve(local) as any)?.grant.accountId,'acct_shared');assert.equal(other.resolve(local),null,'without a registry it is accepted only where it was issued');
 });
 
+// #2401 (D1, decided 14 Nov): free while no agent is connected; refused naming the device while one is; move forces it.
+test('#2401 A1: a grant pair is refused while the Soul\'s agent is connected, naming its device; move forces it; a retry stays what it was',async t=>{
+ const w=await world(t),{soulId,token:old}=await w.born('alice','Brisa'),a=await w.login('alice'),bobs=await w.born('bob','Corvin');
+ assert.equal((await w.call('/v1/edge/inbox/listen?timeoutMs=0',undefined,old)).status,200,'the old agent listens: connected');
+ assert.equal((await w.call('/v1/agent/account',undefined,a.token)).data.souls[0].control.state,'connected');
+ const body={agentLabel:'eden 2.33.0',idempotencyKey:key('pair'),pollSecret:secret()};
+ const refused=await w.call(`/v1/agent/account/souls/${soulId}/pair`,body,a.token);
+ assert.equal(refused.status,409,JSON.stringify(refused.data));assert.equal(refused.data.code,'soul.held-elsewhere');
+ assert.equal(refused.data.heldBy,'eden 2.33.0');assert.match(refused.data.message,/connected now from eden 2\.33\.0\. .*move/);
+ assert.equal((await w.call('/v1/agent/soul',undefined,old)).status,200,'refused: the connected agent keeps the Soul');
+ // another account's Soul is 403 as before, connected or not: nothing about who holds it
+ assert.equal((await w.call('/v1/edge/inbox/listen?timeoutMs=0',undefined,bobs.token)).status,200);
+ const foreign=await w.call(`/v1/agent/account/souls/${bobs.soulId}/pair`,{...body,idempotencyKey:key('pair')},a.token);assert.equal(foreign.status,403);assert.equal(foreign.data.heldBy,undefined);
+ // move forces it: the connected agent is replaced
+ const moved=await w.call(`/v1/agent/account/souls/${soulId}/pair`,{...body,move:true},a.token);assert.equal(moved.status,200,JSON.stringify(moved.data));
+ const polled=await w.call('/v1/agent/approval/poll',{approvalId:moved.data.approval.id,pollSecret:body.pollSecret});assert.match(polled.data.token,/^sim_s_/);
+ assert.equal((await w.call('/v1/agent/soul',undefined,old)).data.reason,'replaced');
+ // the new holder listens; a retry of the request that took it is the same request, not a refusal
+ assert.equal((await w.call('/v1/edge/inbox/listen?timeoutMs=0',undefined,polled.data.token)).status,200);
+ assert.equal((await w.call(`/v1/agent/account/souls/${soulId}/pair`,body,a.token)).data.approval?.id,moved.data.approval.id);
+ assert.deepEqual(w.f.host.engine.runtime.violations,[]);
+});
+
 test('A3 move: pair through the grant hands a Soul token with no person; the old token is replaced; others refused',async t=>{
  const w=await world(t),{soulId,token:old}=await w.born('alice','Brisa'),bobs=await w.born('bob','Corvin'),a=await w.login('alice');
  assert.equal((await w.call('/v1/agent/soul',undefined,old)).status,200);

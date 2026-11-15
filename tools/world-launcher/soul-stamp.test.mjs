@@ -47,9 +47,11 @@ test('the frozen client files (eden-agent.mjs, instructions.md, schema-notes.md,
 
 test('a frozen file whose sha256 changed since the latest release tag also changed its version', (t) => {
   const git = (...args) => { try { return execFileSync('git', ['-C', soul, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
-  const tag = git('describe', '--tags', '--match', 'v*', '--abbrev=0');
-  if (!tag) return t.skip('no release tag (v*) is reachable from HEAD; fetch tags (CI checks out with fetch-depth 0) to compare frozen versions');
-  const then = JSON.parse(git('show', `${tag}:./SOURCES.json`)), now = JSON.parse(readFileSync(join(soul, 'SOURCES.json'), 'utf8'));
+  // #2213: the release gate ships `git archive` (no tags), so remote-suite.sh stages the latest tag's SOURCES.json and names it here
+  const staged = process.env.SOUL_RELEASE_SOURCES ? JSON.parse(readFileSync(process.env.SOUL_RELEASE_SOURCES, 'utf8')) : null;
+  const tag = git('describe', '--tags', '--match', 'v*', '--abbrev=0') ?? staged?.tag;
+  if (!tag) return t.skip('no release tag (v*) is reachable from HEAD and none is staged (SOUL_RELEASE_SOURCES); fetch tags (CI checks out with fetch-depth 0) to compare frozen versions');
+  const then = tag === staged?.tag ? staged.sources : JSON.parse(git('show', `${tag}:./SOURCES.json`)), now = JSON.parse(readFileSync(join(soul, 'SOURCES.json'), 'utf8'));
   const versioned = (s) => new Map(listed(s).filter(([p]) => p !== s.controllerCli.file && p !== s.skill.file)
     .map(([p, e]) => [p, { sha256: e.sha256, version: s.runtime?.artifacts?.includes(e) ? s.runtime.version : e.version }]));
   const before = versioned(then), off = [];
