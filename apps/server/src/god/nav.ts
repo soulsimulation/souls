@@ -471,8 +471,9 @@ export class GodNav {
       // a door approach, a seat's front, a fountain's rim: the nearest to me with standing room; else around the thing
       const stands = [...(t.stands ?? [])].sort((a, b) => Math.hypot(a[0] - me[0], a[1] - me[1]) - Math.hypot(b[0] - me[0], b[1] - me[1]));
       for (const s of stands) { goal = this.standPoint(t, s, except); if (goal) break; }
-      // #1243: ... else the nearest spot to the thing itself, also in its own room (none there: no standing room)
-      goal ??= this.standPoint(t, t.at, except, 40);
+      // #1243: ... else, for a thing with stand points, the nearest spot to the thing itself, also in its own room (none
+      // there: no standing room); a thing with none (a lamp, an open pavilion's table) keeps the nearest spot
+      goal ??= t.stands?.length ? this.standPoint(t, t.at, except, 40) : near(t.at, t.level, 40);
       // a thing with no approach of its own: the main ground nearest it when the spot beside it is a pocket (a lamp behind
       // a fence, a shelf with a gap behind it), and a big structure from the main ground near it
       if (!t.stands?.length) goal = toMain(goal, t.big ? 80 : 3);
