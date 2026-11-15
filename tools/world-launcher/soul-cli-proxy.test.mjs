@@ -6,7 +6,7 @@
 // on Node's own proxyEnv.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttps } from 'node:https';
 import { createServer as createHttp } from 'node:http';
 import { connect } from 'node:net';
@@ -188,7 +188,19 @@ for (const [mode, tunnel] of MODES) {
   });
 }
 
-test('a project skill copy in a read-only folder is a one-line note; SKILL.md beside it is written and no upgrade asks for it again', { skip: process.getuid?.() === 0 && 'root writes anywhere' }, (t) => {
+const SKILL_CASE = 'a project skill copy in a read-only folder is a one-line note; SKILL.md beside it is written and no upgrade asks for it again';
+test(SKILL_CASE, (t) => {
+  // Root writes anywhere, and the release gate's containers run as root (#2212). So the case runs in a child: this file
+  // again, only this test, as an unprivileged uid when the parent is root, else as the same user.
+  if (!process.env.SOUL_SKILL_CASE_CHILD) {
+    const env = { ...process.env, SOUL_SKILL_CASE_CHILD: '1' }; delete env.NODE_TEST_CONTEXT;
+    const nobody = process.getuid?.() === 0 ? { uid: 65534, gid: 65534 } : {};
+    const pattern = `^${SKILL_CASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`;
+    const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', `--test-name-pattern=${pattern}`, fileURLToPath(import.meta.url)], { env, encoding: 'utf8', ...nobody });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^# pass 1$/m, r.stdout);
+    return;
+  }
   const dir = tmp(t, 'skill'), h = openHome(createHome(join(dir, '.souls'))), old = '---\nname: souls\nmetadata:\n  version: "2.1.0"\n---\n';
   writeFileSync(join(dir, 'SKILL.md'), old);
   for (const copy of ['.claude/skills/souls', '.agents/skills/souls']) { mkdirSync(join(dir, copy), { recursive: true }); writeFileSync(join(dir, copy, 'SKILL.md'), old); }
