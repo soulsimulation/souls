@@ -379,7 +379,8 @@ withholds. Owner messages and credentials are never in it.
   `GET /v1/edge/live` older than the pushed copy is never written over it. The 2 s poll of `GET /v1/edge/live` runs only while no push has come for 8 s (a world without it, or a stream cut off), and a stream cut off with no answer at all reconnects as soon as the poll reaches the world again. `look`,
   `find` and `query` answer from the files and make no call that waits on the world's clock. `find` ranks places, acts
   and things by the words, nearest first, and reads "a bench near the pond" and "a chair in the library" as a thing and
-  its anchor. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
+  its anchor. "sit" and "seat" name seats, and "sit at the bandstand" finds the seats in it, or, when it has none of its
+  own, the nearest within 80 m around it. A place whose full name is the words comes first, then the longest name the words hold whole ("the north
   door of Eden House 3 Kitchen"); a place row's `also` names the places beside it whose names share its own as a prefix
   (Eden House 3, Eden House 3 Kitchen). `query` takes several questions in one call, each with its own depth, filters and token budget, and says
   what it cut. A word that is a verb of the world ("read a book") asks for that verb; words that only repeat the verb
