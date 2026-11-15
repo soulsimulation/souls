@@ -167,6 +167,12 @@ hang or a memory runaway.
   on every boot; each tick a recovery replays takes at least K ms, as on a busy world). Every recovery logs one line:
   `[world] recovery hold <ms> ms at tick <t>: <n> replays (<ticks> ticks), …; since the last snapshot …`. The eval's
   load mode injects `throw` with `--fault-every-sec <s>` and reports those lines (`recoveries`).
+- **A recovery is bounded (#2458).** An engine error inside a tick replays from the last snapshot on the main thread:
+  about 2 s fixed (mostly the engine's restore) plus 4 to 6 ms a replayed tick at 24 to 100 Souls. The snapshot debt
+  counts the whole tick, not the engine step alone, which measured 0.6 ms a tick and let 1800 to 4800 ticks build up
+  (holds of 8 to 18 s on souls-timed). So the existing rule (3 s of debt, at most one snapshot per 20 s, capture at
+  most 5 % of the time) keeps a busy world's replay to about 20 s of ticks. Under the repair rules, a recovery tries no
+  further plan replay after holding 3 s (`RECOVERY_REPLAY_BUDGET_MS`): the last rung, which steps no ticks, ends it.
 
 **Measured** (`tools/world-launcher/crash-proof.test.mjs`): a real fake-mind Eden core world with its durable clock,
 under the launcher's `ChildPool`, a 5 s hang limit and a 768 MB heap cap. The workstation was loaded (load average 28 on
