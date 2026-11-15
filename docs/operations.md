@@ -35,6 +35,8 @@ At most `--load-parallel` worlds load at once (default 4); the rest wait in orde
 visitor's connection, an alarm for a listening agent, a wind-down alarm, then anything else (keep-alive, monitors),
 oldest first within each. A request for a world that is unloaded, waiting or loading is held up to `--load-hold-ms`
 (default 45,000), then answered `503 world.waking` with `Retry-After`, which the Soul client waits out and asks again.
+A browser asking for the world's page gets, with that 503, a small page naming the world that reloads itself every
+`Retry-After` seconds until the world answers.
 Declared crawlers and link-preview fetchers never load a world: they get its page (the web build's, with the world's
 title and links) and `503 world.unloaded` for anything else. With `--unload-still 1` a visitor's page and the build's
 files are served the same way, and the world loads on the page's live connection or first data request (a page hidden
