@@ -67,6 +67,24 @@ test('#1513 a marked object broken inside the step or before it gets its marked 
   assert.equal(w.bowl().pose.p[0], at0[0] + 1, 'held at the start of the step, where it last stood whole');
 });
 
+test('#1513 (review) a marked pose comes back only as nonfinite-hold/1 would put it back: a body on the spot, a new support or something on it leaves it to the host', () => {
+  for (const change of ['body', 'support', 'resting'] as const) {
+    const w = objectWorld(), at0 = [...w.bowl().pose.p];
+    w.e.markStandingV1('bowl1', undefined, [['pose']]);
+    w.e.spawnHuman({ id: 'a', label: 'Ada', soul: 's_a', at: [at0[0] + 5, at0[2] + 5] } as any); w.e.step();
+    // the change and the break inside the same step, so the mark cannot follow the change first
+    const breakAt = w.rt.tick + 1;
+    w.rt.invariants = [(r: any) => { if (r.tick !== breakAt) return [];
+      if (change === 'body') r.world.entities.a.pose.p = [at0[0], at0[1], at0[2]];
+      if (change === 'support') w.bowl().support = { kind: 'ground' };
+      if (change === 'resting') { const other = Object.values(r.world.entities).find((o: any) => o.id !== 'bowl1' && o.kind === 'component') as any; other.support = { kind: 'resting-on', on: 'bowl1' }; }
+      w.bowl().pose.p[0] = NaN; return []; }, ...w.rt.invariants];
+    w.e.step();
+    assert.ok(Number.isNaN(w.bowl().pose.p[0]), `${change}: not put back by the mark`);
+    assert.ok(w.marks()?.bowl1, `${change}: the mark is kept`);
+  }
+});
+
 test('#1513 a marked number of an object goes back too; a snapshot carries the mark; it ends after the cooldown whole, or with the object', () => {
   const w = objectWorld();
   w.bowl().body ??= {}; w.bowl().body.radius = 0.2;
