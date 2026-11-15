@@ -598,33 +598,86 @@ function patchClearance(old: LevelGrid, free: Uint8Array, oldCols: Float64Array,
 }
 
 /**
+ * The clearance of `old` lowered for cells it newly blocks (`added`, all inside `box` = [i0, i1, j0, j1]), in place.
+ * Blocking cells only shortens distances: a cell's new squared distance is the smaller of its old one and its nearest
+ * added cell's, and clearance is a monotone function of it (edtRows' expression, rounded to float32), so the smaller
+ * clearance is the exact one. Only cells inside B_r (the box grown by r cells, r as in patchClearance: past it the old
+ * distance is shorter than the way to the box) can change; they are the only ones visited.
+ */
+function lowerClearance(old: LevelGrid, oldClear: Float32Array, clearance: Float32Array, added: number[], box: Rect) {
+  const { nx, nz, cell } = old;
+  const [i0, i1, j0, j1] = box;
+  const d = (c: number) => (old.free[c] ? (oldClear[c] / cell + 0.5) * (1 + 1e-5) + 1e-6 : 0);
+  let r = 1;
+  while (i0 - r > 0 || i1 + r < nx - 1 || j0 - r > 0 || j1 + r < nz - 1) {
+    const a0 = Math.max(0, i0 - r), a1 = Math.min(nx - 1, i1 + r), b0 = Math.max(0, j0 - r), b1 = Math.min(nz - 1, j1 + r);
+    let m = 0;
+    if (j0 - r >= 0) for (let i = a0; i <= a1; i++) m = Math.max(m, d((j0 - r) * nx + i));
+    if (j1 + r < nz) for (let i = a0; i <= a1; i++) m = Math.max(m, d((j1 + r) * nx + i));
+    if (i0 - r >= 0) for (let j = b0; j <= b1; j++) m = Math.max(m, d(j * nx + i0 - r));
+    if (i1 + r < nx) for (let j = b0; j <= b1; j++) m = Math.max(m, d(j * nx + i1 + r));
+    if (m < r) break;
+    r = Math.max(r + 1, Math.ceil(m));
+  }
+  const n = added.length, ai = new Int32Array(n), aj = new Int32Array(n);
+  for (let k = 0; k < n; k++) { ai[k] = added[k] % nx; aj[k] = (added[k] - ai[k]) / nx; clearance[added[k]] = 0; }
+  const a0 = Math.max(0, i0 - r), a1 = Math.min(nx - 1, i1 + r), b0 = Math.max(0, j0 - r), b1 = Math.min(nz - 1, j1 + r);
+  for (let j = b0; j <= b1; j++) {
+    const bz = j < j0 ? j0 - j : j > j1 ? j - j1 : 0;
+    for (let i = a0; i <= a1; i++) {
+      const c = j * nx + i, now = clearance[c];
+      if (!now) continue;
+      // no added cell is nearer than the box: skip unless the box could beat the current clearance
+      const bx = i < i0 ? i0 - i : i > i1 ? i - i1 : 0, lb = bx * bx + bz * bz;
+      if (Math.max(0, Math.sqrt(lb) * cell - cell / 2) >= now) continue;
+      let best = Infinity;
+      for (let k = 0; k < n; k++) { const dx = i - ai[k], dz = j - aj[k], q = dx * dx + dz * dz; if (q < best) best = q; }
+      const v = Math.fround(Math.max(0, Math.sqrt(best) * cell - cell / 2));
+      if (v < now) clearance[c] = v;
+    }
+  }
+}
+
+/** edt(g.free) for grids whose stored clearance is not that (a ground composite's tiles: each tile's own EDT), kept per grid. */
+const EXACT = new WeakMap<LevelGrid, Float32Array>();
+/** The exact EDT of `g`'s free cells: its own clearance when built with a column pass (as patchClearance assumes), else
+ *  computed once per grid (a full rebuild's clearance is exactly this, whatever `g.clearance` holds). */
+function exactClearance(g: LevelGrid): Float32Array {
+  if (COLUMNS.has(g) || LAZY_COLUMNS.has(g)) return g.clearance;
+  let e = EXACT.get(g);
+  if (!e) EXACT.set(g, (e = edt(g.free, g.nx, g.nz, g.cell)));
+  return e;
+}
+
+/**
  * `base` (built by buildGrids from some scene) with `extra` obstacles appended to that scene.
  * Bit-identical to rebuilding: obstacles only ever clear cells, so copy the base rasters, stamp
- * the extras with the same rule and order, and redo the exact EDT — windowed (patchClearance) when
- * the base level kept its column pass (Spatial's synced grids), in full otherwise. Rasterising the
- * base obstacles (thousands on the campus) dominates buildGrids; this skips it.
+ * the extras with the same rule and order, and lower the clearance near each extra's new cells
+ * only (lowerClearance), never the whole level's EDT. Rasterising the base obstacles (thousands on
+ * the campus) dominates buildGrids; this skips it.
  */
 export function gridsWithObstacles(base: GridSet, extra: Obstacle[]): GridSet {
   const levels = new Map<number, LevelGrid>();
   for (const [id, g] of base.levels) {
-    let free: Uint8Array | null = null;
+    let free: Uint8Array | null = null, clearance: Float32Array | null = null;
     let blockers = g.blockers;
-    let ci0 = g.nx, ci1 = -1, cj0 = g.nz, cj1 = -1;
     for (const o of extra) {
       if (o.y1 <= g.y + STEP || o.y0 >= g.y + BODY_HEIGHT) continue;
+      const added: number[] = [];
+      let ci0 = g.nx, ci1 = -1, cj0 = g.nz, cj1 = -1;
       rasterObb(o.obb, g.ox, g.oz, g.cell, g.nx, g.nz, (i) => {
         if (!(free ?? g.free)[i]) return;
         if (!free) { free = g.free.slice(); blockers = copyBlockers(g.blockers, g.nx * g.nz); }
         blockers.set(i, o.id);
         free[i] = 0;
+        added.push(i);
         const ci = i % g.nx, cj = (i - ci) / g.nx;
         if (ci < ci0) ci0 = ci; if (ci > ci1) ci1 = ci; if (cj < cj0) cj0 = cj; if (cj > cj1) cj1 = cj;
       }, o.raster !== 'centre');
+      if (added.length) { const exact = exactClearance(g); lowerClearance(g, exact, (clearance ??= exact.slice()), added, [ci0, ci1, cj0, cj1]); }
     }
     if (!free) { levels.set(id, g); continue; }
-    const cols = columnsFor(g);
-    const clearance = cols ? patchClearance(g, free, cols, [ci0, ci1, cj0, cj1]).clearance : edt(free, g.nx, g.nz, g.cell);
-    levels.set(id, { ...g, free, blockers, clearance });
+    levels.set(id, { ...g, free, blockers, clearance: clearance! });
   }
   return { cell: base.cell, levels };
 }
@@ -703,6 +756,14 @@ export function edt(free: Uint8Array, nx: number, nz: number, cell: number, g = 
   edtColumns(free, nx, nz, g, 0, nx - 1);
   const out = new Float32Array(nx * nz);
   edtRows(free, g, nx, cell, out, 0, nz - 1);
+  return out;
+}
+
+/** `edt` in resumable pieces of at most `lines` columns, then rows, each (the same passes over the same lines: bit-identical). */
+export function* edtSteps(free: Uint8Array, nx: number, nz: number, cell: number, lines = 64): Generator<void, Float32Array> {
+  const g = new Float64Array(nx * nz), out = new Float32Array(nx * nz);
+  for (let i = 0; i < nx; i += lines) { edtColumns(free, nx, nz, g, i, Math.min(nx, i + lines) - 1); yield; }
+  for (let j = 0; j < nz; j += lines) { edtRows(free, g, nx, cell, out, j, Math.min(nz, j + lines) - 1); if (j + lines < nz) yield; }
   return out;
 }
 
