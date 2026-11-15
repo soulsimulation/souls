@@ -49,6 +49,7 @@ import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
 import { BootProgress } from './load/boot-progress.ts';
 import { S } from './load/shared.ts';
+import { RECOVERY_STEP_ID } from './load/restart-loop.ts';
 import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
@@ -1933,10 +1934,10 @@ export class WorldHost {
       for (const actor of recipe.edge?.stopActors ?? []) { const program=this.engine.programOf(actor); if (program) this.engine.stop(program); }
     }
     for (const e of recipe.events.slice(nested+1)) {
-      while (this.engine.world.tick < e.tick) { const out=this.engine.step(); this.advanceLives(); this.afterPrograms(out.programs,true); }
+      while (this.engine.world.tick < e.tick) { const out=this.engine.step(); this.stepFaultV1?.(this.engine.world.tick-1,true); this.advanceLives(); this.afterPrograms(out.programs,true); }
       this.apply(e,true); this.seq=e.seq;
     }
-    while (this.engine.world.tick < recipe.untilTick) { const out=this.engine.step(); this.advanceLives(); this.afterPrograms(out.programs,true); }
+    while (this.engine.world.tick < recipe.untilTick) { const out=this.engine.step(); this.stepFaultV1?.(this.engine.world.tick-1,true); this.advanceLives(); this.afterPrograms(out.programs,true); }
     this.restorePoses(recipe.edge?.poses);
     if (this.engine.runtime.violations.length > historicViolations) {
       // Name both faults (#509): CI logs and a paused world's engineFault keep only this message.
@@ -1948,16 +1949,21 @@ export class WorldHost {
     for (const m of this.minds.values()) { m.nextEvalTick=this.engine.world.tick+1; m.evalTrigger='activity-failed'; m.lastFingerprint=''; if (m.pending && recipe.excluded.includes(m.pending.card)) m.pending=null; }
     this.kernel.tick=this.engine.world.tick; sweep(this.kernel); this.kernelDirty=true;
   }
-  /** #2458 (SIM_FAULT_INJECT, tests and measurement only): run after each engine step with the tick it stepped from; a throw
-   *  here is a fault inside the tick, recovered as an engine fault is. */
-  stepFaultV1: ((tick: number) => void) | null = null;
+  /** #2458 (SIM_FAULT_INJECT, tests and measurement only): run after each engine step with the tick it stepped from, and
+   *  whether a recovery is replaying it; a throw from a live step is a fault inside the tick, recovered as an engine fault is. */
+  stepFaultV1: ((tick: number, replay: boolean) => void) | null = null;
   /** #2458: the replays the current recovery ran (each one from its baseline to the faulted tick), for its hold line. */
   private recoveryReplays: number[] | null = null;
   /** #2458: one line per recovery: how long it held the main thread and how far back it replayed. */
   private recoverFault(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
     const t0 = performance.now(), tick = this.engine.world.tick, replays: number[] = this.recoveryReplays = [], debt = this.replayDebtMs, since = tick - this.lastSnapshotTick, age = t0 - this.lastSnapshotWall;
+    // the watchdog sees a recovery as its own step: a kill inside one is recorded so (restart-loop.ts), and the restart
+    // contains that fault in place instead of replaying it again (recoveryQuarantined)
+    const sh = this.stepSlots, prior = sh ? [sh[S.stepTick], sh[S.step]] : null;
+    if (sh) { sh[S.stepTick] = tick; sh[S.step] = RECOVERY_STEP_ID + 1; }
     try { this.recoverFaultV1(error, cardHint, edgeHint); }
     finally {
+      if (sh && prior) { sh[S.stepTick] = prior[0]; sh[S.step] = prior[1]; }
       this.recoveryReplays = null; const ms = performance.now() - t0, ticks = replays.reduce((a, b) => a + b, 0);
       console.log(`[world] recovery hold ${Math.round(ms)} ms at tick ${tick}: ${replays.length} replays (${replays.join(', ') || 'none'} ticks)${ticks ? `, ${(ms / ticks).toFixed(2)} ms per replayed tick` : ''}; since the last snapshot ${since} ticks, ${Math.round(age)} ms of wall, ${Math.round(debt)} ms of steps (its cost ${Math.round(this.lastSnapshotCostMs)} ms)`);
     }
@@ -1977,7 +1983,7 @@ export class WorldHost {
     // #1377: an invariant that throws reading one entity: only that entity is quarantined (a rewind would stop everyone and read it again)
     if (this.quarantineRule && this.thrownOnly(error)) return this.quarantine(error);
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
-    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
+    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error) || this.recoveryQuarantined())) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
     const untilTick=this.engine.world.tick, originalSeq=this.seq, all=this.db.events(this.worldId,baseline.seq);
     const pending=[...this.minds.values()].filter(m=>m.pending).map(m=>m.pending!.card);
@@ -2012,6 +2018,16 @@ export class WorldHost {
       if (!this.snapshotRepair()) return;
       this.flush(); this.heartbeat(); return;
     }
+  }
+  /** #2458 A2: a recovery that ended the last process (its watchdog killed it inside one; restart-loop.ts quarantines the
+   *  recovery step after one such death) is not run again in that window: the fault is contained where it happens, named,
+   *  and the world goes on from its head. A restart always makes progress and is never killed the same way twice. */
+  private recoveryQuarantined(): boolean {
+    const q = this.quarantinedStep, tick = this.engine.world.tick;
+    if (q?.id !== RECOVERY_STEP_ID || tick < q.fromTick || tick >= q.untilTick) return false;
+    console.error(`[world] world.recovery-quarantined: a recovery ended the last process at tick ${q.fromTick} (${q.deaths} in a row); until tick ${q.untilTick} a fault is contained where it happens, with no replay`);
+    this.recordGlitch('contained', new Error('world.recovery-quarantined'), { rule: 'world.recovery-quarantined', tick, evidence: { fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths } });
+    return true;
   }
   /** Rung 3s this world has had, for the launcher's ALERT (#1150). */
   get rewinds(): number { return Object.values(this.glitches.byRule).reduce((n, r) => n + (r.rewind ?? 0), 0); }
@@ -2124,7 +2140,7 @@ export class WorldHost {
    *  waits on a tick that isn't coming and a replay can't spin on one. */
   private stepEngine(): ReturnType<Engine['step']> {
     const tick = this.engine.world.tick;
-    try { const out = this.engine.step(); this.stepFaultV1?.(tick); return out; }
+    try { const out = this.engine.step(); this.stepFaultV1?.(tick, false); return out; }
     catch (error) {
       // always, even if the tick did move: this is also where the step check's memory and the bounds the step skipped are put right
       if (this.repairRules) { const to = Math.max(this.engine.world.tick, tick + 1); try { this.engine.setClockV1!(to); } catch { this.engine.world.tick = to; } }
