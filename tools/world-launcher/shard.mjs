@@ -149,7 +149,7 @@ export class ShardSet {
   /** @param {{ root: string, size: number, logDir: string, log?: (line: string) => void, dropGraceMs?: number }} o */
   constructor(o) {
     this.o = o; this.shards = new Set(); this.n = 0; this.alone = new Set(); this.log = o.log ?? (() => {}); this.dropGraceMs = o.dropGraceMs ?? DROP_GRACE_MS;
-    this.writers = new Map();   // data dir → the world handle that may still have it open (one writer per data dir)
+    this.writers = new Map();   // data dir → the world handles that may still have it open (one writer per data dir)
   }
   /** The program's part of a world's command (null: the world does not go into a shard). */
   programOf({ cmd, args, env }) {
@@ -161,11 +161,15 @@ export class ShardSet {
   /** A world's handle in a shard, or null when its command cannot run in one. */
   spawn(slug, command) {
     const p = this.programOf(command); if (!p) return null;
-    const dir = command.env.DATA_DIR, h = new ShardWorld(null, slug, dir), prev = this.writers.get(dir);
-    this.writers.set(dir, h); h.once('exit', () => { if (this.writers.get(dir) === h) this.writers.delete(dir); });
-    // its previous load (dropped, or stopping) still has the data open: this one is sent once that has exited
-    if (prev && prev.exitCode === null && prev.signalCode === null) prev.once('exit', () => { if (h.exitCode === null && h.signalCode === null) this.place(h, slug, p, command.env); });
-    else this.place(h, slug, p, command.env);
+    const dir = command.env.DATA_DIR, h = new ShardWorld(null, slug, dir), alive = (x) => x.exitCode === null && x.signalCode === null;
+    const live = this.writers.get(dir) ?? new Set(), before = [...live].filter(alive);
+    this.writers.set(dir, live); live.add(h);
+    h.once('exit', () => { live.delete(h); if (!live.size && this.writers.get(dir) === live) this.writers.delete(dir); });
+    // its earlier loads (dropped, stopping, or themselves waiting) may still have the data open: this one is sent only once
+    // every one of them has exited
+    const go = () => { if (alive(h)) this.place(h, slug, p, command.env); };
+    let left = before.length;
+    if (!left) go(); else for (const x of before) x.once('exit', () => { if (--left === 0) go(); });
     return h;
   }
   place(h, slug, p, env) {

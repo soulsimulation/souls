@@ -178,18 +178,24 @@ test('review: a world dropped while it loads stops alone; its program and the wo
   const settling = h.pool.settled({ waitMs: 0, goneMs: 300_000 });
   // a second load of the same data dir meanwhile is not sent to any program while the first may still write
   const port = h.pool.state('drop').port;
-  const again = h.pool.shards.spawn('drop', h.pool.o.command(h.world('drop'), port));
-  again.stdout.resume(); again.stderr.resume();
-  assert.equal(again.pid, undefined, 'the second load waits for the first to exit');
+  const load = () => { const x = h.pool.shards.spawn('drop', h.pool.o.command(h.world('drop'), port)); x.stdout.resume(); x.stderr.resume(); return x; };
+  const second = load();
+  assert.equal(second.pid, undefined, 'the second load waits for the first to exit');
+  // the waiting second load is given up before the first has exited: a third still waits for the first
+  second.kill('SIGTERM'); await once(second, 'exit');
+  assert.ok(first.exitCode === null && first.signalCode === null, 'the first is still loading');
+  const again = load();
+  assert.equal(again.pid, undefined, 'the third load waits for the first too (one writer per data dir)');
   const abandoned = await settling;
   assert.deepEqual(abandoned.map((b) => b.slug), ['drop']);
   assert.ok(first.exitCode !== null || first.signalCode !== null, 'the dropped world exited');
   assert.match(h.log('drop'), /\[world\] SIGTERM: snapshot saved/, 'it ended its boot and stopped, saving its snapshot');
-  assert.equal(again.pid, pid0, 'then the second load went to the program, which ran on');
+  assert.equal(second.pid, undefined, 'the given-up load was never sent');
+  assert.equal(again.pid, pid0, 'then the third load went to the program, which ran on');
   assert.equal(h.pid('stay'), pid0, 'stay: the same program');
   assert.ok((await h.health('stay')).tick > tick0, 'stay: ticked on through the drop');
   for (let i = 0; i < 6000 && !again.loaded; i++) await wait(50);
-  assert.ok(again.loaded, 'the second load served');
+  assert.ok(again.loaded, 'the third load served');
   again.kill('SIGTERM'); await once(again, 'exit');
   assert.equal(again.exitCode, 0);
   assert.equal(h.pid('stay'), pid0); await ticking(h, 'stay');

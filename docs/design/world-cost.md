@@ -135,7 +135,8 @@ exactly:
 - **A world still loading** cannot be cut short inside the program. A SIGKILL (a stalled boot, a stop past its grace, a
   handover's settle) drops it instead: it is stopped as soon as its boot ends, and only if that takes longer than
   `DROP_GRACE_MS` (3 s) is its program ended. One writer per data dir: a world's next load is sent to a program only
-  once its previous one has exited.
+  once every earlier load of its data dir has exited. A world whose boot fails in a shard clears its timers as its stop
+  does.
 - **Faults are the world's own.** An uncaught error or rejection is noted by the fault guard of the world whose code it
   came from (its async context, `renderWorld`), never by its neighbours. One from a world still loading is that boot
   failing (exit 70, as a world process would crash); one from no world is logged by the shard and counted against none.
@@ -143,10 +144,11 @@ exactly:
   to end: the previous launcher answers the release only once that world's own exit came (`stopChild` refuses to
   report a stop without it).
 - **One watchdog per shard.** `shareWatchdog()` starts one thread; each world adds its live.json and health port to it.
-  A hang shows in every world of the shard: the world whose tick was running is named in its live.json `killed`, else
-  the first judged. Naming the world that holds the thread outside a tick (a sibling's boot, a request) needs a slot
-  written on every callback of the program; it is not built (its cost is B6's to measure first). It changes only which
-  world counts the crash: every world of the shard reloads exactly either way.
+  A hang or heap verdict shows in every world of the shard: the world whose tick was running is named in its live.json
+  `killed`. When no world's tick is running (a sibling's boot or a long request holds the thread), no world is named:
+  naming a serving neighbour would count an innocent world while the culprit reloaded uncounted and could end its next
+  shard the same way. With no world named, every world of the shard exits as the crash it was (the breaker counts each)
+  and loads again in a program of its own, so a hang that repeats is held.
 - **A fault ends the shard.** A fault storm, a clock stopped by a fault, a boot that throws (exit 70) or the watchdog's
   hang or heap rule (SIGKILL) ends the program. The world that ended it exits as the crash it was (the breaker counts
   it) and reloads in a program of its own; the others exit as a planned restart (75) and reload at once in another

@@ -248,6 +248,9 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   // Stage B (lane B-port): the read-worker pool, DARK unless SIM_READ_WORKER=1 (split/read-pool.ts; nothing is imported
   // otherwise). SIM_READ_WORKERS = pool size (registry `readWorkers`, 1–4, default 1); SIM_READ_PORTS = the launcher's ports.
   let readPool: { status(): unknown } | undefined;
+  // #2444: what a world started in a shard (`o.exit`) leaves running in the program unless it is cleared when the world
+  // ends, by its stop or by a boot that fails (world-stop-timers.test.ts)
+  const stopWorldTimers = () => { hub.stopTimers(); souls.stopTimers(); brain.quiesce(); stopRealClock(host); (app as unknown as { portraits?: { dispose(): void } }).portraits?.dispose(); void (readPool as { close?(): Promise<void> } | undefined)?.close?.(); };
   if (config.env.SIM_READ_WORKER === '1' && edge) {
     const { ReadPool, readPorts, deltaSource } = await import('./split/read-pool.ts');
     const { accountTag } = await import('./load/admission.ts');
@@ -446,6 +449,8 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
         }
       } finally {
         process.off('SIGTERM', term); process.off('SIGINT', interrupt);
+        // (a world process exits here; in a shard what shutdown would end must end too)
+        if (o.exit) { try { stopWorldTimers(); wallClock.stop(); (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); void closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews); } catch (e) { console.error('[boot] cleanup failed', e); } }
         (o.exit ?? process.exit)(abort.signal.aborted ? 0 : 1); throw new Error('world.boot.ended');   // (a shard's exit returns: this world goes no further)
       }
     } finally {
@@ -495,8 +500,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     await closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews);
     (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
     if (o.exit) {   // #2444: nothing of a stopped world runs on in its shard (world-stop-timers.test.ts)
-      clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); void (readPool as { close?(): Promise<void> } | undefined)?.close?.();
-      hub.stopTimers(); souls.stopTimers(); brain.quiesce(); stopRealClock(host); (app as unknown as { portraits?: { dispose(): void } }).portraits?.dispose();
+      clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); stopWorldTimers();
     }
     auth.close();db.close(); (o.exit ?? process.exit)(exitCode);
   };
