@@ -143,7 +143,20 @@ export type HostListener = {
    *  work under way, so the world is not still) and its deadlines, each the next tick at which it changes something (`move`
    *  when that change moves a body). A periodic check that would find nothing is not a deadline. */
   stillness?(tick: number): StillPart[];
+  /** #2366: a stable name for this listener's afterTick step (fault logs, the fault storm's record); default: its source. */
+  name?: string;
 };
+/** #2366: a listener's afterTick step by a stable identity: its `name`, else its function's source, as a 32-bit hash (`id`, the
+ *  same on every boot of a build, whatever the listener's place in `host.listeners`) and a short readable `name`. */
+export type StepId = { id: number; name: string };
+const stepIds = new WeakMap<HostListener, StepId>();
+export function stepIdOf(l: HostListener): StepId {
+  let s = stepIds.get(l); if (s) return s;
+  const text = l.name ?? String(l.afterTick ?? '');
+  let h = 0x811c9dc5; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  s = { id: h, name: l.name ?? `afterTick ${h.toString(16).padStart(8, '0')} (${text.replace(/\s+/g, ' ').slice(0, 60)})` };
+  stepIds.set(l, s); return s;
+}
 /** #2297: one deadline (or a busy flag) a part of the world reports to `WorldHost.stillUntil`. */
 export type StillPart = { name: string; tick?: number | null; move?: boolean; busy?: boolean };
 /** #2297 the still contract (#2241) as the host answers it: `untilTick` the earliest deadline, `moveTick` the earliest at
@@ -716,15 +729,21 @@ export class WorldHost {
   holdClock?: () => boolean;
   /** #2366 A1: a served world's tick that throws past the engine's own fault handling (#1150: a listener, the drain, the
    *  broadcast) is reported here and the clock goes on with the next frame. Unset (tests, tools): it throws, as before. */
-  onFault?: (name: string, error: unknown) => void;
-  /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in for the watchdog. Unset: none. */
+  onFault?: (name: string, error: unknown, step?: StepId & { tick: number }) => void;
+  /** #2366: a halt was recorded by name in this process (a glitch of rung `halt`): the launcher restarts a halted world. */
+  haltNamed = false;
+  /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in (its stable id) for the
+   *  watchdog. Unset: none. */
   stepSlots?: Float64Array;
-  /** #2378 A2: a step (listener `index` at `tick`) that ended the process on two boots in a row (load/restart-loop.ts): skipped
-   *  at that tick, named in the log and the glitch counts (`world.step-quarantined`), so the world comes up and runs on. */
-  quarantinedStep?: { tick: number; index: number; name: string; deaths: number };
-  private skipQuarantinedStep(q: { tick: number; index: number; name: string; deaths: number }) {
-    console.error(`[world] step quarantined: ${q.name} skipped at tick ${q.tick} (it ended the world there on ${q.deaths} boots in a row); the rest of the tick runs`);
-    this.recordGlitch('contained', new Error(`world.step-quarantined: ${q.name}`), { rule: 'world.step-quarantined', tick: q.tick, evidence: { step: q.name, index: q.index, deaths: q.deaths } });
+  /** #2378 A2: a step (a listener's afterTick, by its stable id: stepIdOf) that ended the process on two boots in a row
+   *  (load/restart-loop.ts): skipped from `fromTick` until `untilTick`, named once in the log and the glitch counts
+   *  (`world.step-quarantined`), so the world comes up and runs on. By id, not by place: `listeners` changes at runtime. */
+  quarantinedStep?: { id: number; name: string; fromTick: number; untilTick: number; deaths: number };
+  private quarantineSkips = 0;
+  private skipQuarantinedStep(q: { id: number; name: string; fromTick: number; untilTick: number; deaths: number }, tick: number, step: StepId) {
+    if (this.quarantineSkips++) return;
+    console.error(`[world] step quarantined: ${step.name} skipped from tick ${tick} until tick ${q.untilTick} (it ended the world on ${q.deaths} boots in a row: ${q.name}); the rest of the tick runs`);
+    this.recordGlitch('contained', new Error(`world.step-quarantined: ${step.name}`), { rule: 'world.step-quarantined', tick, evidence: { step: step.name, id: q.id, fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths } });
   }
   private frame() {
     if (!this.timer) return;
@@ -830,14 +849,17 @@ export class WorldHost {
     for (const ev of out.events) for (const l of this.listeners) l.onRuntimeEvent?.(ev);
     const now = this.engine.world.tick;
     const tickContext = Object.freeze({ startedAtMs: t0 });
-    // #2378 A2: each listener's afterTick is a named step; the watchdog sees which one a stuck tick is in (S.step), and a step
-    // that ended the process at the same tick on two boots in a row is skipped at that tick (quarantinedStep)
+    // #2366: each listener's afterTick is its own step: one that throws is reported by its stable identity and the rest of the
+    // tick (the other listeners, the broadcast, the heartbeat, the snapshot) runs on. Without onFault (tests, tools) it throws.
+    // #2378 A2: the watchdog sees which step a stuck tick is in (S.step: its id + 1), and a quarantined step is skipped.
     const sh = this.stepSlots, q = this.quarantinedStep;
-    for (let i = 0; i < this.listeners.length; i++) { const l = this.listeners[i]; if (!l.afterTick) continue;
-      if (q && q.tick === now && q.index === i) { this.skipQuarantinedStep(q); continue; }
-      if (sh) { sh[S.stepTick] = now; sh[S.step] = i + 1; }
-      l.afterTick(now, tickContext); }
-    if (sh) sh[S.step] = 0;
+    for (const l of this.listeners) { if (!l.afterTick) continue;
+      const step = sh || q ? stepIdOf(l) : null;
+      if (q && step!.id === q.id && now >= q.fromTick && now < q.untilTick) { this.skipQuarantinedStep(q, now, step!); continue; }
+      if (sh) { sh[S.stepTick] = now; sh[S.step] = step!.id + 1; }
+      try { l.afterTick(now, tickContext); }
+      catch (error) { if (!this.onFault) throw error; this.onFault('world.fault.step', error, { ...(step ?? stepIdOf(l)), tick: now }); }
+      finally { if (sh) sh[S.step] = 0; } }
     if (span) { span[3] = performance.now() - ts; ts = performance.now(); }
     // 3. broadcast
     // #2298: a jump's landing sends what the ticks it covered would have (a batch, a heartbeat, the periodic kernel view)
@@ -2265,6 +2287,7 @@ export class WorldHost {
   }
   /** One record per recovery and per halt. Never throws and writes nothing to the log: whatever called it goes on as before. */
   private recordGlitch(rung: GlitchRung, fault: unknown, o: {rule?: string; tick?: number; bodies?: string[]; evidence?: Record<string, unknown>}) {
+    if (rung === 'halt') this.haltNamed = true;
     try {
       const facts = faultFacts(fault), rule = o.rule ?? facts.rule, counts = this.glitches;
       const g: GlitchRecordV1 = {rung, rule, bodies: facts.bodies.length ? facts.bodies : [...new Set(o.bodies ?? [])].sort(), tick: o.tick ?? this.engine.world.tick, at: Date.now(),
