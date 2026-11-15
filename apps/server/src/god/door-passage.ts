@@ -61,7 +61,11 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
   *  `behind`: the walk's ends are known to lie either side of a closed door (engine walkThroughDoorV1), though the walk's
   *  own coarse plan of far ground may not see it (review of #2397). */
  return (soul:EdgeSoul,steps:Step[],what:string,behind=false):DoorPassage|DoorPassageRefusal|null=>{
-  const eng=d.engine(),found=eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind);if(!eng.walkFromReachesV1)return null;
+  // #2434: a walk upstairs (its last walk_to on an upper floor, after a first leg to the front door's stand) is the chain's:
+  // the one-door search judges only the first leg, and would plan the door out of here and then meet the house's shut
+  // front door at its stand (the served clip world: "Through int-bakery-door-1", then route.unreachable at the front door)
+  const walks=steps.filter(s=>s.verb==='walk_to'),last=walks.at(-1)?.params.level,up=walks.length>1&&typeof last==='number'&&last!==0;
+  const eng=d.engine(),found=up?null:eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind);if(!eng.walkFromReachesV1)return null;
   if(!found)return chain(soul,steps,what);   // #2434: a destination upstairs, or no door named on the ground: the chain
   // entry 32: the hand step reads whether a door is still locked (a thumb-turn nobody needs any more is skipped)
   eng.installDoorLockedV1?.(lockedOf);
