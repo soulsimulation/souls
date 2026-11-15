@@ -170,7 +170,8 @@ hang or a memory runaway.
 - **A recovery is bounded (#2458).** An engine error inside a tick replays from the last snapshot on the main thread:
   about 2 s fixed (mostly the engine's restore) plus 4 to 6 ms a replayed tick at 24 to 100 Souls. The snapshot debt
   counts the whole tick, not the engine step alone, which measured 0.6 ms a tick and let 1800 to 4800 ticks build up
-  (holds of 8 to 18 s on souls-timed). So the existing rule (3 s of debt, at most one snapshot per 20 s, capture at
+  (holds of 8 to 18 s on souls-timed). A jump over still ticks (most of a setup's ticks) adds them at the running
+  average whole tick (`tickCostMs`), since a recovery replays each one. So the existing rule (3 s of debt, at most one snapshot per 20 s, capture at
   most 5 % of the time) keeps a busy world's replay to about 20 s of ticks. Under the repair rules, a recovery tries no
   further plan replay after holding 3 s (`RECOVERY_REPLAY_BUDGET_MS`): the last rung, which steps no ticks, ends it.
 
