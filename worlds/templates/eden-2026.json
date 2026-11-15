@@ -19682,27 +19682,6 @@
         },
         {
           "op": "place",
-          "in": {
-            "parent": "$df193"
-          },
-          "def": "core/door@2",
-          "name": "artists-studio-2-door-3",
-          "p": [
-            0,
-            3.4,
-            -1.08
-          ],
-          "r": 0.001,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
           "def": "core/door@2",
           "name": "artists-studio-2-door-1",
           "p": [
@@ -19740,27 +19719,6 @@
             "roof": "flat"
           },
           "tmp": "$df194"
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df194"
-          },
-          "def": "core/door@2",
-          "name": "artists-studio-3-door-1-0",
-          "p": [
-            -0.99,
-            0,
-            -1.57
-          ],
-          "r": 1.571,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
         },
         {
           "op": "place",
@@ -19857,27 +19815,6 @@
             1.57
           ],
           "r": 1.571,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df195"
-          },
-          "def": "core/door@2",
-          "name": "artists-studio-4-door-3",
-          "p": [
-            0,
-            3.4,
-            -1.08
-          ],
-          "r": 0.001,
           "params": {
             "sx": 1.01,
             "sy": 0.9
@@ -20042,27 +19979,6 @@
             1.57
           ],
           "r": 1.571,
-          "params": {
-            "sx": 1.01,
-            "sy": 0.9
-          },
-          "state": {
-            "open": true
-          }
-        },
-        {
-          "op": "place",
-          "in": {
-            "parent": "$df197"
-          },
-          "def": "core/door@2",
-          "name": "artists-studio-8-door-3",
-          "p": [
-            0,
-            3.4,
-            -1.08
-          ],
-          "r": 0.001,
           "params": {
             "sx": 1.01,
             "sy": 0.9
