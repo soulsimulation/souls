@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { worldBudgetFor, worstCallUsd, turnReservation, priceDriftOf, WORLD_BUDGET_DEFAULTS as K } from './world-budget.mjs';
+import { worldBudgetFor, worstCallUsd, turnReservation, priceDriftOf, tokensUsd, WORLD_BUDGET_DEFAULTS as K } from './world-budget.mjs';
 import { createSeat } from './seat.mjs';
 import * as claude from './adapters/claude-headless.mjs';
 
@@ -85,15 +85,32 @@ test('#1098 a claude seat: per-turn cost from the session total, the CLI capped 
   assert.equal(claude.buildArgs({ sessionId: 'u', resume: true, model: 'sonnet', text: 'x', maxBudgetUsd: 0.2 }).join(' ').includes('--max-budget-usd 0.2'), true);
 });
 
-test('#1098 a call bigger than the sized worst case ends the world\'s turns; a Codex seat is refused under a world budget', async () => {
+test('#1098 a call bigger than the sized worst case ends the world\'s turns', async () => {
   const run = tmp(), s = createSeat({ runDir: run, seat: { id: 'ada', adapter: 'claude-headless' }, worldBase: 'http://h', rails: {} });
   let n = 0;
   s.adapter = { turn: async () => { n++; return { stream: [{ type: 'assistant', message: { usage: { input_tokens: 2, cache_read_input_tokens: 70_000, output_tokens: 10 } } }], usage: { costUsd: 0.05 }, finalText: 'ok', toolCalls: [], exit: 0, wallMs: 1 }; }, renderChat: () => '' };
   await s.chat('one'); const second = await s.chat('two');
   assert.equal(n, 1); assert.equal(second.refused, 'world-budget'); assert.match(s.budgetRefused, /exceeded the sized worst case \(first-call context 70002 tokens/);
-  const c = createSeat({ runDir: tmp(), seat: { id: 'cx', adapter: 'codex-headless' }, worldBase: 'http://h', rails: {} });
-  let called = false; c.adapter = { turn: async () => { called = true; return { stream: [], usage: {}, toolCalls: [] }; }, renderChat: () => '' };
-  const r = await c.chat('hi'); assert.equal(called, false); assert.equal(r.refused, 'world-budget'); assert.match(c.budgetRefused, /reports no turn cost/);
+});
+
+test('#2381 a Codex seat runs under the world budget, each turn priced from its tokens at the published rates', async () => {
+  // gpt-5.2-codex per million: input $1.75, cached input $0.175, output (reasoning too) $14
+  assert.equal(tokensUsd({ inputTokens: 100_000, cachedTokens: 80_000, outputTokens: 1_000, reasoningTokens: 500 }), (20_000 * 1.75 + 80_000 * 0.175 + 1_500 * 14) / 1e6);
+  const run = tmp(), s = createSeat({ runDir: run, seat: { id: 'cx', adapter: 'codex-headless' }, worldBase: 'http://h', rails: {} });
+  let n = 0;
+  s.adapter = { turn: async () => { n++; return { stream: [], usage: { inputTokens: 60_000, cachedTokens: 40_000, outputTokens: 2_000, reasoningTokens: 0, costUsd: null }, finalText: 'ok', toolCalls: [], exit: 0, wallMs: 1 }; }, renderChat: () => '' };
+  const each = (20_000 * 1.75 + 40_000 * 0.175 + 2_000 * 14) / 1e6;   // $0.07
+  const one = await s.chat('one'); await s.chat('two');
+  assert.equal(n, 2, 'both turns ran'); assert.equal(one.refused, undefined); assert.equal(s.budgetRefused, null);
+  assert.deepEqual(rows(join(run, 'seats', 'cx', 'cost.jsonl')).map((r) => r.costUsd), [each, each], 'each turn priced from its tokens');
+  const settled = rows(join(run, 'budget.jsonl')).filter((r) => r.kind === 'settled');
+  assert.deepEqual(settled.map((r) => [r.known, r.costUsd]), [[true, each], [true, each]]);
+  assert.equal(rows(join(run, 'budget.jsonl')).at(-1).spentUsd, Math.round(2 * each * 1e6) / 1e6, 'the spend counts both turns');
+  // the cap still holds: priced turns that spend it refuse the next one before any call
+  const big = createSeat({ runDir: tmp(), seat: { id: 'cx2', adapter: 'codex-headless' }, worldBase: 'http://h', rails: {} });
+  let m = 0; big.adapter = { turn: async () => { m++; return { stream: [], usage: { inputTokens: 0, cachedTokens: 0, outputTokens: 40_000, reasoningTokens: 0, costUsd: null }, finalText: 'ok', toolCalls: [], exit: 0, wallMs: 1 }; }, renderChat: () => '' };
+  for (let i = 0; i < 4; i++) await big.chat(`t${i}`);
+  assert.ok(m < 4, `a $0.56 turn spends the $0.90 cap: ${m} turns ran`); assert.ok(big.budgetRefused);
 });
 
 test('#1098 the coded prices reproduce what the CLI reports, and a difference is flagged', () => {

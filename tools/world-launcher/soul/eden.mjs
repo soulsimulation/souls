@@ -2401,7 +2401,9 @@ const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokens
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
-const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: (h?.acts ?? []).flatMap((a) => tokensOf(a.verb)) }));
+/** #2312: a seat is found by the words for what it is for ("sit near the pond", "a seat"), as by its kind ("bench"). */
+const SEAT_WORDS = ["sit", "seat"];
+const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : [])] }));
 const RELATION = /^(.*?)\s+(near|by|beside|next to|close to|around|in|inside|at)\s+(?:the\s+)?(.+)$/i;
 /** How far "near <somewhere>" reaches, in metres. */
 const NEAR_METRES = 80;
@@ -2476,7 +2478,8 @@ const soulWords = (x) => wordsOf(x, () => ({ name: tokensOf(x.name), id: tokensO
 function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, outline, souls = [] } = {}) {
   let text = String(words ?? ""), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
-  if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; } }
+  let atPlace = null;
+  if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; if (/^at$/i.test(rel[2])) atPlace = anchor; } }
   if (near) { const anchor = bestPlace(ix, near, at); if (!anchor) return { found: [], note: `No place called "${near}" in the catalog.` }; around = anchor; }
   // --in takes a place's id or its words ("reception"), as "in the reception" does
   if (inPlace && !ix.place(inPlace)) inPlace = bestPlace(ix, inPlace, at)?.id ?? inPlace;
@@ -2523,23 +2526,27 @@ function find(ix, words, { verb, kind, inPlace, near, at, limit = 8, states, out
     if (s) out.push({ s, d: 0, row: { type: "act", act: a.id, verb: a.verb, label: a.label, in: "right here" } });
   }
   for (const t of soulsOnly ? [] : ix.cat.things) {
-    const h = ix.handOf(t); if (verbs.size && !h) continue;
+    const h = ix.handOf(t); if (verbs.size && !h && !t.seat) continue;
     if (!inScope(t.place, t.at)) continue;
     if (kind && !hit(stem(kind.toLowerCase()), thingWords(t, h).kind)) continue;
     // #1751: a thing worked by hand comes with its state and the acts that state allows (a lamp that is on: switch-off)
     const can = h ? handActs(ix, t, states) : [];
+    // #2381: a seat offers sit, as its row's act says, so --verb sit finds the benches --kind bench finds
+    const offers = verbs.size && t.seat && !can.some((a) => a.verb === "sit") ? [...can, { id: `sit:${t.id}`, verb: "sit" }] : can;
     let s;
-    if (verbs.size) { const v = Math.max(0, ...can.map((a) => verbs.get(a.verb) ?? 0)); s = v && rest.every((w) => hit(w, [...thingWords(t, h).name, ...thingWords(t, h).kind])) ? v : 0; }
+    if (verbs.size) { const v = Math.max(0, ...offers.map((a) => verbs.get(a.verb) ?? 0)); s = v && rest.every((w) => hit(w, [...thingWords(t, h).name, ...thingWords(t, h).kind])) ? v : 0; }
     else s = q.length ? score(q, thingWords(t, h)) : kind ? 1 : 0;
     if (!s) continue;
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
-    const pick = [...can].sort((a, b) => named(b) - named(a));
+    const pick = [...offers].sort((a, b) => named(b) - named(a));
     out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
   const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
+  // #2312: "at the bandstand" is in it, or else around it: the benches that face a bandstand stand outside its floor
+  if (atPlace && !found.length) return find(ix, text, { verb, kind, near: atPlace.id, at, limit, states, outline, souls });
   return { found, ...(out.length > limit ? { more: out.length - limit } : {}), ...(around ? { near: { id: around.id, name: around.name, within: NEAR_METRES } } : {}) };
 }
 

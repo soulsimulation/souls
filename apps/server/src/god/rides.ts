@@ -49,13 +49,27 @@ export function wheelCars(def: { make?: { kind?: string; args?: { shapes?: unkno
   return { hub: [hub[0], hub[1]], z: list.reduce((n, g) => n + g.p[2], 0) / list.length, R, drop: low.p[1] - low.floor, bottom: Math.atan2(low.p[1] - hub[1], low.p[0] - hub[0]) };
 }
 
+/** #1976: a wheel without gondolas whose cars mount on its rim (the core wheel: rim, spokes and round pods all turn about the
+ *  hub): its hub (the pivot of role `wheel`), its rim radius (the largest torus of that role) and how far the turning parts
+ *  reach out of the wheel's plane toward its front (+z). In the def's own frame. Null without such a rim. */
+export function wheelRim(def: { make?: { kind?: string; args?: { shapes?: unknown } } } | undefined): { hub: [number, number]; R: number; front: number } | null {
+  const shapes = (def?.make?.kind === 'gen' && Array.isArray(def.make.args?.shapes) ? def.make.args.shapes : []) as { kind?: string; role?: string; pivot?: number[]; at?: number[]; size?: number[]; h?: number; r?: number; r2?: number; scale?: number[]; pitch?: number }[];
+  const wheel = shapes.filter((s) => s.role === 'wheel' && s.pivot && s.at), hub = wheel[0]?.pivot, rims = wheel.filter((s) => s.kind === 'torus' && s.r);
+  if (!hub || !rims.length) return null;
+  const reach = (s: (typeof wheel)[number]) => s.kind === 'sphere' ? (s.r ?? 0) * (s.scale?.[2] ?? 1) : s.kind === 'torus' ? (s.r2 ?? 0) : s.kind === 'cyl' ? (Math.abs(Math.sin(s.pitch ?? 0)) > 0.5 ? (s.h ?? 0) / 2 : (s.r ?? 0)) : (s.size?.[2] ?? 0) / 2;
+  return { hub: [hub[0], hub[1]], R: Math.max(...rims.map((s) => s.r!)), front: Math.max(...wheel.map((s) => s.at![2] + reach(s))) };
+}
+/** #1976: the car on a rim-mounted wheel (web WorldRideCars draws the same car): its floor is RIM_DROP under the rim point it
+ *  is fixed to, and it stands RIM_GAP clear of the wheel's turning parts, CAR_HALF (half the car's length) out from its wall. */
+export const RIM_DROP = 0.45, RIM_GAP = 0.06, CAR_HALF = 0.75;
+
 /** E-life B7: a god's ferris wheel or carousel as a ride: its two-place car boards at the front and goes round with the
  *  wheel (once round a ferris wheel at its own 0.8 rpm, 75 s; three turns of a carousel, 45 s), then back. Keys in the
  *  thing's own frame (x across, y up, z out of its front), turned and moved by its world pose.
  *  #2198: a wheel with gondolas (`cars`, wheelCars) is ridden in its own bottom gondola: the riders step up from the front
  *  into it and go round on the gondolas' floor circle in the wheel's plane (the viewer turns the wheel to carry that gondola
  *  with them). Without gondolas the car goes round in front of the wheel, as before. */
-export function attractionRoute(kind: 'ferris-wheel' | 'carousel', wp: { x: number; z: number; yaw: number; s: number }, ground: number, size: [number, number, number], cars?: ReturnType<typeof wheelCars>): { home: V3; keys: RouteKey[]; route: string } {
+export function attractionRoute(kind: 'ferris-wheel' | 'carousel', wp: { x: number; z: number; yaw: number; s: number }, ground: number, size: [number, number, number], cars?: ReturnType<typeof wheelCars>, rim?: ReturnType<typeof wheelRim>): { home: V3; keys: RouteKey[]; route: string } {
   const c = Math.cos(wp.yaw), sn = Math.sin(wp.yaw), W = (x: number, y: number, z: number): V3 => [r2(wp.x + (x * c + z * sn) * wp.s), r2(ground + y * wp.s), r2(wp.z + (-x * sn + z * c) * wp.s)];
   const keys: RouteKey[] = [];
   if (kind === 'ferris-wheel' && cars) {
@@ -66,6 +80,19 @@ export function attractionRoute(kind: 'ferris-wheel' | 'carousel', wp: { x: numb
     for (let k = 1; k <= 32; k++) keys.push({ t: 6 + k * 75 / 32, p: on(bottom + (k / 32) * Math.PI * 2) });
     keys.push({ t: 6 + 75 + 2, p: step }, { t: 6 + 75 + 6, p: home });
     return { home, keys, route: 'ferris-wheel-gondola' };
+  }
+  if (kind === 'ferris-wheel' && rim) {
+    // #1976: a wheel without gondolas (the core wheel) carries the car fixed to its rim, just in front of its turning parts:
+    // the car's floor goes round the rim circle RIM_DROP under it, concentric with the hub, once at the wheel's own 0.8 rpm,
+    // so the car keeps its place on the turning rim. Before, it went round a smaller, lower circle metres in front of the
+    // wheel. Riders wait at the same home; the car lifts clear of the boarding platform before it slides onto the rim.
+    const home = W(0, 0, size[2] / 2 + 1.6 + 1.5), { hub, R } = rim, z = rim.front + RIM_GAP + CAR_HALF, cy = hub[1] - RIM_DROP;
+    // the slide in eases (keys 0.5 m and 5 cm out) so the curve through the keys does not swing into the wheel (< 1 cm)
+    const on = (a: number, out = 0) => W(hub[0] + R * Math.cos(a), cy + R * Math.sin(a), z + out), y0 = Math.max(0, cy - R), up = W(0, y0, size[2] / 2 + 1.6 + 1.5);
+    keys.push({ t: 0, p: home }, { t: 3, p: up }, { t: 4.5, p: on(-Math.PI / 2, 0.5) }, { t: 5.5, p: on(-Math.PI / 2, 0.05) }, { t: 6, p: on(-Math.PI / 2) });
+    for (let k = 1; k <= 32; k++) keys.push({ t: 6 + k * 75 / 32, p: on(-Math.PI / 2 + (k / 32) * Math.PI * 2) });
+    keys.push({ t: 81.5, p: on(-Math.PI / 2, 0.05) }, { t: 82.5, p: on(-Math.PI / 2, 0.5) }, { t: 84, p: up }, { t: 87, p: home });
+    return { home, keys, route: 'ferris-wheel-rim' };
   }
   if (kind === 'ferris-wheel') {
     const R = Math.max(2, size[0] / 2 - 1.0), cy = R + 1.0, front = size[2] / 2 + 1.6, home = W(0, 0, front + 1.5);
@@ -103,8 +130,10 @@ export function installGodRides(o: { host: WorldHost; edge: EdgeLedger; model: W
       const tags: string[] = def.tags ?? [], attraction = tags.includes('ferris-wheel') ? 'ferris-wheel' : tags.includes('carousel') ? 'carousel' : null;
       if (attraction && e.in.parent === 'world') {
         const wp = model.worldPose(e), name = String(e.name ?? ''), id = /^[a-z0-9][a-z0-9._-]{0,99}$/.test(name) && !model.entities.has(name) ? name : `ride-${e.id.toLowerCase()}`;
-        const baked = model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), r = attractionRoute(attraction, wp, model.terrain.sample(wp.x, wp.z), baked.box as [number, number, number], attraction === 'ferris-wheel' ? wheelCars(def) : null);
-        out.push({ entity: e.id, id, attraction: true, def: 'hot-air-balloon', label: (name || attraction).replace(/-/g, ' '), at: [r.home[0], r.home[2]], y: r.home[1], yaw: wp.yaw - Math.PI / 2, route: r.route, routeKeys: r.keys, waitSeconds: 30 });
+        // the car faces into the thing (its +x, Core's convention: rotation.y = -yaw; a god thing's is rotation.y = +yaw, so
+        // its yaw is negated: #1976, a turned wheel's car stood skewed across its rim)
+        const baked = model.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), r = attractionRoute(attraction, wp, model.terrain.sample(wp.x, wp.z), baked.box as [number, number, number], attraction === 'ferris-wheel' ? wheelCars(def) : null, attraction === 'ferris-wheel' ? wheelRim(def) : null);
+        out.push({ entity: e.id, id, attraction: true, def: 'hot-air-balloon', label: (name || attraction).replace(/-/g, ' '), at: [r.home[0], r.home[2]], y: r.home[1], yaw: -wp.yaw - Math.PI / 2, route: r.route, routeKeys: r.keys, waitSeconds: 30 });
         continue;
       }
       if (!tags.includes('balloon')) continue;
