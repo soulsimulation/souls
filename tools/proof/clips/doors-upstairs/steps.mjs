@@ -24,9 +24,9 @@ for (let i = 0; i < 30; i++) {                            // a world just up may
 }
 // off camera: up to the landing, the bedroom door shut by hand, then out to the bakery's front (~45 m away)
 run(['act', 'walk:canal-west-home-3/landing', '--run', '--wait', '150', '--json']);
-const caps = run(['caps', '--search', 'canal-west-home-3-door-3'], 90_000), door = /object:([^:\s"']+):close/.exec(caps.stdout + caps.stderr)?.[1];
-if (!door) throw Error('kit: the bedroom door is not offered to close');
-run(['act', `object:${door}:close`, '--wait', '60', '--json'], 90_000);
+const caps = run(['caps', '--search', 'canal-west-home-3-door-3'], 90_000), out = caps.stdout + caps.stderr;
+const door = /object:([^:\s"']+):close[^}]*canal-west-home-3-door-3"/s.exec(out)?.[1];
+if (door) run(['act', `object:${door}:close`, '--wait', '60', '--json'], 90_000);   // else it is shut already (only "open" offered)
 run(['act', 'walk:int-bakery', '--run', '--wait', '150', '--json']);
 
 const eden = (args, ms) => new Promise((res) => execFile(process.execPath, [EDEN, ...args], { cwd: DIR, encoding: 'utf8', timeout: ms },
