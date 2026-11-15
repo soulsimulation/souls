@@ -8,7 +8,6 @@ import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
 import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, type ActTiming} from './api-times.ts';
-import {noteAnswer} from './stall-log.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
@@ -74,7 +73,9 @@ export type Ticket = {refusal: Refusal} | {turn: Promise<'run' | 'dropped' | Ref
 
 export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>;
   /** The quiet tick ms (default: the monitor's, from the process's shared numbers, S.quietTickMs). */
-  quietTickMs?: () => number};
+  quietTickMs?: () => number;
+  /** #2416: this world's API times (default: the program's, for tests). */
+  api?: Float64Array};
 export class Admission {
   level: Level = 'green';
   readonly queue: Job[] = [];
@@ -95,6 +96,9 @@ export class Admission {
   private now: () => number;
   private o: AdmissionOpts;
   private quietTick: () => number;
+  /** #2416: this world's stall log hears each answer (set by startWorld when the log runs). */
+  onAnswer?: (route: string, t0: number, t1: number) => void;
+  get api(): Float64Array | undefined { return this.o.api; }
   constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]); }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
@@ -309,7 +313,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
     const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
     c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
     const route = apiRoute(c.req.method, c.req.path);
-    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, undefined, p); noteAnswer(route, t0 + queued, t0 + ms); }
+    if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, adm.api, p); adm.onAnswer?.(route, t0 + queued, t0 + ms); }
   };
   /** The handler, inside an act's timing scope when it is POST /v1/edge/act (one lookup otherwise). */
   const run = (c: Context, next: () => Promise<void>): {act?: ActTiming; done: Promise<void>} => {

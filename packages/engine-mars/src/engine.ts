@@ -35,7 +35,7 @@ import {applyUpperFloorsV1,placeLevelOf,previewUpperFloorsV1,type UpperFloorsFac
 import {registerAssets} from './catalog-adapter.ts';
 import {socialEdenTransitionV1Schema,type SocialEdenTransitionV1} from '@souls/engine-contract';
 import {searchArrival,arrivalPocket,type ArrivalGround,type ArrivalPocket,type ArrivalSpot} from './arrival-search.ts';
-import {attachGround,groundRegistry,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
+import {attachGround,groundRegistry,groundReach,installGroundV1 as installGround,previewGroundV1,standOn,groundArrival,groundRecipe,inDeepWater,destinationInDeepWater,shoreToward} from './ground-bridge.ts';
 // The Mars engine behind Sim's engine contract.
 //
 // The shell speaks a small BODY LANGUAGE (walk_to, sit, stand, rest, wave,
@@ -992,7 +992,7 @@ export class MarsEngine implements Engine {
   }
   /** #1150: the take ends and the next begins, even if closing this one throws: a recorder left finished would throw every tick after. */
   private recutV1(between?: () => void) {
-    let hash: string | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
+    let hash: (() => string) | undefined; try { hash = this.finishRecorder(); } catch { hash = undefined; }
     between?.(); this.startRecorder(between ? undefined : hash);
   }
   /** #1150 rung 3: the clock moves to the fault's tick without stepping the world, so ticks stay monotonic for the log. */
@@ -2426,8 +2426,9 @@ export class MarsEngine implements Engine {
   // dayTicks from the scene; the time itself travels in each take's env.datetime)
   private renderContextKeyV1(){return JSON.stringify([this.rt.world.base.campus,this.cfg.scene,this.cfg.clock?.dayTicks??null,this.rulesVersion]);}
   /** `stateHashNow`: rt.stateHash() at this tick when the caller has it (the take it just finished); used only when no
-   *  render base is captured in between (lane L1: one world serialisation per 20-tick take boundary, not two). */
-  private startRecorder(stateHashNow?:string) {
+   *  render base is captured in between (lane L1: one world serialisation per 20-tick take boundary, not two). #2422: it
+   *  is that take's lazy hash, computed only when the new take's baseline is read. */
+  private startRecorder(stateHashNow?:string|(()=>string)) {
     if(this.readerRecordingDepth)return;
     // Authored render bases are immutable for this engine instance. Supported
     // campus/clock/config boundaries change this key; actor/object motion is in
@@ -2442,14 +2443,15 @@ export class MarsEngine implements Engine {
     const retained=new Set([this.recorderScene.ref.hash,...this.chunks.map(c=>(c.take as {renderSceneRef:{hash:string}}).renderSceneRef.hash)]);
     for(const hash of this.takeScenes.keys())if(!retained.has(hash))this.takeScenes.delete(hash);
   }
-  /** Finishes the current take; returns its final state hash (= rt.stateHash() now), or undefined inside a reader setup. */
-  private finishRecorder():string|undefined {
+  /** Finishes the current take; returns its final state hash (= rt.stateHash() now) as a function, computed when first
+   *  called (#2422: the take's hashes are not computed in the tick that cuts it), or undefined inside a reader setup. */
+  private finishRecorder():(()=>string)|undefined {
     if(this.readerRecordingDepth)return undefined;
-    const take=this.recorder.finish();
-    if(this.rt.tick<=take.startTick)return take.finalStateHash;
+    const {take,finalStateHash}=this.recorder.finishLazy() as {take:{startTick:number};finalStateHash:()=>string};
+    if(this.rt.tick<=take.startTick)return finalStateHash;
     this.chunks.push({fromTick:take.startTick,toTick:this.rt.tick,take});
     if(this.chunks.length>12)this.chunks.shift();
-    return take.finalStateHash;
+    return finalStateHash;
   }
   takeScene(hash:string) { const captured=this.takeScenes.get(hash);return captured?structuredClone(captured):undefined; }
   actorBorrowed(actor: string) {
@@ -3588,16 +3590,17 @@ export const SHARED_STAIRS_POLICY = 'shared-stairs/1';
 export const SHARED_BAY_POLICY = 'shared-bay/1';
 
 /** The factory is made once the Mars engine has been loaded (an async import); after that everything is synchronous. */
-export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promise<EngineFactory> {
+/** `env`: the world's own environment (shards, #2389: the server passes its world config's); unset reads the process's. */
+export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND, env: Record<string, string | undefined> = process.env): Promise<EngineFactory> {
   const loaded = cfg.map===MARS_2026_MAP?withMars2026Map(await loadMars()):await loadMars();if(cfg.map&&cfg.map!==MARS_2026_MAP)throw new Error('mars.unknown-map');
   // PC13 (#692): the shared raise's verb and its invariant exist only behind SIM_SHARED_CARRY (the shared-carry ledger
   // flag, the same default); without it the registry and the invariants are exactly what they were before PC13.
-  const sharedCarry = cfg.sharedCarryV1 ?? process.env.SIM_SHARED_CARRY === '1';
+  const sharedCarry = cfg.sharedCarryV1 ?? env.SIM_SHARED_CARRY === '1';
   // resolved once here, so the engine's own rules version (this.cfg) says what the factory registered; off adds no key
   if (sharedCarry && cfg.sharedCarryV1 !== true) cfg = {...cfg, sharedCarryV1: true};
   // a world that can build what can stop standing has the ladder, unless it is switched off: `SIM_SOULS_REPAIR=0` is the
   // operator's way back, and how a shared world made before the ladder still boots under its own rules
-  const repairEnv = process.env.SIM_SOULS_REPAIR;
+  const repairEnv = env.SIM_SOULS_REPAIR;
   if ((cfg.soulsRepairV1 ?? (repairEnv !== '0' && (sharedCarry || repairEnv === '1'))) && cfg.soulsRepairV1 !== true) cfg = {...cfg, soulsRepairV1: true};
   const m = sharedCarry ? {...loaded, invariants: [...loaded.invariants, looseFramesHeld, framesStand, decksBear, stairsBear]} : loaded;
   // disassembly/1 adds its reverse verbs to this engine's registry only; the default registry is unchanged.
@@ -3663,7 +3666,7 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promis
       // (decoded once: registerAssets clones what it keeps, so the graph goes on to Runtime.restore unshared)
       const decoded=decodeSnapshot(s.mars);
       {const ep=(decoded as any).world?.entityPhysicsV1;if(ep)registerAssets(ep.assets);}
-      const rt = m.Runtime.restore(s.mars, (s as {groundV1?:boolean}).groundV1 ? groundRegistry(registry) : registry, services(base), m.invariants, decoded);
+      const rt = m.Runtime.restore(s.mars, (s as {groundV1?:boolean}).groundV1 ? groundRegistry(registry, groundReach((decoded as any).world?.groundV1)) : registry, services(base), m.invariants, decoded);
       if(cfg.scene==='eden-commons'&&(rt.world.base.campus!=='eden-commons'||rt.world.base.staticHash!==base.base.staticHash))throw new Error('snapshot commons physical base differs from the native factory');
       const engine = new MarsEngine(m, rt, s.cfg ?? cfg, { programs: s.programs, nextProg: s.nextProg, leaving: s.leaving,renderPlatformsV1:s.renderPlatformsV1 });
       if (s.quiet) engine.beginQuiet();
@@ -3675,11 +3678,11 @@ export async function marsFactory(cfg: MarsWorldConfig = PROVING_GROUND): Promis
 /** Explicit reader for a logged Greenfield -> commons physical checkpoint.
  * Genesis stays Greenfield. A newly constructed commons world is not a replay
  * substitute; only its validated checkpoint can enter this history reader. */
-export async function marsCommonsTransitionFactory(cfg:MarsWorldConfig=GREEN_FIELD_WORLD,options?:{safeArrivalV1?:boolean}):Promise<EngineFactory> {
+export async function marsCommonsTransitionFactory(cfg:MarsWorldConfig=GREEN_FIELD_WORLD,options?:{safeArrivalV1?:boolean;env?:Record<string,string|undefined>}):Promise<EngineFactory> {
   if(cfg.scene!=='greenfield')throw new Error('commons-transition.factory-origin');
   const target=options?.safeArrivalV1?{commonsArrivalV1:true,safeArrivalV1:true}:{};
-  const old=await marsFactory({...cfg,commonsTransitionV1:true,...(options?.safeArrivalV1?{commonsArrivalV1:true}:{})}),
-    next=await marsFactory({...cfg,...EDEN_COMMONS_WORLD,commonsTransitionV1:true,...target});
+  const old=await marsFactory({...cfg,commonsTransitionV1:true,...(options?.safeArrivalV1?{commonsArrivalV1:true}:{})},options?.env),
+    next=await marsFactory({...cfg,...EDEN_COMMONS_WORLD,commonsTransitionV1:true,...target},options?.env);   // #2416: the world's env
   const allowed=(v:string)=>v===old.rulesVersion||v===next.rulesVersion;
   return {rulesVersion:old.rulesVersion,canReplayHistory:allowed,canRestoreSnapshot:allowed,
     genesis:old.genesis,

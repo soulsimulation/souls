@@ -142,8 +142,8 @@ export function mountAgentInbox(app: Hono, d: Deps) {
       let handed = false;               // MSG: an empty answer means the CLI re-polls at once (presence keeps 'listening')
       // #1326: a Soul's listen also ends when the world's clock stalls (the frame then carries world.stalled); one already
       // stalled holds at most 5 s, so a client listening in a loop doesn't spin
-      const stalledAtStart = kind === 'soul' && stalledNow(), stall = new AbortController();
-      const unstall = kind === 'soul' && !stalledAtStart ? whenStalled(() => stall.abort()) : () => {};
+      const stalledAtStart = kind === 'soul' && stalledNow(c), stall = new AbortController();
+      const unstall = kind === 'soul' && !stalledAtStart ? whenStalled(c, () => stall.abort()) : () => {};
       try {
         await inbox.listen(s, after, stalledAtStart ? Math.min(timeout, 5000) : timeout, AbortSignal.any([c.req.raw.signal, claim.signal, stall.signal]));
         // Superseded (or the caller hung up): hand over nothing; the newer listen takes every waiting message.

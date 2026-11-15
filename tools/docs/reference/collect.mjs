@@ -29,7 +29,7 @@ const { edgeSchema } = await load('apps/server/src/edge/events/schema.ts');
 const { INTENT_VERBS } = await load('apps/server/src/edge/intents/intents.ts');
 const { marsFactory, GREEN_FIELD_WORLD } = await load('packages/engine-mars/src/index.ts');
 
-// The world a launcher starts for a new slug (main.ts plainFactory: green field, safe crew removal, edge minds, god mode).
+// The world a launcher starts for a new slug (world-main.ts plainFactory: green field, safe crew removal, edge minds, god mode).
 const worldId = 'docs-reference', slug = 'garden';
 const factory = await marsFactory({ ...GREEN_FIELD_WORLD, safeCrewRemoval: true });
 const db = new Db(':memory:'), host = new WorldHost(db, factory, 'docs-reference', 1e9, worldId);
@@ -57,11 +57,11 @@ for (const r of app.routes) {
   if (!seen.has(k)) { seen.add(k); routes.push({ method: r.method, path: r.path }); }
 }
 
-// Served beside the route table: main.ts hands /mcp to handleMcp before Hono, and the Hub takes WebSocket upgrades (/ws for
+// Served beside the route table: world-main.ts hands /mcp to handleMcp before Hono, and the Hub takes WebSocket upgrades (/ws for
 // the viewer; any other path, such as /v1/edge/events/ws, goes to the edge's own handler). Each is checked against the
 // source that serves it, so a moved endpoint fails here instead of vanishing from the page.
 const beside = [
-  { method: 'POST', path: '/mcp', what: 'MCP (Streamable HTTP, stateless): Authorization: Bearer <Soul token>, or /mcp/<Soul token> for clients that only take a URL', file: 'apps/server/src/main.ts', needle: "req.url?.startsWith('/mcp')" },
+  { method: 'POST', path: '/mcp', what: 'MCP (Streamable HTTP, stateless): Authorization: Bearer <Soul token>, or /mcp/<Soul token> for clients that only take a URL', file: 'apps/server/src/world-main.ts', needle: "req.url?.startsWith('/mcp')" },
   { method: 'GET', path: '/ws', what: 'WebSocket: the world viewer\'s live stream', file: 'apps/server/src/hub.ts', needle: "req.url?.startsWith('/ws')" },
 ];
 for (const b of beside) if (!readFileSync(join(ROOT, b.file), 'utf8').includes(b.needle)) throw Error(`collect: ${b.file} no longer serves ${b.path} the way collect.mjs expects; update it`);

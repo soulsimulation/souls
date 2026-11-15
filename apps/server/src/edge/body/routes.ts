@@ -13,7 +13,8 @@ import {FLOATER_MODELS} from '../../../../../mars/viewer/engine/bodies/models.ts
 import {CREATURES,CREATURE_IDS,creatureBody} from '../../../../../mars/viewer/engine/bodies/creatures.ts';
 import {addSchemaPart} from '../events/schema.ts';
 import {intakeUpload,recordIntake} from '../../moderation/intake.ts';
-import {moderationFor} from '../../moderation/store.ts';
+import {defaultSiteLog,moderationFor} from '../../moderation/store.ts';
+import {worldConfig} from '../../config.ts';
 import {BODY_UPLOAD_POLICY,UploadRejected} from '../../moderation/validate.ts';
 import {randomInt,createHash} from 'node:crypto';
 import {siteRequestOk} from '../../travel/travel.ts';
@@ -70,8 +71,8 @@ export type BodyRefResolution={ok:true;body:Entity['body'];fetch?:()=>Promise<{o
 /** Per world host: resolve a carried `body_<sha>` reference for its owner, by the same rules as PUT /v1/edge/body {ref}. */
 export const bodyRefResolvers=new WeakMap<object,(ref:string,owner:string)=>BodyRefResolution>();
 export function mountBodyRoutes(app:Hono,deps:EdgeDeps&{ledger:EdgeLedger;bodySite?:BodySite}){
-  const db=deps.db.db,world=deps.host.worldId;
-  const moderation=moderationFor(db,world);
+  const db=deps.db.db,world=deps.host.worldId,env=worldConfig(deps.host).env;
+  const moderation=moderationFor(db,world,defaultSiteLog(env));
   const available=!!deps.host.engine.assignBodyV1&&!!deps.host.engine.bodyAssignmentProblemV1;
   const prefix=deps.souls.cfg.worldPath?.replace(/\/$/,'')??'';
   const types=available?(deps.souls.cfg.bodyTypes??['humanoid','ceramic','floater','creature']):[];
@@ -104,7 +105,7 @@ export function mountBodyRoutes(app:Hono,deps:EdgeDeps&{ledger:EdgeLedger;bodySi
    *  references answer exactly like unknown ones. */
   const visible=(d:{owner:string;public:boolean}|null,owner:string)=>!!d&&(d.owner===owner||d.public);
   const localBytes=(ref:string)=>!!SHARED_BODY_BYTES[ref]||!!db.prepare('SELECT 1 FROM edge_body_assets_v1 WHERE world_id=? AND asset_id=?').get(world,ref);
-  const site=deps.bodySite??launcherBodySite(process.env.SIM_SITE_URL,process.env.SIM_SITE_KEY);
+  const site=deps.bodySite??launcherBodySite(env.SIM_SITE_URL,env.SIM_SITE_KEY);
   /** Pull-through at selection, never on serve or observe: fetch the source world's admitted bytes, check the content
    *  address, re-admit under this world's policy, and cache them once (no owner row: the source owner's quota is unchanged). */
   async function pull(d:{ref:string;sourceWorld:string;descriptor:Record<string,unknown>}){

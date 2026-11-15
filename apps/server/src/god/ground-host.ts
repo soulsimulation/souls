@@ -56,12 +56,12 @@ export class GroundHost {
     // compare with the newest ground this host asked for (a fact may still be queued: A → B → A must log A again)
     // god worlds walk the whole ground (lane NAV: paged navigation); a world standing on the old 384 m window adopts it once
     // (NAV_PAGED=0: the old 384 m window, for comparison runs)
-    const want = process.env.NAV_PAGED !== '0', paged = (this.engine.world.groundV1?.nav === 'paged/1') === want;
+    const want = worldConfig(this.host).env.NAV_PAGED !== '0', paged = (this.engine.world.groundV1?.nav === 'paged/1') === want;
     const intended = this.logged ?? (paged ? this.engine.world.groundV1?.recipeHash : null) ?? null;
     if (intended === hash) return hash;
     if (!this.engine.previewGroundV1) throw new Error('ground.reader-required: this engine has no ground reader');
     this.logged = hash; this.installs++;
-    void this.host.enqueue('rules', 'god:ground', { groundV1: groundFact(g, seq, { paged: process.env.NAV_PAGED !== '0' }), why: 'ground/1: Souls stand on the entity world\'s terrain (prospective; earlier history replays unchanged)' });
+    void this.host.enqueue('rules', 'god:ground', { groundV1: groundFact(g, seq, { paged: want }), why: 'ground/1: Souls stand on the entity world\'s terrain (prospective; earlier history replays unchanged)' });
     return hash;
   }
   /** Ground height for a body standing at (x, z) on the current recipe (diagnostics, e2e). */
@@ -71,6 +71,7 @@ export class GroundHost {
   }
 }
 import { groundField as groundFieldOf } from '@souls/engine-mars';
+import { worldConfig } from '../config.ts';
 
 // ---------------------------------------------------------------- edge capabilities
 
@@ -94,11 +95,11 @@ export function namedFlagsV1(god: GodMode): NamedFlagV1[] {
 }
 
 /** Offer `walk:flag-<name>` and `swim:<water>` capabilities from the god world (chains any profile already installed). */
-const DEEP_MIDDLE = new Map<string, boolean>();
 /** B-facade (read worker): what main's swim offers read besides the god model, shipped with the delta: the ground recipe
  *  and the deep-middle answers main's engine gave (static per recipe and outline). */
 export type GroundEnvV1 = { recipe: string | null; middles: Record<string, boolean> };
 export function installGroundCapabilities(ledger: Ledger, god: GodMode, host: WorldHost, read?: () => GroundEnvV1 | undefined) {
+  const DEEP_MIDDLE = new Map<string, boolean>();   // #2416: this world's answers only (groundEnvV1 ships them to its read worker)
   const offerFlags=(soul:Parameters<NonNullable<EdgeLedger['worldProfile']>>[0],caps:Parameters<NonNullable<EdgeLedger['worldProfile']>>[1],plans:Parameters<NonNullable<EdgeLedger['worldProfile']>>[2],only?:string)=>{
     const me=host.engine.world.entities[soul.entityId];if(!me)return;
     for (const e of god.model.entities.values()) {

@@ -23,7 +23,8 @@ import { renderReport } from './report.mjs';
 
 export const RESULT_SCHEMA = 'soul-eval/1';
 const REPO = resolve(new URL('../../..', import.meta.url).pathname);
-const GENESIS = { 'eden-2026': 'worlds/templates/eden-2026.json' };
+// #2446: hello-hamlet boots in seconds where Eden 2026 takes minutes on a loaded host (battery m4-hamlet-v1)
+export const GENESIS = { 'eden-2026': 'worlds/templates/eden-2026.json', 'hello-hamlet': 'worlds/templates/hello-hamlet.json' };
 const log = (...a) => process.stderr.write(`[soul-eval] ${a.join(' ')}\n`);
 
 export function parseArgs(argv) {
@@ -88,12 +89,12 @@ export async function runEval(o) {
       if (local) w = await startWorld({ serverRoot, slug: 'eden-eval', port, genesis, dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') });
       const rec = await runEpisode({ dir, base: local ? w.base : world.replace(/\/$/, ''), item, seatCfg, catalogRef, rails: { ...(seatCfg.rails ?? {}) }, folder, deliver, warmSec: Number(o['warm-sec'] ?? 0), refreshClient: !!o['refresh-client'] && rep === 1 && n === 1,
         resetTo: local ? null : (o['reset-to'] === true ? null : o['reset-to'] ?? null), log });
-      rec.repeat = rep; episodes.push(rec);
+      rec.repeat = rep; rec.bootMs = w?.bootMs ?? null; episodes.push(rec);   // #2446: the world's boot, from spawn to healthz
       spent += (rec.seat.costUsd ?? 0) + (rec.kickoff.costUsd ?? 0);
       log(`${item.id} r${rep}: ${rec.succeeded ? 'PASS' : 'FAIL'} (${rec.why}) turns=${rec.seat.modelTurns} calls=${rec.worldCalls} motion=${rec.firstMotionMs}ms spent=$${spent.toFixed(3)}`);
     } catch (e) {
       log(`${item.id} r${rep}: ERROR ${e.message}`);
-      episodes.push({ item: item.id, repeat: rep, error: String(e.message).slice(0, 300), succeeded: false, seat: { modelTurns: 0, apiCalls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, cliCalls: {} }, refusals: {}, routes: [] });
+      episodes.push({ item: item.id, repeat: rep, bootMs: w?.bootMs ?? null, error: String(e.message).slice(0, 300), succeeded: false, seat: { modelTurns: 0, apiCalls: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, cliCalls: {} }, refusals: {}, routes: [] });
       if (/is not in this world|no place of kind|no thing of kind/.test(e.message)) { stoppedBy = `battery invalid for this world: ${e.message}`; }
     } finally {
       if (w) { await stopWorld({ pid: w.pid }); if (!o['keep-data']) rmSync(join(dir, 'server', 'data'), { recursive: true, force: true }); }

@@ -26,7 +26,7 @@ const LOCK_OPS=new Set(['lock','unlock','knock']);
 type Refusal={code:string;reason:string};
 export const isContactActuator = (def:StoredDef, action:{name:string}) => contactStateKey(def,action.name)!==null;
 const fail=(code:string,reason:string)=>({ok:false as const,code,reason});
-export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:number)=>number;clearance?:(x:number,z:number,level?:number)=>number;
+export function createContactActuatorService(d:{/** #2416: this world's day (posters) */ worldDay?:()=>number;levelAt?:(x:number,z:number,y:number)=>number;clearance?:(x:number,z:number,level?:number)=>number;
  /** #1070: how far this body must ease from `to` to stay clear of the thing's gap once it is shut; undefined when it's clear, null when no place is */ settle?:(actor:string,target:string,to:[number,number],level:number)=>[number,number]|null|undefined;
  model:()=>WorldModel;body:(id:string)=>{pose:{p:number[]};human?:{hands?:{left?:number[];right?:number[]};handActuator?:import('../../../../mars/viewer/engine/social/hand-actuator.ts').HandActuatorMotion}}|undefined;access:(id:string,soul:EdgeSoul)=>{code:string;reason:string}|null;
  /** entry 32: the thing's owner (a name) and whether it is this Soul; null when nobody owns it */ owner?:(id:string,soul:EdgeSoul)=>{name:string;mine:boolean}|null;
@@ -72,10 +72,10 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
     const posters=!!def.tags?.includes('posters'),wanted=!!def.tags?.includes('wanted');
     const local=(dx:number,dy:number,out:number):[number,number,number]=>[centre[0]+dx*wp.s*c+s*out,centre[1]+dy*wp.s,centre[2]-dx*wp.s*s+c*out];
     let sheet:{title:string;detail:string;name:string;paper:number;age?:number}|undefined;
-    if(posters){const st=actuatedState(e,def),list=posterList(st),p=action==='pin'?null:posterTarget(st,soul,input.which),slot=action==='pin'?Math.max(0,posterFreeSlot(list)):(p?.s??0),[dx,dy]=posterSlot(slot);
+    if(posters){const st=actuatedState(e,def),list=posterList(st),p=action==='pin'?null:posterTarget(st,soul,input.which,d.worldDay?.()??0),slot=action==='pin'?Math.max(0,posterFreeSlot(list)):(p?.s??0),[dx,dy]=posterSlot(slot);
      params.at=local(dx,dy,.004);
      const title=action==='pin'?String(input.title??'').trim():p?.t??'',detail=action==='pin'?String(input.detail??'').trim():p?.d??'';
-     sheet={title:title.slice(0,40),detail:detail.slice(0,80),name:(action==='pin'?posterName(soul):p?.n??'').slice(0,40),paper:posterPaper(title,action==='pin'?posterName(soul):p?.n??''),...(p?{age:Math.min(99,posterAge(p))}:{})};}
+     sheet={title:title.slice(0,40),detail:detail.slice(0,80),name:(action==='pin'?posterName(soul):p?.n??'').slice(0,40),paper:posterPaper(title,action==='pin'?posterName(soul):p?.n??''),...(p?{age:Math.min(99,posterAge(p,d.worldDay?.()??0))}:{})};}
     if(wanted){const st=actuatedState(e,def),list=wantedList(st);let col=0,row=0,dx=0,dy=0;
      if(action==='pin'){const k=wantedColumn(input)??'w';col=k==='o'?1:0;row=Math.max(0,wantedFreeRow(list,k));}
      else{const n=wantedTarget(st,soul,input.note,action==='unpin'?'own':'any');col=n?.c==='o'?1:0;row=n?.r??0;if(action==='reply'){dx=.06;dy=-.075-.03*(n?.re.length??0);}if(action==='take-on'){dx=.1;dy=-.01;}}
@@ -198,7 +198,7 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
     const count=(m:'X'|'O')=>`${m} ${st.men[m]+st.kings[m]} piece${st.men[m]+st.kings[m]===1?'':'s'}${st.kings[m]?` (${st.kings[m]} king${st.kings[m]===1?'':'s'})`:''}`;
     const head=st.fresh?'Checkers: a new game, X (the bottom side) to move':`Checkers: ${who('X')} (X)${names[1]?` against ${names[1]} (O)`:''}; ${st.winner?`${who(st.winner)} won`:`${who(st.turn)} to move${st.chain>=0?', jumping on':''}`}; ${count('X')}, ${count('O')}`;
     return {id:e.id,name:e.name??def.name.replace(/^core-/,''),text:[head,...checkersRows(e.state?.text)].join('\n'),by:null,writable:true};}
-   return {id:e.id,name:e.name??def.name.replace(/^core-/,''),text,...(def.tags?.includes('pinboard')?{notes:pinNotes(e.state??{}),...(def.tags.includes('notebook')?{notebook:true}:{})}:{}),...(def.tags?.includes('signup')?{title:String(e.state?.title??''),signups:pinNotes(e.state??{}),text:[String(e.state?.title??'Sign up'),...pinNotes(e.state??{}).map((n,i)=>`${i+1}. ${n.text}`)].join('\n')}:{}),...(def.tags?.includes('poll')?{title:String(e.state?.title??''),text:[String(e.state?.title??''),pollLines(e.state??{})].join('\n')}:{}),...(def.tags?.includes('posters')?{posters:posterList(e.state??{}).map(p=>({...p,age:posterAge(p),stale:posterStale(p)}))}:{}),...(def.tags?.includes('wanted')?{wanted:wantedList(e.state??{})}:{}),by:typeof e.state?.textBy==='string'&&e.state.textBy&&!def.tags?.some(t=>t==='poll'||t==='signup'||t==='posters'||t==='wanted')?e.state.textBy:null,writable:!!def.tags?.includes('hand-writable')};
+   return {id:e.id,name:e.name??def.name.replace(/^core-/,''),text,...(def.tags?.includes('pinboard')?{notes:pinNotes(e.state??{}),...(def.tags.includes('notebook')?{notebook:true}:{})}:{}),...(def.tags?.includes('signup')?{title:String(e.state?.title??''),signups:pinNotes(e.state??{}),text:[String(e.state?.title??'Sign up'),...pinNotes(e.state??{}).map((n,i)=>`${i+1}. ${n.text}`)].join('\n')}:{}),...(def.tags?.includes('poll')?{title:String(e.state?.title??''),text:[String(e.state?.title??''),pollLines(e.state??{})].join('\n')}:{}),...(def.tags?.includes('posters')?{posters:posterList(e.state??{}).map(p=>({...p,age:posterAge(p,d.worldDay?.()??0),stale:posterStale(p,d.worldDay?.()??0)}))}:{}),...(def.tags?.includes('wanted')?{wanted:wantedList(e.state??{})}:{}),by:typeof e.state?.textBy==='string'&&e.state.textBy&&!def.tags?.some(t=>t==='poll'||t==='signup'||t==='posters'||t==='wanted')?e.state.textBy:null,writable:!!def.tags?.includes('hand-writable')};
   },
   /** Entry 32: who may lock, unlock and knock on a lockable door. Its owner locks and unlocks it (key outside, thumb-turn
    *  inside); a door nobody owns locks for anyone. Knocking is for the outside (the front) of a closed door. A non-owner
@@ -276,8 +276,8 @@ export function createContactActuatorService(d:{levelAt?:(x:number,z:number,y:nu
    const bad=whenRefusal(a,state,e.name??'object');if(bad)return fail(bad.code,bad.reason);
    // entry 32: a knock changes nothing in the world; those who hear it are told once
    if(a.name==='knock'&&def.tags.includes('lockable')){d.knock?.(soul,e.id);d.record(soul,e.id,a.name);done();return {ok:true as const};}
-   const text=isGameAction(def,a)?gameProblem(def,a,state,soul,a.name==='erase'?undefined:intent.params??{}):isListAction(def,a)?listProblem(def,a,state,soul,intent.params??{}):contactStateKey(def,a.name)==='text'&&a.name==='write'?boardTextProblem(intent.params?.text):enumParamProblem(def,a,intent.params??{},e.name??'object');if(text)return fail(text.code,text.reason);
-   const patch=isGameAction(def,a)?gamePatch(def,a,state,soul,intent.params??{}):actionPatch(def,a,state,intent.params??{},soul);if(contactStateKey(def,a.name)==='text'&&a.name==='write')patch.textBy=soul.soulId;
+   const text=isGameAction(def,a)?gameProblem(def,a,state,soul,a.name==='erase'?undefined:intent.params??{}):isListAction(def,a)?listProblem(def,a,state,soul,intent.params??{},d.worldDay?.()??0):contactStateKey(def,a.name)==='text'&&a.name==='write'?boardTextProblem(intent.params?.text):enumParamProblem(def,a,intent.params??{},e.name??'object');if(text)return fail(text.code,text.reason);
+   const patch=isGameAction(def,a)?gamePatch(def,a,state,soul,intent.params??{}):actionPatch(def,a,state,intent.params??{},soul,d.worldDay?.()??0);if(contactStateKey(def,a.name)==='text'&&a.name==='write')patch.textBy=soul.soulId;
    // entry 32: a passage's close re-locks the latch
    if(intent.relock&&a.name==='close'&&typeof state.locked==='boolean')patch.locked=true;
    // A sprinkler coming on soaks the planters (things with numeric moisture) in its forward arc within reach, in the same commit:
