@@ -64,6 +64,39 @@ export function actQueue(pairs) {
   return ms.length ? { n: ms.length, p50: q(0.5), p95: q(0.95), max: ms.at(-1) } : null;
 }
 
+/** #2437 A2: the act calls' whole server time (Server-Timing total: queue + handler, up to the acknowledgment) and their
+ *  queue, p50/p95/p99/max over the run, ms. */
+export function actLatency(pairs) {
+  const calls = pairs.flatMap(({ http }) => http.filter((r) => r.method === 'POST' && /\/v1\/edge\/act(?:\?|$)/.test(r.route ?? '') && Number.isFinite(r.serverMs)));
+  const stats = (ms) => { ms.sort((x, y) => x - y); const q = (p) => ms[Math.min(ms.length - 1, Math.max(0, Math.ceil(p * ms.length) - 1))]; return ms.length ? { n: ms.length, p50: q(0.5), p95: q(0.95), p99: q(0.99), max: ms.at(-1) } : null; };
+  return { server: stats(calls.map((r) => r.serverMs)), queue: stats(calls.filter((r) => Number.isFinite(r.queuedMs)).map((r) => r.queuedMs)) };
+}
+
+// #2437 A2: the paced arm's verbs, like the m4-v1 battery's: walks to named places, sit, eat, read, a bench, music.
+const PACED_WORDS = ['bandstand', 'windmill', 'fire circle', 'lake', 'library', 'sit on the floor', 'eat', 'read', 'bench', 'music', 'garden', 'pond'];
+
+/** #2437 A2: a Soul paced like a real agent: one act every `actSec` on average (uniform ±50 %, from a random first
+ *  offset, so Souls do not act in step), each a `find` and an `act` on one of its three nearest rows; owner messages are
+ *  checked every 30 s. A cycle that runs late starts the next at once, never two together. */
+async function pacedLoop({ folder, until, r, counts, acts = [], actSec }) {
+  let next = Date.now() + r() * actSec * 1000, lastPending = Date.now();
+  for (;;) {
+    await sleep(Math.max(0, next - Date.now()));
+    if (Date.now() >= until) break;
+    next = Math.max(Date.now(), next + actSec * 1000 * (0.5 + r()));
+    if (Date.now() - lastPending >= 30000) {
+      lastPending = Date.now(); const p = await cliJson(folder, ['pending']); counts.cmds++;
+      for (const m of p.data?.ownerMessages ?? []) { if (!m?.id) continue; await cliJson(folder, ['ack', m.id, 'On it.']); await cliJson(folder, ['result', m.id, 'done', 'Done.']); counts.cmds += 2; counts.closed++; }
+    }
+    const f = await cliJson(folder, ['find', PACED_WORDS[Math.floor(r() * PACED_WORDS.length)]]); counts.cmds++;
+    const rows = (f.data?.found ?? []).filter((x) => x.act);
+    if (!rows.length) continue;
+    const row = rows[Math.floor(r() * Math.min(3, rows.length))], t0 = Date.now();
+    const a = await cliJson(folder, ['act', row.act]); counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++;
+    acts.push({ cap: capabilityOf(row), t0, t1: Date.now() });
+  }
+}
+
 async function soulLoop({ folder, until, r, counts, acts = [] }) {
   while (Date.now() < until) {
     const p = await cliJson(folder, ['pending']); counts.cmds++;
@@ -85,14 +118,14 @@ async function soulLoop({ folder, until, r, counts, acts = [] }) {
 
 export async function runLoad(o) {
   const sizes = String(o.souls ?? '12,24').split(',').map(Number).filter((n) => n > 0);
-  const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), port = Number(o.port ?? 18780);
+  const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), actSec = o['act-sec'] != null ? Number(o['act-sec']) : null, port = Number(o.port ?? 18780);
   const serverRoot = resolve(o['server-root'] ?? REPO);
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
   for (let rep = first; rep < first + repeats; rep++) for (const n of sizes) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
-    const prof = rep === first,   // #2414: every arm of the first repeat
+    const prof = true,   // #2437: every arm of every repeat
       profDir = join(dir, 'server', 'prof'), prevOpts = process.env.NODE_OPTIONS;
     if (prof) { mkdirSync(profDir, { recursive: true }); process.env.NODE_OPTIONS = `${prevOpts ? prevOpts + ' ' : ''}--import=${PROF_HOOK}`; process.env.SIM_PROF_DIR = profDir; }
     let w; try { w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log') }); }
@@ -115,7 +148,7 @@ export async function runLoad(o) {
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
-      await Promise.all(souls.map((s, k) => soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts })));
+      await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const live2414 = readLive(liveFile), server = { act: actPartsOfLive(live2414), apiRoutes: live2414?.api?.routes ?? null, read: live2414?.read ?? null, tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
@@ -123,7 +156,8 @@ export async function runLoad(o) {
         writeFileSync(join(profDir, 'prof.stop'), ''); const pf = join(profDir, 'world.cpuprofile');
         for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(2000);
         try { server.gridStats = JSON.parse(readFileSync(join(profDir, 'grid-stats.json'), 'utf8')); } catch (e) { server.gridStats = { error: String(e?.message ?? e).slice(0, 200) }; }
-        try { server.buckets = bucketProfile(pf, serverRoot); } catch (e) { server.buckets = { error: String(e?.message ?? e).slice(0, 200) }; }
+        let hold = null; try { hold = JSON.parse(readFileSync(join(profDir, 'holds.json'), 'utf8')); server.eld = hold.eld; server.longestMarkedCallbackMs = hold.longestMarkedCallbackMs; server.clockSkewUs = hold.hrAtStartUs - hold.profileStartUs; } catch (e) { server.eld = { error: String(e?.message ?? e).slice(0, 200) }; }
+        try { server.buckets = bucketProfile(pf, serverRoot, hold?.marks ?? null); } catch (e) { server.buckets = { error: String(e?.message ?? e).slice(0, 200) }; }
         try { server.profile = summarizeProfile(pf, serverRoot); } catch (e) { server.profile = { error: String(e?.message ?? e).slice(0, 200) }; }
       }
       const http = [], pairs = [];
@@ -133,7 +167,7 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       await stopWorld({ pid: w.pid });

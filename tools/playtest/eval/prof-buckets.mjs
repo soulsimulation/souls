@@ -14,8 +14,12 @@ const ROUTE = new Set(['planWalk', 'routeAround', 'retryPeople', 'goalNear', 'gr
 const TICK = new Set(['tickOnceInner', 'tickOnce', 'advanceStep']);
 const BREAK = new Set(['(idle)', '(program)', '(root)']);
 
-export function bucketProfile(file, repo) {
+// #2437 A1: `marks` (holds.json from prof-hook) are the start and end of every timer and immediate callback, in the
+// profile's µs clock. A busy run is split at each one, so a "hold" is one macrotask's synchronous part (or, between
+// marked callbacks, an I/O callback with the microtasks after it). Reported beside the old busy-run "turns".
+export function bucketProfile(file, repo, marks = null) {
   const p = JSON.parse(readFileSync(file, 'utf8'));
+  const bounds = marks ? Float64Array.from(marks).sort() : new Float64Array(0);
   const byId = new Map(p.nodes.map((n) => [n.id, n])), parent = new Map();
   for (const n of p.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
   const relOf = (u) => String(u || '').replace(/^file:\/\//, '').split(repo + '/').pop();
@@ -58,17 +62,26 @@ export function bucketProfile(file, repo) {
   };
   const tot = new Map(), longest = new Map(), ctxOf = new Map(), routeSearchBy = new Map();
   let cur = null, busy = 0, total = 0, turns = 0;
+  // holds: the same runs split at macrotask marks
+  let hcur = null, bi = 0, t = p.startTime; const holds = [], hlong = new Map();
+  const hclose = () => { if (!hcur) return; holds.push(hcur); for (const [g, ms] of hcur.by) { const L = hlong.get(g); if (!L || ms > L.ms) hlong.set(g, { ms, holdMs: hcur.ms }); } hcur = null; };
   const close = () => { if (!cur) return; turns++; for (const [g, ms] of cur.by) { const L = longest.get(g); if (!L || ms > L.ms) longest.set(g, { ms, turnMs: cur.ms }); } cur = null; };
   for (let i = 0; i < p.samples.length; i++) {
     const dt = (p.timeDeltas[i + 1] ?? p.timeDeltas[i] ?? 0) / 1000; total += dt;
-    const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); continue; }
+    t += p.timeDeltas[i] ?? 0; let crossed = false; while (bi < bounds.length && bounds[bi] <= t) { bi++; crossed = true; }
+    if (crossed) hclose();
+    const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); hclose(); continue; }
     busy += dt; const c = classify(node.id);
     tot.set(c.g, (tot.get(c.g) ?? 0) + dt);
     if (['audit', 'scan', 'gc', 'snapshot'].includes(c.g)) { const m = ctxOf.get(c.g) ?? new Map(); m.set(c.ctx, (m.get(c.ctx) ?? 0) + dt); ctxOf.set(c.g, m); }
     if (c.routeSearch) routeSearchBy.set(c.ctx, (routeSearchBy.get(c.ctx) ?? 0) + dt);
     if (!cur) cur = { ms: 0, by: new Map() }; cur.ms += dt; cur.by.set(c.g, (cur.by.get(c.g) ?? 0) + dt);
+    if (!hcur) hcur = { ms: 0, at: t, by: new Map() }; hcur.ms += dt; hcur.by.set(c.g, (hcur.by.get(c.g) ?? 0) + dt);
   }
-  close();
+  close(); hclose();
+  holds.sort((a, b) => b.ms - a.ms);
+  const hist = {}; for (const b of [50, 100, 200, 300, 500, 1000]) hist[`>=${b}`] = holds.filter((h) => h.ms >= b).length;
+  const lead = (h) => [...h.by].sort((a, b) => b[1] - a[1]);
   const r1 = (x) => Math.round(10 * x) / 10;
   const top = (m, k) => Object.fromEntries([...m].sort((a, b) => b[1] - a[1]).slice(0, k).map(([a, v]) => [a, r1(v)]));
   return {
@@ -76,5 +89,11 @@ export function bucketProfile(file, repo) {
     groups: [...tot.entries()].sort((a, b) => b[1] - a[1]).slice(0, 80).map(([g, ms]) => ({ g, ms: r1(ms), longestMs: r1(longest.get(g)?.ms ?? 0), inTurnMs: r1(longest.get(g)?.turnMs ?? 0) })),
     ctxOf: Object.fromEntries([...ctxOf].map(([g, m]) => [g, top(m, 12)])),
     routeSearchByCtx: top(routeSearchBy, 20),
+    holds: marks ? {
+      n: holds.length, hist, marks: bounds.length,
+      longest: holds.slice(0, 40).map((h) => ({ ms: r1(h.ms), atS: r1((h.at - p.startTime) / 1e6), by: Object.fromEntries(lead(h).slice(0, 5).map(([g, ms]) => [g, r1(ms)])) })),
+      // per group: the most of it in one hold, and the share of all >= 100 ms holds that group led
+      groups: [...hlong.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, 40).map(([g, v]) => ({ g, longestMs: r1(v.ms), inHoldMs: r1(v.holdMs), ledOver100: holds.filter((h) => h.ms >= 100 && lead(h)[0][0] === g).length })),
+    } : null,
   };
 }
