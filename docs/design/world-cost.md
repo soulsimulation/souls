@@ -90,7 +90,7 @@ in the program. The load gauges are one per program.
 | `apps/server/src/eden-bootstrap.ts` (`edenOriginHistoryFactory`), `packages/engine-mars/src/engine.ts` (`marsCommonsTransitionFactory`), `split/god-replica.ts` (`defaultAssetDir()`) | Calls that take no world env yet: these factories build `marsFactory` from `process.env`, and a read worker's replica finds its asset dir from the program's env. `world-config-reads.test.ts` lists the replica's call and `marsFactory`'s default env. **Done (#2416)** for `edenOriginHistoryFactory` and `marsCommonsTransitionFactory`: they take the world's env (`world-factory.ts` passes it). The Eden life readers (`retainedCommonsShoreFactory` and the other transition factories) and `god-replica.ts` still read the program's | Form 2 |
 | `apps/server/src/god/host-render-slot.ts`, `god/look-renderer.ts` | Lock liveness is checked by pid, so a dead world's lock is never stale while the program lives. **Done (#2444):** in a shard each world's slots are held under its name (`renderWorld`), and a world that stops releases them (`releaseWorldRenderSlots`); still one render at a time on the host | Both |
 | Content caches: `packages/engine-mars/src/ground-bridge.ts` (`RECIPES`, `FIELDS`), `catalog-adapter.ts` / `CATALOG`, `mars/viewer/engine/spatial/grid.ts`, `path.ts`, the library and the generator memos | Keyed by content, so sharing them is the point of form 2. But their byte caps become shared, and a registry can let a world resolve a hash it never logged | Shareable |
-| `apps/server/src/load/watchdog.ts` (`faultGuard`, `installFaultGuard`), `load/watchdog-worker.ts` (the kill), `world-main.ts` (`/__sim/fault`) (#2366) | One fault guard per program: the `uncaughtException` and `unhandledRejection` handlers cannot tell which world threw, and its storm exit (70) and stopped-clock exit end every world. The watchdog's hard limits end the whole process **Done (#2444) by design:** a shard has one watchdog thread (`shareWatchdog`) and a fault ends it; the launcher reloads its worlds | Form 2 |
+| `apps/server/src/load/watchdog.ts` (`faultGuard`, `installFaultGuard`), `load/watchdog-worker.ts` (the kill), `world-main.ts` (`/__sim/fault`) (#2366) | One fault guard per program: the `uncaughtException` and `unhandledRejection` handlers cannot tell which world threw, and its storm exit (70) and stopped-clock exit end every world. The watchdog's hard limits end the whole process. **Done (#2444):** each world's guard notes only the errors from its own async context (`installFaultGuard` `mine`); by design a shard has one watchdog thread (`shareWatchdog`) and a fault ends it; the launcher reloads its worlds | Form 2 |
 | `apps/server/src/god/edit-preview.ts` (`live`, `pending`) | One preview worker and `PREVIEW_MAX_PENDING` (2) per program: one world's previews refuse another's | Form 2 |
 | `apps/server/src/edge/ledger/vocabulary.ts` (`knownMemo`, `synonymWords`, `stepVerbs`), `god/mirror.ts` (`lastGroundHashed`) | One-slot memos. Keyed by their input, so never wrong, but two worlds taking turns rebuild them every call | Form 2 (cost) |
 | `apps/server/src/moderation/classifier.ts` (`selected`), `god/context-timing.ts` (`emitted`) | The upload classifier and the timing budget are per program | Form 2 |
@@ -129,15 +129,30 @@ exactly:
   another's settings. The program's heap cap is a world's cap times the shard's size.
 - **Load and stop by message.** `{op:'load'}` runs `startWorld(loadConfig(env), {signals: false, exit})` with the world's
   own env; `{op:'stop'}` runs its shutdown (snapshot saved), after which none of its timers, handlers, watchdog entry or
-  render slots stay in the program. Each world's log lines are tagged in the program and written to its own log.
+  render slots stay in the program: the hub's, the Souls' and the brain's intervals, the real-time clock check, the
+  portrait sweeps and the refusal log's count timer are cleared (`world-stop-timers.test.ts`). Each world's log lines
+  are tagged in the program and written to its own log.
+- **A world still loading** cannot be cut short inside the program. A SIGKILL (a stalled boot, a stop past its grace, a
+  handover's settle) drops it instead: it is stopped as soon as its boot ends, and only if that takes longer than
+  `DROP_GRACE_MS` (3 s) is its program ended. One writer per data dir: a world's next load is sent to a program only
+  once its previous one has exited.
+- **Faults are the world's own.** An uncaught error or rejection is noted by the fault guard of the world whose code it
+  came from (its async context, `renderWorld`), never by its neighbours. One from a world still loading is that boot
+  failing (exit 70, as a world process would crash); one from no world is logged by the shard and counted against none.
+- **Handover.** A world in a shard shares its pid with worlds that run on, so the next launcher does not wait for that pid
+  to end: the previous launcher answers the release only once that world's own exit came (`stopChild` refuses to
+  report a stop without it).
 - **One watchdog per shard.** `shareWatchdog()` starts one thread; each world adds its live.json and health port to it.
-  A hang shows in every world of the shard: the world whose tick was running is named in its live.json `killed`.
+  A hang shows in every world of the shard: the world whose tick was running is named in its live.json `killed`, else
+  the first judged. Naming the world that holds the thread outside a tick (a sibling's boot, a request) needs a slot
+  written on every callback of the program; it is not built (its cost is B6's to measure first). It changes only which
+  world counts the crash: every world of the shard reloads exactly either way.
 - **A fault ends the shard.** A fault storm, a clock stopped by a fault, a boot that throws (exit 70) or the watchdog's
   hang or heap rule (SIGKILL) ends the program. The world that ended it exits as the crash it was (the breaker counts
   it) and reloads in a program of its own; the others exit as a planned restart (75) and reload at once in another
   program. Each replays its log to the durable clock frontier it left and catches its clock up.
 - **The handle.** A world in a shard is a ChildProcess-shaped handle (pid, stdout, stderr, kill, `exit`): SIGTERM stops
-  it alone, SIGKILL ends its shard, SIGSTOP is refused (a world in a shard is never frozen alone). Its Pss is the
+  it alone, SIGKILL ends its shard (drops it while it loads), SIGSTOP is refused (a world in a shard is never frozen alone). Its Pss is the
   shard's split between its worlds.
 
 **Proved** (`tools/world-launcher/shard.test.mjs`, loaded workstation): three Eden core worlds in one shard; one stopped

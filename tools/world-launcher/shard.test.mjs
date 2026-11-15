@@ -6,9 +6,12 @@
 //     the world that ended it reloads in a program of its own
 //  A5 two worlds at different loads in one shard: a god edit in one leaves the other as it was, and each keeps its own
 //     day, load level and state hash, saved and restored exactly
+//  review (#2445) a world dropped while it loads (a handover's settle, a stalled boot, a stop past its grace) stops alone:
+//     its program and the world beside it run on, and its next load is sent only once it has exited (one writer)
 // On a failure the worlds' and shards' log tails are printed. The timings are printed as test diagnostics.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,10 +29,10 @@ const BASE = { PATH: process.env.PATH, DEV_AUTH: '1', WORLD_OWNER_ID: 'dev:admin
 const EDEN = { ENABLE_EDEN_CORE: '1', ENABLE_EDEN_LIFE: '1', ENABLE_CLOSED_HUMAN_GOALS: '1', ENABLE_REGISTERED_HUMAN_ACTIVITIES: '1' };
 
 /** A ChildPool with shards of `size` over worlds by slug: { slug: { key, env } }. */
-function harness(t, { size, worlds, range, program = {} }) {
+function harness(t, { size, worlds, range, program = {}, options = {} }) {
   const dir = mkdtempSync(join(tmpdir(), 'shard-')), logDir = join(dir, 'logs'), frontiers = {};
   const dataDir = (slug) => join(dir, slug), worldId = (slug) => `shard-${slug}-20261115`;
-  const pool = new ChildPool({ root, range, logDir, publicOrigin: 'http://127.0.0.1', healthPath: (s) => `/w/${s}/healthz`, shards: size, guard: { breakerN: 10, backoffCapMs: 2000 },
+  const pool = new ChildPool({ root, range, logDir, publicOrigin: 'http://127.0.0.1', healthPath: (s) => `/w/${s}/healthz`, shards: size, guard: { breakerN: 10, backoffCapMs: 2000 }, ...options,
     command: (w, port) => ({ cmd: process.execPath, args: ['apps/server/src/main.ts'], env: { ...BASE, ...program, ...worlds[w.slug].env, WORLD_KEY: worlds[w.slug].key, WORLD_ID: worldId(w.slug), WORLD_PATH: `/w/${w.slug}`,
       DATA_DIR: dataDir(w.slug), PORT: String(port), PUBLIC_URL: `http://127.0.0.1:${port}/w/${w.slug}` } }),
     // the durable clock frontier each ended world left, read the moment the launcher saw it go (before its reload)
@@ -77,6 +80,7 @@ test('A1, A2: a shard of 3 loads and stops one world alone; a fault in one ends 
   await h.pool.stop('eb');
   assert.equal(h.pool.status('eb').status, 'stopped');
   assert.match(h.log('eb'), /\[world\] SIGTERM: snapshot saved/);
+  await wait(400);   // (a small world's stop can take less than one tick)
   for (const s of ['ea', 'ec']) { assert.equal(h.pid(s), pid0, `${s}: same program`); assert.ok((await h.health(s)).tick > before[s], `${s}: ticked on through the stop`); }
   await h.pool.ensure(h.world('eb'), { timeoutMs: 300_000 });
   assert.equal(h.pid('eb'), pid0, 'eb loads back into the same program');
@@ -156,4 +160,38 @@ test('A5: two worlds at different loads in one shard keep their own edits, day, 
   assert.equal(h.pid('edited'), h.pid('other'), 'back in one program');
   assert.equal((await status('edited')).entities, e1.entities, 'the bench is still there');
   assert.equal((await status('other')).entities, d0.entities, 'and still only there');
+});
+
+test('review: a world dropped while it loads stops alone; its program and the world beside it run on; one writer per data dir', { timeout: 600_000 }, async (t) => {
+  const P0 = await testPort(6);
+  const worlds = { stay: { key: 'stay', env: {} }, drop: { key: 'drop', env: {} } };
+  // (a long drop grace: on a loaded machine a small world's boot can outlast the 3 s default, which would end the program)
+  const h = harness(t, { size: 2, worlds, range: [P0, P0 + 5], options: { shardDropGraceMs: 300_000 } });
+  await h.pool.ensure(h.world('stay'), { timeoutMs: 300_000 });
+  const pid0 = h.pid('stay'), tick0 = (await h.health('stay')).tick;
+  const boot = h.pool.ensure(h.world('drop'), { timeoutMs: 300_000 }).catch((e) => e);
+  let first = null;
+  for (let i = 0; i < 12_000 && !(first = h.pool.state('drop')?.child)?.pid; i++) await wait(5);
+  assert.equal(first?.pid, pid0, 'drop loads into the program of stay');
+  assert.equal(first.loaded, false, 'and is still loading');
+  // a handover's prepare abandons the boot (SIGKILL, as healthy() and stopChild() send too)
+  const settling = h.pool.settled({ waitMs: 0, goneMs: 300_000 });
+  // a second load of the same data dir meanwhile is not sent to any program while the first may still write
+  const port = h.pool.state('drop').port;
+  const again = h.pool.shards.spawn('drop', h.pool.o.command(h.world('drop'), port));
+  again.stdout.resume(); again.stderr.resume();
+  assert.equal(again.pid, undefined, 'the second load waits for the first to exit');
+  const abandoned = await settling;
+  assert.deepEqual(abandoned.map((b) => b.slug), ['drop']);
+  assert.ok(first.exitCode !== null || first.signalCode !== null, 'the dropped world exited');
+  assert.match(h.log('drop'), /\[world\] SIGTERM: snapshot saved/, 'it ended its boot and stopped, saving its snapshot');
+  assert.equal(again.pid, pid0, 'then the second load went to the program, which ran on');
+  assert.equal(h.pid('stay'), pid0, 'stay: the same program');
+  assert.ok((await h.health('stay')).tick > tick0, 'stay: ticked on through the drop');
+  for (let i = 0; i < 6000 && !again.loaded; i++) await wait(50);
+  assert.ok(again.loaded, 'the second load served');
+  again.kill('SIGTERM'); await once(again, 'exit');
+  assert.equal(again.exitCode, 0);
+  assert.equal(h.pid('stay'), pid0); await ticking(h, 'stay');
+  await boot;
 });

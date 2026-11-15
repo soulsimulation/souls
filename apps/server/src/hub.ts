@@ -162,14 +162,17 @@ export class Hub {
       onKernel: (view) => this.broadcast({ t: 'kernel', view }),
       onPlay: (p) => this.broadcast({ t: 'plays', plays: [p] }),
     });
-    setInterval(() => { if (!host.silent?.()) this.sweep(); else this.sweepAt = Date.now(); }, SWEEP_MS).unref();   // #2303: silent means no viewer to ping
+    this.timers.push(setInterval(() => { if (!host.silent?.()) this.sweep(); else this.sweepAt = Date.now(); }, SWEEP_MS).unref());   // #2303: silent means no viewer to ping
     // load dial: viewer stats every 2 s at green, 4 s at amber, 8 s at red/black
     let statsN = 0;
-    setInterval(() => { if (host.silent?.()) return; if (++statsN % ({green: 1, amber: 2, red: 4, black: 4} as const)[this.loadLevel] !== 0) return; const full = this.stats(); this.broadcast({ t: 'stats', stats: full }, (c) => c.me?.role === 'admin'); this.broadcast({ t: 'stats', stats: publicStats(full) }, (c) => c.me?.role !== 'admin'); }, 2_000).unref();
+    this.timers.push(setInterval(() => { if (host.silent?.()) return; if (++statsN % ({green: 1, amber: 2, red: 4, black: 4} as const)[this.loadLevel] !== 0) return; const full = this.stats(); this.broadcast({ t: 'stats', stats: full }, (c) => c.me?.role === 'admin'); this.broadcast({ t: 'stats', stats: publicStats(full) }, (c) => c.me?.role !== 'admin'); }, 2_000).unref());
     // a socket that never introduces itself is not a viewer
     // judged after the poll phase (setImmediate), so a hello that arrived during a stall is read first
-    setInterval(() => host.silent?.() || setImmediate(() => { const now = Date.now(); for (const c of this.clients) if (!c.ready && now - c.joinedAt > 15_000 + this.stallMs) { c.ws.close(1008, 'no hello'); this.clients.delete(c); } }), 5_000).unref();
+    this.timers.push(setInterval(() => host.silent?.() || setImmediate(() => { const now = Date.now(); for (const c of this.clients) if (!c.ready && now - c.joinedAt > 15_000 + this.stallMs) { c.ws.close(1008, 'no hello'); this.clients.delete(c); } }), 5_000).unref());
   }
+  private timers: ReturnType<typeof setInterval>[] = [];
+  /** #2444: a stopped world's hub runs nothing on in the program it shared (a shard). */
+  stopTimers() { for (const t of this.timers) clearInterval(t); this.timers = []; }
 
   private onConnect(ws: WebSocket, req: IncomingMessage) {
     const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();

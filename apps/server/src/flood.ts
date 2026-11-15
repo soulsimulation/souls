@@ -40,10 +40,12 @@ export class RefusalLog {
   private write: (line: string) => void; private everyMs: number; private now: () => number;
   constructor(write: (line: string) => void = (l) => console.warn(l), everyMs = 60_000, now: () => number = Date.now) {
     this.write = write; this.everyMs = everyMs; this.now = now;
-    const t = setInterval(() => this.flush(), everyMs); t.unref?.();
   }
+  // #2444: the count timer runs only while a refusal is held, so a stopped world's log leaves none running in its program
+  private timer: ReturnType<typeof setInterval> | null = null;
   note(scope: string, key: string, what: string) {
     const id = `${scope} ${key}`, now = this.now(), e = this.seen.get(id);
+    if (!this.timer) { this.timer = setInterval(() => this.flush(), this.everyMs); this.timer.unref?.(); }
     if (!e) { this.seen.set(id, { n: 0, since: now, last: what }); this.write(`[limit] refused ${scope} ${key}: ${what} (further refusals counted, one line a minute)`); return; }
     e.n++; e.last = what;
     if (now - e.since >= this.everyMs) this.flushOne(id, e, now);
@@ -52,7 +54,7 @@ export class RefusalLog {
     if (e.n) this.write(`[limit] refused ${id}: ${e.n} more in the last ${Math.round((now - e.since) / 1000)} s (latest ${e.last})`);
     if (e.n) { e.n = 0; e.since = now; } else this.seen.delete(id);
   }
-  flush() { const now = this.now(); for (const [id, e] of this.seen) if (now - e.since >= this.everyMs) this.flushOne(id, e, now); }
+  flush() { const now = this.now(); for (const [id, e] of this.seen) if (now - e.since >= this.everyMs) this.flushOne(id, e, now); if (!this.seen.size && this.timer) { clearInterval(this.timer); this.timer = null; } }
 }
 
 const short = (s: string) => createHash('sha256').update(s).digest('hex').slice(0, 8);

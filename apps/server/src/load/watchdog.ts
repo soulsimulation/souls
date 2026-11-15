@@ -124,9 +124,11 @@ export function faultExit(dataDir: string, reason: string, step: FaultStep | nul
   try { log(`[world] ${reason}${step ? ` (step ${step.name}, ${step.faults} faults, ticks ${step.fromTick}..${step.tick})` : ''}: exiting ${FAULT_EXIT}, a crash the launcher restarts and counts`); } catch { /* exit regardless */ }
   (o.exit ?? process.exit)(FAULT_EXIT);
 }
-/** Route the process's uncaught errors to the guard (installed once the world serves: a boot that throws still exits). */
-export function installFaultGuard(g: {note: (name: string, error: unknown) => void}, proc: NodeJS.Process = process) {
-  const uncaught = (e: unknown) => g.note('world.fault.uncaught', e), rejection = (e: unknown) => g.note('world.fault.rejection', e);
+/** Route the process's uncaught errors to the guard (installed once the world serves: a boot that throws still exits).
+ *  #2444: in a shard every world installs one, and `mine()` says whether the error came from this world's own code (the
+ *  world its async context names): each error is noted by that world alone, never by its neighbours. */
+export function installFaultGuard(g: {note: (name: string, error: unknown) => void}, proc: NodeJS.Process = process, mine: () => boolean = () => true) {
+  const uncaught = (e: unknown) => { if (mine()) g.note('world.fault.uncaught', e); }, rejection = (e: unknown) => { if (mine()) g.note('world.fault.rejection', e); };
   proc.on('uncaughtException', uncaught); proc.on('unhandledRejection', rejection);
   /** #2444: a world that stops in a shard takes its handlers with it. */
   return () => { proc.off('uncaughtException', uncaught); proc.off('unhandledRejection', rejection); };

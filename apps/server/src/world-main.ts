@@ -1,6 +1,6 @@
 import {closeContextViews} from './god/context-views.ts';
 import { WallClock } from './clock-catchup.ts';
-import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled } from './god/real-clock.ts';
+import { defaultTimeZone, hasRealClock, installRealClock, realTimeEnabled, stopRealClock } from './god/real-clock.ts';
 import { cutOverReminders } from './god/clock-cutover.ts';
 import {edenSteeringModeV1,installEdenSteeringModeV1} from './eden-steering-mode.ts';
 import {TakeArchive,r2Store} from './take-archive.ts';
@@ -62,7 +62,7 @@ const NATIVES: { name: string; description: string }[] = [
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
  *  guard, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
-export async function startWorld(config: Config, o: { exit?: (code: number) => void; signals?: boolean } = {}) {   // #2444: a shard passes exit (the world ends, not the program) and signals: false
+export async function startWorld(config: Config, o: { exit?: (code: number) => void; signals?: boolean; mine?: () => boolean } = {}) {   // #2444: a shard passes exit (the world ends, not the program), signals: false and mine (an uncaught error is this world's)
   // Lane P5: when the boot's phases end (ms since the process started; the first is this release's code load)
   const bootAt: Record<string, number> = { code: performance.now() };
   // Release pre-warm (SIM_STANDBY=1, launcher handover): all code is loaded here; the database and port open only after SIGUSR2.
@@ -454,7 +454,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   }
   const listening = new Promise<void>((r) => server.once('listening', () => r()));
   server.listen(config.port, config.host, () => {
-    load.boot.phase('serving', host.engine.world.tick); uninstallFaults = installFaultGuard(faults); monitor.start(); stallLog?.start(); servingWarm('boot');
+    load.boot.phase('serving', host.engine.world.tick); uninstallFaults = installFaultGuard(faults, process, o.mine); monitor.start(); stallLog?.start(); servingWarm('boot');
     console.log(`[http] listening on http://${config.host}:${config.port} (public ${config.publicUrl}), build ${config.build}, brain ${brain.mode}, budget $${brain.budget}/day, invites ${config.inviteRequired ? 'required' : 'open'}`);
     const s = (ms: number) => (ms / 1000).toFixed(2);
     console.log(`[boot] listening ${s(performance.now())} s after start: code ${s(bootAt.code)}, engine ${s(bootAt.engine - bootAt.open)}, the rest ${s(performance.now() - bootAt.engine)}`);
@@ -494,7 +494,10 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     server.close(); void hub.closeClients('server restarting');
     await closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews);
     (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
-    if (o.exit) { clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); void (readPool as { close?(): Promise<void> } | undefined)?.close?.(); }   // #2444: nothing of a stopped world runs on in its shard
+    if (o.exit) {   // #2444: nothing of a stopped world runs on in its shard (world-stop-timers.test.ts)
+      clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); void (readPool as { close?(): Promise<void> } | undefined)?.close?.();
+      hub.stopTimers(); souls.stopTimers(); brain.quiesce(); stopRealClock(host); (app as unknown as { portraits?: { dispose(): void } }).portraits?.dispose();
+    }
     auth.close();db.close(); (o.exit ?? process.exit)(exitCode);
   };
   // The launcher's wedge path sends SIGUSR2 before SIGTERM (LOAD-CONTRACT §4): a diagnostic report, if this thread can still run.

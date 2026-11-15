@@ -19,6 +19,9 @@
 // stops, the guard and the boot watch are the pool's own. Where a program would end one world process (SIGKILL), the
 // shard ends: its other worlds exit as a planned restart (75: at once, not a failure) and the world that ended it as the
 // crash it was, which the breaker counts. That world's next load is in a program of its own.
+// A world still loading is not ended that way (its boot cannot be cut short inside the program): a SIGKILL drops it. It
+// is stopped the moment its boot ends, and only if that takes longer than dropGraceMs is its program ended. One writer
+// per data dir: a world's next load is sent only once its previous one has exited.
 import { fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createWriteStream, readFileSync } from 'node:fs';
@@ -36,7 +39,9 @@ const WORLD_SCRIPT = 'apps/server/src/main.ts';
 export const PER_WORLD = Object.freeze(['WORLD_KEY', 'WORLD_ID', 'WORLD_SLUG', 'WORLD_NAME', 'WORLD_PATH', 'WORLD_OWNER_ID', 'WORLD_TIME_ZONE',
   'PORT', 'PUBLIC_URL', 'DATA_DIR', 'GENESIS_FILE', 'SIM_HEALTH_PORT', 'SIM_LOAD_BASELINE_MS', 'SIM_LOAD_DRILL_LEVEL', 'EDGE_EYES', 'SIM_FAULT_INJECT']);
 const FAULT_EXIT = 70, PLANNED_EXIT = 75;   // load/watchdog.ts FAULT_EXIT; children.mjs PLANNED_EXIT
-const MARK = '\u001e';   // a world's output line: MARK id MARK ' ' text
+const MARK = '\u001e';
+/** How long a world dropped while it loads may take to end its boot and stop before its program is ended. */
+export const DROP_GRACE_MS = 3_000;   // a world's output line: MARK id MARK ' ' text
 
 // ---------------------------------------------------------------- the program
 async function runShard() {
@@ -63,12 +68,21 @@ async function runShard() {
   };
   const stop = (id, w) => { w.stop ??= w.started.then((s) => renderWorld.run(id, () => s.shutdown('SIGTERM'))).catch(() => {}); return w.stop; };
   const stopAll = async () => { await Promise.all([...worlds].map(([id, w]) => stop(id, w))); process.exit(0); };
+  // an uncaught error is noted by the world whose code it came from (its own fault guard, world-main.ts `mine`), never by
+  // its neighbours. One from a world still loading (no guard yet) is its boot failing: the fault a world process would
+  // crash on. One from no world (this program's own code) is logged and counted against none
+  const stray = (kind) => (e) => {
+    const id = renderWorld.getStore(), w = id === undefined ? null : worlds.get(id);
+    if (w && !w.serving && !w.exited) fault(id, e);
+    else if (!w) console.error(`[shard] ${kind} ${id === undefined ? 'outside any world' : `from world ${id}, which has stopped`}: ${e?.stack ?? e}`);
+  };
+  process.on('uncaughtException', stray('uncaught error')); process.on('unhandledRejection', stray('unhandled rejection'));
   process.on('message', (m) => {
     if (m?.op === 'load' && !worlds.has(m.id) && !ending) {
       const w = { dataDir: m.env.DATA_DIR, exited: false, stop: null };
       worlds.set(m.id, w);
-      w.started = renderWorld.run(m.id, () => startWorld(loadConfig(m.env), { signals: false, exit: (code) => ended(m.id, code) }));
-      w.started.then(() => send({ op: 'loaded', id: m.id }), (e) => { if (!w.exited) fault(m.id, e); });
+      w.started = renderWorld.run(m.id, () => startWorld(loadConfig(m.env), { signals: false, exit: (code) => ended(m.id, code), mine: () => renderWorld.getStore() === m.id }));
+      w.started.then((s) => s.listening).then(() => { w.serving = true; send({ op: 'loaded', id: m.id }); }, (e) => { if (!w.exited) fault(m.id, e); });
     } else if (m?.op === 'stop') { const w = worlds.get(m.id); if (w) void stop(m.id, w); }
     else if (m?.op === 'quit' && worlds.size === 0) process.exit(0);
     else if (m?.op === 'look') {
@@ -90,17 +104,29 @@ class ShardWorld extends EventEmitter {
   constructor(shard, slug, dataDir) {
     super(); this.shard = shard; this.slug = slug; this.dataDir = dataDir; this.loadedAt = Date.now();
     this.stdout = new PassThrough(); this.stderr = new PassThrough(); this.exitCode = null; this.signalCode = null; this.script = SHARD_SCRIPT;
+    this.loaded = false; this.dropping = false;   // (shard null: waiting for the world's previous load to exit)
   }
-  get pid() { return this.shard.child.pid; }
+  get pid() { return this.shard?.child.pid; }
   /** How many worlds share this one's program (children.mjs memUse splits the program's Pss between them). */
-  share() { return Math.max(1, this.shard.worlds.size); }
+  share() { return Math.max(1, this.shard?.worlds.size ?? 1); }
   kill(signal = 'SIGTERM') {
     if (this.exitCode !== null || this.signalCode !== null) return false;
+    // not yet sent to a program (its previous load has not exited): it never runs
+    if (!this.shard) { if (['SIGTERM', 'SIGINT', 'SIGKILL'].includes(signal)) this.exit(null, signal); return true; }
     if (signal === 'SIGTERM' || signal === 'SIGINT') { this.shard.send({ op: 'stop', id: this.slug }); return true; }
+    // a world still loading is dropped: stopped as soon as its boot ends, its program ended only after dropGraceMs
+    if (signal === 'SIGKILL' && !this.loaded) { this.drop(); return true; }
     // a world that has to be ended at once ends its program: the thread is the program's
-    if (signal === 'SIGKILL') { this.shard.set.blame(this.shard, this.slug); this.shard.child.kill('SIGKILL'); return true; }
+    if (signal === 'SIGKILL') { this.end(); return true; }
     if (signal === 'SIGSTOP') throw new Error(`world ${this.slug} shares its program: it is not frozen alone`);
     return true;   // SIGCONT, SIGUSR2 (no report of one world), 0
+  }
+  end() { this.shard.set.blame(this.shard, this.slug); this.shard.child.kill('SIGKILL'); }
+  drop() {
+    if (this.dropping) return; this.dropping = true;
+    this.shard.send({ op: 'stop', id: this.slug });
+    const t = setTimeout(() => { if (this.exitCode === null && this.signalCode === null) { this.shard.set.log(`world ${this.slug} still loading ${this.shard.set.dropGraceMs / 1000} s after it was dropped: ending shard ${this.shard.n}`); this.end(); } }, this.shard.set.dropGraceMs);
+    t.unref?.(); this.once('exit', () => clearTimeout(t));
   }
   exit(code, signal) {
     if (this.exitCode !== null || this.signalCode !== null) return;
@@ -120,8 +146,11 @@ function endedTheShard(h, pid) {
 
 /** The launcher's shards: places each world in a shard of its settings with room, or starts one. */
 export class ShardSet {
-  /** @param {{ root: string, size: number, logDir: string, log?: (line: string) => void }} o */
-  constructor(o) { this.o = o; this.shards = new Set(); this.n = 0; this.alone = new Set(); this.log = o.log ?? (() => {}); }
+  /** @param {{ root: string, size: number, logDir: string, log?: (line: string) => void, dropGraceMs?: number }} o */
+  constructor(o) {
+    this.o = o; this.shards = new Set(); this.n = 0; this.alone = new Set(); this.log = o.log ?? (() => {}); this.dropGraceMs = o.dropGraceMs ?? DROP_GRACE_MS;
+    this.writers = new Map();   // data dir → the world handle that may still have it open (one writer per data dir)
+  }
   /** The program's part of a world's command (null: the world does not go into a shard). */
   programOf({ cmd, args, env }) {
     // (read workers are threads of the world's own program, on its own ports: not in a shard yet)
@@ -132,13 +161,20 @@ export class ShardSet {
   /** A world's handle in a shard, or null when its command cannot run in one. */
   spawn(slug, command) {
     const p = this.programOf(command); if (!p) return null;
+    const dir = command.env.DATA_DIR, h = new ShardWorld(null, slug, dir), prev = this.writers.get(dir);
+    this.writers.set(dir, h); h.once('exit', () => { if (this.writers.get(dir) === h) this.writers.delete(dir); });
+    // its previous load (dropped, or stopping) still has the data open: this one is sent once that has exited
+    if (prev && prev.exitCode === null && prev.signalCode === null) prev.once('exit', () => { if (h.exitCode === null && h.signalCode === null) this.place(h, slug, p, command.env); });
+    else this.place(h, slug, p, command.env);
+    return h;
+  }
+  place(h, slug, p, env) {
     const alone = this.alone.delete(slug);   // it ended its last shard: this load is in a program of its own
     let shard = alone ? null : [...this.shards].find((s) => s.key === p.key && !s.alone && !s.closing && s.worlds.size < this.o.size);
     shard ??= this.start(p, alone);
-    const h = new ShardWorld(shard, slug, command.env.DATA_DIR);
+    h.shard = shard; h.loadedAt = Date.now();
     shard.worlds.set(slug, h);
-    shard.send({ op: 'load', id: slug, env: command.env });
-    return h;
+    shard.send({ op: 'load', id: slug, env });
   }
   blame(shard, slug) { shard.blamed.add(slug); }
   /** One world as its shard holds it: { tick, stateHash, day, level } (tests and measurement). */
@@ -169,7 +205,8 @@ export class ShardSet {
         const h = shard.worlds.get(m.id); if (!h) return;
         shard.worlds.delete(m.id); h.exit(m.code, null);
         if (shard.worlds.size === 0) { shard.closing = true; shard.send({ op: 'quit' }); }
-      } else if (m?.op === 'fault') shard.blamed.add(m.id);
+      } else if (m?.op === 'loaded') { const h = shard.worlds.get(m.id); if (h) h.loaded = true; }
+      else if (m?.op === 'fault') shard.blamed.add(m.id);
     });
     child.once('exit', (code, signal) => {
       this.shards.delete(shard); shard.closing = true;
