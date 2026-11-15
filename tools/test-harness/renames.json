@@ -599,6 +599,7 @@
       "pr": "#2238"
     },
     {"step": "V5-server-full", "from": "resolve advises: ranked candidates with schemas and availability, and it never executes", "to": ["candidates for words: ranked, with schemas and availability, and nothing executes", "\\#1910: the resolve route is gone: 410 naming the client's find, and nothing happens"], "reason": "#1910: the resolve route answers 410; the same candidates assertions call resolveCandidates directly", "pr": "#2138"},
+    {"step": "V3-launcher-unit", "from": "alarms: at moveWallMs always, at untilWallMs only with a listener; unloaded again after it served; kept across a restart", "to": "alarms: at moveWallMs and at untilWallMs, listener or not (#2367); unloaded again after it served; kept across a restart", "reason": "#2367 A1: an unloaded world now loads for any deadline in its horizon, listener or not; the same test asserts the new rule", "pr": "#2369"},
     {"step": "V5-server-full", "from": "\\#1910: the resolve route is gone: 410 naming the client's find, and nothing happens", "to": "\\#1910: the resolve route is gone: 410 naming the upgrade command, and nothing happens", "reason": "#1937: only a client from before find calls resolve, so its 410 names the upgrade command; same assertions on the new body", "pr": "#2398"}
   ]
 }
