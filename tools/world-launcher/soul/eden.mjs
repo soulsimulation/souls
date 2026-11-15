@@ -4576,17 +4576,26 @@ function accountOk(r, what, a, id) {
   return ok(r, what);
 }
 /** #2246 (account-grant/1): with a login, one of the account's Souls comes here with no code and no click. The world answers
- *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. The last device to ask wins. */
+ *  an approval it has already approved, and `approval wait` takes the Soul token as it always has. #2401 (D1): with no agent
+ *  connected it comes freely; while one is connected the world refuses and names that device, and `--move` forces it. */
 async function accountPair(id, a) {
   const s = load(), was = s.pendingApproval;
   const pending = was?.account === a.accountId && was.input?.soulId === id && was.input.pollSecret ? was
     : { worldId: s.worldId, account: a.accountId, input: { soulId: id, agentLabel: "eden " + VERSION, idempotencyKey: randomUUID(), pollSecret: randomBytes(32).toString("base64url") } };
   const { soulId, ...body } = pending.input;
+  let named = HOME?.config().souls[id]?.name;
   if (pending !== was) {   // #2257 A6: who holds it now, so the answer can say where it was taken from
     const r = await call("/v1/agent/account", { as: "account" }), it = r.status === 200 ? (r.data?.souls ?? []).find((x) => x.id === id) : null;
     if (it?.control?.held) pending.from = holderLabel(it);
+    named ??= it?.name;
   }
-  const d = accountOk(await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body }), "pair", a, id);
+  const r = await call(`/v1/agent/account/souls/${id}/pair`, { as: "account", soul: id, body: MOVE ? { ...body, move: true } : body });
+  if (r.status === 409 && codeOf(r.data) === "soul.held-elsewhere") {
+    const who = soulHome.plainName(named) || id, from = String(r.data?.heldBy ?? "").trim().slice(0, 80) || "another device";
+    const again = [CLI, ...process.argv.slice(2).map((x) => (/[\s"']/.test(x) ? JSON.stringify(x) : x)), "--move"].join(" ");
+    throw new Error(`soul.held-elsewhere: ${who}'s agent is connected now from ${from}. Run there, or add --move to take control here, which disconnects it. Next: ${again}`);
+  }
+  const d = accountOk(r, "pair", a, id);
   save({ pendingApproval: { ...pending, approvalId: d.approval?.id } });
   return approval("wait");
 }
@@ -4604,7 +4613,7 @@ const pairLabel = () => (HOME ? `eden ${VERSION} on ${HOME.device().name}` : "ed
 /** #2257 A6: the device an agent holds a Soul from, as the world labels it. */
 const holderLabel = (it) => String(it.agent?.label ?? "").trim().slice(0, 80) || "another device";
 /** #2257 A6: a Soul taken from another agent says so, names that device, and asks the agent to tell its person. With no
- *  memory for it in this home, its memory stayed there: export there, import here. The last device to ask still wins. */
+ *  memory for it in this home, its memory stayed there: export there, import here. */
 function takenNotice(id, name, from) {
   if (!from) return {};
   const who = soulHome.plainName(name) || id, mem = HOME ? resolvePath(HOME.soul(id).dir, "..", "memory") : null;
@@ -7932,8 +7941,8 @@ Your person says "connect my account": steps 1 and 2. "Move my Soul to this comp
    Run either again and it says \`already connected\`.
 3. \`${CLI} list --account [@world]\` lists the account's Souls in that world: \`control\`, \`agent\`, and \`here\` (this
    home holds a token for it).
-4. \`${CLI} adopt <name|id>\` brings one here, no code; the device that had it is disconnected. Tell your
-   person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
+4. \`${CLI} adopt <name|id>\` brings one here, no code, when no agent is connected for it; while one is, it is
+   refused naming that device, and \`--move\` takes it anyway. Tell your person the answer's \`tell\` and \`memory\`. \`revoke <name|id>\` disconnects a Soul's agent wherever it runs.
    \`retire <name|id>\` asks your person (\`approvalURL\`, \`confirm\`); \`retire wait\` ends on their click. Each needs a login.
 
 Several accounts: each login is kept beside the others, and the newest of a site is its active one.
