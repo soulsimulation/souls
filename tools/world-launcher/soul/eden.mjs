@@ -6946,7 +6946,7 @@ async function serveForeground() {
   delete st.ended;   // #1928: a serve that starts again no longer reports the last one's end
   /** The folder's world, Soul or token changed under this process (travel, create, pair, by any route): it no longer speaks for it. */
   const moved = () => { const now = load(); return folderKey(now) !== folderKey(s) || soulToken(now) !== soulToken(s); };
-  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0;
+  let waiters = [], terminal = null, stopping = false, gateTail = Promise.resolve(), gateWaiting = 0, busyWaited = 0, busyRefused = 0, lastEventAt = null, worldDown = null, attentionInFlight = 0, heldWaits = 0, heldListens = 0;
   const wake = () => { const w = waiters; waiters = []; for (const f of w) f(); runWake(); };
   // #1929: the wake rules, against what this process stores, every 2 s and whenever something arrives. Fired ones are queued.
   const runWake = () => {
@@ -7352,14 +7352,14 @@ async function serveForeground() {
       // The inbox loop may be up to a minute into its backoff: whoever asks gets the world as it is now.
       if (worldDown) { const r = await worldOnce(`${world}/v1/config`, { method: "GET", headers: {}, timeoutMs: 3_000 }).catch(() => ({ status: 0 })); if ((r.status > 0 && r.status < 500) || isBusy(r.status, r.data)) worldDown = null; }
       return { serving: true, reachable: !worldDown, ...(worldDown ? { unreachable: worldDown } : {}), pid: process.pid, version: VERSION, since: start,
-        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
+        ...(handover ? { handover: { to: handover.to, since: handover.since } } : {}), ...(handoverFailed ? { handoverFailed } : {}), cursor: st.cursor, inboxAfter: st.inboxAfter, unacked: st.messages.filter((x) => !x.acked).length, openReceipts: Object.values(st.receipts).filter((r) => !ENDED.has(r.phase)).length, unreadEvents: st.events.length - readIndex(st), busyWaited, held: { waits: heldWaits, listens: heldListens }, ...(busyRefused ? { busyRefused } : {}), lastEventAt, ...(terminal ? { ended: codeOf(terminal.data) ?? terminal.status } : {}) };
     }
     if (m.op === "stop") { await comeBack(); setTimeout(() => shutdown(0), 10); return { stopping: true, pid: process.pid }; }
     if (m.op === "wake") { const c = soulWake.change(st.wake, m.change); if (c.error) return { error: c.error }; st.wake = c.wake; persist(); if (c.wake.awayOff) await comeBack(); return { ...soulWake.view(st.wake, Date.now()), ...(c.rule ? { added: c.rule.id } : {}), ...(c.removed ? { removed: c.removed } : {}) }; }
     if (m.op === "http") {
       if (RECORD) m = { ...m, proxied: "proxied" };   // the command that asked keeps the content; this keeps the wire time
       const path = routeOf(m.url);
-      if (path === "/v1/edge/inbox/listen") return localListen(m.url, m.reader);
+      if (path === "/v1/edge/inbox/listen") { heldListens++; try { return await localListen(m.url, m.reader); } finally { heldListens--; } }
       if (path === "/v1/edge/wait" && m.method !== "POST") { heldWaits++; try { return await heldWait(m); } finally { heldWaits--; } }
       const cached = m.method === "GET" && /^\/v1\/edge\/receipts\/([^/]+)$/.exec(path);
       const known = cached ? st.receipts[decodeURIComponent(cached[1])] : null;
