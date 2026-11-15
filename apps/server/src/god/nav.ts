@@ -110,9 +110,8 @@ export type Thing = {
   deck?: Vec2[];
   /** Rooms: where the building is entered from outside (its front door's approach), for the reachability check. */
   entry?: { p: Vec2; level: number };
-  /** Rooms of a door-fitted building (#2383): the point just inside its closed front door, where the room check starts (a
-   *  check from the entry outside would search the outside first, fail at the shut leaf and then route through the door). */
-  reachFrom?: { p: Vec2; level: number };
+  /** Rooms of a door-fitted building (#2383): its front doorway holds a real door (closed). */
+  fitted?: true;
 };
 
 const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
@@ -342,7 +341,7 @@ export class GodNav {
         const rname = r.name ?? r.id, floor = r.floor ?? 0;
         roomRefs.push(rref);
         out.push({ id: e.id, room: r.id, ref: rref, name: `${base.name} / ${humanTitle(r.id)}`, kind: 'room', what: `${rname} of ${base.name}${floor ? `, floor ${floor}` : ''}`,
-          words: [...new Set([...words(r.id), ...words(rname), ...base.words, 'room', 'inside'])], at, level: this.h.levelAt(at[0], at[1], ry), rise: r3((r.y ?? 0) * wp.s), floor, poly, roomFrame, ...(stands[0] ? { entry: { p: stands[0], level } } : {}), ...(fitted && inside && stands[0] ? { reachFrom: { p: inside, level } } : {}) });
+          words: [...new Set([...words(r.id), ...words(rname), ...base.words, 'room', 'inside'])], at, level: this.h.levelAt(at[0], at[1], ry), rise: r3((r.y ?? 0) * wp.s), floor, poly, roomFrame, ...(stands[0] ? { entry: { p: stands[0], level } } : {}), ...(fitted ? { fitted: true as const } : {}) });
       }
       // the room the front door opens into goes first (the entrance)
       if (front) { const fa = toWorld(front.at[0], front.at[1]); roomRefs.sort((a, b) => { const A = out.find((t) => t.ref === a)!, B = out.find((t) => t.ref === b)!; return (A.level - B.level) || (polyDist(A.poly!, fa) - polyDist(B.poly!, fa)); }); }
@@ -521,7 +520,7 @@ export class GodNav {
       // #2383: a door-fitted building's room is entered as an open doorway's was (no interior search from the door: the
       // listing offers buildings ~130 m out, and a route search per building there kept ~16 more ground tiles per sweep);
       // its centre's standing room when that lies in the room, else the room's own reach-checked goal
-      const c = room?.reachFrom ? near(room.at, room.level, 40) : null;
+      const c = room?.fitted ? near(room.at, room.level, 40) : null;
       const inner = room ? (c && room.poly && inPoly(c.p[0], c.p[1], room.poly) ? c : this.goal(room, me, except)) : null;
       goal = inner;
       if (!inner) this.blocked.set(t.ref, `The interior of ${t.ref} is not reachable right now; its entrance or the route inside is blocked.`);
@@ -628,8 +627,7 @@ export class GodNav {
   /** Does the room's front door reach p (on the room's level)? True when there is no door or no reach check to ask. */
   private entryReaches(t: Thing, p: Vec2): boolean {
     const E = this.E;
-    const from = t.reachFrom ?? t.entry;
-    return !from || !E.feasibility.reaches || E.feasibility.reach({ p: from.p, level: from.level }, { p, level: t.level })!.ok;
+    return !t.entry || !E.feasibility.reaches || E.feasibility.reach({ p: t.entry.p, level: t.entry.level }, { p, level: t.level })!.ok;
   }
   private rooms = new Map<string, { p: Vec2; level: number } | null>();
   private roomsOf: string | undefined;
