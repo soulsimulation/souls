@@ -34,6 +34,20 @@ export function runtimeDir(folder, soulId) {
   return existsSync(d) ? d : folder;
 }
 
+/** A setup step that got no answer (exit 75, "the world did not answer") may or may not have landed. It is asked again, up to
+ *  `tries` times: register only reads, and create is safe to repeat (a create whose answer was lost meets its name taken, finds this
+ *  identity's own Soul by name in its lifecycle history and pairs it, never a second Soul). The retry moves the pairing,
+ *  since the only other holder can be this folder's own lost one. Any other failure throws at once. */
+export async function setupStep(f, s, { tries = 3, pauseMs = 5000 } = {}) {
+  for (let i = 1; ; i++) {
+    const r = await cli(f, i > 1 && s[0] === 'create' ? [...s, '--move'] : s);
+    if (r.code === 0) return r;
+    const text = (r.stderr || r.stdout).trim().slice(0, 300);
+    if (r.code !== 75 || !/did not answer/.test(text) || i >= tries) throw new Error(`setup ${s[0]} exited ${r.code}: ${text}${i > 1 ? ` (try ${i} of ${tries})` : ''}`);
+    await sleep(pauseMs);
+  }
+}
+
 /** Owner's setup of a fresh seat folder (local dev worlds only: register and create need no account there). */
 export async function prepareFolder(seat, { name }) {
   const f = seat.folder, base = seat.base;
@@ -41,7 +55,7 @@ export async function prepareFolder(seat, { name }) {
   const skill = await fetchServed(base, 'skill.md', join(f, 'skill.md'));
   const steps = [['register', base], ['create', name]];
   let createdAt = null;
-  for (const s of steps) { if (s[0] === 'create') createdAt = Date.now(); const r = await cli(f, s); if (r.code !== 0) throw new Error(`setup ${s[0]} exited ${r.code}: ${(r.stderr || r.stdout).slice(0, 300)}`); }
+  for (const s of steps) { if (s[0] === 'create') createdAt = Date.now(); await setupStep(f, s); }
   const st = await cli(f, ['status']);
   const soulId = st.data?.soul?.id;
   if (!soulId) throw new Error(`setup: no Soul after create: ${st.stdout.slice(0, 300)}`);
