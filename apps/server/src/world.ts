@@ -213,6 +213,8 @@ export class WorldHost {
   snapshotDebtMs = 0; snapshotMinGapMs = 20_000; snapshotAfterReplayTicks = 0;
   /** Main-thread time of the live ticks since the last snapshot (#2458: the whole tick): what a boot after a kill, or a recovery, would replay. */
   replayDebtMs = 0;
+  /** #2458: the running average of a computed tick's whole main-thread time, ms: what each jumped tick adds to the debt. */
+  tickCostMs = 0;
   private lastSnapshotWall = performance.now();
   private snapshotSoon: string | null = null;
   /** Main-thread ms of the last completed snapshot (capture + finish + serialize + persist). */
@@ -696,6 +698,7 @@ export class WorldHost {
         const skip = land - 1 > tick ? (this.engine as unknown as { skipToV1?(t: number): { ok: boolean } }).skipToV1?.(land - 1) : undefined;
         if (skip?.ok) {
           const st = this.skipStats; st.ticksJumped += land - 1 - tick; st.jumps++; st.lastHorizon = s.untilTick;
+          this.replayDebtMs += (land - 1 - tick) * this.tickCostMs;   // #2458: a recovery replays jumped ticks one by one
           this.stillStretch = true; this.stillClaim = s.untilTick ?? Infinity; this.jumpFrom = tick;
           this.landing = true; try { this.tickOnce(); } finally { this.landing = false; }
           if (this.stillClaim !== null && this.engine.world.tick >= this.stillClaim) this.stillClaim = null;   // #2384: landed on the claim: it is spent, ask again
@@ -928,8 +931,10 @@ export class WorldHost {
     if (span) span[4] = performance.now() - ts;
     // #2458 A3: the debt is the whole tick (its inputs, step, listeners, broadcast), not the step alone: a recovery replays
     // the logged inputs and every tick's lives and programmes too, and at 24 to 100 Souls cost 4 to 6 ms a replayed tick
-    // where the step alone measured 0.6, so the step-only debt let 1800 to 4800 ticks build up between snapshots
-    this.replayDebtMs += performance.now() - t0;
+    // where the step alone measured 0.6, so the step-only debt let 1800 to 4800 ticks build up between snapshots. A jump
+    // (a still world, as during setup) adds its ticks at the running average whole tick, `tickCostMs`: a recovery steps
+    // through them one by one (on souls-timed at 100 Souls, 1715 of 1836 setup ticks were jumped and counted nothing)
+    const tickMs = performance.now() - t0; this.replayDebtMs += tickMs; this.tickCostMs += (tickMs - this.tickCostMs) * 0.05;
     // #2298 A4: nothing new since the last. #2406: a landing's snapshot is taken on the next turn, not in the landing's own
     if (this.snapshotDue(now) && !(this.landing && this.seq === this.snapshotSeq)) { if (span) span[5] = 1; if (this.landing) this.deferLandingSnapshot(); else this.schedulePeriodicSnapshot(); }
     this.tickMs.push(performance.now() - t0);

@@ -12,7 +12,7 @@ import {RECOVERY_STEP_ID} from './load/restart-loop.ts';
 
 const repair = soulsRepairReaderV1(await marsFactory({...GREEN_FIELD_WORLD, safeCrewRemoval: true}), {adopt: true});
 
-async function world(t: test.TestContext) {
+async function world(t: test.TestContext, names = ['kino', 'ada']) {
   const lines: string[] = [], keep = (...a: unknown[]) => { lines.push(a.map(String).join(' ')); };
   t.mock.method(console, 'log', keep); t.mock.method(console, 'warn', keep); t.mock.method(console, 'error', keep);
   const f = fixture(':memory:', repair, {durableClockV1: true}); f.brain.quiesce(); f.souls.enableLifecycle();
@@ -21,7 +21,7 @@ async function world(t: test.TestContext) {
   new EdgeLedger(f.host, f.db, undefined, {ambient: false, sharedCarry: false});
   const run = (n: number) => { for (let i = 0; i < n; i++) { f.host.tickOnce(); f.host.drainInputs(); } };
   run(5);
-  for (const name of ['kino', 'ada']) { await invite(f, name); await accept(f.host, f.souls.create(`dev:${name}`, {name, description: 'recovery probe'})); }
+  for (const name of names) { await invite(f, name); await accept(f.host, f.souls.create(`dev:${name}`, {name, description: 'recovery probe'})); }
   run(30);
   let throws = 0; f.host.stepFaultV1 = (_tick, replay) => { if (!replay && throws > 0) { throws--; throw new Error('fault-inject.thrown: a test engine error inside the tick'); } };
   const fault = () => { throws = 1; run(1); };
@@ -61,4 +61,19 @@ test('a recovery that ended the last process is not replayed again in its window
   w.run(20);
   assert.equal(w.host.engine.world.tick, at + 20, 'the clock goes on');
   assert.ok(w.host.clockAvailable && !w.host.paused);
+});
+
+test('a jump over still ticks adds them to the replay debt at the running whole-tick cost: a recovery replays each of them', async t => {
+  const w = await world(t, []);
+  w.host.saveSnapshot(true); w.run(20);
+  assert.ok(w.host.tickCostMs > 0, 'computed ticks keep the running cost');
+  const debt = w.host.replayDebtMs, jumped = w.host.skipStats.ticksJumped, cost = w.host.tickCostMs;
+  // the host's side of a jump: the world says it is still and the engine skips (here by stepping, as a replay would)
+  const e = w.host.engine as unknown as {skipToV1(to: number): {ok: boolean}; step(): unknown; world: {tick: number}};
+  w.host.skip = true; (w.host as unknown as {stillUntil(): unknown}).stillUntil = () => ({still: true, untilTick: null});
+  e.skipToV1 = (to) => { while (e.world.tick < to) e.step(); return {ok: true}; };
+  w.host.advanceTo(w.host.engine.world.tick + 2000);
+  const n = w.host.skipStats.ticksJumped - jumped;
+  assert.ok(n > 1000, `the still world jumped (${n} ticks)`);
+  assert.ok(w.host.replayDebtMs - debt >= n * cost * 0.5, `${n} jumped ticks added ${Math.round(w.host.replayDebtMs - debt)} ms of debt (cost ${cost.toFixed(2)} ms a tick)`);
 });
