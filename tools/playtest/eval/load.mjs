@@ -21,7 +21,7 @@
 // time admission charged each act. `--menu-stats` runs the world with EDGE_MENU_STATS=1 and folds its menu counters over
 // the load window into the report, with builds per act. Without these flags nothing else changes.
 import { join, resolve, relative } from 'node:path';
-import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
 import { readJsonl, writeJson } from '../lib/jsonl.mjs';
 import { newIdentity, rng } from '../lib/hash.mjs';
@@ -163,16 +163,18 @@ export async function runLoad(o) {
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
-      const worldLog = join(dir, 'server', 'world.log'), sums0 = actSums(readLive(liveFile)), menu0 = menuStats ? lastMenuStats(worldLog) : null;
+      const worldLog = join(dir, 'server', 'world.log'), sums0 = actSums(readLive(liveFile)), logAtStart = menuStats ? logSize(worldLog) : 0;
       if (profile) writeFileSync(join(profDir, 'prof.start'), '');
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const faults = faultSec ? (async () => { for (let at = t0; at < until; at += faultSec * 1000) { await sleep(Math.max(0, at - Date.now())); await injectThrow(port); } })() : null;
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards; await faults;
+      if (profile) writeFileSync(join(profDir, 'prof.stop'), '');   // #2508: the profile covers the load, not the settle after it
+      const logAtEnd = menuStats ? logSize(worldLog) : 0;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const live = readLive(liveFile), server = { act: actPartsOfLive(live), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
-      if (profile || menuStats) server.meter = await meterOf({ sums0, sums1: actSums(live), menu0, menu1: menuStats ? lastMenuStats(worldLog) : null, profDir: profile ? profDir : null, serverRoot });
+      if (profile || menuStats) server.meter = await meterOf({ sums0, sums1: actSums(live), menu0: menuStats ? menuStatsAfter(worldLog, logAtStart) : null, menu1: menuStats ? await menuStatsAfterWait(worldLog, logAtEnd) : null, profDir: profile ? profDir : null, serverRoot });
       const http = [], pairs = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
@@ -198,12 +200,15 @@ export async function runLoad(o) {
 
 /** #2508: live.json's since-start act sums (api-times.ts `parts.sums`), or null on a world without them. */
 const actSums = (live) => live?.api?.routes?.['edge:act']?.parts?.sums ?? null;
-/** #2508: the world log's last `[menu-stats]` line (menu-stats.ts, every 10 s with EDGE_MENU_STATS=1), or null. */
-export function lastMenuStats(file) {
-  let text = ''; try { text = readFileSync(file, 'utf8'); } catch { return null; }
-  const i = text.lastIndexOf('[menu-stats] '); if (i < 0) return null;
-  try { return JSON.parse(text.slice(i + 13, text.indexOf('\n', i) < 0 ? undefined : text.indexOf('\n', i))); } catch { return null; }
+const logSize = (file) => { try { return statSync(file).size; } catch { return 0; } };
+/** #2508: the first `[menu-stats]` line (menu-stats.ts, every 10 s with EDGE_MENU_STATS=1) the world logged after byte
+ *  `from` of its log, or null. Both ends of the window are taken this way, so each starts up to 10 s after its moment. */
+export function menuStatsAfter(file, from) {
+  let text = ''; try { text = readFileSync(file).subarray(from).toString('utf8'); } catch { return null; }
+  const i = text.indexOf('[menu-stats] '), j = text.indexOf('\n', i); if (i < 0 || j < 0) return null;
+  try { return JSON.parse(text.slice(i + 13, j)); } catch { return null; }
 }
+async function menuStatsAfterWait(file, from) { for (let k = 0; k < 24; k++) { const m = menuStatsAfter(file, from); if (m) return m; await sleep(500); } return null; }
 /** Numeric fields of `b` less `a`'s, one level of nesting deep (the menu counters' blocks). */
 function minus(b, a) {
   const out = {};
@@ -218,7 +223,7 @@ async function meterOf({ sums0, sums1, menu0, menu1, profDir, serverRoot }) {
   const meter = { acts, parts: d && acts ? Object.fromEntries(['handler', 'bind', 'check', 'route', 'wait', 'commit'].map((k) => [k, r1(d[k] / acts)])) : null,
     charged: d?.chargedN ? { acts: d.chargedN, msPerAct: r1(d.chargedMs / d.chargedN) } : null };
   if (profDir) {
-    writeFileSync(join(profDir, 'prof.stop'), ''); const pf = join(profDir, 'world.cpuprofile');
+    const pf = join(profDir, 'world.cpuprofile');
     for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(1000);
     try { const b = bucketProfile(readProfile(pf), serverRoot); meter.profile = { ...b, perAct: perAct(b, acts) }; }
     catch (e) { meter.profile = { error: String(e?.message ?? e).slice(0, 200) }; }
@@ -244,12 +249,12 @@ export function recoveryLines(file) {
 /** #2508: an arm's act meter as report lines. */
 export function renderMeter(m) {
   const L = ['', `### The act meter (#2508): ${m.acts} acts answered in the load window`];
-  if (m.parts) L.push('', `The world's own parts, mean ms per act (live.json sums): handler ${m.parts.handler} = bind ${m.parts.bind} + check ${m.parts.check} (of it handler-side route ${m.parts.route}) + rest ${Math.round(10 * (m.parts.handler - m.parts.bind - m.parts.check)) / 10}; wait ${m.parts.wait}; commit ${m.parts.commit}.${m.charged ? ` Admission charged ${m.charged.msPerAct} ms per act (${m.charged.acts} acts).` : ''}`);
+  if (m.parts) L.push('', `The world's own parts, mean ms per act (live.json sums): handler ${m.parts.handler} = bind ${m.parts.bind} + check ${m.parts.check} (of it the check's own feasibility search, route ${m.parts.route}) + rest ${Math.round(10 * (m.parts.handler - m.parts.bind - m.parts.check)) / 10}; wait ${m.parts.wait}; commit ${m.parts.commit}.${m.charged ? ` Admission charged ${m.charged.msPerAct} ms per act (${m.charged.acts} acts).` : ''}`);
   const p = m.profile;
   if (p?.error) L.push('', `Profile: ${p.error}`);
   else if (p) {
     const q = p.perAct, h = q.handlerSide, c = m.charged?.msPerAct;
-    L.push('', `Clock-thread profile (V8 sampling every 1 ms; the sampling itself costs some time, so read shares, not absolutes): ${p.totalMs} ms profiled, ${Math.round(100 * q.busyShare)} % busy.`, '',
+    L.push('', `Clock-thread profile (V8 sampling every 1 ms; the sampling itself costs some time, so read shares, not absolutes): ${p.totalMs} ms profiled, ${Math.round(100 * q.busyShare)} % busy. Each sample is in one group: the planner's sync and audit stay nav.* even inside an act, and the strict gate's work other than binding is act.check (the world's own parts count the whole gate as bind).`, '',
       '| part | clock ms per act |', '|---|---|');
     for (const k of ACT_GROUPS) L.push(`| ${k} | ${q[k] ?? ''} |`);
     L.push(`| act.route(tick), all kinds | ${q['act.route(tick)'] ?? ''} |`, '',

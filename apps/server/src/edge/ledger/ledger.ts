@@ -1110,9 +1110,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const [x, y, z] = b.pose.p, scope = `${engine.navEpochV1()}|${Math.round(x * 2)},${Math.round(y * 2)},${Math.round(z * 2)}`, key = `${scope}|${capId}`;
     let out = this.routeMemo.get(key);
     if (out === undefined) {
-      const t = actTiming.getStore(), t0 = t ? performance.now() : 0; if (t) t.routeMisses++;   // #1944: an act's route searches that missed the memo
+      {const t = actTiming.getStore(); if (t) t.routeMisses++;}   // #1944: an act's route searches that missed the memo
       const issue = this.mw.feasibility.canPerform({actor: soul.entityId, label: plan.label, steps: plan.steps}, 'route|' + scope);   // B-facade: a verdict per (nav epoch, 0.5 m cell) on a replica
-      if (t) t.routeMs += performance.now() - t0;   // #2508: and their time
       out = issue && ROUTE_DEAD.has(issue.code) ? {code: issue.code, reason: humanBlockedExplanationV1(issue.code, plan.label)} : null;
       if (this.readOnly && !out) return out;   // #1281: on a replica no issue can be a verdict not yet here: keep asking
       this.routeMemo.set(key, out); if (this.routeMemo.size > 4096) this.routeMemo.delete(this.routeMemo.keys().next().value!);
@@ -2569,8 +2568,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
       return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
-    {const t = actTiming.getStore(); if (t && !t.checkAt) t.checkAt = performance.now();}   // #1944: the act's check begins
+    const timing = actTiming.getStore(), routeAt = timing ? performance.now() : 0; if (timing && !timing.checkAt) timing.checkAt = routeAt;   // #1944: the act's check begins
     let issue = this.host.engine.canPerform({actor: soul.entityId, label, steps});
+    if (timing) timing.routeMs += performance.now() - routeAt;   // #2508: the check's own feasibility search (route), inside check
     // SOUL3 continuation (ACCEPT3 A7): a here-activity asked while this Soul's own replaceable walk still holds the body (e.g. on
     // the way to board a balloon) was refused not-still, so the superseded walk went on and boarded; the body stops first instead.
     if (issue && /(^|\.)not-still$/.test(issue.code) && steps[0]?.verb !== 'stand' && this.host.engine.programOf(soul.entityId)) {

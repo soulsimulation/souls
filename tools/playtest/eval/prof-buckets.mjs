@@ -24,7 +24,7 @@ const ROUTE = new Set(['planWalk', 'routeAround', 'retryPeople', 'goalNear', 'gr
 const ROUTE_KIND = { retryPeople: 'route.people', nextChunk: 'route.chunk', stepWalk: 'route.detour', plan: 'route.first' };
 const TICK = new Set(['tickOnceInner', 'tickOnce', 'advanceStep']);
 /** The act path's async functions in the ledger: a sample resumed inside one of them (after an await, so the route's frame
- *  is no longer on the stack) is still the act's handler. */
+ *  is no longer on the stack) and under no other route is still the act's handler. */
 const ACT_FN = new Set(['actWork', 'actOnce', 'launch', 'acceptInvite', 'openShared', 'performBodies', 'offerGate']);
 const BREAK = new Set(['(idle)', '(program)', '(root)']);
 /** The groups a report lists for an act, in order (the clock cost of one act, by part). */
@@ -64,7 +64,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     else if (any(SNAP)) g = 'snapshot';
     else if (any(AUDIT)) g = 'nav.audit';
     else if (any(SYNC)) g = 'nav.sync';
-    else if (route === 'POST /v1/edge/act' || (!tick && any(ACT_FN))) g = any(BIND) ? 'act.bind' : any(CHECK) ? 'act.check' : 'act.handler-other';
+    else if (route === 'POST /v1/edge/act' || (!tick && !route && any(ACT_FN))) g = any(BIND) ? 'act.bind' : any(CHECK) ? 'act.check' : 'act.handler-other';
     else if (tick) g = any(ROUTE) ? routeKind() : drain ? 'act.commit(tick)' : 'tick';
     else if (route) g = 'req ' + route;
     else if (req) g = 'req (middleware/unknown)';

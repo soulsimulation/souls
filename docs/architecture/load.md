@@ -136,8 +136,8 @@ As built (L1, `tools/world-launcher/guard.mjs` + `children.mjs`): liveness asks 
 
 **The act meter ([#2508](https://github.com/soulsimulation/souls/issues/2508)).**
 - **The extra parts.** `parts` also carries `bind`, `check` and `route`, each `{p50, p99, p999, max}` over the same windows.
-  - `bind` includes the strict gate's own bind (`offerGate`) and an act's exact-walk projection.
-  - `route` is the time of the handler's route searches that missed the memo; it lies inside `check`.
+  - `bind` includes the whole strict gate (`offerGate`, which binds the offer) and an act's exact-walk projection. In the profile below, the gate's work other than binding counts as `act.check`.
+  - `route` is the check's own feasibility search (the engine's `canPerform`); it lies inside `check`.
 - **The sums.** `parts.sums: {n, handler, wait, commit, bind, check, route, chargedN, chargedMs}` are since-start sums in ms. `chargedMs` is the time admission charged each act (`charge`), so the difference of two readings gives the means per act over any window.
 - **`eval-load --act-sec <s>`.** Every arm states intended acts (Souls × seconds ÷ s) and achieved acts. An arm under 95 % is marked under-driven.
 - **`--profile`.** The world's clock thread is CPU-profiled over the load window (`prof-hook.mjs`, V8 sampling every 1 ms; the sampling has a cost, so the report gives shares). `prof-buckets.mjs` puts every sample in one group:
@@ -147,8 +147,8 @@ As built (L1, `tools/world-launcher/guard.mjs` + `children.mjs`): liveness asks 
   - the planner: `nav.sync` (`syncPaged`, `navScan`, `navChanged`) and `nav.audit` (`navWarmV1`, `fineTileSteps`, `labelComponents`);
   - `gc`, `snapshot` and requests by route.
 
-  The report gives each act group's clock ms per act, the planner's ms per second of clock, and long holds (busy runs of 100 ms or more) by their main group.
-- **`--menu-stats`.** The world runs with `EDGE_MENU_STATS=1`, which logs `[menu-stats]` every 10 s. The report folds the counters' change over the load window, with builds per act (`one.built` plus `one.exact`, the exact-walk projections).
+  The report gives each act group's clock ms per act, the planner's ms per second of clock, and long holds (busy runs of 100 ms or more) by their main group. Planner work inside an act stays `nav.*`.
+- **`--menu-stats`.** The world runs with `EDGE_MENU_STATS=1`, which logs `[menu-stats]` every 10 s. The report folds the counters' change over the load window, with builds per act (`one.built` plus `one.exact`, the exact-walk projections). The window runs between the first lines logged after the load's start and after its end, so each end is up to 10 s late.
 - **Without these flags** the world and the report are as before, apart from the intended and achieved line.
 - **Via timed-run.** `timed-run eval-load` allows `--profile` and `--menu-stats`.
 

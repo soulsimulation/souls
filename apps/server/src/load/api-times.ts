@@ -96,6 +96,7 @@ export function recordApi(route: ApiRoute, queueMs: number, handlerMs: number, n
       const next = cur ? 0 : 1;
       for (let i = 0; i < API_ROUTES.length; i++) for (let k = 0; k < KINDS; k++) a.fill(0, at(i, k, next), at(i, k, next) + SERIES);
       for (let k = 0; k < PARTS.length; k++) a.fill(0, partAt(k, next), partAt(k, next) + SERIES);
+      for (let k = 0; k < EXTRA.length; k++) a.fill(0, extraAt(k, next), extraAt(k, next) + SERIES);
       a[OVER0 + next] = 0;
       a[2] = a[1]; a[1] = now; a[0] = cur = next;
     }
