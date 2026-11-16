@@ -7,13 +7,14 @@ import {EdgeLedger} from '../../apps/server/src/edge/ledger/ledger.ts';
 import {mountEdgeRoutes} from '../../apps/server/src/edge/routes.ts';
 import {GodMode} from '../../apps/server/src/god/god.ts';
 import {installEngineBridge} from '../../apps/server/src/god/engine-bridge.ts';
+import {adoptBootRuntimePoliciesV1} from '../../apps/server/src/edge-runtime-rules.ts';
 
 // #1070: a door in a walled yard at any turn. The gap turns solid only at the close's contact, so a close from the far side has
 // to end clear of it. A Soul walks in and out through the door (closed behind her both ways), then shuts it by hand from each
 // side. Every leg completes or fails by name; nothing recovers a fault, breaks an invariant or jumps. Each turn is a fresh world.
 const defs = (process.env.YARD_DEFS ?? 'core/door@3,core/door@2').split(',');
 const turns = (process.env.YARD_TURNS ?? '0,0.4,0.571,0.785,1.2,1.571,1.9,2.356,2.9,3.7,4.712,5.5,5.712').split(',').map(Number);
-const once = async (ref, r, stubs = [], {more = null, only = null} = {}) => {
+const once = async (ref, r, stubs = [], {more = null, only = null, boot = false} = {}) => {
  const f = fixture(':memory:', factory, {durableClockV1: true}); f.brain.quiesce();
  const edge = new EdgeLedger(f.host, f.db, undefined, {ambient: false}), app = new Hono(); let soul;
  const comms = mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: edge, soul: () => soul});
@@ -21,6 +22,7 @@ const once = async (ref, r, stubs = [], {more = null, only = null} = {}) => {
   const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit() {}});
   installEngineBridge({host: f.host, god, edge, log() {}, worldLore: false, worldClock: false});
   const tick = async (n = 5) => {for (let i = 0; i < n; i++) {f.host.tickOnce(); await setImmediate(); f.host.drainInputs();}};
+  if (boot) await accept(f.host, adoptBootRuntimePoliciesV1(f.host, {edge: true, worldKey: 'eden'}));
   await tick(); await invite(f, 'ana'); const row = await accept(f.host, f.souls.create('dev:ana', {name: 'Ana', description: 'Yard test'})); await tick();
   soul = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: 'dev:ana'};
   const body = () => f.host.engine.world.entities[soul.entityId], [ax, az] = [body().pose.p[0], body().pose.p[2]];
@@ -34,6 +36,7 @@ const once = async (ref, r, stubs = [], {more = null, only = null} = {}) => {
    ...stubs.map(([x0, z0, x1, z1], i) => ({op: 'place', def: 'core/garden-wall@1', name: `stub-${i}`, shape: {path: [at(x0, z0), at(x1, z1)]}})),
    ...(more?.(ax, az) ?? []),
   ]});
+  if (boot && !placed.accepted) return null;   // a random wall the edit rules refuse: no yard
   assert.equal(placed.accepted, true, JSON.stringify(placed)); await tick(45);
   const moved = [], out = [];
   const leg = async (capability, name) => {
@@ -116,4 +119,26 @@ test('a sidestep still held when the gap turns solid fails by name, never a faul
   for (const [name, code] of legs) assert.notEqual(code, 'engine.fault-recovered', `r=${r} ${name}`);
   assert.ok(legs.some(([, code]) => code === 'contact.step-blocked'), `r=${r}: ${JSON.stringify(legs)}`);
  }
+});
+
+// #1248: a step to the handle whose goal snaps to where she already stands got her no nearer, and was sent again every
+// other tick: the walk stayed `started`, the body idle by the open door. Now it ends `contact.not-at-handle`.
+test('a step to the handle that gets her no nearer ends the walk by name', {timeout: 120000}, async () => {
+ const legs = await once('core/door@3', 0.4, [[0.3, -0.62, 1, -0.62]], {boot: true});
+ assert.deepEqual(legs[0], ['in', 'contact.not-at-handle']);
+});
+
+test('random walls near a door: every leg ends, completed or by name, within 2400 ticks', {timeout: 1200000}, async () => {
+ // seeded (mulberry32): a turn, door@3 or @2, one or two stubs 0.4 to 1.5 m long within 1.5 m of the door; YARD_SWEEP=163 is the #1248 run
+ let seed = 1248; const R = () => {seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296;}, q = v => +v.toFixed(2);
+ let ran = 0;
+ for (let i = 0, n = +(process.env.YARD_SWEEP ?? 40); i < n; i++) {
+  const r = q(R() * 2 * Math.PI), stubs = [];
+  for (let j = 0, k = 1 + Math.floor(R() * 2); j < k; j++) {const x = R() * 3 - 1.5, z = (R() < .5 ? -1 : 1) * (0.3 + R() * 1.2), a = R() * Math.PI, L = 0.4 + R() * 1.1; stubs.push([q(x), q(z), q(x + L * Math.cos(a)), q(z + L * Math.sin(a))]);}
+  const ref = R() < .7 ? 'core/door@3' : 'core/door@2', legs = await once(ref, r, stubs, {boot: true});
+  if (!legs) continue; ran++;
+  if (process.env.YARD_LOG) console.log(i, ref, r, JSON.stringify(stubs), JSON.stringify(legs));
+  for (const [name, code] of legs) assert.ok(code === 'completed' || /^(contact|object|hand_actuator_v1|walk|route|place|capability)\.[a-z-]+$/.test(code ?? ''), `yard ${i} ${ref} r=${r} ${JSON.stringify(stubs)} ${name}: ${code}`);
+ }
+ assert.ok(ran > 0);
 });
