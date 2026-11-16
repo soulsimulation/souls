@@ -308,7 +308,9 @@ export async function openLauncher(cfg = {}) {
    *  #2367 A1: the alarm loads it leadMs before its next deadline of any kind (a reminder, a plan step, a body's move:
    *  untilWallMs), listener or not, so the deadline is met by the world running, not by its next visitor. */
   const unloadStill = cfg.unloadStill === true;
-  const STILL = { leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
+  // #2490: dueGraceMs, how long past its deadline (or its late load) an alarm-loaded world is kept from being unloaded to
+  // make room; loadMs, the load time the alarm plans with until the pool has measured some (ChildPool.loadMs)
+  const STILL = { dueGraceMs: cfg.stillDueGraceMs ?? 5000, loadMs: cfg.stillLoadMs ?? 5000, leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
   const horizonsFile = join(dataDir, 'horizons.json');
   const horizons = new Map((() => { try { return Object.entries(JSON.parse(readFileSync(horizonsFile, 'utf8'))); } catch { return []; } })());
   const saveHorizons = () => { try { writeFileSync(`${horizonsFile}.tmp`, JSON.stringify(Object.fromEntries(horizons), null, 1) + '\n'); renameSync(`${horizonsFile}.tmp`, horizonsFile); } catch (e) { log(`horizons: ${e.message}`); } };
@@ -346,7 +348,7 @@ export async function openLauncher(cfg = {}) {
   const siteKey = randomBytes(32).toString('hex');
   const siteOk = (req) => { const h = String(req.headers['x-sim-site-key'] ?? ''); return direct(req) && h.length === siteKey.length && timingSafeEqual(Buffer.from(h), Buffer.from(siteKey)); };
   const pool = new ChildPool({ root, range, site: { url: `${origin}${prod.base}`, key: siteKey }, logDir: join(dataDir, 'logs'), pidFile: join(dataDir, 'children.json'), libraryDir: join(dataDir, 'library'), compileCache: cfg.compileCache === false || process.env.SIM_COMPILE_CACHE === '0' ? null : compileCacheDir(dataDir, BUILD), cobuilders: cfg.cobuilders ?? process.env.SIM_COBUILDERS === '1', idleMs: cfg.idleMs, marsWebDir, publicOrigin, auth: auth?.child, soulControllerCliFile: resolve(cfg.soulControllerCli ?? SOUL.controllerCli), soulSkillFile: resolve(cfg.soulSkill ?? SOUL.skill), soulInstructionsFile: resolve(cfg.soulInstructions ?? SOUL.instructions), command: cfg.command ?? ((w, p, o) => (w.fork ? forkCommand : defaultCommand)(w, p, o)), healthPath: (s) => `${wp(s)}/healthz`,
-    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* #2367 A2 */ roomWaitMs: cfg.roomWaitMs, refreshStill: () => lookAtWorlds(), /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0, sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
+    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* #2367 A2 */ roomWaitMs: cfg.roomWaitMs, refreshStill: () => lookAtWorlds(), /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0 || heldForDue(slug), /* #2490 */ sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
     /* worlds serve the same web build, with its --base */ onChange: (slug) => { const s = pool.status(slug); if (s.port && registry.get(slug) && registry.get(slug).port !== s.port) registry.update(slug, { port: s.port }); if (unloadStill && s.status === 'running') loaded(slug); wakeParked(slug); },
     /* #2304: at most loadParallel worlds load at once, in order of reason */ loadParallel: cfg.loadParallel ?? 4,
     ...(unloadStill ? { beforeStop: (k) => recordHorizon(k), afterRelease: (slug) => moveOnHandover(slug) } : {}) });
@@ -873,11 +875,16 @@ export async function openLauncher(cfg = {}) {
     return out.filter(Boolean);
   }
   /** The alarm (A2): an unloaded world loads when a body is due to move or its next deadline nears (#2367 A1); one
-   *  unloaded while not still loads once there is room (#2475 A1). */
-  const alarmLoading = new Set();
+   *  unloaded while not still loads once there is room (#2475 A1). #2490: deadlines that fall together are loaded in
+   *  deadline order, each early enough that it and every world behind it can load in time, loadParallel at a time at the
+   *  pool's measured load time; before its deadline a load starts only into room (or with one world to unload for it, one
+   *  a pass), so it never holds a load slot waiting; and a world so loaded is not unloaded for room until its deadline
+   *  is dueGraceMs past (dueHeld), so early loads never unload one another. */
+  const alarmLoading = new Set(), dueHeld = new Map();
+  const heldForDue = (slug, now = Date.now()) => { const u = dueHeld.get(slug); if (u == null) return false; if (now < u) return true; dueHeld.delete(slug); return false; };
   function alarmScan(now = Date.now()) {
     if (!unloadStill || phase !== 'active' || gate || pool.closing || pool.fenced) return [];
-    const due = []; let roomed = false;
+    const due = [], deadlines = []; let roomed = false;
     for (const [slug, h] of horizons) {
       const w = registry.get(slug);
       if (!w) { horizons.delete(slug); saveHorizons(); continue; }
@@ -890,13 +897,31 @@ export async function openLauncher(cfg = {}) {
         pool.ensure(worldEnv(w), { passive: true, reason: 'background', timeoutMs: 0 }).then((p) => log(`${slug} loaded by its alarm (unloaded while not still; room now) on :${p}`), (e) => log(`${slug}: its alarm could not load it: ${e.message}`)).finally(() => alarmLoading.delete(slug));
         continue;
       }
+      // #2367 A1: any deadline (a reminder is one: edge.reminder.* in the world's horizon)
+      const dueAt = Math.min(h.moveWallMs ?? Infinity, h.untilWallMs ?? Infinity);
+      if (Number.isFinite(dueAt)) deadlines.push({ slug, w, h, dueAt });
+    }
+    // #2490: startAt[j] = min(dueAt[j] - leadMs, startAt[j + parallel] - loadMs): world j and the ones behind it in the
+    // load slots each load before their own deadline (a fixed lead loaded a burst late: the 15 Nov #2301 re-run, p50 59 s)
+    deadlines.sort((a, b) => a.dueAt - b.dueAt || (a.slug < b.slug ? -1 : 1));
+    const par = pool.o.loadParallel > 0 ? pool.o.loadParallel : Infinity, loadMs = pool.loadMs() ?? STILL.loadMs, startAt = [];
+    for (let j = deadlines.length - 1; j >= 0; j--) startAt[j] = Math.min(deadlines[j].dueAt - STILL.leadMs, j + par < deadlines.length ? startAt[j + par] - loadMs : Infinity);
+    const early = []; let unloading = false;
+    for (const [j, { slug, w, h, dueAt }] of deadlines.entries()) {
+      if (startAt[j] > now) continue;
+      if (now < dueAt) {
+        const r = pool.roomFor(slug, [...pool.loadWaiting.map((x) => x.k.world), ...early]);
+        if (!r.ok) { if (r.low || unloading || !pool.roomVictim(slug, now)) continue; unloading = true; }
+        early.push(worldEnv(w));
+      }
       const listener = now - (residentAt.get(slug) ?? -Infinity) < STILL.listenerMs;
-      // #2367 A1: any deadline (a reminder is one: edge.reminder.* in the world's horizon), leadMs early to load in time
-      const why = h.moveWallMs != null && h.moveWallMs - STILL.leadMs <= now ? 'a body is due to move' : h.untilWallMs != null && h.untilWallMs - STILL.leadMs <= now ? (listener ? 'its next event, with a listener' : 'its next deadline') : null;
-      if (!why) continue;
+      const why = h.moveWallMs != null && h.moveWallMs === dueAt ? 'a body is due to move' : listener ? 'its next event, with a listener' : 'its next deadline';
+      const ahead = Math.max(0, Math.round((dueAt - now) / 1000));
       alarmLoading.add(slug); due.push(slug);
       // #2304: in the load queue behind acts and visitors: a listener's alarm, then a wind-down step
-      pool.ensure(worldEnv(w), { passive: true, reason: why === 'a body is due to move' && !listener ? 'winddown' : 'listener', timeoutMs: 0 }).then((p) => log(`${slug} loaded by its alarm (${why}) on :${p}`), (e) => log(`${slug}: its alarm could not load it: ${e.message}`)).finally(() => alarmLoading.delete(slug));
+      pool.ensure(worldEnv(w), { passive: true, reason: why === 'a body is due to move' && !listener ? 'winddown' : 'listener', timeoutMs: 0 })
+        .then((p) => { dueHeld.set(slug, Math.max(dueAt, Date.now()) + STILL.dueGraceMs); log(`${slug} loaded by its alarm (${why}${ahead ? `, asked ${ahead} s before it` : ''}) on :${p}`); }, (e) => log(`${slug}: its alarm could not load it: ${e.message}`))
+        .finally(() => alarmLoading.delete(slug));
     }
     return due;
   }
