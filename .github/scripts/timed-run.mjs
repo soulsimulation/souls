@@ -54,7 +54,7 @@ export const ARG_ALLOW = {
   walk: { '--world': (v) => v.split(',').every((w) => WALK_WORLDS.includes(w)) && new Set(v.split(',')).size === v.split(',').length },
   // --battery: a bare battery name (battery/<name>.json in the ref); --seat: the scripted owner only, never a live mind
   'eval-scripted': { '--battery': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--seat': (v) => v === 'scripted', '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
-  'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600), '--act-sec': int(1, 600), '--fault-every-sec': int(10, 600), '--hang-kill-sec': int(1, 600), '--profile': FLAG, '--menu-stats': FLAG },
+  'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600), '--act-sec': int(1, 600), '--fault-every-sec': int(10, 600), '--hang-kill-sec': int(1, 600), '--profile': FLAG, '--menu-stats': FLAG, '--scan-census': FLAG },
   'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
