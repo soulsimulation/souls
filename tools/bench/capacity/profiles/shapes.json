@@ -1,0 +1,99 @@
+{
+  "schema": "bench-shapes/1",
+  "note": "#2556: uneven load for every scaling bench, read by shapes.mjs. These numbers are judgement, not data: their job is to be uneven in the right ways (a few agents make most acts, agents act in runs and then pause, people arrive and leave in waves, crowds gather in one place, many react at once) and to be repeatable, not to be exact. Every number sits in a {value, source} pair whose source names where it came from or says 'estimate'. Change a number here, with evidence, never in a bench. Times are seconds.",
+  "agents": {
+    "uniform": {
+      "about": "today's even load: the soul-eval paced loop (--act-sec), every joined Soul acting at the same pace, to places around the map, for the whole window",
+      "presence": { "value": 1, "source": "tools/playtest/eval/load.mjs pacedLoop: every joined Soul's agent acts" },
+      "rate": { "kind": "equal", "actSec": { "value": 10, "source": "estimate: the documented example pace (docs/testing/soul-eval.md, `load --act-sec 10`); a bench passes its own --act-sec" } },
+      "time": { "kind": "even", "gapShare": { "value": [0.5, 1.5], "source": "tools/playtest/eval/load.mjs pacedLoop (#2437): first act at U(0, actSec), then each gap actSec x U(0.5, 1.5)" } },
+      "arrivals": null,
+      "crowds": null,
+      "place": { "gatheredShare": { "value": 0, "source": "tools/playtest/eval/load.mjs PACED_WORDS: walk targets are named places around the map" } },
+      "mix": { "value": { "walk": 7, "sit-ground": 1, "eat": 1, "read": 1, "sit": 1, "play-music": 1 }, "source": "tools/playtest/eval/load.mjs PACED_WORDS (#2437): of its 12 words, 7 are places to walk to (bandstand, windmill, fire circle, lake, library, garden, pond), then sit on the floor, eat, read, bench (sit) and music; the word-to-kind mapping is the lane's estimate" }
+    },
+    "everyday": {
+      "about": "a quiet day: a quarter of the joined Souls' agents active, heavy-tailed rates, acts in runs then a pause, spread out",
+      "presence": { "value": 0.25, "source": "estimate" },
+      "rate": {
+        "kind": "lognormal",
+        "medianSec": { "value": 30, "source": "estimate: one act per 30 s for the median agent" },
+        "sigma": { "value": 1.25, "source": "estimate: chosen so the busiest tenth of agents make about half of all acts" },
+        "minSec": { "value": 2, "source": "estimate: no agent is offered more than one act per 2 s" }
+      },
+      "time": {
+        "kind": "runs",
+        "runActs": { "value": [1, 4], "source": "estimate: a run is 1 to 4 acts" },
+        "runGapSec": { "value": [2, 4], "source": "profiles/cadence.json real.gapS: the live agents' act-to-act gaps cluster at 2 to 4 s (p10 2.2 s, p25 3.7 s) and at 60 to 75 s (p50 61.6 s, p90 73.0 s)" },
+        "pauseShare": { "value": [0.5, 1.5], "source": "estimate: each pause is the one that keeps the agent's rate, times U(0.5, 1.5)" },
+        "firstAct": "profiles/cadence.json real.firstActS (an arrival's first act, median 7.4 s); at the window's start an agent is part way through its cycle"
+      },
+      "arrivals": null,
+      "crowds": null,
+      "place": { "gatheredShare": { "value": 0, "source": "estimate: on a quiet day walk targets are spread around the map" } },
+      "mix": { "value": { "walk": 7, "sit-ground": 1, "eat": 1, "read": 1, "sit": 1, "play-music": 1 }, "source": "the uniform shape's mix (the paced loop's), as #2556 gives it" }
+    },
+    "event": {
+      "about": "a live event: most agents active, the same heavy-tailed runs, arrivals in a ramp and waves of people leaving and returning, crowd moments, gathered at one named place, social acts",
+      "presence": { "value": 0.8, "source": "estimate" },
+      "rate": {
+        "kind": "lognormal",
+        "medianSec": { "value": 30, "source": "estimate: the everyday shape's" },
+        "sigma": { "value": 1.25, "source": "estimate: the everyday shape's" },
+        "minSec": { "value": 2, "source": "estimate: the everyday shape's" }
+      },
+      "time": {
+        "kind": "runs",
+        "runActs": { "value": [1, 4], "source": "estimate: the everyday shape's" },
+        "runGapSec": { "value": [2, 4], "source": "profiles/cadence.json real.gapS, as in the everyday shape" },
+        "pauseShare": { "value": [0.5, 1.5], "source": "estimate: the everyday shape's" },
+        "firstAct": "profiles/cadence.json real.firstActS, as in the everyday shape"
+      },
+      "arrivals": {
+        "startShare": { "value": 0.5, "source": "estimate: half of the present agents are there from the start" },
+        "rampSec": { "value": 120, "source": "estimate: the other half arrive in the first 2 minutes" },
+        "maxPerSec": { "value": 2, "source": "estimate: at most 2 arrivals in any one second" },
+        "waveEverySec": { "value": 300, "source": "estimate: every 5 minutes some leave and others return" },
+        "waveShare": { "value": 0.1, "source": "estimate: a tenth of the present agents leave in each wave, as many absent ones return" },
+        "waveSpreadSec": { "value": 30, "source": "estimate: a wave's leaving and returning is spread over 30 s" }
+      },
+      "crowds": {
+        "gapSec": { "value": [45, 120], "source": "estimate: something happens at random gaps of 45 to 120 s" },
+        "share": { "value": 0.3, "source": "estimate: 30 % of the present agents react" },
+        "withinSec": { "value": 2, "source": "estimate: each reaction is due within 2 s of the moment" }
+      },
+      "place": {
+        "gatheredShare": { "value": 0.6, "source": "estimate: 60 % of walk targets are near one named place (the bench's meetup place)" },
+        "radiusM": { "value": 30, "source": "estimate: near is within 30 m" }
+      },
+      "mix": { "value": { "say": 30, "gesture": 15, "sit": 15, "walk": 30, "read": 4, "eat": 3, "play-music": 3 }, "source": "estimate: #2556's social mix (30 % speech, 15 % gestures, 15 % sitting, 30 % short walks, 10 % other); the split of 'other' into read, eat and music is the lane's estimate" }
+    }
+  },
+  "viewers": {
+    "uniform": {
+      "about": "every viewer from the start, for the whole window",
+      "startShare": { "value": 1, "source": "viewers/viewers.mjs: every viewer opens at the start of the run, 50 ms apart" },
+      "ratePerSec": { "value": 0, "source": "viewers/viewers.mjs: no later arrivals" },
+      "wave": null,
+      "stay": { "kind": "whole-window" }
+    },
+    "everyday": {
+      "about": "viewers trickle in and leave after a heavy-tailed stay",
+      "startShare": { "value": 0.25, "source": "estimate" },
+      "ratePerSec": { "value": 0.2, "source": "estimate: one new viewer every 5 s" },
+      "wave": null,
+      "stay": { "kind": "lognormal", "medianSec": { "value": 60, "source": "#2556: a heavy-tailed stay with a median of 60 s (estimate)" }, "sigma": { "value": 1, "source": "estimate" } }
+    },
+    "event": {
+      "about": "a link shared at an event or on a front page: a steady stream plus waves, heavy-tailed stays",
+      "startShare": { "value": 0.25, "source": "estimate" },
+      "ratePerSec": { "value": 1, "source": "estimate: one new viewer a second between waves" },
+      "wave": {
+        "size": { "value": 50, "source": "estimate: 50 viewers open the link together" },
+        "everySec": { "value": 300, "source": "estimate: a wave every 5 minutes" },
+        "withinSec": { "value": 10, "source": "estimate: a wave's viewers arrive within 10 s" }
+      },
+      "stay": { "kind": "lognormal", "medianSec": { "value": 60, "source": "#2556: a heavy-tailed stay with a median of 60 s (estimate)" }, "sigma": { "value": 1, "source": "estimate" } }
+    }
+  }
+}
