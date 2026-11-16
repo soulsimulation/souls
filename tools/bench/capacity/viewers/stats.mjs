@@ -25,7 +25,7 @@ export function tickWindows(samples, from, to) {
   return [...seen.values()];
 }
 
-/** One measuring window. `samples`: [{at, live, cpuS, rssMb}], `acts`: [{at, status, accepted, code, queueMs, worldMs, clientMs}],
+/** One measuring window. `samples`: [{at, live, cpuS, rssMb, launcherCpuS?, launcherRssMb?, driverCpuS?}], `acts`: [{at, status, accepted, code, queueMs, worldMs, clientMs}],
  *  `v0`/`v1`: the viewers' counters at the window's start and end, `viewers`: how many were held, `calls`: the viewers'
  *  HTTP answers since the arm's viewers started opening ([{status, cache}]). */
 export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to }) {
@@ -40,6 +40,8 @@ export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to 
   const viewerRefusals = {}; for (const c of calls) if (c.status !== 200) viewerRefusals[c.status] = (viewerRefusals[c.status] ?? 0) + 1;
   const worldCalls = calls.filter((c) => c.status !== 0 && c.cache !== 'hit' && c.cache !== 'shared').length;
   const bytes = v1.bytes - v0.bytes;
+  // cores used over the window by one sampled process clock (`cpuS`, `launcherCpuS`, `driverCpuS`); null without two readings
+  const share = (k) => (first && last && Number.isFinite(first[k]) && Number.isFinite(last[k]) && last.at > first.at ? r3((last[k] - first[k]) / ((last.at - first.at) / 1000)) : null);
   return {
     seconds: r1(secs), viewers, tickWindows: wins.length,
     tickMs: { p50: r1(quantile(wins.map((w) => w.tickMs?.p50), 0.5)), p99: r1(wins.length ? Math.max(...wins.map((w) => w.tickMs?.p99 ?? 0)) : null) },
@@ -48,8 +50,9 @@ export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to 
     amberS: { service: r1(sum('service')), loop: r1(sum('loop')), heap: r1(sum('heap')), dwell: r1(sum('dwell')) },
     acts: { n: a.length, ok: ok.length, queueMs: { p50: r1(quantile(ok.map((x) => x.queueMs), 0.5)), p95: r1(quantile(ok.map((x) => x.queueMs), 0.95)) },
       handlerMs: { p50: r1(quantile(handler, 0.5)), p99: r1(quantile(handler, 0.99)) }, waitMs: { p50: r1(quantile(ok.map((x) => x.waitMs), 0.5)), p99: r1(quantile(ok.map((x) => x.waitMs), 0.99)) }, clientMs: { p50: r1(quantile(ok.map((x) => x.clientMs), 0.5)), p99: r1(quantile(ok.map((x) => x.clientMs), 0.99)) }, refused: refusedActs },
-    world: { cpuShare: first && last && Number.isFinite(first.cpuS) && Number.isFinite(last.cpuS) && last.at > first.at ? r3((last.cpuS - first.cpuS) / ((last.at - first.at) / 1000)) : null,
-      rssMb: r1(last?.rssMb ?? null), heapUsedMb: last?.live?.heap?.usedMb ?? null },
+    world: { cpuShare: share('cpuS'), rssMb: r1(last?.rssMb ?? null), heapUsedMb: last?.live?.heap?.usedMb ?? null },
+    launcher: { cpuShare: share('launcherCpuS'), rssMb: r1(last?.launcherRssMb ?? null) },
+    driver: { cpuShare: share('driverCpuS') },
     viewersOut: { bytesPerViewerPerS: viewers ? Math.round(bytes / viewers / secs) : null, messagesPerViewerPerS: viewers ? r1((v1.messages - v0.messages) / viewers / secs) : null,
       wsOpens: v1.opens - v0.opens, wsCloses: v1.closes - v0.closes, wsRefused: v1.refused - v0.refused },
     viewerCalls: { http: calls.length, worldCalls, refusals: viewerRefusals },

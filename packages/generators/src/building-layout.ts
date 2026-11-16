@@ -361,6 +361,18 @@ export function realize(p: Plan): Layout {
     const o: Vec2 = side === 's' ? [0, D / 2] : side === 'n' ? [0, -D / 2] : side === 'e' ? [W / 2, 0] : [-W / 2, 0];
     L.openings.push({ id: `open-${side}`, kind: 'arch', floor: 0, wall: -1, wallId: '', s: 0, at: o, width: side === 's' || side === 'n' ? W - 0.4 : D - 0.4, height: p.fh - 0.3, sill: 0, from: L.rooms[0]?.id, to: 'outside', exterior: true });
   }
+  // #2434 (minDoorW): once every other opening has its place, an inside door is widened about its centre toward minDoorW
+  // where its wall has room (0.35 m from the wall's ends, the usual 0.15 m from any other opening), else kept as it is
+  if (p.minDoorW) for (const o of L.openings) {
+    if (o.kind !== 'door' || o.exterior || o.width >= p.minDoorW || o.wall < 0) continue;
+    const wall = L.walls[o.wall], len = len2(wall.a, wall.b), others = (used.get(o.wall) ?? []).filter(([a, b]) => !(Math.abs(a - (o.s - o.width / 2)) < 1e-6 && Math.abs(b - (o.s + o.width / 2)) < 1e-6));
+    const room = Math.min(o.s - 0.35, len - 0.35 - o.s, ...others.map(([a, b]) => (b <= o.s ? o.s - b - 0.15 : a - o.s - 0.15)));
+    const w = Math.min(p.minDoorW, 2 * room);
+    if (w <= o.width) continue;
+    const own = (used.get(o.wall) ?? []).find(([a, b]) => Math.abs(a - (o.s - o.width / 2)) < 1e-6 && Math.abs(b - (o.s + o.width / 2)) < 1e-6);
+    if (own) { own[0] = o.s - w / 2; own[1] = o.s + w / 2; }
+    o.width = w;
+  }
   return L;
 }
 

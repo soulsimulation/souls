@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { hostRenderSlot, releaseWorldRenderSlots, renderWorld } from './host-render-slot.ts';
+import { hostRenderSlot, renderWorld } from './host-render-slot.ts';
 test('foreign holder keeps another world waiting without blocking its event loop; dead holder recovers', async () => {
     const previous = process.env.SIM_RENDER_LOCK_DIR, dir = mkdtempSync(join(tmpdir(), 'context-host-lock-'));
     process.env.SIM_RENDER_LOCK_DIR = dir;
@@ -37,17 +37,18 @@ test('foreign holder keeps another world waiting without blocking its event loop
             process.env.SIM_RENDER_LOCK_DIR = previous;
     }
 });
-test('#2444: a world that stops in a shard releases its render slot, so it never blocks the other worlds of the program', async () => {
+test('#2469: a world that stops in a shard mid-render keeps its slot until that render ends; then the next world gets it', async () => {
     const previous = process.env.SIM_RENDER_LOCK_DIR, dir = mkdtempSync(join(tmpdir(), 'context-host-lock-'));
     process.env.SIM_RENDER_LOCK_DIR = dir;
     try {
-        const heldByA = await renderWorld.run('a', () => hostRenderSlot(AbortSignal.timeout(2000)));
-        // world b in the same program waits while a holds the slot (one render at a time on the host, as before)...
+        // world a renders (holds the slot); a stops meanwhile: nothing frees the slot but the end of a's render
+        const renderOfA = await renderWorld.run('a', () => hostRenderSlot(AbortSignal.timeout(2000)));
+        // world b in the same program (same pid) waits while a's render is mid-way: one render at a time on the host
         await assert.rejects(renderWorld.run('b', () => hostRenderSlot(AbortSignal.timeout(300))));
-        // ...and gets it once world a stops, though the program (its pid) lives on and a never released it itself
-        releaseWorldRenderSlots('a');
+        assert.equal('releaseWorldRenderSlots' in await import('./host-render-slot.ts'), false, 'no stop-time release of a world\'s slots');
+        // a's render ends (its release in `finally`): b gets the slot
+        renderOfA();
         const heldByB = await renderWorld.run('b', () => hostRenderSlot(AbortSignal.timeout(2000)));
-        heldByA();   // a's own late release is a no-op: b still holds the slot
         await assert.rejects(renderWorld.run('c', () => hostRenderSlot(AbortSignal.timeout(300))));
         heldByB();
         (await hostRenderSlot(AbortSignal.timeout(2000)))();

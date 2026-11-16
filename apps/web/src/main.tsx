@@ -6,7 +6,8 @@ import {pageRoute} from './page-route.ts';
 import {installAssetTransport} from './boot-assets.ts';
 import {takeConfigPrefetch} from './snapshot-prefetch.ts';
 import {takeInlineConfig} from './inline-config.ts';
-import { StrictMode, Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { EdenMark } from './EdenMark.tsx';
 import { createRoot } from 'react-dom/client';
 const PrivyAuth=lazy(()=>import('./PrivyAuth.tsx'));
 import { Shell, type AuthCtx } from './Shell.tsx';
@@ -113,7 +114,12 @@ function WorldList(){
   try{const r=await fetch(BASE+'/__sim/worlds.json',{signal:AbortSignal.timeout(5000)});const data=r.ok&&r.headers.get('content-type')?.includes('application/json')?await r.json():null;if(data?.contract==='local-worlds/1'&&typeof data.launcher==='string'&&Array.isArray(data.worlds)){if(active)setLauncher(data);return;}}catch{/* show the home-page retry state */}
   if(active)setChecking(false);
  })();return()=>{active=false;};},[]);
- if(checking&&!launcher)return <main className="world-list lh"><h1>Worlds</h1><p role="status">Loading worlds…</p></main>;
- if(!launcher)return <main className="world-list lh"><h1>Worlds</h1><p role="status">The world list could not load.</p><button type="button" onClick={()=>location.reload()}>Try again</button></main>;
- return <Suspense fallback={<main className="world-list lh"><h1>Worlds</h1><p role="status">Loading worlds…</p></main>}><LauncherRoot list={launcher}/></Suspense>;
+ if(checking&&!launcher)return <HomeFrame><p className="lh-loading" role="status">Loading worlds…</p></HomeFrame>;
+ if(!launcher)return <HomeFrame><p className="lh-loading" role="status">The world list could not load.</p><button type="button" onClick={()=>location.reload()}>Try again</button></HomeFrame>;
+ return <Suspense fallback={<HomeFrame><p className="lh-loading" role="status">Loading worlds…</p></HomeFrame>}><LauncherRoot list={launcher}/></Suspense>;
+}
+/** #2464: LauncherHome's own frame (its bar with the wordmark, the Worlds header; styled in styles.css, not the lazy
+ *  chunk) while the list and the launcher's code load, so the page is drawn once in its place and the cards fill in. */
+function HomeFrame({children}:{children:ReactNode}){
+ return <main className="world-list lh"><header className="lh-bar"><div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div></header><div className="lh-list-head"><h1 className="lh-h">Worlds</h1></div>{children}</main>;
 }

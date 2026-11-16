@@ -72,7 +72,6 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       <header className="lh-bar">
         <div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div>
         <div className="lh-actions">
-          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
           {session.authed ? <AccountMenu label={session.label} avatarUrl={session.avatarUrl} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
               : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
@@ -83,10 +82,14 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
           <p className="dim">Name it, pick how it starts, and hand your agent one line. About a minute.</p>
-          <button className="lh-new" onClick={() => setDialog(true)}>+ New world</button>
+          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
         </div>
       )}
-      {worlds.length > 0 && <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>}
+      {/* #2465: New world sits with the list it adds to, across from the count; the empty state above has its own */}
+      {worlds.length > 0 && <div className="lh-list-head">
+        <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>
+        <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
+      </div>}
       <div className="lh-cards">
         {worlds.map((w) => (
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>

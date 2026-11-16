@@ -28,6 +28,8 @@ test('args: only each command\'s own allowlisted flags, with checked values, onc
     ['eval-scripted', '--world https://example.org'], ['eval-scripted', '--items A;B'], ['eval-scripted', '--warm-sec 0'], ['eval-scripted', '--warm-sec 900'], ['eval-scripted', 'x --items a']])
     assert.throws(() => checkArgs(c, a), /input args/, `${c} ${a}`);
   assert.throws(() => parseInputs({ ...ENV, INPUT_ARGS: '--seat x' }), /not allowed for walk/);
+  assert.deepEqual(checkArgs('viewers', '--viewers 200,500,1000,2000'), ['--viewers', '200,500,1000,2000']);
+  for (const a of ['--viewers 2001', '--viewers 0', '--viewers 1,2,3,4,5', '--viewers 05']) assert.throws(() => checkArgs('viewers', a), /input args/, a);
 });
 
 test('command line: walk once per repeat; the eval runs its own repeats with a scripted seat, on the given port', () => {

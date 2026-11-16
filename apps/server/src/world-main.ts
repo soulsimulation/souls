@@ -63,7 +63,7 @@ const NATIVES: { name: string; description: string }[] = [
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
  *  guard, standby) is listed in docs/design/world-cost.md (A4) for the later shard steps. */
-export async function startWorld(config: Config, o: { exit?: (code: number) => void; signals?: boolean; mine?: () => boolean } = {}) {   // #2444: a shard passes exit (the world ends, not the program), signals: false and mine (an uncaught error is this world's)
+export async function startWorld(config: Config, o: { exit?: (code: number) => void; signals?: boolean; mine?: () => boolean; abort?: AbortSignal } = {}) {   // #2444: a shard passes exit (the world ends, not the program), signals: false and mine (an uncaught error is this world's); #2469: abort (its stop while it boots)
   // Lane P5: when the boot's phases end (ms since the process started; the first is this release's code load)
   const bootAt: Record<string, number> = { code: performance.now() };
   // Release pre-warm (SIM_STANDBY=1, launcher handover): all code is loaded here; the database and port open only after SIGUSR2.
@@ -324,7 +324,11 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     // (not during the boot catch-up: its clock has not started yet, and a stop there ends the catch-up and starts the clock)
     const stopped = catchingUp ? null : stoppedByFault(host, closing); if (stopped) faultExit(config.dataDir, stopped, null);
   };
+  // #2469: in a shard, the requests still open when the world has stopped are answered 503 world.stopping (or closed) by
+  // its stop, never later by its stopped code, as a world process's exit closes them
+  const open = o.exit ? new Set<import('node:http').ServerResponse>() : null;
   server.on('request', (req, res) => {
+    if (open) { open.add(res); res.once('close', () => open.delete(res)); }
     try { onRequest(req, res); }
     catch (error) { faults.note('world.fault.request', error); if (!res.headersSent) res.writeHead(500, { 'Cache-Control': 'no-store' }).end('Internal error.'); else res.destroy(); }
   });
@@ -429,8 +433,10 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     const waitAt = performance.now(), abort = new AbortController();
     load.boot.phase('boot:projection', host.engine.world.tick);
     const stopped = (signal: string) => abort.abort(new Error(`boot interrupted: ${signal}`));
-    const term = () => stopped('SIGTERM'), interrupt = () => stopped('SIGINT');
+    const term = () => stopped('SIGTERM'), interrupt = () => stopped('SIGINT'), dropped = () => stopped('stop');
     process.on('SIGTERM', term); process.on('SIGINT', interrupt);
+    // #2469: in a shard, the world's own stop (a drop while it loads) ends this wait at once, as SIGTERM ends a process's
+    if (o.abort?.aborted) dropped(); else o.abort?.addEventListener('abort', dropped, { once: true });
     try {
       // Recheck in this continuation: a pre-listen model commit can follow the bridge's notification microtask.
       do {
@@ -453,13 +459,13 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
           try { close(); } catch (cleanupError) { console.error('[boot] cleanup failed', cleanupError); }
         }
       } finally {
-        process.off('SIGTERM', term); process.off('SIGINT', interrupt);
+        process.off('SIGTERM', term); process.off('SIGINT', interrupt); o.abort?.removeEventListener('abort', dropped);
         // (a world process exits here; in a shard what shutdown would end must end too)
         if (o.exit) { try { stopWorldTimers(); wallClock.stop(); (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); void closeContextViews((app as unknown as { contextViews?: { close(): Promise<void> } }).contextViews); } catch (e) { console.error('[boot] cleanup failed', e); } }
         (o.exit ?? process.exit)(abort.signal.aborted ? 0 : 1); throw new Error('world.boot.ended');   // (a shard's exit returns: this world goes no further)
       }
     } finally {
-      process.off('SIGTERM', term); process.off('SIGINT', interrupt);
+      process.off('SIGTERM', term); process.off('SIGINT', interrupt); o.abort?.removeEventListener('abort', dropped);
     }
   }
   const listening = new Promise<void>((r) => server.once('listening', () => r()));
@@ -506,6 +512,13 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     (app as unknown as {edgeClients?: {close(): void}}).edgeClients?.close(); // #1936: the last client counts
     if (o.exit) {   // #2444: nothing of a stopped world runs on in its shard (world-stop-timers.test.ts)
       clearTimeout(firstBackup); clearInterval(backupTimer); clearInterval(diskTimer); monitor.stop(); stallLog?.stop(); uninstallFaults?.(); stopWorldTimers();
+      for (const res of open ?? []) {
+        if (res.headersSent) { res.destroy(); continue; }
+        setSecurityHeaders(res);
+        res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store', 'retry-after': '5' })
+          .end(JSON.stringify({ ok: false, code: 'world.stopping', message: 'The world stopped while this call was in flight. It asked you to wait 5 s', retry_after: 5, retryAfterMs: 5000 }));
+      }
+      server.closeAllConnections();
     }
     auth.close();db.close(); (o.exit ?? process.exit)(exitCode);
   };
