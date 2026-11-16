@@ -120,6 +120,6 @@ When the page has no `window.__soulsStream` (soul.game before `?stream=1` shippe
 
 - Sound is captured by app, so anything else running in Chrome for Testing on the stream machine would be heard too;
   the tool's window is normally the only one.
-- soul.game starts a world's sound only after a click and keeps it muted by default; until the page's stream mode
-  turns sound on by itself, a stream carries no world sound.
+- soul.game's music starts by itself (Chrome is launched with autoplay allowed), but the world's soundscape waits
+  for a click and is muted by default; until the page's stream mode starts it, a stream carries the music only.
 - macOS only; one stream per machine.
