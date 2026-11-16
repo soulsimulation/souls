@@ -71,14 +71,18 @@ function env(key: string, worldId: string, dir: string) {
  *  exits, so a failed or interrupted run leaves nothing behind (once, they piled up to ~85 GB). Only this process's own
  *  directories are ever removed. A killed process runs no exit handler (and the audit's long synchronous phases would
  *  hold off a JS signal handler), so a small detached watcher removes the copy once this process is gone. */
-const scratch = new Set<string>();
 const keepScratch = () => process.argv.includes('--keep');
-function dropScratch(dir: string) {
-  if (!scratch.delete(dir)) return;
-  if (keepScratch()) { console.error(`walk-audit: kept ${dir}`); return; }
-  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort at exit */ }
+function scratchDir(): { dir: string; drop(): void } {
+  const dir = mkdtempSync(join(tmpdir(), 'walk-audit-'));
+  let gone = false;
+  const drop = () => {
+    if (gone) return; gone = true; process.off('exit', drop);
+    if (keepScratch()) { console.error(`walk-audit: kept ${dir}`); return; }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort at exit */ }
+  };
+  process.on('exit', drop); reapAfterExit(dir);
+  return { dir, drop };
 }
-process.on('exit', () => { for (const d of [...scratch]) dropScratch(d); });
 const REAPER = `const [pid, dir] = process.argv.slice(1), { rmSync } = require('node:fs');
 const t = setInterval(() => { try { process.kill(+pid, 0); } catch { clearInterval(t); rmSync(dir, { recursive: true, force: true }); } }, 500);`;
 function reapAfterExit(dir: string) {
@@ -87,11 +91,11 @@ function reapAfterExit(dir: string) {
 }
 
 export async function bootForWalk(o: { db?: string; genesis?: string; fuzz?: string; name?: string }): Promise<Booted> {
-  const dir = mkdtempSync(join(tmpdir(), 'walk-audit-')); scratch.add(dir); reapAfterExit(dir);
-  try { return await bootIn(dir, o); } catch (e) { dropScratch(dir); throw e; }
+  const { dir, drop } = scratchDir();
+  try { return await bootIn(dir, drop, o); } catch (e) { drop(); throw e; }
 }
 
-async function bootIn(dir: string, o: { db?: string; genesis?: string; fuzz?: string; name?: string }): Promise<Booted> {
+async function bootIn(dir: string, drop: () => void, o: { db?: string; genesis?: string; fuzz?: string; name?: string }): Promise<Booted> {
   const file = join(dir, 'sim.db');
   let worldId: string, seed: string;
   if (o.db) {
@@ -117,7 +121,7 @@ async function bootIn(dir: string, o: { db?: string; genesis?: string; fuzz?: st
   bridge.reconcile(); host.drainInputs();
   const refused = fuzz ? await buildFuzz(fuzz, god, host, bridge) : [];
   const name = o.name ?? (o.db ? basename(o.db).replace(/\.db(\.gz)?$/, '') : o.fuzz ? 'fuzz' : basename(o.genesis!).replace(/\.json$/, '') + '-genesis');
-  const stop = () => { try { host.stop(); } finally { dropScratch(dir); } };
+  const stop = () => { try { host.stop(); } finally { drop(); } };
   return { name, worldId, host, god, bridge, engine: host.engine as any, edge, refused, stop };
 }
 
