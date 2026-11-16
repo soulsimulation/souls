@@ -118,8 +118,9 @@ switch independent. A previously saved master mute migrates to both switches off
     recently used order stays the visitors'). A world whose takeover from the previous launcher failed is passed over. A visitor's boot still evicts the
     least recently used idle world when the registry does not fit, and that world waits, owing its time, until a round
     finds room. Crashed worlds restart with backoff, and a world held by the breaker stays held.
-  - **A still world leaves memory (#2299; `--unload-still 1`, off by default and in production until the tranche's
-    proof task has passed; `--unload-still 0` is the behaviour above).** Every 15 s the launcher reads each running
+  - **A still world leaves memory (#2299; `--unload-still 1`, off by default; `--unload-still 0` is the behaviour
+    above. Without the arg the launcher takes it from `<data>/launcher-settings.json`, which a release writes with
+    `unload_still`: [release](../release.md#the-release-workflow)).** Every 15 s the launcher reads each running
     world's `GET /__sim/still` (the contract in #2241) and unloads, by its ordinary clean stop, a world that is still,
     whose horizon (`untilWallMs`) is at least 10 minutes away or `null`, that no request other than a resident read or a
     passive one (an act, a god call, a page) reached for 10 minutes, with no visitor or god connection open, nothing but
