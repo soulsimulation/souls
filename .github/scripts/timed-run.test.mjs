@@ -30,7 +30,8 @@ test('args: only each command\'s own allowlisted flags, with checked values, onc
   assert.throws(() => parseInputs({ ...ENV, INPUT_ARGS: '--seat x' }), /not allowed for walk/);
   assert.deepEqual(checkArgs('viewers', '--viewers 200,500,1000,2000'), ['--viewers', '200,500,1000,2000']);
   assert.deepEqual(checkArgs('viewers', '--viewers 0,50,200 --souls 24 --act-sec 10 --arrive-per-sec 20 --arrive-burst 300@40 --dwell-sec 60').length, 12);   // #2511
-  for (const a of ['--viewers 2001', '--viewers 00', '--viewers 0,0', '--viewers 1,2,3,4,5', '--viewers 05', '--souls 101', '--arrive-burst 300', '--arrive-burst 3000@10', '--arrive-per-sec 0']) assert.throws(() => checkArgs('viewers', a), /input args/, a);
+  assert.deepEqual(checkArgs('viewers', '--viewers 2000,5000,10000 --drivers 4 --slow-readers 50 --restart-at 40 --stub --stub-kb 50').length, 11);   // #2512
+  for (const a of ['--viewers 10001', '--drivers 17', '--drivers 0', '--slow-readers 501', '--restart-at 4', '--stub yes', '--viewers 00', '--viewers 0,0', '--viewers 1,2,3,4,5', '--viewers 05', '--souls 101', '--arrive-burst 300', '--arrive-burst 3000@10', '--arrive-per-sec 0']) assert.throws(() => checkArgs('viewers', a), /input args/, a);
 });
 
 test('command line: walk once per repeat; the eval runs its own repeats with a scripted seat, on the given port', () => {
@@ -184,6 +185,7 @@ test('world pinning: only world servers under the run\'s own process tree', () =
   assert.deepEqual(descendants([[10, 1]], 99), []);
   assert.ok(isWorld(['/usr/bin/node', '--max-old-space-size=2048', '/w/src/apps/server/src/main.ts', ''].join('\0')));
   assert.ok(isWorld(['node', 'apps/server/src/main.ts'].join('\0')));
+  assert.ok(isWorld(['node', '/w/src/tools/bench/capacity/viewers/stub.mjs', '--port', '1'].join('\0')));   // #2512
   for (const c of ['node\0tools/world-launcher/launcher.mjs', 'node\0tools/bench/capacity/bench.mjs', 'grep\0apps/server/src/main.ts.bak'])
     assert.ok(!isWorld(c), c);
 });

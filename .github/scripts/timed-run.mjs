@@ -63,8 +63,10 @@ export const ARG_ALLOW = {
   hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
   colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
   // #2511: 0 is the zero-viewer arm; arrivals, a burst (<n>@<s>), stays and the Souls' pacing
-  viewers: { '--viewers': list(/^(2000|1\d{3}|[1-9]\d{0,2}|0)$/, 4), '--window-sec': int(10, 600), '--souls': int(1, 100), '--act-sec': int(1, 600), '--arrive-per-sec': int(1, 200),
-    '--arrive-burst': (v) => /^[1-9]\d{0,3}@[1-9]\d{0,2}$/.test(v) && Number(v.split('@')[0]) <= 2000, '--dwell-sec': int(1, 3600), '--short': FLAG },
+  // #2512: up to 10,000 viewers on --drivers processes, slow readers, a world restart mid-window, the drivers against a stub
+  viewers: { '--viewers': list(/^(10000|[1-9]\d{0,3}|0)$/, 4), '--window-sec': int(10, 600), '--souls': int(1, 100), '--act-sec': int(1, 600), '--arrive-per-sec': int(1, 200),
+    '--arrive-burst': (v) => /^[1-9]\d{0,3}@[1-9]\d{0,2}$/.test(v) && Number(v.split('@')[0]) <= 2000, '--dwell-sec': int(1, 3600), '--short': FLAG,
+    '--drivers': int(1, 16), '--slow-readers': int(1, 500), '--restart-at': int(5, 570), '--stub': FLAG, '--stub-kb': int(1, 500) },
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
   clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
 };
@@ -171,7 +173,7 @@ export function descendants(table, root) {
   return out;
 }
 /** A world server process (a direct boot, or a child of the launcher), by its NUL-separated command line. */
-export const isWorld = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('apps/server/src/main.ts'));
+export const isWorld = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('apps/server/src/main.ts') || a.endsWith('tools/bench/capacity/viewers/stub.mjs'));   // #2512: the stub stands in for it
 
 /** "0-3,8,10-11" → [0,1,2,3,8,10,11]. */
 export function parseCpuList(s) {
