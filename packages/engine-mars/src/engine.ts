@@ -86,7 +86,7 @@ import { listTable, stableIndices, withEntityList, type EntityTable } from '../.
 import { CATALOG, HUMAN_RADIUS } from '../../../mars/viewer/engine/world/catalog.ts';
 import { HUMAN_PROFILE as HUMAN_PROFILE_V1 } from '../../../mars/viewer/engine/spatial/types.ts';
 import type { Spatial, StaticExportV1 } from '../../../mars/viewer/engine/spatial/service.ts';
-import { navTrustClose, navTrustResume } from '../../../mars/viewer/engine/spatial/nav-trust.ts';
+import { navTrustClose, navTrustOpen, navTrustToken } from '../../../mars/viewer/engine/spatial/nav-trust.ts';
 import { NavConnectivity, NAV_CONNECT_POLICY, NAV_RESCUE_MAX_POCKET, CONNECT_CLEAR, type ConnPoint, type ConnVerdict } from '../../../mars/viewer/engine/spatial/connectivity.ts';
 /** lane NAV: a body in one of these activities is anchored to furniture (seat, bed, berth): never relocated as cut off. */
 const NAV_ANCHORED=new Set<unknown>(['sit','lie','nap','sleep']);
@@ -450,7 +450,8 @@ export class MarsEngine implements Engine {
     // advance, no quiet point, no one leaving. The clock, attention and take recorder change no entry.
     // L4 (c): the listing the last step ended with, while nothing outside step has run engine code since (tableWritesV1)
     const cached = this.tableCacheV1;
-    const reuse = !!cached && cached.entities === this.ents && this.tableCacheAt === this.tableWritesV1;
+    // N1b: and no runtime call that can run action code (Runtime.writesV1) since, on the same runtime
+    const reuse = !!cached && cached.entities === this.ents && this.tableCacheAt === this.tableWritesV1 && this.tableCacheRt === this.rt && this.tableCacheRtAt === this.rt.writesV1;
     if (reuse) this.tableReusesV1++;
     const table: EntityTable = reuse ? checkedTable(cached!) : listTable(this.ents);
     this.tableCacheV1 = null;
@@ -517,7 +518,7 @@ export class MarsEngine implements Engine {
     this.cursor = this.rt.events.length;
     if (tick % 600 === 0) this.pruneRecords(tick);
     // L4 (c): the body loop changed no entry; the next step reuses this listing unless engine code runs in between
-    this.tableCacheV1 = listing; this.tableCacheAt = this.tableWritesV1;
+    this.tableCacheV1 = listing; this.tableCacheAt = this.tableWritesV1; this.tableCacheRt = this.rt; this.tableCacheRtAt = this.rt.writesV1;
     // N1b: kept while neither barrier moves (navCarryOfV1); a runtime write since the pass (programmes, clearStairHeads,
     // timeoutStalledReflexes) has voided the runtime's own token
     if (this.rt.navCarryV1() !== carry) carry = -1;
@@ -2956,10 +2957,10 @@ export class MarsEngine implements Engine {
   }
   /** A read of this world that moves nothing (a Soul's walk listing): the planner syncs once for all of it (Spatial.readPass). */
   readPassV1<T>(fn:()=>T):T{if(this.inPass++===0)this.passHumans=null;
-    // N1b: between ticks, the pass's one sync takes the last step's scan while nothing that can write ran since; trust closes
-    // again before `fn` runs (fn's own syncs are the pass's anyway)
-    const carry=navCarryOfV1(this);navTrustResume(carry);
-    try{return (this.rt.services.spatial as Spatial).readPass(this.rt.world,carry<0?fn:()=>{navTrustClose();return fn();});}finally{if(carry>=0)navTrustClose();if(--this.inPass===0)this.passHumans=null;}}
+    // N1b: between ticks, the pass's one sync takes the last step's scan while nothing that can write ran since (adoptCarryV1);
+    // trust closes again before `fn` runs, so the reader runs under closed trust as before (its own syncs are the pass's)
+    const sp=this.rt.services.spatial as Spatial,to=adoptCarryV1(this,sp,this.rt.world);
+    try{return sp.readPass(this.rt.world,to<0?fn:()=>{navTrustClose();return fn();});}finally{if(to>=0)navTrustClose();if(--this.inPass===0)this.passHumans=null;}}
   /** S2: inside readPassV1 (nothing moves), the world's bodies listed once for every standableNearV1 of the pass (each
    *  listed all ~4,900 entities of Eden 2026 to find the few bodies; ~4% of a busy world). Positions are read live. */
   private passHumans:any[]|null=null;
@@ -2967,8 +2968,12 @@ export class MarsEngine implements Engine {
   /** L4 (c): the entity-table listing the last step ended with, and the tableWritesV1 count it was taken at. */
   private tableCacheV1: EntityTable | null = null;
   private tableCacheAt = -1;
+  /** N1b: the runtime the listing was taken on, and its writesV1 then. */
+  private tableCacheRt: unknown = null;
+  private tableCacheRtAt = -1;
   /** L4 (c): moves on entry to and exit from every MarsEngine method but `step` and the TABLE_PURE reads (below the
-   *  class), so a listing taken at the end of one step is reused by the next only when no other engine code ran. */
+   *  class), so a listing taken at the end of one step is reused by the next only when no other engine code ran. N1b: also
+   *  the nav carry's barrier; a TABLE_PURE read must also write no static entity field (see TABLE_PURE). */
   tableWritesV1 = 0;
   /** L4 (c): steps that reused the listing (load stats). */
   tableReusesV1 = 0;
@@ -3675,10 +3680,15 @@ export class MarsEngine implements Engine {
 // writes still voids the listing its inner step left), and step reuses the listing the previous step ended with while
 // the count is unchanged and the table is the same object. Exact: the same keys, order and values as a fresh listing
 // (oracle SIM_TABLE_CHECK=1 lists afresh and throws on any difference). A method added later is wrapped by default.
-/** Reads called between ticks on a served world that never add, remove or replace an entry of the table. */
+// N1b (#2593): the count is also the nav carry's barrier (navCarryOfV1): while it holds, the next step and the syncs
+// between ticks take the last pass's static scan. So the contract of every unwrapped method is two-fold: it adds, removes
+// or replaces no entry of the table AND writes no static entity field (pose, phase, def, support, connections); nav
+// carry relies on both (oracle SIM_NAV_TRUST_CHECK=1 scans anyway and throws on a static change the carry skipped).
+/** Reads called between ticks on a served world that add, remove or replace no entry of the table AND write no static
+ *  entity field; the listing cache relies on the first and nav carry (N1b, navCarryOfV1) on both. */
 const TABLE_PURE: ReadonlySet<string> = new Set<string>([
   // read every tick by the server and the step itself (SIM_L4_SCAN_SITES=1 engine calls on the live copy); each only reads
-  // the table (spatial syncs and connectivity labels are derived state outside it)
+  // the world (spatial syncs and connectivity labels are derived state outside it)
   'takeChunks', 'composedRules', 'renderContextKeyV1', 'carrierOf', 'carriers', 'stallProbeV1', 'placeLevelV1', 'programOf',
   'poseSampleOf', 'staticEpochV1', 'lyingRoomAtV1', 'navWarmV1', 'connectivityV1', 'navCheckV1', 'exportStaticScene',
   // N1b (#2593): the ledger's static version only syncs and reads the epoch. A read pass only syncs and runs its reader,
@@ -3694,11 +3704,22 @@ function navCarryOfV1(e: MarsEngine): number {
   const c = e.navCarryV1, rt = (e as unknown as { rt: { writesV1: number; world: { entities: object }; services: { spatial?: unknown } } }).rt;
   return c && c.at === e.tableWritesV1 && c.rt === rt && c.rtAt === rt.writesV1 && c.ents === rt.world.entities && c.sp === rt.services.spatial ? c.token : -1;
 }
-/** N1b: a sync between ticks that takes the last step's scan while it holds (navCarryOfV1); trust is closed again after. */
+/** N1b: while the carry holds (navCarryOfV1), open a new nav-trust interval and move this engine's own Spatial's last scan
+ *  into it (Spatial.adoptTrust; no other Spatial's certificate is touched and no token reopens). Returns the new token,
+ *  which the carry follows (after the caller's sync this Spatial's scan is in it, adopted or fresh), or -1 (nothing done).
+ *  The caller closes trust again. */
+function adoptCarryV1(e: MarsEngine, sp: Spatial, world: Parameters<Spatial['sync']>[0]): number {
+  if (navCarryOfV1(e) < 0) return -1;
+  navTrustClose(); navTrustOpen();
+  const to = navTrustToken();
+  sp.adoptTrust(e.navCarryV1!.token, to, world);
+  e.navCarryV1!.token = to;
+  return to;
+}
+/** N1b: a sync between ticks that takes the last step's scan while it holds (adoptCarryV1); trust is closed again after. */
 function carriedSyncV1(e: MarsEngine, sp: Spatial): boolean {
-  const carry = navCarryOfV1(e), world = (e as unknown as { rt: { world: Parameters<Spatial['sync']>[0] } }).rt.world;
-  if (carry < 0) return sp.sync(world);
-  navTrustResume(carry);
+  const world = (e as unknown as { rt: { world: Parameters<Spatial['sync']>[0] } }).rt.world;
+  if (adoptCarryV1(e, sp, world) < 0) return sp.sync(world);
   try { return sp.sync(world); } finally { navTrustClose(); }
 }
 const TABLE_COUNT = process.env.SIM_L4_SCAN_SITES === '1' ? new Map<string, number>() : null;

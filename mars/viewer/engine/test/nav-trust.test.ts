@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Spatial } from '../spatial/service.ts';
-import { navTrustClose, navTrustOpen, navTrustResume, navTrustToken, setNavTrustCheck } from '../spatial/nav-trust.ts';
+import { navTrustClose, navTrustOpen, navTrustToken, setNavTrustCheck } from '../spatial/nav-trust.ts';
 import { emptyWorld, human, addAll, component } from '../world/factory.ts';
 import type { SpatialScene } from '../spatial/types.ts';
 
@@ -83,39 +83,31 @@ test('nav trust (L4 audit): a seated body and a walker share one scan a tick; th
   } finally { setNavTrustCheck(false); navTrustClose(); }
 });
 
-test('nav trust (N1b): a resumed token takes its scan again; a close gives a token never seen; the oracle still checks', () => {
-  const sp = new Spatial(open(20));
+test('nav trust (N1b): a Spatial adopts its own last scan into a new interval; no other Spatial and no older scan is moved; the oracle still checks', () => {
+  const sp = new Spatial(open(20)), other = new Spatial(open(20));
   const w = addAll(emptyWorld('open', open(20)), human('p', 0, 0), component('wall', 'test-wall', [5, 0, 0], 0, { phase: 'stored' }));
+  const v = addAll(emptyWorld('open', open(20)), human('q', 0, 0), component('wall', 'test-wall', [9, 0, 0], 0, { phase: 'stored' }));
   try {
     navTrustClose(); navTrustOpen();
-    sp.sync(w);
-    const token = navTrustToken(), scans = sp.stats.scans;
+    sp.sync(w); other.sync(v);
+    const token = navTrustToken(), scans = sp.stats.scans, otherScans = other.stats.scans;
     navTrustClose();
-    assert.equal(navTrustToken(), -1);
     navTrustOpen();
-    assert.notEqual(navTrustToken(), token, 'a close moves to a new token');
+    const next = navTrustToken();
+    assert.notEqual(next, token, 'a close moves to a new token');
+    assert.equal(sp.adoptTrust(token, next, w), true);
     sp.sync(w);
-    assert.equal(sp.stats.scans, scans + 1, 'the new interval scans');
-    const token2 = navTrustToken();
+    assert.equal(sp.stats.scans, scans, 'the adopted scan answers in the new interval');
+    other.sync(v);
+    assert.equal(other.stats.scans, otherScans + 1, 'a Spatial that adopted nothing scans again');
+    assert.equal(sp.adoptTrust(token, next, w), false, 'a scan already moved on is not the one asked for');
+    assert.equal(sp.adoptTrust(next, next, v), false, 'another world is never adopted');
     navTrustClose();
-    navTrustResume(token2);
-    assert.equal(navTrustToken(), token2);
-    sp.sync(w);
-    assert.equal(sp.stats.scans, scans + 1, 'the resumed interval takes its scan');
-    navTrustClose();
-    navTrustResume(token);
-    sp.sync(w);
-    assert.equal(sp.stats.scans, scans + 2, 'an older token is not the last scan: a real scan');
-    navTrustClose();
-    navTrustResume(-1);
-    assert.equal(navTrustToken(), -1, 'a negative token resumes nothing');
-    // a resume its caller could not prove: the oracle scan throws
-    navTrustOpen(); sp.sync(w);
-    const last = navTrustToken();
-    navTrustClose();
+    // an adoption its caller could not prove: the oracle scan throws
     w.entities.wall.pose.p = [8, 0, 0];
     setNavTrustCheck(true);
-    navTrustResume(last);
+    navTrustOpen();
+    assert.equal(sp.adoptTrust(next, navTrustToken(), w), true);
     assert.throws(() => sp.sync(w), /nav-trust/);
   } finally { setNavTrustCheck(false); navTrustClose(); }
 });
