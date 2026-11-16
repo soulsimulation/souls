@@ -146,10 +146,10 @@ As built (L1, `tools/world-launcher/guard.mjs` + `children.mjs`): liveness asks 
   - the act's handler: `act.bind`, `act.check`, `act.handler-other`;
   - the tick's route searches: `route.first` (a walk's first plan), `route.people` (`retryPeople`), `route.detour` (a re-plan from inside a walk's step), `route.chunk` (a paged walk's next chunk) and `route.other`; together they are #2470's `act.route(tick)`;
   - `act.commit(tick)` and `tick`;
-  - the planner: `nav.sync` (`syncPaged`, `navScan`, `navChanged`) and `nav.audit` (`navWarmV1`, `fineTileSteps`, `labelComponents`);
+  - the planner: `nav.sync` (`syncPaged`, `navScan`, `navChanged`); `nav.warm`, the connectivity audit (`navWarmV1`, or a tile or labels built in connectivity's `update`/`compile`); `nav.tile`, a fine tile built on demand (`fineTileSteps` outside the audit); `nav.label`, a tile's labels built on demand (`labelComponents` outside it). Until #2592 these three were one group, `nav.audit`, and they still sum to it;
   - `gc`, `snapshot` and requests by route.
 
-  The report gives each act group's clock ms per act, the planner's ms per second of clock, and long holds (busy runs of 100 ms or more) by their main group. Planner work inside an act stays `nav.*`.
+  The report gives each act group's clock ms per act, the planner's ms per second of clock, and long holds (busy runs of 100 ms or more) by their main group. Planner work inside an act stays `nav.*`. Each JS task of 100 ms or more gets a cause (`step0.causes`, the top 10 per group, and `step0.longTasks`, each task with its heaviest path), so the report needs no `.cpuprofile`: for `nav.*` the caller outside the spatial service, otherwise the frame just under the group's entry, followed down while one child holds at least half the task.
 - **`--menu-stats`.** The world runs with `EDGE_MENU_STATS=1`, which logs `[menu-stats]` every 10 s. The report folds the counters' change over the load window, with builds per act (`one.built` plus `one.exact`, the exact-walk projections). The window runs between the first lines logged after the load's start and after its end, so each end is up to 10 s late.
 - **Without these flags** the world and the report are as before, apart from the intended and achieved line.
 - **Via timed-run.** `timed-run eval-load` allows `--profile` and `--menu-stats`.
