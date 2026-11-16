@@ -162,7 +162,7 @@ type Plans = Map<string, {label: string; steps: Program['steps']; seconds?: bool
 
 type WalkProfile=(soul:EdgeSoul,caps:EdgeCapability[],plans:Plans)=>void;
 type ExactWalkProfile=(soul:EdgeSoul,asked:string,caps:EdgeCapability[],plans:Plans)=>boolean;
-type ExactWalkBindings={caps:EdgeCapability[];plans:Plans;tick:number};
+type ExactWalkBindings={caps:EdgeCapability[];plans:Plans;tick:number;reused?:true};
 type CapabilityProvider=(soul:EdgeSoul,only?:ReadonlySet<string>,places?:Map<string,string>)=>EdgeCapability[];
 /** warmForServing's account: busy ms in all, wall ms from start to end, its slices before the listing and the longest of
  *  them, the final listing's ms, and whether it was stopped (shutdown) before the listing. */
@@ -1355,8 +1355,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // #1770 plan-once: the strict gate's bind answers the act's own bind in the same synchronous turn (one request, before
     // its first await: no tick, no other request and no fold can run in between), under the same tick and same-tick
     // signature. Any await ends the turn (the microtask below forgets it), so the act's later binds are built as before.
-    const turn = this.oneTurn, tick = this.mw.world.tick;
-    if (PLAN_ONCE && turn && turn.soulId === soul.soulId && turn.id === id && turn.tick === tick && turn.sig === this.sameTickSig()) {
+    const turn = this.inTurn(soul, id), tick = this.mw.world.tick;
+    if (turn) {
       menuStats.one.turn++;
       if (PLAN_ONCE_ORACLE) {const fresh = this.bindOneRaw(soul, id), a = JSON.stringify(turn.out ? [turn.out.cap, turn.out.plan] : null), b = JSON.stringify(fresh ? [fresh.cap, fresh.plan] : null); if (a !== b) {menuStats.one.oracleMiss++; console.error('[plan-once-oracle] bindOne', soul.soulId, id);}}
       return turn.out;
@@ -1368,6 +1368,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** #1770: the last offer bound in this synchronous turn (forgotten at the turn's end). */
   private oneTurn: {soulId: string; id: string; tick: number; sig: string; out: ReturnType<EdgeLedger['bindOneRaw']>} | null = null;
+  /** #1770: the offer bound for this Soul and id in this synchronous turn, at this tick and same-tick signature, or null. */
+  private inTurn(soul: EdgeSoul, id: string) {const t = this.oneTurn; return PLAN_ONCE && t && t.soulId === soul.soulId && t.id === id && t.tick === this.mw.world.tick && t.sig === this.sameTickSig() ? t : null;}
   private bindOneRaw(soul: EdgeSoul, id: string) {
     const b = this.bindFocus(soul, focusFor(id)), cap = b.caps.find(c => c.id === id);
     return cap ? {cap, plan: b.plans.get(id)} : undefined;
@@ -1906,6 +1908,20 @@ export class EdgeLedger implements EdgeLedgerHooks {
         // Keep the authoritative full cache intact; the on-demand area binding
         // below is local to this request, never a replacement listing.
       }
+      // #2527: the strict gate bound this very offer in this turn (bindOne, the menu's own offer): the act takes it, and
+      // builds no second copy; the oracle (SIM_PLAN_ONCE_ORACLE) compares it with the projection it replaces
+      // (resolve's listed-only path too: a focused bindOne of walk:<ref> holds listed walks only, never an area's on-demand walk)
+      const gate=this.inTurn(soul,asked)?.out,reuse=gate?.cap.available&&gate.plan?{caps:[gate.cap],plans:new Map([[asked,gate.plan]]) as Plans,tick,reused:true as const}:null;
+      if(reuse&&!PLAN_ONCE_ORACLE){menuStats.one.exactTurn++;return reuse;}
+      const built=this.exactWalkBuild(soul,asked,ref,project);
+      if(reuse){menuStats.one.exactTurn++;const a=JSON.stringify([gate!.cap,gate!.plan]),b=built?JSON.stringify([built.caps.find(c=>c.id===asked),built.plans.get(asked)]):a;if(a!==b){menuStats.one.oracleMiss++;console.error('[plan-once-oracle] exactWalk',soul.soulId,asked);}return reuse;}
+      return built?{...built,tick}:null;
+    }catch{return null;}
+  }
+  /** exactWalkBindings' own build of one authored walk: its native binding, the profile's projection, the object
+   *  providers' check, the core's ride refusals and the tail; null when it cannot answer exactly. */
+  private exactWalkBuild(soul:EdgeSoul,asked:string,ref:string,project:ExactWalkProfile):{caps:EdgeCapability[];plans:Plans}|null {
+    try {
       const read=readHumanCapabilitiesV1(this.host,this.mind(soul),{registeredActivitiesV1:true,deferRouteChecks:true,skipRegisteredCards:true,onlyWalkTarget:ref}),caps:EdgeCapability[]=[],plans:Plans=new Map();
       for(const b of read.bindings.values())if(b.id===asked&&b.goal==='walk')this.addNativeBinding(b,caps,plans);
       if(!project(soul,asked,caps,plans))return null;
@@ -1918,7 +1934,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.rideBlocks(soul,caps);
       const out=this.bindsTail(soul,{caps,plans},focus),cap=out.caps.find(c=>c.id===asked);
       // Refusals need the original complete diagnostics/alternatives too.
-      return cap?.available&&out.plans.has(asked)?{caps:out.caps,plans:out.plans,tick}:null;
+      return cap?.available&&out.plans.has(asked)?{caps:out.caps,plans:out.plans}:null;
     }catch{return null;}
   }
   /** exactWalkBindings for an offer the full listing itself contains (native, profile or bounded GodNav listing), never
@@ -2232,7 +2248,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if(input.capability.length>=1&&input.capability.length<=200&&typeof input.clientRef==='string'&&input.clientRef.length<=100){const old=this.coreA.byClientRef(soul.soulId,input.clientRef);if(old)return {accepted:true,receipt:old};}
       // BODY refusals precede place/alias diagnostics, as in the original actOnce path.
       const bodyIssue=this.bodyVerbProblem(soul,input.capability.split(/[:\s]/)[0]!);
-      {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;if(exactWalk)menuStats.one.exact++;}   // #1944: bind (#2508: and the exact-walk projections built)
+      {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;if(exactWalk&&!exactWalk.reused)menuStats.one.exact++;}   // #1944: bind (#2508: and the exact-walk projections built; #2527: not the gate's bind reused)
       const place=bodyIssue?null:explicitPlaceCapability(this,soul,input.capability.trim(),exactWalk?.caps);
       // SOULSIM-E (real-agent run on 3.60, 2026-10-21): resolve offers a far place's walk on demand and the agent acts on
       // that id, as the skill says; the id was refused place.unwalkable here. actOnce below walks it on demand, as words.
