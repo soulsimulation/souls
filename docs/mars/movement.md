@@ -99,9 +99,14 @@ End-of-tick invariants (`runtime/invariants.ts`):
 to the load, rides alias the rider to the vehicle. A cycle with unchanged dependencies and poses for `DEADLOCK_TICKS`
 (200 ticks, 10 s) reports `deadlock.cycle`; a persistent acyclic wait reports `deadlock.stalled`. Each episode may request
 one extra validated planner attempt within existing budgets; unsupported phases report
-`deadlock.recovery-unavailable`. The detector never forces a release. `SequenceRunner` returns `blocked` early only when
-every live action certifies its movers exhausted and no future cue or timeout could change that; it does not settle the
-blocked actions, and `execute` refuses to commit the unsettled result.
+`deadlock.recovery-unavailable`. A cycle never clears by itself, so its members request that attempt once it has stood
+unchanged for `CYCLE_RECOVER_TICKS` (60 ticks, 3 s); the report still waits for `DEADLOCK_TICKS`. For a walker in a
+two-body cycle (one waits at its walk's end for the other to leave its spot, the other for it to get out of the way, or
+two face to face) that routing round the other does not break, one of the pair steps aside to the nearest free spot clear
+of the other's way, as an entity world's face-off does, and walks on once the other has passed (`deadlock.stepped-aside`):
+the one at the end of its walk first, since it comes back to the same spot. The detector never forces a release.
+`SequenceRunner` returns `blocked` early only when every live action certifies its movers exhausted and no future cue or
+timeout could change that; it does not settle the blocked actions, and `execute` refuses to commit the unsettled result.
 
 ## Stall releases upstairs
 
