@@ -226,7 +226,10 @@ async function main() {
     for (const n of sizes) {
       const j0 = Date.now(), fresh = [];
       for (let i = souls.length; i < n; i += 8) await Promise.all(Array.from({ length: Math.min(8, n - i) }, async (_, j) => { const s = await rawJoin(w.base, i + j); souls[i + j] = s; fresh.push(s); }));
-      if (!cat) { cat = (await cs.startPicture(w.base, souls[0])).catalog; ids = cs.catalogIds(cat); meet = wordIds(cat).bandstand; if (!meet?.length) throw new Error('no bandstand in the catalog'); }
+      // the meetup place: the first of these the world's catalog names (the catalog is read until the world answers it)
+      for (let k = 0; !cat && k < 30; k++) { const pic = await cs.startPicture(w.base, souls[0]); cat = pic.catalog; if (!cat) { log(`catalog: ${pic.catalogStatus}`); await sleep(2000); } }
+      if (!ids) { ids = cs.catalogIds(cat); const named = wordIds(cat); res.place = ['bandstand', 'fire circle', 'garden', 'library', 'lake'].find((k) => named[k]?.length) ?? null; meet = res.place ? named[res.place] : ids.walk.slice(0, 1); res.place ??= meet[0] ?? null;
+        log(`meetup place: ${res.place} (${meet.length} ids); ${ids.walk.length} walks, ${ids.gesture.length} gestures in the catalog`); if (!meet.length) throw new Error('no place to meet in the catalog'); }
       res.driver.joined = souls.length; res.driver.joinS.push({ souls: n, s: Math.round((Date.now() - j0) / 1000) });
       log(`${n} Souls joined (${fresh.length} new in ${Math.round((Date.now() - j0) / 1000)} s); first walks, then the ${shape} schedule`);
       // the previous size's schedule ends; the new one covers every joined Soul for this size's whole stay
