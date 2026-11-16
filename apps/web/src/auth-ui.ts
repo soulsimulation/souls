@@ -57,4 +57,10 @@ export function clerkHomeRoute(authenticationOrigin:string|undefined,currentOrig
  if(!basePrefix.test(base))return {initialize:false,signInUrl:null};
  return {initialize:currentOrigin===origin.origin,signInUrl:origin.origin+base+'/'};
 }
+/** #2464: whether the launcher homepage mounts Clerk at once. A signed-out satellite's Clerk leaves for the primary's
+ *  sync and loads the page a second time (every signed-out visit), so only for Clerk's own redirect parameters, a browser
+ *  that is probably signed in, or a sign-in the person asked for in the last ten minutes (`askedAt`). */
+export function homeClerkNow(href:string,cookie:string,askedAt:number|null,now:number):boolean{
+ return /[?&#]__clerk/.test(href)||clerkSignedInHint(cookie)||askedAt!==null&&now-askedAt>=0&&now-askedAt<600_000;
+}
 export function unsignedPreviewAuth(signInUrl:string|null,login:()=>void){return {ready:true,authed:false,label:null,signInUrl:signInUrl??undefined,login,logout:()=>{},getToken:async()=>null,debug:{privyUserId:null,wallet:null,linked:[]}};}
