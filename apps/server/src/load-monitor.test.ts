@@ -2,7 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {AMBER_BLIP_MS, BASELINE_CAP_MS, LevelState, LoadMonitor, QUIET_TICK_ALPHA, QuietBaseline, QuietTick, STEP_DOWN_MS, type Signals} from './load/monitor.ts';
-import {frameBudgetMs} from './load/admission.ts';
+import {frameBudgetMs, ticksOnTimeNow} from './load/admission.ts';
 import {liveOf, newSharedLoad, S} from './load/shared.ts';
 import {newSharedApi} from './load/api-times.ts';
 import {attachBootSlots, bootPhase, bootSlots, bootTick} from './load/boot-progress.ts';
@@ -378,4 +378,25 @@ test('monitor: overdue sample waits for SIGCONT delivery and stop cancels the qu
     assert.equal(cancelled, true);
     assert.equal(process.listenerCount('SIGCONT'), listeners);
   } finally { m.stop(); }
+});
+
+test('#2440 review: a hold longer than 1 s reads as missed 1 s tick service, so spare time stops', () => {
+  let now = 0;
+  const host = {engine: {world: {tick: 0}}, tickMs: [1], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
+  const shared = newSharedLoad(), m = new LoadMonitor({host, now: () => now, shared});
+  m.sample();
+  for (let i = 0; i < 8; i++) { now += 250; host.engine.world.tick += 5; m.sample(); }   // on time: 5 ticks per 250 ms
+  assert.equal(shared[S.service1s], 1);
+  assert.equal(ticksOnTimeNow(shared, now), true);
+  now += 3000; host.engine.world.tick += 1; m.sample();   // a 3 s hold with one tick in it
+  assert.ok(shared[S.service1s] < 1, `1 s service after the hold: ${shared[S.service1s]}`);
+  assert.equal(ticksOnTimeNow(shared, now), false, 'not on time: admission gives no spare time');
+});
+
+test('#2440 review: each completed tick adds its own ms to the shared tickSpentMs', () => {
+  const host = {engine: {world: {tick: 0}}, tickMs: [] as number[], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
+  let mono = 0; const shared = newSharedLoad(), m = new LoadMonitor({host, now: () => 0, mono: () => mono, shared});
+  host.tickMs.push(7); host.engine.world.tick++; mono += 50; m.tickDone();
+  host.tickMs.push(5); host.engine.world.tick++; mono += 50; m.tickDone();
+  assert.equal(shared[S.tickSpentMs], 12);
 });

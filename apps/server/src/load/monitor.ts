@@ -316,8 +316,9 @@ export class LoadMonitor {
     let owed = 0; for (let i = 1; i < this.ticks.length; i++) owed += this.ticks[i].due;
     const ran = this.ticks.at(-1)!.tick - this.ticks[0].tick;
     const service = owed >= 2 ? Math.min(1, ran / owed) : 1;
-    // #2440: the same over the last ~1 s (the samples since then), for admission's spare time
-    let i1 = this.ticks.length - 1; while (i1 > 0 && now - this.ticks[i1 - 1].at <= 1000) i1--;
+    // #2440: the same over the last ~1 s, for admission's spare time: from the newest sample at least 1 s old, so a hold
+    // longer than 1 s (one sample before it, one after) counts its owed ticks instead of reading 1
+    let i1 = this.ticks.length - 1; while (i1 > 0 && now - this.ticks[i1].at < 1000) i1--;
     let owed1 = 0; for (let i = i1 + 1; i < this.ticks.length; i++) owed1 += this.ticks[i].due;
     const service1 = owed1 >= 2 ? Math.min(1, (this.ticks.at(-1)!.tick - this.ticks[i1].tick) / owed1) : 1;
     // event-loop delay p99 over the last ~5 s (two rotating windows)
