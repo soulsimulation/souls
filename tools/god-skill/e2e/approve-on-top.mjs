@@ -94,7 +94,7 @@ const probe = () => {
 async function scenario(browser, { name, viewport, dpr, mobile, introSeen, dismiss, approve }, base, slug, id) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: dpr, isMobile: !!mobile, hasTouch: !!mobile });
   await ctx.exposeFunction('__stubClerkMint', (sub) => keys.sign(sub));
-  await ctx.addInitScript(({ slug, introSeen }) => { try { localStorage.setItem('stubClerk.user', 'user_gene'); if (introSeen) localStorage.setItem(`sim.godIntro:${slug}`, '1'); } catch { /* storage off */ } }, { slug, introSeen });
+  await ctx.addInitScript(({ slug, introSeen }) => { try { localStorage.setItem('stubClerk.user', 'user_gene'); document.cookie = '__client_uat=' + Math.floor(Date.now() / 1000) + '; path=/'; if (introSeen) localStorage.setItem(`sim.godIntro:${slug}`, '1'); } catch { /* storage off */ } }, { slug, introSeen });
   await ctx.addInitScript(STUB);
   await ctx.route(/clerk\.example\.test/, (r) => r.abort());
   const page = await ctx.newPage(); const errors = []; page.on('pageerror', (e) => errors.push(String(e.message).slice(0, 200)));
