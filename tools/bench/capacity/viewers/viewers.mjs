@@ -229,7 +229,7 @@ function arrivals(run) {
 /** #2512 --restart-at: SIGTERM to the world process (the launcher restarts it), the drivers marked just before; its
  *  healthz read every second until `until`. Returns the table's inputs once `until` has passed. */
 async function restartWorld(run, until) {
-  const pid = run.launcher.worldPid(), at = Date.now(), health = [];
+  const pid = run.launcher.worldPid(), h0 = await getJ(`${BASE}/w/${SLUG}/healthz`, 900), at = Date.now(), health = [{ at: at - 1, ok: h0.j?.ok === true, tick: h0.j?.tick ?? null, clients: h0.j?.clients ?? null }];   // the tick just before
   for (const d of run.drivers) send(run, d, { op: 'mark', at });
   if (pid) try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
   log(`r${run.k}: world restarted (SIGTERM) with ${run.base.size + run.burst.size} viewers`);
