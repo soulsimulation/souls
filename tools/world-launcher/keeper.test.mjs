@@ -26,6 +26,8 @@ function release(name, { brokenLauncher = false, brokenWorlds = false, loadMs = 
   cpSync(join(here, '../../apps/server/src/moderation'), join(r, 'apps/server/src/moderation'), { recursive: true, filter: (f) => !f.endsWith('.test.ts') });
   // and a world's page for a world that is not loaded carries the world's own title (#2304)
   cpSync(join(here, '../../apps/server/src/inline-config.ts'), join(r, 'apps/server/src/inline-config.ts'));
+  // and every per-address limit keys through the server's address helper (#2543)
+  cpSync(join(here, '../../apps/server/src/address-key.ts'), join(r, 'apps/server/src/address-key.ts'));
   // loadMs: the release's code takes that long to load (the part a pre-warmed take-over hides)
   writeFileSync(join(r, 'apps/server/src/main.ts'), brokenWorlds ? 'process.exit(5);\n' : `process.env.FAKE_LOAD_MS ??= '${loadMs}';\n` + readFileSync(join(here, 'fake-world.mjs')));
   if (brokenLauncher) writeFileSync(join(r, 'tools/world-launcher/launcher.mjs'), 'process.exit(3);\n');
