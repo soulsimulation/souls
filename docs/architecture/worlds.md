@@ -130,7 +130,10 @@ switch independent. A previously saved master mute migrates to both switches off
     second, never unloading another world for it, and its `live` poll is answered as an unloaded world's (#2475)). An unloaded world is never booted by the keep-alive, and loads on an act, a
     god call, a visitor's connection or a page, and by its alarm 30 s before `moveWallMs` or `untilWallMs`, listener or
     not (#2367): the horizon holds every deadline, a personal reminder's (`edge.reminder.*`) and a plan step's among
-    them, so they are met on time by the world running. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    them, so they are met on time by the world running. Deadlines that fall together load in deadline order, each
+    earlier by the queue behind it (4 loads at once at the pool's measured load time), before its deadline only into
+    room (or unloading one world for it a pass), and a world so loaded is not unloaded to make room until 5 s after its
+    deadline, so early loads never unload one another (#2490). The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
     get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll

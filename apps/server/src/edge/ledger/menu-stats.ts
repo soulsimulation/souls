@@ -16,7 +16,7 @@ export const menuStats = {
   capClear: {} as Counts,   // site → global clears
   capDrop: {} as Counts,    // site → one Soul's entry dropped
   src: {hit: 0, miss: 0, cpuUs: 0} as Counts,
-  one: {n: 0, sameTick: 0, kept: 0, keptFocus: 0, built: 0, turn: 0, oracleMiss: 0, cpuUs: 0} as Counts,   // L3 item 4: bindOne (one offer)
+  one: {n: 0, sameTick: 0, kept: 0, keptFocus: 0, built: 0, exact: 0, turn: 0, oracleMiss: 0, cpuUs: 0} as Counts,   // L3 item 4: bindOne (one offer); #2508 exact: an act's exact-walk projections
   words: {exact: 0, kept: 0, built: 0, exactified: 0, fellBack: 0, oracleMiss: 0, focused: 0, focusUnknown: 0, focusSkipped: 0, keepNarrowed: 0, keepWidened: 0, focusOracleMiss: 0} as Counts,   // L3 (b): the words menu (resolve / act in words); srv-act-words: focused words
   missBySoul: {} as Counts,   // soulId → menu rebuilds
 };
@@ -31,4 +31,5 @@ export function resetMenuStats() {
   menuStats.capClear = {}; menuStats.capDrop = {}; menuStats.missBySoul = {};
 }
 export function snapshotMenuStats() {return JSON.parse(JSON.stringify(menuStats)) as typeof menuStats;}
-if (MENU_STATS) setInterval(() => console.log('[menu-stats]', JSON.stringify(menuStats)), 60_000).unref();
+// #2508: every 10 s, so eval-load --menu-stats can take the counters over its own load window
+if (MENU_STATS) setInterval(() => console.log('[menu-stats]', JSON.stringify(menuStats)), 10_000).unref();

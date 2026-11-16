@@ -14,8 +14,14 @@
 // #2458: `--fault-every-sec <s>` runs the world with SIM_FAULT_INJECT=1 and throws an engine error inside a tick at the end
 // of setup and every s seconds of the load (fault-inject `throw`); each arm reports the world's recovery hold lines
 // (`recoveries`: hold ms, replays and their ticks) and its watchdog kills. `--hang-kill-sec <s>` sets the world's hang kill (SIM_HANG_KILL_MS).
+// #2508 the act meter: every arm states its intended acts (Souls x seconds / --act-sec) and achieved acts, under-driven
+// below 95 %. `--profile` CPU-profiles the world's clock thread over the load window (prof-hook.mjs) and reports an act's
+// clock ms by part (prof-buckets.mjs: bind, check, rest of handler, the tick's route searches by kind, commit), the
+// planner's sync and audit, and long holds by source, beside the means of the world's own parts (live.json sums) and the
+// time admission charged each act. `--menu-stats` runs the world with EDGE_MENU_STATS=1 and folds its menu counters over
+// the load window into the report, with builds per act. Without these flags nothing else changes.
 import { join, resolve, relative } from 'node:path';
-import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
 import { readJsonl, writeJson } from '../lib/jsonl.mjs';
 import { newIdentity, rng } from '../lib/hash.mjs';
@@ -24,6 +30,9 @@ import { run } from '../lib/proc.mjs';
 import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
+import { bucketProfile, perAct, readProfile, ACT_GROUPS } from './prof-buckets.mjs';
+
+const PROF_HOOK = new URL('./prof-hook.mjs', import.meta.url).pathname;
 
 const WORDS = ['bench', 'eat', 'read', 'library', 'windmill', 'bandstand', 'music', 'fire circle', 'pond', 'garden', 'sit on the floor', 'dance'];
 const REPO = resolve(new URL('../../..', import.meta.url).pathname);
@@ -122,6 +131,7 @@ export async function runLoad(o) {
   const serverRoot = resolve(o['server-root'] ?? REPO), faultSec = o['fault-every-sec'] != null ? Number(o['fault-every-sec']) : null;
   if (faultSec) process.env.SIM_FAULT_INJECT = '1';
   if (o['hang-kill-sec'] != null) process.env.SIM_HANG_KILL_MS = String(1000 * Number(o['hang-kill-sec']));
+  const profile = !!o.profile, menuStats = !!o['menu-stats'];
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
@@ -129,8 +139,14 @@ export async function runLoad(o) {
     const dir = join(out, `n${n}-r${rep}`); mkdirSync(dir, { recursive: true });
     // a world that exits on its own says how (code, signal) and its resident memory every 30 s, in this log (Linux /proc)
     let stopping = false;
-    const w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log'),
-      onSpawn: (c) => c.on('exit', (code, signal) => { if (!stopping) log(`n${n} r${rep}: the world exited on its own (code ${code}, signal ${signal}); see n${n}-r${rep}/server/world.log`); }) });
+    // #2508: the profiler hook and the menu counters reach the world through its environment, only while it starts
+    const profDir = join(dir, 'server', 'prof'), envWas = { NODE_OPTIONS: process.env.NODE_OPTIONS, SIM_PROF_DIR: process.env.SIM_PROF_DIR, EDGE_MENU_STATS: process.env.EDGE_MENU_STATS };
+    if (profile) { mkdirSync(profDir, { recursive: true }); process.env.NODE_OPTIONS = `${envWas.NODE_OPTIONS ? envWas.NODE_OPTIONS + ' ' : ''}--import=${PROF_HOOK}`; process.env.SIM_PROF_DIR = profDir; }
+    if (menuStats) process.env.EDGE_MENU_STATS = '1';
+    let w;
+    try { w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log'),
+      onSpawn: (c) => c.on('exit', (code, signal) => { if (!stopping) log(`n${n} r${rep}: the world exited on its own (code ${code}, signal ${signal}); see n${n}-r${rep}/server/world.log`); }) }); }
+    finally { for (const [k, v] of Object.entries(envWas)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } }
     const rss = setInterval(() => { try { const kb = /^VmRSS:\s+(\d+)/m.exec(readFileSync(`/proc/${w.pid}/status`, 'utf8'))?.[1]; if (kb) log(`n${n} r${rep}: world rss ${Math.round(kb / 1024)} MB`); } catch { /* not Linux, or gone */ } }, 30000);
     const souls = [];
     try {
@@ -147,13 +163,18 @@ export async function runLoad(o) {
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
+      const worldLog = join(dir, 'server', 'world.log'), sums0 = actSums(readLive(liveFile)), logAtStart = menuStats ? logSize(worldLog) : 0;
+      if (profile) writeFileSync(join(profDir, 'prof.start'), '');
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const faults = faultSec ? (async () => { for (let at = t0; at < until; at += faultSec * 1000) { await sleep(Math.max(0, at - Date.now())); await injectThrow(port); } })() : null;
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards; await faults;
+      if (profile) writeFileSync(join(profDir, 'prof.stop'), '');   // #2508: the profile covers the load, not the settle after it
+      const logAtEnd = menuStats ? logSize(worldLog) : 0;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
-      const server = { act: actPartsOfLive(readLive(liveFile)), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      const live = readLive(liveFile), server = { act: actPartsOfLive(live), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
+      if (profile || menuStats) server.meter = await meterOf({ sums0, sums1: actSums(live), menu0: menuStats ? menuStatsAfter(worldLog, logAtStart) : null, menu1: menuStats ? await menuStatsAfterWait(worldLog, logAtEnd) : null, profDir: profile ? profDir : null, serverRoot });
       const http = [], pairs = [];
       for (const [k, s] of souls.entries()) {
         await cliJson(s.folder, ['serve', '--stop']);
@@ -161,7 +182,8 @@ export async function runLoad(o) {
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); }
       }
       const routes = routeStats(http);
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
+      const intended = actSec ? Math.round(n * durSec / actSec) : null;
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       clearInterval(rss); stopping = true;
@@ -176,6 +198,44 @@ export async function runLoad(o) {
   return result;
 }
 
+/** #2508: live.json's since-start act sums (api-times.ts `parts.sums`), or null on a world without them. */
+const actSums = (live) => live?.api?.routes?.['edge:act']?.parts?.sums ?? null;
+const logSize = (file) => { try { return statSync(file).size; } catch { return 0; } };
+/** #2508: the first `[menu-stats]` line (menu-stats.ts, every 10 s with EDGE_MENU_STATS=1) the world logged after byte
+ *  `from` of its log, or null. Both ends of the window are taken this way, so each starts up to 10 s after its moment. */
+export function menuStatsAfter(file, from) {
+  let text = ''; try { text = readFileSync(file).subarray(from).toString('utf8'); } catch { return null; }
+  const i = text.indexOf('[menu-stats] '), j = text.indexOf('\n', i); if (i < 0 || j < 0) return null;
+  try { return JSON.parse(text.slice(i + 13, j)); } catch { return null; }
+}
+async function menuStatsAfterWait(file, from) { for (let k = 0; k < 24; k++) { const m = menuStatsAfter(file, from); if (m) return m; await sleep(500); } return null; }
+/** Numeric fields of `b` less `a`'s, one level of nesting deep (the menu counters' blocks). */
+function minus(b, a) {
+  const out = {};
+  for (const [k, v] of Object.entries(b ?? {})) out[k] = typeof v === 'number' ? Math.round(10 * (v - (a?.[k] ?? 0))) / 10 : v && typeof v === 'object' ? minus(v, a?.[k]) : v;
+  return out;
+}
+/** #2508: the act meter of one arm, over its load window: per act, the means of the world's own parts (live.json sums) and
+ *  of admission's charge; with a profile, each act's clock ms by part, the planner's sync and audit, and long holds; with
+ *  the menu counters, their change and builds per act. */
+async function meterOf({ sums0, sums1, menu0, menu1, profDir, serverRoot }) {
+  const d = sums1 ? minus(sums1, sums0) : null, acts = d?.n ?? 0, r1 = (x) => Math.round(10 * x) / 10;
+  const meter = { acts, parts: d && acts ? Object.fromEntries(['handler', 'bind', 'check', 'route', 'wait', 'commit'].map((k) => [k, r1(d[k] / acts)])) : null,
+    charged: d?.chargedN ? { acts: d.chargedN, msPerAct: r1(d.chargedMs / d.chargedN) } : null };
+  if (profDir) {
+    const pf = join(profDir, 'world.cpuprofile');
+    for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(1000);
+    try { const b = bucketProfile(readProfile(pf), serverRoot); meter.profile = { ...b, perAct: perAct(b, acts) }; }
+    catch (e) { meter.profile = { error: String(e?.message ?? e).slice(0, 200) }; }
+    rmSync(pf, { force: true });   // tens of MB; the buckets above are what the report keeps
+  }
+  if (menu1) {
+    const m = minus(menu1, menu0); delete m.missBySoul;
+    meter.menu = { ...m, buildsPerAct: acts ? r1(100 * ((m.one?.built ?? 0) + (m.one?.exact ?? 0)) / acts) / 100 : null };
+  }
+  return meter;
+}
+
 /** #2458: POST the loopback fault endpoint: the next tick's engine step throws. */
 async function injectThrow(port) {
   try { const r = await fetch(`http://127.0.0.1:${port}/__sim/fault?kind=throw`, { method: 'POST' }); log(`fault-inject throw: ${r.status}`); } catch (e) { log(`fault-inject throw failed: ${String(e).slice(0, 120)}`); }
@@ -185,6 +245,25 @@ export function recoveryLines(file) {
   let text = ''; try { text = readFileSync(file, 'utf8'); } catch { /* no log */ }
   const recoveries = [...text.matchAll(/\[world\] recovery hold (\d+) ms at tick (\d+): (\d+) replays \(([^)]*) ticks\)[^;\n]*(?:; since the last snapshot (\d+) ticks, (\d+) ms of wall, (\d+) ms of steps \(its cost (\d+) ms\))?/g)].map((m) => ({ holdMs: Number(m[1]), tick: Number(m[2]), replays: Number(m[3]), replayTicks: m[4] === 'none' ? [] : m[4].split(', ').map(Number), ...(m[5] ? { sinceSnapshot: { ticks: Number(m[5]), wallMs: Number(m[6]), stepMs: Number(m[7]), snapshotCostMs: Number(m[8]) } } : {}) }));
   return { recoveries, kills: [...text.matchAll(/watchdog: (world\.killed\.[a-z]+)/g)].map((m) => m[1]) };
+}
+/** #2508: an arm's act meter as report lines. */
+export function renderMeter(m) {
+  const L = ['', `### The act meter (#2508): ${m.acts} acts answered in the load window`];
+  if (m.parts) L.push('', `The world's own parts, mean ms per act (live.json sums): handler ${m.parts.handler} = bind ${m.parts.bind} + check ${m.parts.check} (of it the check's own feasibility search, route ${m.parts.route}) + rest ${Math.round(10 * (m.parts.handler - m.parts.bind - m.parts.check)) / 10}; wait ${m.parts.wait}; commit ${m.parts.commit}.${m.charged ? ` Admission charged ${m.charged.msPerAct} ms per act (${m.charged.acts} acts).` : ''}`);
+  const p = m.profile;
+  if (p?.error) L.push('', `Profile: ${p.error}`);
+  else if (p) {
+    const q = p.perAct, h = q.handlerSide, c = m.charged?.msPerAct;
+    L.push('', `Clock-thread profile (V8 sampling every 1 ms; the sampling itself costs some time, so read shares, not absolutes): ${p.totalMs} ms profiled, ${Math.round(100 * q.busyShare)} % busy. Each sample is in one group: the planner's sync and audit stay nav.* even inside an act, and the strict gate's work other than binding is act.check (the world's own parts count the whole gate as bind).`, '',
+      '| part | clock ms per act |', '|---|---|');
+    for (const k of ACT_GROUPS) L.push(`| ${k} | ${q[k] ?? ''} |`);
+    L.push(`| act.route(tick), all kinds | ${q['act.route(tick)'] ?? ''} |`, '',
+      `Handler-side parts (bind + check + rest) sum to ${h} ms per act${c ? `; admission charged ${c} ms per act (${c ? Math.round(100 * (h - c) / c) : ''} %)` : ''}. The planner: nav.sync ${q.navSyncMsPerSec} ms and nav.audit ${q.navAuditMsPerSec} ms per second of clock.`,
+      '', `Long holds (busy runs of ${p.holds.overMs} ms or more): ${p.holds.n}, ${p.holds.ms} ms in all; by source: ${Object.entries(p.holds.bySource).map(([g, e]) => `${g} ${e.n} (${e.ms} ms, longest ${e.maxMs})`).join(', ') || 'none'}.`,
+      '', `Every group, ms over the window: ${Object.entries(p.groups).slice(0, 24).map(([g, ms]) => `${g} ${ms}`).join(', ')}.`);
+  }
+  if (m.menu) L.push('', `Menu counters over the load window (EDGE_MENU_STATS): builds per act ${m.menu.buildsPerAct} (one.built + exact-walk projections); one ${JSON.stringify(m.menu.one)}; cap ${JSON.stringify(m.menu.cap)}; words ${JSON.stringify(m.menu.words)}; clears ${JSON.stringify(m.menu.capClear)}.`);
+  return L;
 }
 export function renderLoad(result) {
   const L = ['# Soul Client eval: load', '', 'Server time per call from `Server-Timing`. #1750 levels at p99.9: bookkeeping 50 ms, reads 100 ms, an act\'s acknowledgment 150 ms. Long polls have no level.'];
@@ -206,6 +285,8 @@ export function renderLoad(result) {
       const held = sum('amberS'), entered = sum('amberEntries'), list = (t, u = '') => Object.entries(t).map(([k, v]) => `${k} ${v}${u}`).join(', ') || 'none';
       L.push('', `What held amber, over these windows (a second can count under several signals; \`dwell\` = every signal under the band, the 30 s calm running): ${list(held, ' s')}. Entries into amber by cause (\`red\` = the step down from red): ${list(entered)}.`);
     }
+    if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
+    if (a.server?.meter) L.push(...renderMeter(a.server.meter));
     const al = a.actLatency;
     if (al?.server) L.push('', `Act calls (client trace, ${al.server.n}; ${Math.round(100 * a.counts.acts / a.durationSec) / 100} acts/s): server time p50 ${al.server.p50}, p95 ${al.server.p95}, p99 ${al.server.p99}, max ${al.server.max} ms; of it queue p50 ${al.queue?.p50 ?? ''}, p95 ${al.queue?.p95 ?? ''}, p99 ${al.queue?.p99 ?? ''} ms.`);
     if (a.slowActs?.length) {

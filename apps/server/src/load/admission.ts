@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
-import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, type ActTiming} from './api-times.ts';
+import {actPartsOf, actTiming, apiRoute, handlerMsOf, newActTiming, recordApi, recordCharge, type ActTiming} from './api-times.ts';
 import type {SlowedReason} from './soul-slowed.ts';
 
 export type Cls = 'C0' | 'C1' | 'C2' | 'C3';
@@ -190,6 +190,7 @@ export class Admission {
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
+    if (id === 'edge:act') recordCharge(ms, this.o.api);   // #2508: the act meter's check against admission's own count
   }
   /** §2b cool-down: over budget impolitely 3× (or 20 refusals for overlapping requests) in a minute → 60 s of slow-down.
    *  The god is never cooled (it is never starved; its share is the reserve). */

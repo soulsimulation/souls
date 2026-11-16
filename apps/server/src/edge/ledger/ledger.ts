@@ -2232,7 +2232,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if(input.capability.length>=1&&input.capability.length<=200&&typeof input.clientRef==='string'&&input.clientRef.length<=100){const old=this.coreA.byClientRef(soul.soulId,input.clientRef);if(old)return {accepted:true,receipt:old};}
       // BODY refusals precede place/alias diagnostics, as in the original actOnce path.
       const bodyIssue=this.bodyVerbProblem(soul,input.capability.split(/[:\s]/)[0]!);
-      {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;}   // #1944: bind
+      {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;if(exactWalk)menuStats.one.exact++;}   // #1944: bind (#2508: and the exact-walk projections built)
       const place=bodyIssue?null:explicitPlaceCapability(this,soul,input.capability.trim(),exactWalk?.caps);
       // SOULSIM-E (real-agent run on 3.60, 2026-10-21): resolve offers a far place's walk on demand and the agent acts on
       // that id, as the skill says; the id was refused place.unwalkable here. actOnce below walks it on demand, as words.
@@ -2568,8 +2568,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
       return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
-    {const t = actTiming.getStore(); if (t && !t.checkAt) t.checkAt = performance.now();}   // #1944: the act's check begins
+    const timing = actTiming.getStore(), routeAt = timing ? performance.now() : 0; if (timing && !timing.checkAt) timing.checkAt = routeAt;   // #1944: the act's check begins
     let issue = this.host.engine.canPerform({actor: soul.entityId, label, steps});
+    if (timing) timing.routeMs += performance.now() - routeAt;   // #2508: the check's own feasibility search (route), inside check
     // SOUL3 continuation (ACCEPT3 A7): a here-activity asked while this Soul's own replaceable walk still holds the body (e.g. on
     // the way to board a balloon) was refused not-still, so the superseded walk went on and boarded; the body stops first instead.
     if (issue && /(^|\.)not-still$/.test(issue.code) && steps[0]?.verb !== 'stand' && this.host.engine.programOf(soul.entityId)) {
