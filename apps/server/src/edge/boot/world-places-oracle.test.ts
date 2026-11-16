@@ -85,16 +85,22 @@ function oldExplicitPlaceCapability(L: EdgeLedger, soul: EdgeSoul, asked: string
 }
 
 // ---------------------------------------------------------------- the corpus and the comparison
-/** Every case's answer by both paths, compared whole (ok, code, reason, did_you_mean, chosen, next), with ms by kind. */
-function compare(L: EdgeLedger, soul: EdgeSoul, corpus: Record<string, string[]>, what: string) {
-  const bad: string[] = [], ms: Record<string, {old: number; now: number; n: number}> = {};
+/** Every case's answer by both paths, compared whole (ok, code, reason, did_you_mean, chosen, next), with ms by kind, and
+ *  the refusal codes seen. A `cold` kind takes a tick before each case, so the new path meets no menu built this tick (its
+ *  focused builds run, as in an act), and the old path then reads the same state. */
+function compare(L: EdgeLedger, soul: EdgeSoul, corpus: Record<string, string[]>, what: string, tick: () => void) {
+  const bad: string[] = [], ms: Record<string, {old: number; now: number; n: number}> = {}, codes = new Set<string>();
   for (const [kind, ids] of Object.entries(corpus)) for (const asked of ids) {
+    if (kind.startsWith('cold')) tick();
     // the new path first: the caches it warms favour the old path, so the ms below never flatter the change
     const t0 = performance.now(), b = JSON.stringify(explicitPlaceCapability(L, soul, asked)), t1 = performance.now(), a = JSON.stringify(oldExplicitPlaceCapability(L, soul, asked)), t2 = performance.now();
     const m = ms[kind] ??= {old: 0, now: 0, n: 0}; m.now += t1 - t0; m.old += t2 - t1; m.n++;
     if (a !== b) bad.push(`${kind} ${asked}: was ${a.slice(0, 240)} | now ${b.slice(0, 240)}`);
+    const code = (JSON.parse(a) as {code?: string} | null)?.code; if (code) codes.add(code);
   }
   assert.deepEqual(bad.slice(0, 6), [], `${what}: ${bad.length} answers differ`);
+  // the refusals the change could drop are in the corpus and answered (the issue's footgun: place.ambiguous)
+  for (const c of ['place.ambiguous', 'capability.unknown']) assert.ok(codes.has(c), `${what}: no answer was ${c}`);
   return Object.fromEntries(Object.entries(ms).map(([k, m]) => [k, `${m.n} cases, ms per case was ${(m.old / m.n).toFixed(2)} now ${(m.now / m.n).toFixed(2)}`]));
 }
 
@@ -120,6 +126,10 @@ function corpusOf(L: EdgeLedger, soul: EdgeSoul): Record<string, string[]> {
     'thing walk labels': every(objects, 3).flatMap(c => ['walk:' + c.label, 'walk:the ' + c.label]),
     unknown: ['walk:no-such-place', 'walk:eden-pond-north', 'walk:region-park.nowhere', 'walk:somewhere nice', 'stroll:xq-zz', 'gather:nowhere-at-all', 'read:no-such-book', 'swim:deep-sea-trench', 'hang-out:the moon', 'walk:e_00000000', 'walk:pond', 'walk:the park', 'walk:park'],
     ambiguous: [...new Set([...sharedNames, ...objectPlaceWords, ...objectTwins])].flatMap(w => ['walk:' + w, 'stroll:' + w, 'walk:the ' + w]),
+    // ids the world knows that are no place and no offer (strictCheck answers them without the whole menu now)
+    'known ids, not places': [...Object.keys(L.host.engine.world.entities).slice(0, 12).flatMap(id => [`walk:${id}`, `stroll:${id}`]), ...L.spots.spots.slice(0, 12).flatMap(x => [`swim:${x.id}`, `read:${x.id}`, `gather:${x.id}`])],
+    'cold, not offered, known place by id': every(notOffered, 23).map(p => 'walk:' + p.id),
+    'cold, known ids and unknown': ['walk:no-such-place', 'stroll:xq-zz', ...L.spots.spots.slice(0, 4).map(x => `read:${x.id}`)],
   };
 }
 
@@ -132,12 +142,13 @@ test('#2528 A1: an act\'s place capability or refusal is the old path\'s, over E
   assert.ok(corpus.offered.length > 10 && corpus['not offered, known place by id'].length > 10, 'Eden 2026 offers walks and leaves far places out');
   assert.ok(corpus.ambiguous.length > 0, 'the corpus holds ambiguous words');
   t.diagnostic(JSON.stringify(Object.fromEntries(Object.entries(corpus).map(([k, v]) => [k, v.length]))));
-  t.diagnostic('arrival ' + JSON.stringify(compare(L, soul, corpus, 'arrival')));
+  const tick = () => host.tickOnce();
+  t.diagnostic('arrival ' + JSON.stringify(compare(L, soul, corpus, 'arrival', tick)));
   // and after a walk (another place, other offers)
   const go = L.coreA.binds(soul).caps.filter(c => c.verb === 'walk' && c.available && c.target?.kind === 'place')[5];
   if (go) {
     const r = await (await import('../../../test/native-owner-fixture.ts')).accept(host, L.act(soul, {capability: go.id})) as {accepted?: boolean}; assert.equal(r.accepted, true);
     for (let i = 0; i < 12 && L.openReceipts(soul.soulId).length; i++) await run(25);
-    t.diagnostic(`after ${go.id} ` + JSON.stringify(compare(L, soul, corpusOf(L, soul), `after ${go.id}`)));
+    t.diagnostic(`after ${go.id} ` + JSON.stringify(compare(L, soul, corpusOf(L, soul), `after ${go.id}`, tick)));
   }
 });

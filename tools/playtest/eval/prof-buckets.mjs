@@ -27,9 +27,9 @@ const TICK = new Set(['tickOnceInner', 'tickOnce', 'advanceStep']);
  *  is no longer on the stack) and under no other route is still the act's handler. */
 const ACT_FN = new Set(['actWork', 'actOnce', 'launch', 'acceptInvite', 'openShared', 'performBodies', 'offerGate']);
 const BREAK = new Set(['(idle)', '(program)', '(root)']);
-/** The groups a report lists for an act, in order (the clock cost of one act, by part). */
 /** #2528: functions whose inclusive clock ms an act's samples (act.*) spend under them, whichever group a sample is in. */
 export const UNDER = ['explicitPlaceCapability', 'offeredWalkObject', 'knownBootPlaces', 'strictCheck', 'resolvePlaceForVerb', 'resolveBootPlace'];
+/** The groups a report lists for an act, in order (the clock cost of one act, by part). */
 export const ACT_GROUPS = ['act.bind', 'act.check', 'act.handler-other', 'route.first', 'route.people', 'route.detour', 'route.chunk', 'route.other', 'act.commit(tick)'];
 
 /** The profile `p` (parsed), its samples in groups. `repo`: the server's checkout, to name request routes and frames. */
