@@ -312,7 +312,7 @@ export function buildApp(d: Deps) {
     // #2366: `faults` counts the world's own contained faults by name (world.fault.tick, .step, .timer, …) since it started
     // #1326: the tick's wall age, and `stalled` once the clock owes ticks and none has completed past its threshold
     const clock = mon?.clock();
-    return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
+    return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.host.viewerCount(), paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
       tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
       skip: d.host.skipStats,   // #2298 A5: ticks computed and jumped, jumps, the last horizon
       ...(mon ? {load: mon.health()} : {}), ...(d.load?.faults && Object.keys(d.load.faults()).length ? {faults: d.load.faults()} : {}), ...quarantineOf(d.host), api: apiOf(d.load?.api) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });

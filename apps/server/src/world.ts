@@ -664,9 +664,11 @@ export class WorldHost {
   /** #2298 A4: the ticks an unwatched world found still after an ordinary tick counts before its first jump (1.5 s). After
    *  that jump it sleeps to its horizon (#2384 A1). */
   jumpCap = 30;
-  /** #2298 A4b: true while a viewer is connected (main.ts: the hub's clients). Then a jump covers at most one broadcast batch
+  /** #2520: every connected viewer, the hub's and the anonymous fanout's (set by the Hub). */
+  viewerCount: () => number = () => 0;
+  /** #2298 A4b: true while a viewer is connected. Then a jump covers at most one broadcast batch
    *  and lands on its boundary, so batches and the time of day go out as often as when every tick ran. */
-  watched?: () => boolean;
+  watched?: () => boolean = () => this.viewerCount() > 0;
   private jumpFrom = 0;
   /** #2298: while true the world has been still since its last jump (no ordinary tick outside a jump's landing). */
   stillStretch = false;
