@@ -20,6 +20,9 @@ type LastLive = {phase?: string; at?: number; tick?: {world?: number}; loop?: {l
   killed?: {reason: string; at?: number; step?: Step; top?: string}};
 type FaultExit = {at?: number; reason?: string; step?: {id: number; name: string; fromTick: number; tick: number}};
 const hex = (id: number) => id.toString(16).padStart(8, '0');
+/** #2458 A2: the step a fault recovery holds while it runs (world.ts recoverFault; stepIdOf of a step named 'world recovery').
+ *  One death in it is enough: a restart that went back the same way would be killed the same way, so it is quarantined at once. */
+export const RECOVERY_STEP_ID = 0x2da2deea;
 
 /** Read how the last process ended and update deaths.json. A clean stop clears the record. Never throws. */
 export function noteLastExit(dataDir: string, now = Date.now()): {deaths: Death[]; quarantine: StepQuarantine | null} {
@@ -59,6 +62,7 @@ const windowFor = (same: number, n: number, window: number) => (same < n ? 0 : M
 export function stepQuarantine(deaths: Death[], n = 2, window = QUARANTINE_TICKS): StepQuarantine | null {
   const d = deaths.at(-1);
   if (!d || d.id === null || d.tick === null) return null;
+  if (d.id === RECOVERY_STEP_ID) n = 1;
   let start = deaths.length - 1;
   while (start > 0 && deaths[start - 1].id === d.id && deaths[start - 1].tick !== null) start--;
   const run = deaths.slice(start) as (Death & {tick: number})[];

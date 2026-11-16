@@ -88,7 +88,7 @@ in the program. The load gauges are one per program.
 | `mars/viewer/engine/locomotion/walk.ts` (`setWalkReach`), `god/poster-boards.ts` (`setWorldDaySource`), `god/ground-host.ts` (`DEEP_MIDDLE` listed whole), `god/context-views.ts` (`closeContextViews`), `world-main.ts` (`globalThis.__soulsReadPool`, `setKitViewerContract`), `mars/viewer/engine/spatial/path.ts` (`strandedMetrics`, served by `http.ts`) | World state in module scope: the last world to set it wins. Walk reach feeds `walk_to` validation, so it touches replay. **Done (#2416):** walk reach is in the world's registry (`groundRegistry(base, groundReach(fact))`, also on a snapshot restore); the world day is read from the world's host (`worldDayOf(host)`) and passed to the boards; the deep middles are per `installGroundCapabilities`; each world closes its own context views; the read pool is returned by `startWorld`. Shared on purpose: `strandedMetrics` is a content-keyed memo (its answer is a function of the grids and goal it is keyed by; the debug counters are the program's), and `setKitViewerContract` follows the viewer bundled with the program's code, the same for every world. `apps/server/src/world-module-state.test.ts` fails on new module-level mutable state | Form 2 |
 | `process.env` read after boot: `http.ts`, `auth.ts`, `hub.ts`, `edge/routes.ts`, `edge/eyes/routes.ts`, `god/assets.ts`, `moderation/store.ts`, `god/workbench.ts`, `god/real-clock.ts`, `god/layers.ts`, `god/ground-host.ts`, `edge/ledger/ledger.ts`, `packages/engine-mars/src/engine.ts` | World name, steward token, data paths and rule flags come from the one process env. **Done (#2389):** they read the world's `cfg.env`. What stays is listed by file, with its reason, in `apps/server/src/world-config-reads.test.ts`: import-time measurement switches (the same for every world in a program) and default-parameter fallbacks for tests and tools | Form 2; form 1 only with a per-worker env |
 | `apps/server/src/eden-bootstrap.ts` (`edenOriginHistoryFactory`), `packages/engine-mars/src/engine.ts` (`marsCommonsTransitionFactory`), `split/god-replica.ts` (`defaultAssetDir()`) | Calls that take no world env yet: these factories build `marsFactory` from `process.env`, and a read worker's replica finds its asset dir from the program's env. `world-config-reads.test.ts` lists the replica's call and `marsFactory`'s default env. **Done (#2416)** for `edenOriginHistoryFactory` and `marsCommonsTransitionFactory`: they take the world's env (`world-factory.ts` passes it). The Eden life readers (`retainedCommonsShoreFactory` and the other transition factories) and `god-replica.ts` still read the program's | Form 2 |
-| `apps/server/src/god/host-render-slot.ts`, `god/look-renderer.ts` | Lock liveness is checked by pid, so a dead world's lock is never stale while the program lives. **Done (#2444):** in a shard each world's slots are held under its name (`renderWorld`), and a world that stops releases them (`releaseWorldRenderSlots`); still one render at a time on the host | Both |
+| `apps/server/src/god/host-render-slot.ts`, `god/look-renderer.ts` | Lock liveness is checked by pid, so a dead world's lock is never stale while the program lives. **Done (#2444, #2469):** a slot is freed only by its own render's end (each caller releases in `finally`), never by its world's stop mid-render; a stopped world's renders end with its stop (its context views abort them), so its slot does not outlive them; still one render at a time on the host | Both |
 | Content caches: `packages/engine-mars/src/ground-bridge.ts` (`RECIPES`, `FIELDS`), `catalog-adapter.ts` / `CATALOG`, `mars/viewer/engine/spatial/grid.ts`, `path.ts`, the library and the generator memos | Keyed by content, so sharing them is the point of form 2. But their byte caps become shared, and a registry can let a world resolve a hash it never logged | Shareable |
 | `apps/server/src/load/watchdog.ts` (`faultGuard`, `installFaultGuard`), `load/watchdog-worker.ts` (the kill), `world-main.ts` (`/__sim/fault`) (#2366) | One fault guard per program: the `uncaughtException` and `unhandledRejection` handlers cannot tell which world threw, and its storm exit (70) and stopped-clock exit end every world. The watchdog's hard limits end the whole process. **Done (#2444):** each world's guard notes only the errors from its own async context (`installFaultGuard` `mine`); by design a shard has one watchdog thread (`shareWatchdog`) and a fault ends it; the launcher reloads its worlds | Form 2 |
 | `apps/server/src/god/edit-preview.ts` (`live`, `pending`) | One preview worker and `PREVIEW_MAX_PENDING` (2) per program: one world's previews refuse another's | Form 2 |
@@ -128,15 +128,18 @@ exactly:
   shard.mjs: name, key, path, port, data dir, owner, zone, health port, load pins) is equal, so no world runs under
   another's settings. The program's heap cap is a world's cap times the shard's size.
 - **Load and stop by message.** `{op:'load'}` runs `startWorld(loadConfig(env), {signals: false, exit})` with the world's
-  own env; `{op:'stop'}` runs its shutdown (snapshot saved), after which none of its timers, handlers, watchdog entry or
-  render slots stay in the program: the hub's, the Souls' and the brain's intervals, the real-time clock check, the
-  portrait sweeps and the refusal log's count timer are cleared (`world-stop-timers.test.ts`). Each world's log lines
-  are tagged in the program and written to its own log.
+  own env; `{op:'stop'}` runs its shutdown (snapshot saved), after which none of its timers, handlers or watchdog entry
+  stay in the program: the hub's, the Souls' and the brain's intervals, the real-time clock check, the portrait sweeps
+  and the refusal log's count timer are cleared (`world-stop-timers.test.ts`). The requests still open at the end of
+  its stop are answered 503 `world.stopping` (or closed, when their answer had begun) and its connections closed, as a
+  world process's exit closes them; its stopped code never answers them (#2469, `world-stop-inflight.test.ts`). Each
+  world's log lines are tagged in the program and written to its own log.
 - **A world still loading** cannot be cut short inside the program. A SIGKILL (a stalled boot, a stop past its grace, a
-  handover's settle) drops it instead: it is stopped as soon as its boot ends, and only if that takes longer than
-  `DROP_GRACE_MS` (3 s) is its program ended. One writer per data dir: a world's next load is sent to a program only
-  once every earlier load of its data dir has exited. A world whose boot fails in a shard clears its timers as its stop
-  does.
+  handover's settle) drops it instead. Its boot's open wait, the initial projection, ends at once (`startWorld`'s
+  `abort`, as SIGTERM ends a process's), and it stops as soon as its boot ends. #2469: a drop never ends its program,
+  however long that boot takes (#2444 ended it after 3 s). One writer per data dir: a world's next load is sent to a
+  program only once every earlier load of its data dir has exited. A world whose boot fails in a shard clears its
+  timers as its stop does.
 - **Faults are the world's own.** An uncaught error or rejection is noted by the fault guard of the world whose code it
   came from (its async context, `renderWorld`), never by its neighbours. One from a world still loading is that boot
   failing (exit 70, as a world process would crash); one from no world is logged by the shard and counted against none.
@@ -151,10 +154,13 @@ exactly:
   and loads again in a program of its own, so a hang that repeats is held.
 - **A fault ends the shard.** A fault storm, a clock stopped by a fault, a boot that throws (exit 70) or the watchdog's
   hang or heap rule (SIGKILL) ends the program. The world that ended it exits as the crash it was (the breaker counts
-  it) and reloads in a program of its own; the others exit as a planned restart (75) and reload at once in another
-  program. Each replays its log to the durable clock frontier it left and catches its clock up.
+  it) and reloads in a program of its own; the others exit as a planned restart (75) and reload at once, together, in
+  a fresh program. Each replays its log to the durable clock frontier it left and catches its clock up. #2469: a
+  reload never goes into a shard that runs, since a boot holds its program's thread and stalled the worlds there
+  (#2451). The fresh program takes no other world until every world of the group has loaded or exited, or
+  `RELOAD_HOLD_MS` (60 s) has passed.
 - **The handle.** A world in a shard is a ChildProcess-shaped handle (pid, stdout, stderr, kill, `exit`): SIGTERM stops
-  it alone, SIGKILL ends its shard (drops it while it loads), SIGSTOP is refused (a world in a shard is never frozen alone). Its Pss is the
+  it alone, SIGKILL ends its shard (drops it while it loads, never ending the program), SIGSTOP is refused (a world in a shard is never frozen alone). Its Pss is the
   shard's split between its worlds.
 
 **Proved** (`tools/world-launcher/shard.test.mjs`, loaded workstation): three Eden core worlds in one shard; one stopped
@@ -221,8 +227,11 @@ pool restarts a planned exit. The crash backoff of the world that ended the shar
 - A shard fails as a whole and comes back in about 4 s after a storm, or about 14 s after a hang, as #2300 expected.
 - The worlds of the other shards are not untouched. The 8 reloaded worlds go into programs that still have room, and
   each load holds that program's thread for its boot, which stops its worlds for up to 3 s. Reloading them into a
-  fresh program instead would keep the other shards clear. The design already sends an Eden-class load to a fresh
-  shard; a fault's reload is not yet treated that way.
+  fresh program instead would keep the other shards clear. #2469 does that, and measured it the same way (runs
+  43772204100 and 43772206135, commit `60cfde7c1`): the 43 worlds of the other shards saw at most 390 and 394 ms after
+  a storm and 397 and 354 ms after a hang, all serving throughout, as near as one program per world (0.40 s). The
+  failed shard's own worlds wait for the fresh program's cold start: 4.7 to 4.8 s after a storm, 19.3 to 19.4 s after
+  a hang. After the hang no world was named, so each of its 8 worlds loaded in a program of its own (15 programs).
 - The world that hung was not the one blamed. In every run it exited as a planned restart (75), and a neighbour was
   counted as the crash: the hang ran outside a tick (a timer), where the watchdog names the first world it judged.
 
@@ -277,7 +286,18 @@ hang or a memory runaway.
   clock up (#2235).
 - `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak|stop|storm`,
   and (#2378) `hang-at&tick=N&ticks=K` (a step stuck at ticks N to N+K-1 on every boot), `corrupt` (a Soul's body broken
-  in memory) and `disk&mb=N` (the headroom check reads N MB free; no `mb`: the disk again).
+  in memory) and `disk&mb=N` (the headroom check reads N MB free; no `mb`: the disk again). #2458 adds `throw` (the next
+  tick's engine step throws, recovered as an engine fault) and `throw-at&tick=N&replayMs=K` (the step from tick N throws
+  on every boot; each tick a recovery replays takes at least K ms, as on a busy world). Every recovery logs one line:
+  `[world] recovery hold <ms> ms at tick <t>: <n> replays (<ticks> ticks), …; since the last snapshot …`. The eval's
+  load mode injects `throw` with `--fault-every-sec <s>` and reports those lines (`recoveries`).
+- **A recovery is bounded (#2458).** An engine error inside a tick replays from the last snapshot on the main thread:
+  about 2 s fixed (mostly the engine's restore) plus 4 to 6 ms a replayed tick at 24 to 100 Souls. The snapshot debt
+  counts the whole tick, not the engine step alone, which measured 0.6 ms a tick and let 1800 to 4800 ticks build up
+  (holds of 8 to 18 s on souls-timed). A jump over still ticks (most of a setup's ticks) adds them at the running
+  average whole tick (`tickCostMs`), since a recovery replays each one. So the existing rule (3 s of debt, at most one snapshot per 20 s, capture at
+  most 5 % of the time) keeps a busy world's replay to about 20 s of ticks. Under the repair rules, a recovery tries no
+  further plan replay after holding 3 s (`RECOVERY_REPLAY_BUDGET_MS`): the last rung, which steps no ticks, ends it.
 
 **Measured** (`tools/world-launcher/crash-proof.test.mjs`): a real fake-mind Eden core world with its durable clock,
 under the launcher's `ChildPool`, a 5 s hang limit and a 768 MB heap cap. The workstation was loaded (load average 28 on
@@ -321,6 +341,7 @@ is paged. Times are from the fault to the world serving again, measured on the l
 | 3. A database wait: another process holds the write lock | Each statement waits at most 5 s (`busy_timeout`), then fails: a named halt (`durability.clock-frontier`) the guard restarts (#2133). A tick whose writes wait past the hang limit (10 s) in all ends in the watchdog's kill instead. Either way the launcher restarts the world, and it serves once the lock is gone | 12 s lock, CI runner: halted, serving again at 15.2 s. Workstation: killed at 10.8 s (hang rule), serving at 31 s | frontier tick and hash, log prefix, accepted Soul | `no-stuck-world.test.mjs` |
 | 4. The disk filling | Every minute the world reads its free space; under `SIM_DISK_MIN_FREE_MB` (1024) it logs `[load] disk.low`, prunes by the existing retention rules (the hourly backups' rule, brain calls, talk, local takes) and holds its hourly backup. Nothing beyond retention is deleted. A write that still fails is a named halt, restarted by the guard (#2133) | alert and prune at once; never down | same process | `no-stuck-world.test.mjs`, `apps/server/src/load/restart-loop.test.ts` |
 | 5. A launcher terminal state | The breaker's `held` is a rest, not an end: it boots again after 10 min, doubling for each hold in a row up to 1 h; an operator's resume ends it sooner. A handover's fence clears the rest's timer: `unfence()` arms it again, and `ensure()` resumes a world whose rest is over. A capacity refusal never ends `failed` (#2367) | the rest | as its restart | `tools/world-launcher/guard.test.mjs` (c2, c3) |
+| 6. A recovery that outlasts the hang limit (#2458): an engine error on a busy world replays from its last snapshot on the main thread, past the watchdog's 10 s | A recovery is its own step for the watchdog (`world recovery`, id `2da2deea`). A kill inside one quarantines that step after **one** death (any other step needs two), so the restart meets the same error and contains it where it happens (`[world] world.recovery-quarantined: …`, glitch `world.recovery-quarantined`, the in-place rung: what runs stops, nothing replays) instead of replaying the same stretch again. Before, every restart did, and was killed again: 10 kills, then the breaker's hold | one kill, one restart, the restart's recovery held 2 ms (workstation) | the quarantine and the in-place rung are logged events | `tools/world-launcher/recovery-loop.test.mjs`, `apps/server/src/recovery-bounded.test.ts` |
 
 What is left, named so it is not mistaken for covered:
 
