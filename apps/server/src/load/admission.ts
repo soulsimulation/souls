@@ -4,6 +4,7 @@
 // bucket under contention (`soul.slow-down`); a job whose deadline passes is answered `world.busy` unrun, and a job
 // whose client went away is dropped. It queues, delays and refuses; it never chooses or retries an act for a Soul.
 import {createHash} from 'node:crypto';
+import {performance as perf} from 'node:perf_hooks';
 import type {Context, MiddlewareHandler} from 'hono';
 import {S, sharedLoad, type Level} from './shared.ts';
 import {crowdedNote} from './waking.ts';
@@ -75,7 +76,50 @@ export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>
   /** The quiet tick ms (default: the monitor's, from the process's shared numbers, S.quietTickMs). */
   quietTickMs?: () => number;
   /** #2416: this world's API times (default: the program's, for tests). */
-  api?: Float64Array};
+  api?: Float64Array;
+  /** #2440: monotonic ms of completed ticks (default: the monitor's, S.tickSpentMs). */
+  tickSpentMs?: () => number;
+  /** #2440: the share of the recent loop time the thread sat idle, 0..1 (default: event-loop utilization over the last
+   *  ~250-500 ms; with an injected clock, 0: a test's fake time has no real loop to measure). */
+  idleShare?: () => number;
+  /** #2440: the tick service over the last 5 s, 0..1 (default: the monitor's, S.service5s; with an injected clock, 1). */
+  tickService?: () => number;
+  /** #2440 review: the heap's used share of its limit, 0..1 (default: the monitor's, S.heapUsedMb / S.heapLimitMb; with an
+   *  injected clock, 0). */
+  heapFrac?: () => number;
+  /** #2440: the ticks are on time right now: the 1 s tick service is at least SPARE_SERVICE_1S and the last tick is under
+   *  SPARE_TICK_AGE_MS old while the clock owes ticks (default: the monitor's S.service1s, S.tickAt, S.stallMs; with an
+   *  injected clock, true). */
+  ticksOnTime?: () => boolean};
+/** #2440: spare time. While the loop has been idle at least this share of the last ~250-500 ms, requests are not held
+ *  for the frame credit or a Soul's bucket: the thread has room, so a queued act runs now instead of waiting for a
+ *  budget sized for a busy world. Below it (the thread genuinely full) the credit and the buckets bind as before, and
+ *  black never runs requests. The reserve keeps a fifth of the thread for the tick's own peaks, and spare time needs the
+ *  ticks served (5 s tick service >= SPARE_SERVICE, amber's own leave band): a burst that idles the loop between long
+ *  jobs yet lets ticks fall behind is held to the budgets (the harsh eval-load arm: service 0.66-0.76 for ~30 s without it). */
+export const SPARE_IDLE = 0.2, SPARE_SERVICE = 0.9, IDLE_WINDOW_MS = 250;
+/** #2440 review: spare time also needs the heap below red's own threshold (monitor.ts: red above 0.85): a world red for
+ *  heap with an idle loop and light GC must not admit unbudgeted, allocating requests. */
+export const SPARE_HEAP = 0.85;
+/** #2440: and the ticks on time now, not only over 5 s: spare time must never cost world time (at 100 Souls the 5 s gate
+ *  alone let the candidate serve 10-15 % fewer ticks than base). */
+export const SPARE_SERVICE_1S = 0.98, SPARE_TICK_AGE_MS = 100;
+/** #2440: the monitor's view of the ticks right now (before its first sample, on time). A clock that owes no ticks
+ *  (paused, stopped, rate 0: stallMs 0) is on time. */
+export function ticksOnTimeNow(a: Float64Array = sharedLoad, now = Date.now()): boolean {
+  if (!(a[S.sampledAt] > 0)) return true;
+  if (a[S.service1s] < SPARE_SERVICE_1S) return false;
+  return !(a[S.stallMs] > 0) || !(a[S.tickAt] > 0) || now - a[S.tickAt] < SPARE_TICK_AGE_MS;
+}
+/** The loop's idle share over the last IDLE_WINDOW_MS or more (event-loop utilization), refreshed when asked. */
+export function loopIdle(): () => number {
+  let prev = perf.eventLoopUtilization(), at = perf.now(), idle = 0;
+  return () => {
+    const now = perf.now(); if (now - at < IDLE_WINDOW_MS) return idle;
+    const cur = perf.eventLoopUtilization(); idle = 1 - perf.eventLoopUtilization(cur, prev).utilization; prev = cur; at = now;
+    return idle;
+  };
+}
 export class Admission {
   level: Level = 'green';
   readonly queue: Job[] = [];
@@ -99,7 +143,21 @@ export class Admission {
   /** #2416: this world's stall log hears each answer (set by startWorld when the log runs). */
   onAnswer?: (route: string, t0: number, t1: number) => void;
   get api(): Float64Array | undefined { return this.o.api; }
-  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]); }
+  private tickSpent: () => number;
+  private idleShare: () => number;
+  private tickService: () => number;
+  private heapFrac: () => number;
+  private ticksOnTime: () => boolean;
+  constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); this.quietTick = o.quietTickMs ?? (() => sharedLoad[S.quietTickMs]);
+    this.tickSpent = o.tickSpentMs ?? (() => sharedLoad[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
+    // the tick service is 1 until the monitor's first sample
+    this.tickService = o.tickService ?? (o.now ? () => 1 : () => sharedLoad[S.sampledAt] > 0 ? sharedLoad[S.service5s] : 1);
+    this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => sharedLoad[S.heapLimitMb] > 0 ? sharedLoad[S.heapUsedMb] / sharedLoad[S.heapLimitMb] : 0);
+    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : ticksOnTimeNow); }
+  /** #2440: the world is green, the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE over 5 s, on
+   *  time now) and the heap is below red's (SPARE_HEAP): queued requests are not held for budget. Never at amber, red or
+   *  black: with spare time at amber and red, 100 Souls on a 2-core world served 4-15 % fewer ticks than without. */
+  spare() { return this.level === 'green' && this.heapFrac() < SPARE_HEAP && this.tickService() >= SPARE_SERVICE && this.ticksOnTime() && this.idleShare() >= SPARE_IDLE; }
   /** This level's frame budget (request ms per 50 ms frame), calibrated from the measured quiet tick (frameBudgetMs). */
   frameBudget(level: Level = this.level) { return frameBudgetMs(level, this.quietTick()); }
 
@@ -148,7 +206,7 @@ export class Admission {
     const b = this.bucket(r.key, r.god, now); b.seen = now;
     const est = this.estimate(r.route.id);
     if (read && this.level === 'black') { this.shed.reads++; return this.told(r.key, r.god, now, busyRefusal(this.level)); }
-    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key)) {
+    if (read && b.tokens < this.need(r.route.id) && this.contended(r.key) && !this.spare()) {
       // §2b strike only for an impolite request: one that came back before the Retry-After it was last given had
       // elapsed. A Soul that waited and is still over budget is refused again with a Retry-After, but not struck
       // (eden2, 2026-10-31: honest Souls collected 3 strikes and a 60 s cool-down, 45-59 % of all read wall time)
@@ -176,8 +234,9 @@ export class Admission {
     // amber (a boot or creation spike still stepping down) is not slowed; red/black always queue (budgets bind).
     // Charged when it answers.
     if (!this.queue.length && !this.draining && this.outstanding.size === 1 && (this.level === 'green' || this.level === 'amber') && this.creditNow(now) > 0) {
-      settle('run'); ranAt = now;
-      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, this.now() - now, now); finish(); this.kick(); }};
+      settle('run'); ranAt = now; const ticks = this.tickSpent();
+      // #2440 review: as in the dispatcher, the ticks that ran while the job was timed are the tick's, not the job's
+      return {turn, waitedMs: () => 0, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); this.charge(r.key, r.god, r.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now); finish(); this.kick(); }};
     }
     this.queue.push(job); this.kick();
     return {turn, waitedMs: () => (ranAt || this.now()) - now, done: () => { if (isDone) return; isDone = true; this.outstanding.delete(r.key); finish(); this.kick(); }};
@@ -185,10 +244,13 @@ export class Admission {
 
   private creditNow(now: number) { const budget = this.frameBudget(); this.credit = Math.min(budget, this.credit + (now - this.creditAt) * budget / FRAME_MS); this.creditAt = now; return this.credit; }
   /** Debit a job's measured time: the world credit, the god/Souls shares, the principal's bucket, the route estimate. */
-  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number) {
+  private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, free = false) {
     this.creditNow(startedAt); this.credit -= ms; this.spentMs += ms;
+    // #2440: a job run on spare time leaves no debt: once the thread is busy again, the budgets start from even, not from
+    // the idle time the requests used meanwhile
+    if (free) this.credit = Math.max(0, this.credit);
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
-    const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms;
+    const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
     const e = this.est.get(id); this.est.set(id, e === undefined ? ms : e * 0.8 + ms * 0.2);
     if (id === 'edge:act') recordCharge(ms, this.o.api);   // #2508: the act meter's check against admission's own count
   }
@@ -224,16 +286,19 @@ export class Admission {
   }
   /** Next job: writes before reads, FIFO across Souls (each Soul has at most one), the god's reserve under contention. */
   private pick(now: number): number {
-    const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls);
+    const godTurn = this.share.god <= GOD_SHARE * (this.share.god + this.share.souls), spare = this.spare();
     let best = -1, bestScore = Infinity;
     for (let i = 0; i < this.queue.length; i++) {
-      const j = this.queue[i];
+      const j = this.queue[i]; let over = false;
       if (j.route.cls === 'C1') {
         if (this.level === 'black') continue;   // black: budget 0; acts wait for their deadline answer
         const b = this.bucket(j.key, j.god, now);
-        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) continue;   // short of budget: the act waits
+        if (b.tokens < this.need(j.route.id) && this.contended(j.key)) {
+          if (!spare) continue;   // short of budget: the act waits (#2440: unless the thread has spare time)
+          over = true;   // #2440: on spare time it still runs, but after every Soul within its budget (a flood never queues ahead of bystanders)
+        }
       }
-      const score = (j.route.cls === 'C1' ? 0 : 1e12) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
+      const score = (j.route.cls === 'C1' ? 0 : 1e12) + (over ? 1e10 : 0) + (j.god === godTurn ? 0 : 1e11) + j.arrival;
       if (score < bestScore) { bestScore = score; best = i; }
     }
     return best;
@@ -253,13 +318,20 @@ export class Admission {
         let now = this.now();
         this.sweep(now);
         const budget = this.frameBudget();
-        if (this.creditNow(now) <= 0) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
+        const free = this.spare();
+        if (this.creditNow(now) <= 0 && !free) { this.later(budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS); return; }
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
-        const [j] = this.queue.splice(i, 1);
+        const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
         j.settle('run');
         await Promise.race([j.finished, this.o.yieldTurn ? this.o.yieldTurn() : new Promise<void>(r => setImmediate(r))]);
-        this.charge(j.key, j.god, j.route.id, this.now() - now, now);
+        // #2440: the turn waited on spans the next loop pass, whose timers phase runs the tick (and its long holds): those
+        // are the tick's, not this job's (charged, they cost the requests ~20 s of credit after a 3 s hold)
+        this.charge(j.key, j.god, j.route.id, Math.max(0, this.now() - now - (this.tickSpent() - ticks)), now, free);
+        // #2440: on spare time no credit spaces the jobs, and a job that finished inside its turn resumes this loop in the
+        // same check phase: without a turn of the loop between them, a queue of acts ran back to back and held the C0
+        // bookkeeping routes (#1750 A4: receipt p95 265 ms against 50). Let the poll phase in before the next one.
+        if (free && this.queue.length && !this.o.yieldTurn) await new Promise<void>(r => setImmediate(r));
       }
     } finally { this.draining = false; }
   }

@@ -316,6 +316,10 @@ export class LoadMonitor {
     let owed = 0; for (let i = 1; i < this.ticks.length; i++) owed += this.ticks[i].due;
     const ran = this.ticks.at(-1)!.tick - this.ticks[0].tick;
     const service = owed >= 2 ? Math.min(1, ran / owed) : 1;
+    // #2440: the same over the last ~1 s (the samples since then), for admission's spare time
+    let i1 = this.ticks.length - 1; while (i1 > 0 && now - this.ticks[i1 - 1].at <= 1000) i1--;
+    let owed1 = 0; for (let i = i1 + 1; i < this.ticks.length; i++) owed1 += this.ticks[i].due;
+    const service1 = owed1 >= 2 ? Math.min(1, (this.ticks.at(-1)!.tick - this.ticks[i1].tick) / owed1) : 1;
     // event-loop delay p99 over the last ~5 s (two rotating windows)
     const q = this.o.queue?.() ?? {depth: 0, oldestMs: 0};
     this.quiet.depth = Math.max(this.quiet.depth, q.depth); this.quiet.service = Math.min(this.quiet.service, service);
@@ -352,7 +356,7 @@ export class LoadMonitor {
       if (now - this.blackSince >= (this.o.blackLimitMs ?? 60_000)) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
     } else this.blackSince = null;
     const shed = this.o.shed?.() ?? {reads: 0, acts: 0};
-    a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
+    a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.service1s] = service1; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
     a[S.heapUsedMb] = hs.used_heap_size / 1048576; a[S.heapLimitMb] = hs.heap_size_limit / 1048576; a[S.gcPct10s] = 100 * gcMs / 10_000;
     a[S.level] = LEVELS.indexOf(to); a[S.queueDepth] = q.depth; a[S.queueOldestMs] = q.oldestMs;
     a[S.awake] = this.souls.awake; a[S.waiting] = this.souls.waiting; a[S.connected] = this.souls.connected;
@@ -389,6 +393,7 @@ export class LoadMonitor {
       w.prevDue = due; if (gap > w.maxGap) w.maxGap = gap;
     } else { w.prevLate = false; w.prevDue = start; }
     w.prevStart = start; w.prevTick = h.engine.world.tick; w.ms.push(own);
+    this.a[S.tickSpentMs] += own;   // #2440: admission's job timing leaves the ticks out
   }
   /** #1944 A3: count the time since the last sample at the level it was at; close and publish a full window. */
   private tickWindowSample(now: number, owing: boolean) {
