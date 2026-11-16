@@ -5444,11 +5444,11 @@ export function findNext(id, { code, did_you_mean, candidates } = {}, way) {
 }
 /** A timed act asked for longer than the world takes (`capability.params`, its `params.seconds.max` or "seconds … 1..<max>"):
  *  the act at the most it takes, and the exact wake that lets a promise of the rest be kept (harder-hamlet-v2 refused-recover). */
-export function secondsNext(id, d, params, at = Date.now()) {
+export function secondsNext(id, d, params, forId, at = Date.now()) {
   const max = Number(d?.params?.seconds?.max ?? /seconds must be (?:an )?integer,? \d+\.\.(\d+)/.exec(d?.reason ?? "")?.[1]), asked = params?.seconds;
   if (d?.code !== "capability.params" || typeof id !== "string" || !Number.isInteger(asked) || !(asked > max)) return {};
   const ends = new Date(at + (max + 60) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");   // about when it ends, a walk there included
-  return { next: `${CLI} act ${id} '${JSON.stringify({ ...params, seconds: max })}' --wait (${max} s is the most); the other ${asked - max} s is for later: promise it only after \`${CLI} wake add at ${ends}\`, else tell your owner ${max} s is the most` };
+  return { next: `${CLI} act ${id} '${JSON.stringify({ ...params, seconds: max })}'${forId ? ` --for ${forId}` : ""} --wait (${max} s is the most); the other ${asked - max} s is for later: promise it only after \`${CLI} wake add at ${ends}\`, else tell your owner ${max} s is the most` };
 }
 /** #2452: a walk the world refuses as place.unwalkable: the nearest place a walk reaches (the world's `next`), and a refresh
  *  only when this machine's copy of the catalog is older than the world's (the local files; no call). */
@@ -5687,7 +5687,7 @@ async function act(...argv) {
     noteSteerRefusal(parsed, d);
     const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
     if (json) return { ...d, ...card };
-    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...secondsNext(parsed.capability, d, parsed.params), ...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...secondsNext(parsed.capability, d, parsed.params, forId),...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });

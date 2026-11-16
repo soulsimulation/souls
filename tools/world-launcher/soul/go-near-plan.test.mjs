@@ -56,12 +56,14 @@ test('A3: the skill says a promised later act needs its wake', () => {
 // PR #2479 finding: both refused-recover agents promised the owner a second sit later and set no wake for it
 test('a sit refused for more seconds than the world takes names the capped act and the wake for the rest', () => {
   const d = { code: 'capability.params', reason: 'seconds must be an integer 1..3600 for this capability.' };
-  const next = secondsNext('sit:e_9c01b32d', d, { seconds: 7200 }, Date.parse('2026-11-16T00:00:00Z')).next;
+  const next = secondsNext('sit:e_9c01b32d', d, { seconds: 7200 }, undefined, Date.parse('2026-11-16T00:00:00Z')).next;
   assert.match(next, /^node eden\.mjs act sit:e_9c01b32d '\{"seconds":3600\}' --wait/);
+  // the act serves the owner's message as the refused one did, so the card closes when it ends
+  assert.match(secondsNext('sit:e_9c01b32d', d, { seconds: 7200 }, 'msg_1').next, /'\{"seconds":3600\}' --for msg_1 --wait/);
   assert.match(next, /the other 3600 s is for later: promise it only after `node eden\.mjs wake add at 2026-11-16T01:01:00Z`/);
   // the refusal hello-hamlet's bench gives: the limit in params, a reason worded otherwise
   const bench = { code: 'capability.params', reason: 'seconds must be integer, 1..3600.', params: { seconds: { type: 'integer', min: 1, max: 3600, default: 60 } } };
-  assert.match(secondsNext('sit:e_9c01b32d', bench, { seconds: 7200 }, Date.parse('2026-11-16T00:00:00Z')).next, /wake add at 2026-11-16T01:01:00Z/);
+  assert.match(secondsNext('sit:e_9c01b32d', bench, { seconds: 7200 }, undefined, Date.parse('2026-11-16T00:00:00Z')).next, /wake add at 2026-11-16T01:01:00Z/);
   assert.match(secondsNext('sit:e_9c01b32d', { ...bench, params: undefined }, { seconds: 7200 }).next, /the other 3600 s/);
   assert.deepEqual(secondsNext('sit:e_9c01b32d', d, { seconds: 600 }), {}, 'within the cap: nothing to defer');
   assert.deepEqual(secondsNext('sit:e_9c01b32d', { code: 'capability.unknown' }, { seconds: 7200 }), {});
