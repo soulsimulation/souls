@@ -22,7 +22,8 @@ const sameArray=(a:ArrayLike<number>,b:ArrayLike<number>,n:number)=>{for(let i=0
 // +0/-0 differ in both), compared as 32-bit words: several times faster.
 const sameBits=(a:Uint32Array,b:Float32Array,n:number)=>{const w=new Uint32Array(b.buffer,b.byteOffset,n);for(let i=0;i<n;i++)if(a[i]!==w[i])return false;return true;};
 /** #2617 Step 0 (measurement only): outer query setup cost and instance-cache rebuilds. */
-export const VIS_STATS={queries:0,setupMs:0,rebuilds:0,rebuildInstances:0,validated:0,objects:0};
+export const VIS_STATS={queries:0,setupMs:0,rebuilds:0,rebuildInstances:0,validated:0,objects:0,stockQueries:0,alongCalls:0,alongTotal:0,alongAll:0,always:0,gridBuilds:0,nonStock:{} as Record<string,number>,noBounds:{} as Record<string,number>};
+const DIAG_SEEN=new WeakSet<object>();
 /** CPU-only read accelerator for stock instanced raycasts. No scene/resource ownership. */
 export class WorldVisibilityInstances {
  private generation=0;
@@ -139,7 +140,10 @@ export class WorldVisibilityInstances {
   if(this.queryDepth>0&&this.queryObjects===objects)return run();
   const setup0=performance.now();VIS_STATS.queries++;VIS_STATS.objects=objects.length;
   const previous=this.query,previousObjects=this.queryObjects,generation=this.generation;
-  const stock=objects.every(o=>STOCK_RAYCASTS.has(o.raycast));
+  const stock=objects.every(o=>STOCK_RAYCASTS.has(o.raycast));if(stock)VIS_STATS.stockQueries++;
+  if(!DIAG_SEEN.has(objects)){DIAG_SEEN.add(objects);for(const o of objects){if(!STOCK_RAYCASTS.has(o.raycast)){const k=o.constructor.name+':'+String(o.raycast).slice(0,60).replace(/\s+/g,' ');VIS_STATS.nonStock[k]=(VIS_STATS.nonStock[k]??0)+1;}
+   const kind:unknown=o.constructor;let why='';if(kind===THREE.InstancedMesh)why=o.raycast!==instanceRaycast?'inst-custom':!(o as THREE.InstancedMesh).boundingSphere?'inst-nosphere':'';else if(kind===THREE.Mesh)why=o.raycast!==meshRaycast?'mesh-custom':!(o as THREE.Mesh).geometry.boundingSphere?'mesh-nosphere':'';else why='class:'+o.constructor.name;
+   if(why)VIS_STATS.noBounds[why]=(VIS_STATS.noBounds[why]??0)+1;}}
   // #2617: each instanced member is validated when a ray first reaches it in this query (most never are), not up front;
   // nothing changes the scene inside a synchronous query, so the answer is the same.
   const previousMembers=this.members;this.members=stock&&!previous?new Set(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh)):undefined;
@@ -170,8 +174,9 @@ export class WorldVisibilityInstances {
   out.length=0;const objects=this.queryObjects;if(!objects)return out;
   const far=raycaster.far,near=raycaster.near,o=raycaster.ray.origin,d=raycaster.ray.direction;
   const b=this.boundsObjects===objects?this.bounds:undefined;
-  if(!b||!Number.isFinite(far)||!Number.isFinite(near)||!(o.x+o.z+d.x+d.z>-Infinity&&o.x+o.z+d.x+d.z<Infinity)){for(let i=0;i<objects.length;i++)out.push(i);return out;}
+  if(!b||!Number.isFinite(far)||!Number.isFinite(near)||!(o.x+o.z+d.x+d.z>-Infinity&&o.x+o.z+d.x+d.z<Infinity)){VIS_STATS.alongAll++;for(let i=0;i<objects.length;i++)out.push(i);return out;}
   // Built once per outermost query, and kept while every object's bounds stay the same (scenery mostly stands still).
+  if(!this.grid&&!(this.built&&this.built.bounds.length===b.length&&sameArray(this.built.bounds,b,b.length)))VIS_STATS.gridBuilds++;
   const g=this.grid??(this.grid=this.built&&this.built.bounds.length===b.length&&sameArray(this.built.bounds,b,b.length)?this.built.grid:(this.built={bounds:b,grid:gridOf(b,objects.length)}).grid);
   if(this.seen.length<objects.length)this.seen=new Uint32Array(objects.length);if(++this.seenGen>=0xffffffff){this.seen.fill(0);this.seenGen=1;}const gen=this.seenGen;
   const take=(cell:number)=>{for(let k=g.start[cell],e=g.start[cell+1];k<e;k++){const i=g.items[k];if(this.seen[i]!==gen){this.seen[i]=gen;out.push(i);}}};
@@ -186,6 +191,7 @@ export class WorldVisibilityInstances {
    const r0=Math.max(0,Math.floor((Math.min(va,vb)-GRID_PAD-vOrg)/g.size)),r1=Math.min(nv-1,Math.floor((Math.max(va,vb)+GRID_PAD-vOrg)/g.size));
    for(let r=r0;r<=r1;r++)take(xMajor?r*g.nx+c:c*g.nx+r);
   }
+  VIS_STATS.alongCalls++;VIS_STATS.alongTotal+=out.length;VIS_STATS.always=g.always.length;
   // Ascending, as a loop over every object visits them: a short list is sorted, a long one read back from the marks.
   if(out.length*8<objects.length)return out.sort((x,y)=>x-y);
   out.length=0;for(let i=0;i<objects.length;i++)if(this.seen[i]===gen)out.push(i);return out;

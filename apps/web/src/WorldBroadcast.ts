@@ -21,7 +21,7 @@ const PARTS = { frames: 0, ms: 0, maxMs: 0, over8: 0, over16: 0, over33: 0, pick
 const VIS0 = { ...VIS_STATS };
 (globalThis as unknown as { __soulsBroadcastParts?: unknown }).__soulsBroadcastParts = (reset = false) => {
   if (reset) { for (const k of Object.keys(PARTS) as (keyof typeof PARTS)[]) PARTS[k] = 0; Object.assign(VIS0, VIS_STATS); return null; }
-  const vis = Object.fromEntries(Object.entries(VIS_STATS).map(([k, v]) => [k, k === 'objects' ? v : v - VIS0[k as keyof typeof VIS0]]));
+  const vis = Object.fromEntries(Object.entries(VIS_STATS).map(([k, v]) => [k, typeof v !== 'number' || k === 'objects' || k === 'always' ? v : v - (VIS0[k as keyof typeof VIS0] as number)]));
   return { ...PARTS, vis };
 };
 const lap = (k: 'pick' | 'prepare' | 'track' | 'decide' | 'tour' | 'speck', t0: number) => { PARTS[k] += performance.now() - t0; };
