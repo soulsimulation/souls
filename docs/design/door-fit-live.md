@@ -1,7 +1,8 @@
 # Door-fit in live worlds
 
 Templates, and so new worlds, carry real doors (#2397, #2438). A live world keeps its drawn doorways until the
-live rule is switched on for it: `door-fit/1`, then `door-fit/2`, the last boot rules
+live rule is switched on for it: `door-fit/2` alone, the last boot rule (it fits every building door-fit/1 would,
+with its checks; door-fit/1 alone cut off 19 places on bench-eden)
 (`apps/server/src/god/door-fit.ts`, wired in `apps/server/src/edge-runtime-rules.ts`). This note says what the rule
 guarantees, what must be measured before it is switched on, how to switch it on and how to roll it back. Switching it
 on for any production world is a separate step that needs the maintainer's yes.
@@ -15,6 +16,9 @@ changing) holds the event back, so the next boot fits what is left. A restart pa
 
 What one building's fit guarantees (#2462):
 
+- **Its own building only.** A fit edit that would re-settle anything its ops do not name (a padded neighbour, re-settled
+  when the building's foundation comes up and goes back) is refused. The building keeps its drawn doorways (on bench-eden
+  such re-settling cut whole houses off, and no check of the fitted building saw it).
 - **BUILDSAFE.** The edit is checked on the would-be world before it commits, as a god edit is. It is not made when it
   edits a resident's body, when legal-edits/1 refuses it (its preview breaks a rule on a Soul, a Soul is in its way or
   uses what it changes), or, in a world without legal-edits/1, when the walk-out planner would have to walk somebody out

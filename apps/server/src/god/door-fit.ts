@@ -208,6 +208,9 @@ export async function fitAct(god: GodMode, ops: Op[], note: string, o: { cleanup
       const r = god.engineAct(ops, note, undefined, undefined, (before, after, d, inv) => {
         diff = d; inverse = inv;
         const guard = god.actGuard?.({ ops }); if (guard) return guard;
+        // #2462 (A3: on bench-eden a fit's remove and restore re-settled its padded neighbours, which cut whole houses
+        // off, and no check of its own building saw it): a fit edit changes only what its ops name
+        if (!o.cleanup) { const around = resettled(before, d, ops); if (around.length) return { accepted: false, failures: [{ op: -1, code: RESETTLES, field: 'door-fit', detail: `it would re-settle ${around.length} thing(s) around it: ${around.slice(0, 4).map((x) => before.pathOf(x)).join(', ')}` }] }; }
         const b = god.bodies; if (!b) return null;
         const own = b.refuse?.(after, d, ops); if (own) return { accepted: false, failures: [own] };
         if (o.cleanup) return null;
@@ -226,6 +229,18 @@ export async function fitAct(god: GodMode, ops: Op[], note: string, o: { cleanup
   } finally { god.bodies?.legalDone?.(); }
 }
 const FIT_PENDING = 'door-fit.preview-pending';
+/** #2462: the refusal of a fit edit that would re-settle things around its building (final: the building is refused). */
+export const RESETTLES = 'door-fit.resettles';
+/** What an edit changes beyond what its ops name (a thing that was there before and that no op removes, restores or
+ *  moves: a neighbour the edit re-settled), by id. */
+export function resettled(before: WorldModel, d: Diff, ops: readonly Op[]): string[] {
+  const named = new Set<string>();
+  for (const op of ops as { op: string; id?: string; entity?: { id: string } }[]) {
+    if (op.entity?.id) named.add(op.entity.id);
+    if (op.id) { named.add(op.id); if (op.op === 'remove' && before.entities.has(op.id)) for (const x of before.subtree(op.id)) named.add(x); }
+  }
+  return d.upserts.filter((x) => before.entities.has(x.id) && !named.has(x.id)).map((x) => x.id);
+}
 /** #2462: a refusal that a body caused (a resident seated in, in the way, using what the edit changes, sealed in): the
  *  building is left for a later boot, as one seated in always was. */
 const bodyRefusal = (f: readonly Failure[] | undefined) => (f ?? []).some((x) => x.code.startsWith('body.'));
@@ -500,8 +515,14 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
           for (const q of probes) { t = performance.now(); probesBefore.push(walk.reach(from, q.p, q.y, base) === true); o.slice?.(performance.now() - t, `${id} reach before`); await pause(); }
           const bw = god.model.worldPose(cur), rad = god.model.footprint(cur).reduce((r, f) => Math.max(r, Math.hypot(f.c[0] - bw.x, f.c[1] - bw.z) + Math.hypot(f.half[0], f.half[1])), 0) || 30;
           near = (x, z) => Math.hypot(x - bw.x, z - bw.z) < rad + 2;
-          t = performance.now(); seatsBefore = walk.seats && walk.reachAt ? walk.seats(near).filter((q) => walk.reachAt!(from!, q.p, q.level)).map((q) => q.id) : []; o.slice?.(performance.now() - t, `${id} seats before`); await pause();
-          t = performance.now(); bodiesBefore = walk.bodies && walk.reachAt ? walk.bodies(near).filter((q) => walk.reachAt!(from!, q.p, q.level)).map((q) => q.id) : []; o.slice?.(performance.now() - t, `${id} bodies before`); await pause();
+          // #2462 (A3: one slice for all of a building's seats held the thread 8.8 s on bench-eden): the list, then one walk each
+          if (walk.reachAt) {
+            for (const [list, into, what] of [[walk.seats, seatsBefore, 'seats'], [walk.bodies, bodiesBefore, 'bodies']] as const) {
+              if (!list) continue;
+              t = performance.now(); const qs = list(near); o.slice?.(performance.now() - t, `${id} ${what} before`); await pause();
+              for (const q of qs) { t = performance.now(); if (walk.reachAt(from!, q.p, q.level)) into.push(q.id); o.slice?.(performance.now() - t, `${id} ${what} before`); await pause(); }
+            }
+          }
         }
       }
       fresh = fit.fresh();
@@ -518,6 +539,8 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
     const { r, inverse, diff } = await fitAct(god, fit.ops, note(fit.doors.length));
     o.slice?.(performance.now() - t, `${id} edit`); await pause();
     if (!r.accepted) {
+      const around = (r.failures ?? []).find((x) => x.code === RESETTLES);
+      if (around) { out.refused.push(`${path} (${around.detail})`); continue; }
       const seated = bodyRefusal(r.failures);
       (seated ? out.left : out.kept).push(id);
       log(`door-fit/2: ${path} ${seated ? 'left for a later boot (a body in its way)' : 'keeps its revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
@@ -568,17 +591,15 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
           t = performance.now(); const ok = walk.reach(from!, probes[k]!.p, probes[k]!.y, base) === true; o.slice?.(performance.now() - t, `${id} reach after`); await pause();
           if (!ok) return { what: `a thing at ${probes[k]!.p.map((n) => Math.round(n * 10) / 10).join(', ')}` };
         }
-        if (seatsBefore.length && walk.seats && walk.reachAt) {
-          t = performance.now();
-          const now = new Map(walk.seats(near).map((q) => [q.id, q])), sid = seatsBefore.find((x) => { const q = now.get(x); return !q || !walk.reachAt!(from!, q.p, q.level); });
-          o.slice?.(performance.now() - t, `${id} seats after`); await pause();
-          if (sid) return { what: `the approach of ${sid}` };
-        }
-        if (bodiesBefore.length && walk.bodies && walk.reachAt) {
-          t = performance.now();
-          const now = new Map(walk.bodies(near).map((q) => [q.id, q])), bid = bodiesBefore.find((x) => { const q = now.get(x); return !!q && !walk.reachAt!(from!, q.p, q.level); });
-          o.slice?.(performance.now() - t, `${id} bodies after`); await pause();
-          if (bid) return { what: `body ${bid}`, body: true };
+        for (const [list, was, what] of [[walk.seats, seatsBefore, 'seats'], [walk.bodies, bodiesBefore, 'bodies']] as const) {
+          if (!was.length || !list || !walk.reachAt) continue;
+          t = performance.now(); const now = new Map(list(near).map((q) => [q.id, q])); o.slice?.(performance.now() - t, `${id} ${what} after`); await pause();
+          for (const x of was) {
+            const q = now.get(x);
+            if (!q) { if (what === 'seats') return { what: `the approach of ${x}` }; continue; }   // a body that walked off is not judged
+            t = performance.now(); const ok = walk.reachAt(from!, q.p, q.level); o.slice?.(performance.now() - t, `${id} ${what} after`); await pause();
+            if (!ok) return what === 'seats' ? { what: `the approach of ${x}` } : { what: `body ${x}`, body: true };
+          }
         }
         return null;
       };

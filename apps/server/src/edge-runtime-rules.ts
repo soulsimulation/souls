@@ -62,8 +62,10 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   // is switched on per world (docs/design/door-fit-live.md); templates, and so new worlds, carry the real doors already.
   // #2462: the fits run on after the boot rules, in slices, so nothing after them (the classroom TV) waits minutes for them
   if (opts.doorFit) {
+    // #2462 (A3): a live world runs door-fit/2 alone. It fits every building door-fit/1 would (a first revision moves
+    // straight to its every-doorway revision, its outside doors with the rest) and checks each fit, which door-fit/1
+    // never did: on bench-eden door-fit/1 alone cut off 19 places. A world door-fit/1 already fitted keeps its doors
     const fits = (async () => {
-      await enableDoorFitV1(host, opts.god?.()).catch((e) => console.error('[world] door-fit/1 could not be adopted:', String(e).slice(0, 300)));
       await enableDoorFitV2(host, opts.god?.()).catch((e) => console.error('[world] door-fit/2 could not be adopted:', String(e).slice(0, 300)));
     })();
     opts.doorFits?.(fits);

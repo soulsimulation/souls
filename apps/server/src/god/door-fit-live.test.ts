@@ -12,7 +12,7 @@ import { EdgeLedger } from '../edge/ledger/ledger.ts';
 import { adoptBootRuntimePoliciesV1, doorFitV2, engineDoorReach } from '../edge-runtime-rules.ts';
 import { GodMode } from './god.ts';
 import { installEngineBridge } from './engine-bridge.ts';
-import { doorFit, fitWorldDoorsV1, fitWorldDoorsV2, DOOR_FIT_DOOR, type DoorReach, type HandObstacle } from './door-fit.ts';
+import { doorFit, fitWorldDoorsV1, fitWorldDoorsV2, resettled, DOOR_FIT_DOOR, type DoorReach, type HandObstacle } from './door-fit.ts';
 import { projectProviders } from './query.ts';
 
 const ref = (d: string) => d.replace(/^core-/, 'core/');
@@ -224,6 +224,23 @@ test('#2462 never strands a Soul: a body reached before and not after undoes the
   assert.ok(edited && god.model.editSeq > seq0 + 1, 'the fit was made, then undone');
   assert.deepEqual(r.left, [house.id], 'left for a later boot');
   assert.equal(god.model.entities.get(house.id)!.def, def0);
+  assert.equal(doors().length, 0);
+});
+
+test('#2462 A3: a fit edit that would re-settle things around its building is refused, named, before it commits', { timeout: 120000 }, async (t) => {
+  const { w, god, house, solids, doors } = await cottage(t);
+  assert.equal((god.engineAct([{ op: 'place', def: 'core/floor-lamp@2', name: 'street-lamp', p: [20, 20] }] as never, 'test: a lamp') as { accepted: boolean }).accepted, true);
+  const lamp = [...god.model.entities.values()].find((e) => e.name === 'street-lamp')!;
+  // what the ops name (the building, its contents, a moved prop) is its own; a neighbour in the diff is not
+  const ops = [{ op: 'remove', id: house.id, cascade: true }, { op: 'move', id: 'e_other', p: [0, 0] }] as never;
+  assert.deepEqual(resettled(god.model, { upserts: [house, lamp], removes: [], defs: [], tiles: [], answers: [] }, ops), [lamp.id]);
+  assert.deepEqual(resettled(god.model, { upserts: [house], removes: [], defs: [], tiles: [], answers: [] }, ops), []);
+  // through the rule: the fit's edit re-settles the lamp (as a padded neighbour would be): refused for good, no edit
+  const act = god.engineAct.bind(god), seq0 = god.model.editSeq;
+  god.engineAct = ((ops2, note, c, d, gate) => act(ops2, note, c, d, gate && ((b, a, diff, inv) => gate(b, a, { ...diff, upserts: [...diff.upserts, lamp] }, inv)))) as typeof god.engineAct;
+  const r = await ticking(w.host, fitWorldDoorsV2(god, [], () => {}, solids()));
+  assert.match(r.refused[0] ?? '', /would re-settle 1 thing\(s\) around it: street-lamp/);
+  assert.equal(god.model.editSeq, seq0);
   assert.equal(doors().length, 0);
 });
 

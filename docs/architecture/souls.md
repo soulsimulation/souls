@@ -656,10 +656,11 @@ have it: `tools/worlds/fit-doors-v1.mjs` and then `tools/worlds/fit-doors.mjs` r
 write the outside doors in one batch after everything else, each at its building's settled height (an inside or upstairs
 door is its building's child). A door stands at that height and never cuts a foundation pad into the slope (it would
 re-settle its building away from it). A live world keeps its drawn doorways: live-world door migration
-(`door-fit/1`, then `door-fit/2`, the last boot rules) runs only with `DOOR_FIT_BOOT=1`, off until it is switched on per
+(`door-fit/2` alone, the last boot rule: it fits every building door-fit/1 would, and checks each fit) runs only with `DOOR_FIT_BOOT=1`, off until it is switched on per
 world ([door-fit in live worlds](../design/door-fit-live.md)). With it on, a world gets it once, after the other boot rules
 and without holding them up, one building at a time, each its own recorded edit, with the world serving between them; a
-restart part way through goes on where it stopped. Each fit edit is checked as a god edit is (BUILDSAFE): an edit that
+restart part way through goes on where it stopped. A fit edit that would re-settle anything around its building (a
+padded neighbour) is refused, and that building keeps its drawn doorways. Each fit edit is checked as a god edit is (BUILDSAFE): an edit that
 would move, bury or cut off a Soul, or change what one uses, is not made, and the building is tried again at the next
 boot, as one with a body standing in a doorway is (the bodies are read again for each building). A prop moves only where
 it touches no body, no other solid and no doorway, and leaves every door of its building workable by hand. Door-fit/2
