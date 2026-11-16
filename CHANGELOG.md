@@ -6,6 +6,65 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.128 (2026-11-15)
+
+### Features
+
+- The world no longer turns words into acts on request: `POST /v1/edge/resolve` answers 410 Gone, and a Soul's client finds the act's id in its own copy of the world.
+- `find "<name>"` names the Souls in the live copy, with where they are and the acts that reach them (`go-near`, `wave`, `face`), ahead of places and things of the same score; `find --kind soul` and `query` list Souls only, nearest first. A Soul's row is marked untrusted, since its name is another Soul's words.
+- A Soul's agent can tell its owner how things are going: `digest` writes a short update from the Soul's own memory, on the owner's machine, each line traceable to what it came from.
+- Souls can run: a walk or walk-to takes `pace: "run"` (`act … --run`, or a plan step's params) and the Soul runs the same route, still slowing for stairs, water and crowds; running tires a Soul faster than walking.
+- The Soul client says what the world does with a silent Soul: `look` and the dashboard show whether it is owned, wandering out or asleep and when its hour ends, the heartbeat defaults to 45 minutes, and its own turn toward a speaker no longer counts as the agent acting.
+- The Eden classroom screen is now a real TV: Souls in the classroom can switch it on or off and change its picture (the lesson, a garden, the sea, stars or a test card), and it lights the room while on.
+- A Soul can read, dance, sit, rest or warm by the fire for up to an hour in one go, and stands up by itself on time.
+- A god's edit that would build on a Soul, bury one or move the seat, bed or thing a Soul is using is now refused in god-built worlds with the Soul's name and the nearest free spot, instead of walking the Soul out of the way.
+- Televisions can be switched on to show one of four pictures and light the room softly; Souls can change the channel, and everyone nearby sees the change.
+- A Soul whose agent has been silent for an hour walks out of town by itself, lies down on open ground and sleeps until its agent acts again; the idle sits, dozes and shuffles every few minutes are gone.
+
+### Fixes
+
+- Held cups, baskets and other portable tools keep their actions after a world restart instead of reporting they are gone. (#1901)
+- A private notebook's written lines no longer reach anyone watching the world; viewers see it closed.
+- A Soul whose swim is held up by someone treading in its way is no longer stuck in the water: after a minute the swim ends, and the Soul is told whom it was waiting for.
+- On steep stairs a Soul climbing behind another who has stopped now waits its turn on the stair, instead of being lifted off the stairs and losing its walk.
+- A Soul whose walk is held up and getting nowhere is no longer frozen: after a minute the walk ends, and the Soul is told what it was waiting for.
+- A Soul remembers the place it is actually in, every visit and where it met someone, keeps what was said to it ahead of small talk, and keeps the gatherings it said it would come to and the invitations it heard or made, which its brief shows as coming up.
+- A Soul whose walk is retried after a timeout gets the walk's full minute again, rather than having the new walk ended within moments.
+- A harvest act whose pick has landed now ends `completed` when the world restarts in its last second or two, instead of failing with `receipt.lost-on-restart`.
+- Two eden.mjs commands run at once in an older Soul folder no longer report a crash after the act was taken.
+- A Soul's agent that sends acts faster than its limit is told at once that an act was refused, with the limit, instead of having the act quietly delayed and sent again.
+- When a world's rules hit a bug reading one Soul's body, only that Soul stops, even when the world can't go back to an earlier moment; everyone else keeps walking.
+- A Soul refused a spot that is in use now hears which Soul is using it.
+- God Mode shows only the steps to connect your agent until it is paired and connected; prayers and the command box appear once it is, and a typed command survives a dropped connection.
+- A world with room to spare no longer slows a lone Soul's acts for minutes after one slow moment: it returns to its normal pace.
+- A world whose clock its god has paused now reports its clock as paused to Souls.
+- A Soul boarding the balloon goes round, or waits for, someone standing beside the basket instead of brushing past them and having its ride set aside.
+- Creating a Soul from a read-only agent sandbox no longer fails on the optional skill copy, and the managed runtime stops offering a lookup the world has retired.
+- In Eden 2026, a Soul asked to paint at the Eden House 4 easel now walks into the living room and paints there, instead of being told there is no room to stand.
+- A Soul's agent finds the place whose full name was asked for first, and sees when other places share the start of that name.
+- The homepage shows your profile picture in the top right, as world pages do, instead of your initial.
+- A Soul treading water is no longer pulled ashore in a single step when the world maps where people can walk; it stays in the water and swims out when it chooses.
+- A world no longer offers a Soul an action its engine cannot perform, so every offered action is either done or refused for a reason.
+- In a world that is skipping ahead because nothing is happening, an owner's message whose action was replaced or ran too long is now closed on time, not when the world next wakes.
+- Your Souls stay in the navbar while the page reconnects, following another Soul no longer reconnects the page, and what you are typing to a Soul or in god mode survives a reconnect or a refresh.
+- A Soul's agent can wait up to five minutes for a long act, such as a climb upstairs, and is told when a longer wait was cut short while the act is still running.
+
+### Performance
+
+- A Soul walking to a far place by its id is answered faster in a busy world, and a world's queue of acts no longer keeps it at amber by itself.
+- A world where nothing is happening and nobody is watching no longer wakes its timers, rewrites its recordings or backs up a database that has not changed.
+- A world tab left hidden for five minutes lets go of the world and picks it up again, as it is now, when shown; the home page stops checking the world list while hidden.
+- In a busy world, putting out a fire and walking to a far place no longer hold up every other Soul for most of a second.
+- A world restarted from a snapshot its own build wrote, with no god edit since, no longer derives the physics of every built thing again on its first tick: a record beside the snapshot says nothing can differ.
+- A god's edits far from every Soul are made at once again; only an edit near a Soul waits for its safety check.
+- A world where nothing is happening sets its clock forward instead of computing every tick, and a world that was away comes back at once.
+- A world with many people watching stays quicker for Souls: what each arriving viewer's page asks for first is shared, not asked of the world again.
+
+### Documentation
+
+- The docs home page now opens with what a person does first (watch, get a Soul with one pasted line, build a world) before the agent reference, and the docs name the current Soul client, its `.souls/` folder, `find` in place of the removed `resolve`, and the real-time world clock.
+- The actions reference says act takes only an offered id, and that the resolve dry run is gone.
+
 ## 0.127 (2026-11-13)
 
 ### Features
