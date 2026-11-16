@@ -9,8 +9,7 @@
 // so /healthz and every viewer's welcome waited ~0.9 s for it. It is now sliced, as on a running world.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ChildPool, defaultCommand } from './children.mjs';
 import { decorateCommand } from './production.mjs';
@@ -22,7 +21,8 @@ const P0 = await testPort(6), origin = `http://127.0.0.1:${P0}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test('#2501: a handover of Eden 2026 reconnects its viewer within the release bar, and no tick is skipped', { timeout: 600_000 }, async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'handover-reconnect-')), logDir = join(dir, 'logs'), pools = [];
+  mkdirSync(join(root, '.local'), { recursive: true });
+  const dir = mkdtempSync(join(root, '.local/handover-reconnect-')), logDir = join(dir, 'logs'), pools = [];
   const world = { slug: 'eden', worldKey: 'eden-2026', name: 'Eden', dataDir: join(dir, 'eden'), template: 'eden-2026', templateFile: join(root, 'worlds/templates/eden-2026.json'), bodyCollectionPath: join(dir, 'body-collections.sqlite') };
   const pool = () => { const p = new ChildPool({ root, range: [P0 + 1, P0 + 5], logDir, publicOrigin: origin, healthPath: (s) => `/w/${s}/healthz`, prewarm: true, libraryDir: join(dir, 'library'),
     decorate: (c) => decorateCommand(c, { devAuth: true, publicOrigin: origin, base: '', worldHeapMb: 2048, build: 'dev' }), command: (w, p, o) => defaultCommand(w, p, o) }); pools.push(p); return p; };
