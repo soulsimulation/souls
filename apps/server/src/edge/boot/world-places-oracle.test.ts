@@ -186,7 +186,9 @@ type ActMenu = {caps: EdgeCapability[]; plans: Map<string, unknown>; partial?: t
 type Inside = {binds(s: EdgeSoul): {caps: EdgeCapability[]; plans: Map<string, unknown>}; actMenu(s: EdgeSoul, asked: string, params: unknown): ActMenu;
   resolveOnDemand(s: EdgeSoul, text: string, caps: EdgeCapability[], plans: Map<string, unknown>): {v: {kind: string; cap?: EdgeCapability}; caps: EdgeCapability[]; plans: Map<string, unknown>};
   onDemandId(s: EdgeSoul, asked: string, caps?: EdgeCapability[], plans?: Map<string, unknown>): boolean;
-  together: {resolve(s: EdgeSoul, text: string, caps: EdgeCapability[], plans?: Map<string, unknown>): unknown}};
+  together: {resolve(s: EdgeSoul, text: string, caps: EdgeCapability[], plans?: Map<string, unknown>): unknown};
+  routeDeadAlternatives(s: EdgeSoul, capability: string, code: string, keptOnly?: boolean): unknown;
+  capCache: Map<string, unknown>; wordsCache: Map<string, unknown>; lastMenu: Map<string, unknown>};
 function walkIdCorpus(L: EdgeLedger, soul: EdgeSoul, refs: string[]): Record<string, string[]> {
   const menu = L.coreA.binds(soul).caps, offered = new Set(menu.map(c => c.id)), every = <T,>(xs: T[], k: number) => xs.filter((_, i) => i % k === 0);
   const places = [...L.places.byId.keys()].map(id => 'walk:' + id).filter(id => !offered.has(id));
@@ -194,14 +196,23 @@ function walkIdCorpus(L: EdgeLedger, soul: EdgeSoul, refs: string[]): Record<str
     offered: every(menu.filter(c => c.verb === 'walk').map(c => c.id), 3),
     'not offered, place by id': every(places, 5),
     'not offered, room or thing by ref': every(refs.map(r => 'walk:' + r).filter(id => !offered.has(id)), 9),
+    // (a Soul that has built no menu yet: its act keeps one, as before, for a failed wait's alternatives)
+    'no kept menu, not offered, by id or ref': [...every(places, 37), ...every(refs.map(r => 'walk:' + r).filter(id => !offered.has(id)), 41)],
     unknown: ['walk:no-such-place', 'walk:region-park.nowhere', 'walk:no-such/room', 'walk:e_00000000'],
   };
 }
 function compareWalkIds(L: EdgeLedger, soul: EdgeSoul, corpus: Record<string, string[]>, what: string, tick: () => void) {
-  const I = L as unknown as Inside, bad: string[] = [], seen = {fast: 0, onDemand: 0, n: 0, wholeMenus: 0};
+  const I = L as unknown as Inside, bad: string[] = [], seen = {fast: 0, onDemand: 0, n: 0, wholeMenus: 0, noMenu: 0};
   const sum = (v: {kind: string; cap?: EdgeCapability}, plans: Map<string, unknown>) => JSON.stringify([v.kind, v.cap ?? null, v.cap ? plans.get(v.cap.id) ?? null : null]);
   for (const [kind, ids] of Object.entries(corpus)) for (const asked of ids) {
     tick(); seen.n++;   // a tick each: no menu built this tick, as in an act
+    const forget = () => {if (kind.startsWith('no kept menu')) {I.capCache.delete(soul.soulId); I.wordsCache.delete(soul.soulId); I.lastMenu.delete(soul.soulId);}};
+    // a walk to this id that waits and then fails route-dead takes its alternatives from the menu the act left kept (failWait):
+    // after the act's reads they are the old path's (forget: from a Soul with no kept menu, each path from the same start)
+    forget(); I.onDemandId(soul, asked); I.actMenu(soul, asked, undefined); const altNow = JSON.stringify(I.routeDeadAlternatives(soul, asked, 'route.unreachable', true) ?? null);
+    forget(); {const b0 = I.binds(soul); I.onDemandId(soul, asked, b0.caps, b0.plans); I.resolveOnDemand(soul, asked, [...b0.caps], new Map(b0.plans));} const altWas = JSON.stringify(I.routeDeadAlternatives(soul, asked, 'route.unreachable', true) ?? null);
+    if (altNow !== altWas) bad.push(`${kind} ${asked}: failed-walk alternatives were ${altWas.slice(0, 200)} | now ${altNow.slice(0, 200)}`);
+    if (kind.startsWith('no kept menu')) {seen.noMenu++; continue;}
     const reads = () => menuStats.cap.hit + menuStats.cap.hitKept + menuStats.cap.miss, r0 = reads(), nowOd = I.onDemandId(soul, asked), m = I.actMenu(soul, asked, undefined), whole = reads() - r0;
     const b = I.binds(soul), wasOd = I.onDemandId(soul, asked, b.caps, b.plans);
     if (nowOd !== wasOd) bad.push(`${kind} ${asked}: onDemandId was ${wasOd} now ${nowOd}`);

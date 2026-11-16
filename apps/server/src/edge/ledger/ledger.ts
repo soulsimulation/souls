@@ -3844,8 +3844,11 @@ export class EdgeLedger implements EdgeLedgerHooks {
    *  answer when every offer it made is one the menu does not list (offerWalk makes no offer the menu has the id of, so on
    *  the whole menu the same offers are made, in the same order) and, with `exactOnly`, when it is the asked id itself
    *  (an alias would be the first walk to that place in the menu's order, which may be a listed one). Null otherwise:
-   *  the caller reads the whole menu, as before. */
+   *  the caller reads the whole menu, as before. Also null while the Soul has no kept menu at all: the whole menu that
+   *  read builds is kept, and a walk that waits and then fails route-dead takes its alternatives from that kept menu
+   *  only (failWait: with none, it names none), so the first such act builds it, as before. */
   private unlistedOnDemand(soul: EdgeSoul, asked: string, exactOnly: boolean): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} | null {
+    if (!this.keptMenu(soul)) return null;
     // (`byIdAdded` with no answer from it: the by-id offer was a secret one, where the whole menu's first walk to that place
     // could be a listed one and answer instead: read the whole menu)
     const seen: {byIdAdded?: boolean; from?: 'id' | 'ref'} = {}, r = this.idOnDemand(soul, asked, [], new Map(), seen);
