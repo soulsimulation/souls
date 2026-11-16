@@ -180,6 +180,17 @@ restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM
 off-site. Every release also takes its own compact pre-release copy. Commands are in the
 [runbook](operations/runbook.md#backups).
 
+**Hourly run (#2542).** `sim-worlds-backup-hourly@<stage>.timer` (minute 15 of each hour) runs
+`deploy/backup-restic.mjs backup-hourly <stage>`: it copies only the databases written since their last copy (online
+backup and `quick_check`), skips the rest, takes one snapshot tagged `<stage>,hourly` and copies it off-site. It runs no
+forget, prune or check; the nightly run keeps the newest 24 hourly snapshots (`SIM_BACKUP_KEEP_HOURLY`) beside its own
+rule, which never removes an hourly one. Each hourly snapshot holds every database, so it restores the whole stage. Once
+enabled, a dead disk loses at most about an hour (a day with the nightly run alone; the maintainer accepted the hour, with
+continuous replication as a later task). `install.sh` installs the timer on every release and never enables it:
+enabling it is the maintainer's step, `systemctl enable --now sim-worlds-backup-hourly@production.timer` on the host,
+then one restore drill from an hourly snapshot ([runbook](operations/runbook.md#hourly-run)). Each world itself keeps
+only its newest 2 in-process copies (`backup-YYYYMMDDHH.db`; it kept up to 15 before #2542).
+
 ### Off-site copy
 
 Production's snapshots are also copied each night to a private S3-compatible bucket the maintainer chose (#557). The

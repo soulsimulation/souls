@@ -59,6 +59,20 @@ const NATIVES: { name: string; description: string }[] = [
   { name: 'Basil', description: 'a talkative kiosk regular who loves gossip and hates being alone' },
 ];
 
+/** #2542: the hourly in-process backup keeps only its newest 2 files (`backup-YYYYMMDDHH.db`; no dailies): the history is
+ *  the restic snapshots (deploy/backup-restic.mjs, nightly and hourly), and nothing reads more than the newest copy. */
+export const BACKUP_FILE_RE = /^backup-\d{10}\.db$/;
+export function pruneBackupFiles(dir: string, keep = 2): void {
+  const files = readdirSync(dir).filter((f) => BACKUP_FILE_RE.test(f)).sort().reverse();
+  for (const f of files.slice(keep)) { try { unlinkSync(join(dir, f)); } catch { /* already gone */ } }
+}
+/** #2303 A2: before this process's first backup, the newest backup file is at least as new as the database and its log. */
+export function newestBackupCoversDb(dir: string): boolean {
+  const mtime = (f: string) => { try { return statSync(join(dir, f)).mtimeMs; } catch { return 0; } };
+  const newest = readdirSync(dir).filter((f) => BACKUP_FILE_RE.test(f)).sort().at(-1);
+  return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
+}
+
 /** Shards (#2389): one world, booted from its own config. A world is a value, not the program: what it reads after boot
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
@@ -529,27 +543,14 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   process.on('SIGINT', () => void shutdown('SIGINT').catch(()=>console.error('[world] shutdown is incomplete; retain database and inspect')));
   }
 
-  // Hourly on-box backup with retention: the last 6 hourly files plus one per day (the 00:00 UTC file) for 7 days.
-  function pruneBackups() {
-    const files = readdirSync(config.dataDir).filter((f) => /^backup-\d{10}\.db$/.test(f)).sort().reverse();
-    const keep = new Set(files.slice(0, 6));
-    const now = Date.now();
-    for (const f of files) {
-      const day = Date.UTC(Number(f.slice(7, 11)), Number(f.slice(11, 13)) - 1, Number(f.slice(13, 15)));
-      if (f.slice(15, 17) === '00' && now - day <= 8 * 86400_000) keep.add(f); // real date difference, correct across month boundaries
-    }
-    for (const f of files) if (!keep.has(f)) { try { unlinkSync(join(config.dataDir, f)); } catch { /* already gone */ } }
-  }
+  const pruneBackups = () => pruneBackupFiles(config.dataDir);
   // #2303 A2: no backup of a database nothing has written since the last one: this process has made no change since its last
   // backup (or, before its first, none at all and the newest backup file is newer than the database and its log).
   let backedChanges = 0, backedOnce = false;
   const dbChanges = () => (db.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
   function unchangedSinceBackup(): boolean {
     if (dbChanges() !== backedChanges) return false;
-    if (backedOnce) return true;
-    const mtime = (f: string) => { try { return statSync(join(config.dataDir, f)).mtimeMs; } catch { return 0; } };
-    const newest = readdirSync(config.dataDir).filter((f) => /^backup-\d{10}\.db$/.test(f)).sort().at(-1);
-    return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
+    return backedOnce || newestBackupCoversDb(config.dataDir);
   }
   async function backupNow() {
     if (disk.low || unchangedSinceBackup()) return;   // #2378: no backup while the disk is under its headroom
