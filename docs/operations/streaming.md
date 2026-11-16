@@ -55,7 +55,9 @@ node stream.mjs stop
 - Captures that window (`screen_capture`, window mode) with the title bar cropped, and its sound
   (`sck_audio_capture`, application set to Chrome for Testing's bundle id). Every other audio input in the collection
   is muted.
-- Starts the stream (or the recording), then the watchdog in the background, and exits.
+- Starts the stream (or the recording) and checks that OBS reports it active within 5 s; if not (OBS shows a dialog,
+  for example about the recording path), `start` fails and says so. Then it starts the watchdog in the background
+  and exits.
 
 `status` prints the output state and elapsed time, OBS's frame rate, frames skipped in rendering and encoding,
 frames dropped on the network (streaming only), the bitrate over 3 s, the peak level of the window's sound, and the
@@ -77,7 +79,9 @@ retries. If `start` failed halfway, `stop` still undoes what it did.
 `start` leaves `node stream.mjs watch` running in the background until `stop`. Every 2 s it reads the page's frame
 counter over DevTools. It reloads the page in place when the counter has not moved for 10 s (a page that does not
 answer counts as stalled), and every 4 h regardless. If the stream (or recording) has been stopped for 5 s and OBS is
-not reconnecting it by itself, the watchdog starts it again. So stop a stream with `stop`, not with OBS's button.
+not reconnecting it by itself, the watchdog starts it again: at most 3 times (at once, then after 30 s, then after
+120 s), because every failed start opens an OBS dialog on the screen. Then it logs that it gave up and stops trying;
+the count resets once the output has run for a minute. So stop a stream with `stop`, not with OBS's button.
 Each action is a timestamped line in `<state dir>/watch.log`:
 
 ```text
@@ -96,7 +100,7 @@ When the page has no `window.__soulsStream` (soul.game before `?stream=1` shippe
 | `SOULS_STREAM_SECRETS` | `~/.souls/stream.env` | the secrets file |
 | `SOULS_STREAM_DIR` | `~/.souls/stream` | state, Chrome for Testing and its profile, `watch.log` |
 | `SOULS_STREAM_CDP_PORT` | `9333` | Chrome's DevTools port (localhost only) |
-| `SOULS_STREAM_RECORD_DIR` | OBS's recording folder | where `--record` files go (`.mkv`) |
+| `SOULS_STREAM_RECORD_DIR` | OBS's recording folder | where `--record` files go (`.mkv`); created if missing |
 | `OBS_WEBSOCKET_URL` | `ws://127.0.0.1:4455` | OBS's websocket |
 
 ### OBS 33 faults the tool works around
