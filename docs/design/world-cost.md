@@ -172,8 +172,11 @@ hash, and each restored exactly the state it saved.
 
 ### Capacity on the production host: estimates
 
-These are estimates from this runner's Pss. They assume quiet fresh worlds, a 16 GB host, 7.4 GB for worlds under
-today's unit or 12.5 GB with the whole host, and shards of 8. Form 2's shard cost is the program (about 170 MB) plus
+These are estimates from this runner's Pss. They assume quiet fresh worlds, the 16 GB host production had before
+#2241, 7.4 GB for worlds under that unit or 12.5 GB with the whole host, and shards of 8. The production host now has
+31 GB, of which its worlds may use 24 GB: `install.sh capacity` sets `--worlds-mem-mb` 2 GB below that, so 22 GB
+(`tools/world-launcher/deploy/install.sh`, [operations](../operations.md#services-and-stages)). Counts grow roughly in proportion
+to the memory, about three times the 7.4 GB column; the tables keep the old budgets. Form 2's shard cost is the program (about 170 MB) plus
 98 MB per small world, or plus 338 MB for the first Eden world and 255 MB for each further one.
 
 | Form | Small worlds at 7.4 GB | Eden worlds at 7.4 GB | Small at 12.5 GB | Eden at 12.5 GB |
