@@ -60,6 +60,10 @@ function sameNav(s: NavSnap, e: Entity): boolean {
 
 /** Bounded memo of people-augmented grids (each holds full-size rasters). */
 const AROUND_CACHE = 8;
+/** doors-pass/1 (#2434): the most closed doors one walk act passes in series. */
+export const PASS_MAX_DOORS = 6;
+/** doors-pass/1 (#2434): the doors one walk passes, in order (each with its floor and the faces it is crossed from and to). */
+export type DoorChain = { doors: { id: string; level: number; from: Vec2; to: Vec2 }[]; route: Extract<RouteResult, { ok: true }>['route'] };
 /** Bounded memo of upper-level grids over tiles no paged window holds (levelAt): ~2 MB each. */
 const OUTSIDE_LEVELS = 12;
 /** routeAround: how far the start of a people-avoiding route may snap (path.ts RouteOpts.startTolerance). */
@@ -725,6 +729,86 @@ export class Spatial {
    */
   routeMemo: { cap: number; oracle: boolean; epoch: number; map: Map<string, RouteResult>; hits: number; misses: number; oracleMisses: number } | null = null;
   enableRouteMemo(cap: number, oracle = false) { this.routeMemo = { cap, oracle, epoch: this.epoch, map: new Map(), hits: 0, misses: 0, oracleMisses: 0 }; }
+  /**
+   * doors-pass/1 (#2434): the floor a closed, unlocked hand door stands on, or null when it is no way through: level 0 when
+   * its foot is within 0.6 m of level 0's floor (of the terrain under it, on a ground world), else the upper level whose
+   * floor it stands on (within 0.6 m, inside that level's crop when it has one). The connectivity audit counts the same doors.
+   */
+  passDoorLevel(o: Obstacle): number | null {
+    if (o.door !== 'pass') return null;
+    const [x, z] = o.obb.c, y0 = this.ground ? this.ground.standY(x, z) : this.scene.levels.find((l) => l.id === 0)?.y ?? 0;
+    if (Math.abs(o.y0 - y0) <= 0.6) return 0;
+    // levels are shared by height across buildings: the one with standing room at the door's faces, nearest in height first
+    const sides = doorSides(o), room = (id: number) => sides.some((q) => { const read = this.clearanceCapped(id, q, 1); return !!read && read(q) >= 0.3; });
+    const l = this.scene.levels.filter((v) => v.id !== 0 && Math.abs(o.y0 - v.y) <= 0.6 && (!v.crop || (x >= v.crop[0] && x <= v.crop[2] && z >= v.crop[1] && z <= v.crop[3])))
+      .sort((a, b) => Math.abs(o.y0 - a.y) - Math.abs(o.y0 - b.y) || a.id - b.id).find((v) => room(v.id));
+    return l ? l.id : null;
+  }
+  /**
+   * doors-pass/1 (#2434): the closed hand doors one walk passes from `start` to `goal`, in order, with the route through
+   * them (legs with every door shut, each door crossed between its two faces); null when the goal needs no door or no
+   * chain of at most PASS_MAX_DOORS reaches it. Breadth first (fewest doors first) over the doors each failed search names,
+   * nearest to the way first, at most 4 per region, never one door twice.
+   */
+  /** doors-pass/1: every closed, unlocked hand door with its floor, made once per navigation epoch and scene (#2438
+   *  review: it was made for every chain search, a clearance read per upstairs door, on every walk while the labels were
+   *  cold after a boot). */
+  private passCache: { epoch: number; obstacles: readonly Obstacle[]; map: Map<string, { o: Obstacle; level: number }> } | null = null;
+  passDoors(): Map<string, { o: Obstacle; level: number }> {
+    const c = this.passCache;
+    if (c && c.epoch === this.epoch && c.obstacles === this.scene.obstacles) return c.map;
+    const map = new Map<string, { o: Obstacle; level: number }>();
+    for (const o of this.scene.obstacles) { const level = this.passDoorLevel(o); if (level !== null) map.set(o.id, { o, level }); }
+    this.passCache = { epoch: this.epoch, obstacles: this.scene.obstacles, map };
+    return map;
+  }
+  doorChain(world: WorldState, profile: AgentProfile, start: Place, goal: Place, rest: RouteOpts = {}, out?: { reaches?: boolean }): DoorChain | null {
+    const pass = this.passDoors();
+    if (!pass.size) return null;
+    type Node = { at: Place; doors: DoorChain['doors']; legs: DoorChain['route']['legs']; length: number; expanded: number };
+    // past the first door the naming search floods the (small) region it starts in, as an early proof of unreachability
+    // there names nothing; from the start it keeps the caller's proof, as one door did (a full flood of a big world's
+    // open ground for every room reach made the menu and every act wait: m4-v1 on the runner)
+    const used = new Set<string>(), { proveUnreachable: _p, ...naming } = rest;
+    let frontier: Node[] = [{ at: start, doors: [], legs: [], length: 0, expanded: 0 }];
+    for (let depth = 0; depth <= PASS_MAX_DOORS && frontier.length; depth++) {
+      const next: Node[] = [];
+      for (const n of frontier) {
+        // with the caller's early proof the search names the doors walling the destination in (one door's case, cheap);
+        // when there are some and none of them is reached from here (doors in series), the region here is flooded to name its own
+        const full = depth > 0 || !rest.proveUnreachable;
+        let named = this.routeNow(world, profile, n.at, goal, { ...(full ? naming : rest), nameObstacles: (id) => pass.has(id) && !used.has(id) });
+        if (named.ok) {
+          if (!n.doors.length) { if (out) out.reaches = true; return null; }
+          return { doors: n.doors, route: { legs: [...n.legs, ...named.route.legs], length: n.length + named.route.length, expanded: n.expanded + named.route.expanded } };
+        }
+        if (depth === PASS_MAX_DOORS || named.diagnostic.code !== 'route.unreachable') continue;
+        const along = (c: Vec2) => hypot(c[0] - n.at.p[0], c[1] - n.at.p[1]) + hypot(c[0] - goal.p[0], c[1] - goal.p[1]);
+        const nameOf = (r: RouteResult) => (r.ok ? [] : [...new Set(r.diagnostic.subjects ?? [])].filter((id) => pass.has(id) && !used.has(id))
+          .sort((a, b) => along(pass.get(a)!.o.obb.c) - along(pass.get(b)!.o.obb.c) || (a < b ? -1 : 1)).slice(0, 4));
+        let ids = nameOf(named);
+        if (!full && ids.length && !ids.some((id) => { const { o, level } = pass.get(id)!; return doorSides(o).some((q) => this.routeNow(world, profile, n.at, { level, p: q }, rest).ok); })) {
+          named = this.routeNow(world, profile, n.at, goal, { ...naming, nameObstacles: (id) => pass.has(id) && !used.has(id) });
+          ids = nameOf(named);
+        }
+        for (const id of ids) {
+          const { o, level } = pass.get(id)!, sides = doorSides(o);
+          for (const [a, b] of [sides, [sides[1], sides[0]] as [Vec2, Vec2]]) {
+            const r1 = this.routeNow(world, profile, n.at, { level, p: a }, rest); if (!r1.ok) continue;
+            used.add(id);
+            // a door with both faces on this side (one standing in the open) separates nothing: never a way on
+            if (this.routeNow(world, profile, n.at, { level, p: b }, { ...rest, proveUnreachable: true }).ok) break;
+            // nor one that leads back out to where the walk started (in through one door of a building, out of another)
+            if (depth > 0 && this.routeNow(world, profile, start, { level, p: b }, { ...rest, proveUnreachable: true }).ok) break;
+            next.push({ at: { level, p: b }, doors: [...n.doors, { id, level, from: a, to: b }], legs: [...n.legs, ...r1.route.legs], length: n.length + r1.route.length + hypot(b[0] - a[0], b[1] - a[1]), expanded: n.expanded + r1.route.expanded });
+            break;
+          }
+        }
+      }
+      frontier = next;
+    }
+    return null;
+  }
   route(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
     const m = this.routeMemo;
     if (!m) return this.routeNow(world, profile, start, goal, opts);
@@ -746,27 +830,15 @@ export class Spatial {
     return r;
   }
   private routeNow(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
-    // doors-pass/1 (#2365): what one walk act reaches, as entry 31's passage executes it: a route with every door shut, else
-    // a route through ONE closed, unlocked hand door on the ground (level 0): a route to one face of a door the failed search
-    // names and one from its other face to the goal, both with doors shut. Two doors in series, or a door upstairs, do not
-    // count (the passage opens one door on level 0), so reach, offers and the walk agree.
-    // The start and goal may be on any level (#2383): the door is on the ground, the legs to and from it climb stairs.
+    // doors-pass/1 (#2365, #2434): what one walk act reaches, as entry 31's passage executes it: a route with every door
+    // shut, else a route through closed, unlocked hand doors, any number in series (at most PASS_MAX_DOORS) and on any
+    // floor (doorChain). The passage plans the same chain, so reach, offers and the walk agree.
     if (opts?.doors === 'pass') {
       const { doors: _, ...rest } = opts;
       const r = this.routeNow(world, profile, start, goal, rest);
       if (r.ok || r.diagnostic.code !== 'route.unreachable') return r;
-      // only doors on the ground (within 0.6 m of level 0's floor or the terrain), as the connectivity audit counts them
-      const y0 = this.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0;
-      const pass = new Map(this.scene.obstacles.filter((o) => o.door === 'pass' && Math.abs(o.y0 - (y0 ?? this.ground!.standY(o.obb.c[0], o.obb.c[1]))) <= 0.6).map((o) => [o.id, o]));
-      if (!pass.size) return r;
-      const named = this.routeNow(world, profile, start, goal, { ...rest, nameObstacles: (id) => pass.has(id) });
-      const doors = named.ok ? [] : (named.diagnostic.subjects ?? []).map((id) => pass.get(id)).filter((o): o is Obstacle => !!o).slice(0, 4);
-      for (const o of doors) for (const [a, b] of [doorSides(o), doorSides(o).reverse() as [Vec2, Vec2]]) {
-        const r1 = this.routeNow(world, profile, start, { level: 0, p: a }, rest); if (!r1.ok) continue;
-        const r2 = this.routeNow(world, profile, { level: 0, p: b }, goal, rest); if (!r2.ok) continue;
-        return { ok: true, route: { legs: [...r1.route.legs, ...r2.route.legs], length: r1.route.length + hypot(b[0] - a[0], b[1] - a[1]) + r2.route.length, expanded: r1.route.expanded + r2.route.expanded } };
-      }
-      return r;
+      const chain = this.doorChain(world, profile, start, goal, rest);
+      return chain ? { ok: true, route: chain.route } : r;
     }
     const o0 = this.planner === 'exact' ? opts : { planner: this.planner, ...opts }, o = this.routeReachV1 ? { ...o0, routeReachV1: true } : o0;
     if (this.ground) {

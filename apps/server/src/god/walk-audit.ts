@@ -10,11 +10,13 @@
 //
 //   node apps/server/src/god/walk-audit.ts --db <world copy .db or .db.gz> [--name n] [--shard k/n] [--out part.json]
 //   node apps/server/src/god/walk-audit.ts --genesis worlds/templates/eden-2026.json [--name n] [--shard k/n] [--out part.json]
-// The world copy is never written: it is copied (or gunzipped) into a temporary directory first.
+// The world copy is never written: it is copied (or gunzipped) into a temporary directory first. That walk-audit-* directory
+// is removed when the process exits, on success, failure or a kill (SIGINT/SIGTERM/SIGKILL); --keep keeps it.
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, readFileSync, renameSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Thing } from './nav.ts';
@@ -65,8 +67,36 @@ function env(key: string, worldId: string, dir: string) {
     ENABLE_WORLD_ENGINE: '1', SOUL_LIFECYCLE: '1', MIND_DRIVER: 'edge' });
 }
 
+/** Each boot's scratch copy (a world .db, up to hundreds of MB): removed by stop(), and at the latest when this process
+ *  exits, so a failed or interrupted run leaves nothing behind (once, they piled up to ~85 GB). Only this process's own
+ *  directories are ever removed. A killed process runs no exit handler (and the audit's long synchronous phases would
+ *  hold off a JS signal handler), so a small detached watcher removes the copy once this process is gone. */
+const keepScratch = () => process.argv.includes('--keep');
+function scratchDir(): { dir: string; drop(): void } {
+  const dir = mkdtempSync(join(tmpdir(), 'walk-audit-'));
+  let gone = false;
+  const drop = () => {
+    if (gone) return; gone = true; process.off('exit', drop);
+    if (keepScratch()) { console.error(`walk-audit: kept ${dir}`); return; }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort at exit */ }
+  };
+  process.on('exit', drop); reapAfterExit(dir);
+  return { dir, drop };
+}
+const REAPER = `const [pid, dir] = process.argv.slice(1), { rmSync } = require('node:fs');
+const t = setInterval(() => { try { process.kill(+pid, 0); } catch { clearInterval(t); rmSync(dir, { recursive: true, force: true }); } }, 500);`;
+function reapAfterExit(dir: string) {
+  if (keepScratch()) return;
+  spawn(process.execPath, ['-e', REAPER, String(process.pid), dir], { detached: true, stdio: 'ignore' }).unref();
+}
+
 export async function bootForWalk(o: { db?: string; genesis?: string; fuzz?: string; name?: string }): Promise<Booted> {
-  const dir = mkdtempSync(join(tmpdir(), 'walk-audit-')), file = join(dir, 'sim.db');
+  const { dir, drop } = scratchDir();
+  try { return await bootIn(dir, drop, o); } catch (e) { drop(); throw e; }
+}
+
+async function bootIn(dir: string, drop: () => void, o: { db?: string; genesis?: string; fuzz?: string; name?: string }): Promise<Booted> {
+  const file = join(dir, 'sim.db');
   let worldId: string, seed: string;
   if (o.db) {
     if (o.db.endsWith('.gz')) writeFileSync(file, gunzipSync(readFileSync(o.db)));
@@ -91,9 +121,7 @@ export async function bootForWalk(o: { db?: string; genesis?: string; fuzz?: str
   bridge.reconcile(); host.drainInputs();
   const refused = fuzz ? await buildFuzz(fuzz, god, host, bridge) : [];
   const name = o.name ?? (o.db ? basename(o.db).replace(/\.db(\.gz)?$/, '') : o.fuzz ? 'fuzz' : basename(o.genesis!).replace(/\.json$/, '') + '-genesis');
-  // the copy is scratch: on the laptop it goes to the cleanup trash (lane rule: no rm), elsewhere the OS reaps tmp
-  const trash = join(homedir(), '.Trash', 'eden-cleanup-20261020');
-  const stop = () => { host.stop(); if (existsSync(trash)) try { renameSync(dir, join(trash, basename(dir))); } catch { /* left in tmp */ } };
+  const stop = () => { try { host.stop(); } finally { drop(); } };
   return { name, worldId, host, god, bridge, engine: host.engine as any, edge, refused, stop };
 }
 
@@ -200,7 +228,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const a = process.argv.slice(2), arg = (k: string) => { const i = a.indexOf(`--${k}`); return i < 0 ? undefined : a[i + 1]; };
   const db = arg('db'), genesis = arg('genesis'), fuzz = arg('fuzz'), out = arg('out'), sh = (arg('shard') ?? '0/1').split('/').map(Number) as [number, number];
   if (!(sh[1] >= 1 && sh[0] >= 0 && sh[0] < sh[1])) { console.error('--shard k/n with 0 <= k < n'); process.exit(2); }
-  if ([db, genesis, fuzz].filter(Boolean).length !== 1) { console.error('usage: walk-audit.ts --db <copy.db|.db.gz> | --genesis <template.json> | --fuzz <fuzz-world.mjs> [--use] [--name n] [--shard k/n] [--out file]'); process.exit(2); }
+  if ([db, genesis, fuzz].filter(Boolean).length !== 1) { console.error('usage: walk-audit.ts --db <copy.db|.db.gz> | --genesis <template.json> | --fuzz <fuzz-world.mjs> [--use] [--keep] [--name n] [--shard k/n] [--out file]'); process.exit(2); }
   const t0 = performance.now();
   const w = await bootForWalk({ db: db && resolve(db), genesis: genesis && resolve(ROOT, genesis), fuzz: fuzz && resolve(ROOT, fuzz), name: arg('name') });
   const boot = Math.round(performance.now() - t0);

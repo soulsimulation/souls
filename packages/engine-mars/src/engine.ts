@@ -3198,8 +3198,9 @@ export class MarsEngine implements Engine {
    * when a walk reaches it (or it names nothing). From the body's own floor (review of #2397): a Soul upstairs behind the
    * ground door plans the same passage, its first leg walking down the stairs to the door. Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
    * god engine-bridge) bordering the region the failed route exhausted; nearest to the way there first, at most `max`. */
-  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
+  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false,out?:{reaches?:boolean}):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
     const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
+    if((typeof step.params?.level==='number'?step.params.level:0)!==0)return null;   // #2434: a goal upstairs is the door chain's (doorChainV1)
     const t=this.pointOf(step.params?.to);if(!t)return null;
     const start=this.godWalkoutStartV1(actor);if(!start)return null;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8);if(!goal)return null;
@@ -3208,7 +3209,9 @@ export class MarsEngine implements Engine {
     // the doors are named from the destination's side, whose search the door closes in at once (review of #2397)
     const back=()=>spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},start,{nameObstacles:id=>id.includes('#door:')});
     const r=behind?back():spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
-    if(r.ok||r.diagnostic.code!=='route.unreachable')return null;
+    // `out.reaches` (#2438 review): the walk reaches as it is, so no door chain need be searched either
+    if(r.ok){if(out)out.reaches=true;return null;}
+    if(r.diagnostic.code!=='route.unreachable')return null;
     const pos=(id:string)=>{const o=spatial.scene.obstacles.find(x=>x.id.startsWith(id+'#door:'));return o?o.obb.c:null;};
     const along=(c:[number,number])=>hypot(c[0]-start.p[0],c[1]-start.p[1])+hypot(c[0]-goal[0],c[1]-goal[1]);
     const named=(d:{subjects?:string[]})=>[...new Set((d.subjects??[]).filter(s=>s.includes('#door:')).map(s=>s.split('#')[0]))].map(id=>({id,c:pos(id)})).filter((x):x is {id:string;c:[number,number]}=>!!x.c)
@@ -3226,12 +3229,36 @@ export class MarsEngine implements Engine {
    *  Eden boot, after door-fit/1's edit, a check here drained the whole world's relabel inside one act, ~25 s on a runner);
    *  the caller then asks the destination's side itself (closedDoorsOnWalkV1 with `behind`). */
   walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean|null{
-    const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
+    // #2434: the destination is the plan's last walk_to (a walk upstairs goes to the front door's stand first)
+    const step=[...steps].reverse().find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
     if(!this.navWarmV1(0))return null;
-    const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
+    const level=typeof step!.params?.level==='number'?step!.params.level:0,goal=level?[t[0],t[1]] as [number,number]:this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
     const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return null;
-    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
-    return !!a?.ok&&!!b?.ok&&!!a.door!==!!b.door;
+    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level,tol:.6}]);
+    // #2434: either end behind doors, and not both in the same door group (the areas a walk joins without a door)
+    return !!a?.ok&&!!b?.ok&&(!!a.door||!!b.door)&&(a.door!==b.door||a.group!==b.group);
+  }
+  /** Soul Actions entry 31 (pure; #2434): the closed hand doors, in order, that one walk passes from where this body stands to
+   *  its plan's LAST walk_to destination (a point `[x, z]` with its `level`, or a named thing), any number in series and on any floor
+   *  (Spatial.doorChain, as reach counts them). Each door is its entity id with its floor and the faces it is crossed
+   *  from and to. Searched from the destination, else from the start (a long walk's far ground is planned coarsely and
+   *  may not meet a shut leaf) and turned round. Null when no door is needed or no chain reaches it. */
+  doorChainV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):{goal:[number,number];level:number;doors:{id:string;level:number;from:[number,number];to:[number,number]}[]}|null{
+    const step=[...steps].reverse().find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
+    const to=step.params?.to,t=this.pointOf(to);if(!t)return null;
+    const level=typeof step.params?.level==='number'?step.params.level:typeof to==='string'?(this.rt.world.regions[to]?.level??this.ents[to]?.human?.level??0):0;
+    const start=this.godWalkoutStartV1(actor);if(!start)return null;
+    const goal=level===0?this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]]:[t[0],t[1]] as [number,number];
+    const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);
+    const ent=(id:string)=>id.split('#')[0];
+    // from the destination first: its side is usually the small one (a room), searched exactly, and a long walk's far
+    // ground is planned coarsely and may not meet a shut leaf on the way
+    const plain:{reaches?:boolean}={};
+    const back=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,{level,p:goal},start,{},plain);
+    if(back)return {goal,level,doors:back.doors.reverse().map(d=>({id:ent(d.id),level:d.level,from:d.to,to:d.from}))};
+    if(plain.reaches)return null;   // #2438 review: the walk needs no door; the second search would only repeat the route
+    const fwd=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,start,{level,p:goal});
+    return fwd?{goal,level,doors:fwd.doors.map(d=>({...d,id:ent(d.id)}))}:null;
   }
   /** Soul Actions entry 31 (pure): does a walk from `from` (level 0) reach this plan's first walk_to destination, a
    * standing point at its standoff as the walk itself would choose (goalNear's turns), with the world as it is now? */

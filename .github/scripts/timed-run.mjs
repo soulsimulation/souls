@@ -62,7 +62,7 @@ export const ARG_ALLOW = {
   settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': (v) => ['0', '10', '0,10'].includes(v), '--settle-min': int(1, 20), '--short': FLAG },
   hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
   colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
-  viewers: { '--viewers': list(/^(200|1\d\d|[1-9]\d?)$/, 4), '--window-sec': int(10, 600), '--short': FLAG },
+  viewers: { '--viewers': list(/^(2000|1\d{3}|[1-9]\d{0,2})$/, 4), '--window-sec': int(10, 600), '--short': FLAG },
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
   clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
 };

@@ -16,13 +16,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { bootEden } from '../../apps/server/test/eden-capabilities-timing.ts';
-import { DOOR_FIT_DOOR, fitWorldDoorsV1 } from '../../apps/server/src/god/door-fit.ts';
+import { DOOR_FIT_DOOR, DOOR_FIT_HELD, fitWorldDoorsV1 } from '../../apps/server/src/god/door-fit.ts';
 import { DOOR_FIT_FROM } from '../../packages/world-compiler/src/index.ts';
 
 /** Doors left out of the templates (an open gap, as a held door). Open, the leaf cuts its room off from the room's own
  *  entry, measured on a fresh genesis: region-alpine-mountain-station/hall has no walk goal with door-1 open, and one with
  *  it closed or left out. The rule's hand check does not see an open leaf across a slope. */
-const CUT_OFF = new Set(['region-alpine-mountain-station-door-1']);
+const CUT_OFF = DOOR_FIT_HELD;   // the rule holds these back itself (#2438: one list for the rule and the tools)
 const root = new URL('../../', import.meta.url);
 const back = new Map([...DOOR_FIT_FROM].map(([from, to]) => [to.ref, from]));
 const fitDoor = (o) => o.def === DOOR_FIT_DOOR && /-door-\d+$/.test(o.name ?? '');

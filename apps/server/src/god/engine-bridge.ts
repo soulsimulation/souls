@@ -27,7 +27,7 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
-import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
+import { projectProviders, reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
 import { flightPath, slopePieces } from './slope-solids.ts';
@@ -404,6 +404,7 @@ export class EngineBridge {
     });
     reachProviders.set(this.god.model, (from, to) => this.reach(from, to));
     if (!R) syncProviders.set(this.god.model, () => { this.flush(); return this.physics?.hash === this.engine.world.entityPhysicsV1?.hash; });
+    if (!R) projectProviders.set(this.god.model, (d) => this.onCommit(d));   // #2438: a boot door fit's edits
     seatProviders.set(this.god.model, (id) => { const f = (this.engine as unknown as { seatOccupantsV1?: (id: string) => { slot: string; body: string }[] }).seatOccupantsV1; return f ? f.call(this.engine, id).map((x) => ({ slot: x.slot, soul: this.soulName(x.body) })) : []; });
     usesProviders.set(this.god.model, (id) => { const u = this.usesOf(id); return u ? { soul: u.soul, body: u.body, how: u.how, thing: this.model.pathOf(u.id) } : null; });
     // G1 "god rules" (before legal-edits/1): god edits are never refused for residents; the ones in the way are walked out
