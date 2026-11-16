@@ -20,6 +20,7 @@ import type { MenuFocus } from '../edge/ledger/focus.ts';
 import type {ActivityServicePoint} from './activity-spots.ts';
 import {HUMAN_RADIUS} from '../../../../mars/viewer/engine/world/catalog.ts';
 import { keptShut } from './actuators.ts';
+import { MENU_ORACLE } from '../edge/ledger/menu-stats.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Vec2 = [number, number];
@@ -115,6 +116,10 @@ export type Thing = {
 };
 
 const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
+/** #2489: one named part of an owner for the list: its ref ('' none), its entry (a stand point; none when its floor is
+ *  stale), or for an entity anchor how its entry is made from the thing `tref` names (`via`: the thing `entry` was made
+ *  from). `target`: the anchor's entity. */
+type PartGive = { ref: string; target?: string; tref?: string; make?: (t: Thing) => Thing; via?: Thing; entry?: Thing };
 // Same distance at which the activity layer considers another body to take a spot.
 const SERVICE_STAND_DISTANCE = 0.7;
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -211,47 +216,133 @@ export class GodNav {
   }
   private *indexGen(key: string): Generator<void, NonNullable<GodNav['cache']>, void> {
     const m = this.h.model;
-    const things: Thing[] = [], waters = new Map(m.ground().waters.map((w: any) => [w.id, w])), stamp = this.h.describeStamp?.();
+    const waters = new Map<string, unknown>(m.ground().waters.map((w: any) => [w.id, w])), stamp = this.h.describeStamp?.();
     if (stamp === undefined || stamp !== this.memoStamp) { this.memo.clear(); this.memoStamp = stamp; }
-    const seen = new Set<string>();
+    const last = this.last, defs = stamp === undefined ? [] : [...((m.defs as Map<string, StoredDef> | undefined)?.values() ?? [])];
+    // #2489: under the same stamp, defs and library, only the entities a commit changed (and what reads them) are described again
+    if (last && this.cache && stamp !== undefined && last.stamp === stamp && last.library === m.library && last.defs.length === defs.length && last.defs.every((d, i) => d === defs[i])) {
+      const touched = this.touched(last, waters);
+      if (!touched.length) { this.goals.clear(); return (this.cache = { key, things: this.cache.things, byRef: this.cache.byRef }); }
+      return this.update(key, last, touched, waters, stamp);
+    }
+    this.last = null;
+    const things: Thing[] = [], seen = new Set<string>(), give = new Map<string, Thing[]>(), used = new Map<string, Entity>();
     let n = 0;
     for (const e of [...m.entities.values()]) {
       if (++n % 64 === 0) yield;
-      if (!e.name) continue;
-      const def = m.resolvedDef(e.def); if (!def || def.components.body || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) continue;
-      if (keptShut(m, e)) continue;   // entry 42: kept in a shut drawer or locker: not a place to walk to, nor a name nearby
-      seen.add(e.id);
-      try { things.push(...this.described(e, def, waters.get(e.id), stamp)); } catch { /* one odd thing never hides the rest */ }
+      used.set(e.id, e);
+      const t = this.gives(e, waters, stamp, seen); if (t) { give.set(e.id, t); things.push(...t); }
     }
     for (const id of this.memo.keys()) if (!seen.has(id)) this.memo.delete(id);
-    const byRef = new Map<string, Thing>();
+    const cache = this.finish(key, things, m.entities.values());
+    if (stamp !== undefined) this.last = { stamp, library: m.library, defs, waters, entities: used, give };
+    return cache;
+  }
+  /** #2489: what the list was last made from (each entity object, the waters, defs and stamp) and what each entity gave
+   *  it. The model replaces an entity object when it changes (the rule G1's memo rests on), so a commit's changed entities
+   *  are the ones whose object differs. */
+  private last: { stamp: string; library: unknown; defs: StoredDef[]; waters: Map<string, unknown>; entities: Map<string, Entity>; give: Map<string, Thing[]> } | null = null;
+  /** The entity's things for the list (undefined: none; it is not named, a body's, a flag or kept shut). */
+  private gives(e: Entity, waters: Map<string, unknown>, stamp: string | undefined, seen?: Set<string>): Thing[] | undefined {
+    const m = this.h.model;
+    if (!e.name) return undefined;
+    const def = m.resolvedDef(e.def); if (!def || def.components.body || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) return undefined;
+    if (keptShut(m, e)) return undefined;   // entry 42: kept in a shut drawer or locker: not a place to walk to, nor a name nearby
+    seen?.add(e.id);
+    try { return this.described(e, def, waters.get(e.id), stamp); } catch { return undefined; /* one odd thing never hides the rest */ }
+  }
+  /** Ids whose entity object (or water) differs from the last list's: changed, added or removed since. */
+  private touched(last: NonNullable<GodNav['last']>, waters: Map<string, unknown>): string[] {
+    const m = this.h.model, out: string[] = [];
+    let kept = 0;
+    for (const [id, e] of m.entities) { const was = last.entities.get(id); if (was === e) kept++; else { out.push(id); if (was) kept++; } }
+    if (kept < last.entities.size) for (const id of last.entities.keys()) if (!m.entities.has(id)) out.push(id);
+    for (const [id, w] of waters) if (last.waters.get(id) !== w) out.push(id);
+    for (const id of last.waters.keys()) if (!waters.has(id)) out.push(id);
+    return out;
+  }
+  /** #2489: the list again from the last one: a touched entity, everything under it (its pose, path and holder read it)
+   *  and its holder before and after (a building's rooms yield to a child named like one) are described again; every
+   *  other entity gives what it gave. Same order and first-wins refs as a whole pass. */
+  private update(key: string, last: NonNullable<GodNav['last']>, touched: string[], waters: Map<string, unknown>, stamp: string): NonNullable<GodNav['cache']> {
+    const m = this.h.model, again = new Set<string>();
+    for (const id of touched) {
+      for (const x of m.subtree(id)) again.add(x);
+      const was = last.entities.get(id), now = m.entities.get(id);
+      if (was && was.in.parent !== 'world') again.add(was.in.parent);
+      if (now && now.in.parent !== 'world') again.add(now.in.parent);
+    }
+    for (const id of again) {
+      const e = m.entities.get(id), t = e ? this.gives(e, waters, stamp) : undefined;
+      if (t) last.give.set(id, t); else { last.give.delete(id); this.memo.delete(id); }
+      if (e) last.entities.set(id, e); else last.entities.delete(id);
+    }
+    last.waters = waters;
+    const things: Thing[] = [], owners: Entity[] = [];
+    for (const e of m.entities.values()) { const t = last.give.get(e.id); if (t) for (const x of t) things.push(x); if (e.about?.parts?.length) owners.push(e); }
+    const cache = this.finish(key, things, owners, again);
+    if (MENU_ORACLE) { const bad = this.thingsOracleV1(); if (bad) console.error('[nav-things-oracle]', bad); }
+    return cache;
+  }
+  /** Debug (tests; EDGE_MENU_ORACLE=1 after every update): null when the list equals a whole pass of a fresh nav (no
+   *  memo, nothing kept), else the first difference. */
+  thingsOracleV1(): string | null {
+    const a = this.things(), b = new GodNav(this.h).things();
+    if (a.length !== b.length) { const x = new Set(a.map((t) => t.ref)), y = new Set(b.map((t) => t.ref)); return `${a.length} things, a whole pass ${b.length}: only here ${[...x].filter((r) => !y.has(r)).slice(0, 4)}; only there ${[...y].filter((r) => !x.has(r)).slice(0, 4)}`; }
+    for (let i = 0; i < a.length; i++) { const x = JSON.stringify(a[i]), y = JSON.stringify(b[i]); if (x !== y) return `#${i}: ${x.slice(0, 300)} | ${y.slice(0, 300)}`; }
+    return null;
+  }
+  /** Refs first-wins, then the named parts of `owners` (entities in model order). An update (`again`: the entities it
+   *  described again) keeps an owner's parts unless the owner or an anchor's entity is among them; an entity anchor's
+   *  part is made again when the thing its ref names is another object. */
+  private finish(key: string, things: Thing[], owners: Iterable<Entity>, again?: Set<string>): NonNullable<GodNav['cache']> {
+    const byRef = new Map<string, Thing>(), prev = this.parts, parts = new Map<string, PartGive[]>();
     for (const t of things) if (!byRef.has(t.ref)) byRef.set(t.ref, t);
-    // Named parts reuse a real entity/room or an explicit transformed stand point. Descriptive parts stay prose.
-    for (const e of m.entities.values()) for (const p of meaningParts(m,e.id)) {
-      if (!p.anchor || !p.target) continue;
-      const ref=`${m.pathOf(e.id)}/part-${p.id}`; if(byRef.has(ref)) continue;
-      const partAliases=[...new Set([...(p.aliases??[]),...(e.about?.title?[e.about.title]:[]),...(e.about?.aliases??[]),...(e.about?.kind?[e.about.kind]:[])])].slice(0,24);
-      const names=[...words(p.title),...(p.aliases??[]).flatMap(words),...words(e.about?.title??e.name??'')];
-      if(p.anchor.kind==='entity') {
-        const t=p.target.ref?byRef.get(p.target.ref):undefined; if(!t)continue;
-        const slot=p.target.slot?m.slotsOf(m.entities.get(p.target.entity!)!).find(s=>s.id===p.target!.slot):undefined;
-        byRef.set(ref,{...t,ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??t.what,words:[...new Set([...names,...t.words])],semanticPart:{owner:e.id,part:p.id,entity:p.target.entity!,...(slot?.kind==='seat'?{seat:{entity:p.target.entity!,slot:slot.id}}:{})}});
-      } else {
-        const point=p.target.point!,stand=p.target.stand!,level=p.target.level!;
-        // A stale authored floor number must not send a Soul to an unrelated floor at the same X/Z.
-        if(this.h.levelAt(stand[0],stand[2],stand[1])!==level)continue;
-        byRef.set(ref,{ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??`A named part of ${e.about?.title??humanTitle(m.pathOf(e.id))}`,words:names,kind:'thing',at:[point[0],point[2]],stands:[[stand[0],stand[2]]],level,...(p.target.region?{poly:p.target.region}:{}),semanticPart:{owner:e.id,part:p.id,local:true}});
+    for (const e of owners) {
+      if (!e.about?.parts?.length) continue;
+      let gives = again ? prev.get(e.id) : undefined;
+      if (!gives || again!.has(e.id) || gives.some((g) => g.target !== undefined && again!.has(g.target))) gives = this.partGives(e);
+      parts.set(e.id, gives);
+      for (const g of gives) {
+        if (!g.ref || byRef.has(g.ref)) continue;
+        if (g.make) { const t = g.tref ? byRef.get(g.tref) : undefined; if (!t) continue; if (g.via !== t) { g.entry = g.make(t); g.via = t; } byRef.set(g.ref, g.entry!); }
+        else if (g.entry) byRef.set(g.ref, g.entry);
       }
     }
+    this.parts = parts;
     this.cache = { key, things: [...byRef.values()], byRef };
     this.goals.clear();
     return this.cache;
+  }
+  private parts = new Map<string, PartGive[]>();
+  /** An owner's named parts: each one's ref and its entry (a stand point), or how it is made from the thing it names. */
+  private partGives(e: Entity): PartGive[] {
+    const m = this.h.model, out: PartGive[] = [];
+    // Named parts reuse a real entity/room or an explicit transformed stand point. Descriptive parts stay prose.
+    for (const p of meaningParts(m,e.id)) {
+      const target = p.anchor?.kind === 'entity' ? p.anchor.ref : undefined;
+      if (!p.anchor || !p.target) { if (target !== undefined) out.push({ ref: '', target }); continue; }
+      const ref=`${m.pathOf(e.id)}/part-${p.id}`;
+      const partAliases=[...new Set([...(p.aliases??[]),...(e.about?.title?[e.about.title]:[]),...(e.about?.aliases??[]),...(e.about?.kind?[e.about.kind]:[])])].slice(0,24);
+      const names=[...words(p.title),...(p.aliases??[]).flatMap(words),...words(e.about?.title??e.name??'')];
+      if(p.anchor.kind==='entity') {
+        const pt=p.target, slot=pt.slot?m.slotsOf(m.entities.get(pt.entity!)!).find(s=>s.id===pt.slot):undefined;
+        out.push({ ref, target, tref: pt.ref, make: (t) => ({...t,ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??t.what,words:[...new Set([...names,...t.words])],semanticPart:{owner:e.id,part:p.id,entity:pt.entity!,...(slot?.kind==='seat'?{seat:{entity:pt.entity!,slot:slot.id}}:{})}}) });
+      } else {
+        const point=p.target.point!,stand=p.target.stand!,level=p.target.level!;
+        // A stale authored floor number must not send a Soul to an unrelated floor at the same X/Z.
+        if(this.h.levelAt(stand[0],stand[2],stand[1])!==level) { out.push({ ref }); continue; }
+        out.push({ ref, entry: {ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??`A named part of ${e.about?.title??humanTitle(m.pathOf(e.id))}`,words:names,kind:'thing',at:[point[0],point[2]],stands:[[stand[0],stand[2]]],level,...(p.target.region?{poly:p.target.region}:{}),semanticPart:{owner:e.id,part:p.id,local:true}} });
+      }
+    }
+    return out;
   }
   /** G1 (tranche 2026-10-19): a thing's description is a function of the entity, what holds it (pose, names, slots), its
    *  def, its water and the stamp (terrain, defs, levels); the model replaces an entity object when it changes, so an
    *  unchanged thing keeps its description across rebuilds (every edit rebuilt all ~3,000 on Eden 2026: ~50 ms). */
   private memo = new Map<string, { e: Entity; chain: Entity[]; def: StoredDef; water: unknown; things: Thing[]; kids?: string }>();
-  /** A building's rooms yield to a child named like a room: its named children are part of its description's inputs. */
+  /** A building's rooms yield to a child named like a room: its named children are part of its description's inputs
+   *  (#2489: every building's, one whose rooms all yielded too, so a room is back when the child is renamed). */
   private kidsOf(e: Entity): string { const m = this.h.model; return [...(m.children.get(e.id) ?? [])].map((id) => m.entities.get(id)?.name ?? '').filter(Boolean).sort().join('|'); }
   private memoStamp: string | undefined;
   private described(e: Entity, def: StoredDef, water: any, stamp: string | undefined): Thing[] {
@@ -263,7 +354,7 @@ export class GodNav {
     }
     const things = this.describe(e, def, water);
     if (e.about?.what) for (const t of things) if (t.kind !== 'room') t.what = e.about.what;
-    if (stamp !== undefined) this.memo.set(e.id, { e, chain, def, water, things, ...(things.some((t) => t.kind === 'room') ? { kids: this.kidsOf(e) } : {}) });
+    if (stamp !== undefined) this.memo.set(e.id, { e, chain, def, water, things, ...(things.some((t) => t.kind === 'room' || t.kind === 'building') ? { kids: this.kidsOf(e) } : {}) });
     return things;
   }
   private describe(e: Entity, def: StoredDef, water: any): Thing[] {
