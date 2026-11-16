@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, SPLIT, LOAD_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, LOAD_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
@@ -177,6 +177,28 @@ test('core split: two physical cores for the world, the rest (two of four, one o
   assert.deepEqual(splitCores([5, 6, 7, 13, 14, 15], smt), { physicalCores: 3, layout: '2+1', world: '5,13,6,14', load: '7,15' }, 'the timed runners: 6 logical CPUs, 3 cores');
   assert.throws(() => splitCores([4, 5, 12, 13], smt), /2 physical core\(s\).*needs 3 or 4/);
   assert.throws(() => splitCores([0, 1, 2, 3, 4, 5], (c) => [c]), /6 physical core/);
+});
+
+test('core plan (#2507): cores is accepted for the split commands, validated, recorded in the inputs, and refused at the start gate when it does not fit', () => {
+  const V = { ...ENV, INPUT_COMMAND: 'viewers' };
+  assert.deepEqual(parseInputs({ ...V, INPUT_CORES: 'world=2,launcher=1' }).cores, { world: 2, launcher: 1 });
+  assert.deepEqual(parseInputs({ ...V, INPUT_CORES: ' world=6 ' }).cores, { world: 6, launcher: 0 });
+  assert.ok(!('cores' in parseInputs({ ...V, INPUT_CORES: '' })), 'no plan: the inputs are as before');
+  for (const v of ['world=0', 'world=2,launcher=0', 'launcher=1', 'world=2,launcher=1,load=1', 'world=65', 'world=2 launcher=1', 'world=x', 'world=2;id'])
+    assert.throws(() => parseInputs({ ...V, INPUT_CORES: v }), /input cores=.*world=N or world=N,launcher=M/, v);
+  assert.throws(() => parseInputs({ ...ENV, INPUT_CORES: 'world=2' }), /input cores=.*for eval-load, .*viewers only/, 'walk takes no plan');
+  assert.equal(parseCorePlan('world=2,launcher=1').launcher, 1);
+  const smt = (c) => [c % 8, (c % 8) + 8], three = [5, 6, 7, 13, 14, 15];
+  assert.deepEqual(splitCores(three, smt, { world: 1, launcher: 1 }), { physicalCores: 3, plan: 'world=1,launcher=1', layout: '1+1+1', world: '5,13', launcher: '6,14', load: '7,15' });
+  assert.deepEqual(splitCores([0, 1, 2, 3, 4, 5, 6, 7], (c) => [c], { world: 6, launcher: 1 }), { physicalCores: 8, plan: 'world=6,launcher=1', layout: '6+1+1', world: '0,1,2,3,4,5', launcher: '6', load: '7' });
+  assert.deepEqual(splitCores([0, 1, 2, 3, 4, 5], (c) => [c], { world: 2, launcher: 0 }), { physicalCores: 6, plan: 'world=2', layout: '2+4', world: '0,1', load: '2,3,4,5' }, 'a plan lifts the 3-or-4 rule');
+  assert.throws(() => splitCores(three, smt, { world: 2, launcher: 1 }), /the core plan world=2,launcher=1 needs 4 physical cores \(at least one for the load drivers\); this runner has 3 of its own/);
+  assert.throws(() => splitCores(three, smt, { world: 3, launcher: 0 }), /world=3 needs 4/);
+  assert.deepEqual(splitCores(three, smt, null), splitCores(three, smt), 'no plan: the split of today');
+  assert.ok(isLauncher(['/usr/bin/node', '/w/src/tools/world-launcher/launcher.mjs', '--port', '1'].join('\0')));
+  for (const c of ['node\0apps/server/src/main.ts', 'node\0tools/world-launcher/launcher.test.mjs', 'node\0tools/bench/capacity/viewers/viewers.mjs']) assert.ok(!isLauncher(c), c);
+  const a = parseProcStat('cpu0 10 0 0 90 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0\ncpu2 50 0 0 50 0 0 0 0\n'), b = parseProcStat('cpu0 60 0 0 140 0 0 0 0\ncpu1 10 0 0 190 0 0 0 0\ncpu2 150 0 0 50 0 0 0 0\n');
+  assert.deepEqual(groupBusy(a, b, { world: '0,1', load: '2' }), { world: 0.3, load: 1 });
 });
 
 test('world pinning: only world servers under the run\'s own process tree', () => {

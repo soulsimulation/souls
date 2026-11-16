@@ -58,7 +58,7 @@ import { poolOf } from './god/builds.ts';
 import {VerifyUse} from './god/verify-use.ts';
 import { mountModeration } from './moderation/routes.ts';
 import { defaultSiteLog } from './moderation/store.ts';
-import { mountEdgeSnapshot, safeKey, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
+import { mountEdgeSnapshot, safeKey, snapshotEpoch, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
 import { withInlineConfig, withWorldMeta } from './inline-config.ts';
 import { mountSharedLibraryRoutes } from './god/shared-library.ts';
 import { mountArtRoutes } from './art/routes.ts';
@@ -206,7 +206,8 @@ export function buildApp(d: Deps) {
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
   const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId, siteLog: defaultSiteLog(d.cfg.env) });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
-  const godForKey = d.god, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version() }) : null;
+  // E6: + the epoch kept beside sim.db, so a restored world never answers a key the edge already holds
+  const godForKey = d.god, epoch = godForKey && d.cfg.dataDir ? snapshotEpoch(d.cfg.dataDir) : undefined, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version(), epoch }) : null;
   if (currentSnapshotKey) mountEdgeSnapshot(app, currentSnapshotKey);
   mountSoulNow(app, {host: d.host, souls: d.souls, inbox: () => ownerInbox}); // LINK: the agent's public `now` line (before the routes it rides on)
   // POST /v1/souls/<id>/command (#982): this one decision picks its handler for the world's mode. An edge world's

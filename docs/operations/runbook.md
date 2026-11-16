@@ -120,8 +120,19 @@ ENABLE_WORLD_ENGINE=1 SOUL_LIFECYCLE=1 node tools/god-skill/dev-world.mjs <slug>
 `SOUL_LIFECYCLE=1` is what the launcher sets; without it a production world's history refuses the engine.
 
 To put a world's data back live: stop the stage, move the world's `sim.db` aside (keep it), copy the restored one in,
-`chown simworlds:simworlds`, start the stage. Restoring data discards events accepted since the snapshot, so do it only
+delete the world's `snapshot-epoch` (so the edge never serves the pre-restore snapshot, `apps/server/src/edge-snapshot.ts`),
+`chown simworlds:simworlds`, start the stage. The same goes for a `sim.db` taken from a release backup or an hourly
+`backup-*.db` copy: delete `snapshot-epoch` whenever an older `sim.db` goes back live. Restoring data discards events accepted since the snapshot, so do it only
 for real data loss. Tests: `node --test tools/world-launcher/backup-restic.test.mjs` (skips without restic).
+
+**CDN purges** (behind the CDN, [cache rule](cdn.md#the-cache-rule)): parts, uploads and art are immutable for a year at
+the edge, and the origin's later refusal never reaches copies already there. Purge by prefix `soul.game/w/<slug>/` where
+the plan has it, otherwise purge everything:
+
+- **When moderation vetoes a file**, purge its URLs (`/w/<slug>/assets/<sha>.<ext>`, `/w/<slug>/art/<sha>.<ext>`) and
+  that world's parts and snapshot.
+- **After a restore** of a world's data, purge that world: its snapshot key can repeat a key the edge already holds for
+  other contents.
 
 Release backups (`ship.sh` step `backup`) are separate: row-verified compact copies in
 `/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<date>-<time>-XXXXXX` (a random six-character suffix; older
