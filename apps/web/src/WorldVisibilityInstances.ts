@@ -21,6 +21,8 @@ const sameArray=(a:ArrayLike<number>,b:ArrayLike<number>,n:number)=>{for(let i=0
 // Same answer as sameArray for a finite cached copy (no NaN can be cached;
 // +0/-0 differ in both), compared as 32-bit words: several times faster.
 const sameBits=(a:Uint32Array,b:Float32Array,n:number)=>{const w=new Uint32Array(b.buffer,b.byteOffset,n);for(let i=0;i<n;i++)if(a[i]!==w[i])return false;return true;};
+/** #2617 Step 0 (measurement only): outer query setup cost and instance-cache rebuilds. */
+export const VIS_STATS={queries:0,setupMs:0,rebuilds:0,rebuildInstances:0,validated:0,objects:0};
 /** CPU-only read accelerator for stock instanced raycasts. No scene/resource ownership. */
 export class WorldVisibilityInstances {
  private generation=0;
@@ -112,9 +114,10 @@ export class WorldVisibilityInstances {
   if(mesh.constructor!==THREE.InstancedMesh||mesh.raycast!==instanceRaycast||mesh.getMatrixAt!==matrixAt||THREE.Mesh.prototype.raycast!==meshRaycast||THREE.Mesh.prototype.getVertexPosition!==vertexAt||
    attribute.constructor!==THREE.InstancedBufferAttribute||array.constructor!==Float32Array||attribute.itemSize!==16||!Number.isSafeInteger(mesh.count)||mesh.count<0||mesh.count>MESH_CAP||array.length<mesh.count*16||
    mesh.morphTexture||Object.keys(geometry.morphAttributes).length||!s||!mesh.boundingSphere||!Number.isFinite(s.radius)||s.radius<0||!s.center.toArray().every(Number.isFinite)||!mesh.matrixWorld.elements.every(Number.isFinite))return;
-  const count=mesh.count,world=mesh.matrixWorld.elements,sphere=[s.center.x,s.center.y,s.center.z,s.radius];let c=this.cache.get(mesh);
+  const count=mesh.count,world=mesh.matrixWorld.elements,sphere=[s.center.x,s.center.y,s.center.z,s.radius];let c=this.cache.get(mesh);VIS_STATS.validated+=count;
   const same=c&&c.geometry===geometry&&c.array===array&&c.count===count&&sameArray(world,c.world,16)&&sameArray(sphere,c.sphere,4)&&sameBits(c.localBits,array as Float32Array,count*16);
   if(same)return c;
+  VIS_STATS.rebuilds++;VIS_STATS.rebuildInstances+=count;
   let total=count;for(const [other,old] of this.cache)if(other!==mesh)total+=old.count;if(total>TOTAL_CAP)return;
   const local=new Float32Array(array.subarray(0,count*16));if(!local.every(Number.isFinite))return;
   const matrices:THREE.Matrix4[]=[],spheres:THREE.Sphere[]=[];
@@ -128,10 +131,11 @@ export class WorldVisibilityInstances {
   // PERF-PASSES: a query nested in another over the same objects (every score() inside evaluate()) reuses its bounds
   // pass, whether or not the instance caches were taken (a custom raycast among the objects leaves `query` unset)
   if(this.queryDepth>0&&this.queryObjects===objects)return run();
+  const setup0=performance.now();VIS_STATS.queries++;VIS_STATS.objects=objects.length;
   const previous=this.query,previousObjects=this.queryObjects,generation=this.generation;
   const stock=objects.every(o=>STOCK_RAYCASTS.has(o.raycast));
   this.query=stock&&!previous?new Map(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh).map(o=>[o,this.prepare(o)])):undefined;
-  this.queryObjects=objects;const previousBounds=this.bounds,previousBoundsObjects=this.boundsObjects;this.bounds=boundsOf(objects);this.boundsObjects=objects;this.stats.boundsPasses++;this.queryDepth++;
+  this.queryObjects=objects;const previousBounds=this.bounds,previousBoundsObjects=this.boundsObjects;this.bounds=boundsOf(objects);this.boundsObjects=objects;this.stats.boundsPasses++;this.queryDepth++;VIS_STATS.setupMs+=performance.now()-setup0;
   try{return run();}finally{this.queryDepth--;if(this.generation===generation){this.query=previous;this.queryObjects=previousObjects;this.bounds=previousBounds;this.boundsObjects=previousBoundsObjects;}}
  }
  // Exact stock Mesh near/far sphere rejection.

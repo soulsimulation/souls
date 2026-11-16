@@ -15,6 +15,16 @@ import { speakingNow } from './dialogue-speaking.ts';
 import { BALLOON } from './WorldBalloonRide.ts';
 import { liftHorizon } from './broadcast-horizon.ts';
 import { Tracker, tracked } from './broadcast-tracking.ts';
+import { VIS_STATS } from './WorldVisibilityInstances.ts';
+/** #2617 Step 0 (measurement only): the director's cost per frame by part; the page harness reads and resets it. */
+const PARTS = { frames: 0, ms: 0, maxMs: 0, over8: 0, over16: 0, over33: 0, pick: 0, picks: 0, prepare: 0, prepares: 0, track: 0, tracks: 0, decide: 0, decides: 0, decideStarts: 0, tour: 0, speck: 0, rays: 0, maxRays: 0, objects: 0 };
+const VIS0 = { ...VIS_STATS };
+(globalThis as unknown as { __soulsBroadcastParts?: unknown }).__soulsBroadcastParts = (reset = false) => {
+  if (reset) { for (const k of Object.keys(PARTS) as (keyof typeof PARTS)[]) PARTS[k] = 0; Object.assign(VIS0, VIS_STATS); return null; }
+  const vis = Object.fromEntries(Object.entries(VIS_STATS).map(([k, v]) => [k, k === 'objects' ? v : v - VIS0[k as keyof typeof VIS0]]));
+  return { ...PARTS, vis };
+};
+const lap = (k: 'pick' | 'prepare' | 'track' | 'decide' | 'tour' | 'speck', t0: number) => { PARTS[k] += performance.now() - t0; };
 
 export type WorldCameraMode = 'broadcast' | 'manual' | 'follow';
 export type CarrierPose = { p: readonly number[]; yaw: number };
@@ -145,8 +155,10 @@ export class WorldBroadcast {
   sample(frame: Record<string, SampledEntity>, records: Record<string, Entity>, scene: SpatialScene | null,
     tick: number, dt: number, aspect: number, wallSeconds: number, movementDt: number,renderRoots:readonly THREE.Object3D[]=[] ) {
     const started = performance.now();
+    const work0 = this.rendered.work;
     const shot = this.direct(frame, records, scene, tick, dt, aspect, wallSeconds, movementDt, renderRoots);
     this.shown = shot?.pose ?? null;
+    { const ms = performance.now() - started, rays = this.rendered.work - work0; PARTS.frames++; PARTS.ms += ms; PARTS.maxMs = Math.max(PARTS.maxMs, ms); if (ms > 8) PARTS.over8++; if (ms > 16.7) PARTS.over16++; if (ms > 33.3) PARTS.over33++; PARTS.rays += rays; PARTS.maxRays = Math.max(PARTS.maxRays, rays); }
     // #2202: the camera's own cost per frame (ms), last 600 frames, for the cost budget (docs/design/auto-camera.md §5).
     const cost = ((globalThis as unknown as { __soulsBroadcastCost?: number[] }).__soulsBroadcastCost ??= []); cost.push(performance.now() - started); if (cost.length > 600) cost.shift();
     return shot?.pose ? { ...shot, pose: { ...shot.pose, target: liftHorizon(shot.pose.position, shot.pose.target) } } : shot;
@@ -163,6 +175,7 @@ export class WorldBroadcast {
     // VF1: WorldDirector decides what is worth watching and for how long (4x a second; cheap, no rays).
     if (wallSeconds - this.lastPick >= .25 || !this.choice) {
       this.lastPick = wallSeconds;
+      const tp = performance.now(); PARTS.picks++;
       // DIRECTOR2: speakingNow.since is on the performance.now() clock; the director's `now` is wall seconds.
       const hints = this.hints?.(), speaking = new Map<string, { thread: string; at: number }>(), perfNow = performance.now();
       if (hints) for (const [soulId, sp] of speakingNow) { const id = hints.soulEntity(soulId); if (id && frame[id]) speaking.set(id, { thread: sp.thread, at: wallSeconds - (perfNow - sp.since) / 1000 }); }
@@ -170,6 +183,7 @@ export class WorldBroadcast {
       const carriers = hints?.carriers ?? [];
       this.choice = this.picker.choose({ bodies: people.map(id => ({ id, p: frame[id].p, activity: frame[id].activity, riding: records[id]?.body?.family !== 'floater' && !!ridingCarrier(frame[id].p, carriers) })), speaking, now: wallSeconds, landmarks: this.viewsOf(hints)?.landmarks ?? [] });
       if (this.choice?.key !== before) { this.cutAt = wallSeconds; const cuts = ((globalThis as unknown as { __soulsBroadcastCuts?: { t: number; key: string; label: string }[] }).__soulsBroadcastCuts ??= []); cuts.push({ t: Date.now() / 1000, key: this.choice?.key ?? '', label: this.choice?.label ?? '' }); if (cuts.length > 400) cuts.shift(); this.emptySince = null; if (this.choice?.kind === 'landmark' || before?.startsWith('landmark:')) this.director.reset('live-world'); }
+      lap('pick', tp);
     }
     const choice = this.choice;
     if (!choice) return null;
@@ -190,9 +204,11 @@ export class WorldBroadcast {
     if (members.length && tracked(choice, crowd)) {
       const spread = Math.max(...at.map(p => Math.hypot(p[0] - centre[0], p[2] - centre[2])));
       // The drawn scenery is re-gathered at the decision rate (10 Hz), not every frame; one evaluate per frame.
-      if (wallSeconds - this.trackPrepared >= .1 || wallSeconds < this.trackPrepared) { this.rendered.prepare(renderRoots); this.trackPrepared = wallSeconds; }
+      if (wallSeconds - this.trackPrepared >= .1 || wallSeconds < this.trackPrepared) { const t1 = performance.now(); this.rendered.prepare(renderRoots); this.trackPrepared = wallSeconds; lap('prepare', t1); PARTS.prepares++; }
+      const t2 = performance.now(); PARTS.tracks++;
       const moving = this.rendered.evaluate(() => this.tracker.pose(choice.key, centre, spread, wallSeconds,
         { clear: p => this.rendered.clear(p, .8), reach: (a, b) => this.rendered.reach(a, b) }));
+      lap('track', t2);
       // While the first move is planned (a few frames), the shot that was on screen holds; then the move cuts in.
       if (moving === 'pending' && this.shown) { this.lastTick = tick; this.signature = ''; return { pose: this.shown, shot: `${choice.label}:track-planning` }; }
       if (moving && moving !== 'pending') { this.lastTick = tick; this.signature = ''; return { pose: moving.pose, shot: `${choice.label}:track-${moving.type}` }; }
@@ -237,18 +253,22 @@ export class WorldBroadcast {
     // rendered rays per frame) while the held shot keeps tracking; the
     // choice is re-validated on the frame it is applied (Director.advance).
     const decide = changed || wallSeconds - this.lastDecisionWall >= .1;
-    if(decide&&(changed||!this.director.searching))this.rendered.prepare(renderRoots);
+    if(decide&&(changed||!this.director.searching)){const t3=performance.now();this.rendered.prepare(renderRoots);lap('prepare',t3);PARTS.prepares++;PARTS.decideStarts++;}
     const budget=this.rendered.work+DECISION_RAYS;
+    const t4=performance.now();PARTS.decides++;
     const result = this.rendered.evaluate(()=>this.director.advance(observation, movementDt, decide, changed, ()=>this.rendered.work<budget));
+    lap('decide',t4);
     if (decide) this.lastDecisionWall = wallSeconds;
     this.lastTick = tick;
     // A framing in which the subject is only a speck (a swimmer far out on the lake, a Soul behind a hill) is
     // not a shot: after a moment the director looks elsewhere.
+    const t5 = performance.now();
     if (result?.pose && subjects[focus]) {
       const small = subjectFraction(result.pose, aspect, subjects[focus].p, subjects[focus].height ?? 1.75) < MIN_SUBJECT_FRACTION;
       if (!small) this.emptySince = null;
       else if (leaveSpeck(wallSeconds - (this.emptySince ??= wallSeconds), wallSeconds - this.cutAt)) { broadcastLog('reject', choice.key); this.picker.reject(choice.key, wallSeconds); this.lastPick = -Infinity; this.emptySince = null; }
     }
+    lap('speck', t5);
     return result ? { ...result, shot: `${choice.label}:${result.shot ?? ''}` } : result;
   }
   /** The ride shot (see riderPose): a clear side is picked on entry and re-checked once a second against the drawn
@@ -269,6 +289,7 @@ export class WorldBroadcast {
   }
   /** A tour pose; a new move is checked once against the drawn scenery (clear path, target in sight). */
   private tourShot(wallSeconds: number, daylight: number | null, prefer: TourView | null, renderRoots: readonly THREE.Object3D[], tour: WorldTour = this.tour) {
+    const t6 = performance.now(); try {
     let prepared = false;
     const ready = () => { if (!prepared) { this.rendered.prepare(renderRoots); prepared = true; } };
     const opening = this.opening !== null && prefer?.id === this.opening; this.opening = null;
@@ -277,6 +298,7 @@ export class WorldBroadcast {
       sight: (a, b) => { ready(); const length = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]); return this.rendered.evaluate(() => this.rendered.reach(a, b)) >= Math.min(length * .6, 25); },
       open: p => { ready(); return this.rendered.evaluate(() => this.rendered.reach(p, [p[0], p[1] + 40, p[2]])) >= 39; } });
     return { pose: { position: pose.position, target: pose.target, fov: pose.fov }, shot: 'tour:' + pose.id };
+    } finally { lap('tour', t6); }
   }
 }
 

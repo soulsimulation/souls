@@ -57,7 +57,10 @@ export function topCosts(profile, n = 12) {
   });
   const top = (m) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(([fn, ms]) => ({ fn, ms: Math.round(ms), share: total ? +(ms / total).toFixed(3) : null }));
   const idle = (self.get('(idle)') ?? 0);
-  return { totalMs: Math.round(total), busyShare: total ? +(1 - idle / total).toFixed(3) : null, self: top(self), inclusive: top(incl) };
+  // #2617: the Broadcast director's own functions (inclusive), whatever their rank
+  const FOCUS = /^(sample|direct|evaluate|withQuery|prepare|advance|score|seen|reach|clear|foreground|around|intersect|choose|pose|probeClear|probeForeground|blocked) /;
+  const focus = [...incl].filter(([k]) => FOCUS.test(k)).sort((a, b) => b[1] - a[1]).map(([fn, ms]) => ({ fn, ms: Math.round(ms), share: total ? +(ms / total).toFixed(3) : null }));
+  return { totalMs: Math.round(total), busyShare: total ? +(1 - idle / total).toFixed(3) : null, self: top(self), inclusive: top(incl), focus };
 }
 /** Per tier and camera, the smallest size whose median frame time (the median of its repeats' p50s) is above SLOW_MS,
  *  else 'not reached' with the largest size measured, or 'no data'. */
@@ -172,18 +175,18 @@ async function arm({ browser, url, tier, VIEWPORTS, worldArrived, warmSec, measu
     await page.waitForFunction(worldArrived, null, { timeout: 240_000, polling: 500 });
     const arrivedMs = Date.now() - t0;
     await page.waitForTimeout(warmSec * 1000);
-    await page.evaluate(() => { const P = window.__v9; P.frames = []; P.perFrame = []; P.gpu = []; P.from = performance.now(); P.on = true; });
+    await page.evaluate(() => { const P = window.__v9; P.frames = []; P.perFrame = []; P.gpu = []; P.from = performance.now(); P.on = true; window.__soulsBroadcastParts?.(true); });
     await page.waitForTimeout(measureSec * 1000);
     const d = await page.evaluate(() => {
       const P = window.__v9; P.on = false; const to = performance.now(), w = window.__soulsEntity, s = w?.stats?.() ?? {}, long = P.long.filter(([a]) => a >= P.from && a < to);
-      return { frames: P.frames, perFrame: P.perFrame, gpu: P.gpu, gpuErr: P.gpuErr ?? null, timer: !!P.ext, long: { n: long.length, totalMs: Math.round(long.reduce((n, [, x]) => n + x, 0)), max: long.length ? Math.round(Math.max(...long.map(([, x]) => x))) : 0 },
+      return { director: window.__soulsBroadcastParts?.() ?? null, frames: P.frames, perFrame: P.perFrame, gpu: P.gpu, gpuErr: P.gpuErr ?? null, timer: !!P.ext, long: { n: long.length, totalMs: Math.round(long.reduce((n, [, x]) => n + x, 0)), max: long.length ? Math.round(Math.max(...long.map(([, x]) => x))) : 0 },
         mem: { heapMB: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null, geometries: s.geometries ?? null, textures: s.textures ?? null, entities: s.entities ?? null, instances: s.instances ?? null },
         page: { quality: window.__soulsQuality?.tier ?? null, souls: w?.residents?.().length ?? null, camera: document.querySelector('canvas[data-camera-mode]')?.dataset.cameraMode ?? null, buffer: (() => { const c = document.querySelector('canvas[aria-label="Live 3D view of the world"]'); return c ? [c.width, c.height] : null; })() },
         crowd: (() => { const r = w?.residents?.() ?? []; if (!r.length) return null; const med = (k) => { const v = r.map((x) => x.p[k]).sort((a, b) => a - b); return +v[Math.floor(v.length / 2)].toFixed(1); }; return [med(0), med(1), med(2)]; })() };
     });
     const tris = d.perFrame.map(([, t]) => t), draws = d.perFrame.map(([n]) => n);
     const row = { arrivedMs, frame: frameStats(d.frames), draws: { p50: q(draws, 0.5), p95: q(draws, 0.95), trisP50k: tris.length ? r1(q(tris, 0.5) / 1000) : null }, gpu: { timer: d.timer, n: d.gpu.length, p50: r1(q(d.gpu, 0.5)), p95: r1(q(d.gpu, 0.95)), error: d.gpuErr },
-      long: d.long, mem: d.mem, page: d.page, crowd: d.crowd, errors: errors.slice(0, 5) };
+      long: d.long, mem: d.mem, page: d.page, crowd: d.crowd, errors: errors.slice(0, 5), director: d.director };
     if (shot) await page.screenshot({ path: shot }).catch(() => {});
     if (profileSec) {
       const cdp = await ctx.newCDPSession(page);
