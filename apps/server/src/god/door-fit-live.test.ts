@@ -244,6 +244,16 @@ test('#2462 A3: a fit edit that would re-settle things around its building is re
   assert.equal(doors().length, 0);
 });
 
+test('#2462 A3: a door neither side of which was reached from outside before the fit is held back, named', { timeout: 120000 }, async (t) => {
+  const { w, god, solids, doors } = await cottage(t);
+  const real = engineDoorReach(w.host, god)!;
+  // nothing behind any doorway is reached from the street (a house already cut off): no door leads anywhere reached
+  const r = await ticking(w.host, fitWorldDoorsV2(god, [], () => {}, solids(), { walk: { ...real, reach: () => false } }));
+  assert.equal(r.doors, 0);
+  assert.equal(doors().length, 0);
+  assert.ok(r.held.length >= 4 && r.held.every((h) => /neither side reached from outside before the fit/.test(h)), JSON.stringify(r.held));
+});
+
 test('#2462 boot: the boot rules do not wait for the door fits; they run on after, in slices', { timeout: 120000 }, async (t) => {
   const { w, god } = await cottage(t);
   let fits: Promise<void> | undefined;

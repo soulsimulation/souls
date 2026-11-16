@@ -532,6 +532,18 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
     if (!fresh) { out.kept.push(id); log(`door-fit/2: ${path} kept changing while it was planned, tried again at the next boot`); o.slice?.(performance.now() - t, id); await pause(); continue; }
     // #2462: a fit whose reach cannot be checked (no outside doorway to walk in from) is not made
     if (walk && fit.doors.length && !from) { out.refused.push(`${path} (no outside doorway to check its reach from)`); o.slice?.(performance.now() - t, id); await pause(); continue; }
+    // #2462 (A3, bench-eden): a door neither side of which was reached from outside before the fit leads only to rooms
+    // nobody can reach; it is held back, named (its own walk goal would be one more place nobody reaches)
+    if (walk && from) for (let k = fit.doors.length - 1; k >= 0; k--) {
+      if (before[k]?.some(Boolean) !== false) continue;
+      const d = fit.doors[k]!;
+      fit.held.push(`${d.name ?? `${path} door ${k + 1}`} (neither side reached from outside before the fit)`);
+      fit.ops = fit.ops.filter((x) => x !== d); fit.doors.splice(k, 1); fit.at.splice(k, 1); fit.placed.splice(k, 1); before.splice(k, 1);
+      for (const f of fit.freed.filter((x) => x.door === d)) {   // and the prop moved for it stays where it stands
+        fit.ops = fit.ops.filter((x) => x !== f.move); fit.moves.splice(fit.moves.indexOf(f.move), 1); fit.moved.splice(fit.moved.indexOf(f.text), 1);
+      }
+      fit.freed = fit.freed.filter((f) => f.door !== d);
+    }
     // #2462: a body standing in a doorway a door goes in now (the bodies read again just before the edit): a later boot
     const standing = walk?.bodies ? walk.bodies(() => true).map((b): [number, number, number] => [b.p[0], b.p[1], b.y]) : bodiesNow().map((b): [number, number, number] => [b[0], b[1], NaN]);
     const inWay = fit.placed.find((w) => standing.some(([x, z, y]) => (Number.isNaN(y) || Math.abs(y - w.y) < 1.5) && pointGap(wayRect(w), x, z) < HUMAN_RADIUS));
