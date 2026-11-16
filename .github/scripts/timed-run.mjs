@@ -242,7 +242,7 @@ export const PUBLISH = {
   meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
   load: ['load/results.json', 'load/REPORT.md', 'load.log'],
-  settled: ['settled/results.json', 'settled/REPORT.md', 'settled/wave.json', 'settled/WAVE.md', 'settled/*/world.log', 'settled.log'],
+  settled: ['settled/results.json', 'settled/REPORT.md', 'settled/wave.json', 'settled/WAVE.md', 'settled/*/world.log', 'settled/*/data/stall-*.json', 'settled.log'],
   // #2475 A3: the launcher's own log (what loaded or unloaded each world, and why), scrubbed like every text file
   hundred: ['hundred/results.json', 'hundred/REPORT.md', 'hundred/hundred.log', 'hundred/launcher.log', 'hundred.log'],
   colocate: ['colocate/results.json', 'colocate/REPORT.md', 'colocate.log'],

@@ -58,7 +58,9 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
   mkdirSync(dir, { recursive: true });
   const profDir = join(dir, 'prof'); mkdirSync(profDir, { recursive: true });
   const ev = shape === 'event' ? await eventDriver() : null;
-  const w = await bootWorld(dir, { slug: 'st-wave', template, heapMb, env: { SIM_PROF_DIR: profDir }, nodeOptions: `--import=${PROF_HOOK}` });
+  // #2615: the profiler stops and serializes its profile on the world's main thread (prof-hook.mjs), which took longer than the
+  // 10 s hang kill on a loaded runner and ended the world at the baseline's end (3 of 3 Step 0 runs); the stall log still logs every hold
+  const w = await bootWorld(dir, { slug: 'st-wave', template, heapMb, env: { SIM_PROF_DIR: profDir, SIM_HANG_KILL_MS: '120000' }, nodeOptions: `--import=${PROF_HOOK}` });
   const out = { shape, acting, n, perSec, bootS: w.bootS };
   const liveFile = join(w.data, 'live.json'), windows = new Map(); let watching = true;
   const watch = (async () => { while (watching) { const t = readLive(liveFile)?.api?.ticks; if (t?.at) windows.set(t.at, { at: t.at, levels: t.levels, amberS: t.amberS, tickMs: t.tickMs, gapMs: t.longestGapMs }); await sleep(4000); } })();
@@ -91,7 +93,7 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
     out.waveS = r1((Date.now() - wave0) / 1000);
     if (w.child.exitCode != null) out.worldExited = { code: w.child.exitCode, tail: w.tail() };   // the world ended on its own during the wave
     await sleep(tailMs);
-    const live = await (await fetch(`${w.origin}/v1/edge/live`)).json().catch(() => null), mine = new Set(joins.map((j) => j.soulId));
+    const live = await fetch(`${w.origin}/v1/edge/live`).then((r) => r.json()).catch(() => null), mine = new Set(joins.map((j) => j.soulId));
     out.bodies = spread((live?.souls ?? []).filter((x) => mine.has(x.id)));
     const heap = readLive(liveFile)?.heap; out.heapEnd = heap ? { usedMb: heap.usedMb, limitMb: heap.limitMb } : null;
     watching = false; await watch;
