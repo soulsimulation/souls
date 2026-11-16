@@ -202,7 +202,7 @@ class BridgeStats {
     const sites = ((b.host.engine as unknown as { rt?: { services?: { spatial?: { scanSites?: Map<string, number> | null } } } }).rt?.services?.spatial)?.scanSites;
     let extra = '';
     if (sites) {
-      extra = `; scan sites ${[...sites].sort((x, y) => y[1] - x[1]).slice(0, 40).map(([k, v]) => `${k}=${v}`).join(' ')}`;
+      extra = `; scan sites ${[...sites].sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, v]) => `${k}=${v}`).join(' ')}`;
       sites.clear();
       const live = (b.host.engine as unknown as { rt?: { live?: Map<string, { rec: { verb: string } }> } }).rt?.live, verbs = new Map<string, number>();
       for (const l of live?.values() ?? []) verbs.set(l.rec.verb, (verbs.get(l.rec.verb) ?? 0) + 1);

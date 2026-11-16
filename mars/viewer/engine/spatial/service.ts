@@ -158,7 +158,7 @@ export class Spatial {
   /** Paged-ground counters (cheap integers, read by the server's load stats): syncs, rebuilds because only the windows
    *  moved / because the static world changed, the ms those rebuilds took, and window grids built (and their ms). */
   readonly stats = { pagedSyncs: 0, pagedMoved: 0, pagedChanged: 0, pagedMs: 0, gridBuilds: 0, gridMs: 0, scans: 0, scanMs: 0, trusted: 0 };
-  /** Diagnostic (SIM_L4_SCAN_SITES=1): scans per calling site and the reason trust did not answer (navChanged). */
+  /** Diagnostic (SIM_L4_SCAN_SITES=1): scans per calling function (the first frame outside this file). */
   readonly scanSites: Map<string, number> | null = typeof process !== 'undefined' && (process as { env?: Record<string, string | undefined> }).env?.SIM_L4_SCAN_SITES === '1' ? new Map() : null;
   /** Snapshot restore: the navigation epoch the snapshot recorded, until the engine adopts it (adoptRestoredEpoch). */
   restoredEpoch?: number;
@@ -679,13 +679,8 @@ export class Spatial {
     const t0 = performance.now(), changed = this.navScan(world, onBody);
     this.stats.scans++; this.stats.scanMs += performance.now() - t0;
     if (this.scanSites) {
-      // #2533: why trust did not answer (closed: outside an open interval; new: the first scan of one; table: another
-      // entity table), the caller (the first frame outside this file), the innermost runtime.ts frame (inside a tick) and
-      // the innermost server frame (who asked), as `reason|caller|runtime|server`, each frame `fn@file:line` or `-`
-      const reason = token < 0 ? 'closed' : this.trustToken !== token ? 'new' : 'table';
-      const lim = Error.stackTraceLimit; Error.stackTraceLimit = 64; const ls = (new Error().stack ?? '').split('\n').slice(2); Error.stackTraceLimit = lim;
-      const fr = (l?: string) => { const m = l && /at (?:async )?(?:(.+?) \()?.*?([^/(]+):(\d+):\d+\)?$/.exec(l.trim()); return m ? `${(m[1] ?? '(anon)').replace(/\s+/g, '_')}@${m[2]}:${m[3]}` : '-'; };
-      const k = [reason, fr(ls.find((l) => !l.includes('/spatial/service.ts'))), fr(ls.find((l) => l.includes('/engine/runtime/runtime.ts'))), fr(ls.find((l) => l.includes('/apps/server/src/')))].join('|');
+      const f = (new Error().stack ?? '').split('\n').slice(2).find((l) => !l.includes('/spatial/service.ts')) ?? '?';
+      const k = f.trim().replace(/^at /, '').replace(/\(.*\/([^/]+:\d+):\d+\)$/, '$1');
       this.scanSites.set(k, (this.scanSites.get(k) ?? 0) + 1);
     }
     this.trustToken = token; this.trustEntities = world.entities;

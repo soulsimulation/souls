@@ -21,9 +21,10 @@
 // time admission charged each act. `--menu-stats` runs the world with EDGE_MENU_STATS=1 and folds its menu counters over
 // the load window into the report, with builds per act. Without these flags nothing else changes.
 // #2533: `--scan-census` runs the world with SIM_L4_STATS=1 and SIM_L4_SCAN_SITES=1 and reads the planner's static scans
-// from its `[l4]` lines (engine-bridge.ts, one a minute): scans and trusted syncs a second, ms a scan, and the top scan
-// sites by why trust did not answer and who asked (service.ts navChanged). Only lines whose whole minute lies inside the
-// load window count, so a census wants a load of at least 120 s.
+// from its `[l4]` lines (engine-bridge.ts, one a minute): scans and trusted syncs a second, ms a scan, and the scan sites
+// (service.ts navChanged: the first frame outside the spatial service, a minute's top 8). With `--profile` the report adds
+// the profile's nav.sync by who asked (prof-buckets.mjs navSyncBy). Only lines whose whole minute lies inside the load
+// window count, so a census wants a load of at least 120 s. Nothing in the world changes but those two debug switches.
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -254,17 +255,16 @@ export function recoveryLines(file) {
   const recoveries = [...text.matchAll(/\[world\] recovery hold (\d+) ms at tick (\d+): (\d+) replays \(([^)]*) ticks\)[^;\n]*(?:; since the last snapshot (\d+) ticks, (\d+) ms of wall, (\d+) ms of steps \(its cost (\d+) ms\))?/g)].map((m) => ({ holdMs: Number(m[1]), tick: Number(m[2]), replays: Number(m[3]), replayTicks: m[4] === 'none' ? [] : m[4].split(', ').map(Number), ...(m[5] ? { sinceSnapshot: { ticks: Number(m[5]), wallMs: Number(m[6]), stepMs: Number(m[7]), snapshotCostMs: Number(m[8]) } } : {}) }));
   return { recoveries, kills: [...text.matchAll(/watchdog: (world\.killed\.[a-z]+)/g)].map((m) => m[1]) };
 }
-/** #2533: where a scan site (service.ts navChanged: `reason|caller|runtime|server`) was asked from. With a
- *  runtime.ts frame: an action's step or the invariant and observer pass (inside a tick), or an admission or wait
- *  recovery (inside or outside one; the server frame says which); without: the server file that asked (the act request,
- *  a listing, the bridge's own tick work). */
-export function scanWhere(key) {
-  const [, , rt = '-', srv = '-'] = String(key).split('|'), fn = rt.split('@')[0];
-  if (rt !== '-') return fn === 'Runtime.stepInner' || fn === 'stepInner' ? 'tick: action step' : /admit|recover/i.test(fn) ? 'admission' : /^\(anon\)|^withEntityList/.test(fn) ? 'tick: invariant pass' : `runtime: ${fn}`;
-  return srv === '-' ? 'outside the server' : `outside a tick: ${srv.split('@')[1]?.split(':')[0] ?? srv}`;
+/** #2533: one `[l4]` line's scan sites (`<caller> <file>:<line>=<n>`, space-separated; a caller may hold a space), each
+ *  key reduced to file names (an anonymous frame prints its whole URL). */
+export function scanSitesOf(part) {
+  const xs = String(part ?? '').split(/=(\d+)(?: |$)/), out = [];
+  for (let i = 0; i + 1 < xs.length; i += 2) out.push([xs[i].trim().replace(/\S*\/([^/\s]+)/g, '$1'), Number(xs[i + 1])]);
+  return out;
 }
 /** #2533: the `[l4]` lines of `file` between byte offsets `from` and `to`: scans, their ms, trusted syncs, the seconds the
- *  lines cover, and the scan sites they list (each line lists its minute's top 40 and clears; `listedShare` is their share). */
+ *  lines cover, and the scan sites they list (the first frame outside the spatial service; each line lists its minute's
+ *  top 8 and clears, so `listedShare` is the share of the scans they name). */
 export function scanCensusOf(file, from, to) {
   let text = ''; try { text = readFileSync(file).subarray(from, to).toString('utf8'); } catch { return { error: 'no world log' }; }
   const lines = text.split('\n').filter((l) => l.includes('[l4] cpu '));
@@ -275,25 +275,26 @@ export function scanCensusOf(file, from, to) {
     if (!w || !s) continue;
     sec += Number(w[1]); scans += Number(s[1]); scanMs += Number(s[2]); trusted += Number(s[3]);
     const part = /; scan sites (.*?)(?:; live |$)/.exec(l)?.[1] ?? '';
-    for (const m of part.matchAll(/(\S+)=(\d+)/g)) sites.set(m[1], (sites.get(m[1]) ?? 0) + Number(m[2]));
+    for (const [k, n] of scanSitesOf(part)) sites.set(k, (sites.get(k) ?? 0) + n);
   }
   const r1 = (x) => Math.round(10 * x) / 10, per = (x) => (sec ? r1(x / sec) : null), listed = [...sites.values()].reduce((a, b) => a + b, 0);
-  const where = new Map();
-  for (const [k, n] of sites) { const g = `${scanWhere(k)} (${k.split('|')[0]})`; where.set(g, (where.get(g) ?? 0) + n); }
   return { lines: lines.length, sec, scans, scanMs, trusted, scansPerSec: per(scans), scanMsPerSec: per(scanMs), msPerScan: scans ? Math.round(1000 * scanMs / scans) / 1000 : null, trustedPerSec: per(trusted),
     listedShare: scans ? Math.round(1000 * listed / scans) / 1000 : null,
-    byWhere: [...where].sort((a, b) => b[1] - a[1]).map(([where, n]) => ({ where, scansPerSec: per(n) })),
-    sites: [...sites].sort((a, b) => b[1] - a[1]).map(([site, n]) => ({ site, where: scanWhere(site), scansPerSec: per(n) })) };
+    sites: [...sites].sort((a, b) => b[1] - a[1]).map(([site, n]) => ({ site, scansPerSec: per(n) })) };
 }
-/** #2533: an arm's scan census as report lines. */
-export function renderCensus(c) {
-  const L = ['', '### The planner\'s scans (#2533: SIM_L4_SCAN_SITES census, from the world\'s [l4] lines)'];
-  if (c.error) return [...L, '', `Census: ${c.error}.`];
-  L.push('', `${c.lines} line(s), ${c.sec} s inside the load window: ${c.scansPerSec} scans a second, ${c.msPerScan} ms a scan (${c.scanMsPerSec} ms a second), ${c.trustedPerSec} trusted syncs a second. The listed sites cover ${Math.round(100 * c.listedShare)} % of the scans (each line lists its minute's top 40). Reason: closed = trust was closed, new = the first scan of an open interval, table = another entity table.`,
-    '', '| asked from (reason) | scans a second |', '|---|---|');
-  for (const x of c.byWhere) L.push(`| ${x.where} | ${x.scansPerSec} |`);
-  L.push('', '| site (reason, caller, runtime frame, server frame) | asked from | scans a second |', '|---|---|---|');
-  for (const x of c.sites) L.push(`| \`${x.site.replaceAll('|', ' / ')}\` | ${x.where} | ${x.scansPerSec} |`);
+/** #2533: an arm's scan census as report lines, with the profile's nav.sync by who asked when the arm has one. */
+export function renderCensus(c, navSyncBy, totalMs) {
+  const L = ['', '### The planner\'s scans (#2533: the SIM_L4_SCAN_SITES census, from the world\'s [l4] lines)'];
+  if (c.error) L.push('', `Census: ${c.error}.`);
+  else {
+    L.push('', `${c.lines} line(s), ${c.sec} s inside the load window: ${c.scansPerSec} scans a second, ${c.msPerScan} ms a scan (${c.scanMsPerSec} ms a second), ${c.trustedPerSec} trusted syncs a second. The listed sites (the first frame outside the spatial service) name ${Math.round(100 * c.listedShare)} % of the scans.`,
+      '', '| caller | scans a second |', '|---|---|');
+    for (const x of c.sites) L.push(`| \`${x.site}\` | ${x.scansPerSec} |`);
+  }
+  if (navSyncBy?.length && totalMs) {
+    L.push('', 'The profile\'s nav.sync by who asked (a tick: the runtime frame > the action step or pass it called; outside a tick: the innermost server frame), ms per second of clock:', '', '| asked from | caller | ms a second |', '|---|---|---|');
+    for (const x of navSyncBy) L.push(`| \`${x.where}\` | \`${x.caller}\` | ${Math.round(10000 * x.ms / totalMs) / 10} |`);
+  }
   return L;
 }
 /** #2508: an arm's act meter as report lines. */
@@ -337,7 +338,7 @@ export function renderLoad(result) {
     }
     if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
     if (a.server?.meter) L.push(...renderMeter(a.server.meter));
-    if (a.server?.scanCensus) L.push(...renderCensus(a.server.scanCensus));
+    if (a.server?.scanCensus) L.push(...renderCensus(a.server.scanCensus, a.server.meter?.profile?.navSyncBy, a.server.meter?.profile?.totalMs));
     const al = a.actLatency;
     if (al?.server) L.push('', `Act calls (client trace, ${al.server.n}; ${Math.round(100 * a.counts.acts / a.durationSec) / 100} acts/s): server time p50 ${al.server.p50}, p95 ${al.server.p95}, p99 ${al.server.p99}, max ${al.server.max} ms; of it queue p50 ${al.queue?.p50 ?? ''}, p95 ${al.queue?.p95 ?? ''}, p99 ${al.queue?.p99 ?? ''} ms.`);
     if (a.slowActs?.length) {
