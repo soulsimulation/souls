@@ -17,6 +17,11 @@
 // is never used, so a socket's frames go out in write order. It relies on two `ws` internals, pinned with the version
 // (apps/server/package.json) and checked by anon-fanout-deflate.test.ts: the static `Sender.frame` and a socket's
 // `_sender.sendFrame`.
+//
+// Scaling V4 (#2522): a socket that cannot keep up is skipped and re-pictured, never queued without limit. Past MAX_BUFFERED
+// unsent (beyond its join set or picture still being written) it is marked behind and sent nothing more; once its queue is
+// under DRAINED it gets the picture and the batches after it, exactly as a resync. Behind for BEHIND_MS, it is closed with
+// "try later" (1013; the product client waits at least 5 s).
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
@@ -69,10 +74,14 @@ const SENDER_IDLE = 0;
 /** Recently compressed strings (each with its frame; null under the threshold), oldest first. */
 const FRAMES_KEPT = 64;
 
-const MAX_CONNECTIONS = 20_000, MAX_PER_IP = 200, MAX_BUFFERED = 1_000_000, RING = 600, SWEEP_MS = 15_000;
+const MAX_CONNECTIONS = 20_000, MAX_PER_IP = 200, MAX_BUFFERED = 1_000_000, RING = 600, SWEEP_MS = 15_000, DRAINED = 65_536, BEHIND_MS = 60_000;
 type Peer = { ws: WebSocket; ip: string; ready: boolean; alive: boolean; joinedAt: number; msgs: number; windowStart: number; lastHello: number; lastSnapshot: number; heldSince?: number;
   generation: number; resyncs: number; takeTransport?: typeof TAKE_BOUNDARY_WIRE_V1; takeEntities?: { last: number | null; join?: true }; takeChunks?: { last: number | null; kernel?: string };
-  columns: boolean; awaitingTakes: boolean; joinSend: boolean; joinPending: number;
+  columns: boolean; awaitingTakes: boolean; joinSend: boolean;
+  /** Bytes of its join set or picture not yet written to the socket (exempt from the behind rule). */
+  joinPending: number;
+  /** #2522: when it was marked behind (sent nothing until its queue drains). */
+  behind?: number;
   /** It negotiated permessage-deflate with the full window, so the shared compressed frame fits it. */
   deflate: boolean };
 
@@ -107,6 +116,8 @@ export class AnonFanout {
   }
   /** Sockets held (ready or still joining): the fanout's part of the host's viewerCount(). */
   get size() { return this.peers.size; }
+  /** #2522: sockets marked behind, and pictures sent to one that caught up, since start. */
+  readonly counts = { behind: 0, repictures: 0 };
   hasReady() { for (const p of this.peers) if (p.ready) return true; return false; }
   stopTimers() { for (const t of this.timers) clearInterval(t); this.timers = []; }
   /** The world's stop: every socket gets the "going away" code. */
@@ -125,21 +136,23 @@ export class AnonFanout {
     }
     if (!this.peers.size) return;
     if (!this.feed.available()) return this.down();
+    const now = Date.now();
     if (t === 'takes') {
       const strings = new Map<string, string>();
-      for (const p of this.peers) { if (!p.ready || p.ws.readyState !== 1) continue; this.hold(p.ws); this.sendMsg(p, m!, strings); }
+      for (const p of this.peers) { if (!p.ready || p.ws.readyState !== 1 || this.behind(p, now, false)) continue; this.hold(p.ws); this.sendMsg(p, m!, strings); }
       return;
     }
     const rest = t === 'kernel' && m?.t === 'kernel' ? kernelRestV1(m.view) : undefined;
-    // a batch is never dropped for backpressure: a missing one is a seq gap, and the gap costs the viewer a whole snapshot
-    for (const p of this.peers) { if (!p.ready || p.ws.readyState !== 1) continue; if (p.ws.bufferedAmount > MAX_BUFFERED && t !== 'batch') continue;
+    // a batch is not dropped for backpressure (a missing one is a seq gap) unless the socket is behind (#2522): then it gets the
+    // picture again when it has caught up
+    for (const p of this.peers) { if (!p.ready || p.ws.readyState !== 1 || this.behind(p, now, t === 'batch')) continue; if (p.ws.bufferedAmount > MAX_BUFFERED && t !== 'batch') continue;
       const out = m ? this.kernelWire(p, m, s, rest) : s; this.hold(p.ws); this.send(p, out === s ? o : out); }
   }
   /** A recovery (#1221): the ring is cleared (nothing before it resumes) and every viewer gets the picture again where it is. */
   reset() {
     this.ring = []; this.resumeFrom = -1;
     let j: PublicJoin | null = null;
-    for (const p of this.peers) if (p.ready) { j ??= this.feed.join(); this.picture(p, j); }
+    for (const p of this.peers) if (p.ready && p.behind === undefined) { j ??= this.feed.join(); this.picture(p, j); }
   }
   /** The clock is unavailable: everyone is told to try later. */
   down() { for (const p of this.peers) { p.ready = false; p.ws.close(1013, 'world unavailable'); } }
@@ -185,7 +198,7 @@ export class AnonFanout {
       if (now - p.heldSince < 30_000) { if (now - p.heldSince < 100) this.write(p, JSON.stringify({ t: 'load', level: 'black' })); setTimeout(() => { if (this.peers.has(p)) this.onMessage(p, m); }, 2_000).unref(); return; }
     }
     p.heldSince = undefined;
-    if (m.t === 'resync') { if (now - p.lastSnapshot < 2_000) return; p.lastSnapshot = now; p.resyncs++; this.picture(p, this.feed.join()); return; }
+    if (m.t === 'resync') { if (now - p.lastSnapshot < 2_000 || p.behind !== undefined) return; p.lastSnapshot = now; p.resyncs++; this.picture(p, this.feed.join()); return; }
     if (m.t !== 'hello') return;
     if (now - p.lastHello < 3_000) return; p.lastHello = now; p.lastSnapshot = now;
     p.generation++; p.ready = false; p.takeTransport = undefined; p.takeEntities = undefined; p.takeChunks = undefined; p.columns = false; p.awaitingTakes = false;
@@ -212,6 +225,22 @@ export class AnonFanout {
       for (const x of j.rest) typeof x === 'string' ? this.write(p, x) : this.sendMsg(p, x);
     } finally { p.joinSend = false; }
     p.ready = p.ws.readyState === 1;
+  }
+  /** #2522: true when `p` is sent nothing this time. Past MAX_BUFFERED unsent beyond its join set or picture, it is marked
+   *  behind; once under DRAINED it gets the picture and the batches after it, as a resync (they include `batch`, the one
+   *  being published); behind for BEHIND_MS, it is closed with "try later". */
+  private behind(p: Peer, now: number, batch: boolean): boolean {
+    if (p.behind === undefined) {
+      if (p.ws.bufferedAmount - p.joinPending <= MAX_BUFFERED) return false;
+      p.behind = now; this.counts.behind++; return true;
+    }
+    if (p.ws.bufferedAmount < DRAINED) {
+      p.behind = undefined; p.lastSnapshot = now; this.counts.repictures++;
+      p.joinSend = true; try { this.picture(p, this.feed.join()); } finally { p.joinSend = false; }
+      return batch;
+    }
+    if (now - p.behind > BEHIND_MS) { p.ready = false; p.ws.close(1013, 'try later'); }
+    return true;
   }
   /** The shared picture in this peer's form, (on a join) its log list, then every batch after it. */
   private picture(p: Peer, j: PublicJoin, log = false) {
@@ -279,16 +308,20 @@ export class AnonFanout {
   private write(p: Peer, s: string | Out) {
     if (!this.feed.available()) { p.ready = false; p.ws.close(1013, 'world unavailable'); return false; }
     if (p.ws.readyState !== 1) return false;
-    if (p.joinSend) { p.joinPending++; this.send(p, s, () => { p.joinPending--; }); } else this.send(p, s);
+    if (p.joinSend) {
+      let n = 0; const sent = this.send(p, s, () => { p.joinPending -= n; });
+      n = typeof sent === 'string' ? Buffer.byteLength(sent) : sent.reduce((k, b) => k + b.length, 0); p.joinPending += n;
+    } else this.send(p, s);
     return true;
   }
   /** One message to one open socket: the shared compressed frame if it negotiated deflate and the string is 1 KB or more,
-   *  otherwise uncompressed. `Out` carries its frame once built (ring batches, pictures, a broadcast's string). */
-  private send(p: Peer, o: string | Out, cb?: () => void) {
+   *  otherwise uncompressed. `Out` carries its frame once built (ring batches, pictures, a broadcast's string). Returns what
+   *  it queued. */
+  private send(p: Peer, o: string | Out, cb?: () => void): Frame | string {
     const f = p.deflate ? (typeof o === 'string' ? this.frameOf(o) : o.f !== undefined ? o.f : (o.f = this.build(o.s))) : null;
     const sender = (p.ws as unknown as { _sender: WsSender })._sender;
-    if (f && sender._state === SENDER_IDLE) sender.sendFrame(f, cb);
-    else p.ws.send(typeof o === 'string' ? o : o.s, { compress: false }, cb);
+    if (f && sender._state === SENDER_IDLE) { sender.sendFrame(f, cb); return f; }
+    const s = typeof o === 'string' ? o : o.s; p.ws.send(s, { compress: false }, cb); return s;
   }
   /** A string's compressed frame (null under the threshold), kept for the last FRAMES_KEPT strings sent without an `Out`. */
   private frames = new Map<string, Frame | null>();
