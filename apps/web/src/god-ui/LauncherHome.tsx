@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
 import { AccountPicture } from '../AccountPicture.tsx';
+import { HomeSouls } from './HomeSouls.tsx';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
 export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
@@ -108,6 +109,8 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           </a>
         ))}
       </div>
+      {/* #2466: the signed-in person's own Souls, below the worlds, only when they have some */}
+      <HomeSouls/>
       <ForAgents/>
       {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
       <footer className="lh-footer">

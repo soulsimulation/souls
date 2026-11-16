@@ -161,6 +161,8 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   // Re-read Me when it is not ours yet (the owner box needs it for a just-approved Soul).
   const handleRef=useRef<WorldViewerHandle|null>(null);handleRef.current=viewerHandle;
   useEffect(()=>onFollowSoulRequest((soulId,approved)=>{if(approved&&!meRef.current?.souls.includes(soulId))refreshMe(sim);setCardFollow(null);if(!handleRef.current?.flyToSoul?.(soulId))setCardFollow({soulId,scope:'card'});}),[]);
+  // #2466: the homepage's My Souls opens <world>?follow=1#soul/<id>: the camera follows that Soul, not only selects it
+  useEffect(()=>{const soul=hashTab().soul;if(soul&&new URLSearchParams(location.search).has('follow'))requestFollowSoul(soul);},[]);
   useEffect(()=>{if(!cardFollow)return;const t=setTimeout(()=>setCardFollow(null),FOLLOW_SOUL_WAIT_MS);return()=>clearTimeout(t);},[cardFollow]);
   useApprovalFollow(cardFollow,'card',true,viewerHandle,viewerState,()=>setCardFollow(null));
   // OWNER-DAY: a "Today" entry moves the camera to where it happened (your own camera, not follow/broadcast).
