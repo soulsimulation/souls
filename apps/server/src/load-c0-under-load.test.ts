@@ -8,10 +8,12 @@ import {fileURLToPath} from 'node:url';
 import {Agent, request} from 'node:http';
 
 const agent = new Agent({keepAlive: true});
+const notOk: string[] = [];   // a C0 read refused or failed answers fast but is no answer: every one must be a 200
 function call(port: number, method: string, path: string, body?: string): Promise<{status: number; ms: number; worldMs: number}> {
   return new Promise((resolve, reject) => {
     const t0 = performance.now();
     const req = request({host: '127.0.0.1', port, method, path, agent, headers: {authorization: 'Bearer sim_probe', ...(body ? {'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body))} : {})}}, res => {
+      if (res.statusCode !== 200) notOk.push(`${method} ${path.split('?')[0]} ${res.statusCode}`);
       res.resume(); res.on('end', () => resolve({status: res.statusCode ?? 0, ms: performance.now() - t0, worldMs: Number(/world;dur=([\d.]+)/.exec(String(res.headers['server-timing']))?.[1])}));
     });
     req.on('error', reject); req.end(body);
@@ -47,6 +49,7 @@ test('A4: ack, result, receipt reads and due long-poll returns answer within 50 
     const line = Object.entries({...c0, listenWall}).map(([k, v]) => `${k} n=${v.length} p95=${p95(v).toFixed(1)} p99=${p99(v).toFixed(1)} max=${Math.max(...v).toFixed(1)}`).join('; ');
     console.log(`# under load: acts n=${acts.length} p50=${[...acts].sort((a, b) => a - b)[acts.length >> 1].toFixed(0)} ms; ${line}`);
     assert.ok(acts.length > 100, `the thread was kept busy (${acts.length} acts in 5 s)`);
+    assert.deepEqual(notOk, [], 'every C0 read and long-poll is answered 200');
     for (const [k, v] of Object.entries(c0)) { assert.ok(v.length >= 10, `${k}: ${v.length} samples`); assert.ok(p95(v) <= 50, `${k} p95 ${p95(v).toFixed(1)} ms > 50 ms (${line})`); }
   } finally { child.kill(); agent.destroy(); }
 });
