@@ -48,7 +48,12 @@ node tools/test-harness/walk/walk.mjs                       # audit and compare 
 node tools/test-harness/walk/walk.mjs --world fuzz,bench-hamlet
 node tools/test-harness/walk/walk.mjs --write               # accept a deliberate change as the new baseline
 node tools/test-harness/walk/walk.mjs --from <gate out>/candidate/out/suite/walk --write
+node tools/test-harness/walk/walk.mjs --keep                # keep each audit's walk-audit-* scratch world copy
 ```
+
+Each audit copies its world into a `walk-audit-*` folder in the temp directory and removes it when it exits, also
+after a failure or a kill (a detached watcher removes a killed audit's copy); `--keep` keeps it (`WALK_KEEP=1` for
+`walk-gate.test.mjs`).
 
 The fixtures are part of the `test` media set (`pnpm assets:pull --set test`). A baseline change, better or worse, is
 its own reviewed commit before the final gate.
