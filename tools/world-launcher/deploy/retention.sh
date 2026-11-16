@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Keep-N retention for eden2's two unpruned piles (OPS, 2026-10-20):
-#   - routine compact backups  /srv/sim-worlds-data/release-backups/pre-r<release>-<production|legacy>-<YYYYmmdd-HHMMSS>
+#   - routine compact backups  /srv/sim-worlds-data/release-backups/pre-r<release>-<production|legacy>-<YYYYmmdd-HHMMSS>[-XXXXXX]
+#     (ship/compact-backup.sh adds mktemp's six-character suffix; older copies have none)
 #     keep the newest --keep-backups (default 10) PER STAGE; one-off backups with any other name (pre-archive-*, pre-cleanup-*,
 #     pre-e1-*, pre-mars-* ...) are never touched and are listed as kept;
 #   - legacy releases          /srv/sim-old/releases/we-<sha12>-root (+ its .deps.log), which release.sh legacy never prunes
@@ -44,13 +45,13 @@ $2"; COUNT=$((COUNT + 1)); echo "$([ $APPLY = 1 ] && echo 'delete      ' || echo
 if [ -d "$BK" ]; then
   for stage in production legacy; do
     n=0
-    # newest first by the timestamp in the name (not mtime: a copy or chown must not reorder them)
-    for d in $(ls -1 "$BK" | grep -E "^pre-r[0-9a-z]+-$stage-[0-9]{8}-[0-9]{6}\$" | awk '{print substr($0, length($0)-14) " " $0}' | sort -r | awk '{print $2}'); do
+    # newest first by the date and time fields in the name (not mtime: a copy or chown must not reorder them)
+    for d in $(ls -1 "$BK" | grep -E "^pre-r[0-9a-z]+-$stage-[0-9]{8}-[0-9]{6}(-[A-Za-z0-9]{6})?\$" | sed -E "s/^pre-r[0-9a-z]+-$stage-([0-9]{8}-[0-9]{6}).*/\1 &/" | sort -r | awk '{print $2}'); do
       n=$((n + 1)); [ -d "$BK/$d" ] || continue
       if [ $n -le "$KEEP_BACKUPS" ]; then echo "keep      $BK/$d"; else drop "$BK/$d"; fi
     done
   done
-  ls -1 "$BK" | grep -vE '^pre-r[0-9a-z]+-(production|legacy)-[0-9]{8}-[0-9]{6}$' | sed "s:^:keep (one-off, never pruned) $BK/:" || true
+  ls -1 "$BK" | grep -vE '^pre-r[0-9a-z]+-(production|legacy)-[0-9]{8}-[0-9]{6}(-[A-Za-z0-9]{6})?$' | sed "s:^:keep (one-off, never pruned) $BK/:" || true
 else echo "no $BK"; fi
 
 # ---- legacy releases

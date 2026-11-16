@@ -40,6 +40,26 @@ network). Tests, the web build and the release check or pull it themselves; see 
 pull-only objects are published with `publish.mjs --repo-media`, validated against the asset manifest instead of the
 licence records, and never enter the client `cdn-manifest.json`.
 
+## Origin answers the edge keeps briefly
+
+Two origin answers are the same for every caller without a token and change often:
+
+| Path | Served by | Varies by |
+|---|---|---|
+| `/__sim/worlds.json` | the launcher | nothing per caller |
+| `/w/<slug>/v1/config` | the world (`apps/server/src/http.ts`) | the host the caller reached (part of the edge's key) |
+
+Requests without an `Authorization` header get `Cloudflare-CDN-Cache-Control: max-age=5, stale-while-revalidate=30`:
+the edge keeps the answer 5 s and serves it stale for up to 30 s while it asks again. A plain `s-maxage` would turn
+the revalidation off. The browser still gets the origin's `Cache-Control` (`no-store` for the world list). A request
+with `Authorization` never gets the header. The cache rule for these two paths is "eligible for cache, respect the
+origin's headers", applied only to requests without `Authorization`. Add them to the rule set with the hashed and
+stable classes.
+
+The world page itself is not edge-cached. The launcher keeps it for 2 s
+([load contract §2](../architecture/load.md#2-request-classes)), so a burst of arrivals costs the world one page
+build every 2 s.
+
 ## The client
 
 The web build carries `apps/web/src/cdn-manifest.json`, which maps origin URLs (in both the root and `/worlds`
@@ -184,3 +204,86 @@ The god folder may name either allowed site with `/w/<slug>/` or `/worlds/w/<slu
 
 **Rollback:** delete the route. Clients get a 404 from the bucket and fall back to the origin. Objects under `w/` are
 inert and may stay.
+
+## The site behind the CDN
+
+The launcher and the worlds key every per-address limit on the first `X-Forwarded-For` entry. With the site record
+proxied, Caddy's default would keep what the CDN sent and append, and the CDN appends to whatever the visitor sent, so
+the first entry would be the visitor's own text; and without trusted-proxy settings every viewer would come from a
+CDN address and be refused at the per-address ceiling. Two files in `tools/world-launcher/deploy/caddy/` fix that:
+
+| File | Installed as | Does |
+|---|---|---|
+| `cdn-trust.snippet` | `/etc/caddy/cdn-trust.snippet`, imported **inside** the Caddyfile's global options | Trusts `CF-Connecting-IP` only from Cloudflare's published ranges (static, on one line: Caddy silently drops ranges written in a block) |
+| `soul-game.caddy` | `/etc/caddy/sites/soul-game.caddy` | Proxies `https://soul.game` to the production port with `X-Forwarded-For` replaced by exactly `{client_ip}` |
+
+`{client_ip}` is the `CF-Connecting-IP` value for a peer in those ranges and the TCP peer for anyone else (or when the
+header is missing or not an address), so the launcher always sees one entry, never an empty one. The trust applies to
+every site on the host, but only to requests from CDN addresses. `GET /__sim/whoami` answers `{address}`, the address
+the launcher keyed that request on (an entry that is not an address answers `null`).
+
+`node tools/world-launcher/deploy/caddy/check-soul-game.mjs [--origin https://soul.game] [--world eden]`, with
+`SOUL_CHECK_TOKEN` set to a scratch Soul's token in the environment, checks from outside: `address` (whoami equals
+the `ip=` line of `/cdn-cgi/trace` on the same name), `forged` (the same with a forged `X-Forwarded-For`), `viewer`
+(a viewer WebSocket gets its welcome), `agent` (a request with no browser headers to `/__sim/healthz` and a token-less
+`POST /w/<world>/v1/edge/act` get the launcher's JSON, not a challenge), `events` (the first event of
+`/w/<world>/v1/edge/events` within 5 s) and `ranges` (the snippet's ranges equal the published lists). It prints each
+problem and PASS or FAIL. Tests: `node --test tools/world-launcher/check-soul-game.test.mjs` (A1/A2 need `caddy` on
+`PATH` or in `$CADDY`).
+
+### Hands-on steps, in this order
+
+The release never writes Caddy's configuration. Do these once, after a release that carries both files is live.
+
+1. **Install the site file and the snippet** on the production host, as root. The live `https://soul.game` block
+   must be in no other site file (Caddy refuses a site defined twice): if it is, first move every other handler it
+   has into `soul-game.caddy` in a reviewed change, then delete that block in the same step as the install. First
+   put the import inside the global options of `/etc/caddy/Caddyfile` by hand, so it reads:
+
+   ```caddy
+   {
+   	admin 127.0.0.1:2019
+   	import cdn-trust.snippet
+   }
+   import sites/*.caddy
+   ```
+
+   Then:
+
+   ```bash
+   bash -s <<'INSTALL'
+   set -uo pipefail
+   SRC=/srv/sim-worlds/production/tools/world-launcher/deploy/caddy
+   PORT="$(sed -n 's/.*--port \([0-9][0-9]*\).*/\1/p' /etc/sim-worlds/production.conf)"
+   [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "no --port in production.conf: stopping, nothing changed"; exit 1; }
+   [ -f "$SRC/soul-game.caddy" ] && [ -f "$SRC/cdn-trust.snippet" ] || { echo "the live release has no soul-game.caddy: ship it first"; exit 1; }
+   grep -lE '^https://soul\.game[ ,{]' /etc/caddy/sites/*.caddy | grep -v '/soul-game\.caddy$' && { echo "soul.game is still defined above: move it first"; exit 1; }
+   grep -qE '^\s*import cdn-trust\.snippet' /etc/caddy/Caddyfile || { echo "the Caddyfile's global options do not import cdn-trust.snippet: stopping, nothing changed"; exit 1; }
+   for f in /etc/caddy/sites/soul-game.caddy /etc/caddy/cdn-trust.snippet; do [ -e "$f" ] && cp -a "$f" "$f.bak.$(date +%s)"; done
+   sed "s/@@PRODUCTION_PORT@@/$PORT/g" "$SRC/soul-game.caddy" > /etc/caddy/sites/soul-game.caddy
+   cp "$SRC/cdn-trust.snippet" /etc/caddy/cdn-trust.snippet
+   caddy validate --config /etc/caddy/Caddyfile || { echo "caddy validate failed: restore the .bak files; Caddy was NOT reloaded"; exit 1; }
+   systemctl reload caddy && echo "installed; Caddy reloaded"
+   INSTALL
+   ```
+
+   Before the record is proxied, the check fails only `address` (no trace page yet); `forged` must already pass.
+2. **Turn off bot challenges and script rewriting** in the CDN zone: no Bot Fight Mode, managed challenge, Browser
+   Integrity Check or challenge rule on `/v1/*`, `/w/*/v1/*`, `/__sim/*` or the page, and no Rocket Loader, Email
+   Obfuscation, minification or injected scripts on any path. Agents' command-line clients, the release's health
+   checks, the walk and eyes runners and the off-box watcher are not browsers, and the page depends on its inline
+   script order.
+3. **Keep the sign-in records unproxied** (DNS only): Clerk's records for the domain must answer from Clerk.
+4. **TLS mode Full (strict)**: the CDN connects to the origin over HTTPS and checks Caddy's certificate.
+5. **Switch the `soul.game` record to proxied, together with E2's cache rules** (never one without the other).
+6. **Soak**: run `check-soul-game.mjs` from outside until it prints PASS, then keep it and the release's health checks
+   running through a busy period. The CDN restarts sockets without notice, so viewer bars are measured at the origin.
+7. **Last, restrict the firewall** so ports 80 and 443 accept only the ranges in `cdn-trust.snippet`. Leave SSH as it
+   is.
+
+The deploy and backup workflows reach the host by `SIM_DEPLOY_HOST`: it must stay a name that is not proxied (or
+the address), since the CDN carries only HTTP(S).
+
+**Rollback** is the DNS switch: set the `soul.game` record back to DNS only (if step 7 is done, first reopen 80 and
+443 to everyone). The site file and snippet can stay: for a peer outside the CDN ranges `{client_ip}` is the peer
+itself, which is what the launcher saw before.

@@ -108,6 +108,8 @@ export class ChildPool {
     /** #2304: the load queue (kids waiting for a slot, each with its rank and the time it joined), the loads running, and
      *  the wait of the last 100 loads (ms from joining the queue to starting). */
     this.loadWaiting = []; this.loading = 0; this.loadWaits = [];
+    /** #2490: how long the last 100 loads took, from their load slot to the world answering (making room included). */
+    this.loadTimes = [];
     /** #2233: when a load was last refused for memory or slots (the host problem code worlds.capacity). */
     this.capacityRefusedAt = null;
     this.g = { ...GUARD, ...(o.guard ?? {}) }; this.random = o.random ?? Math.random; this.guardTimer = null;
@@ -261,16 +263,21 @@ export class ChildPool {
    *  exact, it ticks through what it missed on return), the one acted in longest ago first within each. A world someone is
    *  acting in or watching (busy) is never unloaded. Null when none qualifies. */
   async unloadForRoom(except, now = Date.now()) {
-    const quietMs = this.o.idleMs ?? QUIET_MS;
-    const ok = (k) => k.slug !== except && k.status === 'running' && k.child && !k.adopted && !k.ready && !k.stopped && !k.stopping && !this.o.busy?.(k.slug);
-    const byAge = [...this.kids.values()].filter(ok).sort((a, b) => (a.lastUsed ?? 0) - (b.lastUsed ?? 0));
-    const still = byAge.find((k) => { const s = this.o.still?.(k); return s?.still === true && (s.at ?? 0) >= (k.lastUsed ?? 0) && (s.untilWallMs == null || s.untilWallMs - now >= STILL_HORIZON_MS); });
-    const victim = still ?? byAge.find((k) => now - (k.lastUsed ?? 0) >= quietMs);
+    const { victim, still } = this.roomVictim(except, now) ?? {};
     if (!victim) return null;
     this.log(`world ${victim.slug} unloaded to make room (${still ? 'still' : `no act or visitor for ${Math.round((now - (victim.lastUsed ?? 0)) / 60_000)} min`})`);
     await this.stop(victim.slug);
     victim.asleep = true; victim.unloadedFor = still ? 'still' : 'quiet';
     return victim.slug;
+  }
+  /** The world unloadForRoom() would unload now ({ victim, still }), or null; #2490: the alarm asks before an early load. */
+  roomVictim(except, now = Date.now()) {
+    const quietMs = this.o.idleMs ?? QUIET_MS;
+    const ok = (k) => k.slug !== except && k.status === 'running' && k.child && !k.adopted && !k.ready && !k.stopped && !k.stopping && !this.o.busy?.(k.slug);
+    const byAge = [...this.kids.values()].filter(ok).sort((a, b) => (a.lastUsed ?? 0) - (b.lastUsed ?? 0));
+    const still = byAge.find((k) => { const s = this.o.still?.(k); return s?.still === true && (s.at ?? 0) >= (k.lastUsed ?? 0) && (s.untilWallMs == null || s.untilWallMs - now >= STILL_HORIZON_MS); });
+    const victim = still ?? byAge.find((k) => now - (k.lastUsed ?? 0) >= quietMs);
+    return victim ? { victim, still: !!still } : null;
   }
   /** #2233 A1: a world's estimate while it loads (LOAD_MB by its class). */
   loadMb(k) { return LOAD_MB[worldClass(k?.world)]; }
@@ -449,15 +456,18 @@ export class ChildPool {
 
   /** Live (or booting) children other than `except`. */
   running(except) { return [...this.kids.values()].filter((k) => k.slug !== except && (k.child || k.adopted || k.status === 'starting' || k.status === 'restarting' || k.status === 'handover')).length; }
-  /** Is there room for one more world under the memory figure (or the running cap) and the free-memory floor, as things stand? */
-  roomFor(slug) {
+  /** Is there room for one more world under the memory figure (or the running cap) and the free-memory floor, as things stand?
+   *  (`also`: see below; ordinary loads pass none.) */
+  roomFor(slug, also = []) {
     const { maxRunning = Infinity, minFreeMb = 0, worldsMemMb = 0 } = this.o;
+    // #2490: `also`, the worlds (registry entries) a caller is about to load besides, counted as if already loading
+    const plusMb = also.reduce((n, w) => n + LOAD_MB[worldClass(w)], 0);
     // low: the host under its floor, or (lane P3) the unit within one world of its own MemoryHigh/Max: the worlds share
     // the unit's cgroup (production 8G/9G), which fills long before the host does, and over MemoryMax a world is killed
     const room = minFreeMb > 0 ? (this.o.unitRoom ?? cgroupHeadroomMb)() : null;
     // #2233 A1: with a memory figure, the running worlds' Pss and each loading world's estimate, this one's included
-    const mem = worldsMemMb > 0 ? this.memUse(slug) : null, needMb = mem ? mem.running + mem.loading + this.loadMb(this.kids.get(slug)) : null;
-    const full = mem ? needMb > worldsMemMb : this.running(slug) >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
+    const mem = worldsMemMb > 0 ? this.memUse(slug) : null, needMb = mem ? mem.running + mem.loading + plusMb + this.loadMb(this.kids.get(slug)) : null;
+    const full = mem ? needMb > worldsMemMb : this.running(slug) + also.length >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
     return { full, low, room, needMb, ok: !full && !low };
   }
   /** Make room for one more world under the memory figure (or the running cap) and the free-memory floor, unloading worlds if needed. */
@@ -488,11 +498,14 @@ export class ChildPool {
       if (this.fenced) { k.status = 'stopped'; const e = new Error(`world ${k.slug} is served by a newer launcher`); e.code = 'handed-over'; throw e; }
       if (this.closing || k.stopped) { k.status = 'stopped'; this.o.onChange?.(k.slug); const e = new Error(`world ${k.slug} was stopped`); e.code = 'stopping'; throw e; }
     } catch (e) { done(); throw e; }
-    const run = this.spawnAndWait(k, timeoutMs);
+    const t0 = Date.now(), run = this.spawnAndWait(k, timeoutMs);
     this.inflight.set(run, k); run.then(() => this.inflight.delete(run), () => this.inflight.delete(run));
+    run.then(() => { if (queued) { this.loadTimes.push(Date.now() - t0); if (this.loadTimes.length > 100) this.loadTimes.shift(); } }, () => {});
     run.then(done, done);
     return run;
   }
+  /** #2490: the median of the last loads' times (loadTimes), or null before any. */
+  loadMs() { const w = [...this.loadTimes].sort((a, b) => a - b); return w.length ? w[Math.ceil(w.length / 2) - 1] : null; }
   /** #2304: wait for one of the loadParallel slots (status 'waiting' meanwhile); resolves with the slot's release. */
   async loadSlot(k) {
     const max = this.o.loadParallel ?? Infinity, joined = Date.now();

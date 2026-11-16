@@ -1298,8 +1298,10 @@ export class EngineBridge {
       if (this.perceive.stats.runs && tick - this.perceiveStarted < dial.settle) return;   // amber/red/black: catch-ups start further apart
       // boot: the first catch-up is a whole pass (~0.4 s at 4,900 entities). A served world runs it in slices too (lane P5):
       // at once it held a cold-booted world's first visitor. A Soul's read before it ends catches up at once (perceive.ensure).
-      // A world stepped by hand (tests, tools) runs it at once, as before.
-      if (!this.perceive.stats.runs && !this.host.running) { this.perceiveStarted = tick; this.perceiveFirst = -1; this.perceiveSync(true); return; }
+      // A world stepped by hand (tests, tools) runs it at once, as before. #2501: a world catching up its owed ticks (a
+      // handover's or a restart's boot, before its clock starts) is served: whole, the pass held its /healthz and every
+      // viewer's welcome for ~0.9 s of each release's pause on Eden 2026.
+      if (!this.perceive.stats.runs && !this.host.running && !(this.host.owedTicks > 0)) { this.perceiveStarted = tick; this.perceiveFirst = -1; this.perceiveSync(true); return; }
       if (this.perceive.stats.runs && tick - this.perceiveLast < 20 && tick - this.perceiveFirst < 40) return;
       this.perceiveRunning = true; this.perceiveStarted = tick; this.perceiveFirst = -1; this.catchUp = { slices: 0, maxMs: 0, t0: performance.now() };
     }
@@ -1307,8 +1309,9 @@ export class EngineBridge {
     try { if (this.perceive.step(dial.sliceMs)) this.perceiveRunning = false; }
     catch (e) { this.perceiveRunning = false; this.log(`perceive: ${(e as Error).message}`); }   // retried on the next catch-up, never every tick
     const c = this.catchUp, ms = performance.now() - t0; c.slices++; if (ms > c.maxMs) c.maxMs = ms;
-    // a slice that ran long (one place or the named things re-derived at once) is worth a line in the world's log
-    if (!this.perceiveRunning && c.maxMs > 40) this.log(`perceive catch-up: ${this.perceive.stats.lastIds} things${this.perceive.stats.lastFull ? ' (whole pass)' : ''}, ${c.slices} slices, longest ${Math.round(c.maxMs)} ms, ${Math.round(performance.now() - c.t0)} ms in all`);
+    // a slice that ran long (one place or the named things re-derived at once) is worth a line in the world's log, and so
+    // is the first pass after a boot (#2501: how a handover's catch-up ran it)
+    if (!this.perceiveRunning && (c.maxMs > 40 || this.perceive.stats.runs === 1)) this.log(`perceive catch-up: ${this.perceive.stats.lastIds} things${this.perceive.stats.lastFull ? ' (whole pass)' : ''}, ${c.slices} slices, longest ${Math.round(c.maxMs)} ms, ${Math.round(performance.now() - c.t0)} ms in all`);
   }
   /** The current catch-up: slices run, the longest (ms), when it began. */
   catchUp = { slices: 0, maxMs: 0, t0: 0 };
