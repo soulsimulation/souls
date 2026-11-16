@@ -899,15 +899,24 @@ export async function openLauncher(cfg = {}) {
     }));
     return out.filter(Boolean);
   }
-  /** The alarm (A2): an unloaded world loads when a body is due to move or its next deadline nears (#2367 A1). */
+  /** The alarm (A2): an unloaded world loads when a body is due to move or its next deadline nears (#2367 A1); one
+   *  unloaded while not still loads once there is room (#2475 A1). */
   const alarmLoading = new Set();
   function alarmScan(now = Date.now()) {
     if (!unloadStill || phase !== 'active' || gate || pool.closing || pool.fenced) return [];
-    const due = [];
+    const due = []; let roomed = false;
     for (const [slug, h] of horizons) {
       const w = registry.get(slug);
       if (!w) { horizons.delete(slug); saveHorizons(); continue; }
-      if (!h.still || !sleeping(slug) || pool.state(slug)?.stopping || alarmLoading.has(slug)) continue;
+      if (!sleeping(slug) || pool.state(slug)?.stopping || alarmLoading.has(slug)) continue;
+      // #2475 A1: a world stopped while not still (unloaded to make room, or not saying) is due at once: it loads again
+      // as soon as there is room, in the background rank, one per pass, and never unloads another world for it
+      if (!h.still) {
+        if (roomed || !pool.roomFor(slug).ok) continue;
+        roomed = true; alarmLoading.add(slug); due.push(slug);
+        pool.ensure(worldEnv(w), { passive: true, reason: 'background', timeoutMs: 0 }).then((p) => log(`${slug} loaded by its alarm (unloaded while not still; room now) on :${p}`), (e) => log(`${slug}: its alarm could not load it: ${e.message}`)).finally(() => alarmLoading.delete(slug));
+        continue;
+      }
       const listener = now - (residentAt.get(slug) ?? -Infinity) < STILL.listenerMs;
       // #2367 A1: any deadline (a reminder is one: edge.reminder.* in the world's horizon), leadMs early to load in time
       const why = h.moveWallMs != null && h.moveWallMs - STILL.leadMs <= now ? 'a body is due to move' : h.untilWallMs != null && h.untilWallMs - STILL.leadMs <= now ? (listener ? 'its next event, with a listener' : 'its next deadline') : null;
@@ -1064,11 +1073,14 @@ export async function openLauncher(cfg = {}) {
     // a long-poll at the cursor it held when the world unloaded is held here and answered "nothing new" at its deadline.
     // Anything this launcher cannot answer truly (no picture kept for the caller, another cursor) loads the world.
     const cold = !!resident && sleeping(slug) && unloaded(slug);
+    // #2475 A2: a live poll of a world unloaded while not still (to make room; its alarm loads it once there is room) is
+    // answered as an unloaded one: its kept picture with the clock moved on, never the picture as kept
+    const roomOut = resident === 'live' && !cold && unloadStill && sleeping(slug) && horizons.has(slug);
     const hold = cold ? (resident === 'live' ? liveKept.has(c3Key(req, slug, url)) : caught.get(slug)?.get(ask.key) === ask.cursor) : !!resident && sleeping(slug);
     // #1997: a resident's poll or long-poll never wakes or boots a sleeping world: the poll gets the last live picture, a
     // long-poll waits here for the world to wake (then goes on with what is left of its own deadline) or ends as a retry
     if (hold) {
-      if (resident === 'live') { asleepLive(req, res, slug, url, cold); return; }
+      if (resident === 'live') { asleepLive(req, res, slug, url, cold || roomOut); return; }
       const t0 = Date.now();
       if (!(await park(req, res, slug, residentHoldMs(edgeRest, url.search)))) { if (!clientGone(req, res)) { if (unloaded(slug) && sleeping(slug)) nothingNew(res, ask.kind, ask.cursor); else asleepRetry(res, slug); } return; }
       path = withDeadlineLeft(req.url, edgeRest, url.search, Date.now() - t0);
@@ -1076,7 +1088,7 @@ export async function openLauncher(cfg = {}) {
     let p;
     // #2304: the load's place in the queue (an act or god call first) and the hold, past which the answer is world.waking
     const reason = resident ? 'listener' : passive ? 'background' : edgeRest.startsWith('/v1/god/') ? 'god' : req.headers.authorization || /^\/(?:v1\/(?:edge|god|agent)\/|mcp\b)/.test(edgeRest) ? 'act' : 'visitor';
-    try { p = await pool.ensure(worldEnv(w), { passive, reason, timeoutMs: BOOT_HOLD_MS }); }
+    try { p = await pool.ensure(worldEnv(w), { passive, reason, timeoutMs: BOOT_HOLD_MS, why: `${req.method} ${edgeRest.split('/').slice(0, 3).join('/') || '/'}${resident ? ` ${resident}` : ''}` }); }   // (no ids or codes)
     catch (e) { await unreachable(req, res, slug, e, edgeRest); return; }
     if (clientGone(req, res)) return;   // before httpLive: a closed response never fires 'close' again to undo it
     // a request in flight (a god's long-poll listen, a slow upload) keeps the world awake (pool busy), and its end counts as

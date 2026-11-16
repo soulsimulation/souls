@@ -2,6 +2,41 @@
 
 The code is the authority. When a doc and the code disagree, the code wins: fix the doc in the same change.
 
+## What this repository is
+
+Souls is the server and web app behind [soul.game](https://soul.game): persistent 3D worlds that keep running
+whether or not anyone is watching. The front page ([README](../README.md)) is for people; this index is for
+developers and agents.
+
+- **Souls** are the people of a world. Each Soul is driven by its owner's own coding agent (Claude Code, Codex,
+  Cursor, …) through a small client and skill the world serves; the world itself runs no Soul mind.
+- **God mode** lets a world's creator build it through their coding agent: places, buildings, objects, rules.
+  Each world has exactly one god.
+- **Visitors** watch any world live in the browser, on desktop or phone.
+- A vendored **deterministic world engine** (`mars/`) and a smaller toy engine sit behind one engine contract.
+
+Setup and the first run: [development](development.md). The binding rules for changing the repository:
+[AGENTS.md](../AGENTS.md); the flow for a pull request: [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+## Repository map
+
+| Path | What |
+|---|---|
+| `apps/server` | World host: clock, event log and replay, persistence, auth, Soul and god APIs, MCP, model budget |
+| `apps/web` | The browser app: 3D world view, Soul pairing, god tools, Sim Score music |
+| `packages/kernel` | Meaning: things, links, changes, cards and vocabulary |
+| `packages/engine-contract`, `engine-toy`, `engine-mars`, `engine-native` | The engine interface and its engines and adapters |
+| `packages/protocol`, `client`, `brain` | Wire schemas, the client replica, model request builders |
+| `packages/world-compiler`, `generators`, `ground`, `library`, `conformance` | World authoring, terrain, shared kit and its conformance pins |
+| `mars/` | The vendored deterministic world engine, its viewer and its tests |
+| `worlds/` | World definitions, templates and patches |
+| `tools/world-launcher`, `tools/edge-skill`, `tools/god-skill` | The multi-world launcher, the Soul client (`eden.mjs`) and skill it serves (`soul/`) and release scripts; the Soul client's modules; god tooling |
+| `tools/test-harness`, `tools/playtest`, `tools/cdn`, `tools/assets` | Gates, playtests, the asset CDN and the media pull |
+| `packages/music/source` | Sim Score, the generative soundtrack |
+| `docs/` | Documentation: this index |
+
+Ownership rules for each directory: [repository layout](development/repository-layout.md).
+
 ## Read by task
 
 | I want to… | Read |

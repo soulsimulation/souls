@@ -148,8 +148,9 @@ Then boot one world from it as above. Tests: `node --test tools/world-launcher/b
 directory stands in for the off-site bucket; skips without restic).
 
 Release backups (`ship.sh` step `backup`) are separate: row-verified compact copies in
-`/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<time>`. `deploy/retention.sh` lists and prunes old ones
-([release](../release.md#retention)).
+`/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<date>-<time>-XXXXXX` (a random six-character suffix; older
+copies have none). `deploy/retention.sh` lists and prunes old ones, newest first by the date and time in the name, dry
+run by default ([release](../release.md#retention)).
 
 ## Legacy stage
 

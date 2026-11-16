@@ -25,15 +25,20 @@ load, read workers off) and put every sample in one group:
 **Binding and checking an act** cost 15 % of the clock thread. **Route search** costs at most 3.6–5.6 %, and re-plans
 under way, which read where people stand that tick, cannot move.
 
-## Stage 3a: bind and check in a worker (first)
+## Stage 3a: bind in a worker (first)
+
+Only the bind can move. The act's check stays on the clock: it asks the live engine (`canPerform`, again after
+putting a stand first, the door passage) and can write (an `edge-relocate` that steps a body clear before it starts),
+all in the act path of `apps/server/src/edge/ledger/ledger.ts` from the `checkAt` mark on. A replica cannot answer or
+write those.
 
 The act's accepted `decision` event already carries the bound programme (`steps`). A replay folds those steps and
 never re-binds. Moving the binding changes no logged fact and needs no rules change.
 
 - In mode 2, read workers already run `binds()` over a replica (`split/menu-world.ts`). The gateway sends
-  `POST /v1/edge/act` to a worker. The worker binds and checks the offer, then posts
+  `POST /v1/edge/act` to a worker. The worker binds the offer, then posts
   `{soulId, option, steps, gen, navEpoch}` to the clock over the admission port.
-- The clock runs the acceptance guard it runs today (`enqueueChecked`) against live state at the drain. If the
+- The clock runs the act's check and the acceptance guard it runs today (`enqueueChecked`) against live state at the drain. If the
   worker's `gen` is more than a few ticks old, the clock binds again itself. Refusals keep today's reasons.
 - **Equality proof:** an oracle mode binds on both and compares `steps` field by field, as `read-oracle.ts` does for
   reads. The one permitted difference is a verdict that has not yet reached the replica (one delta).
@@ -81,7 +86,7 @@ Ceilings are observed wall clock for one lane.
 
 | # | Task | Ceiling |
 |---|---|---|
-| B1 | Acts to a read worker: bind and check there, `steps` to the clock over the admission port; guard at the drain | 3 h |
+| B1 | Acts to a read worker: bind there, `steps` to the clock over the admission port; guard at the drain | 3 h |
 | B2 | Bind oracle, then timed `eval-load` 24 and 50, on against off, 2 repeats, bar declared first | 2 h |
 | P1 | Key purity of `Spatial.route`, cold against warm; fix or name what is not pure | 2 h |
 | P2 | `routeOfferV1`, `route-offer/1` and the key check in `admit`; replay tests (accept, ignore, old history) | 3 h |
