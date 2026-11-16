@@ -144,7 +144,8 @@ export class QuietBaseline {
  *  windows (~50 s, half-life ~33 s), long enough to average over a large world's heavy ticks (one every 10-15 s) and short
  *  enough to follow a world that grows within a minute or two. Until the first quiet window, non-warm windows with tick
  *  service >= 0.95 seed it provisionally (a world that boots straight into load still calibrates); the first quiet window
- *  replaces that seed. A window needs >= 20 ticks of its own (1 s) to count. */
+ *  replaces that seed. Any other window whose ticks averaged less than the value moves it down by alpha (#2559), never
+ *  up. A window needs >= 20 ticks of its own (1 s) to count. */
 export const QUIET_TICK_ALPHA = 0.1, QUIET_TICK_MIN_TICKS = 20;
 export class QuietTick {
   value = 0;
@@ -155,6 +156,12 @@ export class QuietTick {
     if (!Number.isFinite(avgMs) || avgMs < 0) return this.value;
     if (quiet && !this.quietSeen) { this.quietSeen = true; this.value = avgMs; return this.value; }
     if (quiet || (!this.quietSeen && served)) this.value = this.value > 0 ? this.value + QUIET_TICK_ALPHA * (avgMs - this.value) : avgMs;
+    // #2559 (after #2470's round 2): any window whose own ticks averaged less than the learned value shows that value is
+    // stale-high (load only adds to a tick, so the quiet tick is at most this), and moves it down by alpha, served or not,
+    // quiet seen or not. Never up. Learned once from heavy setup ticks (a boot, Souls joining), the quiet tick otherwise
+    // stayed high for good: it left requests the 2 ms floor budget on a mostly idle thread, the acts queued past their
+    // deadline, and with acts queued no window was quiet again to relearn it. Viewers arriving tipped worlds into it.
+    else if (this.value > 0 && avgMs < this.value) this.value += QUIET_TICK_ALPHA * (avgMs - this.value);
     return this.value;
   }
 }

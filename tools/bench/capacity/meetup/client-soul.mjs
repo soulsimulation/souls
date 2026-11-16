@@ -17,6 +17,11 @@ export const clientHeaders = ({ token, address }, { auth = true, key = null } = 
   ...(address ? { 'x-forwarded-for': address } : {}), ...(auth && token ? { authorization: `Bearer ${token}` } : {}), ...(key ? { 'idempotency-key': key } : {}) });
 /** An act by catalog id: strict (offered ids only), keyed; the key is also the clientRef. */
 export const actBody = (id, key) => ({ capability: id, params: {}, strict: true, clientRef: key });
+/** #2556: speech for the social mix of the load shapes: POST it to SAY_PATH with the act's headers (keyed, like an act). */
+export const SAY_PATH = '/v1/edge/say';
+export const sayBody = (text) => ({ text: String(text).slice(0, 500) });
+/** #2556: the gestures of the social mix, by verb; their ids are the catalog's anywhere acts (`wave:here`, ...). */
+export const GESTURE_VERBS = Object.freeze(['wave', 'nod', 'clap', 'cheer', 'bow']);
 
 function retryAfterMs(r, d) {
   const h = r.headers.get('retry-after'), n = Number(h); if (h && Number.isFinite(n) && n >= 0) return n * 1000;
@@ -58,13 +63,15 @@ export async function startPicture(base, soul) {
   return { catalog: cat.status === 200 ? cat.data : null, catalogStatus: cat.status, liveStatus: live.status };
 }
 
-/** Catalog ids by act kind, as bench.mjs reads them: the walks (buildings first, then other open places), the spots, and
- *  the kinds of the profiles' mixes. A kind the world does not offer has no ids; the caller sends a walk and counts it. */
+/** Catalog ids by act kind, as bench.mjs reads them: the walks (buildings first, then other open places), the spots, the
+ *  kinds of the profiles' mixes and (#2556) the gestures. A kind the world does not offer has no ids; the caller sends a
+ *  walk and counts it. Speech is not an act: it is sent with SAY_PATH and sayBody. */
 export function catalogIds(cat) {
   const walkOf = (p) => `walk:${p.ref ?? p.id}`, spots = (cat?.acts ?? []).filter((a) => !a.with && !a.needs), verb = (v) => spots.filter((a) => a.verb === v).map((a) => a.id);
   const walks = [...(cat?.places ?? []).filter((p) => p.kind === 'building'), ...(cat?.places ?? []).filter((p) => p.kind !== 'building' && !p.fixed && !p.parent)].map(walkOf);
   return { walk: walks, spot: spots.map((a) => a.id), 'sit-ground': ['sit-ground:here'], sit: [...verb('sit'), ...(cat?.things ?? []).filter((t) => t.seat).map((t) => `sit:${t.id}`)],
-    read: verb('read'), eat: verb('eat'), 'play-music': verb('play-music'), swim: verb('swim') };
+    read: verb('read'), eat: verb('eat'), 'play-music': verb('play-music'), swim: verb('swim'),
+    gesture: (cat?.anywhere ?? []).filter((a) => GESTURE_VERBS.includes(a.verb)).map((a) => a.id) };
 }
 
 // ------------------------------------------------------------------ pacing (cadence.json), deterministic given u in [0,1)

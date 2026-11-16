@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runEpisode, runCase, prepareFolder, readCatalog, setupStep } from './episode.mjs';
+import { createSeat, planWake } from '../arena/seat.mjs';
 
 // A stand-in client: `serve` starts a detached process and logs its pid, `serve --stop` ends it, `listen` logs its pid and blocks.
 const FAKE_CLI = `import { spawn } from 'node:child_process';
@@ -119,5 +120,32 @@ test('#2440: a create that got no answer is asked again, moving the pairing, a b
   } finally {
     delete process.env.CREATES_LOST;
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// #2498 F3 (the Eden harder-v1 errand, r2): serve logged plan-stopped and plan-finished, the harness listen ended on them with no
+// message, and the seat took no turn, so the agent could not recover or tell its owner. The eval now hands those wakes on.
+const PLAN_FINISHED = JSON.stringify({ messages: [], wakes: [{ id: 'plan-finished', kind: 'plan-finished', why: 'plan p_1 ended failed', at: '2026-11-16T03:32:23.769Z', count: 1 }], next: 'Your wake rules fired' });
+test('#2498 A2: a listen that ends on serve\'s plan-stopped or plan-finished wake is a turn for the eval\'s seat', { timeout: 20000 }, async () => {
+  assert.equal(planWake(PLAN_FINISHED), true);
+  assert.equal(planWake(JSON.stringify({ messages: [], plan: { id: 'p_1', state: 'stopped', next: 'Step 1 was refused.' } })), true, 'a stopped plan');
+  assert.equal(planWake(JSON.stringify({ messages: [], wakes: [{ id: 'plan-stopped', kind: 'plan-stopped', count: 1 }] })), true);
+  assert.equal(planWake(JSON.stringify({ messages: [], wakes: [{ id: 'act-ended', kind: 'act-ended', count: 1 }] })), false, 'other wakes are not handed on');
+  assert.equal(planWake('listen: 503, retrying'), false);
+  for (const planWakes of [true, false]) {
+    const run = mkdtempSync(join(tmpdir(), 'episode-planwake-'));
+    try {
+      const s = createSeat({ runDir: run, seat: { id: 'soul', adapter: 'scripted-owner', script: { rules: [] } }, worldBase: 'http://127.0.0.1:9', rails: { planWakes } });
+      writeFileSync(join(s.folder, 'eden.mjs'), `console.log(${JSON.stringify(PLAN_FINISHED)});`);
+      const turns = []; s.chat = async (text, o) => { turns.push({ text, reason: o.reason }); };
+      s.info.wake = true; s.wakeLoop();
+      await new Promise((ok) => setTimeout(ok, 1500));
+      await s.stop();
+      if (planWakes) {
+        assert.equal(turns.length, 1, 'one turn for the wake');
+        assert.equal(turns[0].reason, 'wake');
+        assert.match(turns[0].text, /^\[background task\] node eden\.mjs listen exited with output:\n.*plan-finished/s);
+      } else assert.equal(turns.length, 0, 'without the rail, a seat takes no turn for it, as before');
+    } finally { rmSync(run, { recursive: true, force: true }); }
   }
 });

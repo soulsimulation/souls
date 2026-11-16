@@ -63,6 +63,23 @@ refused). Every call is an audit row.
 
 All take `--port <port>` and `--base /` for production (no `--base` on legacy).
 
+### Pausing uploads or new worlds
+
+Two site switches stop the two things that can fill the machine, at once and without a release (#2540). They are kept
+in `<data>/worlds.json` (`site`), so they survive a restart and go into the backup; each change is an audit row.
+
+```sh
+node $R/tools/world-launcher/op.mjs set-site --port $P --base / --uploads off     # god assets, art media, bodies, world thumbnails
+node $R/tools/world-launcher/op.mjs set-site --port $P --base / --creation off    # POST /__sim/worlds
+node $R/tools/world-launcher/op.mjs set-site --port $P --base / --uploads on --creation on
+curl -fsS http://127.0.0.1:$P/__sim/healthz | grep -o '"site":{[^}]*}'        # both switches
+```
+
+Off, a `POST` to an upload route is answered by the launcher `503 site.uploads-paused`, and a new world
+`503 site.creation-paused`, each with `Retry-After: 600` and a plain message, so a god's build stops with a named,
+retriable code. Reads of assets, art and thumbnails, acts, viewing and existing worlds are never refused. Sign-ups are
+not paused here: pause them in the sign-in provider's dashboard ([auth](auth.md)).
+
 ## Backups
 
 Nightly at 03:30 UTC `sim-worlds-backup@<stage>.service` runs `deploy/backup-restic.mjs backup <stage>` as
@@ -107,8 +124,9 @@ To put a world's data back live: stop the stage, move the world's `sim.db` aside
 for real data loss. Tests: `node --test tools/world-launcher/backup-restic.test.mjs` (skips without restic).
 
 Release backups (`ship.sh` step `backup`) are separate: row-verified compact copies in
-`/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<time>`. `deploy/retention.sh` lists and prunes old ones
-([release](../release.md#retention)).
+`/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<date>-<time>-XXXXXX` (a random six-character suffix; older
+copies have none). `deploy/retention.sh` lists and prunes old ones, newest first by the date and time in the name, dry
+run by default ([release](../release.md#retention)).
 
 ## Legacy stage
 

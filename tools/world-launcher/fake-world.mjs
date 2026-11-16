@@ -67,6 +67,9 @@ const server = createServer((req, res) => {
   // a crash whose open connections outlive the process for a while (their fds handed to a short-lived helper): the
   // launcher sees the exit before the in-flight requests drop, as when a world restarts under a long-poll
   if (path.startsWith('/crash-hold')) { const ms = Number(new URL(req.url, 'http://x').searchParams.get('ms') ?? 300); res.end('bye'); setTimeout(() => { spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: ['ignore', 'ignore', 'ignore', ...[...conns].filter((s) => s !== req.socket && !s.destroyed)] }); process.exit(3); }, 10); return; }
+  // #2515: the world page (marked X-Sim-Page, the same for every caller; a query variant noindex) and an HTML route that is not it
+  if (path.split('?')[0] === '/') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'x-sim-page': 'index', ...(path.includes('?') ? { 'x-robots-tag': 'noindex, nofollow' } : {}) }).end(`<!doctype html><title>${slug}</title><script>window.__simConfig={"worldKey":"${slug}","pid":${process.pid}}</script>`);
+  if (path.split('?')[0] === '/studio') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(`<p>studio ${path}</p>`);
   res.writeHead(404).end('fake: no such route ' + path);
 });
 const conns = new Set(); server.on('connection', (s) => { conns.add(s); s.on('close', () => conns.delete(s)); });

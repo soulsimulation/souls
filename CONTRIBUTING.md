@@ -1,82 +1,100 @@
 # Contributing to Souls
 
-Thanks for helping. Souls is developed mostly by coding agents working with the maintainer, and agents are welcome
-contributors here: the same rules apply to everyone, and they are written down in [AGENTS.md](AGENTS.md).
+Thanks for helping. Souls is built mostly by coding agents working with the maintainer, and your agent is as welcome
+here as you are. People and agents follow the same rules: this page is the short version, and
+[AGENTS.md](AGENTS.md) is the full one. If you are an agent, read AGENTS.md before you change anything.
 
-## Setup
+Everyone here follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Ways to help
+
+- **Live in it.** Run a Soul or build a world on [soul.game](https://soul.game) and tell us what was confusing,
+  broken or delightful.
+- **Report a bug** with the bug template: the world, what you or your agent did, what happened and what you
+  expected. A clip or the command and its receipt helps most.
+- **Share ideas and worlds** in [Discussions](https://github.com/soulsimulation/souls/discussions).
+- **Fork it.** The code is MIT-licensed; build your own worlds, clients and tools on it.
+- **Send a pull request**, as below.
+
+Security issues go through [SECURITY.md](SECURITY.md), never a public issue.
+
+## Before you write code
+
+1. **Find or open an issue.** For anything bigger than a small fix, describe the problem and the change you have in
+   mind, and wait for a reply before building it. That saves you work on something that won't merge.
+2. **Say you are taking it** in a comment on the issue, so nobody else starts the same thing. A maintainer assigns
+   it to you.
+3. **Fork, and branch from `main`.** Any branch name works. Keep one change per pull request, small and focused, and
+   put unfinished work behind a flag that defaults to off.
+
+Setup takes a few minutes: Node ≥ 22.18, pnpm 10, then
 
 ```sh
 pnpm install --frozen-lockfile
 pnpm assets:pull
 cp .env.example .env
+pnpm build
+BRAIN_MODE=fake DEV_AUTH=1 DATA_DIR=.local/dev node --env-file=.env apps/server/src/main.ts
 ```
 
-Details, environment variables and running other worlds: [docs/development.md](docs/development.md).
+and open <http://localhost:4500/w/toy/?dev=1>. Details, environment variables and other worlds are in
+[docs/development.md](docs/development.md); the repository map is in [docs/README.md](docs/README.md).
 
-## The flow
+## Making the change
 
-1. **Start from an issue.** Use the bug or feature template. For anything large, agree the approach in the issue
-   before writing code. Claim it before you start: assign it and add the `agent:claimed` label.
-2. **Branch** from `main` as `agent/<issue>-<slug>` (people may use any name). One branch per issue; keep the change
-   small and focused, and put unfinished work behind a flag that defaults to off.
-3. **Change and test.** Add or update tests with the code. Update the doc that describes any behaviour you change.
-4. **Prove it at your tier.** `node tools/proof/tier.mjs` prints your change's proof tier from
-   [docs/process/PROOF-POLICY.yml](docs/process/PROOF-POLICY.yml). Visible changes need an uncut, real-speed clip of
-   the changed journey on a fake-mind world; Soul, navigation and engine changes need a scenario playtest. See
-   [docs/process/agent-lifecycle.md](docs/process/agent-lifecycle.md).
-5. **Add a changelog fragment** in `changes/` if people using Soul will notice the change: one line, written for them.
-   The format is in [changes/README.md](changes/README.md). Otherwise ask for the `no-changelog` label. Never edit
-   `CHANGELOG.md`; the release compiles it.
-6. **Open a pull request** from the template. Put proof (clips, logs) in the PR, never in the tree.
-7. **Checks and review.** On every push these workflows run:
-   - `ci`: the checks your paths need; its `ci-ok` job is the one required check;
-   - `security`: gitleaks, the path guard (no databases, `.env`, agent or god files, or unlisted binaries) and the
-     scrub guard (no home paths, private hosts, IPs or personal emails in added lines);
-   - `changelog`: a valid fragment in `changes/` or the `no-changelog` label;
-   - `claude-review`: an automated review against [AGENTS.md](AGENTS.md) and the proof policy.
+- **Test it.** Add or update tests with the code, and update the doc that describes any behaviour you change.
+- **Use fake minds.** Local worlds run with `BRAIN_MODE=fake`. Never run a live model or point tests at production
+  data.
+- **Prove it.** `node tools/proof/tier.mjs` prints your change's proof tier
+  ([PROOF-POLICY.yml](docs/process/PROOF-POLICY.yml)). A change people can see needs an uncut, real-speed screen
+  recording of it working on a local world: drag the video into the pull request description. Soul, navigation and
+  engine changes also need a playtest; a maintainer can help with that.
+- **Add a changelog line** in `changes/` if people using Souls will notice the change: one line, written for them
+  ([format](changes/README.md)). Never edit `CHANGELOG.md`; releases compile it.
 
-   Answer each review comment with a fix or a reason. Mention `@claude` in a comment to ask follow-ups or have it push
-   a fix (the `claude` workflow).
-8. **Merge.** Label the PR `merge:ready`. The merge train merges it: T0–T2 automatically once green (as is
-   when it merges cleanly and touches no engine or other strict path, otherwise rebased onto `main` and re-tested
-   first), T3 and above rebased, re-tested and after the maintainer approves. If it can't rebase cleanly it labels the
-   PR `needs:rebase`. Details: [docs/process/agent-workflow.md](docs/process/agent-workflow.md).
-
-The authorized release owner handles releases under the maintainer’s approvals and existing gates.
-See [docs/release.md](docs/release.md) for the current root-only topology and automation limits.
-
-## Checks to run
+### Checks to run
 
 ```sh
 pnpm typecheck                                              # or tsc -p for the packages you touched
 node --test <the test files you touched>                    # focused tests
 node tools/test-harness/walk/walk.mjs                       # if geometry, navigation or god builds can change
 node tools/test-harness/bundle-budget/budget.mjs --build --check   # if the web app changed
-pnpm --filter @souls/conformance test                         # if library defs, generators or the compiler changed
-node tools/changelog/compile.mjs --check                    # if you added a fragment
+pnpm --filter @souls/conformance test                       # if library defs, generators or the compiler changed
+node tools/changelog/compile.mjs --check                    # if you added a changelog line
 ```
 
-What each check means and when to run it: [docs/testing.md](docs/testing.md). Don't run a live model locally
-(`BRAIN_MODE=fake`), and don't point tests at production data.
+What each check means and when it matters: [docs/testing.md](docs/testing.md). A walk or bundle baseline update, or a
+conformance supplement, goes in its own commit with the reason in the message. Never edit an older conformance
+supplement.
 
-## Baselines and pins
-
-A walk or bundle baseline update, or a conformance supplement, goes in its own commit with the reason in the message,
-regenerated after rebasing onto `main`. Add a new conformance supplement for your change; never edit an older one.
-Don't commit generated output that CI builds. Reviewers read the numbers.
-
-## Commits
+### Commits
 
 - Imperative, scoped subject lines: `fix(nav): keep basement rooms out of default mesh entry`.
 - Explain why in the body when it isn't obvious.
 - Agents add their co-author trailer.
 
-## Never commit
+### Never commit
 
-Secrets, `.env` or `deploy.env`, databases, run outputs, screenshots, media (it lives on the asset CDN; see
-[ASSETS.md](ASSETS.md)), or status, brief and report files. A secret scanner runs on every PR; never bypass hooks.
+Secrets, `.env` or `deploy.env`, databases, run outputs, screenshots, video or other media (media lives on the asset
+CDN, see [ASSETS.md](ASSETS.md)), or status and report files. A secret scanner and a path guard run on every pull
+request, and the hooks must never be bypassed.
+
+## The pull request
+
+Open it from the template and fill in what it asks: what changed, why, how you checked it, and the proof. Then:
+
+- **CI runs** the checks your paths need; `ci-ok` is the one required check. The `security` and `changelog` checks
+  run too.
+- **Review.** An automated reviewer reads the change against [AGENTS.md](AGENTS.md) and the proof policy, and a
+  maintainer reviews it. Answer each comment with a fix or a reason.
+- **Merge.** When it is ready, a maintainer adds `merge:ready` and the merge train merges it. Larger or engine
+  changes are rebased, re-tested and approved by the maintainer first. How that works:
+  [docs/process/agent-workflow.md](docs/process/agent-workflow.md).
+
+Maintainers and the agents working with them claim issues with labels and name branches `agent/<issue>-<slug>`; the
+lifecycle is in [docs/process/agent-lifecycle.md](docs/process/agent-lifecycle.md).
 
 ## Licence
 
 By contributing you agree that your contribution is licensed under the [MIT License](LICENSE). Media is handled
-separately; see [ASSETS.md](ASSETS.md). Security issues: [SECURITY.md](SECURITY.md), not public issues.
+separately; see [ASSETS.md](ASSETS.md).
