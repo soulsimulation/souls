@@ -927,7 +927,7 @@ export class Spatial {
       let rest: Place | undefined;
       if (this.ground?.paged && start.level === 0 && goal.level === 0 && hypot(goal.p[0] - start.p[0], goal.p[1] - start.p[1]) > PAGED_DIRECT_M) {
         this.sync(world);
-        const c = pagedRoute(this.ground, this.scene, profile, start, goal, this.routeReachV1 ? { routeReachV1: true } : {});
+        const c = pagedRoute(this.ground, this.scene, profile, start, goal, this.routeReachV1 ? { routeReachV1: true, planner: 'corridor' } : { planner: 'corridor' });   // N4 step 0 (throwaway)
         if (!c.ok) return c;
         const end = c.route.rest ? (c.route.legs.at(-1) as { points?: Vec2[] } | undefined)?.points?.at(-1) : undefined;
         if (end) { rest = c.route.rest; goal = { level: 0, p: end }; }
@@ -939,7 +939,7 @@ export class Spatial {
       // and a walker standing between people (a gap in a ring) plans from the nearest standable spot up to
       // 1 m away (it steps out of the gap first) instead of failing 'route.start-blocked'
       const opts: RouteOpts = { proveUnreachable: this.proveUnreachable, explainUnusable, nameObstacles: (id) => ids.has(id), startTolerance: AROUND_START_TOL };
-      if (this.planner !== 'exact') opts.planner = this.planner;
+      opts.planner = 'corridor';   // N4 step 0 (throwaway): corridor for every people-avoiding replan
       const res = findRoute(grids, scene, profile, start, goal, opts);
       return rest && res.ok ? { ok: true as const, route: { ...res.route, rest } } : res;
     };

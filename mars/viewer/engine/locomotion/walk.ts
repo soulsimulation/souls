@@ -258,7 +258,7 @@ function actorOf(rt: Runtime, id: string): Entity | Diagnostic {
 }
 
 export function planWalk(rt: Runtime, actor: Entity, goal: { level: number; p: Vec2 }, profile = bodyProfile(actor)) {
-  return spatial(rt,actor.id).route(rt.world, profile, { level: actor.human!.level, p: [actor.pose.p[0], actor.pose.p[2]] }, goal, actor.body?.family==='floater'?{planner:'corridor'}:undefined);
+  return spatial(rt,actor.id).route(rt.world, profile, { level: actor.human!.level, p: [actor.pose.p[0], actor.pose.p[2]] }, goal, {planner:'corridor'});   // N4 step 0 (throwaway): corridor for every walker
 }
 
 export const walkTo: ActionDef<WalkParams, Route, Exec> = {
