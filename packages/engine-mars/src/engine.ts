@@ -163,6 +163,9 @@ const GUARDED_V1 = new WeakSet<object>();
 const guardInvariantOnceV1 = (inv: any) => { if (GUARDED_V1.has(inv)) return inv; const g = guardedInvariantV1(inv); GUARDED_V1.add(g); return g; };
 /** #1440: how long a body under a standing hold must stay whole before the mark ends. */
 const STANDING_HOLD_COOLDOWN_V1 = 1200;
+/** #1513 nonfinite-mark/1: one field of an object under a standing mark, at its last whole value: its pose (with the support it
+ *  stood on), or a number at `path` inside the entity. */
+type ObjectMarkFieldV1 = { path: string[]; value?: number; pose?: any; support?: string };
 const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } catch (e) { return [{ code: 'engine.thrown', message: String((e as Error)?.message ?? e).slice(0, 200), subjects: [] }]; } };
 /** #1952 wait-bound/1: the walk watchdog's own measure (walk.ts WATCH_M), held for a minute. */
 export const WAIT_BOUND_V1 = 'wait-bound/1', WAIT_BOUND_M = 0.5, WAIT_BOUND_TICKS = 1200;
@@ -845,17 +848,67 @@ export class MarsEngine implements Engine {
    *  one logged hold a tick. While it is marked the engine holds it again, at the logged pose, whenever it is found broken (at the
    *  start and end of each step, so the host never reads it broken); the mark ends once the body has stayed whole for a cooldown, or
    *  is gone. World state, so a snapshot and a replay carry it. */
-  markStandingV1(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void {
+  markStandingV1(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }, fields?: string[][]): void {
+    if (fields) {   // #1513 nonfinite-mark/1: an object, by the fields its holds put back, at their values now (just put back), live and in a replay alike
+      const e = this.ents[id], marked = e && e.kind !== 'human' ? fields.flatMap(path => this.objectMarkFieldV1(e, path) ?? []) : [];
+      if (marked.length) (this.world.standingHoldsV1 ??= {})[id] = { fields: marked, last: this.rt.tick };
+      return;
+    }
     if (!this.ents[id] || !Array.isArray(pose?.p)) return;
     (this.world.standingHoldsV1 ??= {})[id] = { pose: { p: [...pose.p] as [number, number, number], yaw: pose.yaw, level: pose.level }, last: this.rt.tick };
   }
+  /** #1513 nonfinite-mark/1 (the host calls it after a hold it has seen MARK_AFTER times in a cooldown): each object these
+   *  just-applied patches put back that no mark holds yet is marked by the fields they put back (`['pose']` for a pose put back
+   *  or set down at the arrival). Bodies are quarantine-mark/1's. Returns the marks made, for the log. */
+  markNonFiniteV1(patches: NonFinitePatchV1[]): { id: string; fields: string[][] }[] {
+    const by = new Map<string, string[][]>(), marked = this.world.standingHoldsV1 ?? {};
+    for (const q of patches) {
+      const id = q.root === 'world' && q.path[0] === 'entities' ? q.path[1] : undefined;
+      if (!id || !this.ents[id] || this.ents[id].kind === 'human' || marked[id]) continue;
+      by.set(id, [...(by.get(id) ?? []), q.pose || q.place || q.path.length === 2 ? ['pose'] : q.path.slice(2)]);
+    }
+    const out = [...by].sort(([a], [b]) => (a < b ? -1 : 1)).map(([id, fields]) => ({ id, fields }));
+    for (const m of out) this.markStandingV1(m.id, undefined, m.fields);
+    return out.filter(m => this.world.standingHoldsV1?.[m.id]);
+  }
+  /** #1513: one marked field of an object as it is now, or null when it is no number: its pose whole (and the support it stands
+   *  on, which a put-back needs unchanged), or the number at `path`. */
+  private objectMarkFieldV1(e: any, path: string[]): ObjectMarkFieldV1 | null {
+    if (path.length === 1 && path[0] === 'pose') return e.pose && finiteDeepV1(e.pose) ? { path: ['pose'], pose: structuredClone(e.pose), support: stableStringify(e.support ?? null) } : null;
+    let v: any = e; for (const k of path) { if (!v || typeof v !== 'object') return null; v = v[k]; }
+    return typeof v === 'number' && Number.isFinite(v) ? { path: [...path], value: v } : null;
+  }
+  /** #1513: a marked object found broken gets its marked fields back, as nonfinite-hold/1 would put them back: a pose only for a
+   *  free component on the support it had, clear of every body (else the host meets it and plans as before). While it is whole
+   *  the mark follows it. False once it has stayed whole for the cooldown: the mark ends. */
+  private holdObjectMarkV1(id: string, m: { fields: ObjectMarkFieldV1[]; last: number }, tick: number): boolean {
+    const e = this.ents[id]; let broken = false, moved = false;
+    for (const f of m.fields) {
+      if (f.pose) {
+        if (e.pose && finiteDeepV1(e.pose)) continue;
+        broken = true;
+        if (stableStringify(e.support ?? null) === f.support && this.freeComponentV1(id) && this.clearOfBodiesV1(e, f.pose.p)) { e.pose = structuredClone(f.pose); moved = true; }
+        continue;
+      }
+      let v: any = e; for (const k of f.path.slice(0, -1)) { if (!v || typeof v !== 'object') { v = undefined; break; } v = v[k]; }
+      const k = f.path[f.path.length - 1];
+      if (!v || typeof v !== 'object' || typeof v[k] !== 'number' || Number.isFinite(v[k])) continue;
+      broken = true; v[k] = f.value;
+    }
+    if (moved) { try { acknowledgeRelocation(this.rt, id); } catch { /* the pose stands */ } this.tableCacheV1 = null; rememberPosesAfterRestore(this.rt); }
+    if (broken) { m.last = tick; return true; }
+    if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) return false;
+    for (const f of m.fields) { const now = this.objectMarkFieldV1(e, f.path); if (now) Object.assign(f, now); }   // whole: the mark follows it
+    return true;
+  }
   private standingHoldsStepV1(): void {
-    const marks = this.world.standingHoldsV1 as Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; last: number }>, tick: number = this.rt.tick;
+    const marks = this.world.standingHoldsV1 as Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; fields?: ObjectMarkFieldV1[]; last: number }>, tick: number = this.rt.tick;
     let bad: Set<string>;
     try { bad = new Set(this.corruptBodiesV1().flatMap(k => k.subjects)); } catch { return; }
     for (const id of Object.keys(marks).sort()) {
       const m = marks[id];
       if (!this.ents[id]) { delete marks[id]; continue; }
+      if (m.fields) { let keep = true; try { keep = this.holdObjectMarkV1(id, m as { fields: ObjectMarkFieldV1[]; last: number }, tick); } catch { /* the host's read still finds it */ } if (!keep) delete marks[id]; continue; }   // #1513
       if (bad.has(id)) { try { this.holdBodyV1(id, m.pose); } catch { /* the host's sweep still finds it */ } m.last = tick; }
       else if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) delete marks[id];
       else { const e = this.ents[id], q = e.pose?.p, lv = e.human?.level ?? 0;   // whole: the mark follows it, so a later break holds it where it last stood whole
@@ -929,18 +982,27 @@ export class MarsEngine implements Engine {
     return found > CAP || stuck ? [] : out;
   }
   /** #1496: what puts back an entity whose pose is no number, or null when nothing legal can (it then halts by name). */
-  private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
-    const e = this.ents[id], was = baseline?.ents[id], ents = Object.values(this.ents) as any[];
-    // only a free component: a kind that can never carry, seat, berth or hold anyone (a def with slots can: a seat holds its
-    // body only through the live action, which no scan of the body sees) (a boat, a bed, a rack, a ride, a frame
-    // part are not), with nothing resting on it. Anything else halts by name rather than move what may hold a body.
+  /** #1496: only a free component: a kind that can never carry, seat, berth or hold anyone (a def with slots can: a seat holds its
+   *  body only through the live action, which no scan of the body sees) (a boat, a bed, a rack, a ride, a frame part are not),
+   *  with nothing resting on it, and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`;
+   *  a grip is released by the patch). Anything else halts by name rather than move what may hold a body. */
+  private freeComponentV1(id: string): boolean {
+    const e = this.ents[id], ents = Object.values(this.ents) as any[];
     const def = (this.rt.world as any).entityPhysicsV1?.assets?.[e.def] ?? (CATALOG as any)[e.def];   // the world's library first, as registered for seat placement; an unknown def is not free
     const free = e.kind === 'component' && !!def && !def.slots?.length && !def.seats?.length && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
-    // and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`, a grip is released below)
     const names = (v: unknown, depth = 0): boolean => typeof v === 'string' ? v === id || v.startsWith(`${id}#`) || v.endsWith(`:${id}`) : !!v && typeof v === 'object' && depth < 5 && Object.entries(v).some(([k, x]) => k !== 'grip' && names(x, depth + 1));
-    if (!free || ents.some(o => o.kind === 'human' && names(o.human))) return null;
+    return free && !ents.some(o => o.kind === 'human' && names(o.human));
+  }
+  /** #1496: `p` is clear of every body for this object's width. */
+  private clearOfBodiesV1(e: any, p: number[]): boolean {
     const radius = typeof e.body?.radius === 'number' && Number.isFinite(e.body.radius) ? e.body.radius : 0.3;
-    const clear = (p: number[]) => !ents.some(o => o.kind === 'human' && Array.isArray(o.pose?.p) && o.pose.p.every(Number.isFinite) && hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < radius + HUMAN_RADIUS && Math.abs(o.pose.p[1] - p[1]) < 1.5);
+    return !(Object.values(this.ents) as any[]).some(o => o.kind === 'human' && Array.isArray(o.pose?.p) && o.pose.p.every(Number.isFinite) && hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < radius + HUMAN_RADIUS && Math.abs(o.pose.p[1] - p[1]) < 1.5);
+  }
+  private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
+    const e = this.ents[id], was = baseline?.ents[id];
+    if (!this.freeComponentV1(id)) return null;
+    const radius = typeof e.body?.radius === 'number' && Number.isFinite(e.body.radius) ? e.body.radius : 0.3;
+    const clear = (p: number[]) => this.clearOfBodiesV1(e, p);
     if (was?.pose && finiteDeepV1(was.pose) && Array.isArray(was.pose.p) && was.pose.p.length === 3 && stableStringify(was.support ?? null) === stableStringify(e.support ?? null) && clear(was.pose.p))
       return { root: 'world', path: ['entities', id, 'pose'], from: 'baseline', pose: structuredClone(was.pose) };
     const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0];
