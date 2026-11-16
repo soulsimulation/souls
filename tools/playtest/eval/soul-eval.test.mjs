@@ -47,3 +47,15 @@ test('#2477: harder-hamlet-v2 is v1 with the cottage bench\'s wording and the 36
   assert.match(item(v2, 'refused-recover').note, /at most 3600 s/);
   assert.deepEqual(v2.items.map((i) => [i.id, i.check]), v1.items.map((i) => [i.id, i.check]), 'the same checks');
 });
+
+test('#2498: harder-v2 is harder-v1 on Eden with the errand\'s 600 s timeout and the 3600 s cap; v1 stays as scored', () => {
+  const v1 = resolveInputs({ battery: 'harder-v1', seat: 'scripted' }).battery, v2 = resolveInputs({ battery: 'harder-v2', seat: 'claude-sonnet' }).battery;
+  assert.deepEqual(validateBattery(v2), []);
+  assert.equal(v2.world, 'eden-2026');
+  const item = (b, id) => b.items.find((i) => i.id === id);
+  assert.equal(item(v2, 'errand-three-step').timeoutSec, 600);
+  assert.equal(item(v1, 'errand-three-step').timeoutSec, 420, 'v1 unchanged');
+  assert.match(item(v2, 'refused-recover').note, /at most 3600 s/);
+  assert.match(item(v1, 'refused-recover').note, /at most 1800 s/, 'v1 unchanged');
+  assert.deepEqual(v2.items.map((i) => [i.id, i.instruction, i.check]), v1.items.map((i) => [i.id, i.instruction, i.check]), 'the same instructions and checks');
+});
