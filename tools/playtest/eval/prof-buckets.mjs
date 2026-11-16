@@ -123,6 +123,19 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     holdsOver1s: holds.filter((h) => h.ms >= 1000).map((h) => ({ atS: r1(h.at / 1000), ms: r1(h.ms), tasks: h.tasks, longestTaskMs: r1(h.longestTask), groups: top(h.by, 5) })),
     longestTasks: [...tasks].sort((a, b) => b.ms - a.ms).slice(0, 25).map((tk) => ({ atS: r1(tk.at / 1000), ms: r1(tk.ms), groups: top(tk.by, 4), frames: framesOf(tk, 12) })),
   };
+  // #2597 Step 0 (measurement only): act.bind tasks of 100 ms or more, their frames summed (inclusive, per task), and each
+  // one's heaviest path (from its root, the heaviest child at every step: app frames only, with their inclusive ms)
+  const bindTasks = tasks.filter((tk) => tk.ms >= 100 && mainOf(tk.by) === 'act.bind');
+  const heavy = (tk) => {
+    const inc = new Map(); for (const [leaf, ms] of tk.leaf) for (let x = leaf; x != null; x = parent.get(x)) inc.set(x, (inc.get(x) ?? 0) + ms);
+    const out = []; let x = tk.root;
+    while (x != null) { const f = byId.get(x).callFrame, rel = relOf(f.url); if (/^(apps|packages|mars)\//.test(rel)) out.push([`${f.functionName || '(anon)'} ${rel.split('/').slice(-2).join('/')}:${f.lineNumber + 1}`, r1(inc.get(x) ?? 0)]);
+      let best = null, bm = 0; for (const c of byId.get(x).children ?? []) { const m = inc.get(c) ?? 0; if (m > bm) { bm = m; best = c; } } x = best; }
+    return out.slice(0, 70);
+  };
+  const aggInc = new Map(), aggN = new Map(); for (const tk of bindTasks) { const inc = new Map(); for (const [leaf, ms] of tk.leaf) for (const f of new Set(appChain(leaf))) inc.set(f, (inc.get(f) ?? 0) + ms); for (const [f, ms] of inc) { aggInc.set(f, (aggInc.get(f) ?? 0) + ms); aggN.set(f, (aggN.get(f) ?? 0) + 1); } }
+  step0.bindTasks = { n: bindTasks.length, ms: r1(bindTasks.reduce((s, tk) => s + tk.ms, 0)), frames: top(aggInc, 90).map(([f, ms]) => [f, ms, aggN.get(f)]),
+    each: [...bindTasks].sort((a, b) => b.ms - a.ms).slice(0, 30).map((tk) => ({ atS: r1(tk.at / 1000), ms: r1(tk.ms), groups: top(tk.by, 4), path: heavy(tk) })) };
   const bySource = new Map();
   for (const h of holds) { const [src] = [...h.by].sort((a, b) => b[1] - a[1])[0]; const e = bySource.get(src) ?? { n: 0, ms: 0, maxMs: 0 }; e.n++; e.ms += h.ms; e.maxMs = Math.max(e.maxMs, h.ms); bySource.set(src, e); }
   return {
