@@ -86,6 +86,7 @@ import { listTable, stableIndices, withEntityList, type EntityTable } from '../.
 import { CATALOG, HUMAN_RADIUS } from '../../../mars/viewer/engine/world/catalog.ts';
 import { HUMAN_PROFILE as HUMAN_PROFILE_V1 } from '../../../mars/viewer/engine/spatial/types.ts';
 import type { Spatial, StaticExportV1 } from '../../../mars/viewer/engine/spatial/service.ts';
+import { navTrustClose, navTrustResume } from '../../../mars/viewer/engine/spatial/nav-trust.ts';
 import { NavConnectivity, NAV_CONNECT_POLICY, NAV_RESCUE_MAX_POCKET, CONNECT_CLEAR, type ConnPoint, type ConnVerdict } from '../../../mars/viewer/engine/spatial/connectivity.ts';
 /** lane NAV: a body in one of these activities is anchored to furniture (seat, bed, berth): never relocated as cut off. */
 const NAV_ANCHORED=new Set<unknown>(['sit','lie','nap','sleep']);
@@ -417,6 +418,10 @@ export class MarsEngine implements Engine {
 
   // ------------------------------------------------------------------ tick
   step() {
+    // N1b (#2593): the nav-trust token the last step's pass ended in, while nothing that can write ran since (navCarryOfV1);
+    // taken first and dropped, so no read inside this step resumes it
+    let carry = navCarryOfV1(this); this.navCarryV1 = null;
+    if (this.world.standingHoldsV1 && Object.keys(this.world.standingHoldsV1).length) carry = -1;   // a hold can place an object
     if (this.world.standingHoldsV1) this.standingHoldsStepV1();   // #1440: a body under a standing hold, broken before the step
     // Rebased physical runtimes rebuild service state; the accepted policy stays in cfg.
     if(this.cfg.walkSettleWaitV1===true)this.rt.services.walkSettleWaitV1=true;
@@ -452,9 +457,19 @@ export class MarsEngine implements Engine {
     if (this.cfg.soulsRepairV1 === true && this.rt.invariants !== this.guardedV1) this.guardedV1 = this.rt.invariants = this.rt.invariants.map(guardInvariantOnceV1);
     if (this.cfg.soulsRepairV1 === true) this.rt.actionThrewV1 ??= (action: string, error: unknown) => this.abandonV1(action, error);
     const refusable = this.cfg.soulsRepairV1 === true ? this.refusalCopyV1(table) : null, seen = this.rt.violations.length;
+    // N1b: a ride that is not parked moves (or changes the phase of) its own body, a static entity, in stepCarriers; the
+    // hand holds change only bodies, which no scan certifies
+    if (carry >= 0) { const list = table.list as any[]; for (const i of stableIndices(this.ents, 'nav-carry rides', list, null, (e: any) => !!e.carrier).idx) if (list[i].carrier.phase !== 'parked') { carry = -1; break; } }
     this.m.stepCarriers(this.rt, table);   // carrier/1: rides move their seated riders first (no carriers: no effect)
     this.m.stepHandHolds(this.rt);         // entry 35: hands let go finish, a broken pair lets go (no holds: no effect)
-    this.rt.step(table);
+    this.rt.step(table, carry);
+    // N1b: the token the pass ended in; what runs below voids it when it can write a static entity: any runtime call that
+    // can run action code (programmes, the quiet point, make-way, timeouts: Runtime.writesV1), a standing hold, a refusal,
+    // a removal. The clock, attention, the take recorder and the body loop write only the clock, bodies and the take.
+    carry = this.rt.navCarryV1();
+    if (this.world.standingHoldsV1 && Object.keys(this.world.standingHoldsV1).length) carry = -1;
+    if (refusable && (this.world.containedV1 || this.rt.violations.length > seen)) carry = -1;
+    if (this.quiet || this.leaving.length) carry = -1;
     // #1440: a body under a standing hold, broken inside the step: held before anything reads it (the refusal pass, the take's
     // cut, the keyframes), so no reader meets the broken pose; the trailing hold below stays for what runs after
     if (this.world.standingHoldsV1) this.standingHoldsStepV1();
@@ -503,6 +518,11 @@ export class MarsEngine implements Engine {
     if (tick % 600 === 0) this.pruneRecords(tick);
     // L4 (c): the body loop changed no entry; the next step reuses this listing unless engine code runs in between
     this.tableCacheV1 = listing; this.tableCacheAt = this.tableWritesV1;
+    // N1b: kept while neither barrier moves (navCarryOfV1); a runtime write since the pass (programmes, clearStairHeads,
+    // timeoutStalledReflexes) has voided the runtime's own token
+    if (this.rt.navCarryV1() !== carry) carry = -1;
+    if (this.world.standingHoldsV1 && Object.keys(this.world.standingHoldsV1).length) carry = -1;
+    this.navCarryV1 = carry >= 0 ? { token: carry, at: this.tableWritesV1, rt: this.rt, rtAt: this.rt.writesV1, ents: this.ents, sp: this.rt.services.spatial } : null;
     return out;
   }
 
@@ -2935,7 +2955,11 @@ export class MarsEngine implements Engine {
     return {hash:physics.hash,relocated,trapped,kept};
   }
   /** A read of this world that moves nothing (a Soul's walk listing): the planner syncs once for all of it (Spatial.readPass). */
-  readPassV1<T>(fn:()=>T):T{if(this.inPass++===0)this.passHumans=null;try{return (this.rt.services.spatial as Spatial).readPass(this.rt.world,fn);}finally{if(--this.inPass===0)this.passHumans=null;}}
+  readPassV1<T>(fn:()=>T):T{if(this.inPass++===0)this.passHumans=null;
+    // N1b: between ticks, the pass's one sync takes the last step's scan while nothing that can write ran since; trust closes
+    // again before `fn` runs (fn's own syncs are the pass's anyway)
+    const carry=navCarryOfV1(this);navTrustResume(carry);
+    try{return (this.rt.services.spatial as Spatial).readPass(this.rt.world,carry<0?fn:()=>{navTrustClose();return fn();});}finally{if(carry>=0)navTrustClose();if(--this.inPass===0)this.passHumans=null;}}
   /** S2: inside readPassV1 (nothing moves), the world's bodies listed once for every standableNearV1 of the pass (each
    *  listed all ~4,900 entities of Eden 2026 to find the few bodies; ~4% of a busy world). Positions are read live. */
   private passHumans:any[]|null=null;
@@ -2948,6 +2972,10 @@ export class MarsEngine implements Engine {
   tableWritesV1 = 0;
   /** L4 (c): steps that reused the listing (load stats). */
   tableReusesV1 = 0;
+  /** N1b (#2593): the nav-trust token the last step's pass ended in, kept at the end of step with both write barriers
+   *  (tableWritesV1 and the runtime's writesV1), the runtime, the entity table and the spatial service it holds for.
+   *  Null when anything after the pass could have changed a static entity. Read by navCarryOfV1 only. */
+  navCarryV1: { token: number; at: number; rt: unknown; rtAt: number; ents: object; sp: unknown } | null = null;
   /** world-edit/1 read: the nearest clear standing point to `at` on a level (rings of 0.25 m out to `maxRing`), away from
    *  other bodies; null when none. Used to plan a Soul's approach to a god-placed thing on another floor. */
   standableNearV1(at:[number,number],level=0,except?:string,minClear=HUMAN_RADIUS+.12,maxRing=24):[number,number]|null{
@@ -3012,7 +3040,7 @@ export class MarsEngine implements Engine {
   /** nav/1 read: current raster bounds, widened by installed navigation overlays. */
   groundBoundsV1():[number,number,number,number]{const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);return [...spatial.scene.bounds] as [number,number,number,number];}
   /** nav read: the navigation epoch after syncing (moves exactly when the static world the planner sees changes). */
-  navEpochV1():number{const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);return spatial.epoch;}
+  navEpochV1():number{const spatial=this.rt.services.spatial as Spatial;carriedSyncV1(this,spatial);return spatial.epoch;}
   /** lane NAV (nav-connect/1, connectivity.ts): the world's level-0 connectivity, relabelled for what changed since the last
    *  read (only the edited ground tiles on a ground world). The main area is the one holding the arrival point. Pure read. */
   private conn?:NavConnectivity;
@@ -3022,7 +3050,7 @@ export class MarsEngine implements Engine {
    *  or replaced spatial service). It is read after a spatial sync, so it is the planner's own change test (Spatial.epoch,
    *  `navChanged`), monotonic over this engine's life. Consumers key derived caches on it instead of scanning the world
    *  (punt search, menu sources). Inside readPassV1 it costs nothing more than an integer compare. */
-  staticEpochV1():number{const sp=this.rt.services.spatial as Spatial;sp.sync(this.rt.world);
+  staticEpochV1():number{const sp=this.rt.services.spatial as Spatial;carriedSyncV1(this,sp);
     if(sp!==this.epochSpatial||sp.epoch!==this.epochSeen){this.epochSpatial=sp;this.epochSeen=sp.epoch;this.staticEpoch++;}return this.staticEpoch;}
   connectivityV1():NavConnectivity{this.navWarmV1(Infinity);return this.conn!;}
   /** Stage B (lane B-spatial): everything the spatial service's static reads need at the current static epoch, as plain
@@ -3038,7 +3066,7 @@ export class MarsEngine implements Engine {
   navCheckV1(points:ConnPoint[]):ConnVerdict[]{return this.connectivityV1().check(points);}
   /** lane NAV: warm the world's labels within `budgetMs`, including the current spatial sync. Atomic sync or compile
    *  units may overrun; an exhausted budget still polls and invalidates the graph. True when the labels are complete. */
-  navWarmV1(budgetMs:number):boolean{const started=performance.now(),spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);
+  navWarmV1(budgetMs:number):boolean{const started=performance.now(),spatial=this.rt.services.spatial as Spatial;carriedSyncV1(this,spatial);
     if(!this.conn||this.conn.spatial!==spatial)this.conn=new NavConnectivity(spatial,{anchors:()=>[this.rt.world.groundV1?groundArrival(this.rt,this.cfg.arrival):this.cfg.arrival]});
     return this.conn.update(budgetMs===Infinity?Infinity:Math.max(0,budgetMs-(performance.now()-started)));}
   /** lane NAV: the nearest point of the main walkable area to p with room to stand, away from other bodies (rescue target). */
@@ -3653,7 +3681,26 @@ const TABLE_PURE: ReadonlySet<string> = new Set<string>([
   // the table (spatial syncs and connectivity labels are derived state outside it)
   'takeChunks', 'composedRules', 'renderContextKeyV1', 'carrierOf', 'carriers', 'stallProbeV1', 'placeLevelV1', 'programOf',
   'poseSampleOf', 'staticEpochV1', 'lyingRoomAtV1', 'navWarmV1', 'connectivityV1', 'navCheckV1', 'exportStaticScene',
+  // N1b (#2593): the ledger's static version only syncs and reads the epoch. A read pass only syncs and runs its reader,
+  // which by Spatial.readPass's contract moves nothing (its callers: the ledger's bindings and listings, the bridge's
+  // walk listings and offer passes, the serving warm's slices); any engine method the reader calls moves the count itself
+  'navEpochV1', 'readPassV1',
 ]);
+/** N1b (#2593): the nav-trust token the engine's last step ended its pass in (Runtime.navCarryV1), while it still holds:
+ *  no MarsEngine method that can write ran since (tableWritesV1 unchanged), no runtime call that can run action code
+ *  (Runtime.writesV1 unchanged), and the same runtime, entity table and spatial service. -1 otherwise, and always inside
+ *  a step (step drops it on entry). A module function, not a method, so reading it moves no count. */
+function navCarryOfV1(e: MarsEngine): number {
+  const c = e.navCarryV1, rt = (e as unknown as { rt: { writesV1: number; world: { entities: object }; services: { spatial?: unknown } } }).rt;
+  return c && c.at === e.tableWritesV1 && c.rt === rt && c.rtAt === rt.writesV1 && c.ents === rt.world.entities && c.sp === rt.services.spatial ? c.token : -1;
+}
+/** N1b: a sync between ticks that takes the last step's scan while it holds (navCarryOfV1); trust is closed again after. */
+function carriedSyncV1(e: MarsEngine, sp: Spatial): boolean {
+  const carry = navCarryOfV1(e), world = (e as unknown as { rt: { world: Parameters<Spatial['sync']>[0] } }).rt.world;
+  if (carry < 0) return sp.sync(world);
+  navTrustResume(carry);
+  try { return sp.sync(world); } finally { navTrustClose(); }
+}
 const TABLE_COUNT = process.env.SIM_L4_SCAN_SITES === '1' ? new Map<string, number>() : null;
 (MarsEngine as unknown as { tableWriteSitesV1?: Map<string, number> | null }).tableWriteSitesV1 = TABLE_COUNT;   // diagnostic (SIM_L4_SCAN_SITES=1): calls per method
 for (const name of Object.getOwnPropertyNames(MarsEngine.prototype)) {

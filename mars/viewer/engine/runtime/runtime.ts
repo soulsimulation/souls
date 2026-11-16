@@ -7,7 +7,7 @@ import type { WorldState } from '../world/types.ts';
 import { hashOf } from '../core/hash.ts';
 import { listTable, withEntityList, type EntityTable } from '../world/entity-list.ts';
 import { Profiler } from './profile.ts';
-import { navTrustClose, navTrustOpen } from '../spatial/nav-trust.ts';
+import { navTrustClose, navTrustOpen, navTrustResume, navTrustToken } from '../spatial/nav-trust.ts';
 import { deadlockDiagnostics, exhaustedWaitMovers, recoverPersistentWaits } from './waits.ts';
 import { applySnapshot, captureSnapshot, captureSnapshotDeferred, decodeSnapshot, takeSnapshot, type Graph, type RuntimeInternals, type RuntimeSnapshot, type RuntimeSnapshotCapture, type RuntimeDeferredSnapshotCapture, type SnapshotOptions } from './snapshot.ts';
 
@@ -69,6 +69,15 @@ export class Runtime {
    *  shared arrays, never mutate them). The engine reuses it after the step while it can show nothing has added,
    *  removed or replaced an entity since. */
   passTable: EntityTable | null = null;
+  /** N1b (#2593): moves on every call that can run action code or change an action outside a step (submit, cancel,
+   *  forceCancel, a social reclaim, any status change). The nav-trust token the last step's pass ended in is handed back
+   *  (navCarryV1) only while it has not moved since. */
+  writesV1 = 0;
+  private carryV1 = -1;
+  private carryAtV1 = -1;
+  /** N1b: the nav-trust token the last step ended its pass in, while no runtime call that can write ran since (else -1).
+   *  Its owner (the engine) adds what the runtime cannot see (its own writes) before resuming it (spatial/nav-trust.ts). */
+  navCarryV1(): number { return this.carryAtV1 === this.writesV1 ? this.carryV1 : -1; }
   /** Opt-in profiler (see `profile`); null when off. Measurement only, never read by the simulation. */
   prof: Profiler | null = null;
 
@@ -112,6 +121,7 @@ export class Runtime {
    * the directive then fails `reservation.conflict` as before.
    */
   submit(verb: string, params: unknown, opts: { id?: string; parent?: string; preempt?: boolean } = {}): ActionRecord {
+    this.writesV1++;
     if (opts.id !== undefined && this.records.has(opts.id)) throw new ActionAdmissionError(opts.id);
     // Explicit ids can occupy the generated namespace; skip them without replacing history.
     if (opts.id === undefined) while (this.records.has(`${this.idPrefix}${this.nextId}`)) this.nextId++;
@@ -240,6 +250,7 @@ export class Runtime {
   actionThrewV1?: (action: string, error: unknown) => void;
   /** `reason` (optional) is recorded as the cancelled action's diagnostic and on its events (e.g. `social.pre-empted`). */
   cancel(id: string, reason?: Diagnostic): ActionRecord {
+    this.writesV1++;
     const l = this.live.get(id);
     const rec = this.records.get(id);
     if (!rec) throw new Error(`unknown action ${id}`);
@@ -289,11 +300,19 @@ export class Runtime {
    *  of the world's entity table the caller took after the last change to the table (S1 r2: the engine lists once a
    *  tick, before the rides step, which changes no entry). The pass reuses it when this step runs no action code before
    *  the pass (none live, none waiting, no social return queued): then nothing can have added, removed or replaced an
-   *  entity in between, and the pass sees the same entities in the same order as a listing of its own. */
-  step(table?: EntityTable | null) {
+   *  entity in between, and the pass sees the same entities in the same order as a listing of its own.
+   *  `carry` (N1b, #2593): a nav-trust token its owner has proved still holds (navCarryV1, and none of the owner's own
+   *  code that can write ran since); the tick resumes it, so its first nav-pure step takes the last pass's scan. */
+  step(table?: EntityTable | null, carry = -1) {
     // L4: trust (spatial/nav-trust.ts) is open only around nav-pure steps and the read-only pass; closed on any exit
     navTrustClose();
-    try { this.stepInner(table); } finally { navTrustClose(); }
+    navTrustResume(carry);
+    this.carryV1 = -1;
+    try {
+      this.stepInner(table);
+      // N1b: the interval the pass ended in; nothing after the pass in this step has run yet
+      this.carryV1 = navTrustToken(); this.carryAtV1 = this.writesV1;
+    } finally { navTrustClose(); }
   }
   private stepInner(table?: EntityTable | null) {
     const noActionCode = this.live.size === 0 && this.waiting.size === 0 && !(this.services.socialReturns as unknown[] | undefined)?.length;
@@ -424,6 +443,7 @@ export class Runtime {
    *  without asking its def (a def's deferred or refused stop is what stalled it). Its reservations and claims are released
    *  and the usual failed-action cleanup runs; a claim left by an action that is no longer live is dropped too. */
   forceCancel(id: string, reason: Diagnostic): boolean {
+    this.writesV1++;
     if (this.waiting.has(id)) { this.cancel(id, reason); return true; }
     const l = this.live.get(id);
     if (l) { l.rec.diagnostic = reason; this.finish(l, 'cancelled', reason); return true; }
@@ -602,6 +622,7 @@ export class Runtime {
 
   /** A still-live social group may reclaim only an unowned actor through ordinary reservation checks. */
   reclaimSocialActor(group: string, actor: string): Diagnostic | null {
+    this.writesV1++;
     const live = this.live.get(group);
     if (!live?.def.canYieldMembers) return { code: 'social.group-ended', message: `group ${group} is not live`, subjects: [group, actor] };
     const resource = `actor:${actor}`;
@@ -703,6 +724,7 @@ export class Runtime {
   }
 
   private emit(rec: ActionRecord, status: ActionStatus, d?: Diagnostic, phase?: string) {
+    this.writesV1++;
     rec.status = status;
     if (phase !== undefined) rec.phase = phase;
     rec.history.push({ tick: this.tick, status, phase: rec.phase, code: d?.code });

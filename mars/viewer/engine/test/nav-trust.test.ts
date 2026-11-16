@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Spatial } from '../spatial/service.ts';
-import { navTrustClose, navTrustOpen, setNavTrustCheck } from '../spatial/nav-trust.ts';
+import { navTrustClose, navTrustOpen, navTrustResume, navTrustToken, setNavTrustCheck } from '../spatial/nav-trust.ts';
 import { emptyWorld, human, addAll, component } from '../world/factory.ts';
 import type { SpatialScene } from '../spatial/types.ts';
 
@@ -80,5 +80,42 @@ test('nav trust (L4 audit): a seated body and a walker share one scan a tick; th
     assert.equal(sp.stats.scans - scans, 20, 'one scan a tick (the first sync after the tick opens)');
     assert.ok(sp.stats.trusted - trusted >= 20, 'the pass (and later syncs) take the scan');
     assert.deepEqual(rt.violations, []);
+  } finally { setNavTrustCheck(false); navTrustClose(); }
+});
+
+test('nav trust (N1b): a resumed token takes its scan again; a close gives a token never seen; the oracle still checks', () => {
+  const sp = new Spatial(open(20));
+  const w = addAll(emptyWorld('open', open(20)), human('p', 0, 0), component('wall', 'test-wall', [5, 0, 0], 0, { phase: 'stored' }));
+  try {
+    navTrustClose(); navTrustOpen();
+    sp.sync(w);
+    const token = navTrustToken(), scans = sp.stats.scans;
+    navTrustClose();
+    assert.equal(navTrustToken(), -1);
+    navTrustOpen();
+    assert.notEqual(navTrustToken(), token, 'a close moves to a new token');
+    sp.sync(w);
+    assert.equal(sp.stats.scans, scans + 1, 'the new interval scans');
+    const token2 = navTrustToken();
+    navTrustClose();
+    navTrustResume(token2);
+    assert.equal(navTrustToken(), token2);
+    sp.sync(w);
+    assert.equal(sp.stats.scans, scans + 1, 'the resumed interval takes its scan');
+    navTrustClose();
+    navTrustResume(token);
+    sp.sync(w);
+    assert.equal(sp.stats.scans, scans + 2, 'an older token is not the last scan: a real scan');
+    navTrustClose();
+    navTrustResume(-1);
+    assert.equal(navTrustToken(), -1, 'a negative token resumes nothing');
+    // a resume its caller could not prove: the oracle scan throws
+    navTrustOpen(); sp.sync(w);
+    const last = navTrustToken();
+    navTrustClose();
+    w.entities.wall.pose.p = [8, 0, 0];
+    setNavTrustCheck(true);
+    navTrustResume(last);
+    assert.throws(() => sp.sync(w), /nav-trust/);
   } finally { setNavTrustCheck(false); navTrustClose(); }
 });
