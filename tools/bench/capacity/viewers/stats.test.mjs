@@ -21,9 +21,9 @@ test('tick windows inside the window, each once', () => {
 test('one window: ticks, amber, acts, CPU, viewer bytes and world calls', () => {
   const tw = (at, amber, p99) => ({ at, tickMs: { p50: 4, p99 }, levels: { green: 1 - amber, amber, red: 0, black: 0 }, amberS: { service: 10 * amber, loop: 0, heap: 0, dwell: 1 } });
   const samples = [
-    { at: 1000, cpuS: 10, rssMb: 500, live: { tick: { service5s: 1 }, api: { ticks: tw(900, 0, 9) } } },
+    { at: 1000, cpuS: 10, rssMb: 500, launcherCpuS: 2, launcherRssMb: 100, driverCpuS: 1, live: { tick: { service5s: 1 }, api: { ticks: tw(900, 0, 9) } } },
     { at: 11000, cpuS: 15, rssMb: 510, live: { tick: { service5s: 0.9 }, api: { ticks: tw(10_500, 0.5, 20) } } },
-    { at: 21000, cpuS: 20, rssMb: 520, live: { tick: { service5s: 1 }, heap: { usedMb: 300 }, api: { ticks: tw(20_500, 0, 12) } } },
+    { at: 21000, cpuS: 20, rssMb: 520, launcherCpuS: 6, launcherRssMb: 140, driverCpuS: 21, live: { tick: { service5s: 1 }, heap: { usedMb: 300 }, api: { ticks: tw(20_500, 0, 12) } } },
   ];
   const acts = [
     { at: 2000, status: 200, accepted: true, queueMs: 1, worldMs: 5, clientMs: 8 },
@@ -43,6 +43,8 @@ test('one window: ticks, amber, acts, CPU, viewer bytes and world calls', () => 
   assert.deepEqual(w.acts.refused, { '429 rate-limited': 1 });
   assert.equal(w.world.cpuShare, 0.5);
   assert.equal(w.world.rssMb, 520);
+  assert.deepEqual(w.launcher, { cpuShare: 0.2, rssMb: 140 });
+  assert.deepEqual(w.driver, { cpuShare: 1 });
   assert.equal(w.viewersOut.bytesPerViewerPerS, 500);
   assert.equal(w.viewerCalls.worldCalls, 3);
   assert.deepEqual(w.viewerCalls.refusals, { 429: 1 });

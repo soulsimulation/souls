@@ -310,7 +310,10 @@ function passageStep(rt:Runtime,ex:Exec,dt:number):StepResult|null{
   // the whole swing and the stepping path, closed to open, before the hand goes out
   for(let k=0;k<=8;k++){const ang=o.from+(o.to-o.from)*k/8,pt=actuatorPoint(o,ang),who=personBlocking(rt,ex,pt.root,ang);if(who)return hold(rt,ex,'swing',who.id);}
   const r0=actuatorPoint(o,o.from).root;
-  if(hypot(a.pose.p[0]-r0[0],a.pose.p[2]-r0[2])>.2){if(stepTo(rt,ex,[r0[0],r0[2]]))return {status:'running',phase:'waiting'};return {status:'failed',diagnostic:issue('not-at-handle','Walk to the actual handle before operating it.',[p.target])};}
+  const far=hypot(a.pose.p[0]-r0[0],a.pose.p[2]-r0[2]);
+  // #1248: a step that got her no nearer (its goal snapped to where she stands) would be sent again every other tick, for ever
+  if(far>.2&&ex.approach!==undefined&&far>ex.approach-.05){dropHandover(rt,ex);return {status:'failed',diagnostic:issue('not-at-handle','There is no room to stand at the handle.',[p.target])};}
+  if(far>.2){if(stepTo(rt,ex,[r0[0],r0[2]])){ex.approach=far;return {status:'running',phase:'waiting'};}return {status:'failed',diagnostic:issue('not-at-handle','Walk to the actual handle before operating it.',[p.target])};}
   ex.began=true;delete ex.held;ex.t=0;ex.root=[...a.pose.p];ex.yaw=a.pose.yaw;ex.motion.startTick=rt.tick;
   rt.mark('hand.passage-begin',{action:ex.id,target:p.target,mode:pass.mode});
   return null;
@@ -338,7 +341,7 @@ function hold(rt:Runtime,ex:Exec,why:'passing'|'swing'|'queue',who:string):StepR
  const waited=(rt.tick-ex.held.since)*DT;
  if(why==='queue'){if(waited>PASSAGE_QUEUE_SECONDS)return {status:'failed',diagnostic:issue('door-busy','Someone ahead at the door did not get through; this walk stopped before it.',[p.target,who])};if(a.human&&!ex.child)a.human.activity='idle';return {status:'running',phase:'waiting'};}
  if(waited>(why==='passing'?PASSAGE_YIELD_SECONDS:PASSAGE_WAIT_SECONDS))return {status:'failed',diagnostic:why==='passing'?issue('door-busy','Someone else kept passing through the door; this walk stopped before it.',[p.target,who]):issue('swing-blocked','Someone is in the door’s swing and did not move aside; nothing was opened.',[p.target,who])};
- if(why==='passing'&&inTheWay(ex,a.pose.p[0],a.pose.p[2])){const q=waitSpot(rt,ex);if(q&&hypot(q[0]-a.pose.p[0],q[1]-a.pose.p[2])>.3&&stepTo(rt,ex,q))return {status:'running',phase:'waiting'};}
+ if(why==='passing'&&inTheWay(ex,a.pose.p[0],a.pose.p[2])){const q=waitSpot(rt,ex);if(q&&hypot(q[0]-a.pose.p[0],q[1]-a.pose.p[2])>.3&&stepTo(rt,ex,q)){delete ex.approach;return {status:'running',phase:'waiting'};}}
  if(why==='swing'&&waited>=PASSAGE_ASK_SECONDS&&ex.held.asked!==who){ex.held.asked=who;ask(rt,who,swingCentre(p.opening!));}
  if(a.human&&!ex.child)a.human.activity='idle';
  return {status:'running',phase:'waiting'};
@@ -348,6 +351,7 @@ type Exec={p:HandActuatorParams;motion:HandActuatorMotion;t:number;root:Vec3;yaw
  /** passage: waiting before the reach (a body in the swing, another Soul passing) since tick; who was asked to step aside */ held?:{since:number;asked?:string;why:string};
  /** passage: ticks the swing has been paused on a body in it */ paused?:number;
  /** passage: a courtesy walk of this Soul's own in progress */ child?:string;
+ /** passage: how far from the handle she was when the last step towards it set out (#1248) */ approach?:number;
  /** passage: the operation reached the door (motion begun) */ began?:true};
 function clear(rt:Runtime,ex:Exec){const h=rt.world.entities[ex.p.actor]?.human;if(!h)return;delete h.handActuator;freeHand(h,ex.p);delete h.speed;h.activity='idle';}
 /** Lower the operating hand: the other hand keeps what it carries (entry 42); without `hand`, all hands as before. */

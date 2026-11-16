@@ -10,6 +10,7 @@
 //   node tools/test-harness/walk/walk.mjs --write         ... and write the results as the new baseline
 //   node tools/test-harness/walk/walk.mjs --from <dir>    compare / --write from a gate's reports (out/suite/walk)
 //   ... --world fuzz,bench-hamlet                         only these worlds
+//   ... --keep                                            keep each audit's walk-audit-* scratch copy (removed by default)
 // "Worse" per place (the top segment of a thing's path, e.g. hillside-home-7): more bad destinations (not walkable both
 // ways: nav.disconnected / nav.one-way / nav.no-standing-room), more one-ways, more goalless things (no walk goal at all),
 // more floating root things, or a float that rose by more than FLOAT_RISE_M.
@@ -102,7 +103,7 @@ export function writeBaseline(report) {
 }
 
 /** Run every world's shards as separate processes (bounded by cores and memory); parts land in outDir. */
-export async function runAudits(outDir, { root = ROOT, worlds = WORLDS, log = () => {} } = {}) {
+export async function runAudits(outDir, { root = ROOT, worlds = WORLDS, log = () => {}, keep = false } = {}) {
   mkdirSync(outDir, { recursive: true });
   if (!existsSync(join(root, AUDIT))) throw Error(`this tree has no ${AUDIT}`);
   const jobs = worlds.flatMap(w => Array.from({ length: w.shards }, (_, k) => ({ w, k })));
@@ -111,7 +112,7 @@ export async function runAudits(outDir, { root = ROOT, worlds = WORLDS, log = ()
   const env = { ...process.env }; delete env.NODE_TEST_CONTEXT;   // the audits are plain processes, not node:test children
   const one = ({ w, k }) => new Promise(done => {
     const out = join(outDir, `${w.name}.${k}-${w.shards}.json`), t0 = Date.now();
-    const src = [...(w.db ? ['--db', resolve(HERE, w.db)] : w.fuzz ? ['--fuzz', join(root, w.fuzz)] : ['--genesis', join(root, w.genesis)]), ...(w.use ? ['--use'] : [])];
+    const src = [...(w.db ? ['--db', resolve(HERE, w.db)] : w.fuzz ? ['--fuzz', join(root, w.fuzz)] : ['--genesis', join(root, w.genesis)]), ...(w.use ? ['--use'] : []), ...(keep ? ['--keep'] : [])];   // each audit removes its scratch copy unless kept
     const child = spawn(process.execPath, ['--max-old-space-size=6000', join(root, AUDIT), ...src, '--name', w.name, '--shard', `${k}/${w.shards}`, '--out', out], { cwd: root, stdio: ['ignore', 'ignore', 'pipe'], env });
     let err = ''; child.stderr.on('data', b => { err = (err + b).slice(-4000); });
     child.on('close', code => { log(`${w.name} ${k}/${w.shards} exit ${code} ${Math.round((Date.now() - t0) / 1000)} s ${err.trim().split('\n').at(-1) ?? ''}`); if (code !== 0) errors.push(`${w.name} ${k}/${w.shards} exit ${code}: ${err.slice(-1500)}`); done(); });
@@ -129,7 +130,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const a = process.argv.slice(2), from = a.includes('--from') ? resolve(a[a.indexOf('--from') + 1]) : null;
   const dir = from ?? join(ROOT, '.lane/walk', new Date().toISOString().replace(/[:.]/g, '-'));
   const only = a.includes('--world') ? a[a.indexOf('--world') + 1].split(',') : null, worlds = only ? WORLDS.filter(w => only.includes(w.name)) : WORLDS;
-  if (!from) { const r = await runAudits(dir, { worlds, log: m => console.log(m) }); if (r.errors.length) { console.error(r.errors.join('\n')); process.exit(1); } }
+  if (!from) { const r = await runAudits(dir, { worlds, log: m => console.log(m), keep: a.includes('--keep') }); if (r.errors.length) { console.error(r.errors.join('\n')); process.exit(1); } }
   const reports = readReports(dir, worlds);
   let worse = false;
   for (const [name, rep] of Object.entries(reports)) {

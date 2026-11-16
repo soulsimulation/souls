@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import './launcher-home.css';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
 import { AccountPicture } from '../AccountPicture.tsx';
+import { HomeSouls } from './HomeSouls.tsx';
 
 export type LauncherTemplate = { id: string; name: string; description: string; batches: number; ops?: number };
 export type LauncherWorldCard = { thumbnail?: string | null; thumbnailSource?: 'owner' | 'template' | null; slug: string; name: string; basePath: string; url: string; template: string; templateName: string; createdAt: number; god: boolean; godName?: string | null; nameTag?: string | null; claimable?: boolean; souls?: number | null; entities: number | null; seq: number | null; status: string; restarts: number };
@@ -72,7 +73,6 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
       <header className="lh-bar">
         <div className="lh-title"><EdenMark/><span className="lh-wordmark">Souls</span></div>
         <div className="lh-actions">
-          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
           {session.authed ? <AccountMenu label={session.label} avatarUrl={session.avatarUrl} onSignOut={() => void session.logout()}/>
             : session.mode === 'clerk' ? (!session.ready ? <span className="dim">Signing in…</span>
               : <button className="lh-signin" data-home-signin="1" onClick={() => setDialog(true)}>Sign in</button>)
@@ -83,10 +83,14 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
         <div className="lh-empty">
           <p>No worlds yet. Be the first.</p>
           <p className="dim">Name it, pick how it starts, and hand your agent one line. About a minute.</p>
-          <button className="lh-new" onClick={() => setDialog(true)}>+ New world</button>
+          <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
         </div>
       )}
-      {worlds.length > 0 && <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>}
+      {/* #2465: New world sits with the list it adds to, across from the count; the empty state above has its own */}
+      {worlds.length > 0 && <div className="lh-list-head">
+        <h1 className="lh-h">Worlds <span className="lh-count">{worlds.length}</span></h1>
+        <button className="lh-new" data-new-world="1" onClick={() => setDialog(true)}>+ New world</button>
+      </div>}
       <div className="lh-cards">
         {worlds.map((w) => (
           <a key={w.slug} href={w.url} data-world={w.slug} className="lh-card" title={`${w.slug} · made ${ago(w.createdAt)}`}>
@@ -105,6 +109,8 @@ export function LauncherHome({ initial }: { initial: LauncherList }) {
           </a>
         ))}
       </div>
+      {/* #2466: the signed-in person's own Souls, below the worlds, only when they have some */}
+      <HomeSouls/>
       <ForAgents/>
       {/* #388: the public changelog, a static page the launcher serves beside this list (apps/web/changelog.html); #897: the docs */}
       <footer className="lh-footer">

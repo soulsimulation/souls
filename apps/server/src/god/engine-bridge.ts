@@ -27,7 +27,7 @@ import type { LogEvent } from '@souls/protocol';
 import type { EdgeLedger, FloorNear } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
 import type { GodMode } from './god.ts';
-import { reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
+import { projectProviders, reachProviders, seatProviders, syncProviders, usesProviders, type ReachEnd, type ReachEndpoint } from './query.ts';
 import { GodNav } from './nav.ts';
 import { hasStraightLandings, railRaster } from './rail-raster.ts';
 import { flightPath, slopePieces } from './slope-solids.ts';
@@ -319,7 +319,7 @@ export class EngineBridge {
     this.initialEngine = this.host.engine;
     engineBridges.set(this.god.model, this);
     if (o.bootRecord && !R) { const r = this.bootRecord = o.bootRecord; this.host.snapshotSidecar = () => this.recordAtCapture(r); }
-    this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}` });
+    this.nav = new GodNav({ model: this.god.model, seatRead: (entity, slot, me) => (this.edge as { seatRead?(e: string, s: string, m: string): boolean } | undefined)?.seatRead?.(entity, slot, me) ?? false, serviceStandingPoints: () => this.activitySpots?.serviceStandingPoints(), outdoorRegionExclusions: ref => {const id = this.places.forRef(ref)?.id;return this.edge && id ? outdoorRegionExclusions(this.edge.places, id) : undefined;}, version: () => this.version, staticVersion: () => this.godEdits, get engine() { return o.host.engine as never; }, levelAt: (x, z, y) => this.levelAt(x, z, y), engineOwned: (e) => this.engineOwned(e), placeOf: (ref) => (this.edge ? this.places.forRef(ref)?.id : undefined), describeStamp: () => `${this.describeEpoch}:${this.levels.length}:${(this.floorsNow(), this.floorEpoch)}` });
     this.layers = new GodLayers({ env: worldConfig(o.host).env, model: this.god.model, edge: this.edge, get engine() { return o.host.engine as never; }, living: () => this.host.living, engineAct: (ops, note) => this.god.engineAct(ops, note), placeOf: (e) => this.layerPlace(e), authoredPlaceRef: id => {
       if(!this.edge||!this.places.walkable(id))return undefined;
       const ref=(this.edge.places.byId.get(id) as {ref?:unknown}|undefined)?.ref;
@@ -404,6 +404,7 @@ export class EngineBridge {
     });
     reachProviders.set(this.god.model, (from, to) => this.reach(from, to));
     if (!R) syncProviders.set(this.god.model, () => { this.flush(); return this.physics?.hash === this.engine.world.entityPhysicsV1?.hash; });
+    if (!R) projectProviders.set(this.god.model, (d) => this.onCommit(d));   // #2438: a boot door fit's edits
     seatProviders.set(this.god.model, (id) => { const f = (this.engine as unknown as { seatOccupantsV1?: (id: string) => { slot: string; body: string }[] }).seatOccupantsV1; return f ? f.call(this.engine, id).map((x) => ({ slot: x.slot, soul: this.soulName(x.body) })) : []; });
     usesProviders.set(this.god.model, (id) => { const u = this.usesOf(id); return u ? { soul: u.soul, body: u.body, how: u.how, thing: this.model.pathOf(u.id) } : null; });
     // G1 "god rules" (before legal-edits/1): god edits are never refused for residents; the ones in the way are walked out
@@ -2205,7 +2206,10 @@ export class EngineBridge {
     return below?.id ?? 0;
   }
   /** Floors per upper level: the engine's (cached per physics hash) and those derived in the current send. */
-  private floorIndex: { hash: string; by: Map<number, FloorCells> } | null = null;
+  /** `raised`: each entity's raised floor surfaces as derived (`of`) and as JSON, for floorEpoch. */
+  private floorIndex: { hash: string; by: Map<number, FloorCells>; raised: Map<string, { of: unknown; json: string }> } | null = null;
+  /** #2489: moves when the raised floors change (levelAt reads them; nav's describe stamp carries it), not on every derive. */
+  private floorEpoch = 0;
   /** During a send: the floors derived so far, and the entities it re-derives (their engine floors are being replaced). */
   private sendFloors = new Map<number, OBB2[]>();
   private sendIds: Set<string> | null = null;
@@ -2214,16 +2218,27 @@ export class EngineBridge {
     this.hasFloorAt(level, at[0], at[1]);   // the index, current
     return !!this.floorIndex?.by.get(level)?.some(at[0], at[1], (f) => pointInObb(at, f.obb, -0.28));
   }
-  private hasFloorAt(level: number, x: number, z: number): boolean {
+  private floorsNow(): NonNullable<EngineBridge['floorIndex']> {
     const hash = this.physics?.hash ?? '';
     if (this.floorIndex?.hash !== hash) {
-      const by = new Map<number, FloorCells>();
-      for (const [id, part] of Object.entries(this.physics?.byEntity ?? {}) as [string, Part][]) for (const f of part.surfaces ?? []) if (f.level) { let a = by.get(f.level); if (!a) by.set(f.level, (a = new FloorCells())); a.add(id, f.obb); }
-      this.floorIndex = { hash, by };
+      const by = new Map<number, FloorCells>(), raised = new Map<string, { of: unknown; json: string }>(), was = this.floorIndex?.raised;
+      let moved = !was;
+      for (const [id, part] of Object.entries(this.physics?.byEntity ?? {}) as [string, Part][]) {
+        const up = (part.surfaces ?? []).filter((f) => f.level); if (!up.length) continue;
+        for (const f of up) { let a = by.get(f.level); if (!a) by.set(f.level, (a = new FloorCells())); a.add(id, f.obb); }
+        const w = was?.get(id), json = w && w.of === part.surfaces ? w.json : JSON.stringify(up.map((f) => [f.level, f.obb]));
+        raised.set(id, { of: part.surfaces, json }); if (!moved && w?.json !== json) moved = true;
+      }
+      if (moved || raised.size !== was!.size) this.floorEpoch++;
+      this.floorIndex = { hash, by, raised };
     }
+    return this.floorIndex;
+  }
+  private hasFloorAt(level: number, x: number, z: number): boolean {
+    this.floorsNow();
     const at: Vec2 = [x, z], near = (o: OBB2) => pointInObb(at, o, FLOOR_NEAR);
     const send = this.sendIds;
-    return !!(this.floorIndex.by.get(level)?.some(x, z, (f) => !send?.has(f.id) && near(f.obb)) || (send && this.sendFloors.get(level)?.some(near)));
+    return !!(this.floorIndex!.by.get(level)?.some(x, z, (f) => !send?.has(f.id) && near(f.obb)) || (send && this.sendFloors.get(level)?.some(near)));
   }
   private levelOfY(y: number) { if (Math.abs(y) > GROUND_BAND) { const exact = this.levels.find((l) => Math.abs(l.y - y) <= LEVEL_MATCH); if (exact) return exact.id; } if (Math.abs(y) <= GROUND_BAND + 0.5) return 0; const l = this.levels.reduce<Level | null>((b, l) => (l.y <= y + 0.5 && (!b || l.y > b.y) ? l : b), null); return l?.id ?? 0; }
   reach(from: ReachEnd, to: ReachEnd) {

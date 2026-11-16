@@ -20,6 +20,7 @@ import type { MenuFocus } from '../edge/ledger/focus.ts';
 import type {ActivityServicePoint} from './activity-spots.ts';
 import {HUMAN_RADIUS} from '../../../../mars/viewer/engine/world/catalog.ts';
 import { keptShut } from './actuators.ts';
+import { MENU_ORACLE } from '../edge/ledger/menu-stats.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Vec2 = [number, number];
@@ -115,10 +116,16 @@ export type Thing = {
 };
 
 const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
+/** #2489: one named part of an owner for the list: its ref ('' none), its entry (a stand point; none when its floor is
+ *  stale), or for an entity anchor how its entry is made from the thing `tref` names (`via`: the thing `entry` was made
+ *  from). `target`: the anchor's entity. */
+type PartGive = { ref: string; target?: string; tref?: string; make?: (t: Thing) => Thing; via?: Thing; entry?: Thing };
 // Same distance at which the activity layer considers another body to take a spot.
 const SERVICE_STAND_DISTANCE = 0.7;
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
+/** Rings (0.25 m) a thing's stand point is searched out to for standing room: 1.5 m. */
+const STAND_RINGS = 6;
 /** L8: nearest first, ties by ref, so "by the X" names do not depend on the things list's order (a boot's full pass and
  *  incremental passes built it differently: 472 built objects rewrote their `near` on every first boot after a copy). */
 const byDistanceThenRef = (a: { o: { ref: string }; d: number }, b: { o: { ref: string }; d: number }) => a.d - b.d || (a.o.ref < b.o.ref ? -1 : a.o.ref > b.o.ref ? 1 : 0);
@@ -211,47 +218,133 @@ export class GodNav {
   }
   private *indexGen(key: string): Generator<void, NonNullable<GodNav['cache']>, void> {
     const m = this.h.model;
-    const things: Thing[] = [], waters = new Map(m.ground().waters.map((w: any) => [w.id, w])), stamp = this.h.describeStamp?.();
+    const waters = new Map<string, unknown>(m.ground().waters.map((w: any) => [w.id, w])), stamp = this.h.describeStamp?.();
     if (stamp === undefined || stamp !== this.memoStamp) { this.memo.clear(); this.memoStamp = stamp; }
-    const seen = new Set<string>();
+    const last = this.last, defs = stamp === undefined ? [] : [...((m.defs as Map<string, StoredDef> | undefined)?.values() ?? [])];
+    // #2489: under the same stamp, defs and library, only the entities a commit changed (and what reads them) are described again
+    if (last && this.cache && stamp !== undefined && last.stamp === stamp && last.library === m.library && last.defs.length === defs.length && last.defs.every((d, i) => d === defs[i])) {
+      const touched = this.touched(last, waters);
+      if (!touched.length) { this.goals.clear(); return (this.cache = { key, things: this.cache.things, byRef: this.cache.byRef }); }
+      return this.update(key, last, touched, waters, stamp);
+    }
+    this.last = null;
+    const things: Thing[] = [], seen = new Set<string>(), give = new Map<string, Thing[]>(), used = new Map<string, Entity>();
     let n = 0;
     for (const e of [...m.entities.values()]) {
       if (++n % 64 === 0) yield;
-      if (!e.name) continue;
-      const def = m.resolvedDef(e.def); if (!def || def.components.body || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) continue;
-      if (keptShut(m, e)) continue;   // entry 42: kept in a shut drawer or locker: not a place to walk to, nor a name nearby
-      seen.add(e.id);
-      try { things.push(...this.described(e, def, waters.get(e.id), stamp)); } catch { /* one odd thing never hides the rest */ }
+      used.set(e.id, e);
+      const t = this.gives(e, waters, stamp, seen); if (t) { give.set(e.id, t); things.push(...t); }
     }
     for (const id of this.memo.keys()) if (!seen.has(id)) this.memo.delete(id);
-    const byRef = new Map<string, Thing>();
+    const cache = this.finish(key, things, m.entities.values());
+    if (stamp !== undefined) this.last = { stamp, library: m.library, defs, waters, entities: used, give };
+    return cache;
+  }
+  /** #2489: what the list was last made from (each entity object, the waters, defs and stamp) and what each entity gave
+   *  it. The model replaces an entity object when it changes (the rule G1's memo rests on), so a commit's changed entities
+   *  are the ones whose object differs. */
+  private last: { stamp: string; library: unknown; defs: StoredDef[]; waters: Map<string, unknown>; entities: Map<string, Entity>; give: Map<string, Thing[]> } | null = null;
+  /** The entity's things for the list (undefined: none; it is not named, a body's, a flag or kept shut). */
+  private gives(e: Entity, waters: Map<string, unknown>, stamp: string | undefined, seen?: Set<string>): Thing[] | undefined {
+    const m = this.h.model;
+    if (!e.name) return undefined;
+    const def = m.resolvedDef(e.def); if (!def || def.components.body || /^core[-/]flag@/.test(def.ref) || this.h.engineOwned(e)) return undefined;
+    if (keptShut(m, e)) return undefined;   // entry 42: kept in a shut drawer or locker: not a place to walk to, nor a name nearby
+    seen?.add(e.id);
+    try { return this.described(e, def, waters.get(e.id), stamp); } catch { return undefined; /* one odd thing never hides the rest */ }
+  }
+  /** Ids whose entity object (or water) differs from the last list's: changed, added or removed since. */
+  private touched(last: NonNullable<GodNav['last']>, waters: Map<string, unknown>): string[] {
+    const m = this.h.model, out: string[] = [];
+    let kept = 0;
+    for (const [id, e] of m.entities) { const was = last.entities.get(id); if (was === e) kept++; else { out.push(id); if (was) kept++; } }
+    if (kept < last.entities.size) for (const id of last.entities.keys()) if (!m.entities.has(id)) out.push(id);
+    for (const [id, w] of waters) if (last.waters.get(id) !== w) out.push(id);
+    for (const id of last.waters.keys()) if (!waters.has(id)) out.push(id);
+    return out;
+  }
+  /** #2489: the list again from the last one: a touched entity, everything under it (its pose, path and holder read it)
+   *  and its holder before and after (a building's rooms yield to a child named like one) are described again; every
+   *  other entity gives what it gave. Same order and first-wins refs as a whole pass. */
+  private update(key: string, last: NonNullable<GodNav['last']>, touched: string[], waters: Map<string, unknown>, stamp: string): NonNullable<GodNav['cache']> {
+    const m = this.h.model, again = new Set<string>();
+    for (const id of touched) {
+      for (const x of m.subtree(id)) again.add(x);
+      const was = last.entities.get(id), now = m.entities.get(id);
+      if (was && was.in.parent !== 'world') again.add(was.in.parent);
+      if (now && now.in.parent !== 'world') again.add(now.in.parent);
+    }
+    for (const id of again) {
+      const e = m.entities.get(id), t = e ? this.gives(e, waters, stamp) : undefined;
+      if (t) last.give.set(id, t); else { last.give.delete(id); this.memo.delete(id); }
+      if (e) last.entities.set(id, e); else last.entities.delete(id);
+    }
+    last.waters = waters;
+    const things: Thing[] = [], owners: Entity[] = [];
+    for (const e of m.entities.values()) { const t = last.give.get(e.id); if (t) for (const x of t) things.push(x); if (e.about?.parts?.length) owners.push(e); }
+    const cache = this.finish(key, things, owners, again);
+    if (MENU_ORACLE) { const bad = this.thingsOracleV1(); if (bad) console.error('[nav-things-oracle]', bad); }
+    return cache;
+  }
+  /** Debug (tests; EDGE_MENU_ORACLE=1 after every update): null when the list equals a whole pass of a fresh nav (no
+   *  memo, nothing kept), else the first difference. */
+  thingsOracleV1(): string | null {
+    const a = this.things(), b = new GodNav(this.h).things();
+    if (a.length !== b.length) { const x = new Set(a.map((t) => t.ref)), y = new Set(b.map((t) => t.ref)); return `${a.length} things, a whole pass ${b.length}: only here ${[...x].filter((r) => !y.has(r)).slice(0, 4)}; only there ${[...y].filter((r) => !x.has(r)).slice(0, 4)}`; }
+    for (let i = 0; i < a.length; i++) { const x = JSON.stringify(a[i]), y = JSON.stringify(b[i]); if (x !== y) return `#${i}: ${x.slice(0, 300)} | ${y.slice(0, 300)}`; }
+    return null;
+  }
+  /** Refs first-wins, then the named parts of `owners` (entities in model order). An update (`again`: the entities it
+   *  described again) keeps an owner's parts unless the owner or an anchor's entity is among them; an entity anchor's
+   *  part is made again when the thing its ref names is another object. */
+  private finish(key: string, things: Thing[], owners: Iterable<Entity>, again?: Set<string>): NonNullable<GodNav['cache']> {
+    const byRef = new Map<string, Thing>(), prev = this.parts, parts = new Map<string, PartGive[]>();
     for (const t of things) if (!byRef.has(t.ref)) byRef.set(t.ref, t);
-    // Named parts reuse a real entity/room or an explicit transformed stand point. Descriptive parts stay prose.
-    for (const e of m.entities.values()) for (const p of meaningParts(m,e.id)) {
-      if (!p.anchor || !p.target) continue;
-      const ref=`${m.pathOf(e.id)}/part-${p.id}`; if(byRef.has(ref)) continue;
-      const partAliases=[...new Set([...(p.aliases??[]),...(e.about?.title?[e.about.title]:[]),...(e.about?.aliases??[]),...(e.about?.kind?[e.about.kind]:[])])].slice(0,24);
-      const names=[...words(p.title),...(p.aliases??[]).flatMap(words),...words(e.about?.title??e.name??'')];
-      if(p.anchor.kind==='entity') {
-        const t=p.target.ref?byRef.get(p.target.ref):undefined; if(!t)continue;
-        const slot=p.target.slot?m.slotsOf(m.entities.get(p.target.entity!)!).find(s=>s.id===p.target!.slot):undefined;
-        byRef.set(ref,{...t,ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??t.what,words:[...new Set([...names,...t.words])],semanticPart:{owner:e.id,part:p.id,entity:p.target.entity!,...(slot?.kind==='seat'?{seat:{entity:p.target.entity!,slot:slot.id}}:{})}});
-      } else {
-        const point=p.target.point!,stand=p.target.stand!,level=p.target.level!;
-        // A stale authored floor number must not send a Soul to an unrelated floor at the same X/Z.
-        if(this.h.levelAt(stand[0],stand[2],stand[1])!==level)continue;
-        byRef.set(ref,{ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??`A named part of ${e.about?.title??humanTitle(m.pathOf(e.id))}`,words:names,kind:'thing',at:[point[0],point[2]],stands:[[stand[0],stand[2]]],level,...(p.target.region?{poly:p.target.region}:{}),semanticPart:{owner:e.id,part:p.id,local:true}});
+    for (const e of owners) {
+      if (!e.about?.parts?.length) continue;
+      let gives = again ? prev.get(e.id) : undefined;
+      if (!gives || again!.has(e.id) || gives.some((g) => g.target !== undefined && again!.has(g.target))) gives = this.partGives(e);
+      parts.set(e.id, gives);
+      for (const g of gives) {
+        if (!g.ref || byRef.has(g.ref)) continue;
+        if (g.make) { const t = g.tref ? byRef.get(g.tref) : undefined; if (!t) continue; if (g.via !== t) { g.entry = g.make(t); g.via = t; } byRef.set(g.ref, g.entry!); }
+        else if (g.entry) byRef.set(g.ref, g.entry);
       }
     }
+    this.parts = parts;
     this.cache = { key, things: [...byRef.values()], byRef };
     this.goals.clear();
     return this.cache;
+  }
+  private parts = new Map<string, PartGive[]>();
+  /** An owner's named parts: each one's ref and its entry (a stand point), or how it is made from the thing it names. */
+  private partGives(e: Entity): PartGive[] {
+    const m = this.h.model, out: PartGive[] = [];
+    // Named parts reuse a real entity/room or an explicit transformed stand point. Descriptive parts stay prose.
+    for (const p of meaningParts(m,e.id)) {
+      const target = p.anchor?.kind === 'entity' ? p.anchor.ref : undefined;
+      if (!p.anchor || !p.target) { if (target !== undefined) out.push({ ref: '', target }); continue; }
+      const ref=`${m.pathOf(e.id)}/part-${p.id}`;
+      const partAliases=[...new Set([...(p.aliases??[]),...(e.about?.title?[e.about.title]:[]),...(e.about?.aliases??[]),...(e.about?.kind?[e.about.kind]:[])])].slice(0,24);
+      const names=[...words(p.title),...(p.aliases??[]).flatMap(words),...words(e.about?.title??e.name??'')];
+      if(p.anchor.kind==='entity') {
+        const pt=p.target, slot=pt.slot?m.slotsOf(m.entities.get(pt.entity!)!).find(s=>s.id===pt.slot):undefined;
+        out.push({ ref, target, tref: pt.ref, make: (t) => ({...t,ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??t.what,words:[...new Set([...names,...t.words])],semanticPart:{owner:e.id,part:p.id,entity:pt.entity!,...(slot?.kind==='seat'?{seat:{entity:pt.entity!,slot:slot.id}}:{})}}) });
+      } else {
+        const point=p.target.point!,stand=p.target.stand!,level=p.target.level!;
+        // A stale authored floor number must not send a Soul to an unrelated floor at the same X/Z.
+        if(this.h.levelAt(stand[0],stand[2],stand[1])!==level) { out.push({ ref }); continue; }
+        out.push({ ref, entry: {ref,id:`${e.id}#meaning-${p.id}`,name:p.title,aliases:partAliases,what:p.what??`A named part of ${e.about?.title??humanTitle(m.pathOf(e.id))}`,words:names,kind:'thing',at:[point[0],point[2]],stands:[[stand[0],stand[2]]],level,...(p.target.region?{poly:p.target.region}:{}),semanticPart:{owner:e.id,part:p.id,local:true}} });
+      }
+    }
+    return out;
   }
   /** G1 (tranche 2026-10-19): a thing's description is a function of the entity, what holds it (pose, names, slots), its
    *  def, its water and the stamp (terrain, defs, levels); the model replaces an entity object when it changes, so an
    *  unchanged thing keeps its description across rebuilds (every edit rebuilt all ~3,000 on Eden 2026: ~50 ms). */
   private memo = new Map<string, { e: Entity; chain: Entity[]; def: StoredDef; water: unknown; things: Thing[]; kids?: string }>();
-  /** A building's rooms yield to a child named like a room: its named children are part of its description's inputs. */
+  /** A building's rooms yield to a child named like a room: its named children are part of its description's inputs
+   *  (#2489: every building's, one whose rooms all yielded too, so a room is back when the child is renamed). */
   private kidsOf(e: Entity): string { const m = this.h.model; return [...(m.children.get(e.id) ?? [])].map((id) => m.entities.get(id)?.name ?? '').filter(Boolean).sort().join('|'); }
   private memoStamp: string | undefined;
   private described(e: Entity, def: StoredDef, water: any, stamp: string | undefined): Thing[] {
@@ -263,7 +356,7 @@ export class GodNav {
     }
     const things = this.describe(e, def, water);
     if (e.about?.what) for (const t of things) if (t.kind !== 'room') t.what = e.about.what;
-    if (stamp !== undefined) this.memo.set(e.id, { e, chain, def, water, things, ...(things.some((t) => t.kind === 'room') ? { kids: this.kidsOf(e) } : {}) });
+    if (stamp !== undefined) this.memo.set(e.id, { e, chain, def, water, things, ...(things.some((t) => t.kind === 'room' || t.kind === 'building') ? { kids: this.kidsOf(e) } : {}) });
     return things;
   }
   private describe(e: Entity, def: StoredDef, water: any): Thing[] {
@@ -474,8 +567,10 @@ export class GodNav {
     } else {
       // a door approach, a seat's front, a fountain's rim: the nearest to me with standing room; else around the thing
       const stands = [...(t.stands ?? [])].sort((a, b) => Math.hypot(a[0] - me[0], a[1] - me[1]) - Math.hypot(b[0] - me[0], b[1] - me[1]));
-      for (const s of stands) { goal = near(s, t.level, 6); if (goal) break; }
-      goal ??= near(t.at, t.level, 40);
+      for (const s of stands) { goal = this.standPoint(t, s, except); if (goal) break; }
+      // #1243: ... else, for a thing with stand points, the nearest spot to the thing itself, also in its own room (none
+      // there: no standing room); a thing with none (a lamp, an open pavilion's table) keeps the nearest spot
+      goal ??= t.stands?.length ? this.standPoint(t, t.at, except, 40) : near(t.at, t.level, 40);
       // a thing with no approach of its own: the main ground nearest it when the spot beside it is a pocket (a lamp behind
       // a fence, a shelf with a gap behind it), and a big structure from the main ground near it
       if (!t.stands?.length) goal = toMain(goal, t.big ? 80 : 3);
@@ -535,6 +630,32 @@ export class GodNav {
     }
     this.goals.set(key, { tick, key: positionKey, warm: !sawCold && this.navWarm(tick), goal });
     return goal;
+  }
+
+  /** #1243: the standing point for one of a thing's stand points `s`: the nearest clear spot within 1.5 m, on the stand's
+   *  own side of its room's wall. A search by distance alone doesn't know a wall: a kitchen stool's stand with no room for
+   *  a body by the counter found the wall's outer face 1 m away, a 30 m walk round to the door. When the nearest spot is
+   *  outside the room the stand is in, the nearest one inside it in the same rings; none: null (the next stand is tried). */
+  standPoint(t: Thing, s: Vec2, except?: string, rings = STAND_RINGS): { p: Vec2; level: number } | null {
+    const E = this.E, level = t.level, at = (p: Vec2 | null) => (p ? { p: [r2(p[0]), r2(p[1])] as Vec2, level } : null);
+    const p = E.standableNearV1!(s, level, except, 0.4, rings);
+    if (!p || Math.hypot(p[0] - s[0], p[1] - s[1]) < 1e-3) return at(p);
+    const room = this.roomAt(s, level);
+    if (!room || inPoly(p[0], p[1], room)) return at(p);
+    // the rings standableNearV1 walks (0.25 m apart, 8 points more each), from the one its answer was on: nearer rings had no clear spot
+    const scan = () => {
+      for (let ring = Math.round(Math.hypot(p[0] - s[0], p[1] - s[1]) / 0.25); ring <= rings; ring++) for (let k = 0, n = ring * 8; k < n; k++) {
+        const a = (k / n) * Math.PI * 2, q: Vec2 = [r3(s[0] + Math.cos(a) * ring * 0.25), r3(s[1] + Math.sin(a) * ring * 0.25)];
+        if (inPoly(q[0], q[1], room) && E.standableNearV1!(q, level, except, 0.4, 0)) return q;
+      }
+      return null;
+    };
+    return at(E.readPassV1 ? E.readPassV1(scan) : scan());
+  }
+
+  /** The outline of the room on `level` a point is in, if any. */
+  private roomAt(p: Vec2, level: number): Vec2[] | undefined {
+    return this.things().find((r) => r.kind === 'room' && r.level === level && r.poly && inPoly(p[0], p[1], r.poly))?.poly;
   }
 
   /** RESOLVE2: the nearest connected (walkable both ways from the main ground) standing spot on `g`'s level within `r` m
@@ -669,6 +790,44 @@ export class GodNav {
     }
     return {pick, here, myLevel, seated, exit};
   }
+  /** #2486: selectedWalks' pick entries whose thing's ref is in `refs`, in its order, without ranking every thing. The
+   *  ranking is by (distance, ref) and refs are unique, so the things no farther than the farthest wanted one (a grid
+   *  read, `within`) are exactly the ranking's prefix that decides whether, and where, each wanted thing is picked: its
+   *  rank against SHOW and the open places before it. The rooms of buildings within ROOMS_WITHIN come after, as there.
+   *  Null (rank as before) when the grid saw a thing with no finite outline, whose distance could not be ordered. */
+  private selectedRefs(soul: EdgeSoul, refs: ReadonlySet<string>) {
+    const me = this.E.world.entities[soul.entityId]; if (!me?.human) return null;
+    const here: Vec2 = [me.pose.p[0], me.pose.p[2]], myLevel = me.human.level ?? 0;
+    const seated = me.human.activity === 'sit' || me.human.baseActivity === 'sit';
+    const all = this.things();
+    const exit = myLevel === 0 ? null : all.find((t) => t.kind === 'room' && t.level === myLevel && t.poly && inPoly(here[0], here[1], t.poly) && t.entry && t.entry.level === 0)?.entry ?? null;
+    this.within(here, 0); if (this.grid!.bad) return null;
+    const ranked = (r: number, keep: (t: Thing) => boolean) => this.within(here, r).filter((t) => keep(t) && (t.kind !== 'room' || !!t.semanticPart))
+      .map((t) => ({ t, d: this.distance(t, here) })).filter((x) => x.d <= r).sort((a, b) => a.d - b.d || (a.t.ref < b.t.ref ? -1 : 1));
+    const wanted = [...refs].map((r) => this.thing(r)).filter((t): t is Thing => !!t && (t.kind !== 'room' || !!t.semanticPart)).map((t) => this.distance(t, here));
+    if (wanted.some((d) => Number.isNaN(d))) return null;
+    const pick: { t: Thing; d: number }[] = [];
+    if (wanted.length) {
+      let places = 0;
+      ranked(Math.max(...wanted), () => true).forEach((x, i) => {
+        const take = i < SHOW || (x.t.semanticPart && x.d <= ROOMS_WITHIN) || ((x.t.kind === 'building' || x.t.big) && x.d <= BUILDINGS_WITHIN)
+          || (places < PLACES_MAX && x.d <= PLACES_WITHIN && !!x.t.area && polyArea(x.t.area) >= PLACE_M2 && !!this.h.placeOf?.(x.t.ref) && ++places > 0);
+        if (take && refs.has(x.t.ref)) pick.push(x);
+      });
+    }
+    for (const { t, d } of ranked(ROOMS_WITHIN, (t) => t.kind === 'building')) {
+      const rooms = (t.rooms ?? []).map((r) => this.thing(r)).filter((r): r is Thing => !!r);
+      if (!rooms.some((r) => refs.has(r.ref))) continue;
+      const inside = d <= UPPER_ROOMS_WITHIN || myLevel !== 0 || rooms.some((r) => r.level === 0 && !!r.poly && inPoly(here[0], here[1], r.poly));
+      for (const rt of rooms) if (refs.has(rt.ref) && (rt.level === 0 || (rt.rise ?? 0) < LOW_RISE_M || inside)) pick.push({ t: rt, d: this.distance(rt, here) });
+    }
+    return { pick, here, myLevel, seated, exit };
+  }
+  /** Test hook (#2486 oracle): the pick entries of `refs`, bounded (selectedRefs) and from the whole ranking. */
+  pickOracleV1(soul: EdgeSoul, refs: ReadonlySet<string>) {
+    const pick = (s: { pick: { t: Thing; d: number }[] } | null) => s?.pick.filter((x) => refs.has(x.t.ref)).map((x) => [x.t.ref, x.d]) ?? null;
+    return { bounded: pick(this.selectedRefs(soul, refs)), full: pick(this.selectedWalks(soul)) };
+  }
 
   /** Continuity (warm after listen): the walk goals this Soul's listing would ask for (room reaches, standing points and
    *  the fine route tiles under them), one thing per step, so a sliced caller builds them between other requests instead
@@ -679,7 +838,13 @@ export class GodNav {
   }
 
   capabilities(soul: EdgeSoul, caps: EdgeCapability[], plans: Plans, focus?: MenuFocus | null) {
-    const selected=this.selectedWalks(soul);if(!selected)return;
+    // #2486: a focused build wants only the things wantsThing passes. None (an object, a spot, `sit-ground:here`): nothing
+    // to rank. Only walk/sit/hang-out/stroll ids (bindOne of one walk): their own entries of the ranking, found without
+    // ranking every thing (selectedRefs). Same offers in the same order either way (nav-focus-oracle.test.ts).
+    const refs = focus ? focusRefs(focus) : null;
+    if (refs && !refs.size && !focus!.verbs.size && !focus!.targets.size) return;
+    const selected = refs && refs.size && !focus!.verbs.size && !focus!.targets.size ? this.selectedRefs(soul, refs) ?? this.selectedWalks(soul) : this.selectedWalks(soul);
+    if (!selected) return;
     // srv-act-words (D): a focused words walk keeps only the walks its words can choose (focus.walkKeep, the ledger's test)
     const at={...selected,keep:focus?.walkKeep?.keep};
     for(const {t,d} of selected.pick)if(this.wantsThing(focus,t))this.offerWalk(soul,t,d,at,caps,plans);
@@ -1004,16 +1169,17 @@ export class GodNav {
     const all = this.things();
     if (this.grid?.of !== all) {
       const cells = new Map<number, number[]>(), always: number[] = [];
+      let bad = false;
       all.forEach((t, i) => {
         const pts = t.area ?? t.path ?? t.poly ?? [t.at], pad = !t.area && t.path ? Math.max(0, (t.width ?? 3) / 2) : 0;
         let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-        for (const [x, z] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
-        if (!(x0 <= x1 && z0 <= z1) || !Number.isFinite(x0 + x1 + z0 + z1 + pad)) return;  // no outline: never within r
+        for (const [x, z] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; if (!Number.isFinite(x) || !Number.isFinite(z)) bad = true; }
+        if (!(x0 <= x1 && z0 <= z1) || !Number.isFinite(x0 + x1 + z0 + z1 + pad)) { bad = true; return; }  // no outline: never within r
         const i0 = Math.floor((x0 - pad) / NEAR_CELL), i1 = Math.floor((x1 + pad) / NEAR_CELL), j0 = Math.floor((z0 - pad) / NEAR_CELL), j1 = Math.floor((z1 + pad) / NEAR_CELL);
         if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4096) { always.push(i); return; }
         for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) { const k = cellKey(ci, cj), l = cells.get(k); if (l) l.push(i); else cells.set(k, [i]); }
       });
-      this.grid = { of: all, cells, always };
+      this.grid = { of: all, cells, always, bad };
     }
     const g = this.grid, m = r + 1, seen = new Set<number>(g.always);   // (+1 m: float slack; the caller's distance test decides)
     const i0 = Math.floor((at[0] - m) / NEAR_CELL), i1 = Math.floor((at[0] + m) / NEAR_CELL), j0 = Math.floor((at[1] - m) / NEAR_CELL), j1 = Math.floor((at[1] + m) / NEAR_CELL);
@@ -1021,7 +1187,8 @@ export class GodNav {
     for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) for (const i of g.cells.get(cellKey(ci, cj)) ?? []) seen.add(i);
     return [...seen].sort((a, b) => a - b).map((i) => all[i]);
   }
-  private grid: { of: Thing[]; cells: Map<number, number[]>; always: number[] } | null = null;
+  /** `bad`: some thing has no finite outline (never within r; selectedRefs then ranks every thing). */
+  private grid: { of: Thing[]; cells: Map<number, number[]>; always: number[]; bad: boolean } | null = null;
   /** "by the X" answers depend only on the named things (index version): remembered until the world changes (each
    *  label scanned every thing: ~0.25 s of every capabilities sweep in the Eden 2026 cafe). */
   private nearMemo = new Map<string, unknown>();
@@ -1035,6 +1202,12 @@ export class GodNav {
 
 const NEAR_CELL = 16;
 const cellKey = (i: number, j: number) => (i + 0x8000) * 0x10000 + (j + 0x8000);
+/** #2486: the things a focus names by a walk, sit, hang-out or stroll id (nav wantsThing's ids). */
+function focusRefs(f: MenuFocus): Set<string> {
+  const out = new Set<string>();
+  for (const id of f.ids) for (const v of ['walk:', 'sit:', 'hang-out:', 'stroll:']) if (id.startsWith(v)) out.add(id.slice(v.length));
+  return out;
+}
 function polyDist(poly: Vec2[], p: Vec2) { return inPoly(p[0], p[1], poly) ? 0 : nearestOn(poly, p, true).d; }
 
 function roomSamples(poly: Vec2[], at: Vec2, step = 0.6): Vec2[] {

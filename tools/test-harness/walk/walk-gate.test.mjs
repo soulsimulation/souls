@@ -2,16 +2,20 @@
 // when any place of that world is less walkable than baseline/<world>.json. The shard reports land in
 // $SUITE_COVERAGE_DIR/walk (the gate returns them under out/suite/walk), so a reviewed baseline change is
 //   node tools/test-harness/walk/walk.mjs --from <gate out>/candidate/out/suite/walk --write
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WORLDS, compare, describe, merge, readBaseline, runAudits } from './walk.mjs';
 
 const out = process.env.SUITE_COVERAGE_DIR ? join(process.env.SUITE_COVERAGE_DIR, 'walk') : mkdtempSync(join(tmpdir(), 'walk-gate-'));
+// without a suite coverage dir the parts are scratch: removed after the run unless WALK_KEEP=1 (which also keeps the
+// audits' walk-audit-* world copies)
+const keep = process.env.WALK_KEEP === '1';
+if (!process.env.SUITE_COVERAGE_DIR && !keep) after(() => rmSync(out, { recursive: true, force: true }));
 let run;
-const audits = async () => (run ??= (async () => { const t0 = Date.now(); const r = await runAudits(out, { log: m => console.log(m) }); console.log(`walk audits: ${Math.round((Date.now() - t0) / 1000)} s, ${r.slots} at once, parts in ${out}`); return r; })());
+const audits = async () => (run ??= (async () => { const t0 = Date.now(); const r = await runAudits(out, { log: m => console.log(m), keep }); console.log(`walk audits: ${Math.round((Date.now() - t0) / 1000)} s, ${r.slots} at once, parts in ${out}`); return r; })());
 
 for (const w of WORLDS) {
   test(`walk ${w.name}: no place less walkable than baseline/${w.name}.json`, { timeout: 840_000 }, async () => {

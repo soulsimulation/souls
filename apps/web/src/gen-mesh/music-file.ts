@@ -32,7 +32,7 @@ export type GainLike = { gain: ParamLike; connect(n: unknown): unknown; disconne
 export type CtxLike = { currentTime: number; state: string; destination: unknown; createGain(): GainLike; createMediaElementSource(el: AudioEl): { connect(n: unknown): unknown; disconnect(): void }; resume(): Promise<void>; createAnalyser?(): AnalyserNode; createMediaStreamDestination?(): MediaStreamAudioDestinationNode; createMediaStreamSource?(s: MediaStream): AudioNode };
 export type FileEnv = { ctx(): CtxLike; audio(): AudioEl; now(): number; random?(): number };
 
-type Deck = { id: string; perf: number; el: AudioEl; gain: GainLike; src: { disconnect(): void }; startedAt: number; endsAt: number; positionAt: number; fading: boolean; prefetched: boolean; retireAt: number; failed: string | null; onError: () => void };
+type Deck = { id: string; perf: number; el: AudioEl; gain: GainLike; src: { disconnect(): void }; startedAt: number; endsAt: number; positionAt: number; fading: boolean; prefetched: boolean; retireAt: number; failed: string | null; onError: () => void; onTime: () => void; onEnded: () => void };
 export type FileEventHandler = (e: Omit<MusicEvent, 't'>) => void;
 
 const dbToAmp = (db: number) => (db === -Infinity ? 0 : Math.pow(10, db / 20));
@@ -64,6 +64,10 @@ export class FilePlayer {
   private meter: AnalyserNode | null = null;
   private volume = 0;
   trackS = Infinity;
+  /** #2467: the playing file's media events (`timeupdate` about 4 times a second while it plays, `ended` true at its end).
+   *  A hidden tab's timers can run as rarely as once a minute, so the caller runs its scheduler from these as well as from
+   *  its tick: the prefetch, fade and crossfade come on time, and the next piece starts at the latest when the file ends. */
+  onMedia: ((ended: boolean) => void) | null = null;
   fadeS = 4; prefetchS = 20; crossfadeS = CROSSFADE_S;
   private env: FileEnv;
   private index: FileIndex;
@@ -93,14 +97,17 @@ export class FilePlayer {
     const all = performancesOf(this.index, id), k = perf != null && perf >= 0 && perf < all.length ? perf : this.pick(id);
     const out = this.out(), el = this.env.audio(), gain = this.ctx.createGain(); gain.gain.value = 0; gain.connect(out);
     const src = this.ctx.createMediaElementSource(el); src.connect(gain);
-    const d: Deck = { id, perf: k, el, gain, src, startedAt: 0, endsAt: 0, positionAt: 0, fading: false, prefetched: false, retireAt: 0, failed: null, onError: () => { d.failed = 'media error'; } };
-    el.addEventListener('error', d.onError);
+    const d: Deck = { id, perf: k, el, gain, src, startedAt: 0, endsAt: 0, positionAt: 0, fading: false, prefetched: false, retireAt: 0, failed: null, onError: () => { d.failed = 'media error'; },
+      // the file's own position bounds its end: a piece that runs ahead of the clock (a seek, a late tick) ends no later
+      onTime: () => { if (this.current !== d) return; const t = d.el.currentTime, dur = d.el.duration; if (Number.isFinite(dur) && dur > 0 && t > 0) d.endsAt = Math.min(d.endsAt, this.env.now() + (dur - t) * 1000); this.onMedia?.(false); },
+      onEnded: () => { if (this.current !== d) return; d.endsAt = Math.min(d.endsAt, this.env.now()); this.onMedia?.(true); } };
+    el.addEventListener('error', d.onError); el.addEventListener('timeupdate', d.onTime); el.addEventListener('ended', d.onEnded);
     el.src = fileUrl(all[k].url); el.load();
     return d;
   }
   private retire(d: Deck) {
     try { d.el.pause(); } catch { /* gone */ }
-    try { d.el.removeEventListener('error', d.onError); d.src.disconnect(); d.gain.disconnect(); d.el.removeAttribute('src'); d.el.load(); } catch { /* gone */ }
+    try { d.el.removeEventListener('error', d.onError); d.el.removeEventListener('timeupdate', d.onTime); d.el.removeEventListener('ended', d.onEnded); d.src.disconnect(); d.gain.disconnect(); d.el.removeAttribute('src'); d.el.load(); } catch { /* gone */ }
   }
   /** Start buffering the next piece (a media element with preload=auto), without playing it. */
   prefetch(id: string) {

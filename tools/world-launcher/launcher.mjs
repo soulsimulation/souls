@@ -12,6 +12,9 @@
 //                                world's every response is X-Robots-Tag noindex, as is every /__sim JSON answer
 //   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities
 //   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain
+//   GET  /__sim/my-souls.json    my-souls/1 (#2466): the signed-in account's own Souls across these worlds (my-souls.mjs), read
+//                                from each world's store (a sleeping world stays asleep); 401 signed out. GET /__sim/soul-photo/
+//                                <slug>/<soulId>/<sha256>.png: a live Soul's stored photo or portrait by its hash, immutable
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
@@ -125,6 +128,7 @@ import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
 import { mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
 import { opSoul, opSetTest } from './op-souls.mjs';
+import { accountSouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
 /** The world's heap cap (lane L1, LOAD-CONTRACT §4: per world from the registry, registry.mjs worldHeapMb). A node child gets
@@ -610,6 +614,29 @@ export async function openLauncher(cfg = {}) {
     if (!tok) return null;
     if (auth) { const id = await verifiedCreator(authorization, auth.child, publicOrigin, root); return id ? { account: id, via: 'session' } : null; }
     return tok.startsWith('dev:') && tok.length > 4 ? { account: `dev:${tok.slice(4, 40)}`, via: 'session' } : null;
+  }
+  // #2466: the homepage's My Souls: the signed-in account's Souls in every world here, read from each world's own store (a
+  // sleeping world stays asleep). A running world's own /v1/me gives its current photo (an uploaded one outranks the portrait).
+  async function mySouls(authorization) {
+    const tok = /^Bearer\s+(\S+)$/i.exec(authorization ?? '')?.[1];
+    if (!tok || tok.startsWith('god_')) return null;
+    const account = auth ? await verifiedCreator(authorization, auth.child, publicOrigin, root) : tok.startsWith('dev:') && tok.length > 4 ? `dev:${tok.slice(4, 40)}` : null;
+    if (!account) return null;
+    const worlds = registry.worlds.filter((w) => !w.fork && !closing.has(w.slug));
+    const opts = { file: (w) => join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf, url: (w) => describe(w).url,
+      photo: (w, id, hash) => `${B}/__sim/soul-photo/${w.slug}/${encodeURIComponent(id)}/${hash}.png` };
+    const souls = accountSouls(worlds, account, opts);
+    const live = [...new Set(souls.flatMap((s) => s.worlds.map((x) => x.slug)))].filter((slug) => pool.status(slug).status === 'running');
+    if (!live.length) return souls;
+    const current = new Map();
+    await Promise.all(live.map(async (slug) => {
+      try {
+        const r = await fetch(`http://127.0.0.1:${pool.status(slug).port}${wp(slug)}/v1/me`, { headers: { authorization }, signal: AbortSignal.timeout(3000) });
+        const me = r.ok ? await r.json() : null;
+        current.set(slug, new Map((Array.isArray(me?.souls) ? me.souls : []).flatMap((s) => typeof s?.profile?.photo?.hash === 'string' ? [[s.id, s.profile.photo.hash]] : [])));
+      } catch { /* its stored portrait stands */ }
+    }));
+    return accountSouls(worlds, account, { ...opts, current });
   }
   /** `readBody` runs only once the owner is known (null: over the size limit). Every await is followed by a check that
    *  the world was not archived meanwhile, so nothing is written into a folder that has moved (the restore would refuse). */
@@ -1305,6 +1332,18 @@ export async function openLauncher(cfg = {}) {
         const d = await dash.json(); json(res, 200, d, { 'server-timing': `dash;dur=${(performance.now() - t0).toFixed(1)}` }); return;
       }
       if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson()); return; }
+      if (path === '/__sim/my-souls.json' && req.method === 'GET') {
+        const souls = await mySouls(req.headers.authorization);
+        if (!souls) { json(res, 401, { ok: false, code: 'signin-required', message: 'sign in to see your Souls' }, { vary: 'authorization' }); return; }
+        json(res, 200, { contract: 'my-souls/1', souls }, { vary: 'authorization' }); return;
+      }
+      const photoGet = (req.method === 'GET' || req.method === 'HEAD') && /^\/__sim\/soul-photo\/([a-z][a-z0-9-]{0,31})\/([A-Za-z0-9_-]{1,100})\/([a-f0-9]{64})\.png$/.exec(path);
+      if (photoGet) {
+        const w = registry.get(photoGet[1]);
+        let bytes = null; try { bytes = w && !w.fork ? soulPhoto(join(registry.worldDir(w.slug), 'sim.db'), worldIdOf(w), photoGet[2], photoGet[3]) : null; } catch { /* unreadable: not found */ }
+        if (!bytes) { json(res, 404, { ok: false, code: 'not-found' }); return; }
+        res.writeHead(200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'public, max-age=31536000, immutable', 'content-length': bytes.length }).end(req.method === 'HEAD' ? undefined : bytes); return;
+      }
       if (path === '/__sim/templates.json' && req.method === 'GET') { json(res, 200, { templates: templateList().map(({ file: _f, ...t }) => t) }); return; }
       if (oldRoot && req.method === 'POST' && (path === '/__sim/worlds' || path === '/__sim/op/create-world')) {
         json(res, 403, { ok: false, code: 'creation.elsewhere', message: 'This server keeps the original worlds. Make new worlds at /worlds/.', url: '/worlds/' }); return;

@@ -30,6 +30,9 @@ export type Plan = {
   windowStyle: { sill: number; top: number; width: number; spacing: number };
   balcony?: { floor: number; room: string; width: number; depth: number; ring?: boolean };
   porch?: { depth: number };
+  /** #2434: inside doorways are made at least this wide where their shared wall has room (a door-fitted revision's real
+   *  door needs more than the 0.9 m drawn doorway). Absent: as before. */
+  minDoorW?: number;
   warnings: string[];
 };
 
