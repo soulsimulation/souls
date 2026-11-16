@@ -276,6 +276,9 @@ export async function runLoad(o) {
   const serverRoot = resolve(o['server-root'] ?? REPO), faultSec = o['fault-every-sec'] != null ? Number(o['fault-every-sec']) : null;
   if (faultSec) process.env.SIM_FAULT_INJECT = '1';
   if (o['hang-kill-sec'] != null) process.env.SIM_HANG_KILL_MS = String(1000 * Number(o['hang-kill-sec']));
+  // #2532 A7: `--read-workers <n>` runs the world with Stage B's read workers on as the launcher boots them (mode 2). No launcher
+  // routes to their ports here, so they keep their replicas and serve nothing: the curve carries their cost, not their gain.
+  if (o['read-workers'] != null) Object.assign(process.env, { SIM_READ_WORKER: '1', SIM_READ_WORKERS: String(Number(o['read-workers'])), SIM_READ_MODE: '2' });
   // #2556: a shape drives raw Souls, so with one and no --raw-from every Soul is raw
   const shape = shapeOf(o.shape), radiusM = shape ? (SHAPES.agents[shape].place?.radiusM?.value ?? 30) : null;
   const profile = !!o.profile, menuStats = !!o['menu-stats'], census = !!o['scan-census'], rawFrom = o['raw-from'] != null ? Number(o['raw-from']) : shape ? 1 : Infinity;
