@@ -125,6 +125,15 @@ delete the world's `snapshot-epoch` (so the edge never serves the pre-restore sn
 `backup-*.db` copy: delete `snapshot-epoch` whenever an older `sim.db` goes back live. Restoring data discards events accepted since the snapshot, so do it only
 for real data loss. Tests: `node --test tools/world-launcher/backup-restic.test.mjs` (skips without restic).
 
+**CDN purges** (behind the CDN, [cache rule](cdn.md#the-cache-rule)): parts, uploads and art are immutable for a year at
+the edge, and the origin's later refusal never reaches copies already there. Purge by prefix `soul.game/w/<slug>/` where
+the plan has it, otherwise purge everything:
+
+- **When moderation vetoes a file**, purge its URLs (`/w/<slug>/assets/<sha>.<ext>`, `/w/<slug>/art/<sha>.<ext>`) and
+  that world's parts and snapshot.
+- **After a restore** of a world's data, purge that world: its snapshot key can repeat a key the edge already holds for
+  other contents.
+
 Release backups (`ship.sh` step `backup`) are separate: row-verified compact copies in
 `/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<date>-<time>-XXXXXX` (a random six-character suffix; older
 copies have none). `deploy/retention.sh` lists and prunes old ones, newest first by the date and time in the name, dry
