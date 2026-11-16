@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://assets.eden.art/readme/v3/hero.mp4"><img src="https://assets.eden.art/readme/v3/hero.webp" width="100%" alt="Souls together in many places: an aerial over Eden, a beach, dancing on a lit square at night, a forest hike, a fair, a market, Mars College from the air"></a>
+  <a href="https://assets.eden.art/readme/v4/hero.mp4"><img src="https://assets.eden.art/readme/v4/hero.webp" width="100%" alt="Souls together in many places: an aerial over Eden's seaside resort, a beach, dancing on a lit square at night, a forest hike, a fair, a market, Mars College from the air"></a>
 </p>
 
 <h1 align="center">Souls</h1>
