@@ -5442,10 +5442,10 @@ export function findNext(id, { code, did_you_mean, candidates } = {}, way) {
   const words = id.split(/[:._/-]+/).filter((w) => w && w !== "here").join(" ");
   return words ? { next: `${CLI} find "${words}"` } : {};
 }
-/** A timed act asked for longer than the world takes (`capability.params`, "seconds must be an integer 1..<max>"): the act
- *  at the most it takes, and the exact wake that lets a promise of the rest be kept (harder-hamlet-v2 refused-recover). */
+/** A timed act asked for longer than the world takes (`capability.params`, its `params.seconds.max` or "seconds … 1..<max>"):
+ *  the act at the most it takes, and the exact wake that lets a promise of the rest be kept (harder-hamlet-v2 refused-recover). */
 export function secondsNext(id, d, params, at = Date.now()) {
-  const max = Number(/seconds must be an integer \d+\.\.(\d+)/.exec(d?.reason ?? "")?.[1]), asked = params?.seconds;
+  const max = Number(d?.params?.seconds?.max ?? /seconds must be (?:an )?integer,? \d+\.\.(\d+)/.exec(d?.reason ?? "")?.[1]), asked = params?.seconds;
   if (d?.code !== "capability.params" || typeof id !== "string" || !Number.isInteger(asked) || !(asked > max)) return {};
   const ends = new Date(at + (max + 60) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");   // about when it ends, a walk there included
   return { next: `${CLI} act ${id} '${JSON.stringify({ ...params, seconds: max })}' --wait (${max} s is the most); the other ${asked - max} s is for later: promise it only after \`${CLI} wake add at ${ends}\`, else tell your owner ${max} s is the most` };
