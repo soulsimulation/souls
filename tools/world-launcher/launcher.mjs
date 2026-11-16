@@ -1112,9 +1112,10 @@ export async function openLauncher(cfg = {}) {
     // it is kept by its path, the world process and the host headers its URLs are made from, never by the query (a random
     // one would pass the cache) or the cookie. Only an answer the world marks as its page (X-Sim-Page), from a GET that
     // reached it, is kept; arrivals while it is asked wait for it (a wave costs one build). The world's other routes are
-    // proxied as before. Its robots tag is the world's own rule, set for each request.
+    // proxied as before. Its robots tag is the world's own rule, set for each request. Only a GET that asks for HTML (a
+    // browser's arrival) is a page: any other GET, such as a long-poll, never waits behind another caller's flight.
     let keep;
-    if (req.method === 'GET' && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
+    if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
       if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
