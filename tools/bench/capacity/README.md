@@ -277,6 +277,26 @@ node tools/bench/capacity/slopes/slopes.mjs --root <built checkout> --axis inven
 
 `--slice` wraps each world on its own, so a CPU quota there is per world, unlike the meetup bench. A qualifying slopes run needs no slice: it measures cost per call, not headroom.
 
+## Viewers on one world (#2308, #2511)
+
+`viewers/viewers.mjs` measures what anonymous viewers cost one Eden 2026 world (fake minds, behind the checkout's own launcher) while Souls act, from zero viewers up. Each viewer does what the web page's entry does, with no browser: it fetches the world page, the snapshot, the config and the parts the snapshot names, then holds the world's socket open. A closed socket is reopened with the product client's own backoff (`reconnectDelayMs` in `viewers/stats.mjs` mirrors `packages/client`; its test fails if the client changes). Every viewer and every Soul has its own documentation or benchmarking address.
+
+| option | meaning |
+|---|---|
+| `--viewers 0,50,200` | the arms, in rising order; `0` is the zero-viewer arm |
+| `--souls <n>` (to 100) and `--act-sec <s>` | Souls joined with the world's CLI; each acts every `s` seconds from the start of its last act (without it, 6–10 s after the last answer) |
+| `--arrive-per-sec <n>` (default 20) | the rate at which viewers arrive while fewer than the arm's count are present |
+| `--dwell-sec <median>` | each viewer leaves after a heavy-tailed stay (log-normal, sigma 1, seeded per repeat); arrivals continue all window to hold the count |
+| `--arrive-burst <n>@<s>` | `n` more viewers arrive within 5 s, `s` seconds into each window with viewers (a link was just posted); they leave by their own stay, or at the window's end |
+
+Per window it reports the existing columns (tick, act queue and handler time, load levels, world, launcher and driver processor use, bytes per viewer, world calls by viewers, refusals) and: viewers held, joins and leaves per second, reconnects, **first motion** (seconds from a newcomer's first socket to its first take that carries a chunk, p50 and p95; only up to 50 newcomers waiting at once read their messages' heads, and nothing else is parsed), the main thread's heap beside the process's resident memory, and acts achieved against intended. The world's log and any `stall-*.json` are kept in each repeat's folder and in the timed run's artifact.
+
+```bash
+# the timed runner (all timing): command viewers, repeats 2
+#   args: --viewers 0,50,200 --souls 24 --act-sec 10 --arrive-per-sec 20                      (even)
+#   args: --viewers 0,200 --souls 24 --act-sec 10 --dwell-sec 60 --arrive-burst 100@30        (uneven)
+```
+
 ## Recorded baseline (2026-10-31, before the server-reliability fixes)
 
 Fixture: the compact Eden 2026 copy, sha256 `d0921000a7ef…`, heap cap 768 MB unless noted; two repeats per arm, shown
