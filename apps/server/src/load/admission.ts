@@ -312,6 +312,7 @@ export function admissionMiddleware(adm: Admission, level: () => Level, bearer: 
   const timed = (c: Context, t0: number, queued = 0, act?: ActTiming) => {
     const warm = Number((c.get as (k: string) => unknown)(WARM_WAIT_KEY)) || 0, ms = performance.now() - t0;
     const p = act ? actPartsOf(act, t0 + queued, t0 + ms) : undefined;
+    {const b = (act as {b2597?: {k: string; ms: number; w: string}[]; cap2597?: string} | undefined); const sum = b?.b2597?.reduce((x, e) => x + e.ms, 0) ?? 0; if (b && (sum >= 50 || (p?.handler ?? 0) >= 250)) console.log('[slow-bind-2597]', JSON.stringify({cap: b.cap2597, handler: Math.round(p?.handler ?? 0), bind: Math.round(p?.bind ?? 0), builds: Math.round(sum), each: b.b2597 ?? []}));}   // #2597 Step 0 (measurement branch only)
     c.header('Server-Timing', `world;dur=${(ms + warm).toFixed(1)}, queue;dur=${queued.toFixed(1)}${warm ? `, warm;dur=${warm.toFixed(1)}` : ''}${p ? `, handler;dur=${p.handler.toFixed(1)}, wait;dur=${p.wait.toFixed(1)}, commit;dur=${p.commit.toFixed(1)}, bind;dur=${p.bind.toFixed(1)}, check;dur=${p.check.toFixed(1)}, route-miss;desc=${p.routeMisses}` : ''}`);
     const route = apiRoute(c.req.method, c.req.path);
     if (route) { recordApi(route, queued + warm, handlerMsOf(route, ms - queued, k => c.req.query(k)), undefined, adm.api, p); adm.onAnswer?.(route, t0 + queued, t0 + ms); }

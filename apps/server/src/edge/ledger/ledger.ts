@@ -50,6 +50,8 @@ const STUCK_RADIUS = 0.34;
 export const HERE_SEAT_M = 8;
 const STUCK_REASON = 'The walk made no headway for 30 seconds, even after looking for another way from where it stood; choose another way or somewhere else.';
 import {actTiming} from '../../load/api-times.ts';
+/** #2597 Step 0 (measurement branch only): an act's menu builds, by kind, ms and what they built. */
+const m2597 = (k: string, ms: number, w: string) => {const t = actTiming.getStore() as {b2597?: {k: string; ms: number; w: string}[]} | undefined; if (t) (t.b2597 ??= []).push({k, ms: Math.round(ms * 10) / 10, w: w.slice(0, 120)});};
 import {ActPending, actCommitScope, EdgeError, SEAT_KEPT, type EdgeCapability, type EdgeLedgerHooks, type EdgeReceipt, type EdgeSoul, type NearbyBody, type PlaceRef,type ObjectBodyAdmission} from '../contract.ts';
 import {CATALOG} from '../../../../../mars/viewer/engine/world/catalog.ts';
 import {PlaceIndex, centroid, derivePlaceData, happenings, validatePlaceData, type PlaceData,type Place} from './places.ts';
@@ -1338,7 +1340,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     }
     menuStats.cap.miss++; if (hit) menuStats.cap[hit.key !== key ? 'missKey' : tick - hit.tick >= MENU_MAX_AGE_TICKS ? 'missAge' : 'missReads']++; else menuStats.cap.missAbsent++;
     menuStats.missBySoul[soul.soulId] = (menuStats.missBySoul[soul.soulId] ?? 0) + 1;
-    const c0 = cpuNow(), {core, reads} = this.recordReads(() => this.bindsCore(soul)); menuStats.cap.cpuUs += cpuNow() - c0;
+    const c0 = cpuNow(), w0 = performance.now(), {core, reads} = this.recordReads(() => this.bindsCore(soul)); menuStats.cap.cpuUs += cpuNow() - c0; m2597('full:' + (hit ? (hit.key !== key ? 'key' : tick - hit.tick >= MENU_MAX_AGE_TICKS ? 'age' : 'reads') : 'absent'), performance.now() - w0, new Error().stack!.split('\n').slice(2, 5).map(l => l.trim().replace(/^at /, '').replace(/\(.*\/(?=[^/]+\/[^/]+:)/, '(')).join(' < '));
     const value = this.bindsTail(soul, core); this.capCache.set(soul.soulId, {tick, key, reads, value: core, last: {tick, sig, value}}); return value;
   }
   /** Everything a Soul's menu reads that moves without a version of its own: its body (position to 5 cm, level, activity, ride, hand hold),
@@ -1389,7 +1391,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const spot = this.asksSpot(focus), far = spot || [...focus.ids].some(id => id.startsWith('object:')), has = (b: {caps: EdgeCapability[]}) => [...focus.ids].every(id => b.caps.some(c => c.id === id));
     if (hit?.last?.tick === tick && hit.last.sig === this.sameTickSig()) {const v = only(hit.last.value); if (!far || has(v)) {menuStats.one.sameTick++; return v;}}
     else if (hit && hit.key === this.menuKey(soul, tick) && tick - hit.tick < MENU_MAX_AGE_TICKS && this.readsHold(soul, hit.reads)) {const v = only(this.bindsTail(soul, only(hit.value), focus)); if (!far || has(v)) {menuStats.one.kept++; return v;}}
-    if (spot) {menuStats.one.built++; return only(this.bindsTail(soul, only(this.bindsCore(soul, focus)), focus));}
+    if (spot) {menuStats.one.built++; const w0 = performance.now(), v = only(this.bindsTail(soul, only(this.bindsCore(soul, focus)), focus)); m2597('spot', performance.now() - w0, focusSig(focus)); return v;}
     // a focused build is kept like a whole menu (same key, same reads), per focus: `here` asks the same one every frame
     const sig = focusSig(focus), mine = this.focusCache.get(soul.soulId), kept = mine?.get(sig), key = this.menuKey(soul, tick, focus);
     if (kept && kept.key === key && tick - kept.tick < MENU_MAX_AGE_TICKS && this.readsHold(soul, kept.reads)) {
@@ -1398,7 +1400,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       return value;
     }
     menuStats.one.built++; countFocusMiss(mine, kept, key, tick, () => this.readsHold(soul, kept!.reads));
-    const {core, reads} = this.recordReads(() => only(this.bindsCore(soul, focus)));
+    const w0 = performance.now(), {core, reads} = this.recordReads(() => only(this.bindsCore(soul, focus))); m2597('focus:' + (kept ? (kept.key !== key ? 'key' : tick - kept.tick >= MENU_MAX_AGE_TICKS ? 'age' : 'reads') : 'absent'), performance.now() - w0, focusSig(focus));
     const m = mine ?? new Map(); m.set(sig, {tick, key, reads, value: core}); if (m.size > 8) m.delete(m.keys().next().value!); this.focusCache.set(soul.soulId, m);
     return only(this.bindsTail(soul, core, focus));
   }

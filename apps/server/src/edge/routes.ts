@@ -91,6 +91,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     // #1327: a key without a clientRef names the act too, so a retry of an act handed over and not yet recorded is that act
     {const key = c.req.header('idempotency-key'); if (input.clientRef === undefined && key && key.length <= 100) input.clientRef = key;}
     // CTRL-1 (#1093), #1911: an act is an offered id, whatever client sends it; words are refused by the strict gate
+    {const t = actTiming.getStore(); if (t) (t as {cap2597?: string}).cap2597 = String(input.capability ?? input.verb ?? '').slice(0, 100);}   // #2597 Step 0 (measurement branch only)
     {const t = actTiming.getStore(), t0 = t ? performance.now() : 0, no = L.offerGate(s, input); if (t) t.bindMs += performance.now() - t0; if (no) return no;}   // #2508: offerGate's bind is the act's bind
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
     // #1327: once this request commits a receipt, that receipt is its answer: a fault after the commit point answers
