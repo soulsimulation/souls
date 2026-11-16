@@ -10,9 +10,18 @@
 // the join set), resume (`since` + the hub's epoch, from its own ring of the last 600 batches), `resync`, the take
 // transports (its own TakeEntitiesEncoderV1 / TakeChunksEncoderV1 and kernel-tick), backpressure, per-tick corking, the
 // load dial's join hold, the hello and message rate limits, the ping sweep and the 15 s hello deadline.
+//
+// Scaling V3 (#2521): each outgoing string of 1 KB or more is compressed once, here, on this thread, and the same frame is
+// written to every socket that negotiated permessage-deflate. Both sides negotiate no context takeover, so a message's
+// compressed bytes are the same for every socket; the library's per-socket compression (on the process's shared pool)
+// is never used, so a socket's frames go out in write order. It relies on two `ws` internals, pinned with the version
+// (apps/server/package.json) and checked by anon-fanout-deflate.test.ts: the static `Sender.frame` and a socket's
+// `_sender.sendFrame`.
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
+import { constants as zlib, deflateRawSync } from 'node:zlib';
+import * as wsLib from 'ws';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
 import { addressKey } from '../address-key.ts';
@@ -47,27 +56,51 @@ export interface PublicFeed {
   load(): Load;
 }
 
+/** Strings under this many bytes go uncompressed (the threshold the hub's sockets use). */
+export const DEFLATE_THRESHOLD = 1024;
+/** permessage-deflate's payload for one message (RFC 7692 7.2.1): raw deflate, no context, sync-flushed, the trailing
+ *  00 00 ff ff removed. */
+export const deflateMessage = (s: string): Buffer => { const z = deflateRawSync(s, { finishFlush: zlib.Z_SYNC_FLUSH }); return z.subarray(0, z.length - 4); };
+type Frame = Buffer[];
+const { Sender } = wsLib as unknown as { Sender: { frame(data: Buffer, o: { fin: boolean; rsv1: boolean; opcode: number; mask: boolean; readOnly: boolean }): Frame } };
+type WsSender = { _state: number; sendFrame(f: Frame, cb?: (err?: Error) => void): void };
+/** A socket's sender is idle (not compressing or reading a blob), so a prepared frame may go straight to its socket. */
+const SENDER_IDLE = 0;
+/** Recently compressed strings (each with its frame; null under the threshold), oldest first. */
+const FRAMES_KEPT = 64;
+
 const MAX_CONNECTIONS = 20_000, MAX_PER_IP = 200, MAX_BUFFERED = 1_000_000, RING = 600, SWEEP_MS = 15_000;
 type Peer = { ws: WebSocket; ip: string; ready: boolean; alive: boolean; joinedAt: number; msgs: number; windowStart: number; lastHello: number; lastSnapshot: number; heldSince?: number;
   generation: number; resyncs: number; takeTransport?: typeof TAKE_BOUNDARY_WIRE_V1; takeEntities?: { last: number | null; join?: true }; takeChunks?: { last: number | null; kernel?: string };
-  columns: boolean; awaitingTakes: boolean; joinSend: boolean; joinPending: number };
+  columns: boolean; awaitingTakes: boolean; joinSend: boolean; joinPending: number;
+  /** It negotiated permessage-deflate with the full window, so the shared compressed frame fits it. */
+  deflate: boolean };
+
+type Out = { s: string; f?: Frame | null };
+/** The socket negotiated permessage-deflate and did not ask for a smaller server window than the default (15 bits). */
+function fullWindowDeflate(ws: WebSocket): boolean {
+  const pmd = (ws as unknown as { _extensions?: Record<string, { params?: { server_max_window_bits?: number } }> })._extensions?.['permessage-deflate'];
+  const bits = pmd?.params?.server_max_window_bits;
+  return !!pmd && (bits === undefined || bits >= 15);
+}
 
 export class AnonFanout {
   readonly wss: WebSocketServer;
   private peers = new Set<Peer>();
   private perIp = new Map<string, number>();
-  /** The last RING batches as the hub stringified them, with their seq. */
-  private ring: { seq: number; s: string }[] = [];
+  /** The last RING batches as the hub stringified them, with their seq (and their frame once built). */
+  private ring: (Out & { seq: number })[] = [];
   /** The oldest batch a peer may resume from (#1221); -1: the first batch after the last reset. */
   private resumeFrom = 0;
   private readonly takeEntities = new TakeEntitiesEncoderV1();
   private readonly takeChunks = new TakeChunksEncoderV1();
   private timers: ReturnType<typeof setInterval>[] = [];
-  private feed: PublicFeed; private wake: () => void;
+  private feed: PublicFeed; private wake: () => void; private deflate: (s: string) => Buffer;
 
-  constructor(feed: PublicFeed, o: { wake?: () => void } = {}) {
-    this.feed = feed; this.wake = o.wake ?? (() => {});
-    this.wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: { threshold: 1024, clientNoContextTakeover: true, serverNoContextTakeover: true, concurrencyLimit: 4 } });
+  constructor(feed: PublicFeed, o: { wake?: () => void; deflate?: (s: string) => Buffer } = {}) {
+    this.feed = feed; this.wake = o.wake ?? (() => {}); this.deflate = o.deflate ?? deflateMessage;
+    // negotiated as the hub's sockets are; the fanout compresses itself (frameOf), never through the library
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: { threshold: DEFLATE_THRESHOLD, clientNoContextTakeover: true, serverNoContextTakeover: true } });
     this.timers.push(setInterval(() => this.sweep(), SWEEP_MS).unref());
     // a socket that never introduces itself is not a viewer (judged after the poll phase, as the hub does)
     this.timers.push(setInterval(() => setImmediate(() => { const now = Date.now(); for (const p of this.peers) if (!p.ready && now - p.joinedAt > 15_000 + this.stallMs) { p.ws.close(1008, 'no hello'); this.drop(p); } }), 5_000).unref());
@@ -84,9 +117,10 @@ export class AnonFanout {
   // ------------------------------------------------------------------ the three pushes
   /** Every unfiltered broadcast as the hub stringified it; `m` only for `takes` (s unused) and `kernel`. */
   pub(t: string, s: string, m?: ServerMsg) {
+    let o: Out = { s };
     if (t === 'batch') {
       const seq = Number(/^\{"t":"batch","seq":(\d+)/.exec(s)?.[1] ?? (JSON.parse(s) as { seq: number }).seq);
-      this.ring.push({ seq, s }); if (this.ring.length > RING) this.ring.shift();
+      const b = { seq, s }; this.ring.push(b); o = b; if (this.ring.length > RING) this.ring.shift();
       if (this.resumeFrom < 0) this.resumeFrom = seq;
     }
     if (!this.peers.size) return;
@@ -99,7 +133,7 @@ export class AnonFanout {
     const rest = t === 'kernel' && m?.t === 'kernel' ? kernelRestV1(m.view) : undefined;
     // a batch is never dropped for backpressure: a missing one is a seq gap, and the gap costs the viewer a whole snapshot
     for (const p of this.peers) { if (!p.ready || p.ws.readyState !== 1) continue; if (p.ws.bufferedAmount > MAX_BUFFERED && t !== 'batch') continue;
-      const out = m ? this.kernelWire(p, m, s, rest) : s; this.hold(p.ws); p.ws.send(out); }
+      const out = m ? this.kernelWire(p, m, s, rest) : s; this.hold(p.ws); this.send(p, out === s ? o : out); }
   }
   /** A recovery (#1221): the ring is cleared (nothing before it resumes) and every viewer gets the picture again where it is. */
   reset() {
@@ -115,7 +149,8 @@ export class AnonFanout {
     const ip = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // as the hub (#2543): an IPv6 network by its /64
     if (this.peers.size >= MAX_CONNECTIONS || (this.perIp.get(ip) ?? 0) >= MAX_PER_IP) { ws.close(1013, 'too many connections'); return; }
     const now = Date.now();
-    const p: Peer = { ws, ip, ready: false, alive: true, joinedAt: now, msgs: 0, windowStart: now, lastHello: 0, lastSnapshot: 0, generation: 0, resyncs: 0, columns: false, awaitingTakes: false, joinSend: false, joinPending: 0 };
+    const p: Peer = { ws, ip, ready: false, alive: true, joinedAt: now, msgs: 0, windowStart: now, lastHello: 0, lastSnapshot: 0, generation: 0, resyncs: 0, columns: false, awaitingTakes: false, joinSend: false, joinPending: 0,
+      deflate: fullWindowDeflate(ws) };
     this.peers.add(p); this.perIp.set(ip, (this.perIp.get(ip) ?? 0) + 1);
     this.wake();
     ws.on('pong', () => (p.alive = true));
@@ -172,7 +207,7 @@ export class AnonFanout {
       const ring = this.ring, last = ring.at(-1)?.seq;
       const resume = typeof m.since === 'number' && m.epoch === w.epoch && this.resumeFrom >= 0 && m.since >= this.resumeFrom && last !== undefined && m.since >= ring[0].seq - 1 && m.since <= last;
       const j = this.feed.join();
-      if (resume) { for (const b of ring) if (b.seq > m.since!) this.write(p, b.s); this.write(p, j.log); }
+      if (resume) { for (const b of ring) if (b.seq > m.since!) this.write(p, b); this.write(p, j.log); }
       else this.picture(p, j, true);
       for (const x of j.rest) typeof x === 'string' ? this.write(p, x) : this.sendMsg(p, x);
     } finally { p.joinSend = false; }
@@ -181,14 +216,14 @@ export class AnonFanout {
   /** The shared picture in this peer's form, (on a join) its log list, then every batch after it. */
   private picture(p: Peer, j: PublicJoin, log = false) {
     const w = this.snapshotWire(j.snapshot, !!p.takeEntities?.join, p.columns);
-    if (this.write(p, w.s) && w.table !== null && p.takeEntities) p.takeEntities.last = w.table;
+    if (this.write(p, w) && w.table !== null && p.takeEntities) p.takeEntities.last = w.table;
     if (log) this.write(p, j.log);
-    for (const b of this.ring) if (b.seq > j.seq) this.write(p, b.s);
+    for (const b of this.ring) if (b.seq > j.seq) this.write(p, b);
   }
 
   // ------------------------------------------------------------------ encoding (as the hub's send)
   /** Per picture, its strings by negotiated form; the entity table registered in this fanout's own encoder. */
-  private wire = new WeakMap<object, Map<string, { s: string; table: number | null }>>();
+  private wire = new WeakMap<object, Map<string, Out & { table: number | null }>>();
   private snapshotWire(m: Snapshot, join: boolean, columns: boolean) {
     let forms = this.wire.get(m); if (!forms) this.wire.set(m, forms = new Map());
     const key = `${join}|${columns}`; let w = forms.get(key);
@@ -226,7 +261,7 @@ export class AnonFanout {
       if (entities) nextTable = entities.last;
       if (chunks) nextTake = chunks.last;
     } catch {
-      p.ready = false; p.ws.send(JSON.stringify({ t: 'error', code: 'takes.transport-invalid', message: 'The take transport cannot be encoded exactly.' })); p.ws.close(1011, 'invalid take transport'); return false;
+      p.ready = false; this.send(p, JSON.stringify({ t: 'error', code: 'takes.transport-invalid', message: 'The take transport cannot be encoded exactly.' })); p.ws.close(1011, 'invalid take transport'); return false;
     }
     this.write(p, s);
     if (nextTable !== undefined && p.takeEntities) p.takeEntities.last = nextTable;
@@ -241,11 +276,30 @@ export class AnonFanout {
     if (r !== null && r === p.takeChunks.kernel) return JSON.stringify({ t: 'kernel-tick', tick: m.view.tick });
     p.takeChunks.kernel = r ?? undefined; return s;
   }
-  private write(p: Peer, s: string) {
+  private write(p: Peer, s: string | Out) {
     if (!this.feed.available()) { p.ready = false; p.ws.close(1013, 'world unavailable'); return false; }
     if (p.ws.readyState !== 1) return false;
-    if (p.joinSend) { p.joinPending++; p.ws.send(s, () => { p.joinPending--; }); } else p.ws.send(s);
+    if (p.joinSend) { p.joinPending++; this.send(p, s, () => { p.joinPending--; }); } else this.send(p, s);
     return true;
+  }
+  /** One message to one open socket: the shared compressed frame if it negotiated deflate and the string is 1 KB or more,
+   *  otherwise uncompressed. `Out` carries its frame once built (ring batches, pictures, a broadcast's string). */
+  private send(p: Peer, o: string | Out, cb?: () => void) {
+    const f = p.deflate ? (typeof o === 'string' ? this.frameOf(o) : o.f !== undefined ? o.f : (o.f = this.build(o.s))) : null;
+    const sender = (p.ws as unknown as { _sender: WsSender })._sender;
+    if (f && sender._state === SENDER_IDLE) sender.sendFrame(f, cb);
+    else p.ws.send(typeof o === 'string' ? o : o.s, { compress: false }, cb);
+  }
+  /** A string's compressed frame (null under the threshold), kept for the last FRAMES_KEPT strings sent without an `Out`. */
+  private frames = new Map<string, Frame | null>();
+  private frameOf(s: string): Frame | null {
+    if (s.length * 3 < DEFLATE_THRESHOLD) return null;
+    let f = this.frames.get(s); if (f !== undefined) return f;
+    this.frames.set(s, f = this.build(s)); if (this.frames.size > FRAMES_KEPT) this.frames.delete(this.frames.keys().next().value!);
+    return f;
+  }
+  private build(s: string): Frame | null {
+    return Buffer.byteLength(s) < DEFLATE_THRESHOLD ? null : Sender.frame(this.deflate(s), { fin: true, rsv1: true, opcode: 1, mask: false, readOnly: false });
   }
   /** Some peer's join set is still being compressed or written within `holdMs` of its hello (the hub's lane P5 clock hold). */
   joining(now: number, holdMs: number) { for (const p of this.peers) if (p.joinPending && now - p.lastHello < holdMs && p.ws.readyState === 1) return true; return false; }
