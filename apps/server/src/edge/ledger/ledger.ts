@@ -163,6 +163,25 @@ type Plans = Map<string, {label: string; steps: Program['steps']; seconds?: bool
 type WalkProfile=(soul:EdgeSoul,caps:EdgeCapability[],plans:Plans)=>void;
 type ExactWalkProfile=(soul:EdgeSoul,asked:string,caps:EdgeCapability[],plans:Plans)=>boolean;
 type ExactWalkBindings={caps:EdgeCapability[];plans:Plans;tick:number;reused?:true};
+/** A5 (#2530): an act's bind (`bindAct`), made of reads only: the offer it chose and that offer's steps, or the refusal it
+ *  found (not yet recorded), the inputs its answer read, and how the act goes on (`next`). actWork writes what follows. */
+export type BoundAct = {capability: string; steps?: Program['steps']; refusal?: {code: string; reason: string};
+  inputs: {menu: string; navEpoch: number; tick: number}; next: BoundNext};
+type BoundNext =
+  | {kind: 'replay'; receipt: EdgeReceipt}   // a retry of an act already recorded: its receipt
+  | {kind: 'place-refused'; out: {accepted: false; code: string; reason: string; capability: string; did_you_mean?: {id: string; label: string}[]}}
+  | {kind: 'place'; chosen: {capability: string; [k: string]: unknown}}   // a place by name: the act is on its own offer
+  | {kind: 'walk-words'; walk: IntentInput}
+  | {kind: 'once'; once: BoundOnce};
+type BoundMenu = {caps: EdgeCapability[]; plans: Plans; partial?: true; words?: {caps: EdgeCapability[]; exact: boolean}; pre?: {v: VocabResult; caps: EdgeCapability[]; plans: Plans}};
+/** actOnce's reads before its first write (`bindOnce`). `faded`: pure up to here, since the reclaim moves the body (an awaited
+ *  write) before the menu it is then bound on is read. */
+type BoundOnce =
+  | {kind: 'replay'; receipt: EdgeReceipt}
+  | {kind: 'refuse'; code: string; reason: string}
+  | {kind: 'stop'}
+  | {kind: 'faded'; navWasCold: boolean}
+  | {kind: 'bound'; navWasCold: boolean; bound: BoundMenu};
 type CapabilityProvider=(soul:EdgeSoul,only?:ReadonlySet<string>,places?:Map<string,string>)=>EdgeCapability[];
 /** warmForServing's account: busy ms in all, wall ms from start to end, its slices before the listing and the longest of
  *  them, the final listing's ms, and whether it was stopped (shutdown) before the listing. */
@@ -2231,21 +2250,50 @@ export class EdgeLedger implements EdgeLedgerHooks {
   /** #1737: why a spot asked for by id was not offered to this Soul (`<soul>|<verb>:<spot id>`), from the build just made for it. */
   private spotWhy = new Map<string, {code: string; reason: string}>();
   offerGate(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; verb?: unknown; target?: unknown; clientRef?: unknown}): OfferRefusal | null {
+    const no = this.gateBind(soul, input); if (!no) return null;
+    this.recordRefusal(soul.soulId, 'act', no.capability, no.code, no.reason);
+    return no.out;
+  }
+  /** A5 (#2530): the strict gate's bind, reads only: its refusal (recorded by offerGate) and the answer it gives, or null. */
+  gateBind(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; verb?: unknown; target?: unknown; clientRef?: unknown}): (OfferRefusal & {out: OfferRefusal}) | null {
     let no = offerCheck(this, soul, input); if (!no) return null;
     const spot = no.code === 'capability.unknown' && typeof input.capability === 'string' ? this.spotWhy.get(`${soul.soulId}|${input.capability.trim()}`) : undefined;
     if (spot) no = {...no, code: spot.code, reason: spot.reason};
-    this.recordRefusal(soul.soulId, 'act', no.capability, no.code, no.reason);
     // #1948: an id is refused as it is (strict.ts); words still name what the Soul can do instead
-    return no.code === 'capability.unknown' && !OFFER_ID.test(no.capability) ? this.withAlternatives(soul, no.capability, no, this.wordsMenu(soul).caps) : no;
+    return {...no, out: no.code === 'capability.unknown' && !OFFER_ID.test(no.capability) ? this.withAlternatives(soul, no.capability, no, this.wordsMenu(soul).caps) : no};
   }
   private async actWork(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown; verb?: unknown; target?: unknown}): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
     // PC08 (#687, PC02 §3): a member's safe stop of a running shared operation never touches the member's own receipt
     if (this.sharedCarry && typeof input.capability === 'string' && input.capability.startsWith('stop-carry:')) return this.stopShared(soul, input.capability, typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined);
     // intents/1 (Core-A): {verb, target} is resolved now and acted on as the concrete choice it reports
     if (input.capability === undefined && input.verb !== undefined) {const out = await this.intents.act(soul, input as IntentInput); if (out.accepted) this.menusChangedBy('act-intent', soul.soulId, out.receipt.capability); return out;}
+    // A5 (#2530): the bind reads only; what it found is written here, after it
+    const bound=this.bindAct(soul,input),next=bound.next;
+    if(next.kind==='replay')return {accepted:true,receipt:next.receipt};
+    if(next.kind==='place-refused'){this.recordRefusal(soul.soulId,'act',input.capability as string,bound.refusal!.code,bound.refusal!.reason);return next.out;}
+    if(next.kind==='place'){
+      const out=await this.act(soul,{...input,capability:next.chosen.capability});
+      if(!out.accepted)return out;
+      const receipt=this.coreA.setDetail(out.receipt.id,{chosen:{...next.chosen,...(out.receipt.chosen as Record<string,unknown>??{})}})??out.receipt;return {...out,receipt};
+    }
+    if(next.kind==='walk-words'&&typeof input.capability==='string'){const walk=next.walk;{const out=await this.intents.act(soul,{...walk,...(input.params?{params:input.params}:{}),clientRef:input.clientRef});if(out.accepted){this.menusChangedBy('act-walk-words', soul.soulId, out.receipt.capability);return {...out,resolved:{from:input.capability,to:out.receipt.capability,note:'Walk to the named destination; companions receive an invitation and choose whether to join.'}};}
+      // quality case 27: an ambiguous destination ("the library") falls back to the walk its plain words resolve to, still inviting
+      const alt=walkWithFallback(this,soul,walk);if(alt){const again=await this.actOnce(soul,{capability:alt.cap.id,params:{...(input.params&&typeof input.params==='object'?input.params as Record<string,unknown>:{}),with:walk.with},clientRef:input.clientRef});if(again.accepted){this.menusChangedBy('act-walk-fallback', soul.soulId, again.receipt.capability);return {...again,resolved:{from:input.capability,to:alt.cap.id,note:`Walk to ${alt.cap.label}; ${(walk.with as string[]).join(', ')} receive an invitation and choose whether to join.`}};}}
+      return out;}}
+    const out = await this.actOnce(soul, input, null, false, (next as {once: BoundOnce}).once);
+    if (out.accepted) this.menusChangedBy('act-accepted', soul.soulId, out.receipt.capability);     // invitations, items and follows (together.version) and seats near the actor or target change what others can do
+    return out;
+  }
+  /** A5 (#2530): an act's bind, in the order the act path reads it, with no write and nothing enqueued: the replay of a
+   *  recorded retry, the body's verb problem, the exact walk, a place named by id, a walk to named words, then actOnce's
+   *  reads (bindOnce) and its offers (bindMenu). Every refusal it finds is returned, recorded only by actWork after it. */
+  bindAct(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}): BoundAct {
+    const tick = this.mw.world.tick, asked = typeof input.capability === 'string' ? input.capability : '';
+    const done = (next: BoundNext, capability = asked, steps?: Program['steps'], refusal?: {code: string; reason: string}): BoundAct => ({capability, ...(steps ? {steps} : {}), ...(refusal ? {refusal} : {}),
+      inputs: {menu: this.menuKey(soul, tick, focusFor(asked.trim())), navEpoch: (this.mw as unknown as {navEpochV1?(): number}).navEpochV1?.() ?? 0, tick}, next});
     let exactWalk:ExactWalkBindings|null=null;
     if(typeof input.capability==='string'){
-      if(input.capability.length>=1&&input.capability.length<=200&&typeof input.clientRef==='string'&&input.clientRef.length<=100){const old=this.coreA.byClientRef(soul.soulId,input.clientRef);if(old)return {accepted:true,receipt:old};}
+      if(input.capability.length>=1&&input.capability.length<=200&&typeof input.clientRef==='string'&&input.clientRef.length<=100){const old=this.coreA.byClientRef(soul.soulId,input.clientRef);if(old)return done({kind:'replay',receipt:old});}
       // BODY refusals precede place/alias diagnostics, as in the original actOnce path.
       const bodyIssue=this.bodyVerbProblem(soul,input.capability.split(/[:\s]/)[0]!);
       {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;if(exactWalk&&!exactWalk.reused)menuStats.one.exact++;}   // #1944: bind (#2508: and the exact-walk projections built; #2527: not the gate's bind reused)
@@ -2254,21 +2302,42 @@ export class EdgeLedger implements EdgeLedgerHooks {
       // that id, as the skill says; the id was refused place.unwalkable here. actOnce below walks it on demand, as words.
       const onDemand=!!place&&!place.ok&&place.code==='place.unwalkable'&&this.onDemandId(soul,input.capability.trim());
       if(place&&!onDemand){
-        if(!place.ok){this.recordRefusal(soul.soulId,'act',input.capability,place.code,place.reason);const {ok:_ok,...refusal}=place,out=this.withInPlaceAlternative(soul,{accepted:false as const,capability:input.capability,...refusal});
+        if(!place.ok){const {ok:_ok,...refusal}=place,out=this.withInPlaceAlternative(soul,{accepted:false as const,capability:input.capability,...refusal});
           // #824: an unknown place id names what the Soul can do instead (one kept words-menu read, on this refusal only)
-          return NOTHING_MATCHES.has(out.code)?this.withAlternatives(soul,input.capability,out,exactWalk?.caps??this.wordsMenu(soul).caps):out;}
-        const out=await this.act(soul,{...input,capability:place.chosen.capability});
-        if(!out.accepted)return out;
-        const receipt=this.coreA.setDetail(out.receipt.id,{chosen:{...place.chosen,...(out.receipt.chosen as Record<string,unknown>??{})}})??out.receipt;return {...out,receipt};
+          return done({kind:'place-refused',out:NOTHING_MATCHES.has(out.code)?this.withAlternatives(soul,input.capability,out,exactWalk?.caps??this.wordsMenu(soul).caps):out},asked,undefined,{code:place.code,reason:place.reason});}
+        return done({kind:'place',chosen:place.chosen},place.chosen.capability);
       }
+      const walk=walkWithDestinationWords(input.capability,[...this.host.minds.values()].map(m=>m.name));if(walk)return done({kind:'walk-words',walk});
     }
-    if(typeof input.capability==='string'){const walk=walkWithDestinationWords(input.capability,[...this.host.minds.values()].map(m=>m.name));if(walk){const out=await this.intents.act(soul,{...walk,...(input.params?{params:input.params}:{}),clientRef:input.clientRef});if(out.accepted){this.menusChangedBy('act-walk-words', soul.soulId, out.receipt.capability);return {...out,resolved:{from:input.capability,to:out.receipt.capability,note:'Walk to the named destination; companions receive an invitation and choose whether to join.'}};}
-      // quality case 27: an ambiguous destination ("the library") falls back to the walk its plain words resolve to, still inviting
-      const alt=walkWithFallback(this,soul,walk);if(alt){const again=await this.actOnce(soul,{capability:alt.cap.id,params:{...(input.params&&typeof input.params==='object'?input.params as Record<string,unknown>:{}),with:walk.with},clientRef:input.clientRef});if(again.accepted){this.menusChangedBy('act-walk-fallback', soul.soulId, again.receipt.capability);return {...again,resolved:{from:input.capability,to:alt.cap.id,note:`Walk to ${alt.cap.label}; ${(walk.with as string[]).join(', ')} receive an invitation and choose whether to join.`}};}}
-      return out;}}
-    const out = await this.actOnce(soul, input, exactWalk);
-    if (out.accepted) this.menusChangedBy('act-accepted', soul.soulId, out.receipt.capability);     // invitations, items and follows (together.version) and seats near the actor or target change what others can do
-    return out;
+    const once = this.bindOnce(soul, input, exactWalk, false);
+    if (once.kind === 'refuse') return done({kind: 'once', once}, asked, undefined, {code: once.code, reason: once.reason});
+    const plan = once.kind === 'bound' && once.bound.caps.some(c => c.id === asked) ? once.bound.plans.get(asked) : undefined;
+    return done({kind: 'once', once}, asked, plan?.steps);
+  }
+  /** A5: actOnce's reads before its first write, and the offers it binds (see BoundOnce). */
+  private bindOnce(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}, exactWalk: ExactWalkBindings | null, navRebound: boolean): BoundOnce {
+    // nav-warm-wait/1: whether the labels are cold as this act binds its offer (read before anything here warms them)
+    const navWasCold = !navRebound && this.navCold();
+    const asked = typeof input.capability === 'string' ? input.capability : '';
+    if (!asked || asked.length > 200) throw new EdgeError(400, 'invalid', 'body must be {capability, params?, clientRef?}');
+    const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
+    if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {kind: 'replay', receipt: this.view(old)};}
+    if (this.host.stepFailingFor(soul.entityId)) return {kind: 'refuse', code: STEP_FAILING.code, reason: STEP_FAILING.message};   // #1378: the bodies its faults named
+    // #1381: the explicit stop of the act under way, with an honest answer when nothing runs (by id, or by its words while offered)
+    // (a member of a running shared carry: its words keep going to the carry's safe shared stop, PC10)
+    if (asked.trim() === STOP_CURRENT || (STOP_WORDS.test(asked.trim()) && this.openReceipts(soul.soulId).length && !this.together.sharedRunning(soul.soulId))) return {kind: 'stop'};
+    const askedVerb=asked.split(/[:\s]/)[0]!;const unsupported=askedVerb==='object'?null:this.bodyVerbProblem(soul,askedVerb);if(unsupported)return {kind: 'refuse', code: unsupported.code, reason: unsupported.reason};
+    if (this.faded.has(soul.soulId)) return {kind: 'faded', navWasCold};
+    return {kind: 'bound', navWasCold, bound: this.bindMenu(soul, asked, input.params, exactWalk)};
+  }
+  /** The offers an act binds: an exact walk projected this tick, else actMenu (timed as the act's bind, #1944). */
+  private bindMenu(soul: EdgeSoul, asked: string, params: unknown, exactWalk: ExactWalkBindings | null): BoundMenu {
+    // L3 item 4: an offered id builds that one offer (bindOne), never the whole menu; words and via legs read the menu
+    // (an exact walk projected this tick by act: that one offer, as bindOne would give it)
+    const timing = actTiming.getStore(), bindAt = timing ? performance.now() : 0;   // #1944: bind
+    const bound = exactWalk?.tick === this.mw.world.tick ? {caps: exactWalk.caps, plans: exactWalk.plans, partial: true as const, words: undefined} : this.actMenu(soul, asked, params);
+    if (timing) timing.bindMs += performance.now() - bindAt;
+    return bound;
   }
   /** L3 item 4: the offers an act reads. An id the menu offers: that one offer (bindOne). Anything else (words, an id
    *  offered only on demand, `via` legs naming other places): the whole menu, as before. */
@@ -2281,31 +2350,27 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (!via) {const w = this.wordsMenu(soul); return w.exact ? {caps: w.caps, plans: w.plans} : {caps: w.caps, plans: w.plans, words: w};}
     return this.binds(soul);
   }
-  private async actOnce(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}, exactWalk: ExactWalkBindings | null = null, navRebound = false): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
-    // nav-warm-wait/1: whether the labels are cold as this act binds its offer (read before anything here warms them)
-    const navWasCold = !navRebound && this.navCold();
-    const asked = typeof input.capability === 'string' ? input.capability : '';
-    if (!asked || asked.length > 200) throw new EdgeError(400, 'invalid', 'body must be {capability, params?, clientRef?}');
+  private async actOnce(soul: EdgeSoul, input: {capability?: unknown; params?: unknown; clientRef?: unknown}, exactWalk: ExactWalkBindings | null = null, navRebound = false, pre?: BoundOnce): Promise<{accepted: true; receipt: EdgeReceipt; resolved?: Resolved; result?: unknown; repeat?: true; channel?: string} | {accepted: false; code: string; reason: string; capability: string; retry_after?: number; did_you_mean?: {id: string; label: string}[]; resolved?: Resolved}> {
+    // A5 (#2530): its reads up to the bind (bindOnce, part of bindAct); the writes they lead to follow here
+    const once = pre ?? this.bindOnce(soul, input, exactWalk, navRebound);
+    const asked = input.capability as string;
     let capability = asked;
     const clientRef = typeof input.clientRef === 'string' && input.clientRef.length <= 100 ? input.clientRef : undefined;
-    if (clientRef) {const old = this.rows('soul_id=? AND client_ref=?', soul.soulId, clientRef)[0]; if (old) return {accepted: true, receipt: this.view(old)};}
+    if (once.kind === 'replay') return {accepted: true, receipt: once.receipt};
     const refuse = (code: string, reason: string, extra?: {retry_after?: number}) => {this.recordRefusal(soul.soulId, 'act', capability, code, reason); return this.withInPlaceAlternative(soul, {accepted: false as const, code, reason, capability, ...extra});};
-    if (this.host.stepFailingFor(soul.entityId)) return refuse(STEP_FAILING.code, STEP_FAILING.message);   // #1378: the bodies its faults named
-    // #1381: the explicit stop of the act under way, with an honest answer when nothing runs (by id, or by its words while offered)
-    // (a member of a running shared carry: its words keep going to the carry's safe shared stop, PC10)
-    if (asked.trim() === STOP_CURRENT || (STOP_WORDS.test(asked.trim()) && this.openReceipts(soul.soulId).length && !this.together.sharedRunning(soul.soulId))) return this.stopCurrent(soul, input.params, clientRef, refuse);
-    const askedVerb=asked.split(/[:\s]/)[0]!;const unsupported=askedVerb==='object'?null:this.bodyVerbProblem(soul,askedVerb);if(unsupported)return refuse(unsupported.code,unsupported.reason);
-    if (this.faded.has(soul.soulId)) {
+    if (once.kind === 'refuse') return refuse(once.code, once.reason);
+    if (once.kind === 'stop') return this.stopCurrent(soul, input.params, clientRef, refuse);
+    const navWasCold = once.navWasCold;
+    let bound: BoundMenu;
+    if (once.kind === 'faded') {
       // Reclaim: fall onto feet at a starting place, identity and history intact (C9).
       this.faded.delete(soul.soulId);
       if (!this.inSharedCarry(soul.soulId)) await this.host.enqueue('edge-relocate', `edge:${soul.soulId}`, {soulId: soul.soulId, entityId: soul.entityId, to: this.startingPoint(soul.soulId), why: 'reclaimed after fading'});
       this.dropMenu('act-retry', soul.soulId);
-    }
-    // L3 item 4: an offered id builds that one offer (bindOne), never the whole menu; words and via legs read the menu
-    // (an exact walk projected this tick by act: that one offer, as bindOne would give it)
-    const timing = actTiming.getStore(), bindAt = timing ? performance.now() : 0;   // #1944: bind
-    const bound = exactWalk?.tick === this.host.engine.world.tick ? {caps: exactWalk.caps, plans: exactWalk.plans, partial: true as const, words: undefined} : this.actMenu(soul, asked, input.params), partial = !!bound.partial, words = bound.words;
-    if (timing) timing.bindMs += performance.now() - bindAt;
+      bound = this.bindMenu(soul, asked, input.params, exactWalk);
+    } else bound = once.bound;
+    const partial = !!bound.partial, words = bound.words;
+    const askedVerb = asked.split(/[:\s]/)[0]!;
     let {caps, plans} = bound;
     const menu = () => partial || words ? this.binds(soul) : {caps, plans};
     let params = (input.params && typeof input.params === 'object' && !Array.isArray(input.params) ? {...input.params as Record<string, unknown>} : {}) as Record<string, unknown>;
