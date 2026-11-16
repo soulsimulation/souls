@@ -160,7 +160,7 @@ export async function runLoad(o) {
         souls[k] = { folder, identity, soulId: s.soulId, acts: [] };
       })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
       log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
-      const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
+      const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 }, cpu0 = driverCpu();
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const worldLog = join(dir, 'server', 'world.log'), sums0 = actSums(readLive(liveFile)), logAtStart = menuStats ? logSize(worldLog) : 0;
@@ -170,6 +170,7 @@ export async function runLoad(o) {
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
       await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards; await faults;
+      const driver = driverCpuSince(cpu0);   // #2509: the driver's processor share over the load
       if (profile) writeFileSync(join(profDir, 'prof.stop'), '');   // #2508: the profile covers the load, not the settle after it
       const logAtEnd = menuStats ? logSize(worldLog) : 0;
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
@@ -183,7 +184,7 @@ export async function runLoad(o) {
       }
       const routes = routeStats(http);
       const intended = actSec ? Math.round(n * durSec / actSec) : null;
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, driver, intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       clearInterval(rss); stopping = true;
@@ -198,6 +199,23 @@ export async function runLoad(o) {
   return result;
 }
 
+/** #2509: the driver's processor use: this process's own (user + system, its reaped children included), and on Linux every
+ *  process on this process's CPUs (/proc/stat), which under timed-run are the load generator's own cores (the world is
+ *  pinned to others): the `serve` daemons and `eden.mjs` calls too. */
+function driverCpu() {
+  const own = process.cpuUsage(), self = (() => { try { const f = readFileSync('/proc/self/stat', 'utf8').split(') ').at(-1).split(' '); return (Number(f[11]) + Number(f[12]) + Number(f[13]) + Number(f[14])) * 10;   // utime, stime, cutime, cstime (clock ticks of 10 ms) } catch { return null; } })();
+  let cpus = null, stat = null;
+  try { const m = /^Cpus_allowed_list:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8')); cpus = m ? m[1].split(',').flatMap((r) => { const [a, b = a] = r.split('-').map(Number); return Array.from({ length: b - a + 1 }, (_, k) => a + k); }) : null; stat = readFileSync('/proc/stat', 'utf8'); } catch { /* not Linux */ }
+  return { at: Date.now(), own, children: self, cpus, stat };
+}
+function driverCpuSince(a) {
+  const b = driverCpu(), wall = b.at - a.at, r2 = (x) => Math.round(100 * x) / 100;
+  const per = (text) => Object.fromEntries(text.split('\n').filter((l) => /^cpu\d+ /.test(l)).map((l) => { const [k, ...v] = l.trim().split(/\s+/), n = v.map(Number), idle = n[3] + (n[4] ?? 0), total = n.slice(0, 8).reduce((x, y) => x + y, 0); return [Number(k.slice(3)), [total - idle, total]]; }));
+  let cores = null;
+  if (a.stat && b.stat && a.cpus) { const x = per(a.stat), y = per(b.stat); cores = r2(a.cpus.reduce((sum, c) => { const d = y[c] && x[c] ? y[c][1] - x[c][1] : 0; return sum + (d > 0 ? (y[c][0] - x[c][0]) / d : 0); }, 0)); }
+  const ownMs = (b.own.user - a.own.user + b.own.system - a.own.system) / 1000;
+  return { wallS: Math.round(wall / 1000), harnessCores: r2(ownMs / wall), harnessWithChildrenCores: a.children != null && b.children != null ? r2((b.children - a.children) / wall) : null, generatorCpus: a.cpus?.length ?? null, generatorCores: cores };
+}
 /** #2508: live.json's since-start act sums (api-times.ts `parts.sums`), or null on a world without them. */
 const actSums = (live) => live?.api?.routes?.['edge:act']?.parts?.sums ?? null;
 const logSize = (file) => { try { return statSync(file).size; } catch { return 0; } };
@@ -285,6 +303,7 @@ export function renderLoad(result) {
       const held = sum('amberS'), entered = sum('amberEntries'), list = (t, u = '') => Object.entries(t).map(([k, v]) => `${k} ${v}${u}`).join(', ') || 'none';
       L.push('', `What held amber, over these windows (a second can count under several signals; \`dwell\` = every signal under the band, the 30 s calm running): ${list(held, ' s')}. Entries into amber by cause (\`red\` = the step down from red): ${list(entered)}.`);
     }
+    if (a.driver) L.push('', `Driver (#2509): this process ${a.driver.harnessCores} of a core${a.driver.harnessWithChildrenCores != null ? ` (${a.driver.harnessWithChildrenCores} with its finished children)` : ''}${a.driver.generatorCores != null ? `; everything on its ${a.driver.generatorCpus} CPUs (the serve daemons and CLI calls too) ${a.driver.generatorCores} of a core` : ''}, over ${a.driver.wallS} s.`);
     if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
     if (a.server?.meter) L.push(...renderMeter(a.server.meter));
     const al = a.actLatency;
