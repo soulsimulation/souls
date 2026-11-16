@@ -44,8 +44,8 @@ test('#2533: nav.sync by who asked: the action step a tick ran it in, or the ser
     [['actWork@apps/server/src/edge/ledger/ledger.ts', 'routeProblem@mars/viewer/engine/x/check.ts', S], 4],
   ]);
   assert.deepEqual(bucketProfile(p, '/repo').navSyncBy, [
-    { where: 'tick: stepInner > step@walk.ts:1', caller: 'planWalk@walk.ts:1', ms: 6 },
-    { where: 'outside a tick: actWork@ledger.ts:1', caller: 'routeProblem@check.ts:1', ms: 4 },
+    { where: 'tick: stepInner > step walk.ts:1', caller: 'planWalk walk.ts:1', ms: 6 },
+    { where: 'outside a tick: actWork ledger.ts:1', caller: 'routeProblem check.ts:1', ms: 4 },
   ]);
 });
 

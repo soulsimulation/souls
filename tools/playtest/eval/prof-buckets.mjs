@@ -76,7 +76,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
   // #2533: a nav.sync sample by who asked: the first frame outside the spatial service (the caller), and either the action
   // step or the pass a tick ran it in (the frame runtime.ts called), or, outside a tick, the innermost server frame
   const syncMemo = new Map();
-  const at = (f) => `${f.functionName || '(anon)'}@${relOf(f.url).split('/').pop()}:${f.lineNumber + 1}`;
+  const at = (f) => `${f.functionName || '(anon)'} ${relOf(f.url).split('/').pop()}:${f.lineNumber + 1}`;
   const syncWhere = (leafId) => {
     if (syncMemo.has(leafId)) return syncMemo.get(leafId);
     const frames = []; for (let x = leafId; x != null; x = parent.get(x)) frames.push(byId.get(x).callFrame);
