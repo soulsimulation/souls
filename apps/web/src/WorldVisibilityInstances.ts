@@ -31,7 +31,7 @@ export class WorldVisibilityInstances {
  private query?:Map<THREE.InstancedMesh,Cache|undefined>;
  private members?:Set<THREE.InstancedMesh>;
  /** The current query's validated cache for an instanced member (validated on first use); undefined for a non-member. */
- private queried(mesh:THREE.InstancedMesh){const q=this.query!;if(q.has(mesh))return q.get(mesh);if(!this.members?.has(mesh))return undefined;const c=this.prepare(mesh);q.set(mesh,c);return c;}
+ private queried(mesh:THREE.InstancedMesh){const q=this.query;if(!q)return undefined;if(q.has(mesh))return q.get(mesh);if(!this.members?.has(mesh))return undefined;const c=this.prepare(mesh);q.set(mesh,c);return c;}
  private queryObjects?:readonly THREE.Object3D[];
  private queryDepth=0;
  /** Bounds passes taken (one per outermost withQuery; tests and frame-cost readouts). */
