@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,9 @@ function makeDb(file, rows) {
   for (let i = 0; i < rows; i++) ins.run(`event ${i} ${'x'.repeat(2000)}`);
   return db;
 }
+/** The fixture's writes, dated 10 s back: a copy's time is 2 s before it began, so a database written in the 2 s before its
+ *  copy is copied again next hour (by design); the fixture's setup writes are not the changes under test. */
+const settle = (files, ms = Date.now() - 10_000) => { for (const f of files) for (const x of [f, `${f}-wal`]) utimesSync(x, ms / 1000, ms / 1000); };
 const write = (db, n = 3) => { const ins = db.prepare('INSERT INTO events (payload) VALUES (?)'); for (let i = 0; i < n; i++) ins.run(`hour ${i}`); };
 const count = (file) => { const d = new DatabaseSync(file, { readOnly: true }); try { return d.prepare('SELECT count(*) AS n FROM events').get().n; } finally { d.close(); } };
 
@@ -50,6 +53,7 @@ test('#2542 A1: an unchanged database is skipped; a changed one is copied, check
   const a = makeDb(f.world('alpha'), 100), b = makeDb(f.world('beta'), 40);
   t.after(() => { a.close(); b.close(); });
   writeFileSync(join(f.T, 'data/production/worlds.json'), '[{"slug":"alpha"},{"slug":"beta"}]\n');
+  settle([f.world('alpha'), f.world('beta')]);
   let r = f.run(['backup', 'production'], { SIM_BACKUP_TIME: '2026-01-01 03:30:00' });
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /2\/2 databases ok \(quick_check\)/);
 
@@ -71,6 +75,10 @@ test('#2542 A1: an unchanged database is skipped; a changed one is copied, check
   assert.equal(hourly.length, 2); assert.deepEqual(hourly.at(-1).tags.sort(), ['hourly', 'production']);
   assert.equal(f.snaps('production,hourly', { RESTIC_REPOSITORY: f.env.SIM_BACKUP_OFFSITE }).length, 2, 'both hourly snapshots off-site');
 
+  // the copy's time is 2 s before it began: a write in those 2 s is copied again next hour; date alpha's to its copy's,
+  // so this step sees only the next write
+  const alphaCopy = statSync(f.mirror('alpha')).mtimeMs;
+  settle([f.world('alpha')], alphaCopy);
   // a write to the log only (a WAL append, the main file untouched) counts as a change
   const before = statSync(f.world('beta')).mtimeMs; write(b, 1);
   assert.equal(statSync(f.world('beta')).mtimeMs, before, '(the write went to the log)');
@@ -102,6 +110,7 @@ test('#2542 A3: 20 small worlds, 2 changed: the hourly run copies 2 and takes un
   const slugs = Array.from({ length: 20 }, (_, i) => `w${String(i).padStart(2, '0')}`);
   const dbs = slugs.map((s) => makeDb(f.world(s), 1000));   // a few MB each, with its log
   t.after(() => { for (const d of dbs) d.close(); });
+  settle(slugs.map((s) => f.world(s)));
   let r = f.run(['backup', 'production'], { SIM_BACKUP_TIME: '2026-01-01 03:30:00' });
   assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /20\/20 databases ok/);
   write(dbs[3]); write(dbs[17]);

@@ -155,7 +155,9 @@ async function runBackup(stage, { hourly = false } = {}) {
     mkdirSync(dirname(dest), { recursive: true });
     const db = new DatabaseSync(src);
     try {
-      const began = (Date.now() - 1) / 1000;   // (a millisecond early: a write in the copy's first millisecond is copied again)
+      // 2 s early: file timestamps can be coarser than the clock, so a write just after the copy began is never skipped
+      // (a database written in the 2 s before is copied again next hour, which costs one copy)
+      const began = (Date.now() - 2000) / 1000;
       // one complete step: the default 100-page steps restart whenever a live world writes in between (2026-10-19)
       await sqliteBackup(db, `${dest}.tmp`, { rate: 0x7fffffff });
       const check = quickCheck(`${dest}.tmp`);

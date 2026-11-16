@@ -96,6 +96,9 @@ node $R/tools/world-launcher/deploy/backup-restic.mjs list [<stage>]
 node $R/tools/world-launcher/deploy/backup-restic.mjs restore <stage> <latest|YYYY-MM-DD|id> <empty dir>
 ```
 
+`restore <stage> YYYY-MM-DD` picks that day's newest snapshot, which may be an hourly one; to get that night's nightly
+snapshot, use its id from `list`.
+
 Restore refuses a non-empty directory, lays it out like `/srv/sim-worlds-data/<stage>` and quick-checks every
 database (exit 1 if any is bad). To boot one restored world on any machine:
 
