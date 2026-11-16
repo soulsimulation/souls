@@ -62,8 +62,10 @@ export type ConnVerdict = {
   pocket?: number;
   /** Upper floors: the floor (surface id) it stands on, when not connected. */
   floor?: string;
-  /** Connected by ONE closed ground hand door only (doors-pass/1): a walk between it and the main area goes through that door. */
+  /** Connected only through closed hand doors (doors-pass/1): a walk between it and the main area goes through them. */
   door?: true;
+  /** With `door`: the areas a walk joins without another door share it (a walk between two different ones passes a door). */
+  group?: number;
 };
 
 const ALL = new Int32Array(0), NONE = new Int32Array(0);
@@ -140,8 +142,8 @@ export class NavConnectivity {
   private flatUpper = new WeakMap<LevelGrid, Int32Array>();
   /** Components joined to the main area both ways (node ids: `0:<root>` level 0, `u<cluster>:<level>:<label>` upper). */
   private good = new Set<string>();
-  /** Areas in `good` only by one ground hand door (doors-pass/1): a walk between one of these and the rest goes through it. */
-  private behind = new Set<string>();
+  /** Areas in `good` only through closed hand doors (doors-pass/1), each with its door group (areas joined without a door). */
+  private behind = new Map<string, number>();
   private fwd = new Set<string>();
   private bwd = new Set<string>();
   private graphVer = '';
@@ -603,26 +605,41 @@ export class NavConnectivity {
       while (q.length) for (const n of adj.get(q.pop()!) ?? []) if (!seen.has(n)) { seen.add(n); q.push(n); }
       return seen;
     };
-    this.good = new Set(); this.behind = new Set();
+    this.good = new Set(); this.behind = new Map();
     if (this.main >= 0) {
       const m = `0:${this.main}`;
       this.fwd = reach(fwdAdj, m); this.bwd = reach(bwdAdj, m);
       for (const n of this.fwd) if (this.bwd.has(n)) this.good.add(n);
-      // doors-pass/1 (#2365): a ground area ONE closed, unlocked hand door away from the main area is joined to it (a walk
-      // opens that door, passes and closes it: entry 31), with every area that walks to and from it without another door:
-      // the building's upper floors by its stairs (#2383). Not across a second door: an area two doors away, or behind a
-      // door upstairs, stays cut off, since the passage opens one door on the ground; there the step-out stays the way out.
-      const y0 = sp.ground ? null : this.scene.levels.find((l) => l.id === 0)?.y ?? 0, extra: string[] = [];
-      for (const o of this.scene.obstacles) {
-        if (o.door !== 'pass' || Math.abs(o.y0 - (y0 ?? sp.ground!.standY(o.obb.c[0], o.obb.c[1]))) > 0.6) continue;
-        const [a, b] = doorSides(o), ra = this.snap(a, 0.6)?.root, rb = this.snap(b, 0.6)?.root;
-        if (ra === undefined || rb === undefined || ra === rb) continue;
-        const na = `0:${ra}`, nb = `0:${rb}`;
-        if (this.good.has(na) && !this.good.has(nb)) extra.push(nb); else if (this.good.has(nb) && !this.good.has(na)) extra.push(na);
+      // doors-pass/1 (#2365, #2434): an area closed, unlocked hand doors away from the main area is joined to it (a walk
+      // opens each door, passes and closes it: entry 31), with every area that walks to and from it without another door
+      // (the building's upper floors by its stairs). Any number of doors in series and on any floor (the passage's door
+      // chain, Spatial.doorChain), so joined areas are taken door by door until no door joins another.
+      const nodeAt = (level: number, p: Vec2): string | null => {
+        if (level === 0) { const s = this.snap(p, 0.6); return s ? `0:${s.root}` : null; }
+        const u = this.upperAt(level, p, 0.6), c = u ? snapCell(u.g, p, this.t, 0.6) : -1;
+        return u && c >= 0 ? u.node(c) : null;
+      };
+      const pairs: [string, string][] = [];
+      // in ground-tile order, so a tile's fine labels are made once for all its doors (the LRU holds 8 tiles: in scene
+      // order Eden's ~650 doors re-made a tile per door side, ~45 s of each graph build)
+      const tileKey = (o: Obstacle) => [Math.floor(o.obb.c[1] / GROUND_TILE_M), Math.floor(o.obb.c[0] / GROUND_TILE_M)];
+      const doors = this.scene.obstacles.filter((o) => o.door === 'pass').map((o) => ({ o, k: tileKey(o) }))
+        .sort((x, y) => x.k[0] - y.k[0] || x.k[1] - y.k[1] || (x.o.id < y.o.id ? -1 : x.o.id > y.o.id ? 1 : 0));
+      for (const { o } of doors) {
+        const level = sp.passDoorLevel(o); if (level === null) continue;
+        const [a, b] = doorSides(o), na = nodeAt(level, a), nb = nodeAt(level, b);
+        if (na && nb && na !== nb) pairs.push([na, nb]);
+        yield 'graph';   // a door's sides may make a tile's fine labels: a slice may end here (the build stays unpublished)
       }
-      for (const n of extra) {
-        const f = reach(fwdAdj, n), b = reach(bwdAdj, n);
-        for (const x of f) if (b.has(x) && !this.good.has(x)) { this.good.add(x); this.behind.add(x); this.fwd.add(x); this.bwd.add(x); }
+      for (let more = true, group = 0; more;) {
+        more = false;
+        for (const [na, nb] of pairs) {
+          const n = this.good.has(na) && !this.good.has(nb) ? nb : this.good.has(nb) && !this.good.has(na) ? na : null;
+          if (!n) continue;
+          const f = reach(fwdAdj, n), b = reach(bwdAdj, n);
+          for (const x of f) if (b.has(x) && !this.good.has(x)) { this.good.add(x); this.behind.set(x, group); this.fwd.add(x); this.bwd.add(x); }
+          group++; more = true;
+        }
       }
     } else { this.fwd = new Set(); this.bwd = new Set(); }
     this.linkMemo = memo;
@@ -677,7 +694,7 @@ export class NavConnectivity {
       if (u && c >= 0) { node = u.node(c); floor = u.floor; }
     }
     if (!node) return { id, level, ok: false, code: 'nav.no-standing-room' };
-    if (this.good.has(node)) return { id, level, ok: true, area: node, ...(this.behind.has(node) ? { door: true as const } : {}) };
+    if (this.good.has(node)) return { id, level, ok: true, area: node, ...(this.behind.has(node) ? { door: true as const, group: this.behind.get(node)! } : {}) };
     const code = this.fwd.has(node) || this.bwd.has(node) ? 'nav.one-way' : 'nav.disconnected';
     return { id, level, ok: false, code, area: node, ...(level === 0 ? { pocket } : { floor }) };
   }

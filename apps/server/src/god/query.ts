@@ -6,7 +6,7 @@
 // Owner: L1 (contract); L7 owns it from tranche 2; `reach` is L9's.
 import { mediumAt, waterDepthAt, waterLevelAt } from '@souls/ground';
 import { creatureAbilities, offsetPolyline, pointAlong, pointInPoly, prepareFor, queryOf, type Baked, type Vec2 } from '@souls/generators';
-import { aimOf, obbOverlap, type Entity, type OBB, type StoredDef, WorldModel } from '@souls/world-compiler';
+import { aimOf, obbOverlap, type Diff, type Entity, type OBB, type StoredDef, WorldModel } from '@souls/world-compiler';
 // L2's furnish recipes (pure over the WorldModel; reads tools/god-skill/recipes/furnish/*.json)
 import { furnishBatch } from '../../../../tools/god-skill/lib/furnish.mjs';
 
@@ -21,6 +21,9 @@ export const reachProviders = new WeakMap<WorldModel, ReachFn>();
 /** Whether the engine already holds the latest physics of the model (false while the last edit is still on its way);
  *  registered by the engine bridge. Without it `describe` assumes the engine is current. */
 export const syncProviders = new WeakMap<WorldModel, () => boolean>();
+/** #2438: sends an edit the server made, journaled as the engine's (a boot door fit), on to the engine, which did not make it
+ *  itself; registered by the engine bridge. */
+export const projectProviders = new WeakMap<WorldModel, (diff: Diff) => void>();
 /** doorblock: wait (up to `ms`) until the engine holds the latest edit, so a walk check right after an edit (a door
  *  shut or opened, a wall moved) answers for the world as it now is. The engine takes an edit in at its next tick. */
 export async function engineSettled(w: WorldModel, ms = 1500): Promise<boolean> {

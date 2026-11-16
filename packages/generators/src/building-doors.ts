@@ -9,7 +9,7 @@ const FRAME_W = 1.16, FRAME_H = 2.33, SX: [number, number] = [0.8, 1.8], SY: [nu
 const clamp = (v: number, [a, b]: [number, number]) => Math.min(b, Math.max(a, v));
 const r2 = (v: number) => Math.round(v * 100) / 100, r3 = (v: number) => Math.round(v * 1000) / 1000;
 
-export type DoorFit = { opening: string; exterior: boolean; p: [number, number]; r: number; sx: number; sy: number };
+export type DoorFit = { opening: string; exterior: boolean; p: [number, number]; r: number; sx: number; sy: number; /** #2434: the floor, and above floor 0 the door's height over the building's base (m) */ floor: number; y?: number; /** #2434: the doorway's width (m) */ width: number };
 
 /** The doors for a building with these params and def args, placed at `p` (x, z) turned by `r` (yaw, radians). Empty
  *  for a revision that leaves no doorway bare. */
@@ -20,7 +20,7 @@ export function buildingDoorFits(params: Record<string, unknown>, args: Record<s
     if (o.leaf !== false) return;
     const b = baked[i]!, [x, z] = b.at;
     let r = yaw + b.yaw; while (r > Math.PI + 1e-6) r -= 2 * Math.PI; while (r <= -Math.PI + 1e-6) r += 2 * Math.PI; r = r3(r);
-    out.push({ opening: b.id, exterior: o.exterior, p: [r3(pose.p[0] + x * c + z * s), r3(pose.p[1] - x * s + z * c)], r, sx: r2(clamp((b.width - 0.03) / FRAME_W, SX)), sy: r2(clamp(b.height / FRAME_H, SY)) });
+    out.push({ opening: b.id, exterior: o.exterior, floor: o.floor, width: r2(b.width), ...(o.floor > 0 ? { y: r3(o.floor * L.fh) } : {}), p: [r3(pose.p[0] + x * c + z * s), r3(pose.p[1] - x * s + z * c)], r, sx: r2(clamp((b.width - 0.03) / FRAME_W, SX)), sy: r2(clamp(b.height / FRAME_H, SY)) });
   });
   return out;
 }

@@ -82,8 +82,8 @@ export class ChildPool {
    * maxRunning / minFreeMb: before a world boots, idle worlds are put to sleep until it fits; when none can sleep the
    * boot is refused (error.code 'capacity'). busy(slug): a world with live viewers is never put to sleep.
    * stopGraceMs: how long stop() waits after SIGTERM before SIGKILL (10 s; tests shorten it).
-   * shards / shardDropGraceMs (#2444): worlds per shard program (else SIM_SHARDS; off by default); how long a world dropped
-   * while it loads may take to stop before its program is ended (shard.mjs DROP_GRACE_MS; tests lengthen it).
+   * shards (#2444): worlds per shard program (else SIM_SHARDS; off by default). A world dropped while it loads never ends
+   * its program (#2469): it stops once its boot ends.
    * sleepMs (lane P3): freezeIdle() freezes a world nobody asked anything for that long (see there); 0/absent: never.
    * exitMs (lane SLEEP): releaseIdle() lets a world frozen that long more exit, giving its memory back (see there).
    * guard (lane L1): overrides of guard.mjs GUARD (tests); random: the backoff's jitter source (tests).
@@ -115,7 +115,7 @@ export class ChildPool {
     mkdirSync(o.logDir, { recursive: true });
     /** #2444: worlds share programs (tools/world-launcher/shard.mjs) only when SIM_SHARDS (or o.shards) sets a shard's size. */
     const shards = shardSize(o.shards ?? process.env.SIM_SHARDS);
-    this.shards = shards ? new ShardSet({ root: o.root, size: shards, logDir: o.logDir, log: this.log, dropGraceMs: o.shardDropGraceMs }) : null;
+    this.shards = shards ? new ShardSet({ root: o.root, size: shards, logDir: o.logDir, log: this.log }) : null;
   }
 
   // ---------- handover between launcher generations (keeper.mjs; lane C4 downtime)

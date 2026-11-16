@@ -263,3 +263,14 @@ test('a resume naming a performance the prefetch did not roll replaces the prefe
   assert.equal(els.length, 3); assert.equal(els[2].src, perf('b', 0).url); assert.ok(els[1].removed);
   els[2].metadata(); await r; assert.equal(player.playing()?.perf, 0);
 });
+
+test('#2467: the playing file\'s media events wake the scheduler and bound its end; an outgoing deck\'s do not', async () => {
+  const { els, player, tick, flush } = rig(); const woke: boolean[] = []; player.onMedia = (ended) => woke.push(ended);
+  const p = player.play('a'); els[0].metadata(); await p;
+  tick(60_000, 'b'); els[0].currentTime = 230; els[0].emit('timeupdate');   // the file ran ahead of the clock
+  assert.deepEqual(woke, [false]); assert.equal(player.playing()?.endsAt, 61_000 + 10_000);
+  els[0].emit('ended');                                    // it ran out before the (throttled, hidden-tab) tick
+  assert.deepEqual(woke, [false, true]); assert.equal(player.playing()?.endsAt, 61_000);
+  assert.equal(tick(0, 'b'), 'crossfade'); els[1].metadata(); await flush();
+  els[0].emit('ended'); els[0].emit('timeupdate'); assert.equal(woke.length, 2);   // the old deck is no longer current
+});

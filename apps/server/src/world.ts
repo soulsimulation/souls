@@ -1702,6 +1702,9 @@ export class WorldHost {
   /** #1440 quarantine-mark/1, one logged rules event (prospective, host-only): a body broken again and again is held by one standing
    *  mark after MARK_AFTER holds in a cooldown, not one logged hold a tick. Main adopts it at boot, after quarantine/1. */
   enableQuarantineMarkV1(author='operator:quarantine-mark'){if((this.extra.runtimePolicy as {quarantineMarkV1?:boolean}|undefined)?.quarantineMarkV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,quarantineMarkV1:true},why:'quarantine-mark/1 (#1440): a body broken again and again is held by one standing mark after 3 holds in a cooldown, not one logged hold a tick; retain historical replay before this event'});}
+  /** #1513 nonfinite-mark/1, one logged rules event (prospective, host-only): an object broken again and again is held by one standing
+   *  mark after MARK_AFTER nonfinite-hold/1 holds in a cooldown, not one logged hold a tick. Main adopts it at boot, after nonfinite-hold/1. */
+  enableNonFiniteMarkV1(author='operator:nonfinite-mark'){if((this.extra.runtimePolicy as {nonFiniteMarkV1?:boolean}|undefined)?.nonFiniteMarkV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,nonFiniteMarkV1:true},why:'nonfinite-mark/1 (#1513): an object broken again and again is held by one standing mark after 3 non-finite holds in a cooldown, not one logged hold a tick; retain historical replay before this event'});}
   enableQuarantineV1(author='operator:quarantine'){if((this.extra.runtimePolicy as {quarantineV1?:boolean}|undefined)?.quarantineV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,quarantineV1:true},why:'quarantine/1 (#1369): a rule fault the repair ladder cannot undo stops and contains only the bodies it names, and the world runs on; a halt is left for a failed write'});}
   enableReflexTimeoutV1(){if((this.extra.runtimePolicy as {reflexTimeoutV1?:boolean}|undefined)?.reflexTimeoutV1)return Promise.resolve();return this.enqueue('rules','operator:reflex-timeout',{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,reflexTimeoutV1:true},why:'every reflex the runtime reports stalled on other people for 60 s (walk, seat, stair, swim, courtesy step, yield) is natively cancelled in every state, so no single body can hold another or the world; retain historical replay before this event'});}
   /** placeRegionsV1: admit W1 places (id, label, polygon) as native destination regions in one logged prospective rules fact.
@@ -2063,6 +2066,8 @@ export class WorldHost {
   private get quarantineRule(): boolean { return this.repairRules && (this.extra.runtimePolicy as {quarantineV1?: boolean} | undefined)?.quarantineV1 === true; }
   /** #1496: nonfinite-hold/1 is adopted, on top of quarantine/1. */
   private get nonFiniteHoldRule(): boolean { return this.quarantineRule && (this.extra.runtimePolicy as {nonFiniteHoldV1?: boolean} | undefined)?.nonFiniteHoldV1 === true; }
+  /** #1513 nonfinite-mark/1 (host-only, prospective): an object held again past MARK_AFTER times in a cooldown is held by one standing mark. */
+  private get nonFiniteMarkRule(): boolean { return this.nonFiniteHoldRule && (this.extra.runtimePolicy as {nonFiniteMarkV1?: boolean} | undefined)?.nonFiniteMarkV1 === true; }
   /** #1369: what a quarantine takes: the bodies the fault names, and any body whose own state is broken (`entity.corrupt`: no
    *  rule names it, but it can make every step or the state hash throw). */
   private quarantineTargets(error: unknown): { bodies: string[]; corrupt: string[] } {
@@ -2857,13 +2862,17 @@ export class WorldHost {
     if (!patches.length) return false;
     const tick = engine.world.tick, done = engine.applyNonFiniteV1(patches, NONFINITE_HELD);
     const souls = done.bodies.flatMap(id => { const m = this.mindByEntity.get(id); return m ? [m.soulId] : []; });
-    const q = {patches, bodies: done.bodies, souls, programmes: done.programmes, stopped: done.stopped, ...(done.deadlines ? {deadlines: done.deadlines} : {}), reason: String(error).slice(0, 300)};
+    const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
+    const key = fields.map(f => f.field).join('|'), r = this.nonFiniteRepeats.get(key), again = r && tick - r.since < REWIND_COOLDOWN_TICKS ? r.n + 1 : 1;
+    // #1513 nonfinite-mark/1: an object held again past MARK_AFTER times in a cooldown is held from here by one standing mark the
+    // engine keeps (logged here, so a replay keeps it too), not one event a tick
+    const standing = this.nonFiniteMarkRule && engine.markNonFiniteV1 && again >= MARK_AFTER ? engine.markNonFiniteV1(patches) : [];
+    const q = {patches, bodies: done.bodies, souls, programmes: done.programmes, stopped: done.stopped, ...(done.deadlines ? {deadlines: done.deadlines} : {}), ...(standing.length ? {standing} : {}), reason: String(error).slice(0, 300)};
     const e: LogEvent = {seq: this.seq + 1, tick, kind: 'rules', author: 'world:nonfinite-hold', payload: {nonFiniteHoldV1: q}, at: Date.now()};
     if (!this.writeRepair(e)) return false;
     this.seq = e.seq; this.acc.log.push(e);
-    const fields = patches.map(p => ({field: `${p.root}:${p.path.join('.')}`, from: p.from}));
     // as quarantine/1 (#1377): the event every time (a replay needs it), the row at most twice a cooldown for the same fields
-    const key = fields.map(f => f.field).join('|'), r = this.nonFiniteRepeats.get(key), loud = !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2;
+    const loud = !r || tick - r.since >= REWIND_COOLDOWN_TICKS || r.n < 2;
     this.nonFiniteRepeats.set(key, r && tick - r.since < REWIND_COOLDOWN_TICKS ? {since: r.since, n: r.n + 1} : {since: tick, n: 1});
     if (this.nonFiniteRepeats.size > 256) for (const [k, v] of this.nonFiniteRepeats) if (tick - v.since >= REWIND_COOLDOWN_TICKS) this.nonFiniteRepeats.delete(k);
     if (loud) this.recordGlitch('contained', error, {rule: NONFINITE_HELD.code, tick, bodies: done.bodies, evidence: {seq: e.seq, fields, stopped: done.stopped, programmes: done.programmes, ...(patches.some(p => p.from === 'arrival') ? {arrival: patches.filter(p => p.from === 'arrival').map(p => p.path[1])} : {})}});

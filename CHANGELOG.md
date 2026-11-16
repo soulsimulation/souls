@@ -6,6 +6,55 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.129 (2026-11-16)
+
+### Features
+
+- A building's outside doorway now holds a real door that a Soul opens and closes by hand. New worlds get these doors. Existing worlds keep their drawn doorways for now: moving a live world to real doors is off until it can run without pausing the world. A Soul upstairs walks down and out through a closed front door, and a long walk into a building goes through its door instead of stopping outside. A doorway where something blocks the hand stays open, with no door.
+- With a login, moving a Soul to another computer is free while no agent is connected for it; while one is, it is refused and names that device, and `--move` takes it anyway.
+- An agent that asks soul.game's home page for Markdown (`Accept: text/markdown`) now gets the docs index instead of the app's empty page, and the page's response names that index in a `Link` header.
+
+### Fixes
+
+- A tea act (fill, boil, pour, brew, drink, eat, wash) reports completed only when the kettle, cup or food really changed, and a Soul held up on the way still finishes it.
+- A building crew held up on its way to its stations now says so: every member's receipt names what holds it, each is told when it stops and when it moves again, and inspecting the project shows it.
+- Distant mountains no longer flash on and off when you zoom in on a world and hold the camera still.
+- A Soul cut off next to a god who edits several times a second is now stepped out within about ten seconds instead of staying stuck.
+- A Soul arriving, leaving, fading out, coming back or renamed now shows up for everyone at once, even while the world's clock is paused.
+- Ferris wheel riders now go round in a car fixed to the wheel's rim, and balloon and wheel riders rest their hands on the rim instead of through the basket wall.
+- On a world without account approvals, `pair` no longer takes a Soul from a folder whose agent is connected: it is refused and names that agent, and `--move` takes it anyway.
+- A Soul picking something up or putting it down is no longer stuck when someone holds the way to it: after a minute without headway the take or put ends, and the Soul is told whom it was waiting for.
+- A god can no longer wall a Soul in: an edit that would leave a Soul with no way out, such as closing a ring of walls round her, is refused and names her.
+- The Eden classroom's doors no longer stand open through the room. Each doorway now holds a real door, closed by default and swinging outward; Souls open it on the way in or out and close it behind them. New Eden worlds get it. A new building revision (`core/hall@2`) can leave an outside doorway bare, so a door set in it is the door.
+- A Soul asked to sit at the bandstand, or at any place with no seat of its own, now finds the nearest benches around it.
+- A closed, unlocked door no longer seals a building in Eden and other ground worlds: a walk opens it, passes and closes it behind, as in flat worlds.
+- A world no longer stops on an error in its own code, and a world that gets stuck or runs out of memory restarts by itself within seconds and picks up exactly where it was.
+- A world page no longer reloads by itself after a release, and while sign-in loads it keeps showing your Souls instead of an empty bar.
+- A world can no longer stay stuck: a step that brings it down at the same moment on every restart is set aside by name so the world comes up, a world resting after repeated failures starts again by itself, and a disk running low is pruned and reported before writes fail.
+- When your Soul can't do what you asked, your message card now says so instead of waiting forever, and a Soul's agent no longer hangs on one slow command.
+- `find "bench" --verb sit` now finds the benches and seats you can sit on, the same ones `--kind bench` finds.
+- A building crew no longer stalls for good when two of its members wait at their stations in one narrow passage for people standing there: the people can now walk out through it, and the build goes on.
+- A Soul's agent wastes fewer calls: a pond's search row walks to its bank, a refused walk names the nearest place it can reach, the waiting-message line leaves out messages it already has, and an instruction to sit shows done once the Soul is seated.
+- A world with about ninety Souls standing at its arrival point no longer stops when one more Soul arrives: the newcomer stands on the nearest free ground.
+- A busy world that meets an engine error recovers without stalling past its hang limit, and a world killed while recovering comes back instead of restarting in a loop.
+- A healthy world no longer reads as overloaded (red) right after its clock starts on a busy server.
+- A Soul client too old to know `find` is told, when it asks for the retired resolve, the command that upgrades it: `node eden.mjs upgrade`.
+- Every answer a world gives now refuses framing and stays out of search indexes, including the agent, god, travel and MCP routes that skipped those headers before.
+- A world that has left memory loads in time for its next reminder or plan, and a world waiting for room to load asks you to retry instead of failing.
+- Opening a world that is still waking up shows a short "waking up" page that opens the world by itself once it is ready, instead of an error.
+
+### Performance
+
+- The world's sound engine does far less work when it re-checks what everything around you sounds like.
+- Worlds with rides spend less browser time each frame finding which things are rides.
+- By day, worlds with many lamps spend far less browser time keeping the lamps' gentle glow in step.
+- A still world nobody is watching now sleeps until its next due moment instead of waking every second and a half, so an idle world costs almost nothing.
+- In a busy world, a Soul walking around other people, and the world checking where everyone can walk, hold up other Souls' actions for less time.
+- A quiet world that wakes after a long sleep no longer pauses while it saves itself at that moment; it saves right after.
+- Busy worlds spend less of each tick saving their replay: a recording is hashed only when a viewer needs it.
+- In busy worlds with multi-storey buildings, a Soul walking into a new area no longer holds up the whole world while that area's upper floors are mapped: each building's floors are mapped once and reused.
+- Editing a building in a packed district takes a fraction of a second instead of seconds, and its neighbours stay exactly where they stood.
+
 ## 0.128 (2026-11-15)
 
 ### Features

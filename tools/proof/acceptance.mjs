@@ -12,9 +12,9 @@
 //                                                   with `gh api`; prints the report; writes ok=true|false; T3-T4
 //                                                   also need the maintainer's sign-off, tools/proof/gate.mjs)
 //
-// Clip and proof.json links count only on a proof host (proofHostProblem, #765): this repository's proofs releases,
-// GitHub attachments, or the SIM_PROOF_PUBLIC_URL CDN. Others are ignored with a warning, and `pr` fetches proof.json
-// only from such a host. `check` without --repo accepts any repository's proofs releases.
+// Clip and proof.json links count only on a proof host (proofHostProblem, #765): the proof CDN (PROOF_CDN,
+// tools/proof/upload.mjs), GitHub attachments, or the SIM_PROOF_PUBLIC_URL endpoint. Others are ignored with a warning,
+// and `pr` fetches proof.json only from such a host. GitHub releases are no longer proof hosts.
 //
 // Exit codes: 0 proof-ok, 1 proof missing or invalid, 2 usage error. `pr` always exits 0 unless the tool itself
 // failed; it reports the verdict through --output so the workflow can post the comment first.
@@ -114,34 +114,28 @@ export const isVideo = u => VIDEO.test(u) && !IMAGE.test(u);
 export const isImage = u => IMAGE.test(u);
 const isProofJson = u => /proof[^/]*\.json(\?|#|$)/i.test(u);
 
-/** Earlier names of a repository (#1183): GitHub redirects them, and open PRs and their proof still carry them. Keyed by
- *  the current name, so every other repository's check stays exact. */
-export const PREVIOUS_REPOS = { 'soulsimulation/souls': ['genekogan/souls'] };
+/** Where tools/proof/upload.mjs puts proof: the asset CDN's `proofs/` prefix. Old proof that lived on GitHub
+ *  releases was moved to `proofs/legacy/<release>/<asset>` and its links rewritten. */
+export const PROOF_CDN = 'https://assets.eden.art/proofs';
 
 /**
- * Where a proof.json or clip link may live (#765): this repository's proofs releases (`releases/download/proofs/` or
- * `proofs-<n>/`), GitHub user attachments, and the proof CDN (SIM_PROOF_PUBLIC_URL) when one is configured. A canonical
- * https URL only: no userinfo, port, query or fragment. `repo` null (a local check with no repository known) accepts
- * any repository's proofs releases; proof-check always passes its repository, and its PREVIOUS_REPOS names count as
- * this repository. Returns null when allowed, else why not.
+ * Where a proof.json or clip link may live (#765): the proof CDN, GitHub user attachments, and the endpoint named by
+ * SIM_PROOF_PUBLIC_URL when one is configured. A canonical https URL only: no userinfo, port, query or fragment.
+ * Returns null when allowed, else why not.
  */
-export function proofHostProblem(value, { repo = null, cdn = process.env.SIM_PROOF_PUBLIC_URL || null } = {}) {
+export function proofHostProblem(value, { cdn = process.env.SIM_PROOF_PUBLIC_URL || null } = {}) {
   let u;
   try { u = new URL(value); } catch { return 'not a URL'; }
   if (u.protocol !== 'https:') return 'not https';
   if (u.username || u.password || u.port || u.search || u.hash) return 'userinfo, a port, a query or a fragment is not allowed';
-  const repoRe = repo ? [repo, ...(PREVIOUS_REPOS[repo] ?? [])].map(r => r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') : '[\\w.-]+/[\\w.-]+';
+  const under = base => { let c; try { c = new URL(base); } catch { return false; } return u.origin === c.origin && u.pathname.startsWith(c.pathname.replace(/\/?$/, '/')); };
+  if (under(PROOF_CDN) && /^\/proofs\/(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+$/.test(u.pathname) && !/(?:^|\/)\.\.?(?:\/|$)/.test(u.pathname)) return null;
   if (u.origin === 'https://github.com') {
-    if (new RegExp(`^/(?:${repoRe})/releases/download/proofs(?:-\\d+)?/[A-Za-z0-9._-]+$`).test(u.pathname)) return null;
     if (/^\/user-attachments\/(?:assets|files)\/[A-Za-z0-9-]+(?:\/[A-Za-z0-9._-]+)?$/.test(u.pathname)) return null;
-    return `not this repository's proofs release${repo ? ` (${repo})` : ''} or a GitHub attachment`;
+    return 'not a GitHub attachment (GitHub releases are no longer proof hosts: upload with tools/proof/upload.mjs)';
   }
-  if (cdn) {
-    let c;
-    try { c = new URL(cdn); } catch { c = null; }
-    if (c && u.origin === c.origin && u.pathname.startsWith(c.pathname.replace(/\/?$/, '/'))) return null;
-  }
-  return `host ${u.host} is not a proof host (proofs releases, GitHub attachments${cdn ? ', the proof CDN' : ''})`;
+  if (cdn && under(cdn)) return null;
+  return `host ${u.host} is not a proof host (the proof CDN, GitHub attachments${cdn ? ', SIM_PROOF_PUBLIC_URL' : ''})`;
 }
 /** Splits candidate links into allowed ones and ignored ones (with the reason). */
 export function allowedProofLinks(links, opts) {
@@ -337,7 +331,7 @@ export function checkPr({ body = '', tier = 'T0', issueBody = null, proof = unde
 
   const links = urls(body);
   // Clip and proof.json links count only on a proof host (#765); every other one is named in the warnings.
-  const v = allowedProofLinks(links.filter(isVideo), { repo }), pj = allowedProofLinks(links.filter(isProofJson), { repo });
+  const v = allowedProofLinks(links.filter(isVideo)), pj = allowedProofLinks(links.filter(isProofJson));
   for (const x of [...v.ignored, ...pj.ignored]) warnings.push(`ignored proof link ${x.url}: ${x.why}`);
   const videos = v.ok, images = links.filter(isImage), proofLinks = pj.ok;
   if (need.has('clip')) row('clip', videos.length > 0, videos.length ? `${videos.length} video link(s)${images.length ? `, ${images.length} image(s)` : ''}` : 'no video link: record an uncut, real-speed clip of the changed journey (proof skill) and upload it (tools/proof/upload.mjs)');
@@ -360,7 +354,7 @@ export function checkPr({ body = '', tier = 'T0', issueBody = null, proof = unde
 }
 
 /** Each clip with its inline preview (tools/proof/upload.mjs uploads `<clip>.preview.gif` beside it): from proof.json
- *  `media[].preview`, else an image link in the PR named after the clip. GitHub serves release mp4s as downloads, so the
+ *  `media[].preview`, else an image link in the PR named after the clip. GitHub plays only its own attachments inline, so the
  *  comment embeds the preview and links it to the clip. */
 export function clipPreviews(videos = [], images = [], proof = null) {
   const media = Array.isArray(proof?.media) ? proof.media : [];
@@ -489,7 +483,7 @@ export async function prMode({ repo, pr, head, gh = ghJson, fetchImpl = fetch, p
   let issueBody = null;
   if (issueNums.length) { try { const i = gh(`repos/${repo}/issues/${issueNums[0]}`); if (!i.pull_request) issueBody = i.body ?? ''; } catch { /* unreadable issue: skip the carry check */ } }
   // Only a proof.json on a proof host is ever fetched (#765): never a host chosen by PR text.
-  const proofUrl = allowedProofLinks(urls(body).filter(isProofJson), { repo }).ok[0];
+  const proofUrl = allowedProofLinks(urls(body).filter(isProofJson)).ok[0];
   const proof = proofUrl ? await fetchProof(proofUrl, fetchImpl) : undefined;
   const privateInputs = publicationFindings({ body, issueBody, proof });
   if (privateInputs.length) {
