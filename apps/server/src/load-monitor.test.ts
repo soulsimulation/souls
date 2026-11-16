@@ -237,6 +237,37 @@ test('monitor: dials hear the level at once and on every change; black for the l
   assert.equal(restarts, 1, 'black from 30 s, restart at 90 s');
 });
 
+/** #2622: a world whose clock owes 5 ticks per 250 ms sample and completes `per4` of them every 4 samples (3 → service 0.15). */
+const busy = () => {
+  let now = 0, restarts = 0, i = 0;
+  const host = {engine: {world: {tick: 0}}, tickMs: [], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};
+  const m = new LoadMonitor({host, now: () => now, shared: newSharedLoad(), blackLimitMs: 60_000, onBlackTooLong: () => restarts++});
+  m.sample();
+  const run = (ms: number, per4: number) => { for (const end = now + ms; now < end;) { now += 250; if (++i % 4 === 0) host.engine.world.tick += per4; m.sample(); } };
+  return {m, run, restarts: () => restarts};
+};
+
+test('monitor: a busy world at service 0.1-0.2 whose ticks still complete is black but never restarted (#2622)', () => {
+  const b = busy();
+  b.run(120_000, 3);   // black from ~30 s: 90 s at black
+  assert.ok(b.m.signals.service > 0.1 && b.m.signals.service < 0.2, String(b.m.signals.service));
+  assert.equal(b.m.level, 'black'); assert.equal(b.restarts(), 0, 'slow but progressing: no planned restart');
+});
+
+test('monitor: a black world whose ticks stop is restarted once no tick has completed for the limit (#2622)', () => {
+  const b = busy();
+  b.run(90_000, 3); assert.equal(b.m.level, 'black'); assert.equal(b.restarts(), 0);
+  b.run(59_000, 0); assert.equal(b.restarts(), 0, 'black for two minutes, but its last tick is under 60 s old');
+  b.run(2000, 0); assert.equal(b.restarts(), 1, 'no tick for 60 s: the planned restart, as before');
+});
+
+test('monitor: a busy black world back above the starvation band leaves black, never restarted (#2622)', () => {
+  const b = busy();
+  b.run(100_000, 3); assert.equal(b.m.level, 'black');
+  b.run(40_000, 20); assert.equal(b.m.signals.service, 1);
+  assert.notEqual(b.m.level, 'black', 'service >= 0.4 for 30 s leaves black'); assert.equal(b.restarts(), 0);
+});
+
 test('live.json: phases, boot progress through the absorbed L5 slots, and the turn age of a stuck thread', () => {
   const a = newSharedLoad(), before = bootSlots();
   attachBootSlots(a, S.boot);
