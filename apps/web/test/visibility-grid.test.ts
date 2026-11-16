@@ -48,8 +48,8 @@ test('rendered visibility answers the same with the grid as over every object', 
   }
 });
 
-test('a custom raycast among the occluders (no instance caches) answers clearance and rays like every object', () => {
-  // The page's scenery holds custom raycasts; then a query takes no instance caches, and every path must still answer.
+test('a custom raycast among the occluders: the same answers, and instances validated once per query', () => {
+  // The page's scenery holds hundreds of no-op custom raycasts; every path must still answer as over every object.
   const root = town(4), odd = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), material);
   odd.raycast = function (r, out) { THREE.Mesh.prototype.raycast.call(this, r, out); }; odd.position.set(3, 1, 3); root.add(odd); root.updateWorldMatrix(true, true);
   const grid = new WorldRenderedVisibility(), all = new WorldRenderedVisibility(); everyObject(all); grid.prepare([root]); all.prepare([root]);
@@ -58,6 +58,11 @@ test('a custom raycast among the occluders (no instance caches) answers clearanc
     const a = [-60 + r() * 120, r() * 6, -60 + r() * 120], b = [-60 + r() * 120, r() * 6, -60 + r() * 120];
     assert.deepEqual(grid.evaluate(() => [grid.clear(a, .8), grid.reach(a, b), grid.around(a, 12, 3)]), all.evaluate(() => [all.clear(a, .8), all.reach(a, b), all.around(a, 12, 3)]), `ray ${k}`);
   }
+  // The custom raycast no longer sends the instanced trees back to revalidating their instances on every ray.
+  const inst = (grid as unknown as { instances: { prepare(m: THREE.InstancedMesh): unknown } }).instances, prepare = inst.prepare.bind(inst);
+  let validations = 0; inst.prepare = (m) => { validations++; return prepare(m); };
+  grid.evaluate(() => { for (let k = 0; k < 50; k++) grid.reach([-60 + r() * 120, 2, -60 + r() * 120], [-60 + r() * 120, 2, -60 + r() * 120]); });
+  assert.ok(validations <= 1, `instanced validations in one query of 50 rays: ${validations}`);
 });
 
 test('Broadcast makes the same choices with the grid, frame for frame', () => {

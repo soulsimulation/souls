@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-const instanceRaycast=THREE.InstancedMesh.prototype.raycast,meshRaycast=THREE.Mesh.prototype.raycast,skinRaycast=THREE.SkinnedMesh.prototype.raycast,matrixAt=THREE.InstancedMesh.prototype.getMatrixAt,vertexAt=THREE.Mesh.prototype.getVertexPosition;
+const instanceRaycast=THREE.InstancedMesh.prototype.raycast,meshRaycast=THREE.Mesh.prototype.raycast,matrixAt=THREE.InstancedMesh.prototype.getMatrixAt,vertexAt=THREE.Mesh.prototype.getVertexPosition;
 // Instances are visited through spatially grouped chunks. Each chunk sphere
 // encloses its members' spheres, so rejecting a chunk never rejects a member
 // the per-instance test would have kept.
@@ -9,8 +9,6 @@ type Chunk={sphere:THREE.Sphere;members:number[]};
 // the per-instance test would have kept. Leaves list instance indices.
 type Tree={nodes:Float64Array;left:Int32Array;right:Int32Array;start:Int32Array;count:Int32Array;order:Int32Array};
 type Cache={geometry:THREE.BufferGeometry;array:Float32Array;count:number;world:number[];local:Float32Array;localBits:Uint32Array;sphere:number[];matrices:THREE.Matrix4[];spheres:THREE.Sphere[];chunks:Chunk[];tree:Tree};
-// Library raycasts only read geometry/matrices; the Object3D/Group one is a no-op.
-const STOCK_RAYCASTS=new Set<unknown>([meshRaycast,instanceRaycast,skinRaycast,THREE.Object3D.prototype.raycast,THREE.Line.prototype.raycast,THREE.LineSegments.prototype.raycast,THREE.Points.prototype.raycast,THREE.Sprite.prototype.raycast]);
 const CHUNK=16,CELL=6,LEAF=4,MESH_CAP=65536,TOTAL_CAP=262144,CELL_MIN_TRIANGLES=256,CELL_TRIANGLES=48;
 // Large static single-material meshes are split into local-space cells. Each
 // cell is a subset index over the SAME attributes and is raycast by stock
@@ -135,10 +133,11 @@ export class WorldVisibilityInstances {
   // pass, whether or not the instance caches were taken (a custom raycast among the objects leaves `query` unset)
   if(this.queryDepth>0&&this.queryObjects===objects)return run();
   const previous=this.query,previousObjects=this.queryObjects,generation=this.generation;
-  const stock=objects.every(o=>STOCK_RAYCASTS.has(o.raycast));
   // #2617: each instanced member is validated when a ray first reaches it in this query (most never are), not up front;
-  // nothing changes the scene inside a synchronous query, so the answer is the same.
-  const previousMembers=this.members;this.members=stock&&!previous?new Set(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh)):undefined;
+  // nothing changes the scene inside a synchronous query, so the answer is the same. Objects with their own raycast
+  // (the page's scenery has hundreds of no-op ones) are still called as they are, but no longer send every stock
+  // instanced mesh back to revalidating its instances on each ray: a raycast is a read.
+  const previousMembers=this.members;this.members=!previous?new Set(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh)):undefined;
   this.query=this.members?new Map():undefined;
   this.queryObjects=objects;const previousBounds=this.bounds,previousBoundsObjects=this.boundsObjects,previousGrid=this.grid;this.bounds=boundsOf(objects);this.boundsObjects=objects;this.grid=undefined;this.stats.boundsPasses++;this.queryDepth++;
   try{return run();}finally{this.queryDepth--;if(this.generation===generation){this.query=previous;this.members=previousMembers;this.queryObjects=previousObjects;this.bounds=previousBounds;this.boundsObjects=previousBoundsObjects;this.grid=previousGrid;}}
