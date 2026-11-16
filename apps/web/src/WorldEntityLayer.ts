@@ -655,7 +655,7 @@ export class WorldEntityLayer {
         const { enter } = this.ring.update(pose.eye[0], pose.eye[2], true);
         sorted = enter.flatMap((id) => { const e = m.entities.get(id); return e ? [e] : []; }); far = -1;
         if (!workersLater) { this.prefetchBuildings(m, sorted, pending); await nextTask(); if (signal.aborted || this.model !== m) return; }
-        (window as unknown as { __soulsStream?: unknown }).__soulsStream = { inner: this.ring.inner, outer: this.ring.outer, things: this.ring.size, ring: sorted.length, stats: this.streamStats };   // probes
+        (window as unknown as { __soulsRing?: unknown }).__soulsRing = { inner: this.ring.inner, outer: this.ring.outer, things: this.ring.size, ring: sorted.length, stats: this.streamStats };   // probes
       }
       // t4-phone-new: of the near things, those the arrival camera can see (or whose shadow can reach its view) are drawn
       // before the poster; the fill then draws the next things in view, then the near ones behind or beside it (arrival-view.ts)

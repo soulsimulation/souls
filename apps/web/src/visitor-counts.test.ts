@@ -73,7 +73,7 @@ test('a world visit sends one page view, then one enter event when the card goes
   assert.equal(enter.searchParams.get('p'), 'enter world eden-2026'); assert.equal(enter.searchParams.get('e'), 'true');
   m.countEvent('soul paired'); assert.equal(new URL(sent[2]!).searchParams.get('p'), 'soul paired');
   for (const [href, o] of [['http://localhost:6960/worlds/w/eden-2026/', {}], ['http://127.0.0.1:6960/worlds/w/x/', {}],
-    ['https://sim.eden.art/worlds/w/eden-2026/', { webdriver: true }], ['https://sim.eden.art/worlds/w/eden-2026/?shot=1', {}],
+    ['https://sim.eden.art/worlds/w/eden-2026/', { webdriver: true }], ['https://sim.eden.art/worlds/w/eden-2026/?shot=1', {}], ['https://sim.eden.art/worlds/w/eden-2026/?stream=1', {}],
     ['https://sim.eden.art/worlds/w/eden-2026/', { skipgc: true }]] as const) {
     const r = await visit(href, { ...o, tag: 'off' + Math.random() }); r.m.countEvent('god connected');
     assert.deepEqual(r.sent, [], href + JSON.stringify(o));

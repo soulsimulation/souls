@@ -13,10 +13,11 @@ import type * as THREE from 'three';
 const q = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
 const MODE = q.get('dpr');
 
-/** W2b: screenshots use one drawing-buffer pixel per requested viewport pixel, even on slow GPUs. */
-export function worldResolution(renderer: THREE.WebGLRenderer, deviceRatio: number, entityWorld: boolean, shotMode: boolean) {
+/** W2b: screenshots use one drawing-buffer pixel per requested viewport pixel, even on slow GPUs. #2492: a stream
+ *  (?stream=1) draws at the full device ratio (capped at 2), never adapted: a 960×540 window on a 2× screen is 1920×1080. */
+export function worldResolution(renderer: THREE.WebGLRenderer, deviceRatio: number, entityWorld: boolean, shotMode: boolean, streamMode = false) {
   renderer.setPixelRatio(shotMode ? 1 : Math.min(deviceRatio, 2));
-  return entityWorld && !shotMode ? new AdaptiveResolution(renderer, deviceRatio) : null;
+  return entityWorld && !shotMode && !streamMode ? new AdaptiveResolution(renderer, deviceRatio) : null;
 }
 
 export class AdaptiveResolution {

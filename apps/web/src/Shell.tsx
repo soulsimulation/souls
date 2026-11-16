@@ -123,6 +123,9 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   useEffect(()=>{if(launcherWorld)void godStatus().then(s=>{if(s?.name)setNewWorldName(s.name);});},[]);
   // The served title from the first frame (V1: never the slug); god status only refreshes it.
   const worldName=newWorldName??worldTitle(cfg.worldName,worldKey);
+  // #2492 ?stream=1: the page as a broadcast feed (stream-mode.ts, loaded only then): picture, spoken lines, a label
+  const [streaming]=useState(()=>new URLSearchParams(location.search).get('stream')==='1');
+  useEffect(()=>{if(streaming)void import('./stream-mode.ts').then(m=>m.startStreamMode(worldName));},[streaming,worldName]);
   useEffect(() => { if (!pairCode&&!approvalId){if(location.hash==='#join'||tab==='watch'&&!selected&&location.hash==='#advanced')return;const next=tab==='watch'&&selected?soulFragment(selected):tab;if(location.hash!=='#'+next){if(location.hash===''||location.hash==='#')history.replaceState(history.state,'',location.pathname+location.search+'#'+next);else location.hash=next;}} }, [tab, pairCode,selected,approvalId]);
   // lane QA: the landing's own '#watch' replaces the bare URL instead of pushing a second entry: one Back now leaves the
   // world (a stranger pressed Back and stayed on the same view).
@@ -163,6 +166,7 @@ function ShellWorld({ cfg, auth: providerAuth, arrivalEnabled=false,humanPresets
   useEffect(()=>onFollowSoulRequest((soulId,approved)=>{if(approved&&!meRef.current?.souls.includes(soulId))refreshMe(sim);setCardFollow(null);if(!handleRef.current?.flyToSoul?.(soulId))setCardFollow({soulId,scope:'card'});}),[]);
   useEffect(()=>{if(!cardFollow)return;const t=setTimeout(()=>setCardFollow(null),FOLLOW_SOUL_WAIT_MS);return()=>clearTimeout(t);},[cardFollow]);
   useApprovalFollow(cardFollow,'card',true,viewerHandle,viewerState,()=>setCardFollow(null));
+  useEffect(()=>{if(streaming&&viewerState&&viewerState.cameraMode!=='broadcast')viewerHandle?.setCameraMode('broadcast');},[streaming,viewerState?.cameraMode,viewerHandle]);  // #2492: a stream's camera is always Broadcast
   // OWNER-DAY: a "Today" entry moves the camera to where it happened (your own camera, not follow/broadcast).
   useEffect(()=>onLookAtRequest(({x,z})=>{if(viewerHandle?.setManualNavigation)viewerHandle.setManualNavigation('orbit');else viewerHandle?.setCameraMode('manual');void import('./god-ui/camera.ts').then(m=>m.flyTo(x,0,z,{distance:28}));}),[viewerHandle]);
   const placePreview=useCallback((place:EdenTourPlace)=>viewerHandle?.locationPreview?.(place)??Promise.resolve(null),[viewerHandle]);
