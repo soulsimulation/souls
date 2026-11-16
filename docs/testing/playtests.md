@@ -234,7 +234,22 @@ own and takes one job; a run records its starting load and does not start while 
 put the world on two of the runner's physical cores and the load generator on the rest (one on a three-core runner, two
 on a four-core one), the split recorded in `timed-run.json`. An `eval-load` artifact also carries each world's own log
 (`eval-load/n<souls>-r<repeat>/server/world.log`), and `eval-load.log` names a world that exited on its own (exit code,
-signal) and its resident memory every 30 s. The runners use a dedicated, unprivileged account: the
+signal) and its resident memory every 30 s.
+
+**`eval-load` with 100 to 500 agents: `--raw-from <k>` ([#2509](https://github.com/soulsimulation/souls/issues/2509)).** Souls 1 to k − 1 run the real client, with `serve` and a CLI call per command. Souls k and above are raw-HTTP Souls in the harness's own process:
+- each joins from its own documentation-range address, 8 at a time;
+- it reads the catalog and live picture once;
+- it acts by catalog id with the client's retry rules (`tools/bench/capacity/meetup/client-soul.mjs`), reading each act's receipt once;
+- its acts are the paced loop's, from the same seeded draws a real Soul in its place would make.
+
+Raw Souls get no owner messages, and the report says how else they differ. Every arm reports:
+- the driver's processor share (the harness, and everything on the load generator's cores);
+- acts achieved against intended;
+- act queue per tenth of agents by activity, busiest first, with the slow-down refusals that held an agent back.
+
+`--souls` goes up to 500. `--shape uniform` is the paced loop. The uneven shapes plug in from the shapes module.
+
+The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
 
