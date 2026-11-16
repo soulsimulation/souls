@@ -16,6 +16,7 @@ import { isLooseCarryAsset } from '@souls/engine-mars';
 import type {CandidateStationV1} from './station.ts';
 import type {CandidateStationV2} from './station-v2.ts';
 import { AnonFanout, clientMsg, type PublicJoin } from './viewer/anon-fanout.ts';
+import { addressKey } from './address-key.ts';
 
 const MAX_PER_IP = 30, MAX_CLIENTS = 2000;
 type Client = { heldSince?: number; ws: WebSocket; me: Me | null; ready: boolean; alive: boolean; joinedAt: number; resyncs: number; sent: number; ip: string; msgs: number; windowStart: number; lastHello: number; lastSnapshot: number; stationContract:StationLiveContract|null;
@@ -193,7 +194,7 @@ export class Hub {
   stopTimers() { for (const t of this.timers) clearInterval(t); this.timers = []; this.fanout?.stopTimers(); }
 
   private onConnect(ws: WebSocket, req: IncomingMessage) {
-    const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+    const ip = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
     let sameIp = 0; for (const x of this.clients) if (x.ip === ip) sameIp++;
     if (this.clients.size >= MAX_CLIENTS || sameIp >= MAX_PER_IP) { ws.close(1013, 'too many connections'); return; }
     const c: Client = { ws, me: null, ready: false, alive: true, joinedAt: Date.now(), resyncs: 0, sent: 0, ip, msgs: 0, windowStart: Date.now(), lastHello: 0, lastSnapshot: 0,stationContract:null,authUserId:null,helloGeneration:0 };

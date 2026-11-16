@@ -15,6 +15,7 @@ import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { z } from 'zod';
+import { addressKey } from '../address-key.ts';
 import { COLUMNS_V1, packColumnsV1, joinTableOrderV1, PROTO, TAKE_BOUNDARY_WIRE_V1, stringifyTakeBoundaryWireV1, TAKE_ENTITIES_WIRE_V1, TAKE_ENTITIES_JOIN_V1,
   TakeEntitiesEncoderV1, TAKE_CHUNKS_WIRE_V1, TakeChunksEncoderV1, kernelRestV1, stationHelloCapabilitiesV1Schema, type ClientMsg, type ServerMsg } from '@souls/protocol';
 
@@ -111,7 +112,7 @@ export class AnonFanout {
 
   // ------------------------------------------------------------------ connections
   private onConnect(ws: WebSocket, req: IncomingMessage) {
-    const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+    const ip = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // as the hub (#2543): an IPv6 network by its /64
     if (this.peers.size >= MAX_CONNECTIONS || (this.perIp.get(ip) ?? 0) >= MAX_PER_IP) { ws.close(1013, 'too many connections'); return; }
     const now = Date.now();
     const p: Peer = { ws, ip, ready: false, alive: true, joinedAt: now, msgs: 0, windowStart: now, lastHello: 0, lastSnapshot: 0, generation: 0, resyncs: 0, columns: false, awaitingTakes: false, joinSend: false, joinPending: 0 };

@@ -77,6 +77,7 @@ import {soulLink} from './soul-link.ts';
 import {mountOperatorSouls} from './op-souls.ts';
 import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
 import {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
+import {addressKey} from './address-key.ts';
 export {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
 /** #1326: the edge writes that wait on the clock (an act's body, a plan's acts): refused with 503 world.stalled while it is
  *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
@@ -237,7 +238,7 @@ export function buildApp(d: Deps) {
   // visitors read every world page makes (SoulTravel.tsx): travel is not available here and nobody is visiting. Before
   // this it was a 404 in every visitor's console, again every 15 s (lane L2, live old worlds 2026-10-17).
   if (!travel) app.get('/v1/world/visitors', c => c.json({contract: TRAVEL_CONTRACT, world: d.cfg.worldKey, available: false, open: false, visitors: [], recent: []}, 200, {'cache-control': 'no-store'}));
-  const ip = (c: Context) => (c.req.header('x-forwarded-for') ?? 'local').split(',')[0].trim();
+  const ip = (c: Context) => addressKey(c.req.header('x-forwarded-for')) ?? 'local';   // #2543: an IPv6 network by its /64
   const requireUser = async (c: Context): Promise<UserRow> => { const u = await d.auth.userFromToken(bearer(c)); if (!u) throw new ApiError(401, 'unauthorized', 'sign in first'); return u; };
   const requireAdmin = async (c: Context): Promise<UserRow> => { const u = await requireUser(c); if (u.role !== 'admin') throw new ApiError(403, 'forbidden', 'admin only'); return u; };
   // Authentication establishes identity across an await; it does not freeze
