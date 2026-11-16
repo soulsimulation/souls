@@ -1,7 +1,9 @@
 // Lane PUX (Gene 2026-10-20: "you end up with music coming out of both tabs"): one world tab sounds at a time.
 // Tabs of this site talk over a BroadcastChannel. A tab claims the sound when it loads visible, gains focus, becomes
-// visible, or is touched; every other tab goes silent. A hidden tab is always silent. When the sounding tab closes, a
-// visible tab takes the sound back. Without BroadcastChannel (old browsers) every tab sounds while visible.
+// visible, or is touched; every other tab goes silent, hidden or not. #2467: the tab that holds the sound keeps it while
+// hidden (switching to a non-Souls tab or another app changes nothing you hear); only another Souls tab taking it silences
+// it. A tab opened in the background takes nothing until it is first seen. When the sounding tab closes, a visible tab
+// takes the sound back, else nobody does. Without BroadcastChannel (old browsers) every tab sounds once it has been seen.
 type Msg = { type: 'claim' | 'release'; id: string };
 export type AudioFocus = { audible(): boolean; owner(): boolean; claim(): void; subscribe(fn: () => void): () => void; close(): void };
 type Doc = Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'>;
@@ -11,7 +13,7 @@ type Channel = { postMessage(m: Msg): void; close(): void; onmessage: ((e: { dat
 export function createAudioFocus(env: { doc: Doc; win: Win; channel: Channel | null; id?: string }): AudioFocus {
   const { doc, win, channel } = env;
   const id = env.id ?? Math.random().toString(36).slice(2);
-  let mine = true;
+  let mine = !doc.hidden;
   const listeners = new Set<() => void>();
   const notify = () => { for (const fn of listeners) fn(); };
   const set = (v: boolean) => { if (mine !== v) { mine = v; notify(); } };
@@ -30,7 +32,7 @@ export function createAudioFocus(env: { doc: Doc; win: Win; channel: Channel | n
   win.addEventListener('pagehide', onLeave);
   if (!doc.hidden) claim();
   return {
-    audible: () => mine && !doc.hidden,
+    audible: () => mine,
     owner: () => mine,
     claim,
     subscribe: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },

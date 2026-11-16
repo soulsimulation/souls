@@ -138,6 +138,7 @@ export async function attachFolder({ dir, folder, base, seatCfg, rails, refreshC
  *  deliver "inbox" (default): the instruction is an owner message (local dev worlds: the dev owner identity). "chat": it is
  *  typed into the agent's chat, as a person at their own agent does; there is no card, so card checks read as unknown. */
 export async function runEpisode({ dir, base, item, seatCfg, rails = {}, folder = null, catalogRef = null, refreshClient = false, deliver = 'inbox', resetTo = null, warmSec = 0, sampleMs = 500, holdSec = 15, graceSec = 10, log = () => {} }) {
+  rails = { planWakes: true, ...rails };   // #2498: serve's plan-stopped and plan-finished wakes are a turn, as the owner's scheduler gives
   let seat, setup;
   if (folder) ({ seat, setup } = await attachFolder({ dir, folder, base, seatCfg, rails, refreshClient }));
   else { seat = createSeat({ runDir: dir, seat: { ...seatCfg, id: 'soul' }, worldBase: base, rails }); setup = await prepareFolder(seat, { name: seatCfg.soulName ?? 'Wren' }); }

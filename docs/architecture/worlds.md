@@ -92,7 +92,8 @@ Music switch shows what is actually sounding: Off, Starting…, On, or **Tap to 
 back. That happens when `play()` was refused or a context stayed suspended or interrupted, as on iOS after the page was
 in the background. The speaker button then carries an amber dot. Any tap resumes the contexts and retries from the same
 place. A held-back piece is never counted as a broken file (#1389). Preferences persist in the browser; the existing file/synthesis playback, positional
-world sounds, ducking and tab audio focus remain in use. Muting effects silences world sounds while leaving music's
+world sounds, ducking and tab audio focus remain in use. Only one Souls tab sounds at a time: the newest one seen,
+focused or touched. It keeps sounding while hidden, so switching to another site or app changes nothing you hear (#2467). Muting effects silences world sounds while leaving music's
 switch independent. A previously saved master mute migrates to both switches off, preserving silence. Menus support Tab, arrow keys, Escape, outside clicks and touch.
 
 ## The world launcher (`tools/world-launcher`)
@@ -117,17 +118,22 @@ switch independent. A previously saved master mute migrates to both switches off
     recently used order stays the visitors'). A world whose takeover from the previous launcher failed is passed over. A visitor's boot still evicts the
     least recently used idle world when the registry does not fit, and that world waits, owing its time, until a round
     finds room. Crashed worlds restart with backoff, and a world held by the breaker stays held.
-  - **A still world leaves memory (#2299; `--unload-still 1`, off by default and in production until the tranche's
-    proof task has passed; `--unload-still 0` is the behaviour above).** Every 15 s the launcher reads each running
+  - **A still world leaves memory (#2299; `--unload-still 1`, off by default; `--unload-still 0` is the behaviour
+    above. Without the arg the launcher takes it from `<data>/launcher-settings.json`, which a release writes with
+    `unload_still`: [release](../release.md#the-release-workflow)).** Every 15 s the launcher reads each running
     world's `GET /__sim/still` (the contract in #2241) and unloads, by its ordinary clean stop, a world that is still,
     whose horizon (`untilWallMs`) is at least 10 minutes away or `null`, that no request other than a resident read or a
     passive one (an act, a god call, a page) reached for 10 minutes, with no visitor or god connection open, nothing but
     resident reads in flight, and up for at least 30 s. Before every stop the launcher reads `/__sim/still` again and
-    records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, is recorded as due at once
-    and the keep-alive boots it as before). An unloaded world is never booted by the keep-alive, and loads on an act, a
+    records the horizon in `<data>/horizons.json` (a world that is not still, or does not say, such as one unloaded to
+    make room, is recorded as due at once: its alarm loads it as soon as there is room, in the background rank, one a
+    second, never unloading another world for it, and its `live` poll is answered as an unloaded world's (#2475)). An unloaded world is never booted by the keep-alive, and loads on an act, a
     god call, a visitor's connection or a page, and by its alarm 30 s before `moveWallMs` or `untilWallMs`, listener or
     not (#2367): the horizon holds every deadline, a personal reminder's (`edge.reminder.*`) and a plan step's among
-    them, so they are met on time by the world running. The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
+    them, so they are met on time by the world running. Deadlines that fall together load in deadline order, each
+    earlier by the queue behind it (4 loads at once at the pool's measured load time), before its deadline only into
+    room (or unloading one world for it a pass), and a world so loaded is not unloaded to make room until 5 s after its
+    deadline, so early loads never unload one another (#2490). The alarms are rebuilt from `horizons.json` at the launcher's start. Resident reads never
     get 503 from an unloaded world: `live` is the caller's last picture with its clock moved on by wall time; a
     long-poll (`inbox/listen`, `wait`, `events`) asking from the cursor it held when the world unloaded is held and
     answered "nothing new" at its deadline, or handed to the world if it loads meanwhile; any other cursor, or a poll

@@ -156,8 +156,12 @@ export interface Engine {
   classroomTvScreensV1?(): string[];
   standOnFloorV2?(bodies: { id: string; p: [number, number, number] }[]): string[];
   holdBodyV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }): { p: [number, number, number]; yaw: number; level: number } | null;
-  /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick. */
-  markStandingV1?(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void;
+  /** #1440: hold this body by one standing mark (re-held at `pose` whenever found broken) instead of one logged hold a tick.
+   *  #1513: with `fields` (paths inside the entity, `['pose']` for its pose), an object, held at those fields' last whole values. */
+  markStandingV1?(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }, fields?: string[][]): void;
+  /** #1513 nonfinite-mark/1: marks the objects (never a body) these just-applied patches put back that no mark holds yet, and
+   *  returns the marks made, for the log: a replay passes each to `markStandingV1`. */
+  markNonFiniteV1?(patches: NonFinitePatchV1[]): { id: string; fields: string[][] }[];
   /** #1496 nonfinite-hold/1: every non-finite number in the world and the programmes, and what each is put back to: its value in
    *  `baseline` (an engine restored from the last good snapshot) at the same path, else the named fallback. A pure read. A body's
    *  pose and human state are left out (quarantine/1's). Empty when anything can't be put back legally: that halts by name. */

@@ -1,4 +1,4 @@
 ---
 type: perf
 ---
-In a busy world, about five times as many of Souls' actions now go through, instead of being turned away after a 20-second wait.
+When a world has time to spare, Souls' actions run sooner instead of waiting behind a budget sized for a busy world.

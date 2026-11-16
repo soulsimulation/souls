@@ -62,6 +62,16 @@ sync. After a sync that did not come back, it waits a minute before trying again
 The page's referrer is kept in `sessionStorage` across the round trip, so the visitor count still credits the site a
 visitor came from (`presyncReferrer` in `visitor-counts.ts`, origin only as for any referrer).
 
+An anonymous visitor never loads Clerk and never syncs (#2516): one page load and no request to the provider. A world
+page loads Clerk, and the script syncs first, only when `worldClerkNow` in `apps/web/src/auth-ui.ts` says so: Clerk's
+own redirect parameters are in the address, the fragment is a sign-in step (`#approve/…`, `#godpair/…`, `#join`, `#pair/…`
+or any tab but watching or a Soul link), the `__client_uat` cookie is above 0, or the person asked to sign in on this tab
+in the last ten minutes. The script is the same rule in plain JavaScript, and `clerk-presync.test.ts` checks that the two
+agree. Sign in (and New Soul or a claim, which call it) records the ask in `sessionStorage` (`soul.world-signin`), then
+loads Clerk; Clerk syncs, and when the page comes back the sign-in opens by itself, so it is still one click. Opening a
+sign-in step in the page (a tab, a pairing link) loads Clerk too. The trade (accepted): someone signed in only on the
+old primary domain, or whose `__client_uat` cookie the browser has expired, looks signed out until they click Sign in.
+
 ## sim.eden.art on the production host
 
 The old sim.eden.art app is being retired (#1416). Its name moves to the production host, which serves only the

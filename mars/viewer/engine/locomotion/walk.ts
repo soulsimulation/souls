@@ -12,7 +12,7 @@ import {bodyProfile,bodySpatial} from '../bodies/navigation.ts';
 //               (docs/engineering/MOVEMENT.md)
 //   traffic   : single-file passages are exclusive resources per direction (yield, never oscillate)
 //   animation : consumers read pose + human.activity; they never write positions
-import { blockedWait, publishedWaitsFor } from '../runtime/waits.ts';
+import { blockedWait, mutualWaits, publishedWaitsFor } from '../runtime/waits.ts';
 import { guardBodyStep } from '../runtime/static-step.ts';
 import { z } from 'zod';
 import { pointInObb, add2, angleDelta, clamp, cross2, dist2, dot2, heading, len2, norm2, rot2, scale2, sub2, wrapAngle, type OBB2, type Vec2, hypot } from '../core/math.ts';
@@ -329,11 +329,16 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
   },
   recoverWait(rt, ex, mover) {
     const unavailable = (message: string) => ({ status: 'unavailable' as const, diagnostic: { code: 'deadlock.recovery-unavailable', message, subjects: [mover] } });
-    if (mover !== ex.actor || ex.phase !== 'walk' || ex.v >= 0.02 || !ex.block || ex.peopleReplans >= MAX_PEOPLE_REPLANS || ex.detour || ex.cancelTo)
-      return unavailable('walker has no remaining applicable person/load replan; occupied goals and stairs require clearance');
-    if (!takeReplan(rt, false)) return { status: 'deferred', diagnostic: { code: 'deadlock.recovery-budget', message: 'walker recovery waits for existing planner budget', subjects: [mover] } };
-    const planned = retryPeople(rt, ex, rt.world.entities[ex.actor]);
-    return { status: 'attempted', diagnostic: { code: planned ? 'deadlock.replanned' : 'deadlock.replan-refused', message: planned ? 'existing person/load planner found a route from the current pose' : 'existing person/load planner found no safe route', subjects: [mover] } };
+    if (mover !== ex.actor || ex.detour || ex.cancelTo) return unavailable('walker has no remaining applicable person/load replan; occupied goals and stairs require clearance');
+    const replannable = ex.phase === 'walk' && ex.v < 0.02 && !!ex.block && ex.peopleReplans < MAX_PEOPLE_REPLANS;
+    if (replannable) {
+      if (!takeReplan(rt, false)) return { status: 'deferred', diagnostic: { code: 'deadlock.recovery-budget', message: 'walker recovery waits for existing planner budget', subjects: [mover] } };
+      if (retryPeople(rt, ex, rt.world.entities[ex.actor])) return { status: 'attempted', diagnostic: { code: 'deadlock.replanned', message: 'existing person/load planner found a route from the current pose', subjects: [mover] } };
+    }
+    const aside = rt.services.cycleRecoverV1 === true ? stepAsideInCycle(rt, ex) : null;   // #2596 cycle-recover/1
+    if (aside) return { status: 'attempted', diagnostic: { code: 'deadlock.stepped-aside', message: `${aside.mover} steps aside for ${aside.for} to pass, then walks on`, subjects: [mover, aside.mover, aside.for] } };
+    if (!replannable) return unavailable('walker has no remaining applicable person/load replan; occupied goals and stairs require clearance');
+    return { status: 'attempted', diagnostic: { code: 'deadlock.replan-refused', message: 'existing person/load planner found no safe route', subjects: [mover] } };
   },
   waitQuiescent(_rt, ex, exhausted) { return exhausted.has(ex.actor) && ((ex.v < 0.02 && ex.phase === 'walk') || ex.phase === 'align' || ex.phase === 'climb') && !ex.cancelTo && !ex.detour; },
   cancel(rt, ex) {
@@ -1430,7 +1435,8 @@ export const POSE_DEFER_S = 5;
  * ~2.5 min, W47's release only swapping the two roles every 3 s). After FACEOFF_TICKS one of them steps aside to the
  * nearest free spot clear of the other's remaining way (`makeWay` with `clearOf`), waits there until the other has
  * passed, then walks on: first the one yielding the passage (or, two plain person-waits, the later id); if that one
- * finds no spot within 3·FACEOFF_TICKS, the other. Mars/Eden/LM native worlds (no entity physics) are unchanged.
+ * finds no spot within 3·FACEOFF_TICKS, the other. Mars/Eden/LM native worlds (no entity physics) do not run this; under
+ * #2596 cycle-recover/1 their two-body cycles take the same step aside from the deadlock recovery (`stepAsideInCycle`).
  */
 function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   const f = ex.faceoff;
@@ -1445,10 +1451,36 @@ function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   const first = orec.diagnostic.code === 'traffic.yield' || ex.actor < who ? who : ex.actor;
   const mover = waited < 3 * FACEOFF_TICKS ? first : first === who ? ex.actor : who;
   const forEx = mover === who ? ex : oex, moverEx = mover === who ? oex : ex;
+  stepAside(rt, mover, moverEx, forEx);
+}
+
+/** #2596 cycle-recover/1: the deadlock recovery's answer to a two-body wait cycle that routing round the other did not break (one waits at
+ *  its walk's end for the other to leave its spot, the other for it to get out of the way; or two face to face). One of
+ *  the pair steps aside as in `resolveFaceoff` and walks on once the other has passed: the one standing at the end of its
+ *  walk first (it comes back to the same spot), else the walker being recovered; if that one finds no spot, the other. */
+function stepAsideInCycle(rt: Runtime, ex: Exec): { mover: string; for: string } | null {
+  // a carry's gathering walkers share one walk exec under the carry's id: the clear-of-the-way test would read another
+  // crew member's way, so only a walk's own exec takes part
+  if (walkExecs(rt).get(ex.id) !== ex) return null;
+  const atEnd = (x: Exec) => x.leg === x.route.legs.length - 1 && x.s >= x.total - 1e-6;
+  const able = (x: Exec) => x.phase === 'walk' && x.route.legs[x.leg]?.kind === 'walk' && !x.detour && !x.cancelTo;
+  for (const who of mutualWaits(rt, ex.actor)) {
+    const ot = rt.world.entities[who]?.human?.task, oex = ot ? walkExecs(rt).get(ot) : undefined;
+    if (!oex || oex.actor !== who || oex.detour || oex.cancelTo || rt.records.get(ot!)?.status !== 'blocked') continue;
+    const pairs: [Exec, Exec][] = atEnd(oex) && !atEnd(ex) ? [[oex, ex], [ex, oex]] : [[ex, oex], [oex, ex]];
+    // the clear-of-the-way test reads the other's walk leg (pointAt): both stand on walk legs
+    for (const [m, f] of pairs) if (able(m) && f.route.legs[f.leg]?.kind === 'walk' && stepAside(rt, m.actor, m, f)) return { mover: m.actor, for: f.actor };
+  }
+  return null;
+}
+
+/** `mover` (walking `moverEx`) steps to the nearest free spot clear of what is left of `forEx`'s way (a faceoff detour). The
+ *  id is passed, not read from `moverEx.actor`: a carry's gathering walkers share one exec, whose actor may be another member. */
+function stepAside(rt: Runtime, mover: string, moverEx: Exec, forEx: Exec): boolean {
   const m = rt.world.entities[mover], o = rt.world.entities[forEx.actor];
-  if (!m?.human || m.human.grip) return;
+  if (!m?.human || m.human.grip) return false;
   const g = spatial(rt, mover).level(m.human.level);
-  if (!g) return;
+  if (!g) return false;
   const r = moverEx.profile.radius, test: ClearOfRef = { kind: 'way', action: forEx.id, r };
   const from: Vec2 = [m.pose.p[0], m.pose.p[2]];
   // nearest free spot first; it must be reachable going round the other body (not through it, as a plain plan would)
@@ -1464,8 +1496,9 @@ function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
     const rr = spatial(rt, mover).routeAround(rt.world, moverEx.profile, { level: m.human.level, p: from }, { level: m.human.level, p: q }, around);
     if (!rr.ok || rr.route.length > 6) continue;
     moverEx.detour = { spot: q, level: m.human.level, by: forEx.actor, blockers: [forEx.actor], clearOf: test, stage: 'pending', faceoff: true };
-    return;
+    return true;
   }
+  return false;
 }
 
 /** `q` is clear of what is left of walk `ref.action`'s way (or that walk is over or stepping aside itself): a body of

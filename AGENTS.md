@@ -67,6 +67,13 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 - **SEATDEF:** seat heights come from the def's model geometry. A change is a new def revision; old revisions keep
   their bytes. A seat is refused only above the body's standing reach (`seat.out-of-reach`).
 
+## Scaling
+
+- Work whose point is that Souls carries more Souls, agents, viewers or worlds starts from
+  [docs/architecture/scaling.md](docs/architecture/scaling.md): the goal, and the rules that bind it. Never meet a
+  number with a cap, a queue or a redirect. Keep one concern to one thread or process with its own limit and gauge.
+  Measure in even and uneven load, and state the expected and the measured effect.
+
 ## Playtests and the swarm director
 
 - Batteries, personas and casts live in `tools/playtest/`. Measure on a quiet machine only, two repeats per arm.

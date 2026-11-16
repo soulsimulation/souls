@@ -58,7 +58,8 @@ the stages always run `clerk`.
 ## The account registry
 
 The registry maps each exact `(issuer, subject)` pair to a random `acct_<uuid>` id. All worlds of a stage open the
-same SQLite file; `BEGIN IMMEDIATE`, a unique binding and WAL with `synchronous=FULL` serialise writes. Provider ids
+same SQLite file; `BEGIN IMMEDIATE`, a unique binding and WAL with `synchronous=FULL` serialise writes. A sign-in for an
+existing account is a plain read and takes no write lock, so one world's new account never stalls another. Provider ids
 never become world owner ids. Memberships, delegated Soul grants and ownership history stay in each world's own
 database.
 

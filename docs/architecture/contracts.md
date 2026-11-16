@@ -12,6 +12,7 @@ schemas are in `packages/protocol/src`; producer-side checks are in `apps/server
 | `account-soul-approval/1` | `apps/server/src/accounts/` | Agent approval start/poll/cancel, advertised in `/v1/config` |
 | `travel/1` | `apps/server/src/travel/travel.ts` | Passport and travel routes between worlds of one site |
 | `local-worlds/1` | `tools/world-launcher/launcher.mjs` | The launcher's world list (`__sim/worlds.json`) |
+| `my-souls/1` | `tools/world-launcher/my-souls.mjs` | The signed-in account's Souls across the launcher's worlds (`__sim/my-souls.json`, the homepage's My Souls) |
 | `moderation/1` | `apps/server/src/moderation/routes.ts` | Hidden-content list read by viewers |
 | `mars-take/4` | `mars/viewer/engine/take/` | Recorded pose takes; decoders also accept older /1–/3 shapes |
 | `sim-mars-snapshot/1` | `packages/engine-mars/src/engine.ts` | Adapter snapshot format |

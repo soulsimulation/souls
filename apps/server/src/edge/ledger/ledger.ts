@@ -162,7 +162,7 @@ type Plans = Map<string, {label: string; steps: Program['steps']; seconds?: bool
 
 type WalkProfile=(soul:EdgeSoul,caps:EdgeCapability[],plans:Plans)=>void;
 type ExactWalkProfile=(soul:EdgeSoul,asked:string,caps:EdgeCapability[],plans:Plans)=>boolean;
-type ExactWalkBindings={caps:EdgeCapability[];plans:Plans;tick:number};
+type ExactWalkBindings={caps:EdgeCapability[];plans:Plans;tick:number;reused?:true};
 type CapabilityProvider=(soul:EdgeSoul,only?:ReadonlySet<string>,places?:Map<string,string>)=>EdgeCapability[];
 /** warmForServing's account: busy ms in all, wall ms from start to end, its slices before the listing and the longest of
  *  them, the final listing's ms, and whether it was stopped (shutdown) before the listing. */
@@ -931,16 +931,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private passageApplied=new Set<string>();
   private contactTicks(tick:number){
     for(const id of this.contactPending){
-      const r=this.rows('receipt_id=?',id)[0],detail=r?.detail?JSON.parse(r.detail):{},passage=detail.doorPassageV1 as {door:string;open:ContactActuatorIntent;applied:string[];unlocked?:true}|undefined;
+      const r=this.rows('receipt_id=?',id)[0],detail=r?.detail?JSON.parse(r.detail):{},passage=detail.doorPassageV1 as {door:string;doors?:string[];open:ContactActuatorIntent;applied:string[];unlocked?:true}|undefined;
       let intent=detail.contactActuatorV1 as ContactActuatorIntent|undefined;
       if(!r||(!intent&&!passage)||detail.contactAppliedV1||passage&&!OPEN.includes(r.phase)){this.contactPending.delete(id);continue;}
       const m=this.host.minds.get(r.soul_id),body=m&&this.body(m.entityId),motion=body?.human?.handActuator;
       // entry 31: a passage walk binds two hand contacts on its door (open before the doorway, close after); each applies once
-      if(passage){if(!m||!motion?.passage||motion.target!==passage.door||!motion.actionId||passage.applied.includes(motion.actionId)||this.passageApplied.has(id+'|'+motion.actionId))continue;
+      if(passage){if(!m||!motion?.passage||(motion.target!==passage.door&&!passage.doors?.includes(motion.target))||!motion.actionId||passage.applied.includes(motion.actionId)||this.passageApplied.has(id+'|'+motion.actionId))continue;
         // entry 32: a walk that turned the lock first binds the open at contact (the lock's turn changed the door since the
         // walk was admitted); the close of a walk through a locked door carries the latch (`relock`)
         const who={soulId:m.soulId,entityId:m.entityId,name:m.name,owner:m.owner},mode=motion.passage.mode;
-        intent=mode==='open'&&!passage.unlocked?passage.open:this.contactActuator?.prepare(who,passage.door,mode)??undefined;if(!intent)continue;
+        intent=mode==='open'&&!passage.unlocked&&motion.target===passage.door?passage.open:this.contactActuator?.prepare(who,motion.target,mode)??undefined;if(!intent)continue;
         intent={...intent,passage:true,...(mode==='close'&&motion.passage.relock?{relock:true as const}:{})};}
       if(!intent)continue;
       if(!motion||motion.target!==intent.target){if(!OPEN.includes(r.phase))this.contactPending.delete(id);continue;}
@@ -1355,8 +1355,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // #1770 plan-once: the strict gate's bind answers the act's own bind in the same synchronous turn (one request, before
     // its first await: no tick, no other request and no fold can run in between), under the same tick and same-tick
     // signature. Any await ends the turn (the microtask below forgets it), so the act's later binds are built as before.
-    const turn = this.oneTurn, tick = this.mw.world.tick;
-    if (PLAN_ONCE && turn && turn.soulId === soul.soulId && turn.id === id && turn.tick === tick && turn.sig === this.sameTickSig()) {
+    const turn = this.inTurn(soul, id), tick = this.mw.world.tick;
+    if (turn) {
       menuStats.one.turn++;
       if (PLAN_ONCE_ORACLE) {const fresh = this.bindOneRaw(soul, id), a = JSON.stringify(turn.out ? [turn.out.cap, turn.out.plan] : null), b = JSON.stringify(fresh ? [fresh.cap, fresh.plan] : null); if (a !== b) {menuStats.one.oracleMiss++; console.error('[plan-once-oracle] bindOne', soul.soulId, id);}}
       return turn.out;
@@ -1368,6 +1368,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   }
   /** #1770: the last offer bound in this synchronous turn (forgotten at the turn's end). */
   private oneTurn: {soulId: string; id: string; tick: number; sig: string; out: ReturnType<EdgeLedger['bindOneRaw']>} | null = null;
+  /** #1770: the offer bound for this Soul and id in this synchronous turn, at this tick and same-tick signature, or null. */
+  private inTurn(soul: EdgeSoul, id: string) {const t = this.oneTurn; return PLAN_ONCE && t && t.soulId === soul.soulId && t.id === id && t.tick === this.mw.world.tick && t.sig === this.sameTickSig() ? t : null;}
   private bindOneRaw(soul: EdgeSoul, id: string) {
     const b = this.bindFocus(soul, focusFor(id)), cap = b.caps.find(c => c.id === id);
     return cap ? {cap, plan: b.plans.get(id)} : undefined;
@@ -1906,6 +1908,20 @@ export class EdgeLedger implements EdgeLedgerHooks {
         // Keep the authoritative full cache intact; the on-demand area binding
         // below is local to this request, never a replacement listing.
       }
+      // #2527: the strict gate bound this very offer in this turn (bindOne, the menu's own offer): the act takes it, and
+      // builds no second copy; the oracle (SIM_PLAN_ONCE_ORACLE) compares it with the projection it replaces
+      // (resolve's listed-only path too: a focused bindOne of walk:<ref> holds listed walks only, never an area's on-demand walk)
+      const gate=this.inTurn(soul,asked)?.out,reuse=gate?.cap.available&&gate.plan?{caps:[gate.cap],plans:new Map([[asked,gate.plan]]) as Plans,tick,reused:true as const}:null;
+      if(reuse&&!PLAN_ONCE_ORACLE){menuStats.one.exactTurn++;return reuse;}
+      const built=this.exactWalkBuild(soul,asked,ref,project);
+      if(reuse){menuStats.one.exactTurn++;const a=JSON.stringify([gate!.cap,gate!.plan]),b=built?JSON.stringify([built.caps.find(c=>c.id===asked),built.plans.get(asked)]):a;if(a!==b){menuStats.one.oracleMiss++;console.error('[plan-once-oracle] exactWalk',soul.soulId,asked);}return reuse;}
+      return built?{...built,tick}:null;
+    }catch{return null;}
+  }
+  /** exactWalkBindings' own build of one authored walk: its native binding, the profile's projection, the object
+   *  providers' check, the core's ride refusals and the tail; null when it cannot answer exactly. */
+  private exactWalkBuild(soul:EdgeSoul,asked:string,ref:string,project:ExactWalkProfile):{caps:EdgeCapability[];plans:Plans}|null {
+    try {
       const read=readHumanCapabilitiesV1(this.host,this.mind(soul),{registeredActivitiesV1:true,deferRouteChecks:true,skipRegisteredCards:true,onlyWalkTarget:ref}),caps:EdgeCapability[]=[],plans:Plans=new Map();
       for(const b of read.bindings.values())if(b.id===asked&&b.goal==='walk')this.addNativeBinding(b,caps,plans);
       if(!project(soul,asked,caps,plans))return null;
@@ -1918,7 +1934,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.rideBlocks(soul,caps);
       const out=this.bindsTail(soul,{caps,plans},focus),cap=out.caps.find(c=>c.id===asked);
       // Refusals need the original complete diagnostics/alternatives too.
-      return cap?.available&&out.plans.has(asked)?{caps:out.caps,plans:out.plans,tick}:null;
+      return cap?.available&&out.plans.has(asked)?{caps:out.caps,plans:out.plans}:null;
     }catch{return null;}
   }
   /** exactWalkBindings for an offer the full listing itself contains (native, profile or bounded GodNav listing), never
@@ -2232,7 +2248,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       if(input.capability.length>=1&&input.capability.length<=200&&typeof input.clientRef==='string'&&input.clientRef.length<=100){const old=this.coreA.byClientRef(soul.soulId,input.clientRef);if(old)return {accepted:true,receipt:old};}
       // BODY refusals precede place/alias diagnostics, as in the original actOnce path.
       const bodyIssue=this.bodyVerbProblem(soul,input.capability.split(/[:\s]/)[0]!);
-      {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;}   // #1944: bind
+      {const t=actTiming.getStore(),t0=t?performance.now():0;exactWalk=bodyIssue?null:this.exactWalkBindings(soul,input);if(t)t.bindMs+=performance.now()-t0;if(exactWalk&&!exactWalk.reused)menuStats.one.exact++;}   // #1944: bind (#2508: and the exact-walk projections built; #2527: not the gate's bind reused)
       const place=bodyIssue?null:explicitPlaceCapability(this,soul,input.capability.trim(),exactWalk?.caps);
       // SOULSIM-E (real-agent run on 3.60, 2026-10-21): resolve offers a far place's walk on demand and the agent acts on
       // that id, as the skill says; the id was refused place.unwalkable here. actOnce below walks it on demand, as words.
@@ -2568,8 +2584,9 @@ export class EdgeLedger implements EdgeLedgerHooks {
       this.arm({receipt: r.id, soul, steps, label, deadline: this.host.engine.world.tick + WAIT_LIMIT_TICKS, capability});
       return {accepted: true as const, receipt: this.receipt(soul.soulId, r.id)!, ...resolved};
     }
-    {const t = actTiming.getStore(); if (t && !t.checkAt) t.checkAt = performance.now();}   // #1944: the act's check begins
+    const timing = actTiming.getStore(), routeAt = timing ? performance.now() : 0; if (timing && !timing.checkAt) timing.checkAt = routeAt;   // #1944: the act's check begins
     let issue = this.host.engine.canPerform({actor: soul.entityId, label, steps});
+    if (timing) timing.routeMs += performance.now() - routeAt;   // #2508: the check's own feasibility search (route), inside check
     // SOUL3 continuation (ACCEPT3 A7): a here-activity asked while this Soul's own replaceable walk still holds the body (e.g. on
     // the way to board a balloon) was refused not-still, so the superseded walk went on and boarded; the body stops first instead.
     if (issue && /(^|\.)not-still$/.test(issue.code) && steps[0]?.verb !== 'stand' && this.host.engine.programOf(soul.entityId)) {
@@ -2594,7 +2611,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // closed room is not cut off when its door opens.
     let passage: DoorPassage | undefined, doorRefusal: DoorPassageRefusal | undefined;
     // (review of #2397) a walk bound from upstairs to a ground place is a point walk (`mars:walk_to`, level 0): the same walk
-    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
+    // (#2434) and one bound to an upper floor keeps its floor (`level`): the passage's door chain climbs to it
+    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(typeof s.params.level === 'number' && s.params.level !== 0 ? {level: s.params.level} : {}), ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
     // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
     // the start: a long walk plans its far ground coarsely and would meet the shut leaf only at the end, short of it
     const plain = !!this.doorPassage && plainWalk.every(s => s.verb === 'walk_to' || s.verb === 'stand');
@@ -2707,7 +2725,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const remember = (id: string) => {
       if (note) this.update(id, {reason: note});
       if (approach) this.setDetail(id, {approach});
-      if (passage) {this.setDetail(id, {doorPassageV1: {door: passage.door, open: passage.open, applied: [], ...(passage.unlocked ? {unlocked: true} : {})}}); this.contactPending.add(id);}
+      if (passage) {this.setDetail(id, {doorPassageV1: {door: passage.door, ...(passage.doors ? {doors: passage.doors} : {}), open: passage.open, applied: [], ...(passage.unlocked ? {unlocked: true} : {})}}); this.contactPending.add(id);}
       this.launched.set(id, {soul, capability, label, steps}); if (this.launched.size > 512) this.launched.delete(this.launched.keys().next().value!);
     };
     // nav-warm-wait/1 (#884): while the connectivity labels are cold, a walk goal skipped RESOLVE2's roofReach (and WALK3's

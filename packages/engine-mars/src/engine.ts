@@ -163,6 +163,9 @@ const GUARDED_V1 = new WeakSet<object>();
 const guardInvariantOnceV1 = (inv: any) => { if (GUARDED_V1.has(inv)) return inv; const g = guardedInvariantV1(inv); GUARDED_V1.add(g); return g; };
 /** #1440: how long a body under a standing hold must stay whole before the mark ends. */
 const STANDING_HOLD_COOLDOWN_V1 = 1200;
+/** #1513 nonfinite-mark/1: one field of an object under a standing mark, at its last whole value: its pose (with the support it
+ *  stood on), or a number at `path` inside the entity. */
+type ObjectMarkFieldV1 = { path: string[]; value?: number; pose?: any; support?: string };
 const guardedInvariantV1 = (inv: any) => (rt: any) => { try { return inv(rt); } catch (e) { return [{ code: 'engine.thrown', message: String((e as Error)?.message ?? e).slice(0, 200), subjects: [] }]; } };
 /** #1952 wait-bound/1: the walk watchdog's own measure (walk.ts WATCH_M), held for a minute. */
 export const WAIT_BOUND_V1 = 'wait-bound/1', WAIT_BOUND_M = 0.5, WAIT_BOUND_TICKS = 1200;
@@ -193,7 +196,7 @@ const bodyEntriesV1 = <T,>(entries: Map<string, T>, v: { subjects?: string[] }):
   return out;
 };
 type RefusalCopy = { pose: { p: number[]; yaw?: number }; level?: number };
-export type MarsWorldConfig = { /** #2302 classroom-tv/1 (runtime policy): the installed lecture screen is a TV (on or off, a picture or the lesson); adopting it marks that screen once. */ classroomTvV1?:boolean; /** #2294 held-activity/1 (runtime policy): an activity in place (a solo pose, a mat sleep) keeps a start and an end tick, not a running sum; a seat, slot or circle once taken is held with no end; `stillnessV1` reads them. */ heldActivitiesV1?:boolean; /** #1530 climb-spacing/1 (runtime policy): a climber's step is refused where the separation invariant would flag it against a body ahead on the stair (walk.ts stairBlocker). */ climbSpacingV1?:boolean; /** #2196 park-away/1 (runtime policy): an empty ride that landed away from home parks there, never flies itself back (carrier.ts). */ carrierParkAwayV1?:boolean; /** board-path/1 (runtime policy): a boarder's step into a carrier never brings it within the human-human separation of another body; it goes round the basket or waits (carrier.ts pathBlocker). */ carrierBoardPathV1?:boolean; /** #1216 item-approach/1 (runtime policy): a take_item / put_item approach walk falls under the blocked-walk limit, and a ground take also tries wider rings of stands. */ itemApproachV1?:boolean; /** #1454 stand-height/1 (runtime policy): the engine stands a body it places upstairs at its floor's own height, never the height it had. */ standHeightV1?:boolean; /** #1521 stand-height/2 (runtime policy): on a world with no ground field, a body a stall release sets down on level 0 stands at that level's floor height, never the height it had (a mid-climb height left it in the air, and every walk was refused motion.teleport); adopting it once stands any such body already left in the air on its floor. */ standHeightV2?:boolean; /** #2133 stall-release-support/1 (runtime policy): a stall release upstairs stands a body only on a floor: the nearest clear spot on its own, else the nearer clear landing of its flight, else it stays held (never where it stands mid-flight). */ stallReleaseSupportV1?:boolean; /** #1952 wait-bound/1 (runtime policy): off a stair flight, a walk whose body stays inside a 0.5 m disc on one level for 1,200 ticks ends route.blocked, named waits included. */ waitBoundV1?:boolean; /** #1288 wait-bound/2 (runtime policy): the same bound for swim_to, ground_travel and swim_in steps as for walk_to. */ waitBoundV2?:boolean; /** #2155 wait-bound/3 (runtime policy): the same bound for a take_item / put_item approach walk, which stops only that walk. */ waitBoundV3?:boolean; /** #1428 stair-way/1 (runtime policy): a walk's way on a link leg is the link's exit (walk.ts pointAt). */ stairWayV1?:boolean; /** #2426 cede-passage/1 (runtime policy): a walker at the end of its walk leg does not take up a single-file passage it does not hold while the body standing there yields to it (W38's test), so that body can walk out through it (walk.ts). */ cedePassageV1?:boolean; /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
+export type MarsWorldConfig = { /** #2302 classroom-tv/1 (runtime policy): the installed lecture screen is a TV (on or off, a picture or the lesson); adopting it marks that screen once. */ classroomTvV1?:boolean; /** #2294 held-activity/1 (runtime policy): an activity in place (a solo pose, a mat sleep) keeps a start and an end tick, not a running sum; a seat, slot or circle once taken is held with no end; `stillnessV1` reads them. */ heldActivitiesV1?:boolean; /** #1530 climb-spacing/1 (runtime policy): a climber's step is refused where the separation invariant would flag it against a body ahead on the stair (walk.ts stairBlocker). */ climbSpacingV1?:boolean; /** #2196 park-away/1 (runtime policy): an empty ride that landed away from home parks there, never flies itself back (carrier.ts). */ carrierParkAwayV1?:boolean; /** board-path/1 (runtime policy): a boarder's step into a carrier never brings it within the human-human separation of another body; it goes round the basket or waits (carrier.ts pathBlocker). */ carrierBoardPathV1?:boolean; /** #1216 item-approach/1 (runtime policy): a take_item / put_item approach walk falls under the blocked-walk limit, and a ground take also tries wider rings of stands. */ itemApproachV1?:boolean; /** #1454 stand-height/1 (runtime policy): the engine stands a body it places upstairs at its floor's own height, never the height it had. */ standHeightV1?:boolean; /** #1521 stand-height/2 (runtime policy): on a world with no ground field, a body a stall release sets down on level 0 stands at that level's floor height, never the height it had (a mid-climb height left it in the air, and every walk was refused motion.teleport); adopting it once stands any such body already left in the air on its floor. */ standHeightV2?:boolean; /** #2133 stall-release-support/1 (runtime policy): a stall release upstairs stands a body only on a floor: the nearest clear spot on its own, else the nearer clear landing of its flight, else it stays held (never where it stands mid-flight). */ stallReleaseSupportV1?:boolean; /** #1952 wait-bound/1 (runtime policy): off a stair flight, a walk whose body stays inside a 0.5 m disc on one level for 1,200 ticks ends route.blocked, named waits included. */ waitBoundV1?:boolean; /** #1288 wait-bound/2 (runtime policy): the same bound for swim_to, ground_travel and swim_in steps as for walk_to. */ waitBoundV2?:boolean; /** #2155 wait-bound/3 (runtime policy): the same bound for a take_item / put_item approach walk, which stops only that walk. */ waitBoundV3?:boolean; /** #1428 stair-way/1 (runtime policy): a walk's way on a link leg is the link's exit (walk.ts pointAt). */ stairWayV1?:boolean; /** #2426 cede-passage/1 (runtime policy): a walker at the end of its walk leg does not take up a single-file passage it does not hold while the body standing there yields to it (W38's test), so that body can walk out through it (walk.ts). */ cedePassageV1?:boolean; /** #2596 cycle-recover/1 (runtime policy): a two-body wait cycle asks for recovery after 3 s, and one of the pair steps aside. */ cycleRecoverV1?:boolean; /** PC13 (#692): the shared raise (raise_hold_v1 and its invariant); absent, SIM_SHARED_CARRY=1 decides. */ sharedCarryV1?:boolean; /** #1150: a move that would break a rule is refused inside the step; absent, SIM_SOULS_REPAIR decides (0 off, 1 on), and otherwise shared building brings it. */ soulsRepairV1?:boolean; /** #1332 body-step-guard/1 (logged runtime policy): every placement the engine writes for a body passes the static invariant's own read (static-step.ts bodyStandsClear) and its body separation. */ bodyStepGuardV1?:boolean; /** #1334 hold-settle/1 (logged runtime policy, under the repair rules): a refused move holds its programme (the third refusal in the window fails it), a body undo can't answer is settled at the nearest legal pose, and only what neither answers goes to the host's repair, alone. */ refusalSettleV1?:boolean; groundReclaimV1?:boolean;routeReachV1?:boolean; shoreDepartV1?:boolean; map?:typeof MARS_2026_MAP; walkSettleWaitV1?:boolean; occupiedLinkRoutingV1?:boolean; concurrentLinkEgressV1?:boolean; stairLandingClearanceV1?:boolean; edgeMotionV1?:boolean; spreadClearV1?:boolean; disassemblyV1?:boolean; spreadV2?:boolean; yieldTimeoutV1?:boolean; quietStallReleaseV1?:boolean; stairMakeWayV1?:boolean; reflexTimeoutV1?:boolean; walkBlockV1?:boolean; safeArrivalV1?:boolean; commonsArrivalV1?:boolean; commonsTransitionV1?:boolean; fixtureGroundGoalsV1?:boolean; nativeArrivalWitnessV1?:boolean; quietLandingCourtesyV1?:boolean; scene: 'proving-ground' | 'meal' | 'eden-camp' | 'littlemartians' | 'greenfield' | 'eden-commons'; clock?: { origin: number; dayTicks: number }; sleepBlockTicks?:number; quietSeatCourtesy?:boolean; safeCrewRemoval?:boolean; arrival: [number, number]; arrivalPlace: string; reference: [number, number]; grounds: { id: string; name: string } };
 export const LITTLE_MARTIANS_WORLD: MarsWorldConfig={scene:'littlemartians',arrival:[0,18],arrivalPlace:'garden',reference:[0,16],grounds:{id:'grounds',name:'Ceramic garden'}};
 export const GREEN_FIELD_WORLD:MarsWorldConfig={scene:'greenfield',arrival:[0,0],arrivalPlace:'field',reference:[2,0],grounds:{id:'grounds',name:'Green field'}};
 export const EDEN_COMMONS_WORLD:MarsWorldConfig={scene:'eden-commons',arrival:[14,4],arrivalPlace:'commons',reference:[9,5],grounds:{id:'grounds',name:'Eden commons'}};
@@ -203,7 +206,7 @@ export const EDEN_SAFE_COMMONS_WORLD:MarsWorldConfig={...EDEN_COMMONS_WORLD,safe
  *  runtime-policy-registry.test.ts fails. */
 export const RUNTIME_POLICY_FLAGS=['walkSettleWaitV1','occupiedLinkRoutingV1','concurrentLinkEgressV1','stairLandingClearanceV1',
   'fixtureGroundGoalsV1','nativeArrivalWitnessV1','quietLandingCourtesyV1','quietStallReleaseV1','stairMakeWayV1','reflexTimeoutV1',
-  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1','refusalSettleV1','stairWayV1','standHeightV1','standHeightV2','itemApproachV1','stallReleaseSupportV1','carrierParkAwayV1','climbSpacingV1','heldActivitiesV1','waitBoundV1','waitBoundV2','carrierBoardPathV1','classroomTvV1','waitBoundV3','cedePassageV1'] as const satisfies readonly (keyof MarsWorldConfig)[];
+  'edgeMotionV1','spreadV2','spreadClearV1','yieldTimeoutV1','shoreDepartV1','routeReachV1','bodyStepGuardV1','refusalSettleV1','stairWayV1','standHeightV1','standHeightV2','itemApproachV1','stallReleaseSupportV1','carrierParkAwayV1','climbSpacingV1','heldActivitiesV1','waitBoundV1','waitBoundV2','carrierBoardPathV1','classroomTvV1','waitBoundV3','cedePassageV1','cycleRecoverV1'] as const satisfies readonly (keyof MarsWorldConfig)[];
 export type RuntimePolicyV1={sleepBlockTicks:number;quietSeatCourtesy?:boolean}&{[K in typeof RUNTIME_POLICY_FLAGS[number]]?:boolean};
 /** #1363: every `cfg` key a world may change after genesis without changing its rules version: the runtime policy, the render
  *  clock (`configureClock`) and ground-reclaim/1 (its own logged fact, `enableGroundReclaimV1`). Each still enters the state
@@ -366,6 +369,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.heldActivitiesV1===true)this.rt.services.heldActivitiesV1=true;   // #2294
     if(this.cfg.waitBoundV1===true)this.rt.services.waitBoundV1=true;   // #1952
     if(this.cfg.cedePassageV1===true)this.rt.services.cedePassageV1=true;   // #2426
+    if(this.cfg.cycleRecoverV1===true)this.rt.services.cycleRecoverV1=true;   // #2596
     this.rt.services.doorPassersV1=this.doorPassersV1;
     if(rt.world.authoredBoundariesV1)immutableAuthoredBoundaryFact(rt.world.authoredBoundariesV1);
     this.schema = rt.world.schema;
@@ -408,7 +412,7 @@ export class MarsEngine implements Engine {
   stateHash(): string { return this.stateHashWithWorld(this.rt.stateHash()); }
   /** Reuse only the native hash captured synchronously by snapshot(); never cache a live world hash across calls. */
   private stateHashWithWorld(nativeStateHash: string): string { return hashOf(this.stateHashInputs(nativeStateHash)); }
-  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.stairWayV1===true?{stairWayPolicy:'stair-way/1'}:{}),...(this.cfg.itemApproachV1===true?{itemApproachPolicy:'item-approach/1'}:{}),...(this.cfg.standHeightV1===true?{standHeightPolicy:'stand-height/1'}:{}),...(this.cfg.climbSpacingV1===true?{climbSpacingPolicy:'climb-spacing/1'}:{}),...(this.cfg.standHeightV2===true?{standHeightGroundPolicy:'stand-height/2'}:{}),...(this.cfg.stallReleaseSupportV1===true?{stallReleasePolicy:'stall-release-support/1'}:{}),...(this.cfg.carrierParkAwayV1===true?{carrierParkAwayPolicy:'park-away/1'}:{}),...(this.cfg.carrierBoardPathV1===true?{carrierBoardPathPolicy:'board-path/1'}:{}),...(this.cfg.heldActivitiesV1===true?{heldPolicy:'held-activity/1',held:this.heldV1()}:{}),...(this.cfg.waitBoundV1===true?{waitBoundPolicy:WAIT_BOUND_V1}:{}),...(this.cfg.waitBoundV2===true?{waitBoundMovesPolicy:WAIT_BOUND_V2}:{}),...(this.cfg.waitBoundV3===true?{waitBoundItemPolicy:WAIT_BOUND_V3}:{}),...(this.cfg.cedePassageV1===true?{cedePassagePolicy:'cede-passage/1'}:{}), ...(this.cfg.classroomTvV1===true?{classroomTvPolicy:'classroom-tv/1'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
+  private stateHashInputs(nativeStateHash: string) { return { ...(this.cfg.groundReclaimV1===true?{groundReclaimPolicy:'ground-reclaim/1'}:{}), ...(this.world.officeStairGuardsV1?{officeGuardPolicy:this.world.officeStairGuardsV1.version}:{}), ...(this.lecturePlacement?{lecturePolicy:this.lecturePlacement}:{}), ...(this.sleepSnapshotActive?{sleepSnapshotPolicy:NATIVE_SLEEP_SNAPSHOT_V1}:{}), ...(this.newcomerResources.length?{newcomerResources:this.newcomerResources}:{}), w: nativeStateHash, p: [...this.programs.values()], l: this.leaving, clock: this.cfg.clock ?? null, quiet: this.quiet, ...(this.cfg.safeCrewRemoval?{removalPolicy:'crew-removal/1'}:{}), ...(this.cfg.disassemblyV1?{disassemblyPolicy:DISASSEMBLY_POLICY}:{}), ...(this.cfg.fixtureGroundGoalsV1?{fixtureGoalPolicy:'ground-fixture-levels/1'}:{}), ...(this.cfg.nativeArrivalWitnessV1?{arrivalWitnessPolicy:'native-navigation-arrival/1'}:{}), ...(this.cfg.quietLandingCourtesyV1?{quietLandingPolicy:'idle-landing-courtesy/1'}:{}), ...(this.commonsProvisionsActive?{provisionsPolicy:'commons-provisions/1'}:{}), ...(this.commonsKitchenActive?{kitchenPolicy:this.commonsKitchenVersion}:{}), ...(this.greenLandmarkActive?{greenLandmarkPolicy:'existing-green-landmark/1'}:{}), ...(this.socialEdenActive?{socialPolicy:'social-eden/1'}:{}), ...(this.foodDeliveries.length?{foodDeliveryPolicy:'commons-food-delivery/1',foodDeliveries:this.foodDeliveries}:{}), ...(this.cfg.safeArrivalV1?{arrivalPolicy:'arrival-clearance/1'}:{}), ...(this.cfg.walkSettleWaitV1===true?{walkSettlePolicy:'walk-settle-wait/1'}:{}),...(this.cfg.bodyStepGuardV1===true?{bodyStepGuardPolicy:'body-step-guard/1'}:{}),...(this.cfg.stairWayV1===true?{stairWayPolicy:'stair-way/1'}:{}),...(this.cfg.itemApproachV1===true?{itemApproachPolicy:'item-approach/1'}:{}),...(this.cfg.standHeightV1===true?{standHeightPolicy:'stand-height/1'}:{}),...(this.cfg.climbSpacingV1===true?{climbSpacingPolicy:'climb-spacing/1'}:{}),...(this.cfg.standHeightV2===true?{standHeightGroundPolicy:'stand-height/2'}:{}),...(this.cfg.stallReleaseSupportV1===true?{stallReleasePolicy:'stall-release-support/1'}:{}),...(this.cfg.carrierParkAwayV1===true?{carrierParkAwayPolicy:'park-away/1'}:{}),...(this.cfg.carrierBoardPathV1===true?{carrierBoardPathPolicy:'board-path/1'}:{}),...(this.cfg.heldActivitiesV1===true?{heldPolicy:'held-activity/1',held:this.heldV1()}:{}),...(this.cfg.waitBoundV1===true?{waitBoundPolicy:WAIT_BOUND_V1}:{}),...(this.cfg.waitBoundV2===true?{waitBoundMovesPolicy:WAIT_BOUND_V2}:{}),...(this.cfg.waitBoundV3===true?{waitBoundItemPolicy:WAIT_BOUND_V3}:{}),...(this.cfg.cedePassageV1===true?{cedePassagePolicy:'cede-passage/1'}:{}), ...(this.cfg.cycleRecoverV1===true?{cycleRecoverPolicy:'cycle-recover/1'}:{}), ...(this.cfg.classroomTvV1===true?{classroomTvPolicy:'classroom-tv/1'}:{}),...(this.cfg.refusalSettleV1===true?{refusalSettlePolicy:'hold-settle/1'}:{}),...(this.cfg.occupiedLinkRoutingV1===true?{occupiedLinkPolicy:'occupied-link-routing/1'}:{}),...(this.cfg.concurrentLinkEgressV1===true?{concurrentLinkEgressPolicy:'concurrent-link-egress/1'}:{}),...(this.cfg.stairLandingClearanceV1===true?{stairLandingPolicy:'stair-landing-clearance/1'}:{}), ...(this.cfg.walkBlockV1?{walkPolicy:'walk-block/1'}:{}), ...(this.physical?{physicalBinding:this.physical.rulesVersion,physicalPolicy:physicalPolicyV1(this.cfg)}:{}) }; }
   // Preserve the contract serializer's exact bytes; only the Node digest implementation changes.
   physicalHash(): string { return createHash('sha256').update(stableStringify(physicalView(this.world))).digest('hex'); }
 
@@ -430,6 +434,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.heldActivitiesV1===true)this.rt.services.heldActivitiesV1=true;   // #2294
     if(this.cfg.waitBoundV1===true)this.rt.services.waitBoundV1=true;   // #1952
     if(this.cfg.cedePassageV1===true)this.rt.services.cedePassageV1=true;   // #2426
+    if(this.cfg.cycleRecoverV1===true)this.rt.services.cycleRecoverV1=true;   // #2596
     this.rt.services.doorPassersV1=this.doorPassersV1;
     // Reader wrappers finish restoring public policies after construction.
     // Discard only their empty initial recorder before the first new frame.
@@ -845,17 +850,67 @@ export class MarsEngine implements Engine {
    *  one logged hold a tick. While it is marked the engine holds it again, at the logged pose, whenever it is found broken (at the
    *  start and end of each step, so the host never reads it broken); the mark ends once the body has stayed whole for a cooldown, or
    *  is gone. World state, so a snapshot and a replay carry it. */
-  markStandingV1(id: string, pose: { p: [number, number, number]; yaw: number; level: number }): void {
+  markStandingV1(id: string, pose?: { p: [number, number, number]; yaw: number; level: number }, fields?: string[][]): void {
+    if (fields) {   // #1513 nonfinite-mark/1: an object, by the fields its holds put back, at their values now (just put back), live and in a replay alike
+      const e = this.ents[id], marked = e && e.kind !== 'human' ? fields.flatMap(path => this.objectMarkFieldV1(e, path) ?? []) : [];
+      if (marked.length) (this.world.standingHoldsV1 ??= {})[id] = { fields: marked, last: this.rt.tick };
+      return;
+    }
     if (!this.ents[id] || !Array.isArray(pose?.p)) return;
     (this.world.standingHoldsV1 ??= {})[id] = { pose: { p: [...pose.p] as [number, number, number], yaw: pose.yaw, level: pose.level }, last: this.rt.tick };
   }
+  /** #1513 nonfinite-mark/1 (the host calls it after a hold it has seen MARK_AFTER times in a cooldown): each object these
+   *  just-applied patches put back that no mark holds yet is marked by the fields they put back (`['pose']` for a pose put back
+   *  or set down at the arrival). Bodies are quarantine-mark/1's. Returns the marks made, for the log. */
+  markNonFiniteV1(patches: NonFinitePatchV1[]): { id: string; fields: string[][] }[] {
+    const by = new Map<string, string[][]>(), marked = this.world.standingHoldsV1 ?? {};
+    for (const q of patches) {
+      const id = q.root === 'world' && q.path[0] === 'entities' ? q.path[1] : undefined;
+      if (!id || !this.ents[id] || this.ents[id].kind === 'human' || marked[id]) continue;
+      by.set(id, [...(by.get(id) ?? []), q.pose || q.place || q.path.length === 2 ? ['pose'] : q.path.slice(2)]);
+    }
+    const out = [...by].sort(([a], [b]) => (a < b ? -1 : 1)).map(([id, fields]) => ({ id, fields }));
+    for (const m of out) this.markStandingV1(m.id, undefined, m.fields);
+    return out.filter(m => this.world.standingHoldsV1?.[m.id]);
+  }
+  /** #1513: one marked field of an object as it is now, or null when it is no number: its pose whole (and the support it stands
+   *  on, which a put-back needs unchanged), or the number at `path`. */
+  private objectMarkFieldV1(e: any, path: string[]): ObjectMarkFieldV1 | null {
+    if (path.length === 1 && path[0] === 'pose') return e.pose && finiteDeepV1(e.pose) ? { path: ['pose'], pose: structuredClone(e.pose), support: stableStringify(e.support ?? null) } : null;
+    let v: any = e; for (const k of path) { if (!v || typeof v !== 'object') return null; v = v[k]; }
+    return typeof v === 'number' && Number.isFinite(v) ? { path: [...path], value: v } : null;
+  }
+  /** #1513: a marked object found broken gets its marked fields back, as nonfinite-hold/1 would put them back: a pose only for a
+   *  free component on the support it had, clear of every body (else the host meets it and plans as before). While it is whole
+   *  the mark follows it. False once it has stayed whole for the cooldown: the mark ends. */
+  private holdObjectMarkV1(id: string, m: { fields: ObjectMarkFieldV1[]; last: number }, tick: number): boolean {
+    const e = this.ents[id]; let broken = false, moved = false;
+    for (const f of m.fields) {
+      if (f.pose) {
+        if (e.pose && finiteDeepV1(e.pose)) continue;
+        broken = true;
+        if (stableStringify(e.support ?? null) === f.support && this.freeComponentV1(id) && this.clearOfBodiesV1(e, f.pose.p)) { e.pose = structuredClone(f.pose); moved = true; }
+        continue;
+      }
+      let v: any = e; for (const k of f.path.slice(0, -1)) { if (!v || typeof v !== 'object') { v = undefined; break; } v = v[k]; }
+      const k = f.path[f.path.length - 1];
+      if (!v || typeof v !== 'object' || typeof v[k] !== 'number' || Number.isFinite(v[k])) continue;
+      broken = true; v[k] = f.value;
+    }
+    if (moved) { try { acknowledgeRelocation(this.rt, id); } catch { /* the pose stands */ } this.tableCacheV1 = null; rememberPosesAfterRestore(this.rt); }
+    if (broken) { m.last = tick; return true; }
+    if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) return false;
+    for (const f of m.fields) { const now = this.objectMarkFieldV1(e, f.path); if (now) Object.assign(f, now); }   // whole: the mark follows it
+    return true;
+  }
   private standingHoldsStepV1(): void {
-    const marks = this.world.standingHoldsV1 as Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; last: number }>, tick: number = this.rt.tick;
+    const marks = this.world.standingHoldsV1 as Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; fields?: ObjectMarkFieldV1[]; last: number }>, tick: number = this.rt.tick;
     let bad: Set<string>;
     try { bad = new Set(this.corruptBodiesV1().flatMap(k => k.subjects)); } catch { return; }
     for (const id of Object.keys(marks).sort()) {
       const m = marks[id];
       if (!this.ents[id]) { delete marks[id]; continue; }
+      if (m.fields) { let keep = true; try { keep = this.holdObjectMarkV1(id, m as { fields: ObjectMarkFieldV1[]; last: number }, tick); } catch { /* the host's read still finds it */ } if (!keep) delete marks[id]; continue; }   // #1513
       if (bad.has(id)) { try { this.holdBodyV1(id, m.pose); } catch { /* the host's sweep still finds it */ } m.last = tick; }
       else if (tick - m.last >= STANDING_HOLD_COOLDOWN_V1) delete marks[id];
       else { const e = this.ents[id], q = e.pose?.p, lv = e.human?.level ?? 0;   // whole: the mark follows it, so a later break holds it where it last stood whole
@@ -929,18 +984,27 @@ export class MarsEngine implements Engine {
     return found > CAP || stuck ? [] : out;
   }
   /** #1496: what puts back an entity whose pose is no number, or null when nothing legal can (it then halts by name). */
-  private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
-    const e = this.ents[id], was = baseline?.ents[id], ents = Object.values(this.ents) as any[];
-    // only a free component: a kind that can never carry, seat, berth or hold anyone (a def with slots can: a seat holds its
-    // body only through the live action, which no scan of the body sees) (a boat, a bed, a rack, a ride, a frame
-    // part are not), with nothing resting on it. Anything else halts by name rather than move what may hold a body.
+  /** #1496: only a free component: a kind that can never carry, seat, berth or hold anyone (a def with slots can: a seat holds its
+   *  body only through the live action, which no scan of the body sees) (a boat, a bed, a rack, a ride, a frame part are not),
+   *  with nothing resting on it, and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`;
+   *  a grip is released by the patch). Anything else halts by name rather than move what may hold a body. */
+  private freeComponentV1(id: string): boolean {
+    const e = this.ents[id], ents = Object.values(this.ents) as any[];
     const def = (this.rt.world as any).entityPhysicsV1?.assets?.[e.def] ?? (CATALOG as any)[e.def];   // the world's library first, as registered for seat placement; an unknown def is not free
     const free = e.kind === 'component' && !!def && !def.slots?.length && !def.seats?.length && !e.connections?.length && !e.carrier && !e.vehicle && !e.boat && ['ground', 'resting-on', 'held', 'in-hand'].includes(e.support?.kind) && !ents.some(o => o.id !== id && o.support?.on === id);
-    // and no body names it anywhere in its state (a seat, a berth `<id>#<slot>`, a link `beam:<id>`, a grip is released below)
     const names = (v: unknown, depth = 0): boolean => typeof v === 'string' ? v === id || v.startsWith(`${id}#`) || v.endsWith(`:${id}`) : !!v && typeof v === 'object' && depth < 5 && Object.entries(v).some(([k, x]) => k !== 'grip' && names(x, depth + 1));
-    if (!free || ents.some(o => o.kind === 'human' && names(o.human))) return null;
+    return free && !ents.some(o => o.kind === 'human' && names(o.human));
+  }
+  /** #1496: `p` is clear of every body for this object's width. */
+  private clearOfBodiesV1(e: any, p: number[]): boolean {
     const radius = typeof e.body?.radius === 'number' && Number.isFinite(e.body.radius) ? e.body.radius : 0.3;
-    const clear = (p: number[]) => !ents.some(o => o.kind === 'human' && Array.isArray(o.pose?.p) && o.pose.p.every(Number.isFinite) && hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < radius + HUMAN_RADIUS && Math.abs(o.pose.p[1] - p[1]) < 1.5);
+    return !(Object.values(this.ents) as any[]).some(o => o.kind === 'human' && Array.isArray(o.pose?.p) && o.pose.p.every(Number.isFinite) && hypot(o.pose.p[0] - p[0], o.pose.p[2] - p[2]) < radius + HUMAN_RADIUS && Math.abs(o.pose.p[1] - p[1]) < 1.5);
+  }
+  private nonFinitePoseV1(id: string, baseline?: MarsEngine | null): NonFinitePatchV1 | null {
+    const e = this.ents[id], was = baseline?.ents[id];
+    if (!this.freeComponentV1(id)) return null;
+    const radius = typeof e.body?.radius === 'number' && Number.isFinite(e.body.radius) ? e.body.radius : 0.3;
+    const clear = (p: number[]) => this.clearOfBodiesV1(e, p);
     if (was?.pose && finiteDeepV1(was.pose) && Array.isArray(was.pose.p) && was.pose.p.length === 3 && stableStringify(was.support ?? null) === stableStringify(e.support ?? null) && clear(was.pose.p))
       return { root: 'world', path: ['entities', id, 'pose'], from: 'baseline', pose: structuredClone(was.pose) };
     const [ax, az] = (this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival) ?? [0, 0];
@@ -3136,8 +3200,9 @@ export class MarsEngine implements Engine {
    * when a walk reaches it (or it names nothing). From the body's own floor (review of #2397): a Soul upstairs behind the
    * ground door plans the same passage, its first leg walking down the stairs to the door. Doors are the walk graph's closed-gap solids (`<door>#door:<opening>`,
    * god engine-bridge) bordering the region the failed route exhausted; nearest to the way there first, at most `max`. */
-  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
+  closedDoorsOnWalkV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[],max=4,behind=false,out?:{reaches?:boolean}):{goal:[number,number];doors:string[];goalDoors:()=>string[]}|null{
     const step=steps.find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
+    if((typeof step.params?.level==='number'?step.params.level:0)!==0)return null;   // #2434: a goal upstairs is the door chain's (doorChainV1)
     const t=this.pointOf(step.params?.to);if(!t)return null;
     const start=this.godWalkoutStartV1(actor);if(!start)return null;
     const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8);if(!goal)return null;
@@ -3146,7 +3211,9 @@ export class MarsEngine implements Engine {
     // the doors are named from the destination's side, whose search the door closes in at once (review of #2397)
     const back=()=>spatial.route(this.rt.world,HUMAN_PROFILE_V1,{level:0,p:goal},start,{nameObstacles:id=>id.includes('#door:')});
     const r=behind?back():spatial.route(this.rt.world,HUMAN_PROFILE_V1,start,{level:0,p:goal},{nameObstacles:id=>id.includes('#door:')});
-    if(r.ok||r.diagnostic.code!=='route.unreachable')return null;
+    // `out.reaches` (#2438 review): the walk reaches as it is, so no door chain need be searched either
+    if(r.ok){if(out)out.reaches=true;return null;}
+    if(r.diagnostic.code!=='route.unreachable')return null;
     const pos=(id:string)=>{const o=spatial.scene.obstacles.find(x=>x.id.startsWith(id+'#door:'));return o?o.obb.c:null;};
     const along=(c:[number,number])=>hypot(c[0]-start.p[0],c[1]-start.p[1])+hypot(c[0]-goal[0],c[1]-goal[1]);
     const named=(d:{subjects?:string[]})=>[...new Set((d.subjects??[]).filter(s=>s.includes('#door:')).map(s=>s.split('#')[0]))].map(id=>({id,c:pos(id)})).filter((x):x is {id:string;c:[number,number]}=>!!x.c)
@@ -3164,12 +3231,36 @@ export class MarsEngine implements Engine {
    *  Eden boot, after door-fit/1's edit, a check here drained the whole world's relabel inside one act, ~25 s on a runner);
    *  the caller then asks the destination's side itself (closedDoorsOnWalkV1 with `behind`). */
   walkThroughDoorV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):boolean|null{
-    const step=steps.find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
+    // #2434: the destination is the plan's last walk_to (a walk upstairs goes to the front door's stand first)
+    const step=[...steps].reverse().find(s=>s.verb==='walk_to'),t=step&&this.pointOf(step.params?.to),start=this.godWalkoutStartV1(actor);if(!t||!start)return false;
     if(!this.navWarmV1(0))return null;
-    const goal=this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
+    const level=typeof step!.params?.level==='number'?step!.params.level:0,goal=level?[t[0],t[1]] as [number,number]:this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]];
     const spatial=this.rt.services.spatial as Spatial;if(!this.conn||this.conn.spatial!==spatial)return null;
-    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level:0,tol:.6}]);
-    return !!a?.ok&&!!b?.ok&&!!a.door!==!!b.door;
+    const [a,b]=this.conn.check([{id:'from',p:start.p,level:start.level,tol:.6},{id:'to',p:goal,level,tol:.6}]);
+    // #2434: either end behind doors, and not both in the same door group (the areas a walk joins without a door)
+    return !!a?.ok&&!!b?.ok&&(!!a.door||!!b.door)&&(a.door!==b.door||a.group!==b.group);
+  }
+  /** Soul Actions entry 31 (pure; #2434): the closed hand doors, in order, that one walk passes from where this body stands to
+   *  its plan's LAST walk_to destination (a point `[x, z]` with its `level`, or a named thing), any number in series and on any floor
+   *  (Spatial.doorChain, as reach counts them). Each door is its entity id with its floor and the faces it is crossed
+   *  from and to. Searched from the destination, else from the start (a long walk's far ground is planned coarsely and
+   *  may not meet a shut leaf) and turned round. Null when no door is needed or no chain reaches it. */
+  doorChainV1(actor:string,steps:{verb:string;params?:Record<string,unknown>}[]):{goal:[number,number];level:number;doors:{id:string;level:number;from:[number,number];to:[number,number]}[]}|null{
+    const step=[...steps].reverse().find(s=>s.verb==='walk_to'),e=this.ents[actor];if(!step||!e?.human)return null;
+    const to=step.params?.to,t=this.pointOf(to);if(!t)return null;
+    const level=typeof step.params?.level==='number'?step.params.level:typeof to==='string'?(this.rt.world.regions[to]?.level??this.ents[to]?.human?.level??0):0;
+    const start=this.godWalkoutStartV1(actor);if(!start)return null;
+    const goal=level===0?this.nearestStandableV1([t[0],t[1]],actor,HUMAN_RADIUS+.05,8)??[t[0],t[1]]:[t[0],t[1]] as [number,number];
+    const spatial=this.rt.services.spatial as Spatial;spatial.sync(this.rt.world);
+    const ent=(id:string)=>id.split('#')[0];
+    // from the destination first: its side is usually the small one (a room), searched exactly, and a long walk's far
+    // ground is planned coarsely and may not meet a shut leaf on the way
+    const plain:{reaches?:boolean}={};
+    const back=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,{level,p:goal},start,{},plain);
+    if(back)return {goal,level,doors:back.doors.reverse().map(d=>({id:ent(d.id),level:d.level,from:d.to,to:d.from}))};
+    if(plain.reaches)return null;   // #2438 review: the walk needs no door; the second search would only repeat the route
+    const fwd=spatial.doorChain(this.rt.world,HUMAN_PROFILE_V1,start,{level,p:goal});
+    return fwd?{goal,level,doors:fwd.doors.map(d=>({...d,id:ent(d.id)}))}:null;
   }
   /** Soul Actions entry 31 (pure): does a walk from `from` (level 0) reach this plan's first walk_to destination, a
    * standing point at its standoff as the walk itself would choose (goalNear's turns), with the world as it is now? */
@@ -3310,6 +3401,8 @@ export class MarsEngine implements Engine {
     if(policy.waitBoundV1===true){this.cfg={...this.cfg,waitBoundV1:true};this.rt.services.waitBoundV1=true;}
     // #2426 cede-passage/1 (prospective): a walker at the end of its leg leaves a passage it does not hold to the body there yielding to it.
     if(policy.cedePassageV1===true){this.cfg={...this.cfg,cedePassageV1:true};this.rt.services.cedePassageV1=true;}
+    // #2596 cycle-recover/1 (prospective): a two-body wait cycle asks for recovery after 3 s, and one of the pair steps aside.
+    if(policy.cycleRecoverV1===true){this.cfg={...this.cfg,cycleRecoverV1:true};this.rt.services.cycleRecoverV1=true;}
     if(policy.waitBoundV2===true)this.cfg={...this.cfg,waitBoundV2:true};   // #1288 (prospective): the bound for swims and journeys too
     if(policy.waitBoundV3===true)this.cfg={...this.cfg,waitBoundV3:true};   // #2155 (prospective): the bound for an item step's approach walk too
     // #2302 classroom-tv/1: once, at adoption, the installed lecture screen becomes a TV showing its lesson (later events copy the flag: no-op)
@@ -3470,6 +3563,7 @@ export class MarsEngine implements Engine {
     if(this.cfg.heldActivitiesV1===true)this.rt.services.heldActivitiesV1=true;   // #2294
     if(this.cfg.waitBoundV1===true)this.rt.services.waitBoundV1=true;   // #1952
     if(this.cfg.cedePassageV1===true)this.rt.services.cedePassageV1=true;   // #2426
+    if(this.cfg.cycleRecoverV1===true)this.rt.services.cycleRecoverV1=true;   // #2596
     this.startRecorder();
   }
 

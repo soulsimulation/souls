@@ -2,6 +2,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {AMBER_BLIP_MS, BASELINE_CAP_MS, LevelState, LoadMonitor, QUIET_TICK_ALPHA, QuietBaseline, QuietTick, STEP_DOWN_MS, type Signals} from './load/monitor.ts';
+import {frameBudgetMs} from './load/admission.ts';
 import {liveOf, newSharedLoad, S} from './load/shared.ts';
 import {newSharedApi} from './load/api-times.ts';
 import {attachBootSlots, bootPhase, bootSlots, bootTick} from './load/boot-progress.ts';
@@ -265,15 +266,18 @@ test('quiet tick (srv-admission-calib): an EWMA over quiet windows; a provisiona
   assert.equal(q.window(Number.NaN, true, true), 13);
 });
 
-test('#2470: a served loaded window with cheaper ticks than the learned quiet tick moves it down by alpha, never up', () => {
+test('#2559: a quiet tick learned from heavy setup ticks follows loaded windows down, served or not, so acts get a budget again', () => {
   const q = new QuietTick();
-  assert.equal(q.window(47, true, true), 47, 'learned from heavy setup ticks');
-  assert.ok(Math.abs(q.window(16, false, true) - (47 - QUIET_TICK_ALPHA * 31)) < 1e-9, 'a served loaded window of 16 ms ticks: down by alpha');
+  assert.equal(q.window(60, true, true), 60, 'the first quiet window caught the heavy setup ticks (Souls joining, viewers arriving)');
+  assert.equal(frameBudgetMs('green', q.value), 2, 'which leaves requests the floor budget');
+  // a busy world: acts queued, so no window is quiet again, and its 5 s service is under 0.95 in most windows
+  for (let i = 0; i < 40; i++) q.window(9, false, i % 3 === 0);   // 200 s of 5 s windows
+  assert.ok(q.value < 11, `loaded windows whose own ticks averaged 9 ms bring it down (${q.value})`);
+  assert.ok(frameBudgetMs('green', q.value) > 20, 'and the frame budget back to 0.6 × what the tick leaves of the frame');
   const v = q.value;
-  assert.equal(q.window(16, false, false), v, 'an unserved window (ticks behind) teaches nothing');
-  assert.equal(q.window(60, false, true), v, 'a loaded window with heavier ticks never raises it');
-  for (let i = 0; i < 60; i++) q.window(16, false, true);
-  assert.ok(Math.abs(q.value - 16) < 0.1, 'it follows the loaded ticks down to their average, not below');
+  assert.equal(q.window(40, false, false), v, 'a heavier loaded window never moves it up');
+  const fresh = new QuietTick();
+  assert.equal(fresh.window(9, false, false), 0, 'nothing learned yet: an unserved window does not seed it');
 });
 
 test('monitor: the quiet tick is the window\'s own tick average, learned only in quiet windows, and published', () => {

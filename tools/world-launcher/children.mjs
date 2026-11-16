@@ -82,8 +82,8 @@ export class ChildPool {
    * maxRunning / minFreeMb: before a world boots, idle worlds are put to sleep until it fits; when none can sleep the
    * boot is refused (error.code 'capacity'). busy(slug): a world with live viewers is never put to sleep.
    * stopGraceMs: how long stop() waits after SIGTERM before SIGKILL (10 s; tests shorten it).
-   * shards / shardDropGraceMs (#2444): worlds per shard program (else SIM_SHARDS; off by default); how long a world dropped
-   * while it loads may take to stop before its program is ended (shard.mjs DROP_GRACE_MS; tests lengthen it).
+   * shards (#2444): worlds per shard program (else SIM_SHARDS; off by default). A world dropped while it loads never ends
+   * its program (#2469): it stops once its boot ends.
    * sleepMs (lane P3): freezeIdle() freezes a world nobody asked anything for that long (see there); 0/absent: never.
    * exitMs (lane SLEEP): releaseIdle() lets a world frozen that long more exit, giving its memory back (see there).
    * guard (lane L1): overrides of guard.mjs GUARD (tests); random: the backoff's jitter source (tests).
@@ -108,6 +108,8 @@ export class ChildPool {
     /** #2304: the load queue (kids waiting for a slot, each with its rank and the time it joined), the loads running, and
      *  the wait of the last 100 loads (ms from joining the queue to starting). */
     this.loadWaiting = []; this.loading = 0; this.loadWaits = [];
+    /** #2490: how long the last 100 loads took, from their load slot to the world answering (making room included). */
+    this.loadTimes = [];
     /** #2233: when a load was last refused for memory or slots (the host problem code worlds.capacity). */
     this.capacityRefusedAt = null;
     this.g = { ...GUARD, ...(o.guard ?? {}) }; this.random = o.random ?? Math.random; this.guardTimer = null;
@@ -115,7 +117,7 @@ export class ChildPool {
     mkdirSync(o.logDir, { recursive: true });
     /** #2444: worlds share programs (tools/world-launcher/shard.mjs) only when SIM_SHARDS (or o.shards) sets a shard's size. */
     const shards = shardSize(o.shards ?? process.env.SIM_SHARDS);
-    this.shards = shards ? new ShardSet({ root: o.root, size: shards, logDir: o.logDir, log: this.log, dropGraceMs: o.shardDropGraceMs }) : null;
+    this.shards = shards ? new ShardSet({ root: o.root, size: shards, logDir: o.logDir, log: this.log }) : null;
   }
 
   // ---------- handover between launcher generations (keeper.mjs; lane C4 downtime)
@@ -261,16 +263,21 @@ export class ChildPool {
    *  exact, it ticks through what it missed on return), the one acted in longest ago first within each. A world someone is
    *  acting in or watching (busy) is never unloaded. Null when none qualifies. */
   async unloadForRoom(except, now = Date.now()) {
-    const quietMs = this.o.idleMs ?? QUIET_MS;
-    const ok = (k) => k.slug !== except && k.status === 'running' && k.child && !k.adopted && !k.ready && !k.stopped && !k.stopping && !this.o.busy?.(k.slug);
-    const byAge = [...this.kids.values()].filter(ok).sort((a, b) => (a.lastUsed ?? 0) - (b.lastUsed ?? 0));
-    const still = byAge.find((k) => { const s = this.o.still?.(k); return s?.still === true && (s.at ?? 0) >= (k.lastUsed ?? 0) && (s.untilWallMs == null || s.untilWallMs - now >= STILL_HORIZON_MS); });
-    const victim = still ?? byAge.find((k) => now - (k.lastUsed ?? 0) >= quietMs);
+    const { victim, still } = this.roomVictim(except, now) ?? {};
     if (!victim) return null;
     this.log(`world ${victim.slug} unloaded to make room (${still ? 'still' : `no act or visitor for ${Math.round((now - (victim.lastUsed ?? 0)) / 60_000)} min`})`);
     await this.stop(victim.slug);
     victim.asleep = true; victim.unloadedFor = still ? 'still' : 'quiet';
     return victim.slug;
+  }
+  /** The world unloadForRoom() would unload now ({ victim, still }), or null; #2490: the alarm asks before an early load. */
+  roomVictim(except, now = Date.now()) {
+    const quietMs = this.o.idleMs ?? QUIET_MS;
+    const ok = (k) => k.slug !== except && k.status === 'running' && k.child && !k.adopted && !k.ready && !k.stopped && !k.stopping && !this.o.busy?.(k.slug);
+    const byAge = [...this.kids.values()].filter(ok).sort((a, b) => (a.lastUsed ?? 0) - (b.lastUsed ?? 0));
+    const still = byAge.find((k) => { const s = this.o.still?.(k); return s?.still === true && (s.at ?? 0) >= (k.lastUsed ?? 0) && (s.untilWallMs == null || s.untilWallMs - now >= STILL_HORIZON_MS); });
+    const victim = still ?? byAge.find((k) => now - (k.lastUsed ?? 0) >= quietMs);
+    return victim ? { victim, still: !!still } : null;
   }
   /** #2233 A1: a world's estimate while it loads (LOAD_MB by its class). */
   loadMb(k) { return LOAD_MB[worldClass(k?.world)]; }
@@ -396,7 +403,7 @@ export class ChildPool {
   }
 
   /** Start (or join the start of) a world; resolves with its port once /healthz answers. */
-  ensure(world, { timeoutMs = 90_000, passive = false, reason = 'visitor' } = {}) {
+  ensure(world, { timeoutMs = 90_000, passive = false, reason = 'visitor', why = null } = {}) {
     if (this.fenced) { const e = new Error(`world ${world.slug} is served by a newer launcher`); e.code = 'handed-over'; return Promise.reject(e); }
     // closing (closeAll): nothing boots again, e.g. a long-poll's GET retried after its world was stopped under it would
     // otherwise start a world no one stops (lane srv-shed, found with 100 listens open at close)
@@ -404,7 +411,7 @@ export class ChildPool {
     let k = this.kids.get(world.slug);
     if (k?.handedBack) { const e = new Error(`world ${world.slug} is going back to the previous launcher`); e.code = 'handed-back'; return Promise.reject(e); }
     // being stopped (put to sleep, its memory given back): boot it again only once that process is gone (one writer)
-    if (k?.stopping) return k.stopping.then(() => { if (this.closing) { const e = new Error(`world ${world.slug} is stopping`); e.code = 'stopping'; throw e; } return this.ensure(world, { timeoutMs, passive, reason }); });
+    if (k?.stopping) return k.stopping.then(() => { if (this.closing) { const e = new Error(`world ${world.slug} is stopping`); e.code = 'stopping'; throw e; } return this.ensure(world, { timeoutMs, passive, reason, why }); });
     if (k && !passive) k.lastUsed = Date.now();
     if (k?.frozen) this.thaw(k, { use: !passive });
     if (k && (k.status === 'running')) return Promise.resolve(k.port);
@@ -416,7 +423,7 @@ export class ChildPool {
     const rank = rankOf(reason);
     if (k?.ready) k.loadRank = Math.min(k.loadRank ?? rank, rank);
     // (a handover that left the world unloaded: load it here, as any other)
-    if (k?.ready) return this.waitFor(k.ready.then((p) => (p === UNLOADED ? this.ensure(world, { timeoutMs, passive, reason }) : p)), timeoutMs, world.slug);
+    if (k?.ready) return this.waitFor(k.ready.then((p) => (p === UNLOADED ? this.ensure(world, { timeoutMs, passive, reason, why }) : p)), timeoutMs, world.slug);
     // adopted but its handover failed: the previous launcher may still hold its database, so it is never started here
     if (k?.adopted) { const e = new Error(`world ${world.slug} could not be taken over from the previous launcher${k.lastError ? `: ${k.lastError}` : ''}`); e.code = 'handover-failed'; return Promise.reject(e); }
     k = k ?? { slug: world.slug, world, restarts: 0, crashes: 0, status: 'starting', port: null, child: null, upSince: null, lastExit: null, ready: null, stopped: false, lastUsed: Date.now() };
@@ -426,6 +433,8 @@ export class ChildPool {
     // after a single crash someone waiting restarts it now, as before
     if (k.timer && k.crashes > 1) return this.waitFor(k.pending.p, timeoutMs, world.slug);
     if (k.timer) { clearTimeout(k.timer); k.timer = null; }
+    // #2475 A3: every load is in the log with what asked for it (a timed run's artifact shows what loaded each world)
+    this.log(`world ${k.slug} loads (${reason}${why ? `: ${why}` : ''})`);
     k.loadRank = rank; k.ready = this.boot(k, timeoutMs).finally(() => { k.ready = null; k.loadRank = null; });
     // a boot a visitor started fails: not retried here (the next visit tries again), but it counts toward the breaker,
     // so a world that cannot boot is held instead of booted by every visit
@@ -447,15 +456,18 @@ export class ChildPool {
 
   /** Live (or booting) children other than `except`. */
   running(except) { return [...this.kids.values()].filter((k) => k.slug !== except && (k.child || k.adopted || k.status === 'starting' || k.status === 'restarting' || k.status === 'handover')).length; }
-  /** Is there room for one more world under the memory figure (or the running cap) and the free-memory floor, as things stand? */
-  roomFor(slug) {
+  /** Is there room for one more world under the memory figure (or the running cap) and the free-memory floor, as things stand?
+   *  (`also`: see below; ordinary loads pass none.) */
+  roomFor(slug, also = []) {
     const { maxRunning = Infinity, minFreeMb = 0, worldsMemMb = 0 } = this.o;
+    // #2490: `also`, the worlds (registry entries) a caller is about to load besides, counted as if already loading
+    const plusMb = also.reduce((n, w) => n + LOAD_MB[worldClass(w)], 0);
     // low: the host under its floor, or (lane P3) the unit within one world of its own MemoryHigh/Max: the worlds share
     // the unit's cgroup (production 8G/9G), which fills long before the host does, and over MemoryMax a world is killed
     const room = minFreeMb > 0 ? (this.o.unitRoom ?? cgroupHeadroomMb)() : null;
     // #2233 A1: with a memory figure, the running worlds' Pss and each loading world's estimate, this one's included
-    const mem = worldsMemMb > 0 ? this.memUse(slug) : null, needMb = mem ? mem.running + mem.loading + this.loadMb(this.kids.get(slug)) : null;
-    const full = mem ? needMb > worldsMemMb : this.running(slug) >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
+    const mem = worldsMemMb > 0 ? this.memUse(slug) : null, needMb = mem ? mem.running + mem.loading + plusMb + this.loadMb(this.kids.get(slug)) : null;
+    const full = mem ? needMb > worldsMemMb : this.running(slug) + also.length >= maxRunning, low = minFreeMb > 0 && (memAvailableMb() < minFreeMb || (room !== null && room < (this.o.unitFloorMb ?? PREWARM_MB)));
     return { full, low, room, needMb, ok: !full && !low };
   }
   /** Make room for one more world under the memory figure (or the running cap) and the free-memory floor, unloading worlds if needed. */
@@ -486,11 +498,14 @@ export class ChildPool {
       if (this.fenced) { k.status = 'stopped'; const e = new Error(`world ${k.slug} is served by a newer launcher`); e.code = 'handed-over'; throw e; }
       if (this.closing || k.stopped) { k.status = 'stopped'; this.o.onChange?.(k.slug); const e = new Error(`world ${k.slug} was stopped`); e.code = 'stopping'; throw e; }
     } catch (e) { done(); throw e; }
-    const run = this.spawnAndWait(k, timeoutMs);
+    const t0 = Date.now(), run = this.spawnAndWait(k, timeoutMs);
     this.inflight.set(run, k); run.then(() => this.inflight.delete(run), () => this.inflight.delete(run));
+    run.then(() => { if (queued) { this.loadTimes.push(Date.now() - t0); if (this.loadTimes.length > 100) this.loadTimes.shift(); } }, () => {});
     run.then(done, done);
     return run;
   }
+  /** #2490: the median of the last loads' times (loadTimes), or null before any. */
+  loadMs() { const w = [...this.loadTimes].sort((a, b) => a - b); return w.length ? w[Math.ceil(w.length / 2) - 1] : null; }
   /** #2304: wait for one of the loadParallel slots (status 'waiting' meanwhile); resolves with the slot's release. */
   async loadSlot(k) {
     const max = this.o.loadParallel ?? Infinity, joined = Date.now();

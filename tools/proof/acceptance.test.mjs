@@ -7,10 +7,11 @@ import {
 } from './acceptance.mjs';
 
 const policy = loadChecks();
-// tools/proof/upload.mjs hosts a PR's proof on its own prerelease `proofs-<n>`; older PRs link the shared `proofs`.
-const VIDEO = 'https://github.com/o/r/releases/download/proofs-7/pr-7.desktop.mp4';
-const PROOF = 'https://github.com/o/r/releases/download/proofs-7/pr-7.proof.json';
-const SHARED = url => url.replace('/proofs-7/', '/proofs/');
+// tools/proof/upload.mjs hosts a PR's proof on the proof CDN; proof moved off the old GitHub releases sits under legacy/.
+const VIDEO = 'https://assets.eden.art/proofs/pr-7/desktop.mp4';
+const PROOF = 'https://assets.eden.art/proofs/pr-7/proof.json';
+/** Where proof moved from the old GitHub release `proofs-7` keeps its asset name (pr-7.<file>). */
+const LEGACY = url => url.replace('/proofs/pr-7/', '/proofs/legacy/proofs-7/pr-7.');
 
 const body = ({ problem = 'Visitors on phones cannot open the seat menu. Closes #12', acceptance, audit, proof = '' } = {}) => `## Problem
 <!-- a comment that must not count -->
@@ -129,9 +130,9 @@ test('T2 needs the issue link, a clip and a valid proof.json that agrees with th
   assert.ok(disagree.problems.some(p => /A2 Desktop click still works" is met in the PR but unmet in proof.json/.test(p)));
   const unreadable = checkPr({ body: withLinks, tier: 'T2', proof: { error: 'HTTP 404' }, policy });
   assert.ok(unreadable.problems.some(p => /HTTP 404/.test(p)));
-  const legacy = body({ proof: `- clip: ${SHARED(VIDEO)}\n- proof.json: ${SHARED(PROOF)}` });
-  const legacyProof = proofDoc({ media: proofDoc().media.map(m => ({ ...m, url: SHARED(m.url) })) });
-  assert.equal(checkPr({ body: legacy, tier: 'T2', proof: legacyProof, head: 'abc1234def', policy }).ok, true, 'links on the shared release still count');
+  const legacy = body({ proof: `- clip: ${LEGACY(VIDEO)}\n- proof.json: ${LEGACY(PROOF)}` });
+  const legacyProof = proofDoc({ media: proofDoc().media.map(m => ({ ...m, url: LEGACY(m.url) })) });
+  assert.equal(checkPr({ body: legacy, tier: 'T2', proof: legacyProof, head: 'abc1234def', policy }).ok, true, 'proof moved off the old releases still counts');
 });
 
 test('validateProof: schema, evidence, uncut real-speed video, stale commit warning', () => {
@@ -259,14 +260,14 @@ test('the comment embeds each clip\'s preview, linked to the clip (proof.json fi
   const GIF = VIDEO.replace('.mp4', '.preview.gif');
   assert.deepEqual(clipPreviews([VIDEO], [], { media: [{ url: VIDEO, preview: GIF }] }), [{ video: VIDEO, preview: GIF }]);
   assert.deepEqual(clipPreviews([VIDEO], [VIDEO.replace('.mp4', '.preview-2.gif')]), [{ video: VIDEO, preview: VIDEO.replace('.mp4', '.preview-2.gif') }]);
-  assert.deepEqual(clipPreviews([VIDEO], ['https://h/other.preview.gif', 'https://h/pr-7.desktop.png']), [{ video: VIDEO, preview: null }]);
+  assert.deepEqual(clipPreviews([VIDEO], ['https://h/other.preview.gif', 'https://h/desktop.png']), [{ video: VIDEO, preview: null }]);
   const r = checkPr({ body: body({ proof: `- clips: [![desktop](${GIF})](${VIDEO})` }), tier: 'T1', policy });
   assert.deepEqual(r.clips[0], { video: VIDEO, preview: GIF });
   assert.equal(r.clips[1].preview, null, 'the kept failed take has no preview');
   const c = renderComment(r, { required: [] });
-  assert.ok(c.includes(`[![pr-7.desktop.mp4](${GIF})](${VIDEO})`), c);
+  assert.ok(c.includes(`[![desktop.mp4](${GIF})](${VIDEO})`), c);
   const plain = renderComment(checkPr({ body: body(), tier: 'T1', policy }), { required: [] });
-  assert.match(plain, /\[Full-resolution video: pr-7\.desktop\.mp4\]\(.*\)/);
+  assert.match(plain, /\[Full-resolution video: desktop\.mp4\]\(.*\)/);
   assert.match(c, /GIFs below are reduced previews/);
 });
 
@@ -309,43 +310,30 @@ test('privacy is never waived or skipped for Dependabot, including linked issue 
 });
 
 // #765: proof links count, and proof.json is fetched, only from a proof host.
-test('proofHostProblem: a repository\'s earlier name counts as it, and only that exact name (#1183)', () => {
-  const repo = 'soulsimulation/souls', gh = path => `https://github.com/${path}`, opts = { repo, cdn: null };
-  for (const path of ['genekogan/souls/releases/download/proofs/pr-1.desktop.mp4', 'genekogan/souls/releases/download/proofs-1101/pr-1101.proof.json', 'soulsimulation/souls/releases/download/proofs-7/x.mp4'])
-    assert.equal(proofHostProblem(gh(path), opts), null, path);
-  for (const path of ['genekogan/other/releases/download/proofs/x.mp4', 'evil/souls/releases/download/proofs/x.mp4', 'genekogan/souls2/releases/download/proofs/x.mp4',
-    'xgenekogan/souls/releases/download/proofs/x.mp4', 'genekogan/souls/releases/download/v0.119/x.mp4', 'genekogan/souls/releases/download/proofs/../v1/x.mp4'])
-    assert.match(String(proofHostProblem(gh(path), opts)), /proofs release \(soulsimulation\/souls\)/, path);
-  assert.match(String(proofHostProblem(gh('genekogan/souls/releases/download/proofs/x.mp4'), { repo: 'o/r', cdn: null })), /proofs release \(o\/r\)/, 'another repository gains nothing');
-  assert.deepEqual(allowedProofLinks([gh('genekogan/souls/releases/download/proofs/x.mp4')], opts), { ok: [gh('genekogan/souls/releases/download/proofs/x.mp4')], ignored: [] });
-});
-
-test('proofHostProblem: this repository\'s proofs releases, GitHub attachments and the proof CDN only', () => {
-  const ok = (u, o = { repo: 'o/r' }) => assert.equal(proofHostProblem(u, o), null, u);
-  const no = (u, re, o = { repo: 'o/r' }) => assert.match(String(proofHostProblem(u, o)), re, u);
-  ok(VIDEO); ok(PROOF); ok(SHARED(VIDEO));
+test('proofHostProblem: the proof CDN, GitHub attachments and SIM_PROOF_PUBLIC_URL only; never GitHub releases', () => {
+  const ok = (u, o = { cdn: null }) => assert.equal(proofHostProblem(u, o), null, u);
+  const no = (u, re, o = { cdn: null }) => assert.match(String(proofHostProblem(u, o)), re, u);
+  ok(VIDEO); ok(PROOF); ok(LEGACY(VIDEO)); ok(LEGACY(PROOF));
   ok('https://github.com/user-attachments/assets/1a2b3c4d-1111-2222-3333-444455556666');
   ok('https://github.com/user-attachments/files/123456/run.log');
-  ok('https://cdn.example.test/proofs/pr-7/clip.mp4', { repo: 'o/r', cdn: 'https://cdn.example.test/proofs' });
+  ok('https://cdn.example.test/proofs/pr-7/clip.mp4', { cdn: 'https://cdn.example.test/proofs' });
   // look-alike hosts and paths
-  no('https://github.com.evil.test/o/r/releases/download/proofs-7/x.mp4', /not a proof host/);
-  no('https://evil.test/github.com/o/r/releases/download/proofs-7/x.mp4', /not a proof host/);
-  no('https://gist.github.com/o/r/releases/download/proofs-7/x.mp4', /not a proof host/);
-  no('https://cdn.example.test.evil.test/proofs/x.mp4', /not a proof host/, { repo: 'o/r', cdn: 'https://cdn.example.test/proofs' });
-  no('https://cdn.example.test/other/x.mp4', /not a proof host/, { repo: 'o/r', cdn: 'https://cdn.example.test/proofs' });
+  no('https://assets.eden.art.evil.test/proofs/pr-7/x.mp4', /not a proof host/);
+  no('https://evil.test/assets.eden.art/proofs/pr-7/x.mp4', /not a proof host/);
+  no('https://assets.eden.art/proofsx/pr-7/x.mp4', /not a proof host/);
+  no('https://assets.eden.art/w/world/assets/x.mp4', /not a proof host/);
+  no('https://assets.eden.art/proofs/x.mp4', /not a proof host/, 'a file straight under proofs/ is no PR\'s');
+  no('https://cdn.example.test.evil.test/proofs/x.mp4', /not a proof host/, { cdn: 'https://cdn.example.test/proofs' });
+  no('https://cdn.example.test/other/x.mp4', /not a proof host/, { cdn: 'https://cdn.example.test/proofs' });
   // userinfo, ports, queries, fragments, plain http
-  no('https://user:pw@github.com/o/r/releases/download/proofs-7/x.mp4', /userinfo/);
-  no('https://github.com:8443/o/r/releases/download/proofs-7/x.mp4', /port/);
+  no('https://user:pw@assets.eden.art/proofs/pr-7/x.mp4', /userinfo/);
+  no('https://assets.eden.art:8443/proofs/pr-7/x.mp4', /port/);
   no(`${VIDEO}?x=1`, /query/); no(`${VIDEO}#t=3`, /fragment/);
   no(VIDEO.replace('https:', 'http:'), /not https/);
-  // other repositories and other release tags
-  no('https://github.com/evil/r/releases/download/proofs-7/x.mp4', /proofs release \(o\/r\)/);
-  no('https://github.com/o/r/releases/download/v0.118/x.mp4', /proofs release/);
-  no('https://github.com/o/r/releases/download/proofs-x/x.mp4', /proofs release/);
-  no('https://github.com/o/r/releases/download/proofs-7/../v1/x.mp4', /proofs release/);
-  no('https://github.com/o/r/blob/main/x.mp4', /proofs release/);
-  assert.equal(proofHostProblem('https://github.com/any/repo/releases/download/proofs/x.mp4', { repo: null }), null, 'a local check with no repository accepts any proofs release');
-  assert.deepEqual(allowedProofLinks([VIDEO, 'https://evil.test/a.mp4'], { repo: 'o/r' }).ok, [VIDEO]);
+  // GitHub releases, any repository, are no longer proof hosts
+  for (const u of ['https://github.com/soulsimulation/souls/releases/download/proofs-7/pr-7.desktop.mp4', 'https://github.com/o/r/releases/download/proofs/x.mp4', 'https://github.com/o/r/blob/main/x.mp4'])
+    no(u, /no longer proof hosts/);
+  assert.deepEqual(allowedProofLinks([VIDEO, 'https://evil.test/a.mp4']).ok, [VIDEO]);
 });
 
 test('checkPr counts clips and proof.json only on proof hosts and says why the rest were ignored', () => {

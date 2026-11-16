@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {agentOnboarding,agentQuickstart,clerkNow,clerkSignedInHint,clerkOriginRoute,unsignedPreviewAuth} from './auth-ui.ts';
+import {agentOnboarding,agentQuickstart,clerkNow,clerkSignedInHint,clerkOriginRoute,homeClerkNow,unsignedPreviewAuth,worldClerkNow} from './auth-ui.ts';
 import {readFileSync} from 'node:fs';
 await test('New Soul prompt keeps a raw clickable-world URL and exact plain clipboard sentence',()=>{
  const onboarding=agentOnboarding('https://sim.example/w/eden/');
@@ -116,7 +116,7 @@ await test('Share Soul, the connection prompt and the onboarding name work on a 
  assert.equal(agentOnboarding(origin+path).world,'Willow Hollow') // V1: slug words, never the raw slug;
 });
 
-await test('P1: a Clerk world page loads its sign-in after the arrival unless the page came for a sign-in step',()=>{
+await test('P1, #2516: a Clerk world page loads its sign-in only when the page came for a sign-in step',()=>{
  const u='https://sim.example/worlds/w/eden-2026/';
  assert.equal(clerkNow(u,''),false);assert.equal(clerkNow(u+'#watch','#watch'),false);
  assert.equal(clerkNow(u+'#soul/soul_abc123','#soul/soul_abc123'),false);
@@ -133,4 +133,29 @@ test('lane PUX: the New Soul prompt carries the signed-in window code, and only 
  assert.equal(agentOnboarding('https://sim.example/worlds/w/bench-hamlet','Bench Hamlet','ABCD-EFGH').instructionsUrl,'https://sim.example/worlds/w/bench-hamlet/instructions.md?for=ABCD-EFGH');
  assert.match(agentOnboarding('https://sim.example/worlds/w/bench-hamlet','Bench Hamlet','ABCD-EFGH').text,/instructions\.md\?for=ABCD-EFGH /);
  for(const bad of [null,undefined,'','abcd-efgh','ABCD-EFG0','ABCD-EFGH&x=1'])assert.equal(agentOnboarding('https://sim.example/worlds/w/bench-hamlet','Bench Hamlet',bad).instructionsUrl,'https://sim.example/worlds/w/bench-hamlet/instructions.md');
+});
+await test('#2464: the homepage mounts Clerk only when it is signed in, mid-sign-in or asked to sign in',()=>{
+ const home='https://soul.example/',now=1_800_000_000_000;
+ assert.equal(homeClerkNow(home,'',null,now),false,'a signed-out visitor: no Clerk, so no sync round trip');
+ assert.equal(homeClerkNow(home,'__client_uat=0; __client_uat_x=0',null,now),false,'signed out by Clerk itself');
+ assert.equal(homeClerkNow(home,'a=1; __client_uat_x=1760000000',null,now),true,'probably signed in');
+ assert.equal(homeClerkNow(home+'?__clerk_synced=true','',null,now),true,'back from Clerk sync');
+ assert.equal(homeClerkNow(home+'?new=1&__clerk_db_jwt=x','',null,now),true,'Clerk development handshake');
+ assert.equal(homeClerkNow(home,'',now-60_000,now),true,'asked to sign in a minute ago');
+ assert.equal(homeClerkNow(home,'',now-11*60_000,now),false,'an old ask has lapsed');
+ assert.equal(homeClerkNow(home,'',now+60_000,now),false,'an ask from the future is ignored');
+});
+await test('#2516: a world page mounts Clerk only for a sign-in step, a signed-in browser or a sign-in asked for',()=>{
+ const u='https://soul.example/w/eden/',now=1_800_000_000_000;
+ assert.equal(worldClerkNow(u+'#watch','#watch','',null,now),false,'an anonymous visitor: no Clerk');
+ assert.equal(worldClerkNow(u+'#watch','#watch','__client_uat=0',null,now),false,'signed out by Clerk itself');
+ assert.equal(worldClerkNow(u+'#watch','#watch','__client_uat_x=1760000000',null,now),true,'probably signed in');
+ assert.equal(worldClerkNow(u+'#approve/AB12','#approve/AB12','',null,now),true,'a pairing link');
+ assert.equal(worldClerkNow(u+'#watch','#watch','',now-60_000,now),true,'asked to sign in a minute ago');
+ assert.equal(worldClerkNow(u+'#watch','#watch','',now-11*60_000,now),false,'an old ask has lapsed');
+ assert.equal(worldClerkNow(u+'#watch','#watch','',now+60_000,now),false,'an ask from the future is ignored');
+ // main.tsx: no Clerk mount after the arrival card any more; Sign in records the ask before mounting
+ const main=readFileSync(new URL('./main.tsx',import.meta.url),'utf8');
+ assert.doesNotMatch(main,/whenArrivalCardGone/);
+ assert.match(main,/login:\(\)=>\{writeAsked\(\{t:Date\.now\(\),sent:false\}\);pending\.current=true;setLoad\(true\);\}/);
 });
