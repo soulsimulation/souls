@@ -1910,6 +1910,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       }
       // #2527: the strict gate bound this very offer in this turn (bindOne, the menu's own offer): the act takes it, and
       // builds no second copy; the oracle (SIM_PLAN_ONCE_ORACLE) compares it with the projection it replaces
+      // (resolve's listed-only path too: a focused bindOne of walk:<ref> holds listed walks only, never an area's on-demand walk)
       const gate=this.inTurn(soul,asked)?.out,reuse=gate?.cap.available&&gate.plan?{caps:[gate.cap],plans:new Map([[asked,gate.plan]]) as Plans,tick,reused:true as const}:null;
       if(reuse&&!PLAN_ONCE_ORACLE){menuStats.one.exactTurn++;return reuse;}
       const built=this.exactWalkBuild(soul,asked,ref,project);

@@ -13,7 +13,7 @@ import {registerEdgeComms} from '../edge/comms/index.ts';
 import {edgeSoulResolver} from '../edge/routes.ts';
 import {readHumanCapabilitiesV1} from '../human-capabilities.ts';
 import type {EdgeSoul} from '../edge/contract.ts';
-import {menuStats,PLAN_ONCE_ORACLE} from '../edge/ledger/menu-stats.ts';
+import {menuStats,PLAN_ONCE,PLAN_ONCE_ORACLE} from '../edge/ledger/menu-stats.ts';
 
 async function setup(t:test.TestContext){
  const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
@@ -219,7 +219,7 @@ test('god object capability wrapper preserves a selected object and its place ou
  assert.equal(typeof places.get('projection-object'),'string');
  assert.equal(tableReads,0,'selected-object lookup never reads the whole object table');
 });
-test('#2527: an exact walk takes the strict gate\'s bind from the same turn and builds no second copy',async t=>{
+test('#2527: an exact walk takes the strict gate\'s bind from the same turn and builds no second copy',{skip:!PLAN_ONCE&&'SIM_PLAN_ONCE=0 turns the reuse off'},async t=>{
  const {f,edge,soul}=await setup(t),L=edge as any;let builds=0;
  const build=L.exactWalkBuild.bind(L);L.exactWalkBuild=(...args:any[])=>{builds++;return build(...args);};
  const miss0=menuStats.one.oracleMiss;
