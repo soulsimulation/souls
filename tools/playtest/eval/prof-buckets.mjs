@@ -13,6 +13,8 @@
 // #2533: nav.sync's samples also by who asked (`navSyncBy`): the action step or pass a tick ran the sync in, or the server
 // frame outside a tick, and the first frame outside the spatial service.
 // Long holds: runs of busy samples (no idle between) of at least `holdMs`, each named by the group that took most of it.
+// #2592 `step0`: each hold of 1 s or more split into JS tasks (one long task, or back-to-back work), tasks of 50, 100, 250
+// and 1000 ms or more by the group that took most of each, and the 25 longest tasks with their app frames (inclusive ms).
 import { readFileSync } from 'node:fs';
 
 const ROUTE_RE = /app\.(get|post|put|delete|patch|all)\(\s*['"`]([^'"`]+)/i;
@@ -88,18 +90,41 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
   };
   const syncBy = new Map();
   const tot = new Map(), holds = [];
+  // #2592 (`step0`): JS tasks, each a run of busy samples under one child of (root) (GC samples stay in the task they
+  // interrupt). A loop turn is at least as long as its longest task, so these are a lower bound on loop delay.
+  const rootChild = (id) => { let x = id; while (parent.get(x) != null && parent.get(parent.get(x)) != null) x = parent.get(x); return x; };
+  const appChain = (id) => { const out = []; for (let x = id; x != null; x = parent.get(x)) { const f = byId.get(x).callFrame, rel = relOf(f.url); if (/^(apps|packages|mars)\//.test(rel)) out.push(`${f.functionName || '(anon)'} ${rel.split('/').slice(-2).join('/')}:${f.lineNumber + 1}`); } return out.reverse(); };
+  const tasks = []; let task = null, t = 0;
+  const closeTask = () => { if (task) { tasks.push(task); if (cur) { cur.tasks++; cur.longestTask = Math.max(cur.longestTask, task.ms); } } task = null; };
   let cur = null, busy = 0, total = 0;
-  const close = () => { if (cur && cur.ms >= holdMs) holds.push(cur); cur = null; };
+  const close = () => { closeTask(); if (cur && cur.ms >= holdMs) holds.push(cur); cur = null; };
   for (let i = 0; i < p.samples.length; i++) {
-    const dt = (p.timeDeltas[i + 1] ?? p.timeDeltas[i] ?? 0) / 1000; total += dt;
+    const dt = (p.timeDeltas[i + 1] ?? p.timeDeltas[i] ?? 0) / 1000; total += dt; t += dt;
     const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); continue; }
     busy += dt; const g = classify(node.id);
     tot.set(g, (tot.get(g) ?? 0) + dt);
     if (g === 'nav.sync') { const k = syncWhere(node.id); syncBy.set(k, (syncBy.get(k) ?? 0) + dt); }
-    if (!cur) cur = { ms: 0, by: new Map() }; cur.ms += dt; cur.by.set(g, (cur.by.get(g) ?? 0) + dt);
+    if (!cur) cur = { at: t - dt, ms: 0, by: new Map(), tasks: 0, longestTask: 0 }; cur.ms += dt; cur.by.set(g, (cur.by.get(g) ?? 0) + dt);
+    const rc = g === 'gc' && task ? task.root : rootChild(node.id);
+    if (task && task.root !== rc) closeTask();
+    if (!task) task = { at: t - dt, root: rc, ms: 0, by: new Map(), leaf: new Map() };
+    task.ms += dt; task.by.set(g, (task.by.get(g) ?? 0) + dt); if (g !== 'gc') task.leaf.set(node.id, (task.leaf.get(node.id) ?? 0) + dt);
   }
   close();
   const r1 = (x) => Math.round(10 * x) / 10;
+  const top = (m, k) => [...m].sort((a, b) => b[1] - a[1]).slice(0, k).map(([g, ms]) => [g, r1(ms)]);
+  const mainOf = (m) => top(m, 1)[0]?.[0] ?? '-';
+  // the frames a task spent most in: inclusive ms per app frame on its stacks
+  const framesOf = (tk, k) => { const inc = new Map(); for (const [leaf, ms] of tk.leaf) for (const f of new Set(appChain(leaf))) inc.set(f, (inc.get(f) ?? 0) + ms); return top(inc, k); };
+  const BANDS = [50, 100, 250, 1000];
+  const taskHist = {}; for (const tk of tasks) { if (tk.ms < BANDS[0]) continue; const g = mainOf(tk.by), e = taskHist[g] ??= { n: 0, ms: 0, maxMs: 0, ...Object.fromEntries(BANDS.map((b) => [`over${b}`, 0])) }; e.n++; e.ms += tk.ms; e.maxMs = Math.max(e.maxMs, tk.ms); for (const b of BANDS) if (tk.ms >= b) e[`over${b}`]++; }
+  for (const e of Object.values(taskHist)) { e.ms = r1(e.ms); e.maxMs = r1(e.maxMs); }
+  const step0 = {
+    tasksOver: Object.fromEntries(BANDS.map((b) => [b, tasks.filter((tk) => tk.ms >= b).length])),
+    taskHist: Object.fromEntries(Object.entries(taskHist).sort((a, b) => b[1].ms - a[1].ms)),
+    holdsOver1s: holds.filter((h) => h.ms >= 1000).map((h) => ({ atS: r1(h.at / 1000), ms: r1(h.ms), tasks: h.tasks, longestTaskMs: r1(h.longestTask), groups: top(h.by, 5) })),
+    longestTasks: [...tasks].sort((a, b) => b.ms - a.ms).slice(0, 25).map((tk) => ({ atS: r1(tk.at / 1000), ms: r1(tk.ms), groups: top(tk.by, 4), frames: framesOf(tk, 12) })),
+  };
   const bySource = new Map();
   for (const h of holds) { const [src] = [...h.by].sort((a, b) => b[1] - a[1])[0]; const e = bySource.get(src) ?? { n: 0, ms: 0, maxMs: 0 }; e.n++; e.ms += h.ms; e.maxMs = Math.max(e.maxMs, h.ms); bySource.set(src, e); }
   return {
@@ -107,6 +132,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     groups: Object.fromEntries([...tot.entries()].sort((a, b) => b[1] - a[1]).map(([g, ms]) => [g, r1(ms)])),
     navSyncBy: [...syncBy].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => { const [where, caller] = k.split(' | '); return { where, caller, ms: r1(ms) }; }),
     holds: { overMs: holdMs, n: holds.length, ms: r1(holds.reduce((s, h) => s + h.ms, 0)), bySource: Object.fromEntries([...bySource].sort((a, b) => b[1].ms - a[1].ms).map(([g, e]) => [g, { n: e.n, ms: r1(e.ms), maxMs: r1(e.maxMs) }])) },
+    step0,
   };
 }
 

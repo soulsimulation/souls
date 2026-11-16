@@ -52,3 +52,18 @@ test('#2533: nav.sync by who asked: the action step a tick ran it in, or the ser
 test('#2533: an [l4] line\'s scan sites, a caller with a space and an anonymous frame\'s URL reduced to its file', () => {
   assert.deepEqual(scanSitesOf('planWalk walk.ts:261=100 async actWork ledger.ts:88=5 file:///a/b/z.ts:12:3=7'), [['planWalk walk.ts:261', 100], ['async actWork ledger.ts:88', 5], ['z.ts:12:3', 7]]);
 });
+
+test('#2592: step0 splits a hold into tasks, counts long tasks by group and names the longest task\'s frames', () => {
+  // a timer task (GC inside it stays in it), then an immediate task right after it with no idle between, then idle
+  const p = profileOf([
+    [['processTimers', 'tickOnce@apps/server/src/world.ts', 'navWarmV1@mars/a.ts'], 700], [['(garbage collector)'], 20],
+    [['processTimers', 'tickOnce@apps/server/src/world.ts', 'navWarmV1@mars/a.ts'], 100],
+    [['processImmediate', 'actWork@apps/server/src/edge/ledger/ledger.ts', 'bindOne'], 400], [['(idle)'], 5],
+  ]);
+  const s = bucketProfile(p, '/repo').step0;
+  assert.deepEqual(s.tasksOver, { 50: 2, 100: 2, 250: 2, 1000: 0 });
+  assert.deepEqual(s.taskHist['nav.audit'], { n: 1, ms: 820, maxMs: 820, over50: 1, over100: 1, over250: 1, over1000: 0 });
+  assert.deepEqual(s.taskHist['act.bind'], { n: 1, ms: 400, maxMs: 400, over50: 1, over100: 1, over250: 1, over1000: 0 });
+  assert.deepEqual(s.holdsOver1s, [{ atS: 0, ms: 1220, tasks: 2, longestTaskMs: 820, groups: [['nav.audit', 800], ['act.bind', 400], ['gc', 20]] }]);
+  assert.deepEqual(s.longestTasks[0].frames, [['tickOnce src/world.ts:1', 800], ['navWarmV1 mars/a.ts:1', 800]]);
+});
