@@ -194,12 +194,17 @@ export async function rawPacedLoop({ base, soul, ids, until, r, counts, acts = [
 /** #2509: per tenth of agents by activity (intended acts, then achieved; busiest first): agents, intended and achieved
  *  acts, act queue p50 and the slow-down refusals (an active agent held back by its own budget). */
 export function byTenth(agents) {
-  const s = [...agents].sort((a, b) => b.intended - a.intended || b.achieved - a.achieved), size = Math.max(1, Math.ceil(s.length / 10)), out = [];
-  for (let k = 0; k < s.length; k += size) {
-    const g = s.slice(k, k + size), waits = g.flatMap((x) => x.waits).sort((a, b) => a - b), intended = g.reduce((t, x) => t + x.intended, 0), achieved = g.reduce((t, x) => t + x.achieved, 0);
+  const s = [...agents].sort((a, b) => b.intended - a.intended || b.achieved - a.achieved), out = [];
+  for (let t = 0; t < Math.min(10, s.length); t++) {
+    const g = s.slice(Math.round(t * s.length / Math.min(10, s.length)), Math.round((t + 1) * s.length / Math.min(10, s.length))), waits = g.flatMap((x) => x.waits).sort((a, b) => a - b), intended = g.reduce((t, x) => t + x.intended, 0), achieved = g.reduce((t, x) => t + x.achieved, 0);
     out.push({ tenth: out.length + 1, agents: g.length, raw: g.filter((x) => x.raw).length, intended, achieved, share: intended ? Math.round(1000 * achieved / intended) / 1000 : null, waitP50: waits.length ? waits[Math.floor(0.5 * (waits.length - 1))] : null, slowDown: g.reduce((t, x) => t + x.slowDown, 0) });
   }
   return out;
+}
+/** #2509: act queue p50 of the real and of the raw agents (ms), for comparing the two drivers on one world. */
+export function waitByDriver(agents) {
+  const p50 = (xs) => { const v = xs.flatMap((x) => x.waits).sort((a, b) => a - b); return v.length ? { n: v.length, p50: v[Math.floor(0.5 * (v.length - 1))] } : null; };
+  return { real: p50(agents.filter((x) => !x.raw)), raw: p50(agents.filter((x) => x.raw)) };
 }
 /** One agent's numbers from its act calls (trace records) for byTenth. */
 const agentOf = (http, intended, raw) => { const calls = http.filter((x) => x.method === 'POST' && /\/v1\/edge\/act(?:\?|$)/.test(x.route ?? '')); return { intended, achieved: calls.length, raw, waits: calls.map((x) => x.queuedMs).filter(Number.isFinite), slowDown: calls.filter((x) => (x.facts?.code ?? '') === 'soul.slow-down').length }; };
@@ -281,7 +286,7 @@ export async function runLoad(o) {
       }
       const routes = routeStats(http);
       const intended = actSec ? Math.round(n * durSec / actSec) : null;
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, driver, ...(n > real ? { raw: n - real, setupS, rawDifferences, tenths: byTenth(agents) } : { setupS }), intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, driver, ...(n > real ? { raw: n - real, setupS, rawDifferences, tenths: byTenth(agents), waitByDriver: waitByDriver(agents) } : { setupS }), intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       clearInterval(rss); stopping = true;
@@ -402,7 +407,10 @@ export function renderLoad(result) {
     }
     if (a.driver) L.push('', `Driver (#2509): this process ${a.driver.harnessCores} of a core${a.driver.harnessWithChildrenCores != null ? ` (${a.driver.harnessWithChildrenCores} with its finished children)` : ''}${a.driver.generatorCores != null ? `; everything on its ${a.driver.generatorCpus} CPUs (the serve daemons and CLI calls too) ${a.driver.generatorCores} of a core` : ''}, over ${a.driver.wallS} s.`);
     if (a.raw) {
-      L.push('', `Raw Souls (#2509): ${a.raw} of ${a.souls}; setup took ${a.setupS} s. ${a.rawDifferences}`, '', 'Per tenth of agents by activity (busiest first): acts achieved against intended, act queue p50 (ms), and slow-down refusals (an agent held back by its own budget).', '', '| tenth | agents (raw) | intended | achieved | share | queue p50 | slow-down |', '|---|---|---|---|---|---|---|');
+      const wd = a.waitByDriver;
+      L.push('', `Raw Souls (#2509): ${a.raw} of ${a.souls}; setup took ${a.setupS} s. ${a.rawDifferences}`);
+      if (wd?.real && wd?.raw) L.push('', `Act queue p50: real Souls ${wd.real.p50} ms (${wd.real.n} acts), raw Souls ${wd.raw.p50} ms (${wd.raw.n} acts): raw ${Math.round(100 * (wd.raw.p50 - wd.real.p50) / wd.real.p50)} % against real.`);
+      L.push('', 'Per tenth of agents by activity (busiest first): acts achieved against intended, act queue p50 (ms), and slow-down refusals (an agent held back by its own budget).', '', '| tenth | agents (raw) | intended | achieved | share | queue p50 | slow-down |', '|---|---|---|---|---|---|---|');
       for (const t of a.tenths) L.push(`| ${t.tenth} | ${t.agents} (${t.raw}) | ${Math.round(t.intended)} | ${t.achieved} | ${t.share == null ? '' : Math.round(100 * t.share) + ' %'} | ${t.waitP50 ?? ''} | ${t.slowDown} |`);
     }
     if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
