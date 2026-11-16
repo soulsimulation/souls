@@ -10,10 +10,13 @@ export class AccountRegistry {
   if(path!==':memory:')mkdirSync(dirname(resolve(path)),{recursive:true});
   this.db=new DatabaseSync(path);this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS provider_accounts_v1(account_id TEXT PRIMARY KEY,issuer TEXT NOT NULL,subject TEXT NOT NULL,created_at INTEGER NOT NULL,UNIQUE(issuer,subject))');
  }
+ /** Every world process opens this file: an existing account is a plain read, and the write lock is taken only for a new one. */
  bind(issuer:string,subject:string){
+  const find=()=>this.db.prepare('SELECT account_id FROM provider_accounts_v1 WHERE issuer=? AND subject=?').get(issuer,subject) as {account_id:string}|undefined;
+  const hit=find();if(hit)return hit.account_id;
   this.db.exec('BEGIN IMMEDIATE');
   try{
-   let row=this.db.prepare('SELECT account_id FROM provider_accounts_v1 WHERE issuer=? AND subject=?').get(issuer,subject) as {account_id:string}|undefined;
+   let row=find();
    if(!row){row={account_id:'acct_'+randomUUID()};this.db.prepare('INSERT INTO provider_accounts_v1 VALUES(?,?,?,?)').run(row.account_id,issuer,subject,Date.now());}
    this.db.exec('COMMIT');return row.account_id;
   }catch(e){this.db.exec('ROLLBACK');throw e;}

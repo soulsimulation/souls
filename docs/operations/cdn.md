@@ -40,6 +40,26 @@ network). Tests, the web build and the release check or pull it themselves; see 
 pull-only objects are published with `publish.mjs --repo-media`, validated against the asset manifest instead of the
 licence records, and never enter the client `cdn-manifest.json`.
 
+## Origin answers the edge keeps briefly
+
+Two origin answers are the same for every caller without a token and change often:
+
+| Path | Served by | Varies by |
+|---|---|---|
+| `/__sim/worlds.json` | the launcher | nothing per caller |
+| `/w/<slug>/v1/config` | the world (`apps/server/src/http.ts`) | the host the caller reached (part of the edge's key) |
+
+Requests without an `Authorization` header get `Cloudflare-CDN-Cache-Control: max-age=5, stale-while-revalidate=30`:
+the edge keeps the answer 5 s and serves it stale for up to 30 s while it asks again. A plain `s-maxage` would turn
+the revalidation off. The browser still gets the origin's `Cache-Control` (`no-store` for the world list). A request
+with `Authorization` never gets the header. The cache rule for these two paths is "eligible for cache, respect the
+origin's headers", applied only to requests without `Authorization`. Add them to the rule set with the hashed and
+stable classes.
+
+The world page itself is not edge-cached. The launcher keeps it for 2 s
+([load contract §2](../architecture/load.md#2-request-classes)), so a burst of arrivals costs the world one page
+build every 2 s.
+
 ## The client
 
 The web build carries `apps/web/src/cdn-manifest.json`, which maps origin URLs (in both the root and `/worlds`
