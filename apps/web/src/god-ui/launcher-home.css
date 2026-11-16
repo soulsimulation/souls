@@ -3,7 +3,7 @@
 .world-list.lh { max-width: 1400px; margin: 0 auto; padding: max(20px, var(--sa-t)) max(32px, var(--sa-r)) max(32px, var(--sa-b)) max(32px, var(--sa-l)); font: 15px/1.5 system-ui, -apple-system, sans-serif; }
 .lh button { font-family: inherit; }
 
-/* The top bar: the mark and the name on the left, New world and the account on the right */
+/* The top bar: the mark and the name on the left, sign-in or the account on the right */
 .lh-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; padding: 0; border: 0; position: static; background: none; }
 .lh-title { display: flex; align-items: center; gap: 10px; }
 .lh-wordmark { font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
@@ -25,6 +25,9 @@
 
 /* The world grid: each card is its picture, with the name and one status line over it */
 .lh-h { display: flex; align-items: baseline; gap: 8px; margin: 0 0 14px; font-size: 24px; font-weight: 600; letter-spacing: -.01em; }
+/* #2465: "Worlds <count>" on the left, New world on the right, on one line at any width */
+.lh-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; }
+.lh-list-head .lh-h { margin: 0; min-width: 0; }
 .lh-count { font-size: 14px; font-weight: 400; color: var(--dim); }
 .lh-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .lh-card { position: relative; display: block; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 14px; background: var(--line); color: #fff; text-decoration: none; }
