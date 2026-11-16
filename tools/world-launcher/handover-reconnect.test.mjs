@@ -5,8 +5,8 @@
 // page does, and waits on the next pool the way the launcher's upgrade handler does (pool.ensure). Then it sends hello
 // and waits for the welcome. The bar is the release probe's: close to first message on the next socket <= 6500 ms. World
 // time never stops: the next process restores the very tick the stopped one saved, and then runs every tick owed for the
-// pause. The pause this guards against (#2501): the first perception pass of the god layer ran whole in the boot catch-up,
-// so /healthz and every viewer's welcome waited ~0.9 s for it. It is now sliced, as on a running world.
+// pause. (#2501's fix itself, the first perception pass sliced in the boot catch-up, is held by
+// apps/server/src/god/perceive-catch-up.test.ts: whether that pass starts inside a catch-up this short is a matter of timing.)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -55,8 +55,5 @@ test('#2501: a handover of Eden 2026 reconnects its viewer within the release ba
     const owed = Number(/\[clock\] (\d+) ticks owed to the wall/.exec(lines)?.[1]), caught = /\[clock\] caught up (\d+) ticks/.exec(lines);
     assert.ok(owed > 0 && Number(caught?.[1]) >= owed, `the ticks owed for the pause run (${owed} owed, ${caught?.[1]} run)`);
     assert.doesNotMatch(lines, /ticks still owed when the catch-up stopped/);
-    // the god layer's first perception pass ran in slices during that catch-up (whole, it held the welcome ~0.9 s)
-    let sliced = null; for (let i = 0; i < 600 && !sliced; i++) { sliced = /\[bridge\] perceive catch-up: \d+ things \(whole pass\), (\d+) slices/.exec(log().slice(before)); if (!sliced) await sleep(50); }
-    assert.ok(Number(sliced?.[1]) > 1, `the first perception pass after the handover ran in slices (${sliced?.[0] ?? 'no catch-up line'})`);
   } catch (e) { t.diagnostic(`--- eden.log\n${log().slice(-6000)}`); throw e; }
 });
