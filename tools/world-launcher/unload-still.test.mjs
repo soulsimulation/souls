@@ -182,6 +182,73 @@ test('#2367 A2: a load with no room waits, then answers world.waking with a retr
   } finally { await L.close(); }
 });
 
+// #2475: a world unloaded to make room while not still was recorded "due at once" and then skipped by the alarm, so its
+// reminder waited for a visitor (the #2301 re-run: 84 reminders undelivered) and its live poll got a stale picture
+test('#2475: a world unloaded for room while not still is served "unloaded" with its clock moved on, and its alarm loads it once there is room: its reminder arrives within 60 s', { timeout: 60_000 }, async (t) => {
+  const L = await open({ dataDir: join(dir, 'for-room'), keepAlive: false, idleMs: 0, roomWaitMs: 1500, stillAlarmMs: 100 });
+  try {
+    await create('Rem'); await create('Other'); await until(() => status(L, 'rem') === 'running' && status(L, 'other') === 'running', 'both run');
+    still('rem', { still: false }); still('other', { still: false });
+    const live = () => fetch(`${base}/w/rem/v1/edge/live`, { headers: SOUL });
+    const kept = await (await live()).json();
+    L.pool.o.pss = () => 300; L.pool.o.worldsMemMb = 400; await L.pool.stop('other');   // one world fits (a fixed 300 MB Pss)
+    const out = join(dir, 'delivered-for-room.txt'), dueAt = Date.now() + 10_000;
+    writeFileSync(dueFile('rem'), JSON.stringify({ dueAt, out }));   // read when the world next loads
+    assert.equal((await act('other')).status, 200, 'other loads: rem, quiet and not still, is unloaded to make room');
+    assert.notEqual(status(L, 'rem'), 'running');
+    assert.equal(L.still.horizons.get('rem')?.still, false, 'recorded not still');
+    await wait(500);
+    assert.notEqual(status(L, 'rem'), 'running', 'no room: its alarm never unloads another world for it');
+    assert.equal(status(L, 'other'), 'running');
+    // A2: its live poll is answered as an unloaded world's
+    const c = await live(), pic = await c.json();
+    assert.equal(c.status, 200); assert.equal(c.headers.get('x-sim-cache'), 'unloaded');
+    assert.ok(pic.clock.at > kept.clock.at && pic.clock.worldDateTime > kept.clock.worldDateTime, 'the clock moved on by wall time');
+    assert.notEqual(status(L, 'rem'), 'running', 'the poll did not load it');
+    // memory frees (other turns still and unloads): rem's alarm loads it, in the background rank
+    still('other'); assert.deepEqual(await L.still.sweep(), ['other']);
+    await until(() => status(L, 'rem') === 'running', 'loaded by its alarm once there is room');
+    let at = null;
+    for (let i = 0; i < 400 && at === null; i++) { try { at = Number(readFileSync(out, 'utf8').trim().split('\n')[0]); } catch { await wait(50); } }
+    assert.ok(at !== null, 'the reminder was delivered');
+    assert.ok(at >= dueAt && at - dueAt <= 60_000, `delivered ${at - dueAt} ms after its due time`);
+    t.diagnostic(`delivered ${at - dueAt} ms after its due time`);
+  } finally { await L.close(); }
+});
+
+// #2490: the #2301 re-run's shared instant (101 reminders due together, room for about 19, 4 loads at once) delivered late
+// (p50 59 s, max 281 s) with a fixed 30 s lead. Here 50 unloaded worlds (each load about 1 s), room for 6, a 0.5 s lead.
+test('#2490 A1: 50 reminders due at one instant on a small-room pool each land within 60 s of due: loads start early by the queue ahead, never unload one another before due', { timeout: 120_000 }, async (t) => {
+  const N = 50, dataDir = join(dir, 'burst'), dueAt = Date.now() + 20_000, slugs = Array.from({ length: N }, (_, i) => `b${String(i + 1).padStart(2, '0')}`);
+  const outOf = (slug) => join(dir, `burst-${slug}.txt`), firstLine = (slug) => { try { return Number(readFileSync(outOf(slug), 'utf8').trim().split('\n')[0]); } catch { return null; } };
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', worlds: slugs.map((slug) => ({ slug, name: slug, template: 'hello-hamlet', port: null, createdAt: Date.now(), unlisted: false })) }));
+  writeFileSync(join(dataDir, 'horizons.json'), JSON.stringify(Object.fromEntries(slugs.map((s) => [s, { still: true, untilWallMs: dueAt, moveWallMs: null, at: Date.now() }]))));
+  for (const s of slugs) { writeFileSync(dueFile(s), JSON.stringify({ dueAt, out: outOf(s) })); still(s, { untilWallMs: dueAt }); }
+  const lines = []; process.env.FAKE_BOOT_MS = '1000';
+  const L = await open({ dataDir, keepAlive: false, idleMs: 0, stillLeadMs: 500, stillLoadMs: 1200, stillDueGraceMs: 500, usageStartMs: 600_000, log: (s) => lines.push({ at: Date.now(), s: String(s) }) });
+  try {
+    L.pool.o.pss = () => 300; L.pool.o.worldsMemMb = 2000;   // room for 6 (5 x 300 MB + one loading at 310 MB; a 7th is 2110)
+    const delivered = new Map();
+    while (delivered.size < N && Date.now() < dueAt + 60_000) {
+      L.still.alarms();
+      // a delivered reminder leaves the world's horizon (its still answer no longer says it)
+      for (const s of slugs) if (!delivered.has(s)) { const at = firstLine(s); if (at) { delivered.set(s, at); still(s); } }
+      await wait(100);
+    }
+    const late = slugs.map((s) => (delivered.has(s) ? delivered.get(s) - dueAt : null)).sort((a, b) => a - b);
+    t.diagnostic(`delivered ${delivered.size} of ${N}; late min ${late[0]} p50 ${late[N >> 1]} max ${late.at(-1)} ms; load ${L.pool.loadMs?.()} ms`);
+    assert.equal(delivered.size, N, 'every reminder delivered');
+    for (const x of late) assert.ok(x >= 0 && x <= 60_000, `delivered ${x} ms after its due time`);
+    // the lead scales with the queue: the room was full of worlds already running at the due instant, the first load
+    // was asked for well before a fixed lead (0.5 s) would have, and nothing loaded early was unloaded for room before due
+    assert.ok(late.filter((x) => x < 500).length >= 6, `${late.filter((x) => x < 500).length} on time: the whole room was loaded before due`);
+    const first = lines.find((l) => / loads \(listener/.test(l.s));
+    assert.ok(first && dueAt - first.at > 3000, `first alarm load ${first ? dueAt - first.at : '?'} ms before due`);
+    assert.deepEqual(lines.filter((l) => l.at < dueAt && /unloaded to make room/.test(l.s)).map((l) => l.s), [], 'no early load unloaded another before due');
+  } finally { delete process.env.FAKE_BOOT_MS; await L.close(); }
+});
+
 test('--unload-still 0 (the default): nothing is read, recorded or unloaded', { timeout: 30_000 }, async () => {
   const L = await open({ dataDir: join(dir, 'off'), unloadStill: undefined });
   try {
