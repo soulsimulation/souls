@@ -82,6 +82,8 @@ const BLOCK_PROGRESS = 0.2; // m
 /** Construction replans per tick before walkers with a still-clear current segment wait their turn. */
 export const REPLANS_PER_TICK = 4;
 const REPLAN_MAX_WAIT = 10; // ticks a deferred walker may follow its old corridor before replanning regardless
+/** #2535 replan-budget/1: ticks past its decision a walker blocked by people may be refused the budget before it re-plans forced. */
+export const REPLAN_PEOPLE_WAIT = 20;
 const YIELD_OFFSET = 0.9; // m lateral offset while waiting for oncoming traffic
 const LOOK = 2.5; // m look-ahead for conflicts
 const ENC_STEP = 0.1; // m between samples of the path ahead that encounters are measured against
@@ -1090,7 +1092,12 @@ function stepWalk(rt: Runtime, ex: Exec, dt: number): StepResult {
   // further attempt waits twice as long (0.5, 1, 2, 4 … s), so a crowd that clears is waited for
   const decideAfter = DECIDE_TICKS * (1 << Math.min(ex.peopleReplans, 5)); // (a shift: `**` is host pow)
   if (ex.block && !arrived && ex.peopleReplans < MAX_PEOPLE_REPLANS && ((ex.still ?? 0) >= decideAfter || ex.stuck >= Math.max(STUCK_TICKS, decideAfter))) {
-    if (retryPeople(rt, ex, a)) return { status: 'running', phase: 'replan' };
+    // #2535 replan-budget/1: the re-plan draws from the per-tick budget; refused, the walker stays blocked this tick with its
+    // counters as they are and asks again next tick. Refused REPLAN_PEOPLE_WAIT ticks past either trigger, it re-plans forced
+    // (`stuck` only grows while the block lasts, so every refused walker reaches it: nobody starves).
+    const forced = (ex.still ?? 0) >= decideAfter + REPLAN_PEOPLE_WAIT || ex.stuck >= Math.max(STUCK_TICKS, decideAfter) + REPLAN_PEOPLE_WAIT;
+    if (rt.services.replanBudgetV1 === true ? takeReplan(rt, forced) : (countFree(rt), true))
+      if (retryPeople(rt, ex, a)) return { status: 'running', phase: 'replan' };
   }
   // the corridor ahead turned out blocked by geometry (a stale corridor while a construction replan
   // was deferred): replan on the next tick, whatever the budget
@@ -1939,6 +1946,17 @@ function stepLinkCancel(rt: Runtime, ex: Exec, a: Entity, leg: LinkLeg, dt: numb
 /** Per-tick construction-replan budget (`services.planning.replansPerTick` overrides REPLANS_PER_TICK);
  *  `services.replanBudget` also keeps totals (replans, deferred walker-ticks, peak replans in one tick). */
 export type ReplanBudget = { tick: number; used: number; peak: number; deferred: number; replans: number };
+/** #2535: a count only, never read by the engine: `free` is this tick's non-forced re-plans (with replan-budget/1 off, a
+ *  re-plan around people in stepWalk counts too, unbudgeted), `freePeak` the most in one tick, `freeMulti` the ticks with
+ *  more than one. In `services`, outside the snapshot, like the budget. */
+export type ReplanCount = { tick: number; free: number; freePeak: number; freeMulti: number };
+function countFree(rt: Runtime): void {
+  const c = (rt.services.replanCount ??= { tick: -1, free: 0, freePeak: 0, freeMulti: 0 }) as ReplanCount;
+  if (c.tick !== rt.tick) { c.tick = rt.tick; c.free = 0; }
+  c.free++;
+  if (c.free > c.freePeak) c.freePeak = c.free;
+  if (c.free === 2) c.freeMulti++;
+}
 export function takeReplan(rt: Runtime, forced: boolean): boolean {
   const b = (rt.services.replanBudget ??= { tick: -1, used: 0, peak: 0, deferred: 0, replans: 0 }) as ReplanBudget;
   if (b.tick !== rt.tick) { b.tick = rt.tick; b.used = 0; }
@@ -1950,6 +1968,7 @@ export function takeReplan(rt: Runtime, forced: boolean): boolean {
   b.used++;
   b.replans++;
   if (b.used > b.peak) b.peak = b.used;
+  if (!forced) countFree(rt);
   return true;
 }
 

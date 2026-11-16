@@ -69,6 +69,11 @@ hit, so the hard separation layer rarely fires.
   legs ended in one passage, each waiting for such a body, took turns holding it: one let it go for the body to make way,
   and the other took it the same tick, so the bodies always found it held and never moved (a shared bay's joist crew
   stalled at 22 of 32 for good). A walker whose spot is held by a body yielding to anyone else enters as before.
+- **replan-budget/1** (#2535, adopted at boot last, after cede-passage/1): a walker blocked by people re-plans around them
+  only within the per-tick re-plan budget the construction re-plans already share (`takeReplan`, `REPLANS_PER_TICK` = 4).
+  When it is spent, the walker stays blocked that tick, its counters as they are, and asks again the next. Refused for
+  `REPLAN_PEOPLE_WAIT` (20) ticks past its decision, it re-plans forced, past the cap, so nobody starves. Before it, every
+  walker in a crowd that decided in the same tick re-planned in that tick (7 in one tick in the 30-body fire-ring jam).
 
 ## Speed limits and invariants
 
