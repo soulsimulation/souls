@@ -57,9 +57,12 @@ async function world(t: import('node:test').TestContext, name: string) {
     conns.push(c); return { c, seen };
   };
   /** Both clients join now, the uncached one first; the cache flag is set as each socket opens. */
+  // A join set ends with its takes message; a client's replica is ready at its snapshot, before the frames after it (the
+  // replayed batches among them) have necessarily been read, so each join is awaited to its end
+  const joined = (v: { seen: Seen }) => v.seen.raw.some((s) => /^\{"t":"(takes|take-entities|take-boundary-wire|take-chunks)"/.test(s));
   const pair = async () => {
-    const off = viewer(false); off.c.connect(); await until(() => off.c.replica.ready, 'the uncached client has its snapshot');
-    const on = viewer(true); on.c.connect(); await until(() => on.c.replica.ready, 'the cached client has its snapshot');
+    const off = viewer(false); off.c.connect(); await until(() => joined(off), 'the uncached client has its join set');
+    const on = viewer(true); on.c.connect(); await until(() => joined(on), 'the cached client has its join set');
     return { off, on };
   };
   /** An anonymous page join that only builds the shared picture. */
