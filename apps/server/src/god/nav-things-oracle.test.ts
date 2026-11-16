@@ -12,7 +12,7 @@ import type {EdgeCapability, EdgeSoul} from '../edge/contract.ts';
 import type {Entity} from '@souls/world-compiler';
 
 const NO_EDEN = existsSync(new URL('../../../../worlds/templates/eden-2026.json', import.meta.url)) ? false : 'needs worlds/templates/eden-2026.json';
-type Nav = {things(): {ref: string; kind: string; id: string}[]; thingsOracleV1(): string | null; update: (...a: unknown[]) => unknown};
+type Nav = {things(): {ref: string; kind: string; id: string; level: number; at: [number, number]; rise?: number}[]; thingsOracleV1(): string | null; update: (...a: unknown[]) => unknown};
 type Result = {accepted: boolean; failures?: unknown[]};
 
 test('Eden 2026: the things list updated from each commit equals a whole pass, after every edit and every tick', {timeout: 600_000, skip: NO_EDEN}, async t => {
@@ -70,6 +70,18 @@ test('Eden 2026: the things list updated from each commit equals a whole pass, a
   if (box) for (const open of [false, true, false]) engine(`container open=${open}`, [{op: 'set', id: box.id, state: {open}}]);
   // a thing removed (with what it holds)
   const gone = held.at(-1)!; engine(`remove ${m.pathOf(gone.id)}`, [{op: 'remove', id: gone.id}]);
+  // raised floors (levelAt reads them; review of #2489): a local part stands on a building's upper floor, then the god
+  // moves the building away from under it and back
+  const upper = nav.things().find(x => x.kind === 'room' && x.level > 0 && !x.ref.includes('/part-'));
+  assert.ok(upper, 'Eden 2026 has an upper-floor room');
+  const tower = m.entities.get(upper.id)!, tp = tower.p!, [sx, sz] = upper.at, ty = m.worldPose(tower).y + (upper.rise ?? 3);
+  // the room's point in the owner's frame (the inverse of meaningParts' transform)
+  const ow = m.worldPose(m.entities.get(owner.id)!), c = Math.cos(ow.yaw), sn = Math.sin(ow.yaw), dx = sx - ow.x, dz = sz - ow.z;
+  const loft = [(dx * c - dz * sn) / ow.s, (ty - ow.y) / ow.s, (dx * sn + dz * c) / ow.s];
+  authored('a part on an upper floor', [{op: 'set', id: owner.id, about: {title: 'Oracle Stone', parts: [{id: 'up', title: 'Oracle loft', anchor: {kind: 'local', point: loft, stand: loft, level: upper.level}}]}}]);
+  const away = tp.length === 3 ? [tp[0] + 40, tp[1], tp[2]] : [tp[0] + 40, tp[1]];
+  authored('the floor under it moves away', [{op: 'move', id: tower.id, p: away, mode: 'nudge'}]);
+  authored('and back', [{op: 'move', id: tower.id, p: tp, mode: 'nudge'}]);
   assert.ok(accepted >= 25, `most of the corpus applies (${accepted} accepted; refused: ${refused.join(' | ')})`);
 
   // Souls walking, sitting and acting: their engine edits (doors, seats, what they carry) between every tick
