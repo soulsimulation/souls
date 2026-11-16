@@ -931,16 +931,16 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private passageApplied=new Set<string>();
   private contactTicks(tick:number){
     for(const id of this.contactPending){
-      const r=this.rows('receipt_id=?',id)[0],detail=r?.detail?JSON.parse(r.detail):{},passage=detail.doorPassageV1 as {door:string;open:ContactActuatorIntent;applied:string[];unlocked?:true}|undefined;
+      const r=this.rows('receipt_id=?',id)[0],detail=r?.detail?JSON.parse(r.detail):{},passage=detail.doorPassageV1 as {door:string;doors?:string[];open:ContactActuatorIntent;applied:string[];unlocked?:true}|undefined;
       let intent=detail.contactActuatorV1 as ContactActuatorIntent|undefined;
       if(!r||(!intent&&!passage)||detail.contactAppliedV1||passage&&!OPEN.includes(r.phase)){this.contactPending.delete(id);continue;}
       const m=this.host.minds.get(r.soul_id),body=m&&this.body(m.entityId),motion=body?.human?.handActuator;
       // entry 31: a passage walk binds two hand contacts on its door (open before the doorway, close after); each applies once
-      if(passage){if(!m||!motion?.passage||motion.target!==passage.door||!motion.actionId||passage.applied.includes(motion.actionId)||this.passageApplied.has(id+'|'+motion.actionId))continue;
+      if(passage){if(!m||!motion?.passage||(motion.target!==passage.door&&!passage.doors?.includes(motion.target))||!motion.actionId||passage.applied.includes(motion.actionId)||this.passageApplied.has(id+'|'+motion.actionId))continue;
         // entry 32: a walk that turned the lock first binds the open at contact (the lock's turn changed the door since the
         // walk was admitted); the close of a walk through a locked door carries the latch (`relock`)
         const who={soulId:m.soulId,entityId:m.entityId,name:m.name,owner:m.owner},mode=motion.passage.mode;
-        intent=mode==='open'&&!passage.unlocked?passage.open:this.contactActuator?.prepare(who,passage.door,mode)??undefined;if(!intent)continue;
+        intent=mode==='open'&&!passage.unlocked&&motion.target===passage.door?passage.open:this.contactActuator?.prepare(who,motion.target,mode)??undefined;if(!intent)continue;
         intent={...intent,passage:true,...(mode==='close'&&motion.passage.relock?{relock:true as const}:{})};}
       if(!intent)continue;
       if(!motion||motion.target!==intent.target){if(!OPEN.includes(r.phase))this.contactPending.delete(id);continue;}
@@ -2594,7 +2594,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
     // closed room is not cut off when its door opens.
     let passage: DoorPassage | undefined, doorRefusal: DoorPassageRefusal | undefined;
     // (review of #2397) a walk bound from upstairs to a ground place is a point walk (`mars:walk_to`, level 0): the same walk
-    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && (s.params.level ?? 0) === 0 && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
+    // (#2434) and one bound to an upper floor keeps its floor (`level`): the passage's door chain climbs to it
+    const plainWalk = steps.map(s => s.verb === 'mars:walk_to' && typeof s.params.x === 'number' && typeof s.params.z === 'number' ? {verb: 'walk_to', params: {to: [s.params.x, s.params.z], standoff: 0, ...(typeof s.params.level === 'number' && s.params.level !== 0 ? {level: s.params.level} : {}), ...(s.params.gait ? {gait: s.params.gait} : {})}} : s);
     // (review of #2397) a walk the labels say goes through a closed door (one end behind it) is planned as the passage from
     // the start: a long walk plans its far ground coarsely and would meet the shut leaf only at the end, short of it
     const plain = !!this.doorPassage && plainWalk.every(s => s.verb === 'walk_to' || s.verb === 'stand');
@@ -2707,7 +2708,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
     const remember = (id: string) => {
       if (note) this.update(id, {reason: note});
       if (approach) this.setDetail(id, {approach});
-      if (passage) {this.setDetail(id, {doorPassageV1: {door: passage.door, open: passage.open, applied: [], ...(passage.unlocked ? {unlocked: true} : {})}}); this.contactPending.add(id);}
+      if (passage) {this.setDetail(id, {doorPassageV1: {door: passage.door, ...(passage.doors ? {doors: passage.doors} : {}), open: passage.open, applied: [], ...(passage.unlocked ? {unlocked: true} : {})}}); this.contactPending.add(id);}
       this.launched.set(id, {soul, capability, label, steps}); if (this.launched.size > 512) this.launched.delete(this.launched.keys().next().value!);
     };
     // nav-warm-wait/1 (#884): while the connectivity labels are cold, a walk goal skipped RESOLVE2's roofReach (and WALK3's
