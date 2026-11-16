@@ -94,8 +94,9 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
   const appChain = (id) => { const out = []; for (let x = id; x != null; x = parent.get(x)) { const f = byId.get(x).callFrame, rel = relOf(f.url); if (/^(apps|packages|mars)\//.test(rel)) out.push(`${f.functionName || '(anon)'} ${rel.split('/').slice(-2).join('/')}:${f.lineNumber + 1}`); } return out.reverse(); };
   const tasks = []; let task = null, t = 0;
   const closeTask = () => { if (task) { tasks.push(task); if (cur) { cur.tasks++; cur.longestTask = Math.max(cur.longestTask, task.ms); } } task = null; };
-  let cur = null, busy = 0, total = 0;
-  const close = () => { closeTask(); if (cur && cur.ms >= holdMs) holds.push(cur); cur = null; };
+  let cur = null, busy = 0, total = 0, navRun = null; const navRuns = [];
+  const closeNav = () => { if (navRun && (navRun.g === 'nav.audit' || navRun.g === 'nav.sync') && navRun.ms >= 20) navRuns.push(navRun); navRun = null; };
+  const close = () => { closeNav(); closeTask(); if (cur && cur.ms >= holdMs) holds.push(cur); cur = null; };
   for (let i = 0; i < p.samples.length; i++) {
     const dt = (p.timeDeltas[i + 1] ?? p.timeDeltas[i] ?? 0) / 1000; total += dt; t += dt;
     const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); continue; }
@@ -107,6 +108,9 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     if (task && task.root !== rc) closeTask();
     if (!task) task = { at: t - dt, root: rc, ms: 0, by: new Map(), leaf: new Map() };
     task.ms += dt; task.by.set(g, (task.by.get(g) ?? 0) + dt); if (g !== 'gc') task.leaf.set(node.id, (task.leaf.get(node.id) ?? 0) + dt);
+    // measurement only (#2592 A2): contiguous runs of one nav group (GC inside stays in the run), one call's unit
+    if (g !== 'gc' && (!navRun || navRun.g !== g)) { closeNav(); navRun = { g, at: t - dt, ms: 0, leaf: new Map() }; }
+    if (navRun) { navRun.ms += dt; if (g !== 'gc') navRun.leaf.set(node.id, (navRun.leaf.get(node.id) ?? 0) + dt); }
   }
   close();
   const r1 = (x) => Math.round(10 * x) / 10;
@@ -121,6 +125,8 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     tasksOver: Object.fromEntries(BANDS.map((b) => [b, tasks.filter((tk) => tk.ms >= b).length])),
     taskHist: Object.fromEntries(Object.entries(taskHist).sort((a, b) => b[1].ms - a[1].ms)),
     holdsOver1s: holds.filter((h) => h.ms >= 1000).map((h) => ({ atS: r1(h.at / 1000), ms: r1(h.ms), tasks: h.tasks, longestTaskMs: r1(h.longestTask), groups: top(h.by, 5) })),
+    navRuns: Object.fromEntries(['nav.audit', 'nav.sync'].map((g) => { const rs = navRuns.filter((x) => x.g === g); return [g, { over20: rs.length, over50: rs.filter((x) => x.ms >= 50).length, over100: rs.filter((x) => x.ms >= 100).length,
+      longest: [...rs].sort((a, b) => b.ms - a.ms).slice(0, 10).map((x) => ({ atS: r1(x.at / 1000), ms: r1(x.ms), frames: framesOf(x, 30) })) }]; })),
     longestTasks: [...tasks].sort((a, b) => b.ms - a.ms).slice(0, 25).map((tk) => ({ atS: r1(tk.at / 1000), ms: r1(tk.ms), groups: top(tk.by, 4), frames: framesOf(tk, 12) })),
   };
   const bySource = new Map();
