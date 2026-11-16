@@ -286,6 +286,8 @@ async function run(fx) {
     log(`A4 ${w.slug}: act ${r.ms} ms (${r.j?.accepted === false ? `refused ${r.j?.code}` : 'accepted'}), world was ${wasIn}, ticks moved ${R.a4[w.slug].ticksMoved ?? '?'} for ${R.a4[w.slug].ticksForGap} in the gap`);
   }
   if (a5) {
+    // the 15 Nov re-run read A5 39 min before its reminder was due (a settle that ends early brings A4 forward): wait for it
+    await sleep(a5At + 90_000 - Date.now());
     const rows = reminderRows(a5.slug), loads = L.lines.filter((l) => l.s.includes(`${a5.slug} loaded by its alarm`)).map((l) => l.at), unloads = L.lines.filter((l) => l.s.includes(`${a5.slug} unloaded`)).map((l) => l.at);
     const row = Array.isArray(rows) ? rows.find((x) => x.client_ref === `hundred-${a5.slug}`) : null;
     R.a5 = { slug: a5.slug, dueInGapS: Math.round((a5At - silentAt) / 1000), state: row?.state ?? null, deliveredLateMs: row?.delivered_at ? row.delivered_at - row.due_real_ms : null, alarmLoads: loads.filter((x) => x >= a5At - 60_000).length, unloadedAfter: unloads.some((x) => x > a5At) };
