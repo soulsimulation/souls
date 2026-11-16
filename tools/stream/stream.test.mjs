@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
-  parseArgs, parseEnvFile, findProfileDir, chooseScreen, OUTPUT_GRACE_MS, loadSecrets, redact, log, obsAuth, pickWindow, captureTransform, streamUrl, watchDecision,
-  STALL_MS, RELOAD_EVERY_MS, PROFILE_PARAMS, STREAM_ENCODER, CHROME_FLAGS,
+  parseArgs, parseEnvFile, cftDownload, chooseScreen, OUTPUT_GRACE_MS, loadSecrets, redact, log, obsAuth, pickWindow, captureTransform, streamUrl, watchDecision,
+  STALL_MS, RELOAD_EVERY_MS, PROFILE_PARAMS, CHROME_FLAGS,
 } from './stream.mjs';
 
 test('parseArgs takes start <url> [--record], status, stop and watch', () => {
@@ -112,20 +112,23 @@ test('watchdog: restart the output when it stays stopped for 5 s, not while OBS 
 
 test('the OBS and Chrome settings match the acceptance', () => {
   const p = Object.fromEntries(PROFILE_PARAMS.map(([c, n, v]) => [`${c}.${n}`, v]));
-  assert.equal(p['AdvOut.Encoder'], 'com.apple.videotoolbox.videoencoder.ave.avc');
-  assert.equal(p['AdvOut.Track1Bitrate'], '128');
+  assert.equal(p['Output.Mode'], 'Simple');
+  assert.equal(p['SimpleOutput.StreamEncoder'], 'apple_h264'); // OBS 33: Apple's hardware H.264 (videotoolbox ave.avc)
+  assert.equal(p['SimpleOutput.RecQuality'], 'Stream'); // the recording reuses the stream encoder
+  assert.equal(p['SimpleOutput.VBitrate'], '8000');
+  assert.equal(p['SimpleOutput.ABitrate'], '128');
+  assert.equal(p['SimpleOutput.StreamAudioEncoder'], 'aac');
   assert.equal(p['Audio.SampleRate'], '48000');
-  assert.deepEqual(STREAM_ENCODER, { rate_control: 'CBR', bitrate: 8000, keyint_sec: 3, profile: 'high' });
   for (const f of ['--autoplay-policy=no-user-gesture-required', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling']) assert.ok(CHROME_FLAGS.includes(f));
 });
 
-test('findProfileDir finds an OBS profile by its Name= line, whatever its folder is called', () => {
-  const root = mkdtempSync(join(tmpdir(), 'obs-profiles-'));
-  for (const [dir, name] of [['Untitled', 'Untitled'], ['soulsstream', 'souls-stream']]) {
-    mkdirSync(join(root, dir));
-    writeFileSync(join(root, dir, 'basic.ini'), `[General]\nName=${name}\n\n[Output]\nMode=Simple\n`);
-  }
-  assert.equal(findProfileDir(root, 'souls-stream'), join(root, 'soulsstream'));
-  assert.equal(findProfileDir(root, 'souls'), null);
-  assert.equal(findProfileDir(join(root, 'missing'), 'souls-stream'), null);
+test('cftDownload picks the stable Chrome for Testing build for this Mac', () => {
+  const versions = { channels: { Stable: { version: '157.0.1.2', downloads: { chrome: [
+    { platform: 'linux64', url: 'https://example.invalid/linux64.zip' },
+    { platform: 'mac-arm64', url: 'https://example.invalid/mac-arm64.zip' },
+    { platform: 'mac-x64', url: 'https://example.invalid/mac-x64.zip' },
+  ] } } } };
+  assert.deepEqual(cftDownload(versions, 'arm64'), { version: '157.0.1.2', platform: 'mac-arm64', url: 'https://example.invalid/mac-arm64.zip', app: join('chrome-mac-arm64', 'Google Chrome for Testing.app') });
+  assert.equal(cftDownload(versions, 'x64').platform, 'mac-x64');
+  assert.throws(() => cftDownload({ channels: {} }, 'arm64'), /no Chrome for Testing build/);
 });

@@ -10,7 +10,7 @@
 // Secrets come from the environment or a file outside the repo and are never printed. Docs: docs/operations/streaming.md.
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, openSync, realpathSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, openSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,23 +27,34 @@ export const CHROME_FLAGS = [
   '--no-first-run', '--no-default-browser-check', '--autoplay-policy=no-user-gesture-required',
   '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
 ];
-// Encoder: Apple's hardware H.264 at about 8 Mbps CBR, a keyframe every 3 s; AAC 128 kbps at 48 kHz.
+// Output, set through the websocket only (SetProfileParameter on this tool's own profile). Simple output mode, whose
+// keys and values are OBS 33's (frontend/utility/SimpleOutput.cpp): "apple_h264" is Apple's hardware H.264 encoder
+// (com.apple.videotoolbox.videoencoder.ave.avc); simple mode always uses CBR and that encoder's default keyframe
+// interval of 2 s. AAC at 128 kbps and 48 kHz. Recording reuses the stream encoder ("Stream"), so a --record test
+// checks the stream settings.
 export const PROFILE_PARAMS = [
-  ['Output', 'Mode', 'Advanced'],
-  ['AdvOut', 'Encoder', 'com.apple.videotoolbox.videoencoder.ave.avc'],
-  ['AdvOut', 'ApplyServiceSettings', 'false'],
-  ['AdvOut', 'Rescale', 'false'],
-  ['AdvOut', 'TrackIndex', '1'],
-  ['AdvOut', 'Track1Bitrate', '128'],
-  ['AdvOut', 'AudioEncoder', 'CoreAudio_AAC'],
-  ['AdvOut', 'RecType', 'Standard'],
-  ['AdvOut', 'RecEncoder', 'none'], // the recording reuses the stream encoder, so a --record test checks the stream settings
-  ['AdvOut', 'RecAudioEncoder', 'CoreAudio_AAC'],
-  ['AdvOut', 'RecFormat2', 'mkv'],
-  ['AdvOut', 'RecTracks', '1'],
+  ['Output', 'Mode', 'Simple'],
+  ['SimpleOutput', 'StreamEncoder', 'apple_h264'],
+  ['SimpleOutput', 'RecEncoder', 'apple_h264'],
+  ['SimpleOutput', 'VBitrate', '8000'],
+  ['SimpleOutput', 'StreamAudioEncoder', 'aac'],
+  ['SimpleOutput', 'RecAudioEncoder', 'aac'],
+  ['SimpleOutput', 'ABitrate', '128'],
+  ['SimpleOutput', 'UseAdvanced', 'false'],
+  ['SimpleOutput', 'RecQuality', 'Stream'],
+  ['SimpleOutput', 'RecFormat2', 'mkv'],
   ['Audio', 'SampleRate', '48000'],
 ];
-export const STREAM_ENCODER = { rate_control: 'CBR', bitrate: 8000, keyint_sec: 3, profile: 'high' };
+// The stream page runs in Chrome for Testing, not the user's Chrome: it has its own bundle id, so OBS's app-audio
+// capture hears that window and nothing the user plays in their own browser.
+export const CFT_VERSIONS_URL = 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json';
+export function cftDownload(versions, arch = process.arch) {
+  const platform = arch === 'arm64' ? 'mac-arm64' : 'mac-x64';
+  const stable = versions?.channels?.Stable;
+  const d = stable?.downloads?.chrome?.find((x) => x.platform === platform);
+  if (!d) throw new Error(`no Chrome for Testing build for ${platform}`);
+  return { version: stable.version, platform, url: d.url, app: join(`chrome-${platform}`, 'Google Chrome for Testing.app') };
+}
 
 const env = process.env;
 const stateDir = () => resolve(env.SOULS_STREAM_DIR ?? join(homedir(), '.souls', 'stream'));
@@ -245,16 +256,24 @@ export function watchDecision(w, { now, frames, outputActive, outputReconnecting
 // ---------- state
 const readState = () => (existsSync(statePath()) ? JSON.parse(readFileSync(statePath(), 'utf8')) : null);
 const writeState = (s) => { mkdirSync(stateDir(), { recursive: true }); writeFileSync(statePath(), JSON.stringify(s, null, 2) + '\n'); };
-const obsProfilesDir = () => env.OBS_PROFILES_DIR ?? join(homedir(), 'Library', 'Application Support', 'obs-studio', 'basic', 'profiles');
-// OBS names a profile's folder after the profile with some characters dropped ("souls-stream" lives in "soulsstream"),
-// so find it by the Name= line in its basic.ini.
-export function findProfileDir(root, name) {
-  if (!existsSync(root)) return null;
-  for (const d of readdirSync(root)) {
-    const ini = join(root, d, 'basic.ini');
-    if (existsSync(ini) && readFileSync(ini, 'utf8').split(/\r?\n/).some((l) => l.trim() === `Name=${name}`)) return join(root, d);
+// Chrome for Testing in <state dir>/browser, downloaded on first run; returns its .app path and bundle id.
+async function ensureBrowser(dir) {
+  const root = join(dir, 'browser');
+  const versions = await (await fetch(CFT_VERSIONS_URL)).json();
+  const d = cftDownload(versions);
+  const app = join(root, d.app);
+  if (!existsSync(app)) {
+    log(`installing Chrome for Testing ${d.version} into ${root} (first run)`);
+    mkdirSync(root, { recursive: true });
+    const res = await fetch(d.url);
+    if (!res.ok) throw new Error(`Chrome for Testing download failed: ${res.status}`);
+    const zip = join(root, 'cft.zip');
+    writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
+    execFileSync('ditto', ['-x', '-k', zip, root]);
+    rmSync(zip);
   }
-  return null;
+  const bundleId = execFileSync('plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', join(app, 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim();
+  return { app, bundleId };
 }
 const outputCalls = (record) => (record
   ? { status: 'GetRecordStatus', start: 'StartRecord', stop: 'StopRecord', label: 'recording' }
@@ -282,14 +301,15 @@ async function start({ url, record }) {
   const dir = stateDir();
   mkdirSync(dir, { recursive: true });
 
-  // 1. Chrome: its own profile, an app window on the stream URL, no throttling when covered or in the background.
+  // 1. Chrome for Testing: its own profile, an app window on the stream URL, no throttling when covered or in the background.
   if (await closeChrome(port)) { log('closed a stream Chrome left from before'); await wait(1500); }
   const target = streamUrl(url);
-  execFileSync('open', ['-na', 'Google Chrome', '--args', `--user-data-dir=${join(dir, 'chrome')}`, `--app=${target}`,
+  const browser = await ensureBrowser(dir);
+  execFileSync('open', ['-na', browser.app, '--args', `--user-data-dir=${join(dir, 'chrome')}`, `--app=${target}`,
     `--window-size=${CSS_WIDTH},${CSS_HEIGHT}`, '--window-position=40,40', `--remote-debugging-port=${port}`, ...CHROME_FLAGS]);
   if (!(await cdpReady(port))) throw new Error('the stream Chrome did not open its debugging port');
-  writeState({ url, target, record, port, user: null, startedAt: new Date().toISOString() });
-  log(`chrome open on ${target}`);
+  writeState({ url, target, record, port, bundleId: browser.bundleId, user: null, startedAt: new Date().toISOString() });
+  log(`chrome for testing (${browser.bundleId}) open on ${target}`);
   const page = await cdpPage(port);
   const loaded = `location.origin === ${JSON.stringify(new URL(target).origin)} && document.readyState === 'complete'`;
   for (let i = 0; i < 60 && !(await page.evaluate(loaded)); i++) await wait(500);
@@ -327,19 +347,15 @@ async function start({ url, record }) {
   if (!profiles.profiles.includes(NAME)) await obs.call('CreateProfile', { profileName: NAME });
   await switchTo(obs, 'profile', NAME);
   for (const [parameterCategory, parameterName, parameterValue] of PROFILE_PARAMS) await obs.call('SetProfileParameter', { parameterCategory, parameterName, parameterValue });
-  if (env.SOULS_STREAM_RECORD_DIR) await obs.call('SetProfileParameter', { parameterCategory: 'AdvOut', parameterName: 'RecFilePath', parameterValue: env.SOULS_STREAM_RECORD_DIR });
+  if (env.SOULS_STREAM_RECORD_DIR) await obs.call('SetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'FilePath', parameterValue: env.SOULS_STREAM_RECORD_DIR });
   await obs.call('SetVideoSettings', { baseWidth: WIDTH, baseHeight: HEIGHT, outputWidth: WIDTH, outputHeight: HEIGHT, fpsNumerator: FPS, fpsDenominator: 1 });
-  // Encoder settings live in the profile's streamEncoder.json (there is no websocket request for them); OBS reads it
-  // when the profile is activated, so write it and switch away and back.
-  const profileDir = findProfileDir(obsProfilesDir(), NAME);
-  if (!profileDir) throw new Error(`OBS profile folder not found (set OBS_PROFILES_DIR)`);
-  writeFileSync(join(profileDir, 'streamEncoder.json'), JSON.stringify(STREAM_ENCODER));
+  // OBS picks the output mode and encoder when a profile is activated, so switch away and back.
   await switchTo(obs, 'profile', user.profile);
   await switchTo(obs, 'profile', NAME);
   if (!record) {
     await obs.call('SetStreamServiceSettings', { streamServiceType: 'rtmp_custom', streamServiceSettings: { server: secrets.server, key: secrets.key, use_auth: false } });
   }
-  log('obs profile set: 1920x1080 at 30 fps, hardware H.264 8 Mbps CBR, keyframe 3 s, AAC 128 kbps 48 kHz');
+  log('obs profile set: 1920x1080 at 30 fps, hardware H.264 8 Mbps CBR, keyframe 2 s, AAC 128 kbps 48 kHz');
 
   if (!colls.sceneCollections.includes(NAME)) await obs.call('CreateSceneCollection', { sceneCollectionName: NAME });
   await switchTo(obs, 'collection', NAME);
@@ -367,7 +383,7 @@ async function start({ url, record }) {
   const t = captureTransform(tr.sourceWidth, tr.sourceHeight, vp.w, vp.h);
   await obs.call('SetSceneItemTransform', { sceneName: scene, sceneItemId: vid.sceneItemId, sceneItemTransform: t });
   log(`window capture ${tr.sourceWidth}x${tr.sourceHeight}, title bar cropped ${t.cropTop} px, scaled to ${WIDTH}x${HEIGHT}`);
-  await obs.call('CreateInput', { sceneName: scene, inputName: AUDIO_INPUT, inputKind: 'sck_audio_capture', inputSettings: { type: 1, application: 'com.google.Chrome' } });
+  await obs.call('CreateInput', { sceneName: scene, inputName: AUDIO_INPUT, inputKind: 'sck_audio_capture', inputSettings: { type: 1, application: browser.bundleId } });
   await obs.raw('SetInputMute', { inputName: AUDIO_INPUT, inputMuted: false });
   page.close();
 

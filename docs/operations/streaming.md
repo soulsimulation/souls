@@ -1,7 +1,7 @@
 # Streaming a world to X
 
-A live stream of one world runs on a Mac at an event: Chrome shows the world in its own window, OBS captures that
-window and Chrome's sound and sends them to X. Nobody works the OBS window; a script starts, checks and stops it.
+A live stream of one world runs on a Mac at an event: Chrome for Testing shows the world in its own window, OBS
+captures that window and its sound and sends them to X. Nobody works the OBS window; a script starts, checks and stops it.
 
 ## Stream tool
 
@@ -10,7 +10,7 @@ so copy that one file there; it needs nothing else from the repo.
 
 ### One-time setup on the stream machine
 
-1. Install OBS (tested with 33.0.1 on macOS 26) and Google Chrome.
+1. Install OBS (tested with 33.0.1 on macOS 26). The tool downloads its own browser (below).
 2. In OBS, open **Tools → WebSocket Server Settings**, tick **Enable WebSocket server**, keep port 4455, and set a
    password.
 3. In **System Settings → Privacy & Security → Screen & System Audio Recording**, allow OBS.
@@ -39,21 +39,26 @@ node stream.mjs stop
 
 `start`:
 
-- Opens Chrome with its own profile (`<state dir>/chrome`) in an `--app` window on `<world-url>?stream=1`, with
+- On first run, downloads the stable [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/)
+  build into `<state dir>/browser` (about 150 MB) and reads its bundle id from its `Info.plist`
+  (`com.google.chrome.for.testing`). Your own Chrome is never used, so nothing you play in it reaches the stream.
+- Opens Chrome for Testing by path with its own profile (`<state dir>/chrome`) in an `--app` window on `<world-url>?stream=1`, with
   autoplay allowed and background, occlusion and timer throttling off, and a DevTools port on localhost
   (`SOULS_STREAM_CDP_PORT`, default 9333). It moves the window to the sharpest screen with room and sizes it so the
   page is exactly 1920×1080 device pixels (960×540 on a 2× screen). With no such screen it warns and OBS scales.
 - Waits for OBS to answer, launching it if it is not running. It remembers your current OBS profile and scene
   collection, then switches to its own, both named `souls-stream` (reused on every run).
-- Sets 1920×1080 at 30 fps; Apple's hardware H.264 encoder at 8000 kbps CBR with a keyframe every 3 s (High profile);
-  AAC at 128 kbps and 48 kHz. The encoder settings go into the profile's `streamEncoder.json`, since the websocket
-  has no request for them, and OBS reads them when the profile is switched to.
-- Captures that Chrome window (`screen_capture`, window mode) with the title bar cropped, and Chrome's sound
-  (`sck_audio_capture`, application `com.google.Chrome`). Every other audio input in the collection is muted.
+- Sets 1920×1080 at 30 fps and OBS's simple output mode, all over the websocket (`SetProfileParameter` on its own
+  profile; the tool never touches OBS's files): Apple's hardware H.264 encoder (`apple_h264`) at 8000 kbps CBR, AAC
+  at 128 kbps and 48 kHz, and recordings that reuse the stream encoder. Simple mode fixes the keyframe interval at
+  2 s. X recommends 3 s; 2 s works.
+- Captures that window (`screen_capture`, window mode) with the title bar cropped, and its sound
+  (`sck_audio_capture`, application set to Chrome for Testing's bundle id). Every other audio input in the collection
+  is muted.
 - Starts the stream (or the recording), then the watchdog in the background, and exits.
 
 `status` prints the output state and elapsed time, OBS's frame rate, frames skipped in rendering and encoding,
-frames dropped on the network (streaming only), the bitrate over 3 s, the peak level of Chrome's sound, and the
+frames dropped on the network (streaming only), the bitrate over 3 s, the peak level of the window's sound, and the
 page's frame rate from `window.__soulsStream.frames`:
 
 ```text
@@ -89,31 +94,28 @@ When the page has no `window.__soulsStream` (soul.game before `?stream=1` shippe
 | Variable | Default | What |
 | --- | --- | --- |
 | `SOULS_STREAM_SECRETS` | `~/.souls/stream.env` | the secrets file |
-| `SOULS_STREAM_DIR` | `~/.souls/stream` | state, the Chrome profile and `watch.log` |
+| `SOULS_STREAM_DIR` | `~/.souls/stream` | state, Chrome for Testing and its profile, `watch.log` |
 | `SOULS_STREAM_CDP_PORT` | `9333` | Chrome's DevTools port (localhost only) |
 | `SOULS_STREAM_RECORD_DIR` | OBS's recording folder | where `--record` files go (`.mkv`) |
 | `OBS_WEBSOCKET_URL` | `ws://127.0.0.1:4455` | OBS's websocket |
-| `OBS_PROFILES_DIR` | OBS's profiles folder on macOS | where the `souls-stream` profile lives |
 
 ### OBS 33 faults the tool works around
 
 - **The browser source draws nothing** on macOS 26, so the tool captures a real Chrome window instead.
 - **Listing apps for app audio crashes OBS** (`GetInputPropertiesListPropertyItems` on `sck_audio_capture`,
-  `application`). The tool never lists them; it sets Chrome's bundle id directly. Listing windows for the window
+  `application`). The tool never lists them; it sets Chrome for Testing's bundle id directly. Listing windows for the window
   capture is safe; the tool marks its window by giving it a unique title for a moment.
 - **OBS freezes for about 30 s after launch** and answers requests with status 207 until it is ready; the tool
   polls.
 - **Scene collections cannot be deleted over the websocket**, so the tool reuses one profile and one collection
   named `souls-stream` and clears the scene each run.
-- **OBS drops the `-` from a profile's folder name** (`souls-stream` lives in `soulsstream`); the tool finds the
-  folder by the name inside its `basic.ini`.
 - **After a crash**, relaunch OBS on your own collection, not on `souls-stream` (it may hold the source that
   crashed): `open -a OBS --args --collection <yours> --profile <yours> --disable-shutdown-check`.
 
 ### Known limits
 
-- Chrome's sound is captured by bundle id, so **any** Chrome on the machine is heard. Keep other Chrome windows on
-  the stream machine quiet.
+- Sound is captured by app, so anything else running in Chrome for Testing on the stream machine would be heard too;
+  the tool's window is normally the only one.
 - soul.game starts a world's sound only after a click and keeps it muted by default; until the page's stream mode
   turns sound on by itself, a stream carries no world sound.
 - macOS only; one stream per machine.
