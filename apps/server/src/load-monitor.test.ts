@@ -265,14 +265,13 @@ test('quiet tick (srv-admission-calib): an EWMA over quiet windows; a provisiona
   assert.equal(q.window(Number.NaN, true, true), 13);
 });
 
-test('#2470: a loaded window with cheaper ticks than the learned quiet tick moves it down by alpha, never up', () => {
+test('#2470: a served loaded window with cheaper ticks than the learned quiet tick moves it down by alpha, never up', () => {
   const q = new QuietTick();
   assert.equal(q.window(47, true, true), 47, 'learned from heavy setup ticks');
-  assert.ok(Math.abs(q.window(16, false, true) - (47 - QUIET_TICK_ALPHA * 31)) < 1e-9, 'a loaded window of 16 ms ticks: down by alpha');
+  assert.ok(Math.abs(q.window(16, false, true) - (47 - QUIET_TICK_ALPHA * 31)) < 1e-9, 'a served loaded window of 16 ms ticks: down by alpha');
   const v = q.value;
-  assert.ok(Math.abs(q.window(16, false, false) - (v - QUIET_TICK_ALPHA * (v - 16))) < 1e-9, 'served or not: a busy world\'s long holds keep its service under 0.95');
-  const w = q.value;
-  assert.equal(q.window(60, false, true), w, 'a loaded window with heavier ticks never raises it');
+  assert.equal(q.window(16, false, false), v, 'an unserved window (ticks behind) teaches nothing');
+  assert.equal(q.window(60, false, true), v, 'a loaded window with heavier ticks never raises it');
   for (let i = 0; i < 60; i++) q.window(16, false, true);
   assert.ok(Math.abs(q.value - 16) < 0.1, 'it follows the loaded ticks down to their average, not below');
 });

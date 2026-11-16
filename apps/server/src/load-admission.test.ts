@@ -3,7 +3,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
-import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, JOB_DEBT_MS, tickAgeNow, ticksOnTimeNow, type RouteClass, type Ticket} from './load/admission.ts';
+import {Admission, admissionMiddleware, classify, FRAME_BUDGET_MS, frameBudgetMs, ticksOnTimeNow, type RouteClass, type Ticket} from './load/admission.ts';
 import {newSharedLoad, S, sharedLoad, type Level} from './load/shared.ts';
 import {testPort} from '../test/test-port.ts';
 const TEST_PORT=await testPort();
@@ -409,36 +409,6 @@ test('#2440 review: the default tick service is 1 before the monitor\'s first sa
     assert.equal(adm.spare(), false, 'the default heap share (0.9 of the limit) turns spare time off');
     adm.close();
   } finally { [sharedLoad[S.sampledAt], sharedLoad[S.service5s], sharedLoad[S.heapUsedMb], sharedLoad[S.heapLimitMb]] = saved; }
-});
-
-test('#2470: one job leaves the frame credit at most JOB_DEBT_MS of new debt; its own bucket takes the whole charge', () => {
-  let now = 0; const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, tickSpentMs: () => 0});
-  const t = adm.request({key: 'A', god: false, route: route('GET', '/v1/edge/observe')}); assert.ok('turn' in t);
-  now += 4961; t.done();   // a cold read, run inline
-  const p = adm as unknown as {credit: number; bucket(k: string, g: boolean, n: number): {tokens: number}};
-  assert.ok(p.credit >= -JOB_DEBT_MS - 1e-9 && p.credit <= -JOB_DEBT_MS + 25, String(p.credit));
-  assert.ok(p.bucket('A', false, now).tokens < -2900, 'the Soul still pays for it');
-  adm.close();
-});
-
-test('#2470: the dispatcher starts a queued job only just after a tick, unless the ticks are not flowing', async () => {
-  let now = 0, age = 30; const ran: string[] = [];
-  const adm = new Admission({now: () => now, yieldTurn: () => new Promise(() => {}), quietTickMs: () => 10, tickAgeMs: () => age});
-  const hold = adm.request({key: 'X', god: false, route: route('GET', '/v1/edge/here')}); assert.ok('turn' in hold);   // in flight: the act queues
-  const t = adm.request({key: 'A', god: false, route: route('POST', '/v1/edge/act')}); assert.ok('turn' in t);
-  void t.turn.then(v => { if (v === 'run') { ran.push('A'); t.done(); } });
-  await adm.drain(); await tick();
-  assert.equal(ran.length, 0, '30 ms after the last tick: the act waits for the next one');
-  age = 3; await adm.drain(); await tick();
-  assert.deepEqual(ran, ['A'], 'just after a tick: it runs');
-  const u = adm.request({key: 'B', god: false, route: route('POST', '/v1/edge/act')}); assert.ok('turn' in u);
-  void u.turn.then(v => { if (v === 'run') { ran.push('B'); u.done(); } });
-  age = 400; await adm.drain(); await tick();
-  assert.deepEqual(ran, ['A', 'B'], 'no tick for 400 ms (a long hold, a stall): not held for one');
-  adm.close();
-  const a = newSharedLoad(); a[S.tickAt] = 1000; a[S.stallMs] = 2000;
-  assert.equal(tickAgeNow(a, 1030), 30);
-  a[S.stallMs] = 0; assert.equal(tickAgeNow(a, 1030), -1, 'a clock that owes no ticks (paused, still) has no tick to wait for');
 });
 
 test('#2470: a world\'s admission reads the spare-time signals from its own load numbers (#2416), not the program\'s', () => {

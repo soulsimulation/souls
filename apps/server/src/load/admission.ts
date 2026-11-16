@@ -89,9 +89,6 @@ export type AdmissionOpts = {now?: () => number; yieldTurn?: () => Promise<void>
    *  SPARE_TICK_AGE_MS old while the clock owes ticks (default: the monitor's S.service1s, S.tickAt, S.stallMs; with an
    *  injected clock, true). */
   ticksOnTime?: () => boolean;
-  /** #2470: ms since the last tick completed while the clock owes ticks, or -1 when it owes none or none ran yet (default:
-   *  the monitor's S.tickAt and S.stallMs; with an injected clock, -1: no tick alignment). */
-  tickAgeMs?: () => number;
   /** #2416: this world's API times (default: the program's, for tests). */
   api?: Float64Array;
   /** #2416, #2470: this world's shared load numbers, which its monitor writes (default: the program's, for tests). The
@@ -110,17 +107,6 @@ export const SPARE_HEAP = 0.85;
 /** #2440: and the ticks on time now, not only over 5 s: spare time must never cost world time (at 100 Souls the 5 s gate
  *  alone let the candidate serve 10-15 % fewer ticks than base). */
 export const SPARE_SERVICE_1S = 0.98, SPARE_TICK_AGE_MS = 100;
-/** #2470: the dispatcher starts a queued job only in the first ALIGN_MS after a tick completes, so a request's synchronous
- *  slice runs in the frame's slack instead of across the next tick's due time (an act of 65-160 ms started late in the
- *  frame made that tick late: late ticks doubled with 5-8x more acts). While the ticks are not flowing (the last one is
- *  ALIGN_FRESH_MS old or more: a long hold, a stall), jobs are not held for it. */
-export const ALIGN_MS = 10, ALIGN_FRESH_MS = 100;
-/** #2470: the most new frame-credit debt one job can leave (charge below), ms. */
-export const JOB_DEBT_MS = 1000;
-/** #2470: the monitor's tick age now (ms since the last completed tick), or -1 when the clock owes no ticks. */
-export function tickAgeNow(a: Float64Array = sharedLoad, now = Date.now()): number {
-  return a[S.stallMs] > 0 && a[S.tickAt] > 0 ? Math.max(0, now - a[S.tickAt]) : -1;
-}
 /** #2440: the monitor's view of the ticks right now (before its first sample, on time). A clock that owes no ticks
  *  (paused, stopped, rate 0: stallMs 0) is on time. */
 export function ticksOnTimeNow(a: Float64Array = sharedLoad, now = Date.now()): boolean {
@@ -166,14 +152,12 @@ export class Admission {
   private tickService: () => number;
   private heapFrac: () => number;
   private ticksOnTime: () => boolean;
-  private tickAge: () => number;
   constructor(o: AdmissionOpts = {}) { this.o = o; this.now = o.now ?? (() => performance.now()); const a = o.shared ?? sharedLoad; this.quietTick = o.quietTickMs ?? (() => a[S.quietTickMs]);
     this.tickSpent = o.tickSpentMs ?? (() => a[S.tickSpentMs]); this.idleShare = o.idleShare ?? (o.now ? () => 0 : loopIdle());
     // the tick service is 1 until the monitor's first sample
     this.tickService = o.tickService ?? (o.now ? () => 1 : () => a[S.sampledAt] > 0 ? a[S.service5s] : 1);
     this.heapFrac = o.heapFrac ?? (o.now ? () => 0 : () => a[S.heapLimitMb] > 0 ? a[S.heapUsedMb] / a[S.heapLimitMb] : 0);
-    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : () => ticksOnTimeNow(a));
-    this.tickAge = o.tickAgeMs ?? (o.now ? () => -1 : () => tickAgeNow(a)); }
+    this.ticksOnTime = o.ticksOnTime ?? (o.now ? () => true : () => ticksOnTimeNow(a)); }
   /** #2440: the world is green, the thread has spare time (SPARE_IDLE), its ticks are served (SPARE_SERVICE over 5 s, on
    *  time now) and the heap is below red's (SPARE_HEAP): queued requests are not held for budget. Never at amber, red or
    *  black: with spare time at amber and red, 100 Souls on a 2-core world served 4-15 % fewer ticks than without. */
@@ -274,9 +258,7 @@ export class Admission {
   private charge(key: string, god: boolean, id: string, ms: number, startedAt: number, free = false, onSpare = false) {
     // #2440: a job run on spare time (the frame credit spent) is paid from the spare credit and leaves the frame credit no
     // debt: once the thread is busy again, the budgets start from even, not from the idle time the requests used meanwhile
-    // #2470: one job leaves the frame credit at most JOB_DEBT_MS of new debt (its own bucket still takes the whole charge): a
-    // single cold 4.9 s read left the credit -4.9 s, and at a 2-15 ms frame budget that held every queued act 16-120 s
-    if (onSpare) { this.spareNow(startedAt); this.spareCredit -= ms; } else { this.creditNow(startedAt); const before = this.credit; this.credit = Math.max(before - ms, Math.min(before, 0) - JOB_DEBT_MS); }
+    if (onSpare) { this.spareNow(startedAt); this.spareCredit -= ms; } else { this.creditNow(startedAt); this.credit -= ms; }
     this.spentMs += ms;
     this.share.god = this.share.god * 0.95 + (god ? ms : 0); this.share.souls = this.share.souls * 0.95 + (god ? 0 : ms);
     const b = this.bucket(key, god, startedAt + ms); b.tokens -= ms; if (free) b.tokens = Math.max(0, b.tokens);
@@ -353,10 +335,6 @@ export class Admission {
           const creditMs = budget > 0 ? Math.min(1000, -this.credit * FRAME_MS / budget + 1) : FRAME_MS, rate = this.idleShare() - SPARE_IDLE;
           this.later(free && rate > 0 ? Math.min(creditMs, FRAME_MS, -this.spareCredit / rate + 1) : creditMs); return;
         }
-        // #2470: late in the frame, wait for the next tick to complete (woken just after it is due), so the job does not
-        // push it late; not while the ticks are not flowing
-        const age = this.tickAge();
-        if (age >= ALIGN_MS && age < ALIGN_FRESH_MS) { this.later(Math.max(1, FRAME_MS - age + 5)); return; }
         const i = this.pick(now);
         if (i < 0) { this.later(FRAME_MS); return; }
         const [j] = this.queue.splice(i, 1), ticks = this.tickSpent();
