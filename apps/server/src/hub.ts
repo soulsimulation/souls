@@ -16,6 +16,7 @@ import type { Souls } from './souls.ts';
 import { isLooseCarryAsset } from '@souls/engine-mars';
 import type {CandidateStationV1} from './station.ts';
 import type {CandidateStationV2} from './station-v2.ts';
+import { addressKey } from './address-key.ts';
 
 const clientMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('hello'), proto: z.number(), token: z.string().max(4000).optional(), since: z.number().optional(), epoch: z.string().max(40).optional(),
@@ -186,7 +187,7 @@ export class Hub {
   stopTimers() { for (const t of this.timers) clearInterval(t); this.timers = []; }
 
   private onConnect(ws: WebSocket, req: IncomingMessage) {
-    const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+    const ip = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
     let sameIp = 0; for (const x of this.clients) if (x.ip === ip) sameIp++;
     if (this.clients.size >= MAX_CLIENTS || sameIp >= MAX_PER_IP) { ws.close(1013, 'too many connections'); return; }
     const c: Client = { ws, me: null, ready: false, alive: true, joinedAt: Date.now(), resyncs: 0, sent: 0, ip, msgs: 0, windowStart: Date.now(), lastHello: 0, lastSnapshot: 0,stationContract:null,authUserId:null,helloGeneration:0 };
