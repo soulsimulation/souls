@@ -439,7 +439,9 @@ export class TakeRecorder implements RuntimeObserver {
       if (table && table !== COPIES.get(world)?.table) TEXT.delete(table);
       return id;
     });
-    return { take: take as Take, finalStateHash: () => body.finalStateHash as string };
+    // #2585: the next take's baseline is this hash itself (it caches), holding only this take's final state: a function
+    // that read `body` would hold this take's body, and through its own lazy baseline every take before it, a chain
+    return { take: take as Take, finalStateHash };
   }
 }
 
