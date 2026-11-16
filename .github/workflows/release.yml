@@ -29,7 +29,7 @@
 #   gh release create receipts-v0.123 --prerelease --title "receipts 0.123" release-receipt.json
 # Dry run:  gh workflow run release.yml --ref main -f version=<next version>            (dry_run defaults to true)
 # Ship:     gh workflow run release.yml --ref main -f version=<v> -f dry_run=false [-f date=<the dry run's date>]
-#           [-f accept_host_codes=halted] [-f accept_exceptions=true]
+#           [-f accept_host_codes=halted] [-f accept_exceptions=true] [-f unload_still=1]
 # Accepted exceptions (#2262): a gate blocked only by blockers the maintainer accepted ships when the receipts release also
 # holds accepted-exceptions.json and the dispatch says accept_exceptions=true; the receipts job and ship.sh's preflight
 # match it exactly against the release receipt (root-release.mjs accepted). Check without touching production first:
@@ -62,6 +62,9 @@ on:
         required: false
       accept_host_codes:
         description: ship.sh --accept-host-codes (comma-separated, such as halted for a release that fixes a halted world)
+        required: false
+      unload_still:
+        description: 'ship.sh --unload-still: 1 lets still worlds leave memory from this release on, 0 turns it off; empty: no change'
         required: false
       eyes:
         description: Where the browser checks (probe, walks, poster, stall) run. gpu-runner (default) = ship/eyes.mjs on a souls-timed runner's GPU; laptop = ship/eyes.mjs on a GPU workstation; both handed over by commit status (#1438); runner = here, where no GPU holds their bars
@@ -136,6 +139,7 @@ jobs:
           REF: ${{ github.ref }}
           VERSION: ${{ inputs.version }}
           ACCEPT: ${{ inputs.accept_host_codes }}
+          UNLOAD: ${{ inputs.unload_still }}
           DRY_RUN: ${{ inputs.dry_run }}
           DATE: ${{ inputs.date }}
           CLIENT: ${{ inputs.client_version }}
@@ -165,6 +169,7 @@ jobs:
             echo "::error::release freeze: main's HEAD $(git rev-parse --short HEAD) is not the pinned $FROZEN (repo variable RELEASE_FREEZE). Something merged after the pin: gate the new head and pin it again, or revert it"; exit 1
           fi
           [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "::error::accept_host_codes: comma-separated host codes, such as halted"; exit 1; }
+          [[ -z "$UNLOAD" || "$UNLOAD" =~ ^[01]$ ]] || { echo "::error::unload_still: 0, 1 or empty (got '$UNLOAD')"; exit 1; }
           # ship.sh's label (its output folder and backup prefix pre-r<label without dots>) is the version itself
           LABEL="$VERSION"; [ "$DRY_RUN" = false ] || LABEL="$VERSION-rehearsal"
           [ -n "$DATE" ] || DATE=$(date -u +%F)
@@ -390,6 +395,7 @@ jobs:
           LABEL: ${{ needs.preflight.outputs.label }}
           SHA: ${{ needs.preflight.outputs.sha }}
           ACCEPT: ${{ inputs.accept_host_codes }}
+          UNLOAD: ${{ inputs.unload_still }}
           DRY_RUN: ${{ inputs.dry_run }}
           EYES: ${{ inputs.eyes }}
           GH_TOKEN: ${{ github.token }}
@@ -408,6 +414,7 @@ jobs:
           # fails closed: only an explicit false ships
           [ "$DRY_RUN" = false ] || args+=(--no-switch)
           [ -z "$ACCEPT" ] || args+=(--accept-host-codes "$ACCEPT")
+          [ -z "$UNLOAD" ] || args+=(--unload-still "$UNLOAD")
           ( while sleep 300; do echo "ship still running ($(date -u +%H:%MZ))"; done ) & beat=$!
           set +e
           # The host is a secret, so the log masks it; an address ssh prints is filtered here too.

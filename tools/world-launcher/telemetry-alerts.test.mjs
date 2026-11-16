@@ -15,6 +15,8 @@ const live = (t, o = {}) => ({ v: 1, pid: 1, at: o.stale ? t - 60 * S : t - 2 * 
   tick: { world: Math.round((t - T0) / 50), service5s: 1, p99Ms: o.p99 ?? 30, lateTotal: o.late ?? 0 }, heap: { usedMb: o.heap ?? 500, limitMb: 2048, gcPct10s: o.gc ?? 1, gcSecondsTotal: 0 },
   level: 'green', queue: { depth: 0, oldestMs: o.oldest ?? 0 }, souls: { awake: 3, waiting: 0, connected: 3 }, shed: { reads: o.shed ?? 0, acts: 0 } });
 const world = (slug, t, o = {}) => ({ slug, status: o.status ?? 'running', restarts: o.restarts ?? 0, refused: o.refused, live: o.nolive ? null : live(t, o) });
+/** #2541: the launcher's own series, quiet (a launcher of this release exports them). */
+const LAUNCHER = { loopDelayP99Ms: 5, worldsCreated: 0, diskFreeBytes: 200e9, diskSizeBytes: 300e9 };
 const fetchOf = (body, status = 200) => async () => ({ ok: status === 200, status, text: async () => body });
 
 /** A collector on a fake clock. scene(t) → [world...] or 'fail' (HTTP 500) or 'silent' (no scrape at all). */
@@ -23,7 +25,7 @@ async function run(dir, scene, { from = 0, to, eachStep = false } = {}) {
   for (let s = from; s < to; s += EVERY / S) {
     const t = T0 + s * S, w = scene(s);
     if (w === 'silent') continue;
-    const body = w === 'fail' ? '' : metricsText({ now: t, launcher: { build: 'test', maxRunning: 10, memAvailableMb: 8192 }, worlds: w });
+    const body = w === 'fail' ? '' : metricsText({ now: t, launcher: { build: 'test', maxRunning: 10, memAvailableMb: 8192, ...LAUNCHER }, worlds: w });
     await scrapeOnce(store, 'http://127.0.0.1:1/__sim/metrics', { now: () => t, fetchImpl: fetchOf(body, w === 'fail' ? 500 : 200) });
     if (eachStep) events.push(...catchUp(dir, { everyMs: EVERY, now: t }).events);
   }

@@ -223,6 +223,11 @@ async function run(fx) {
   // the needs and the kept live picture of every world, as the agents fall silent (one read each; the world is loaded now)
   const silentAt = Date.now(), before = {};
   for (const w of worlds) before[w.slug] = { live: (await soulApi(soulDir(w), '/v1/edge/live')).j?.clock ?? null, needs: a4.includes(w) ? needsOf((await soulApi(soulDir(w), '/v1/agent/status')).j) : undefined };
+  // #2490 A2: the A4 pair's tick and wall time as the agents fall silent (the world's own still answer), so A4 counts the
+  // ticks from the silence to the act, whatever loaded or unloaded the world between (the 15 Nov re-run counted from its
+  // last stop, and both worlds had been loaded again in the gap)
+  const silentTicks = {};
+  for (const w of a4) { const s = await childStill(w.slug); silentTicks[w.slug] = s.status === 200 && Number.isFinite(s.j?.tick) && Number.isFinite(s.j?.wallMs) ? { tick: s.j.tick, wallMs: s.j.wallMs } : null; }
   const win = samples.filter((s) => s.at >= t0 && s.at <= end);
   R.a6 = { ...summarizeActs(acts, win), fractionInMemory: inMemoryFractions(win), timeline: win.map(({ status, ...s }) => ({ ...s, at: Math.round((s.at - t0) / 1000) })) };
   log(`A6: ${acts.length} acts, ${R.a6.failed} failed, ${R.a6.refused} refused, added wait p50 ${R.a6.addedWaitMs.p50} p95 ${R.a6.addedWaitMs.p95} max ${R.a6.addedWaitMs.max} ms; in memory at most ${R.a6.inMemMax}`);
@@ -255,8 +260,10 @@ async function run(fx) {
   // A7: the shared instant (loads never past the limit, every world served and unloaded again), then a crawler fetch
   startSampling(1000);
   await sleep(sharedAt - Date.now() + 5000);
-  const w7 = Date.now(); let again = null;
-  for (; Date.now() - w7 < QUIET_MS + 5 * 60_000; await sleep(5000)) { const p = await ps(); if (Object.values(p?.worlds ?? {}).every((v) => v.status !== 'running' && v.status !== 'starting')) { again = Date.now(); break; } }
+  // #2490 A2: the window scales with the world count: every world loaded at the instant (4 at once, a few seconds each)
+  // then waits its quiet time to unload; 5 s a world is about four times the loads' own pace (15 min was short for 104)
+  const w7 = Date.now(), window7 = QUIET_MS + 5 * 60_000 + worlds.length * 5000; let again = null;
+  for (; Date.now() - w7 < window7; await sleep(5000)) { const p = await ps(); if (Object.values(p?.worlds ?? {}).every((v) => v.status !== 'running' && v.status !== 'starting')) { again = Date.now(); break; } }
   startSampling(5000);
   const around = samples.filter((s) => s.at >= sharedAt - 5000 && s.at <= (again ?? Date.now()));
   const delivered = Object.fromEntries(worlds.filter((w) => rem[w.slug] && w !== a5).map((w) => [w.slug, reminderRows(w.slug)]));
@@ -266,7 +273,7 @@ async function run(fx) {
   await sleep(10_000);
   const after = (await ps())?.worlds ?? {};
   R.a7 = { reminderAnswers: Object.values(rem).reduce((o, x) => { const k = x.code ?? `http-${x.status}`; o[k] = (o[k] ?? 0) + 1; return o; }, {}), sharedAtS: Math.round((sharedAt - silentAt) / 1000), maxStartingAtOnce: Math.max(0, ...around.map((s) => s.starting)), maxLoadsReported: around.some((s) => s.loads) ? around.map((s) => s.loads) .filter(Boolean).at(-1) : null,
-    allUnloadedAgainAfterS: again ? Math.round((again - sharedAt) / 1000) : null, failed: Math.max(0, ...around.map((s) => s.failed)), remindersDelivered: late.filter((x) => x != null).length, remindersSet: Object.keys(delivered).length,
+    allUnloadedAgainAfterS: again ? Math.round((again - sharedAt) / 1000) : null, windowS: Math.round(window7 / 1000), failed: Math.max(0, ...around.map((s) => s.failed)), remindersDelivered: late.filter((x) => x != null).length, remindersSet: Object.keys(delivered).length,
     deliveryLateMs: pct(late.filter((x) => x != null)), crawl: { pages: worlds.length, refused: crawl.refused, loaded: Object.entries(after).filter(([s, v]) => v.status !== crawl.before?.[s]?.status && (v.status === 'running' || v.status === 'starting')).map(([s]) => s) } };
   log(`A7: at most ${R.a7.maxStartingAtOnce} loading at once; ${R.a7.remindersDelivered}/${R.a7.remindersSet} reminders delivered; crawler loaded ${R.a7.crawl.loaded.length} world(s)`);
   save();
@@ -280,10 +287,13 @@ async function run(fx) {
     const walks = fx.ids[w.template]?.walk?.length ? fx.ids[w.template].walk : ['sit-ground:here'], t = Date.now();
     const r = await cli(soulDir(w), ['act', walks[0], '--json'], 120_000);
     const still = await childStill(w.slug), here = await soulApi(soulDir(w), '/v1/agent/status');
-    R.a4[w.slug] = { template: w.template, statusBefore: wasIn, gapS: Math.round((t - (unloadedAt[w.slug] ?? t)) / 1000), actMs: r.ms, accepted: r.j?.accepted ?? null, code: r.j?.code ?? null,
-      tickAtUnload: f0, still: still.status === 200 ? still.j : `missing (${still.status || 'no answer'}) #2297`,
-      ticksMoved: f0 != null && Number.isFinite(still.j?.tick) ? still.j.tick - f0 : null, ticksForGap: Math.round((t - (unloadedAt[w.slug] ?? t)) / 50), needsBefore: before[w.slug]?.needs ?? null, needsAfter: needsOf(here.j) };
-    log(`A4 ${w.slug}: act ${r.ms} ms (${r.j?.accepted === false ? `refused ${r.j?.code}` : 'accepted'}), world was ${wasIn}, ticks moved ${R.a4[w.slug].ticksMoved ?? '?'} for ${R.a4[w.slug].ticksForGap} in the gap`);
+    // #2490 A2: from the silence (tick and wall time both read from the world) when it was read, else from the last stop
+    const s0 = silentTicks[w.slug], s1 = still.status === 200 ? still.j : null, fromSilence = !!s0 && Number.isFinite(s1?.tick) && Number.isFinite(s1?.wallMs);
+    R.a4[w.slug] = { template: w.template, statusBefore: wasIn, gapFrom: fromSilence ? 'silence' : 'last stop', gapS: Math.round((t - (fromSilence ? s0.wallMs : unloadedAt[w.slug] ?? t)) / 1000), actMs: r.ms, accepted: r.j?.accepted ?? null, code: r.j?.code ?? null,
+      tickAtSilence: s0?.tick ?? null, tickAtUnload: f0, loadsInGap: L.lines.filter((l) => l.at > silentAt && l.at < t && l.s.includes(`world ${w.slug} loads (`)).length, still: s1 ?? `missing (${still.status || 'no answer'}) #2297`,
+      ticksMoved: fromSilence ? s1.tick - s0.tick : f0 != null && Number.isFinite(s1?.tick) ? s1.tick - f0 : null,
+      ticksForGap: fromSilence ? Math.round((s1.wallMs - s0.wallMs) / 50) : Math.round((t - (unloadedAt[w.slug] ?? t)) / 50), needsBefore: before[w.slug]?.needs ?? null, needsAfter: needsOf(here.j) };
+    log(`A4 ${w.slug}: act ${r.ms} ms (${r.j?.accepted === false ? `refused ${r.j?.code}` : 'accepted'}), world was ${wasIn}, ticks moved ${R.a4[w.slug].ticksMoved ?? '?'} for ${R.a4[w.slug].ticksForGap} since the ${R.a4[w.slug].gapFrom} (${R.a4[w.slug].loadsInGap} loads between)`);
   }
   if (a5) {
     // the 15 Nov re-run read A5 39 min before its reminder was due (a settle that ends early brings A4 forward): wait for it

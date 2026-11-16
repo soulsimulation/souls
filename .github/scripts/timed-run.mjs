@@ -54,7 +54,7 @@ export const ARG_ALLOW = {
   walk: { '--world': (v) => v.split(',').every((w) => WALK_WORLDS.includes(w)) && new Set(v.split(',')).size === v.split(',').length },
   // --battery: a bare battery name (battery/<name>.json in the ref); --seat: the scripted owner only, never a live mind
   'eval-scripted': { '--battery': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--seat': (v) => v === 'scripted', '--items': (v) => /^[a-z0-9][a-z0-9-]{0,60}(,[a-z0-9][a-z0-9-]{0,60}){0,20}$/.test(v), '--warm-sec': (v) => /^[1-9]\d{0,2}$/.test(v) && Number(v) <= 600 },
-  'eval-load': { '--souls': list(/^(100|[1-9]\d?)$/, 6), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600), '--act-sec': int(1, 600), '--fault-every-sec': int(10, 600), '--hang-kill-sec': int(1, 600) },
+  'eval-load': { '--souls': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 6), '--raw-from': int(1, 500), '--shape': (v) => ['uniform', 'everyday', 'event'].includes(v), '--duration-sec': int(10, 3600), '--card-sec': int(5, 600), '--act-sec': int(1, 600), '--fault-every-sec': int(10, 600), '--hang-kill-sec': int(1, 600), '--profile': FLAG, '--menu-stats': FLAG, '--scan-census': FLAG },
   'bench-client': { '--arms': list(/^n(100|[1-9]\d?)$/, 6), '--profile': (v) => v === 'real' || v === 'stress', '--raw-from': int(1, 100), '--short': FLAG },
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
@@ -62,7 +62,9 @@ export const ARG_ALLOW = {
   settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': (v) => ['0', '10', '0,10'].includes(v), '--settle-min': int(1, 20), '--short': FLAG },
   hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
   colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
-  viewers: { '--viewers': list(/^(2000|1\d{3}|[1-9]\d{0,2})$/, 4), '--window-sec': int(10, 600), '--short': FLAG },
+  // #2511: 0 is the zero-viewer arm; arrivals, a burst (<n>@<s>), stays and the Souls' pacing
+  viewers: { '--viewers': list(/^(2000|1\d{3}|[1-9]\d{0,2}|0)$/, 4), '--window-sec': int(10, 600), '--souls': int(1, 100), '--act-sec': int(1, 600), '--arrive-per-sec': int(1, 200),
+    '--arrive-burst': (v) => /^[1-9]\d{0,3}@[1-9]\d{0,2}$/.test(v) && Number(v.split('@')[0]) <= 2000, '--dwell-sec': int(1, 3600), '--short': FLAG },
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
   clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
 };
@@ -96,6 +98,9 @@ export function parseInputs(env) {
   if (!RUNNERS.includes(runner)) bad('runner', runner, RUNNERS.join(' or '));
   if (runner === 'hosted' && command !== 'counted') bad('runner', runner, `${command} is a timing run and runs on souls-timed only`);
   const args = checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
+  const cores = String(env.INPUT_CORES ?? '').trim();   // #2507: a core plan, for the split commands only
+  if (cores && !SPLIT.includes(command)) bad('cores', cores, `a core plan is for ${SPLIT.join(', ')} only`);
+  if (cores) inp.cores = parseCorePlan(cores) ?? bad('cores', cores, 'world=N or world=N,launcher=M (physical cores, 1 to 64); the load drivers get the rest');
   if (command === 'clip' && !args.includes('--kit')) bad('args', env.INPUT_ARGS, 'clip needs --kit <name> (a folder of tools/proof/clips)');
   if (command !== 'counted') return { ...inp, runner };
   // counted: a base ref, a scenario, and the one cell this job runs (base-k or cand-k, k up to repeats)
@@ -151,16 +156,32 @@ export function frameTiming(pts) {
   return { frames: t.length, spanSec: r3(span), meanFps: span > 0 ? +((t.length - 1) / span).toFixed(2) : null, maxGapSec: gaps.length ? r3(Math.max(...gaps)) : null, gapsOver100ms: gaps.filter((g) => g > 0.1).length };
 }
 
+/** #2507: `world=N[,launcher=M]` → { world, launcher } physical cores (launcher 0: not split off), or null. */
+export function parseCorePlan(s) {
+  const m = /^world=([1-9]\d?)(?:,launcher=([1-9]\d?))?$/.exec(String(s)), w = Number(m?.[1]), l = Number(m?.[2] ?? 0);
+  return m && w <= 64 && l <= 64 ? { world: w, launcher: l } : null;
+}
 /** #1970 A2: the runner's own logical CPUs grouped into physical cores (`siblingsOf(cpu)`: that CPU's SMT siblings); the
  *  first two cores for the world under test, the rest for the load generator: 2+2 on four cores, 2+1 on three (the timed
- *  runners give each job three). Any other count is refused. */
-export function splitCores(own, siblingsOf) {
+ *  runners give each job three). Any other count is refused. #2507: a core plan gives the world its first N cores, the
+ *  launcher the next M and the load drivers the rest (at least one); a plan that does not fit is refused. */
+export function splitCores(own, siblingsOf, plan = null) {
   const cores = new Map();
   for (const c of own) { const k = siblingsOf(c).filter((x) => own.includes(x)).sort((a, b) => a - b).join(',') || String(c); cores.set(k, k.split(',').map(Number)); }
   const byFirst = [...cores.values()].sort((a, b) => a[0] - b[0]);
-  const n = byFirst.length;
+  const n = byFirst.length, take = (a, b) => byFirst.slice(a, b).flat().join(',');
+  if (plan) {
+    const { world: w, launcher: l } = plan, name = `world=${w}${l ? `,launcher=${l}` : ''}`;
+    if (w + l + 1 > n) throw new Error(`the core plan ${name} needs ${w + l + 1} physical cores (at least one for the load drivers); this runner has ${n} of its own`);
+    return { physicalCores: n, plan: name, layout: `${w}+${l ? `${l}+` : ''}${n - w - l}`, world: take(0, w), ...(l ? { launcher: take(w, w + l) } : {}), load: take(w + l) };
+  }
   if (n !== 3 && n !== 4) throw new Error(`the runner has ${n} physical core(s) of its own; the world/load split needs 3 or 4`);
-  return { physicalCores: n, layout: `2+${n - 2}`, world: byFirst.slice(0, 2).flat().join(','), load: byFirst.slice(2).flat().join(',') };
+  return { physicalCores: n, layout: `2+${n - 2}`, world: take(0, 2), load: take(2) };
+}
+/** #2507: each group's mean busy fraction of its own CPUs between two /proc/stat samples (groups: name → "1,2,3"). */
+export function groupBusy(a, b, groups) {
+  const busy = (c) => { const d = b[c] && a[c] ? b[c][1] - a[c][1] : 0; return d > 0 ? (b[c][0] - a[c][0]) / d : 0; };
+  return Object.fromEntries(Object.entries(groups).map(([k, v]) => { const cs = parseCpuList(v); return [k, +(cs.reduce((s, c) => s + busy(c), 0) / cs.length).toFixed(3)]; }));
 }
 /** [[pid, ppid], …] → every descendant pid of root. */
 export function descendants(table, root) {
@@ -170,6 +191,8 @@ export function descendants(table, root) {
 }
 /** A world server process (a direct boot, or a child of the launcher), by its NUL-separated command line. */
 export const isWorld = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('apps/server/src/main.ts'));
+/** #2507: the world launcher process (it carries every viewer byte and every act), by its NUL-separated command line. */
+export const isLauncher = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('tools/world-launcher/launcher.mjs'));
 
 /** "0-3,8,10-11" → [0,1,2,3,8,10,11]. */
 export function parseCpuList(s) {
@@ -222,7 +245,7 @@ export const PUBLISH = {
   // #2475 A3: the launcher's own log (what loaded or unloaded each world, and why), scrubbed like every text file
   hundred: ['hundred/results.json', 'hundred/REPORT.md', 'hundred/hundred.log', 'hundred/launcher.log', 'hundred.log'],
   colocate: ['colocate/results.json', 'colocate/REPORT.md', 'colocate.log'],
-  viewers: ['viewers/results.json', 'viewers/REPORT.md', 'viewers.log'],
+  viewers: ['viewers/results.json', 'viewers/REPORT.md', 'viewers/*/world.log', 'viewers/*/stall-*.json', 'viewers.log'],
   // the files the workstation session writes per cell: the kit's record, its log, the score, the class and the probe log
   counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
@@ -299,18 +322,28 @@ const siblingsOf = (c) => { try { return parseCpuList(readFileSync(`/sys/devices
 const procTable = () => readdirSync('/proc').filter((d) => /^\d+$/.test(d)).flatMap((d) => { try { return [[Number(d), Number(readFileSync(`/proc/${d}/stat`, 'utf8').split(') ').at(-1).split(' ')[1])]]; } catch { return []; } });
 const allowedOf = (pid) => { try { return /^Cpus_allowed_list:\s*(\S+)/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] ?? null; } catch { return null; } };
 /** #1970 A2: each world process under root, with all its threads, onto the world's cores as soon as it appears (threads
- *  made later inherit the mask). Returns what was pinned: a count and the allowed lists read back, no pids. */
-function pinWorlds(root, cpus) {
-  const pinned = new Map(), tick = () => {
+ *  made later inherit the mask). #2507: with a launcher in the plan, each launcher process too, onto its own cores (a
+ *  world it starts is moved on to the world's). Every 5 s each group's busy share is sampled. Returns what was pinned (a
+ *  count and the allowed lists read back, no pids) and each group's mean and peak busy share. */
+function pinWorlds(root, split) {
+  const stat = () => parseProcStat(readFileSync('/proc/stat', 'utf8')), groups = { world: split.world, ...(split.launcher ? { launcher: split.launcher } : {}), load: split.load };
+  const first = stat(), peak = {}, pinned = { world: new Map(), launcher: new Map() };
+  let last = first, n = 0;
+  const tick = () => {
     for (const pid of descendants(procTable(), root)) {
-      if (pinned.has(pid)) continue;
+      if (pinned.world.has(pid) || pinned.launcher.has(pid)) continue;
       let cmd; try { cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch { continue; }
-      if (!isWorld(cmd)) continue;
-      try { execFileSync('taskset', ['-a', '-p', '-c', cpus, String(pid)], { stdio: 'ignore' }); pinned.set(pid, allowedOf(pid)); } catch { /* exited */ }
+      const g = isWorld(cmd) ? 'world' : split.launcher && isLauncher(cmd) ? 'launcher' : null; if (!g) continue;
+      try { execFileSync('taskset', ['-a', '-p', '-c', split[g], String(pid)], { stdio: 'ignore' }); pinned[g].set(pid, allowedOf(pid)); } catch { /* exited */ }
     }
+    if (++n % 20) return;
+    const now = stat(); for (const [k, v] of Object.entries(groupBusy(last, now, groups))) peak[k] = Math.max(peak[k] ?? 0, v); last = now;
   };
   const iv = setInterval(tick, 250);
-  return { stop: () => { clearInterval(iv); return { worldProcesses: pinned.size, worldAllowed: [...new Set(pinned.values())] }; } };
+  return { stop: () => { clearInterval(iv); const mean = groupBusy(first, stat(), groups);
+    return { worldProcesses: pinned.world.size, worldAllowed: [...new Set(pinned.world.values())],
+      ...(split.launcher ? { launcherProcesses: pinned.launcher.size, launcherAllowed: [...new Set(pinned.launcher.values())] } : {}),
+      busy: Object.fromEntries(Object.keys(groups).map((k) => [k, { mean: mean[k], peak5s: peak[k] ?? null }])) }; } };
 }
 const la = () => loadavg().slice(0, 2).map((x) => +x.toFixed(2));
 const sh = (cmd, args) => { try { execFileSync(cmd, args, { stdio: 'ignore' }); return true; } catch { return false; } };
@@ -420,10 +453,11 @@ async function main(cmd) {
     console.log('no entries written outside the per-run directory'); return;
   }
   const inp = parseInputs(process.env), rf = arg('record');
-  if (cmd === 'inputs') { output('target', target(inp)); console.log(`inputs ok: ${inp.ref}, ${inp.command} x${inp.repeats}${inp.args.length ? ` ${inp.args.join(' ')}` : ''}${inp.cell ? `, cell ${inp.cell} of base ${inp.base}` : ''} on ${inp.runner}`); return; }
+  if (cmd === 'inputs') { output('target', target(inp)); console.log(`inputs ok: ${inp.ref}, ${inp.command} x${inp.repeats}${inp.args.length ? ` ${inp.args.join(' ')}` : ''}${inp.cores ? `, cores world=${inp.cores.world},launcher=${inp.cores.launcher}` : ''}${inp.cell ? `, cell ${inp.cell} of base ${inp.base}` : ''} on ${inp.runner}`); return; }
   if (cmd === 'load') {   // A3: own cores and whole machine; wait a bounded time for own cores to settle, else refuse
     // counted scores pass/fail per item: its starting load is recorded, never gated
     const own = ownCpus(), stat = () => parseProcStat(readFileSync('/proc/stat', 'utf8')), gated = inp.command !== 'counted';
+    if (inp.cores) console.log(`cores: plan ${JSON.stringify(splitCores(own, siblingsOf, inp.cores))}`);   // #2507: throws if it does not fit
     let f;
     for (let t = 0; ; t += 15) {
       const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own);
@@ -444,18 +478,18 @@ async function main(cmd) {
     if (inp.command === 'clip') return runClip(inp, rec, out, env);
     // #1970: the world on two physical cores, the load generator (the driver and all it starts but the world) on the rest
     // (one or two). HOME goes inside the per-run directory: the capacity bench moves finished world data under ~/.Trash.
-    const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf) : null;
+    const split = SPLIT.includes(inp.command) ? splitCores(ownCpus(), siblingsOf, inp.cores) : null;
     if (split) {
       execFileSync('taskset', ['-V'], { stdio: 'ignore' });
       env.HOME = join(env.PER_RUN, 'home'); mkdirSync(env.HOME, { recursive: true });
-      console.log(`cores: split ${split.layout} of ${split.physicalCores} physical, world ${split.world}, load generator ${split.load}`);
+      console.log(`cores: split ${split.layout} of ${split.physicalCores} physical, world ${split.world}${split.launcher ? `, launcher ${split.launcher}` : ''}, load generator ${split.load}`);
     }
     const n = inp.command === 'walk' ? inp.repeats : 1, runs = [];
     for (let k = 1; k <= n; k++) {
       const argv = commandLine(inp, { out, port: await freePorts(PORT_SPAN[inp.command]) }), log = join(out, logName(inp.command, k)), t0 = Date.now();
       console.log(`${inp.command} ${k}/${n}: ${argv.join(' ')}`);
       const [bin, args] = split ? ['taskset', ['-c', split.load, process.execPath, ...argv]] : [process.execPath, argv];
-      const ws = createWriteStream(log), child = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] }), pins = split ? pinWorlds(child.pid, split.world) : null;
+      const ws = createWriteStream(log), child = spawn(bin, args, { env, stdio: ['ignore', 'pipe', 'pipe'] }), pins = split ? pinWorlds(child.pid, split) : null;
       for (const s of [child.stdout, child.stderr]) s.on('data', (b) => { ws.write(b); process.stdout.write(b); });
       for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
       const code = await new Promise((r) => child.on('close', (c) => r(c ?? 1))); ws.end();
@@ -465,6 +499,7 @@ async function main(cmd) {
     const failed = runs.filter((r) => r.exitCode !== 0);
     if (failed.length) throw new Error(`${failed.length} of ${runs.length} run(s) exited non-zero`);
     if (runs.some((r) => r.cpuSplit && !r.cpuSplit.worldProcesses)) throw new Error('no world process was seen to pin to the world\'s cores');
+    if (runs.some((r) => r.cpuSplit?.launcher && !r.cpuSplit.launcherProcesses)) throw new Error('no launcher process was seen to pin to the launcher\'s cores');
     return;
   }
   if (cmd === 'stage') {

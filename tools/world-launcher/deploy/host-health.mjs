@@ -6,13 +6,17 @@
 // short problem `codes` for everyone, the numbers for direct (loopback) requests. Alert when disk free < 15% OR < 20 GB,
 // or MemAvailable < 1.5 GB; (t4-o1) when a sim-worlds@<stage> unit's working set (cgroup memory.current minus inactive
 // file cache) reaches 90% of its MemoryMax, or its oom_kill count rose since the last run; and, only while a
-// sim-worlds-backup@<stage>.timer is enabled, when that backup's last run did not succeed.
-// No dependencies, no network. The off-box watcher (team/ops/sim-watch, Modal) reads `hostOk`/`hostCodes` from healthz and
+// sim-worlds-backup@<stage>.timer is enabled, when that backup's last run did not succeed (#2541: likewise the hourly
+// sim-worlds-backup-hourly@<stage>, code `backup-hourly:<stage>`); and (#2541) for each telemetry alert rule firing that
+// pages, `alert:<rule>`, from <dataDir>/alert-problems.json (telemetry.mjs collect --problems), or `alert:stale` when
+// the collector stopped writing that file without a clean stop.
+// No dependencies (but telemetry/alerts.mjs, for the alerts file), no network. The off-box watcher (team/ops/sim-watch, Modal) reads `hostOk`/`hostCodes` from healthz and
 // DMs Gene. Exit 0 always (a failed check must not flap the unit).
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, readdirSync, readFileSync, realpathSync, renameSync, statfsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readAlertProblems } from '../telemetry/alerts.mjs';   // #2541
 
 export function memAvailableMb(meminfo) {
   const m = /^MemAvailable:\s+(\d+)\s+kB/m.exec(meminfo);
@@ -29,7 +33,7 @@ export function readCgroup(dir) {
   return { workingBytes: num('memory.current') - field(stat, 'inactive_file'), maxBytes: num('memory.max'), oomKills: field(events, 'oom_kill') };
 }
 
-export function evaluate({ diskTotalBytes, diskFreeBytes, memMb, units = {}, prevUnits = {}, backups = {}, worldProblems = [] }, t = {}) {
+export function evaluate({ diskTotalBytes, diskFreeBytes, memMb, units = {}, prevUnits = {}, backups = {}, backupsHourly = {}, worldProblems = [], alertProblems = [] }, t = {}) {
   const minPct = t.minFreePct ?? 15, minGb = t.minFreeGb ?? 20, minMem = t.minMemMb ?? 1536, capPct = t.capPct ?? 90;
   const diskFreeGb = +(diskFreeBytes / 1e9).toFixed(1), diskFreePct = +(100 * diskFreeBytes / diskTotalBytes).toFixed(1);
   const problems = [], codes = new Set();
@@ -49,9 +53,13 @@ export function evaluate({ diskTotalBytes, diskFreeBytes, memMb, units = {}, pre
   for (const [stage, b] of Object.entries(backups)) {
     if (b.enabled && b.result && b.result !== 'success') flag(`backup:${stage}`, `sim-worlds-backup@${stage} last run: ${b.result}`);
   }
+  for (const [stage, b] of Object.entries(backupsHourly)) {   // #2541: a timeout or a FAILED database fails the unit too
+    if (b.enabled && b.result && b.result !== 'success') flag(`backup-hourly:${stage}`, `sim-worlds-backup-hourly@${stage} last run: ${b.result}`);
+  }
+  for (const a of alertProblems) if (a?.code && a.text) flag(a.code, a.text);
   // lane L1: the launcher's guard (children.mjs problems(), via <data>/world-problems.json): wedged, held, crashloop, bootSlow, halted
   for (const w of worldProblems) if (w?.code && w.text) flag(w.code, w.text);
-  return { ok: problems.length === 0, diskFreeGb, diskFreePct, memAvailableMb: memMb, problems, codes: [...codes], units: unitStatus, backups,
+  return { ok: problems.length === 0, diskFreeGb, diskFreePct, memAvailableMb: memMb, problems, codes: [...codes], units: unitStatus, backups, backupsHourly,
     thresholds: { minFreePct: minPct, minFreeGb: minGb, minMemMb: minMem, capPct } };
 }
 
@@ -66,16 +74,16 @@ function readUnits(slice = CGROUP_SLICE) {
 }
 
 /** Backups count only while their timer is enabled (Gene, 2026-10-19: scheduled backups are off until he wants them). */
-function readBackups(stages) {
+function readBackups(stages, unit = 'sim-worlds-backup') {
   const backups = {};
   const show = (unit, props) => Object.fromEntries(execFileSync('systemctl', ['show', unit, '-p', props], { encoding: 'utf8', timeout: 10_000 })
     .trim().split('\n').map(l => l.split('=')));
   for (const stage of stages) {
     try {
-      const timer = show(`sim-worlds-backup@${stage}.timer`, 'UnitFileState');
+      const timer = show(`${unit}@${stage}.timer`, 'UnitFileState');
       if (timer.UnitFileState !== 'enabled') { backups[stage] = { enabled: false }; continue; }
       // lane DASH: when the last run started and ended (the owner's health page shows them; '' = never ran)
-      const s = show(`sim-worlds-backup@${stage}.service`, 'Result,ExecMainStartTimestamp,ExecMainExitTimestamp,ExecMainStatus');
+      const s = show(`${unit}@${stage}.service`, 'Result,ExecMainStartTimestamp,ExecMainExitTimestamp,ExecMainStatus');
       const iso = (v) => { const t = Date.parse(v ?? ''); return Number.isFinite(t) ? new Date(t).toISOString() : null; };
       backups[stage] = { enabled: true, result: s.Result, startedAt: iso(s.ExecMainStartTimestamp), endedAt: iso(s.ExecMainExitTimestamp), exitStatus: s.ExecMainStatus === undefined ? null : Number(s.ExecMainStatus) };
     } catch {}
@@ -101,7 +109,7 @@ function main(argv) {
     const s = statfsSync(diskPath);
     const units = readUnits();
     status = evaluate({ diskTotalBytes: s.blocks * s.bsize, diskFreeBytes: s.bavail * s.bsize, memMb: memAvailableMb(readFileSync(`${process.env.SIM_PROC_ROOT ?? ''}/proc/meminfo`, 'utf8')),
-      units, prevUnits: prev?.units ?? {}, backups: readBackups(Object.keys(units)), worldProblems: readWorldProblems(dataDir) },
+      units, prevUnits: prev?.units ?? {}, backups: readBackups(Object.keys(units)), backupsHourly: readBackups(Object.keys(units), 'sim-worlds-backup-hourly'), worldProblems: readWorldProblems(dataDir), alertProblems: readAlertProblems(dataDir) },
       { minFreePct: Number(opt('min-free-pct', 15)), minFreeGb: Number(opt('min-free-gb', 20)), minMemMb: Number(opt('min-mem-mb', 1536)), capPct: Number(opt('cap-pct', 90)) });
   } catch (e) { status = { ok: false, problems: [`check failed: ${e.message}`], codes: ['check'] }; }
   status = { ...status, at: new Date().toISOString(), diskPath };

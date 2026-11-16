@@ -28,6 +28,8 @@ function release(name, { brokenLauncher = false, brokenWorlds = false, loadMs = 
   cpSync(join(here, '../../apps/server/src/inline-config.ts'), join(r, 'apps/server/src/inline-config.ts'));
   // and every per-address limit keys through the server's address helper (#2543)
   cpSync(join(here, '../../apps/server/src/address-key.ts'), join(r, 'apps/server/src/address-key.ts'));
+  // and a restore clears the world's snapshot epoch by the server's own file name (E6, #2518)
+  cpSync(join(here, '../../apps/server/src/edge-snapshot.ts'), join(r, 'apps/server/src/edge-snapshot.ts'));
   // loadMs: the release's code takes that long to load (the part a pre-warmed take-over hides)
   writeFileSync(join(r, 'apps/server/src/main.ts'), brokenWorlds ? 'process.exit(5);\n' : `process.env.FAKE_LOAD_MS ??= '${loadMs}';\n` + readFileSync(join(here, 'fake-world.mjs')));
   if (brokenLauncher) writeFileSync(join(r, 'tools/world-launcher/launcher.mjs'), 'process.exit(3);\n');
@@ -72,7 +74,13 @@ test('the keeper serves the launcher of the linked release', async () => {
 test('reload hands every world to the new release with no refused connection and no 5xx', async () => {
   const pids = Object.fromEntries((await Promise.all(['one', 'two'].map(async (s) => [s, (await (await api(`/w/${s}/healthz`)).json()).pid]))));
   // a viewer socket on One stays usable until its world moves, then the new launcher accepts it again
+  // the 0.130 switch (install.sh unload-still): the new generation reads <data>/launcher-settings.json at its start, so the
+  // reload turns unloading on with no restart; the first launcher, started without the file, said the default. (The file
+  // is removed after: later tests' new generations start from the default again.)
+  writeFileSync(join(data, 'launcher-settings.json'), '{"unloadStill":1}\n');
   const { out: h, bad, slowest } = await watch(['one', 'two'], () => handover(B));
+  unlinkSync(join(data, 'launcher-settings.json'));
+  assert.match(keeper.logs(), /unload-still 0 \(the default\)[\s\S]*launcher-settings\.json: unloadStill 1[\s\S]*unload-still 1 \(launcher-settings\.json\)/, 'the first launcher had no file; the reload read it and turned unloading on');
   assert.equal(h.state, 'done', JSON.stringify(h)); assert.equal(h.from, 'we-a'); assert.equal(h.to, 'we-b');
   assert.deepEqual(Object.keys(h.worlds).sort(), ['one', 'two']); assert.ok(Object.values(h.worlds).every((w) => w.ok));
   // canary first, then the rest; every new process was pre-warmed, so a world's pause is shorter than B's code load

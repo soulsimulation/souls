@@ -59,3 +59,18 @@ test('#1150: the timer run on a halted world writes its ALERT line, and RECOVERE
   const after = run([]);
   assert.equal(after.length, 2); assert.match(after[1], / RECOVERED disk /);
 });
+
+test('#2541: a failed hourly backup and a firing telemetry alert set short codes; a stale alerts file is alert:stale', async (t) => {
+  const { evaluate } = await import('./deploy/host-health.mjs'); const { readAlertProblems } = await import('./telemetry/alerts.mjs');
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs'); const { join } = await import('node:path'); const { tmpdir } = await import('node:os');
+  const base = { diskTotalBytes: 301 * GB, diskFreeBytes: 150 * GB, memMb: 8000 };
+  const r = evaluate({ ...base, backupsHourly: { production: { enabled: true, result: 'timeout' }, staging: { enabled: false, result: 'exit-code' } }, alertProblems: [{ code: 'alert:disk-free', text: 'share of the data disk free: over its threshold 0.2' }] });
+  assert.deepEqual(r.codes, ['backup-hourly:production', 'alert:disk-free']);
+  assert.match(r.problems.join(), /sim-worlds-backup-hourly@production last run: timeout/);
+  const d = mkdtempSync(join(tmpdir(), 'alert-problems-')); t.after(() => rmSync(d, { recursive: true, force: true }));
+  const now = Date.parse('2026-11-16T08:00:00Z');
+  assert.deepEqual(readAlertProblems(d, now), [], 'no file: the collector is not enabled');
+  writeFileSync(join(d, 'alert-problems.json'), JSON.stringify({ at: new Date(now - 20_000).toISOString(), everyMs: 15_000, problems: [{ code: 'alert:worlds-created', text: 'x' }, { code: 'disk', text: 'not an alert code' }] }));
+  assert.deepEqual(readAlertProblems(d, now).map((p) => p.code), ['alert:worlds-created']);
+  assert.deepEqual(readAlertProblems(d, now + 5 * 60_000).map((p) => p.code), ['alert:stale']);
+});
