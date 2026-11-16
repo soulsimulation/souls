@@ -124,7 +124,7 @@ import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, 
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
 import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
 import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
-import { addressKey } from '../../apps/server/src/address-key.ts';
+import { addressKey, forwardedAddress } from '../../apps/server/src/address-key.ts';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
@@ -1479,7 +1479,7 @@ export async function openLauncher(cfg = {}) {
       // and the ceilings take it), else the TCP peer. Public, since it is the caller's own address; never a header
       // verbatim: anything that is not an address answers null. deploy/caddy/check-soul-game.mjs compares it from outside.
       if (path === '/__sim/whoami' && (req.method === 'GET' || req.method === 'HEAD')) {
-        const xff = behindProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '', a = xff || (req.socket.remoteAddress ?? '');
+        const a = (behindProxy ? forwardedAddress(req.headers['x-forwarded-for']) : null) || (req.socket.remoteAddress ?? '');   // #2543
         json(res, 200, { address: isIP(a) ? a : null }); return;
       }
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {

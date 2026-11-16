@@ -1,7 +1,7 @@
 // #2543 A1: the one helper that decides what "the same address" means.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addressKey } from './address-key.ts';
+import { addressKey, forwardedAddress } from './address-key.ts';
 
 test('IPv4 is the address itself, never widened', () => {
   assert.equal(addressKey('198.51.100.8'), '198.51.100.8');
@@ -33,6 +33,7 @@ test('a list is keyed on its first entry, or its nearest hop when asked', () => 
   assert.equal(addressKey(['198.51.100.8, 203.0.113.5', '192.0.2.1']), '198.51.100.8');
   assert.equal(addressKey('fake-one, 198.51.100.8', { hop: 'last' }), '198.51.100.8');
   assert.equal(addressKey(' , 198.51.100.8'), '198.51.100.8', 'empty entries are skipped');
+  assert.equal(forwardedAddress(' 2001:db8:1:2::9 , 198.51.100.8'), '2001:db8:1:2::9', 'the address itself, before keying');
 });
 
 test('garbage is keyed as it is, trimmed; an empty value has none', () => {
@@ -47,7 +48,7 @@ test('no site parses a forwarded address by itself', async () => {
   const root = new URL('../../../', import.meta.url).pathname;
   const sites = ['tools/world-launcher/flood.mjs', 'tools/world-launcher/launcher.mjs', 'apps/server/src/hub.ts', 'apps/server/src/http.ts',
     'apps/server/src/flood.ts', 'apps/server/src/welcome.ts', 'apps/server/src/edge/comms/index.ts'];
-  for (const f of sites) assert.match(readFileSync(join(root, f), 'utf8'), /import \{ ?addressKey ?\} from '[./]+(apps\/server\/src\/)?address-key\.ts'/, `${f} imports addressKey`);
+  for (const f of sites) assert.match(readFileSync(join(root, f), 'utf8'), /import \{ ?addressKey(, forwardedAddress)? ?\} from '[./]+(apps\/server\/src\/)?address-key\.ts'/, `${f} imports addressKey`);
   const files = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => e.isDirectory()
     ? (e.name === 'node_modules' ? [] : files(join(dir, e.name)))
     : /\.(ts|mjs)$/.test(e.name) && !/\.test\.(ts|mjs)$/.test(e.name) && e.name !== 'address-key.ts' ? [join(dir, e.name)] : []);

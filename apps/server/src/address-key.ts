@@ -6,11 +6,20 @@
 // mobile carriers put many people behind one IPv4 address.
 import { isIP } from 'node:net';
 
-/** The key for a forwarded address: a header value (`x-forwarded-for`, a comma list: the first entry, the visitor the
- *  proxy saw, unless `hop: 'last'` asks for the nearest proxy hop), or a socket's peer address. `null` when empty. */
-export function addressKey(forwarded: string | readonly string[] | null | undefined, { hop = 'first' }: { hop?: 'first' | 'last' } = {}): string | null {
+type Forwarded = string | readonly string[] | null | undefined;
+type Hop = { hop?: 'first' | 'last' };
+
+/** The address a forwarded value names, trimmed: a header value (`x-forwarded-for`, a comma list: the first entry, the
+ *  visitor the proxy saw, unless `hop: 'last'` asks for the nearest proxy hop), or a socket's peer address. `null`
+ *  when empty. What a limit keys on is addressKey(); this is the address itself (`/__sim/whoami` reports it). */
+export function forwardedAddress(forwarded: Forwarded, { hop = 'first' }: Hop = {}): string | null {
   const list = (Array.isArray(forwarded) ? forwarded.join(',') : String(forwarded ?? '')).split(',').map((s) => s.trim()).filter(Boolean);
-  const a = (hop === 'last' ? list.at(-1) : list[0]) ?? '';
+  return (hop === 'last' ? list.at(-1) : list[0]) ?? null;
+}
+
+/** The key every per-address limit counts under, for the address forwardedAddress() names. `null` when empty. */
+export function addressKey(forwarded: Forwarded, opts: Hop = {}): string | null {
+  const a = forwardedAddress(forwarded, opts);
   if (!a) return null;
   if (isIP(a) !== 6) return a;
   const g = groups(a.split('%')[0]!.toLowerCase());
