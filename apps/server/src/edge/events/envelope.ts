@@ -167,6 +167,8 @@ export function classify(e: StreamEvent, me: Viewer): {kind: string; salience: 0
       return k('object.response', 1);
     }
     case 'world': {
+      // #1917: a Soul's calendar post is another Soul's words: never classified by matching its text
+      if (d.calendarItem !== undefined) return k('calendar.new');
       const text = String(d.text ?? '');
       if (/ gave you /.test(text)) return k('item.received');
       if (/boarded a ride; you stop following/.test(text)) return k('follow.stop');

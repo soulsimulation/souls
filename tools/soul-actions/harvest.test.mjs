@@ -85,7 +85,7 @@ test('harvest: tomatoes into the basket, flowers into the vase, at the hand cont
  const done = async (s, words) => { const b = await act(s, words); report.words[`${s.name}: ${words}`] = b.capability ?? b.receipt?.capability; for (let n = 0; n < 9000 && !['completed', 'failed', 'cancelled', 'replaced'].includes(phase(s, b)); n++) await tick(1); assert.equal(phase(s, b), 'completed', words); };
 
  // ---- an interrupted pick changes nothing: she has the basket, the hand is on its way, she is told to stand ----
- const ib = await act(ana, 'pick the tomatoes'); let reaching = false;
+ const ib = await act(ana, `object:${id('basket')}:harvest`); let reaching = false;
  for (let n = 0; n < 9000 && !reaching; n++) { const m = body(ana).human?.handActuator; if (m && m.target === id('bed')) reaching = true; else await tick(1); }
  assert.ok(reaching, 'the hand started for the bed');
  const stop = await act(ana, 'stand:here'); for (let n = 0; n < 400 && !['completed', 'failed', 'cancelled', 'replaced'].includes(phase(ana, stop)); n++) await tick(1); await tick(40);
@@ -96,11 +96,11 @@ test('harvest: tomatoes into the basket, flowers into the vase, at the hand cont
  report.checks.push(`interrupted before the contact (${phase(ana, ib)}): the bed stays fruiting, the basket empty`);
 
  // ---- "pick the tomatoes": from the basket in her hand, at the contact ----
- const p1 = await pick(ana, 'pick the tomatoes', 'bed');
+ const p1 = await pick(ana, `object:${id('basket')}:harvest`, 'bed');
  assert.equal(state('bed').growth, 3, 'the bed is flowering'); assert.equal(state('basket').fruit, 3, 'three tomatoes in the basket');
  assert.ok(p1.contact !== null && p1.changed !== null && p1.changed >= p1.contact, `the bed changed at the contact (contact ${p1.contact}, changed ${p1.changed})`);
  assert.equal(ent('basket').support?.by, ana.entityId); assert.equal(ent('basket').support?.hand, 'right');
- assert.match(report.summaries['Ana: pick the tomatoes'] ?? '', /Picks 3 tomatoes from bed into .*basket at the hand's touch/);
+ assert.match(report.summaries[`Ana: object:${id('basket')}:harvest`] ?? '', /Picks 3 tomatoes from bed into .*basket at the hand's touch/);
  assert.equal(state('private-bed').growth, 4, 'the private bed, though fruiting, was not picked');
  assert.deepEqual(bridge.harvest.facts(id('basket')), {fruit: 3});
  const fullHere = await here(ana), row = fullHere.objects?.find(o => o.id === id('basket')), bedRow = fullHere.objects?.find(o => o.id === id('bed'));
@@ -121,24 +121,24 @@ test('harvest: tomatoes into the basket, flowers into the vase, at the hand cont
  report.checks.push('regrowth: the daily pass (garden.ts) takes the picked bed from flowering to fruiting again');
 
  // ---- "put the basket on the counter" ----
- await done(ana, 'put the basket on the counter');
+ await done(ana, `put-on:${id('counter')}`);
  assert.equal(ent('basket').support?.kind, 'resting-on'); assert.equal(ent('basket').support?.on, id('counter')); assert.equal(state('basket').fruit, 3, 'the tomatoes stay in it');
 
  // ---- "pick flowers for the vase": the same faculty, the vase's data; the bed is flowering now ----
  assert.equal(cap(ana, vasePick).available, true, JSON.stringify(cap(ana, vasePick)));
- const p2 = await pick(ana, 'pick flowers for the vase', 'bed');
+ const p2 = await pick(ana, `object:${id('vase')}:harvest`, 'bed');
  assert.equal(state('bed').growth, 2, 'the bed is leafy'); assert.equal(state('vase').flowers, 3, 'a bunch in the vase');
  assert.ok(p2.contact !== null && p2.changed >= p2.contact, 'at the contact');
  assert.equal(state('bed-two').growth, 2, 'the other bed is untouched');
  refused(ana, vasePick, 'harvest.vessel-full', /already holds 3 flowers and has no room for more/);
  const vaseRow = (await here(ana)).objects?.find(o => o.id === id('vase')); report.vaseRow = vaseRow ?? null;
  assert.deepEqual(vaseRow?.state, {flowers: 3}, 'nearby, the vase says flowers: 3');
- await done(ana, 'put the vase on the table');
+ await done(ana, `put-on:${id('garden-table')}`);
  assert.equal(ent('vase').support?.on, id('garden-table')); assert.equal(state('vase').flowers, 3);
  report.checks.push('flowers: the vase from the table, the bed flowering -> leafy and the vase 0 -> 3 at the contact; full refused; set back on the table with its flowers');
 
  // ---- hands full: Ben holds the vase; the basket (room for 3 more) is refused to him ----
- await done(ben, 'pick up the vase');
+ await done(ben, `pick-up:${id('vase')}`);
  refused(ben, basketPick, 'harvest.hands-full', /You are holding .*vase; put it down first/);
 
  // ---- persistence ----
@@ -172,24 +172,25 @@ test('harvest: two ripe beds, the named one is picked', {timeout: 300000}, async
   {op: 'place', def: 'core/table@1', name: 'garden-table', p: [ax - 1.2, az - 1.4]},
   {op: 'place', def: 'core/harvest-basket@1', name: 'basket', in: {parent: 'garden-table', slot: 'top'}, p: [0.2, 0.1]}]});
  assert.equal(sc.accepted, true, JSON.stringify(sc.failures?.slice(0, 3))); await tick(60);
- const act = async (capability) => { const r = await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability})})); return r.json(); };
+ const act = async (capability, params) => { const r = await accept(f.host, app.request('/v1/edge/act', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({capability, ...(params ? {params} : {})})})); return r.json(); };
+ const pick = `object:${byName('basket').id}:harvest`;
  const nothing = () => assert.deepEqual([state('near-bed').growth, state('rose-bed').growth, state('herb-bed').growth, state('basket').fruit ?? 0], [4, 4, 2, 0], 'nothing changed');
  // with nothing ripe anywhere, a planter by a name nobody has is refused for that name, not for the nearest bed's stage
  assert.equal(god.act({ops: [{op: 'set', id: 'near-bed', state: {growth: 3}}, {op: 'set', id: 'rose-bed', state: {growth: 3}}]}).accepted, true); await tick(5);
- const none = await act('pick the tomatoes from the shed'); assert.equal(none.accepted, false); assert.match(JSON.stringify(none), /no garden planter called \\"shed\\"/, JSON.stringify(none).slice(0, 300));
+ const none = await act(pick, {from: 'shed'}); assert.equal(none.accepted, false); assert.match(JSON.stringify(none), /no garden planter called \\"shed\\"/, JSON.stringify(none).slice(0, 300));
  assert.equal(god.act({ops: [{op: 'set', id: 'near-bed', state: {growth: 4}}, {op: 'set', id: 'rose-bed', state: {growth: 4}}]}).accepted, true); await tick(5);
- const no = await act('pick the tomatoes from the shed'); assert.equal(no.accepted, false, JSON.stringify(no).slice(0, 300));
+ const no = await act(pick, {from: 'shed'}); assert.equal(no.accepted, false, JSON.stringify(no).slice(0, 300));
  assert.match(JSON.stringify(no), /no garden planter called \\"shed\\"/, JSON.stringify(no).slice(0, 300)); nothing();
- const unripe = await act('pick the tomatoes from the herb bed'); assert.equal(unripe.accepted, false, JSON.stringify(unripe).slice(0, 300));
+ const unripe = await act(pick, {from: 'herb bed'}); assert.equal(unripe.accepted, false, JSON.stringify(unripe).slice(0, 300));
  assert.match(JSON.stringify(unripe), /Nothing in herb-bed is ready/, JSON.stringify(unripe).slice(0, 300)); nothing();
- const b = await act('pick the tomatoes from the rose bed'); assert.equal(b.accepted, true, JSON.stringify(b).slice(0, 400));
+ const b = await act(pick, {from: 'rose bed'}); assert.equal(b.accepted, true, JSON.stringify(b).slice(0, 400));
  assert.match(JSON.stringify(b), /from rose-bed/, 'the summary names the rose bed');
  for (let n = 0; n < 9000 && !['completed', 'failed', 'cancelled', 'replaced'].includes(edge.receipt(soul.soulId, b.receipt.id)?.phase); n++) await tick(1);
  assert.equal(edge.receipt(soul.soulId, b.receipt.id).phase, 'completed', JSON.stringify(edge.receipt(soul.soulId, b.receipt.id)).slice(0, 400));
  assert.equal(state('rose-bed').growth, 3, 'the named bed was picked'); assert.equal(state('near-bed').growth, 4, 'the nearer ripe bed keeps its tomatoes');
  assert.equal(state('basket').fruit, 3);
  // "from the bed" names no planter in particular (no planter is called that): the nearest ripe one, as before
- const g = await act('pick some tomatoes from the bed'); assert.equal(g.accepted, true, JSON.stringify(g).slice(0, 400)); assert.match(JSON.stringify(g), /from near-bed/);
+ const g = await act(pick); assert.equal(g.accepted, true, JSON.stringify(g).slice(0, 400)); assert.match(JSON.stringify(g), /from near-bed/);
  for (let n = 0; n < 9000 && !['completed', 'failed', 'cancelled', 'replaced'].includes(edge.receipt(soul.soulId, g.receipt.id)?.phase); n++) await tick(1);
  assert.equal(edge.receipt(soul.soulId, g.receipt.id).phase, 'completed'); assert.equal(state('near-bed').growth, 3); assert.equal(state('basket').fruit, 6);
  assert.deepEqual(W().runtime?.violations ?? f.host.engine.runtime.violations, []);

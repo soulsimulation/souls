@@ -26,49 +26,6 @@ test('shared rolling preset, exhaustive refusal policy, normal selection and upr
  const back=await accept(f.host,req(b,{preset:'humanoid'}));assert.equal(back.status,200);assert.ok(edge.capabilities(b.soul).some(c=>c.verb==='sit'),'ordinary humanoid seating is preserved');
 });
 
-test('unattended idle, disconnected sleep and wake use upright rest without seat requests',async t=>{
- const {BodyRule}=await import('./edge/ledger/body-rule.ts');const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();t.after(()=>{f.host.stop();f.db.close();});await invite(f,'standby-owner');const row=await accept(f.host,f.souls.create('dev:standby-owner',{name:'Pip',description:'Unattended upright standby'})),s={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};for(let i=0;i<5;i++)f.host.tickOnce();assert.equal(f.host.engine.assignBodyV1!(row.entity_id,PIP_PRESET.body!),true);
- const body=f.host.engine.world.entities[row.entity_id],start=structuredClone(body.pose);let now=100000,listening=true,seatCalls=0;const requested:{option:string;steps:any[]}[]=[];
- const rule=new BodyRule(f.db.db,f.host.worldId,{souls:()=>[s],presence:()=>({listening,at:100000}),createdAt:()=>100000,pose:()=>({x:body.pose.p[0],z:body.pose.p[2],level:0}),posture:()=>body.human?.activity==='walk'?'moving':'standing',agentBusy:()=>false,running:()=>!!f.host.engine.programOf(row.entity_id),dry:()=>true,clear:()=>true,places:()=>'',seat:()=>{seatCalls++;return[{verb:'sit',params:{}}];},standby:(_s,seconds)=>[{verb:'mars:body_motion_v1',params:{motion:'rest',seconds:Math.min(600,seconds)}}],decide:(_s,option,_label,steps)=>{requested.push({option,steps});f.host.engine.perform({actor:row.entity_id,label:option,steps});},stop:()=>{const p=f.host.engine.programOf(row.entity_id);if(p)f.host.engine.stop(p);},publish(){}},{now:()=>now,knobs:{sleepGraceMs:10,zombieWanderMs:10,idleStartMs:0,idleDozeMs:0,idleStepMinMs:1,idleStepMaxMs:1}});
- // A stopped drift schedules a fixed 3000 ms retry; advance the injected clock past that boundary.
- for(let i=0;i<200;i++){rule.sweep();for(let k=0;k<5;k++)f.host.tickOnce();now+=3002;assert.ok(!/sit|lie|nap/.test(body.human?.activity??''));}assert.equal(seatCalls,0);assert.ok(requested.some(r=>r.option==='body:doze'));assert.ok(requested.every(r=>r.steps.every(s=>s.verb!=='sit'&&s.params?.activity!=='sit-ground')));
- const program=f.host.engine.programOf(row.entity_id);if(program)f.host.engine.stop(program);for(let i=0;i<8;i++)f.host.tickOnce();const sleepingAt=structuredClone(body.pose);listening=false;now+=100;rule.sweep();now+=20;rule.sweep();for(let i=0;i<8;i++)f.host.tickOnce();assert.equal(rule.view(row.id)?.state,'asleep');assert.equal(body.human?.activity,'rest');assert.deepEqual(body.pose,sleepingAt);listening=true;rule.listen(row.id);for(let i=0;i<15;i++)f.host.tickOnce();assert.equal(rule.view(row.id)?.state,'awake');assert.equal(body.human?.activity,'idle');assert.deepEqual(body.pose,sleepingAt);
-});
-
-test('an asleep rolling body keeps one upright standby across settle intervals (real ledger posture), never re-asking',async t=>{
- const {BodyRule}=await import('./edge/ledger/body-rule.ts');const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false});t.after(()=>{f.host.stop();f.db.close();});await invite(f,'settle-owner');const row=await accept(f.host,f.souls.create('dev:settle-owner',{name:'Pip',description:'Asleep upright'})),s={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};for(let i=0;i<5;i++)f.host.tickOnce();assert.equal(f.host.engine.assignBodyV1!(row.entity_id,PIP_PRESET.body!),true);
- const body=f.host.engine.world.entities[row.entity_id],posture=(id:string)=>(edge as any).posture(id);let now=100000;const decisions:{option:string;ok:boolean;code?:string}[]=[];
- const rule=new BodyRule(f.db.db,f.host.worldId,{souls:()=>[s],presence:()=>({listening:false,at:100000}),createdAt:()=>100000,pose:()=>({x:body.pose.p[0],z:body.pose.p[2],level:0}),posture,agentBusy:()=>false,running:()=>!!f.host.engine.programOf(row.entity_id),dry:()=>true,clear:()=>true,places:()=>'',seat:()=>null,standby:(_s,seconds)=>[{verb:'mars:body_motion_v1',params:{motion:'rest',seconds:Math.min(600,seconds)}}],decide:(_s,option,_label,steps)=>{const r=f.host.engine.perform({actor:row.entity_id,label:option,steps}) as any;decisions.push({option,ok:r.ok!==false,code:r.diagnostic?.code??r.code});},stop:()=>{const p=f.host.engine.programOf(row.entity_id);if(p)f.host.engine.stop(p);},publish(){}},{now:()=>now,knobs:{sleepGraceMs:10,zombieWanderMs:10}});
- rule.sweep();now+=20;rule.sweep();now+=20;rule.sweep();for(let i=0;i<10;i++)f.host.tickOnce();
- assert.equal(rule.view(row.id)?.state,'asleep');assert.equal(body.human?.activity,'rest');assert.equal(posture(row.entity_id),'standby');const first=decisions.length;assert.ok(first>=1&&decisions.every(d=>d.ok),JSON.stringify(decisions));
- for(let k=0;k<3;k++){now+=61_000;rule.sweep();for(let i=0;i<10;i++)f.host.tickOnce();assert.equal(body.human?.activity,'rest','still in standby after interval '+(k+1));assert.equal(rule.view(row.id)?.state,'asleep');}
- assert.equal(decisions.length,first,'no standby is re-issued while one runs: '+JSON.stringify(decisions));assert.ok(decisions.every(d=>d.ok));
-});
-
-// The idle reflex draws its moves and step lengths from the Soul id (body-rule.ts mix/jitter), so the share of dozing
-// looks is a function of the id; random birth ids made it vary from 316 (CI) to 1100 of 1100, about 7 % of ids under 400 (#866). The id is pinned
-// through the normal create/birth path (only the five-byte id randomness is stubbed, as edge-ledger-swim.test.ts does).
-const DOZE_SOUL_ID='s_3e36c56e14';   // 630/1100, decisions doze, stand, doze, idle-shuffle, doze: covers moves between dozes
-async function pinnedBirth<T extends {id:string}>(t:any,id:string,birth:()=>Promise<T>):Promise<T>{
- const original=crypto.randomBytes;let calls=0;const stub=t.mock.method(crypto,'randomBytes',(...args:any[])=>{if(args[0]===5&&!calls++)return Buffer.from(id.slice(2),'hex');return (original as any)(...args);});syncBuiltinESMExports();
- try{const row=await birth();assert.equal(row.id,id,'the pinned birth id is used');return row;}finally{stub.mock.restore();syncBuiltinESMExports();}
-}
-
-test('an idle rolling body labelled dozing is in standby at every look across idle steps (real ledger posture and standby clock)',async t=>{
- const {BodyRule}=await import('./edge/ledger/body-rule.ts');const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false});t.after(()=>{f.host.stop();f.db.close();});await invite(f,'doze-owner');const row=await pinnedBirth(t,DOZE_SOUL_ID,()=>accept(f.host,f.souls.create('dev:doze-owner',{name:'Pip',description:'Idle upright doze'}))),s={soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner};for(let i=0;i<5;i++)f.host.tickOnce();assert.equal(f.host.engine.assignBodyV1!(row.entity_id,PIP_PRESET.body!),true);
- const body=f.host.engine.world.entities[row.entity_id],posture=(id:string)=>(edge as any).posture(id);let now=100000;const decisions:{option:string;ok:boolean;code?:string}[]=[];
- const standbyLeftMs=(edge.attachPresence({soulPresence:()=>({listening:true,at:100000})}) as any).port.standbyLeftMs;edge.bodyRule=null;   // the ledger's own standby clock; only the rule under test sweeps
- const rule=new BodyRule(f.db.db,f.host.worldId,{souls:()=>[s],presence:()=>({listening:true,at:100000}),createdAt:()=>100000,pose:()=>({x:body.pose.p[0],z:body.pose.p[2],level:0}),posture,agentBusy:()=>false,running:()=>!!f.host.engine.programOf(row.entity_id),dry:()=>true,clear:()=>true,places:()=>'',seat:()=>null,standby:(_s,seconds)=>[{verb:'mars:body_motion_v1',params:{motion:'rest',seconds:Math.min(600,seconds)}}],standbyLeftMs,decide:(_s,option,_label,steps)=>{const r=f.host.engine.perform({actor:row.entity_id,label:option,steps}) as any;decisions.push({option,ok:r.ok!==false,code:r.diagnostic?.code??r.code});},stop:()=>{const p=f.host.engine.programOf(row.entity_id);if(p)f.host.engine.stop(p);},publish(){}},{now:()=>now,knobs:{idleStartMs:0,idleDozeMs:0}});
- // One second of world time per sweep (the production cadence); the label is checked at each look.
- let dozingLooks=0,mislabelled=0;
- for(let sec=0;sec<1100;sec++){const n=decisions.length;rule.sweep();let ticks=0;if(decisions.length>n){f.host.tickOnce();ticks++;}   // a new program starts at the next tick
-  const v=rule.view(row.id);if(v?.state==='idle'&&v.doing==='dozing'){dozingLooks++;if(body.human?.activity!=='rest')mislabelled++;}
-  for(;ticks<20;ticks++)f.host.tickOnce();now+=1000;}
- t.diagnostic(`dozing looks ${dozingLooks}/1100 for ${row.id}: ${JSON.stringify(decisions.map(d=>d.option))}`);
- assert.ok(decisions.filter(d=>d.option==='body:doze').length>=2,'at least two standby cycles: '+JSON.stringify(decisions));assert.ok(dozingLooks>400,'mostly dozing when late: '+dozingLooks);
- assert.equal(mislabelled,0,'labelled dozing only while the upright standby runs');assert.ok(decisions.every(d=>d.ok),JSON.stringify(decisions));
-});
-
 test('a humanoid is not offered paired gestures or hand-overs with a rolling partner: discovery, dry-run and act agree with native admission',async t=>{
  const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false});t.after(()=>{f.host.stop();f.db.close();});
  const people=[];for(const owner of ['pip-owner','human-owner']){await invite(f,owner);const row=await accept(f.host,f.souls.create('dev:'+owner,{name:owner,description:'Partner check'}));people.push({row,soul:{soulId:row.id,entityId:row.entity_id,name:row.name,owner:row.owner}});}

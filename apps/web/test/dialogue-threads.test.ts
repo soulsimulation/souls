@@ -21,7 +21,8 @@ test('a private conversation is one thread: members, colour matching its tether,
   const t=[...s.threads.values()][0];
   assert.deepEqual([t.kind,t.colour,t.members,t.lines.map(l=>l.text)],['private',conversationColour('cv1'),['s_a','s_b'],['Can I ask you something quietly?','Of course.','A night swim?']]);
   assert.equal(joinNames(participants(t).map(nameOf)),'Tamsin Quill & His Duckness');
-  assert.deepEqual(hearingLabel(t,nameOf,5000),{icon:'🔒',text:'private · only they hear'});
+  assert.deepEqual(hearingLabel(t,nameOf,5000),{icon:'💬',text:'conversation · out loud'},'out loud by default (#2269)');
+  t.sealed=true;assert.deepEqual(hearingLabel(t,nameOf,5000),{icon:'🔒',text:'private · only they hear'});
   ingestDialogue(s,[{type:'edge',kind:'conversation.closed',tick:9,at:9000,conversation:'cv1',reason:'empty'}],[],9000);
   assert.equal(hearingLabel(t,nameOf).text,'private · ended');
 });
@@ -90,4 +91,17 @@ test('each thread keeps its last lines; brain talk only when recent', () => {
   ingestDialogue(s,[],[talk(1,now-3*3600_000),talk(2,now-1000)],now);
   const pair=[...s.threads.values()].find(x=>x.conversation==='talk:s_c|s_d')!;
   assert.deepEqual(pair.lines.map(l=>l.text),['hi 2']);
+});
+
+test('#2269: a private conversation is a sealed thread of talking cues, never words', () => {
+  const s=createDialogueStore();
+  ingestDialogue(s,[
+    {type:'edge',kind:'conversation.start',tick:1,at:1000,conversation:'cv9',from:A,invited:[B],private:true},
+    {type:'edge',kind:'conversation.talking',tick:2,at:1100,conversation:'cv9',from:A,private:true},
+    {type:'edge',kind:'conversation.talking',tick:3,at:1200,conversation:'cv9',from:B,private:true},
+    {type:'edge',kind:'conversation.talking',tick:3,at:1200,conversation:'cv9',from:B,private:true},
+  ],[],2000);
+  const t=[...s.threads.values()][0];
+  assert.deepEqual([t.sealed,t.members,t.lines.map(l=>[l.name,l.text])],[true,['s_a','s_b'],[['Tamsin Quill','…'],['His Duckness','…']]],'one cue per talking message, duplicates dropped');
+  assert.deepEqual(hearingLabel(t,nameOf,2000),{icon:'🔒',text:'private · only they hear'});
 });

@@ -6,6 +6,50 @@
 # the existing release's /srv/sim and /srv/sim-data*, Caddy, DNS or the firewall.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# #2233 A5: `bash install.sh capacity <stage> <GB>` sets how much memory a stage's worlds may use, and nothing else. Run only
+# by name (an ordinary release never runs it; release.sh --capacity <GB> calls it once). It rewrites the stage's memory
+# drop-in (MemoryHigh at the figure, MemoryMax 2 GB above) and, in <stage>.conf, --worlds-mem-mb (2 GB below the figure),
+# --max-running (the worlds that fit at a small world's settled memory), a --range of two ports per such world above the
+# stage's --port, and --max-worlds (at least twice --max-running), then prints what it changed. It takes effect at the
+# stage's next restart. SIM_ETC and SIM_UNIT_DIR point it at a scratch copy (no daemon-reload then).
+if [ "${1:-}" = capacity ]; then
+  STAGE="${2:-}"; GB="${3:-}"
+  case "$STAGE" in staging|production) ;; *) echo "usage: $0 capacity <staging|production> <GB>"; exit 2;; esac
+  [[ "$GB" =~ ^[0-9]+$ ]] && [ "$GB" -ge 4 ] || { echo "capacity: <GB> must be a whole number, at least 4 (got '$GB')"; exit 2; }
+  ETC="${SIM_ETC:-/etc/sim-worlds}"; UNITS="${SIM_UNIT_DIR:-/etc/systemd/system}"
+  CONF="$ETC/$STAGE.conf"; DROP="$UNITS/sim-worlds@$STAGE.service.d/10-memory.conf"
+  [ -f "$CONF" ] || { echo "capacity: no $CONF (run install.sh first)"; exit 1; }
+  SMALL_SETTLED_MB=250   # a small world's settled memory (Pss), measured in #2240
+  MEM=$(( (GB - 2) * 1024 )); RUN=$(( MEM / SMALL_SETTLED_MB ))
+  ARGS="$(sed -n 's/^SIM_WORLDS_ARGS=//p' "$CONF")"
+  get_arg() { printf '%s\n' "$ARGS" | sed -nE "s/(^|.* )--$1 ([^ ]+).*/\2/p"; }
+  set_arg() { if [ -n "$(get_arg "$1")" ]; then ARGS="$(printf '%s\n' "$ARGS" | sed -E "s/(^| )--$1 [^ ]+/\1--$1 $2/")"; else ARGS="$ARGS --$1 $2"; fi; }
+  PORT="$(get_arg port)"; [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "capacity: $CONF has no --port"; exit 1; }
+  LO=$(( PORT + 1 )); HI=$(( PORT + 2 * RUN ))
+  # never into another stage's port or ports
+  for other in "$ETC"/*.conf; do
+    [ "$other" = "$CONF" ] && continue
+    oa="$(sed -n 's/^SIM_WORLDS_ARGS=//p' "$other")"; [ -n "$oa" ] || continue
+    op="$(printf '%s\n' "$oa" | sed -nE 's/(^|.* )--port ([0-9]+).*/\2/p')"; orange="$(printf '%s\n' "$oa" | sed -nE 's/(^|.* )--range ([0-9]+-[0-9]+).*/\2/p')"
+    olo="${orange%-*}"; ohi="${orange#*-}"; [ -n "$orange" ] || { olo="$op"; ohi="$op"; }
+    [ -n "$op" ] && [ "$op" -lt "${olo:-$op}" ] && olo="$op"; [ -n "$op" ] && [ "$op" -gt "${ohi:-$op}" ] && ohi="$op"
+    if [ -n "$olo" ] && [ "$HI" -ge "$olo" ] && [ "$PORT" -le "$ohi" ]; then echo "capacity: ports $PORT-$HI would overlap $(basename "$other" .conf)'s $olo-$ohi; nothing changed"; exit 1; fi
+  done
+  OLDWORLDS="$(get_arg max-worlds)"; WORLDS=$(( 2 * RUN )); [ -n "$OLDWORLDS" ] && [ "$OLDWORLDS" -gt "$WORLDS" ] && WORLDS="$OLDWORLDS"
+  BEFORE="$ARGS"; OLDDROP="$(cat "$DROP" 2>/dev/null || echo '(none)')"
+  set_arg worlds-mem-mb "$MEM"; set_arg max-running "$RUN"; set_arg max-worlds "$WORLDS"; set_arg range "$LO-$HI"
+  TMP="$(mktemp)"; sed "s|^SIM_WORLDS_ARGS=.*|SIM_WORLDS_ARGS=$ARGS|" "$CONF" > "$TMP"; cat "$TMP" > "$CONF"; rm -f "$TMP"   # (cat: the file keeps its owner and mode)
+  install -d "$(dirname "$DROP")"; printf '[Service]\nMemoryHigh=%sG\nMemoryMax=%sG\n' "$GB" "$(( GB + 2 ))" > "$DROP"
+  echo "capacity $STAGE: worlds may use $GB GB"
+  echo "  $DROP"; printf '%s\n' "$OLDDROP" | sed 's/^/    was  /'; sed 's/^/    now  /' "$DROP"
+  echo "  $CONF SIM_WORLDS_ARGS"; echo "    was  $BEFORE"; echo "    now  $ARGS"
+  echo "  --worlds-mem-mb $MEM, --max-running $RUN, --max-worlds $WORLDS, --range $LO-$HI ($(( 2 * RUN )) ports: two per world)"
+  [ -n "${SIM_UNIT_DIR:-}" ] || systemctl daemon-reload
+  echo "takes effect at the next restart of sim-worlds@$STAGE (release.sh --capacity restarts it)"
+  exit 0
+fi
+
 UNIT_SRC="${UNIT_SRC:-$HERE/sim-worlds@.service}"
 
 id simworlds >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/simworlds --shell /usr/sbin/nologin simworlds

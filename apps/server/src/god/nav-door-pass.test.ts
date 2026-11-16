@@ -1,0 +1,271 @@
+// doors-pass/1 (#2365): a closed, unlocked, hand-operated door is a way through in every world. Ground worlds (paged and
+// unpaged) and flat ones: reach and the connectivity audit see the walled yard behind a closed door as joined to the
+// world, a plain walk goes through it (Soul Actions entry 31: opened by hand, passed, closed behind), a locked door
+// stays a wall refused by name, and a Soul shut in behind a closed door is never lifted out by the rescue.
+import test, {type TestContext} from 'node:test';
+import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
+import {fixture, factory, invite, accept} from '../../test/native-owner-fixture.ts';
+import {EdgeLedger} from '../edge/ledger/ledger.ts';
+import {GodMode} from './god.ts';
+import {installEngineBridge} from './engine-bridge.ts';
+import {GroundHost} from './ground-host.ts';
+import {mountEdgeRoutes} from '../edge/routes.ts';
+import {Hono} from 'hono';
+import {leafDistance} from '../../../../mars/viewer/engine/social/hand-actuator.ts';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Vec2 = [number, number];
+type Kind = 'flat' | 'ground-paged' | 'ground-unpaged';
+function world(t: TestContext, kind: Kind) {
+  const was = process.env.NAV_PAGED;
+  if (kind !== 'flat') process.env.NAV_PAGED = kind === 'ground-paged' ? '1' : '0';
+  const w = fixture(':memory:', factory, {durableClockV1: true});
+  w.brain.quiesce();
+  const god = new GodMode(w.db, {worldId: w.host.worldId, ownerId: 'dev:admin', tick: () => w.host.engine.world.tick, emit() {}});
+  if (kind !== 'flat') new GroundHost(w.db, w.host, god);
+  const edge = new EdgeLedger(w.host, w.db, undefined, {ambient: false}), bridge = installEngineBridge({host: w.host, god, edge, log() {}, worldClock: false, worldLore: false});
+  // the edge routes give the ledger its comms (a door's hand contact is recorded as an object act there)
+  const comms = mountEdgeRoutes(new Hono(), {host: w.host, db: w.db, souls: w.souls, ledger: edge, soul: () => undefined as never});
+  t.after(() => {w.brain.quiesce(); w.host.stop(); comms.close(); w.db.close(); if (was === undefined) delete process.env.NAV_PAGED; else process.env.NAV_PAGED = was;});
+  const tick = async (n = 4) => {for (let i = 0; i < n; i++) {w.host.tickOnce(); await setImmediate(); w.host.drainInputs();}};
+  const act = (ops: any[]) => {const r = god.act({ops}) as any; assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600)); return r;};
+  return {...w, god, edge, bridge, tick, act, E: w.host.engine as any};
+}
+
+/** A walled yard 8 x 6 m with a door in its south wall at (X, Z), facing south; a bench inside, a lamp outside. */
+const X = 20, Z = 3;
+const yard = (name: string, x: number, w = 0.6) => ({op: 'place', def: 'core/garden-wall@1', name, shape: {path: [[x - w, Z], [x - 4, Z], [x - 4, Z + 6], [x + 4, Z + 6], [x + 4, Z], [x + w, Z]]}});
+const INSIDE: Vec2 = [X + 1.5, Z + 4], OUTSIDE: Vec2 = [X + 2.5, Z - 4];
+
+for (const kind of ['ground-unpaged', 'ground-paged', 'flat'] as Kind[]) {
+  test(`a closed hand door is a way through (${kind})`, {timeout: 300_000}, async t => {
+    const w = world(t, kind); await w.tick(2);
+    assert.equal(!!w.E.world.groundV1, kind !== 'flat', 'the world is the kind asked');
+    w.act([yard('yard-walls', X), {op: 'place', def: 'core/door@2', name: 'door', p: [X, Z], r: Math.PI},
+      {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: INSIDE}, {op: 'place', def: 'core/floor-lamp@2', name: 'outside-lamp', p: OUTSIDE}]);
+    await w.tick(20);
+    const door = () => w.god.model.get('door') as any;
+    assert.equal(door().state.open, false, 'the door stands closed');
+    // reach and connectivity: a way through
+    const inside: Vec2 = [X - 1.5, Z + 3.5], outside: Vec2 = [X - 1.5, Z - 3];
+    const reach = () => w.E.reachV1({p: outside, level: 0}, {p: inside, level: 0});
+    const conn = () => w.E.navCheckV1([{id: 'in', p: inside, level: 0, tol: 0.6}])[0];
+    assert.equal(reach().ok, true, 'reach through the closed door: ' + JSON.stringify(reach()));
+    assert.equal(conn().ok, true, 'the yard is joined to the world: ' + JSON.stringify(conn()));
+    // the walk graph still walls the gap: a body never walks through a shut leaf
+    assert.equal(w.E.reachesV1(outside, inside), false, 'the shut leaf blocks a plain route');
+    // a locked door is a wall
+    w.act([{op: 'set', id: 'door', state: {locked: true}}]); await w.tick(4);
+    assert.equal(reach().ok, false, 'no reach through a locked door');
+    assert.equal(conn().code, 'nav.disconnected', 'a yard behind a locked door is cut off');
+    w.act([{op: 'set', id: 'door', state: {locked: false}}]); await w.tick(4);
+    assert.equal(conn().ok, true);
+    // two Souls, one plain walk act each: in through the closed door and out again, together, both ways
+    const souls: Record<string, any> = {};
+    for (const name of ['ana', 'bea']) {
+      await invite(w, name);
+      const row: any = await accept(w.host, w.souls.create('dev:' + name, {name: name[0].toUpperCase() + name.slice(1), description: 'door test'}));
+      souls[name] = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+    }
+    const body = (s: any) => w.E.world.entities[s.entityId];
+    const side = (s: any) => (body(s).pose.p[2] > Z ? 'inside' : 'outside');
+    const walk = async (s: any, cap: string) => {const r: any = await accept(w.host, w.edge.act(s, {capability: cap})); assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600)); return r;};
+    const finish = async (list: [any, any][], limit = 2400) => {
+      for (let n = 0; n < limit; n++) {const ph = list.map(([s, r]) => w.edge.receipt(s.soulId, r.receipt.id)); if (ph.every((p: any) => ['failed', 'completed', 'replaced'].includes(p?.phase))) return ph; await w.tick(1);}
+      return list.map(([s, r]) => w.edge.receipt(s.soulId, r.receipt.id));
+    };
+    const r1 = await walk(souls.ana, 'walk:inside-bench');
+    assert.match(r1.receipt.reason ?? '', /Through door/, 'the walk goes through the door by hand');
+    const [e1] = await finish([[souls.ana, r1]]);
+    assert.equal((e1 as any).phase, 'completed', JSON.stringify(e1).slice(0, 600));
+    assert.equal(side(souls.ana), 'inside'); assert.equal(door().state.open, false, 'closed behind');
+    // shut in behind a closed door with every destination outside: joined to the world, never lifted out
+    assert.equal(w.E.navRescueV1(souls.ana.entityId, Infinity), null, 'no rescue for a Soul behind a closed hand door');
+    // both ways at once: Ana out, Bea in
+    const ra = await walk(souls.ana, 'walk:outside-lamp'), rb = await walk(souls.bea, 'walk:inside-bench');
+    const both = await finish([[souls.ana, ra], [souls.bea, rb]]);
+    assert.deepEqual(both.map((x: any) => x.phase), ['completed', 'completed'], JSON.stringify(both).slice(0, 900));
+    assert.equal(side(souls.ana), 'outside'); assert.equal(side(souls.bea), 'inside'); assert.equal(door().state.open, false, 'the door ends closed');
+    // a locked door on the only way: refused by name, nothing moves
+    w.act([{op: 'set', id: 'door', state: {locked: true}}]); await w.tick(4);
+    const p0 = [...body(souls.ana).pose.p];
+    const locked: any = await accept(w.host, w.edge.act(souls.ana, {capability: 'walk:inside-bench'}));
+    assert.equal(locked.accepted, false, JSON.stringify(locked).slice(0, 600)); assert.match(JSON.stringify(locked), /locked/i);
+    await w.tick(10); assert.deepEqual(body(souls.ana).pose.p, p0, 'a refusal does not move the body');
+  });
+}
+
+// A2: the leaf ignores everything but Souls: a thing standing in its swing does not stop a walk through the door.
+for (const kind of ['ground-unpaged', 'flat'] as Kind[]) {
+  test(`a thing in the swing does not stop the walk (${kind})`, {timeout: 300_000}, async t => {
+    const LAMP: Vec2 = [X + 0.62, Z - 0.6];   // beside the hinge, where the open leaf comes to rest
+    const w = world(t, kind); await w.tick(2);
+    w.act([yard('yard-walls', X), {op: 'place', def: 'core/door@2', name: 'door', p: [X, Z], r: Math.PI},
+      {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: INSIDE}, {op: 'place', def: 'core/floor-lamp@2', name: 'swing-lamp', p: LAMP}]);
+    await w.tick(20);
+    await invite(w, 'ana');
+    const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+    const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+    const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inside-bench'}));
+    assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
+    let e: any;
+    let opening: any = null;
+    for (let n = 0; n < 2400; n++) {e = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) break; await w.tick(1); opening ??= w.E.world.entities[ana.entityId].human?.handActuator?.opening ?? null;}
+    // the lamp stands in the leaf's sweep (the leaf passes within 0.2 m of its post)
+    assert.ok(opening, "the door was opened by hand"); if (process.env.SWING_DEBUG) console.log("OPENING", JSON.stringify(opening));
+    const sweep = Math.min(...Array.from({length: 17}, (_, k) => leafDistance(opening, opening.from + (opening.to - opening.from) * k / 16, LAMP[0], LAMP[1])));
+    assert.ok(sweep < 0.2, `the lamp is in the swing: ${sweep}`);
+    assert.equal(e.phase, 'completed', JSON.stringify(e).slice(0, 600));
+    assert.ok(w.E.world.entities[ana.entityId].pose.p[2] > Z, 'inside');
+    assert.equal((w.god.model.get('door') as any).state.open, false, 'closed behind');
+  });
+}
+
+// #2434 (replaces #2370's one-door rule): a walk passes ANY number of closed, unlocked hand doors in series in one act,
+// each opened by hand, passed and closed behind. Reach, the audit and the walk agree: three nested yards, three doors,
+// in and back out. With the middle door locked the inner yard is cut off, and a Soul shut in there is stepped out
+// (nav-connect/1, the last resort, judged with the doors shut) and walks out: never left stuck.
+const Z2 = Z + 3.5, Z3 = Z + 7;
+const RING = (name: string, x0: number, x1: number, z0: number, z1: number) => ({op: 'place', def: 'core/garden-wall@1', name, shape: {path: [[X - 0.6, z0], [x0, z0], [x0, z1], [x1, z1], [x1, z0], [X + 0.6, z0]]}});
+const NESTED = [RING('outer-walls', X - 11, X + 11, Z, Z + 18), RING('middle-walls', X - 7.5, X + 7.5, Z2, Z + 15), RING('inner-walls', X - 4, X + 4, Z3, Z + 12),
+  {op: 'place', def: 'core/door@2', name: 'door-a', p: [X, Z], r: Math.PI}, {op: 'place', def: 'core/door@2', name: 'door-b', p: [X, Z2], r: Math.PI},
+  {op: 'place', def: 'core/door@2', name: 'door-c', p: [X, Z3], r: Math.PI},
+  {op: 'place', def: 'core/bench@1', name: 'inner-bench', p: [X + 1.5, Z + 10]}, {op: 'place', def: 'core/floor-lamp@2', name: 'outside-lamp', p: OUTSIDE}];
+const IN_ROOM: Vec2 = [X - 1.5, Z + 10], OUT: Vec2 = [X - 1.5, Z - 3];
+const inInner = (p: number[]) => p[0] > X - 4 && p[0] < X + 4 && p[2] > Z3 && p[2] < Z + 12;
+for (const kind of ['ground-unpaged', 'flat'] as Kind[]) {
+  test(`three closed doors in series: one walk in and one walk out, each door closed behind (${kind})`, {timeout: 400_000}, async t => {
+    const w = world(t, kind); await w.tick(2);
+    w.act(NESTED); await w.tick(20);
+    const reach = (a: Vec2, b: Vec2) => w.E.reachV1({p: a, level: 0}, {p: b, level: 0}).ok;
+    assert.equal(reach(OUT, IN_ROOM), true, 'reach: three doors in series');
+    assert.equal(reach(IN_ROOM, OUT), true, 'reach: and back out');
+    assert.equal(w.E.reachesV1(OUT, IN_ROOM), false, 'the shut leaves wall a plain route');
+    assert.equal(w.E.navCheckV1([{id: 'p', p: IN_ROOM, level: 0, tol: 0.6}])[0].ok, true, 'audit: the inner yard is joined');
+    await invite(w, 'ana');
+    const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+    const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+    const body = () => w.E.world.entities[ana.entityId];
+    const open = () => ['door-a', 'door-b', 'door-c'].map(id => (w.god.model.get(id) as any).state.open);
+    const finish = async (r: any) => {for (let n = 0; n < 6000; n++) {const e: any = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) return e; await w.tick(1);} return w.edge.receipt(ana.soulId, r.receipt.id);};
+    const r1: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inner-bench'}));
+    assert.equal(r1.accepted, true, JSON.stringify(r1).slice(0, 600));
+    assert.match(r1.receipt.reason ?? '', /Through door-a, door-b and door-c/, 'one walk through all three doors');
+    const e1 = await finish(r1);
+    assert.equal(e1.phase, 'completed', JSON.stringify(e1).slice(0, 600));
+    assert.ok(inInner(body().pose.p), 'she ends in the inner yard');
+    assert.deepEqual(open(), [false, false, false], 'each door closed behind');
+    assert.equal(w.E.navRescueV1(ana.entityId, Infinity), null, 'three doors in: joined, no step-out');
+    const r2: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:outside-lamp'}));
+    assert.equal(r2.accepted, true, JSON.stringify(r2).slice(0, 600));
+    assert.match(r2.receipt.reason ?? '', /Through door-c, door-b and door-a/, 'and back out through the same three, in turn');
+    const e2 = await finish(r2);
+    assert.equal(e2.phase, 'completed', JSON.stringify(e2).slice(0, 600));
+    assert.ok(body().pose.p[2] < Z, 'she ends outside');
+    assert.deepEqual(open(), [false, false, false], 'each door closed behind');
+    assert.deepEqual(w.E.runtime.violations, []);
+  });
+}
+test('a refused passage while shut in: the middle door locked, she is stepped out and walks out (flat)', {timeout: 300_000}, async t => {
+  const w = world(t, 'flat'); await w.tick(2);
+  w.act(NESTED); await w.tick(20);
+  w.act([{op: 'set', id: 'door-b', state: {locked: true}}]); await w.tick(4);
+  assert.equal(w.E.reachV1({p: OUT, level: 0}, {p: IN_ROOM, level: 0}).ok, false, 'no reach past a locked door');
+  assert.equal(w.E.navCheckV1([{id: 'p', p: IN_ROOM, level: 0, tol: 0.6}])[0].code, 'nav.disconnected', 'the inner yard is cut off');
+  await invite(w, 'ana');
+  const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+  const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+  const body = () => w.E.world.entities[ana.entityId];
+  await accept(w.host, w.host.enqueue('edge-relocate', 'test:start', {soulId: ana.soulId, entityId: ana.entityId, to: IN_ROOM, why: 'shut in behind a locked door'}));
+  await w.tick(6); delete body().human.speed;
+  assert.ok(inInner(body().pose.p), 'shut in the inner yard');
+  assert.ok(w.E.navRescueV1(ana.entityId, Infinity), 'shut in: the step-out applies');
+  const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:outside-lamp'}));
+  assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
+  let e: any;
+  for (let n = 0; n < 4000; n++) {e = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) break; await w.tick(1);}
+  assert.equal(e.phase, 'completed', JSON.stringify(e).slice(0, 600));
+  assert.ok(!inInner(body().pose.p), 'she is out of the inner yard');
+  assert.deepEqual(w.E.runtime.violations, []);
+});
+
+// Review of #2397, item 4: a long walk across the world into a yard behind a closed hand door. The walk's far ground is
+// planned coarsely, so the shut leaf is met only near the end; reach says the way goes through the door, so the walk is
+// planned as the passage's legs from the start and arrives inside, on the first try.
+for (const kind of ['ground-paged'] as Kind[]) {
+  test(`a long walk into a closed yard goes through its door on the first try (${kind})`, {timeout: 300_000}, async t => {
+    const w = world(t, kind); await w.tick(2);
+    w.act([yard('yard-walls', X), {op: 'place', def: 'core/door@2', name: 'door', p: [X, Z], r: Math.PI},
+      {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: INSIDE}]);
+    await w.tick(20);
+    await invite(w, 'ana');
+    const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+    const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+    const FAR: Vec2 = [X - 120, Z - 90];
+    await accept(w.host, w.host.enqueue('edge-relocate', 'test:start', {soulId: ana.soulId, entityId: ana.entityId, to: FAR, why: 'far away'}));
+    await w.tick(6);
+    const body = () => w.E.world.entities[ana.entityId];
+    assert.ok(Math.hypot(body().pose.p[0] - FAR[0], body().pose.p[2] - FAR[1]) < 1, 'she starts 150 m away');
+    w.E.navWarmV1(Infinity);   // the labels warm, as in a running world
+    const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inside-bench', params: {gait: 'run'}}));
+    assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
+    assert.match(r.receipt.reason ?? '', /Through door/, 'planned through the door from the start');
+    let e: any;
+    for (let n = 0; n < 6000; n++) {e = w.edge.receipt(ana.soulId, r.receipt.id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) break; await w.tick(1);}
+    assert.equal(e.phase, 'completed', JSON.stringify(e).slice(0, 600));
+    assert.ok(body().pose.p[2] > Z, 'inside the yard');
+    assert.equal((w.god.model.get('door') as any).state.open, false, 'closed behind');
+  });
+}
+
+// #2383: the up-front door check only polls the connectivity labels. Cold (walkThroughDoorV1 null, as on a fresh boot
+// after door-fit/1's edit), the ledger asks the destination's side directly: a long walk into a closed yard still goes
+// through its door on the first try, and in a world with no doors a plain reachable walk keeps its original steps.
+const startFar = async (w: ReturnType<typeof world>, far: Vec2) => {
+  await invite(w, 'ana');
+  const row: any = await accept(w.host, w.souls.create('dev:ana', {name: 'Ana', description: 'door test'}));
+  const ana = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await w.tick(3);
+  await accept(w.host, w.host.enqueue('edge-relocate', 'test:start', {soulId: ana.soulId, entityId: ana.entityId, to: far, why: 'far away'}));
+  await w.tick(6);
+  return ana;
+};
+const settle = async (w: ReturnType<typeof world>, soulId: string, id: string) => {
+  let e: any;
+  for (let n = 0; n < 6000; n++) {e = w.edge.receipt(soulId, id); if (['failed', 'completed', 'replaced'].includes(e?.phase)) break; await w.tick(1);}
+  return e;
+};
+test('cold labels: a long walk into a closed yard goes through its door on the first try (ground-paged)', {timeout: 300_000}, async t => {
+  const w = world(t, 'ground-paged'); await w.tick(2);
+  w.act([yard('yard-walls', X), {op: 'place', def: 'core/door@2', name: 'door', p: [X, Z], r: Math.PI},
+    {op: 'place', def: 'core/bench@1', name: 'inside-bench', p: INSIDE}]);
+  await w.tick(20);
+  const ana = await startFar(w, [X - 120, Z - 90]);
+  const body = () => w.E.world.entities[ana.entityId];
+  assert.equal(w.E.walkThroughDoorV1(ana.entityId, [{verb: 'walk_to', params: {to: INSIDE}}]), null, 'the labels are cold');
+  const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:inside-bench', params: {gait: 'run'}}));
+  assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
+  assert.match(r.receipt.reason ?? '', /Through door/, 'planned through the door from the start');
+  const e = await settle(w, ana.soulId, r.receipt.id);
+  assert.equal(e.phase, 'completed', JSON.stringify(e).slice(0, 600));
+  assert.ok(body().pose.p[2] > Z, 'inside the yard');
+  assert.equal((w.god.model.get('door') as any).state.open, false, 'closed behind');
+});
+test('cold labels: in a world with no doors a plain reachable walk keeps its original steps (ground-paged)', {timeout: 300_000}, async t => {
+  const w = world(t, 'ground-paged'); await w.tick(2);
+  w.act([{op: 'place', def: 'core/bench@1', name: 'open-bench', p: INSIDE}]);
+  await w.tick(20);
+  const ana = await startFar(w, [X - 40, Z - 30]);
+  assert.equal(w.E.walkThroughDoorV1(ana.entityId, [{verb: 'walk_to', params: {to: INSIDE}}]), null, 'the labels are cold');
+  const asked: any[] = [], canPerform = w.E.canPerform.bind(w.E);
+  w.E.canPerform = (p: any) => {if (p.actor === ana.entityId && p.steps.some((x: any) => /walk/.test(x.verb))) asked.push(p.steps); return canPerform(p);};
+  const r: any = await accept(w.host, w.edge.act(ana, {capability: 'walk:open-bench'}));
+  w.E.canPerform = canPerform;
+  assert.equal(r.accepted, true, JSON.stringify(r).slice(0, 600));
+  assert.doesNotMatch(r.receipt.reason ?? '', /door/i, 'no door in the plan');
+  assert.ok(asked.length > 0, 'the walk was checked');
+  assert.deepEqual(asked.at(-1), asked[0], 'the steps checked last are the original ones: ' + JSON.stringify(asked).slice(0, 600));
+  const e = await settle(w, ana.soulId, r.receipt.id);
+  assert.equal(e.phase, 'completed', JSON.stringify(e).slice(0, 600));
+  assert.ok(Math.hypot(w.E.world.entities[ana.entityId].pose.p[0] - INSIDE[0], w.E.world.entities[ana.entityId].pose.p[2] - INSIDE[1]) < 3, 'she ends at the bench');
+});

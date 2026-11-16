@@ -23,6 +23,9 @@ export const ITEM_REACH = BODY_MODEL.tableReach;
 export const BODY_REACH = APPROACH_GAPS[APPROACH_GAPS.length - 1] + ITEM_REACH;
 /** Ground items: standing points this far from the item (m), 8 directions. */
 export const GROUND_STANDOFF = 0.45;
+/** #1216: a wider ring after it, for an item whose own footprint leaves the first ring under APPROACH_CLEARANCE (a basket
+ *  on the ground read 0.23 to 0.25 m clear at every point); each is still inside the reach a take makes without a step. */
+const GROUND_STANDOFFS = [GROUND_STANDOFF, 0.55, 0.65, 0.75] as const;
 
 const hyp = (x: number, z: number) => Math.sqrt(x * x + z * z);
 const p2 = (e: Entity): Vec2 => [e.pose.p[0], e.pose.p[2]];
@@ -163,19 +166,30 @@ export type Station = { p: Vec2; yaw: number };
  * each side of the top whose edge is ≤ ITEM_REACH from the target, the point APPROACH_GAPS beyond
  * that edge straight opposite the target (clamped to the edge), first with ≥ APPROACH_CLEARANCE;
  * sides ordered by distance from the actor. On the ground: 8 points GROUND_STANDOFF around it, the
- * one facing the actor first. `item.unreachable` names what blocks every candidate.
+ * one facing the actor first, then the same on each wider GROUND_STANDOFFS ring, where the line from the stand to the item
+ * must cross nothing but the item itself (`self`). `item.unreachable` names what blocks every candidate.
  * `comfortDepth` (m, opted-in presented items only): a side whose edge is farther than this from the target ranks after
  * every shallower side, so the body stands where the reach is short (a bowl 0.44 m in from the end the actor walked up
  * to is 0.23 m in from the side); sides within it keep the actor-distance order.
  */
-export function reachStation(rt: Runtime, actor: Entity, target: Vec3, owner: Entity | undefined, what: string, comfortDepth?: number): Station | Diagnostic {
+export function reachStation(rt: Runtime, actor: Entity, target: Vec3, owner: Entity | undefined, what: string, comfortDepth?: number, self?: string): Station | Diagnostic {
   const sp = rt.services.spatial as Spatial | undefined;
   sp?.sync(rt.world);
   const g = sp?.level(actor.human!.level);
   const clear = (q: Vec2) => (g ? clearanceAt(g, q) : Infinity);
   const me = p2(actor);
   const tried: { p: Vec2; cl: number; side: string }[] = [];
-  let cands: { p: Vec2; yaw: number; side: string; far: boolean }[] = [];
+  let cands: { p: Vec2; yaw: number; side: string; far: boolean; wide?: boolean }[] = [];
+  // #1216: from a wider ground ring the hand's line to the item crosses no obstacle cell but the item's own (`self`)
+  const lineClear = (p: Vec2) => {
+    if (!g) return true;
+    const n = Math.max(1, Math.ceil(hyp(target[0] - p[0], target[2] - p[1]) / (g.cell * 0.5)));
+    for (let k = 1; k <= n; k++) {
+      const q: Vec2 = [p[0] + ((target[0] - p[0]) * k) / n, p[1] + ((target[2] - p[1]) * k) / n];
+      if (clearanceAt(g, q) <= 0 && blockerNear(g, q, '', 0) !== self) return false;
+    }
+    return true;
+  };
   if (owner) {
     const d = CATALOG[owner.def];
     const half: Vec2 = [d.size[0] / 2, d.size[2] / 2];
@@ -205,16 +219,18 @@ export function reachStation(rt: Runtime, actor: Entity, target: Vec3, owner: En
   } else {
     const t: Vec2 = [target[0], target[2]];
     const a0 = hyp(me[0] - t[0], me[1] - t[1]) > 1e-6 ? heading(sub2(me, t)) : 0;
-    for (let k = 0; k < 8; k++) {
-      const dk = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2); // 0, +1, −1, +2, −2 … eighths
-      const p = add2(t, rot2([GROUND_STANDOFF, 0], a0 + (dk * Math.PI) / 4));
-      cands.push({ p, yaw: heading(sub2(t, p)), side: `ground ${k}`, far: false });
-    }
+    // #1216 item-approach/1 (a logged runtime policy): the wider rings; without it, the first ring only, as recorded
+    for (const off of rt.services.itemApproachV1 === true ? GROUND_STANDOFFS : [GROUND_STANDOFF])
+      for (let k = 0; k < 8; k++) {
+        const dk = k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2); // 0, +1, −1, +2, −2 … eighths
+        const p = add2(t, rot2([off, 0], a0 + (dk * Math.PI) / 4));
+        cands.push({ p, yaw: heading(sub2(t, p)), side: `ground ${k}`, far: false, wide: off !== GROUND_STANDOFF });
+      }
   }
   const near = cands.filter((q) => !q.far);
   for (const q of near) {
     const cl = clear(q.p);
-    if (cl >= APPROACH_CLEARANCE) return { p: q.p, yaw: q.yaw };
+    if (cl >= APPROACH_CLEARANCE && (!q.wide || lineClear(q.p))) return { p: q.p, yaw: q.yaw };
     tried.push({ p: q.p, cl, side: q.side });
   }
   cands = [];

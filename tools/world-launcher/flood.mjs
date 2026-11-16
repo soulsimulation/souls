@@ -255,16 +255,22 @@ export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l)
 
 /** C3 public reads (LOAD-CONTRACT §2): one world call per URL per `ttlMs`, concurrent misses share it (single flight). */
 export class MicroCache {
-  constructor({ now = Date.now, maxEntries = 500, maxBytes = 8 * 2 ** 20 } = {}) { this.now = now; this.maxEntries = maxEntries; this.maxBytes = maxBytes; this.m = new Map(); this.flying = new Map(); this.hits = 0; this.misses = 0; }
-  /** fetch() → Promise<{ status, headers, body: Buffer }>; resolves with that response and whether it was shared. */
-  async get(key, ttlMs, fetch) {
+  constructor({ now = Date.now, maxEntries = 500, maxBytes = 8 * 2 ** 20, maxTotalBytes = Infinity } = {}) { this.now = now; this.maxEntries = maxEntries; this.maxBytes = maxBytes; this.maxTotalBytes = maxTotalBytes; this.m = new Map(); this.flying = new Map(); this.bytes = 0; this.hits = 0; this.misses = 0; }
+  /** fetch() → Promise<{ status, headers, body: Buffer }>; resolves with that response and whether it was shared.
+   *  `storable(r)`: whether a 200 may be kept for the next caller (default: every 200 within maxBytes). */
+  async get(key, ttlMs, fetch, storable = () => true) {
     const t = this.now(), e = this.m.get(key);
     if (e && t - e.at < ttlMs) { this.hits++; return { ...e.r, cache: 'hit' }; }
     const f = this.flying.get(key);
     if (f) { this.hits++; return { ...(await f), cache: 'shared' }; }
     this.misses++;
-    const p = fetch().then((r) => { if (r.status === 200 && r.body.length <= this.maxBytes) { this.m.set(key, { at: this.now(), r }); if (this.m.size > this.maxEntries) this.m.delete(this.m.keys().next().value); } return r; }).finally(() => this.flying.delete(key));
+    const p = fetch().then((r) => { if (r.status === 200 && r.body.length <= this.maxBytes && storable(r)) this.keep(key, r); return r; }).finally(() => this.flying.delete(key));
     this.flying.set(key, p);
     return { ...(await p), cache: 'miss' };
   }
+  keep(key, r) {
+    this.drop(key); this.m.set(key, { at: this.now(), r }); this.bytes += r.body.length;
+    while (this.m.size > this.maxEntries || this.bytes > this.maxTotalBytes) this.drop(this.m.keys().next().value);
+  }
+  drop(key) { const e = this.m.get(key); if (e) { this.m.delete(key); this.bytes -= e.r.body.length; } }
 }

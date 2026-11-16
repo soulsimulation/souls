@@ -37,7 +37,13 @@ function fixture(t: TestContext, warm?: (budget: number, tick: number) => boolea
   t.mock.method(state, 'navRescueSouls', () => { rescues++; return 2; });
   t.mock.method(state, 'navLines', (spots: Point[], stepped: number) => { notices.push({ spots: structuredClone(spots), stepped }); return ['completed navigation notice']; });
   t.after(() => { host.stop(); db.close(); });
-  const tick = () => { const before = host.engine.world.tick; host.tickOnce(); assert.equal(host.engine.world.tick, before + 1); };
+  // A slice's budget is what is left of the tick's 40 ms, read from the wall clock. Each tick here runs with that clock
+  // held still, so the budget is the one the scheduler's state and tick count choose, however slow the machine is.
+  const tick = () => {
+    const before = host.engine.world.tick, at = performance.now(), held = t.mock.method(performance, 'now', () => at);
+    try { host.tickOnce(); } finally { held.mock.restore(); }
+    assert.equal(host.engine.world.tick, before + 1);
+  };
   const changed: Diff = { upserts: [], removes: ['removed-test-geometry'], defs: [], tiles: [], answers: [] };
   const rearm = () => god.bodies!.navNote!(changed);
   return { host, state, calls, logs, notices, tick, rearm, rescues: () => rescues, flushes: () => flushes };
@@ -251,4 +257,25 @@ test('#1548: a quiet world with a waiting Soul never takes the forced relabel', 
   upTo(1500);
   assert.deepEqual(forced(), [], 'no static change while it waited: the re-warm is left to finish');
   assert.equal(w.logs.filter(l => l.includes('forced')).length, 0);
+});
+
+test('#1744: a Soul waiting while god edits arrive every tick still gets the forced relabel and is asked, within 210 ticks', t => {
+  const { w, upTo, forced } = stuck(t, { churn: true });
+  const before = w.rescues();
+  // every accepted edit re-arms the first build (navPending), whose 20 ms slice never finishes under this churn
+  while (w.host.engine.world.tick < 212) { w.rearm(); w.tick(); }
+  assert.equal(w.rescues(), before, 'not asked before the forced relabel');
+  w.rearm(); w.tick(); assert.equal(w.rescues(), before + 1, 'asked in the tick of the forced relabel');
+  while (w.host.engine.world.tick < 260) { w.rearm(); w.tick(); }
+  assert.deepEqual(forced(), [213], 'the first rescue read (tick 13) opens the window; 200 ticks later one whole relabel runs');
+  assert.match(w.logs.find(l => l.startsWith('nav rescue: forced'))!, /^nav rescue: forced relabel \d+ ms, warm, 1 waiting$/);
+  assert.ok(w.calls.filter(c => c.tick > 4 && c.budget !== 250).every(c => c.budget <= 20), 'every other call stays within the first build\'s 20 ms');
+});
+
+test('#1744: after a re-warm error, a waiting Soul under edits every tick still gets the forced relabel', t => {
+  const { w, upTo, forced } = stuck(t, { churn: true });
+  upTo(6); w.state.navCold = null;   // as a re-warm error leaves it
+  while (w.host.engine.world.tick < 260) { w.rearm(); w.tick(); }
+  assert.deepEqual(forced(), [213]);
+  assert.match(w.logs.find(l => l.startsWith('nav rescue: forced'))!, /warm, 1 waiting$/);
 });

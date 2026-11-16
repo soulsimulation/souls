@@ -25,10 +25,11 @@ import { definitionUseClosure } from './unused-defs.ts';
 import { rewindChanges, rewindDependents } from './rewind.ts';
 import { GodTrace } from './trace.ts';
 import { repairBatch, tagPlaces, untagPlaces, type Repair } from './buildsafe.ts';
+import { entitiesWithoutPrivateWords } from './private-words.ts';
 /** #1649: a `world` op's time patch is held to the clock rules wherever it comes from (act, preview, env): on a production
  *  world the clock is real time (no accelerated clock, no set hour, no day length); `clock: 'real'` needs real time on. */
-function worldClockFailure(ops: readonly { op: string; state?: unknown }[]) {
-  const realTime = realTimeEnabled(), production = productionWorld();
+function worldClockFailure(ops: readonly { op: string; state?: unknown }[], env?: Record<string, string | undefined>) {
+  const realTime = realTimeEnabled(env), production = productionWorld(env);
   for (const [i, o] of ops.entries()) {
     const t = o.op === 'world' ? (o.state as { time?: Record<string, unknown> } | undefined)?.time : undefined; if (!t) continue;
     if (t.clock === 'real' && !realTime) return { op: i, code: 'time.real-clock-off', field: 'state.time.clock', detail: 'Real time is not on for this server.', fix: 'Leave time.clock unset.' };
@@ -55,6 +56,8 @@ export type GodEvent = { id: number; event: 'diff' | 'prayer' | 'soul' | 'build'
 
 export type GodOptions = {
   worldId: string;
+  /** Shards (#2389): the world's own environment (LAYERS); unset reads the process's. */
+  env?: Record<string, string | undefined>;
   /** Who may approve god pairing when the world has no owner yet (DEV_AUTH 'dev:admin' in local runs). */
   ownerId: string | null;
   tick: () => number;
@@ -92,6 +95,12 @@ export type WalkoutPrep = { moved: ResidentMove[]; warnings: string[]; touched: 
 /** R8: what the committed god request was, for the residents' map-change notice (map-notices.ts). */
 export type ApplyContext = { kind: 'edit' | 'undo' | 'redo'; note?: string; build?: string };
 const NO_WALKOUTS: WalkoutPrep = { moved: [], warnings: [], touched: [] };
+/** legal-edits/1: a request whose off-thread preview has not run yet. `checked` waits for it and runs the request again; a
+ *  caller that does not wait gets this refusal (an edit is never accepted unchecked). */
+export const LEGAL_PENDING = 'edit-preview.pending';
+const pendingRefusal = (): Result => ({ accepted: false, failures: [{ op: -1, code: LEGAL_PENDING, field: 'legal-edits/1', detail: 'This edit is checked against the residents off the tick thread before it is made; this caller did not wait for that check, so it was not made.', measured: { retryable: true }, fix: 'Send it through POST /v1/god/act, /undo or /redo, which wait for the check.' }] });
+/** A refusal (an act's, a rewind's `{ok: false}`, or an abandon's undo `causes`) that only waits for the preview. */
+const isPending = (r: unknown) => { const x = r as { accepted?: boolean; ok?: boolean; failures?: Failure[]; causes?: Failure[] } | null; return !!x && x.accepted !== true && x.ok !== true && (x.failures?.[0]?.code === LEGAL_PENDING || x.causes?.[0]?.code === LEGAL_PENDING); };
 
 export class GodMode {
   readonly store: WorldStore;
@@ -121,7 +130,9 @@ export class GodMode {
    *  G1 "god rules": `prepare` plans, on the would-be world, the residents an accepted edit/undo/redo walks out of its
    *  way (listed as `moved` in the durable receipt), and `apply` moves them after the SQL commit in the same request.
    *  Null in worlds without the engine. */
-  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[] } | null = null;
+  bodies: { uses: UsesHook; lifted?: (ids: string[], after?: WorldModel) => string[]; refuse?: (after: WorldModel, diff: Diff, ops: Op[], o?: { undo?: boolean }) => Failure | null; prepare?: (before: WorldModel, after: WorldModel, diff: Diff, ops: Op[], o?: { dry?: boolean }) => WalkoutPrep; apply?: (moved: ResidentMove[], o?: ApplyContext) => string[] | void; arrivalNote?: (diff: Diff) => string[]; framesNote?: () => string[]; navNote?: (diff: Diff, said?: string[]) => string[];
+    /** legal-edits/1 (engine-bridge.ts legalCheck): refusals for an edit about to commit, 'pending' while its preview has not run */
+    legal?: (before: WorldModel, after: WorldModel, diff: Diff, o?: { dry?: boolean }) => Failure[] | 'pending' | null; legalRun?: () => Promise<Failure[] | null>; legalDone?: () => void } | null = null;
   /** Bridge admission/decoration must run before the accepted receipt is persisted, and never on replay. */
   actGuard: ((batch: unknown) => Result | null) | null = null;
   finalizeAct: ((result: Result, after: WorldModel) => Result) | null = null;
@@ -139,7 +150,7 @@ export class GodMode {
   constructor(db: Db, opts: GodOptions | (Omit<GodOptions, 'emit'> & { emit: (m: WorldDiffMessage) => void })) {
     this.db = db; this.opts = opts as GodOptions;
     this.store = new WorldStore(db, opts.worldId);
-    this.assets = new AssetStore({ dir: opts.assetDir ?? defaultAssetDir(), db, worldId: opts.worldId });
+    this.assets = new AssetStore({ dir: opts.assetDir ?? defaultAssetDir(opts.env), db, worldId: opts.worldId });
     // CATRUN (engine fix i): the core kit is one shared, content-addressed library per process, referenced by version
     // (libraryRef), never copied into a world. A world stores only the defs it uses, adopted (pinned by hash) the first
     // time something is placed from them; its own stored hashes always win, so old worlds resolve exactly as before and
@@ -369,12 +380,14 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const parsed = previewBatchSchema.safeParse(batch); if (!parsed.success) return { accepted: false as const, failures: parsed.error.issues.map(i => ({ op: -1, code: 'schema', field: i.path.join('.'), detail: i.message })) };
     const gate = this.helperGate(this.callerField(parsed.data.build), parsed.data.ops); if (gate) return { accepted: false as const, failures: [gate] };
     const retirement = this.retirementFailure(parsed.data.ops); if (retirement) return { accepted: false as const, failures: [retirement] };
-    const off = deferredOp(parsed.data); if (off) return { accepted: false as const, failures: [off] };
+    const off = deferredOp(parsed.data, this.opts.env); if (off) return { accepted: false as const, failures: [off] };
     const admission = this.builds.admit(this.callerField(parsed.data.build), parsed.data, this.caller.identity); if (admission.failures) return { accepted: false as const, failures: admission.failures };
     // buildsafe/1: a dry run answers as the commit would (the same repair ops, lines and diff; a sealed room repaired or named)
     const safe = this.applySafe({ ...parsed.data, group: admission.group } as Batch, this.opts.tick(), false, this.dryOpts(admission), []);
     if (!safe.r.result.accepted) return { accepted: false as const, failures: safe.r.result.failures };
     const diff = safe.r.diff!;
+    // legal-edits/1: a dry run answers as the commit would, refused by the same names (pending until its preview has run)
+    const legal = this.legalGate(safe.next, diff, { dry: true }); if (legal) return legal as { accepted: false; failures: Failure[] };
     const moving = this.bodies?.prepare?.(this.model, safe.next, diff, safe.batch.ops as Op[], { dry: true }) ?? NO_WALKOUTS;
     return { accepted: true as const, ids: safe.r.result.ids, warnings: [...kit.warnings, ...safe.r.result.warnings, ...(safe.repair?.lines ?? []), ...moving.warnings], diff: summarize(diff), ...(moving.moved.length ? { wouldMove: wouldMove(moving.moved) } : {}) };
   }
@@ -384,11 +397,28 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   }
   act(batch: unknown, note?: string): Result {
     const result = this.commitBatch(batch, note);
-    if (!result.accepted) {
+    if (!result.accepted && !isPending(result)) {
       const input = batch as { build?: BuildField; preview?: string } | null;
       this.builds.recordRefusal(input?.build ?? (input?.preview ? this.getPreview(input.preview)?.build : this.caller.build), result.failures);
     }
     return result;
+  }
+  /** legal-edits/1: run a god request (an act, undo or redo) and, while its edit's preview is pending, wait for that preview off
+   *  the tick thread and run the request again with the same caller; the world may change between tries, so at most three. */
+  async checked<T>(fn: () => T): Promise<T | (Result & { ok?: false })> {
+    const caller = this.caller;
+    try { for (let round = 0; ; round++) {
+      const r = this.as(caller, fn);
+      if (!isPending(r)) return r;
+      if (round === 3 || !this.bodies?.legalRun) return { accepted: false, ok: false, failures: [{ op: -1, code: 'edit-preview.busy', field: 'legal-edits/1', detail: 'The world kept changing while this edit was checked, so it was not made.', measured: { retryable: true, retryAfterMs: 1000 }, fix: 'Send the same request again in a moment.' }] };
+      const refused = await this.bodies.legalRun();
+      if (refused) return { accepted: false, ok: false, failures: refused };   // `ok`: a build rewind's refusal shape too
+    } } finally { this.bodies?.legalDone?.(); }   // a verdict never outlives the request that waited for it
+  }
+  /** legal-edits/1: the bridge's refusal of an edit about to commit (null: the rule is off or the edit passes). */
+  private legalGate(after: WorldModel, diff: Diff, o?: { dry?: boolean }): Result | null {
+    const v = this.bodies?.legal?.(this.model, after, diff, o);
+    return !v ? null : v === 'pending' ? pendingRefusal() : { accepted: false, failures: v };
   }
   /** Only server-owned genesis import can request trusted library adoption; request JSON cannot enable it. */
   private commitBatch(batch: unknown, note?: string, trusted = false): Result {
@@ -414,7 +444,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const field = preview ? preview.build : this.callerField(input.build);
     const gate = this.helperGate(field, normalized.ops); if (gate) return { accepted: false, failures: [gate] };
     const retirement = this.retirementFailure(normalized.ops); if (retirement) return { accepted: false, failures: [retirement] };
-    if (!trusted) { const clock = worldClockFailure(normalized.ops); if (clock) return { accepted: false, failures: [clock] }; }
+    if (!trusted) { const clock = worldClockFailure(normalized.ops, this.opts.env); if (clock) return { accepted: false, failures: [clock] }; }
     const stale = [...this.stale(preview?.expect ?? {}), ...this.staleSubtrees(preview), ...this.stale(input.expect ?? {})];
     for (const expected of [input.expectWorldAbout, preview?.expectWorldAbout]) if (expected !== undefined && expected !== hashOf(this.model.state.about ?? null)) stale.push({ op: -1, code: 'revision.stale', field: 'expectWorldAbout', detail: 'World meaning changed since it was read. Read it again before replacing it.' });
     if (stale.length) return { accepted: false, failures: [...new Map(stale.map(f => [f.entity, f])).values()] };
@@ -424,7 +454,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     const journalNote = note ?? normalized.note;
     const payloadHash = hashOf({ batch: normalized, build: field ?? null, expect: input.expect, expectWorldAbout: input.expectWorldAbout, preview: input.preview, note: journalNote ?? null });
     const guard = this.actGuard?.(normalized); if (guard) return guard;
-    const off = deferredOp(normalized); if (off) return { accepted: false, failures: [off] } as Result;
+    const off = deferredOp(normalized, this.opts.env); if (off) return { accepted: false, failures: [off] } as Result;
     const tick = this.opts.tick();
     // Keep public state untouched until SQL succeeds. No SQL write lock is held while planning or baking.
     let next = this.model.fork();
@@ -450,6 +480,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     if (r.result.accepted) r.result.warnings.push(...lifted, ...(repair?.lines ?? []));
     const result = this.finalizeAct?.(r.result, next) ?? r.result;
     if (!result.accepted) return result;
+    if (!trusted) { const legal = this.legalGate(next, r.diff!); if (legal) return legal; }
     const walkouts = this.bodies?.prepare?.(this.model, next, r.diff!, normalized.ops) ?? NO_WALKOUTS, moved = walkouts.moved;
     if (moved.length) result.moved = moved;
     result.warnings.push(...moved.map(movedWarning), ...walkouts.warnings);
@@ -554,6 +585,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
       const check = this.builds.check(admission, this.model, after, diff, ops, true); if ('failure' in check) return check.failure; made = check.made; return null;
     } });
     if (!r.result.accepted) return { ...r.result, failures: r.result.failures.map((f) => ({ ...f, code: f.code.endsWith('.by-body') || f.code.startsWith('body.') || f.code.startsWith('build.') ? f.code : 'undo.conflict' })) };
+    const legal = this.legalGate(next, r.diff!); if (legal) return legal;
     const walkouts = this.bodies?.prepare?.(this.model, next, r.diff!, target.inverse) ?? NO_WALKOUTS, moved = walkouts.moved;
     if (moved.length) r.result.moved = moved;
     r.result.warnings.push(...moved.map(movedWarning), ...walkouts.warnings);
@@ -644,6 +676,7 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
   private commitUndo(preflight: Extract<ReturnType<GodMode['preflightUndo']>, { ok: true }>, notReverted: number[]) {
     // Clear residents once for the complete inverse chain, after every conflict check has passed.
     const combined: Diff = { upserts: [...new Set(preflight.entries.flatMap(e => e.diff.upserts.map(x => x.id)))].flatMap(id => preflight.model.entities.has(id) ? [preflight.model.entities.get(id)!] : []), removes: [...new Set(preflight.entries.flatMap(e => e.diff.removes))].filter(id => !preflight.model.entities.has(id)), defs: [], tiles: [...new Set(preflight.entries.flatMap(e => e.diff.tiles))], answers: [] };
+    const legal = this.legalGate(preflight.model, combined); if (legal) return { reverted: [] as number[], notReverted, ...legal };
     const walkouts = this.bodies?.prepare?.(this.model, preflight.model, combined, preflight.entries.flatMap(e => e.edit.ops)) ?? NO_WALKOUTS, moved = walkouts.moved;
     // What the planner set down in the would-be world (released by a walk-out, or kept out of a resident's hands) is
     // journaled with the chain's last entry.
@@ -734,12 +767,14 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     if (!parsed.success) return { id: null, accepted: false as const, failures: [{ op: -1, code: 'schema', field: parsed.error.issues[0]?.path.join('.'), detail: parsed.error.issues.map(i => i.message).join('; '), fix: 'Use a valid edit batch from GET /v1/god/schema.' }] };
     const gate = this.helperGate(this.callerField(parsed.data.build), parsed.data.ops); if (gate) return { id: null, accepted: false as const, failures: [gate] };
     const retirement = this.retirementFailure(parsed.data.ops); if (retirement) return { id: null, accepted: false as const, failures: [retirement] };
-    const off = deferredOp(parsed.data); if (off) return { id: null, accepted: false as const, failures: [off] };
+    const off = deferredOp(parsed.data, this.opts.env); if (off) return { id: null, accepted: false as const, failures: [off] };
     const build = this.callerField(parsed.data.build), admission = this.builds.admit(build, parsed.data, this.caller.identity);
     if (admission.failures) return { id: null, accepted: false as const, failures: admission.failures };
     // buildsafe/1: the preview shows the batch as the commit will apply it (repairs included); its ops stay as sent
     const safe = this.applySafe({ ...parsed.data, group: admission.group } as Batch, this.opts.tick(), false, this.dryOpts(admission), []);
-    const p = safe.r.result.accepted ? { ok: true as const, diff: safe.r.diff! } : { ok: false as const, failures: safe.r.result.failures };
+    let p = safe.r.result.accepted ? { ok: true as const, diff: safe.r.diff! } : { ok: false as const, failures: safe.r.result.failures };
+    // legal-edits/1: a preview answers as the commit would, refused by the same names (pending until its preview has run)
+    if (p.ok) { const legal = this.legalGate(safe.next, p.diff, { dry: true }); if (legal && isPending(legal)) return { id: null, ...legal } as { id: null; accepted: false; failures: Failure[] }; if (legal && !legal.accepted) p = { ok: false as const, failures: legal.failures }; }
     const id = 'pv_' + randomBytes(6).toString('hex'), viewKey = randomBytes(32).toString('base64url');
     for (const [k, v] of this.previews) if (this.now() - v.at >= 600_000) this.previews.delete(k);
     while (this.previews.size >= 100) this.previews.delete(this.previews.keys().next().value!);
@@ -818,7 +853,9 @@ Prayers from Souls queue for you: \`node eden-god.mjs prayers\`, \`answer <id> <
     for (const e of diff.upserts) for (let ref: string | undefined = e.def; ref; ref = referenced.get(ref)?.extends) { const d = source.def(ref); if (!d || referenced.has(ref)) break; referenced.set(ref, d); }
     const now = this.now();
     const m: WorldDiffMessage = { type: 'edge', kind: 'world-diff', seq, tick, at: now, now, diff, by, defs: [...referenced.values()].map(publicDef), ...(builds.length ? { builds } : {}), ...(diff.tiles.length || diff.constants ? { ground: source.ground() } : {}) };
-    try { this.opts.emit(m); } catch { /* viewers are best-effort */ }
+    // #1223: viewers get a private notebook without its words; the god's own stream keeps them
+    const upserts = entitiesWithoutPrivateWords(source, diff.upserts);
+    try { this.opts.emit(upserts === diff.upserts ? m : { ...m, diff: { ...diff, upserts } }); } catch { /* viewers are best-effort */ }
     this.push('diff', m);
   }
 

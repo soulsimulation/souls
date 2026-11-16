@@ -82,14 +82,14 @@ test('lost-and-found: hand in, owner claim, finder named nearby only, group and 
 
  // no door: nothing to open
  assert.ok(!edge.capabilities(soul).some(c => c.object === boxId && ['open', 'close'].includes(c.action)), 'a lost-and-found has no door to open');
- await refuse('open the lost and found', 'capability.unknown');
+ await refuse(`object:${boxId}:open`, 'capability.unknown');
  const emptyNear = await here();
  // Ben finds Ana's bowl on the table and hands it in
- results.benPickUp = await done('pick up the bowl', souls.Ben);
+ results.benPickUp = await done(`pick-up:${id('bowl')}`, souls.Ben);
  assert.equal(ent('bowl').owner, 'soul:Ana', 'carrying it does not change whose it is');
  const putCap = edge.capabilities(souls.Ben).find(c => c.id === `put-in:${boxId}`);
  assert.ok(putCap?.available, 'put-in offered at once, no open step ' + JSON.stringify(putCap));
- const put = await done('put the bowl in the lost and found', souls.Ben, {item: bowl, isize: bowlSize});
+ const put = await done(`put-in:${boxId}`, souls.Ben, {item: bowl, isize: bowlSize});
  assert.match(put.capability, new RegExp(`put-in:${boxId}$`));
  assert.equal(item('bowl').support.kind, 'resting-on'); assert.equal(item('bowl').support.on, boxId); assert.match(item('bowl').support.slot, /^in-\d$/);
  assert.equal(ent('bowl').in.parent, boxId); assert.equal(ent('bowl').owner, 'soul:Ana', 'still Ana\'s');
@@ -102,7 +102,7 @@ test('lost-and-found: hand in, owner claim, finder named nearby only, group and 
  assert.deepEqual(row(benNear)?.state, {holds: ["bowl (Ana's, found by Ben)"]}, 'nearby: whose it is and who found it');
  const benTake = edge.capabilities(souls.Ben).find(c => c.id === `pick-up:${bowl}`);
  assert.equal(benTake?.available, false); assert.equal(benTake.blocked.code, 'item.not-yours'); assert.match(benTake.label, /^Take lost-and-found\/bowl \(Ana's, found by Ben\) out of lost-and-found \(shelf\) /, benTake.label);
- {const b = await refuse('take the bowl from the lost and found', 'item.not-yours', souls.Ben); assert.match(b.reason, /bowl is Ana's; you handed it in\. Only Ana can claim it from lost-and-found \(shelf\)\./, b.reason);}
+ {const b = await refuse(`pick-up:${id('bowl')}`, 'item.not-yours', souls.Ben); assert.match(b.reason, /bowl is Ana's; you handed it in\. Only Ana can claim it from lost-and-found \(shelf\)\./, b.reason);}
  assert.equal(item('bowl').support.on, boxId, 'a refused take changes nothing'); assert.equal(leftBy(), `${bowl}=${souls.Ben.soulId}`);
  // Ana: told it is hers and who found it; the take is hers
  const anaNear = await here(souls.Ana);
@@ -110,11 +110,11 @@ test('lost-and-found: hand in, owner claim, finder named nearby only, group and 
  const anaTake = edge.capabilities(souls.Ana).find(c => c.id === `pick-up:${bowl}`);
  assert.equal(anaTake?.available, true); assert.match(anaTake.label, /^Take lost-and-found\/bowl \(yours, found by Ben\) out of lost-and-found \(shelf\) /, anaTake.label);
  // interrupted before the grasp: the bowl stays on the shelf, the record unchanged
- {const before = leftBy(), r = await act('take my bowl from the lost and found', true, souls.Ana); for (let n = 0; n < 600 && !body(souls.Ana).human?.itemTransferV1?.reachTick; n++) await tick(1);
+ {const before = leftBy(), r = await act(`pick-up:${id('bowl')}`, true, souls.Ana); for (let n = 0; n < 600 && !body(souls.Ana).human?.itemTransferV1?.reachTick; n++) await tick(1);
   await accept(f.host, edge.act(souls.Ana, {capability: 'stand:here'})); await tick(60);
   assert.equal(edge.receipt(souls.Ana.soulId, r.receipt.id).phase, 'replaced'); assert.equal(item('bowl').support.on, boxId, 'interrupted: still on the shelf');
   assert.equal(ent('bowl').in.parent, boxId); assert.equal(leftBy(), before); results.interrupted = 'bowl stayed on the shelf; record unchanged';}
- const claim = await done('take my bowl from the lost and found', souls.Ana, {item: bowl, isize: bowlSize});
+ const claim = await done(`pick-up:${id('bowl')}`, souls.Ana, {item: bowl, isize: bowlSize});
  assert.equal(claim.capability, `pick-up:${bowl}`);
  assert.equal(item('bowl').support.kind, 'in-hand'); assert.equal(item('bowl').support.by, souls.Ana.entityId); assert.equal(ent('bowl').owner, 'soul:Ana');
  assert.ok(claim.lip.min >= 0, 'hand and bowl pass over the front rail: ' + JSON.stringify(claim.lip));
@@ -123,7 +123,7 @@ test('lost-and-found: hand in, owner claim, finder named nearby only, group and 
  assert.equal(leftBy(), '', 'a claimed thing drops out of the record');
  assert.equal(row(await here(souls.Ana))?.state?.holds, undefined, 'the shelf is empty again');
 
- results.anaPutsBowlDown = await done('put the bowl on the table', souls.Ana);
+ results.anaPutsBowlDown = await done(`put-on:${id('table')}`, souls.Ana);
  // the same mechanism, a second case: a thing the bakers own goes to a baker; a thing nobody owns is anyone's
  // (god-set relationships are a LAYERS=1 opt-in; only the membership is set with it on)
  {const was = process.env.LAYERS; process.env.LAYERS = '1'; try {ok(god.act({ops: [{op: 'relate', a: 'soul:Ben', rel: 'member-of', b: 'group:bakers'}]}));} finally {if (was === undefined) delete process.env.LAYERS; else process.env.LAYERS = was;}}
@@ -136,13 +136,13 @@ test('lost-and-found: hand in, owner claim, finder named nearby only, group and 
  const cupAna = edge.capabilities(souls.Ana).find(c => c.id === `pick-up:${cup}`), cupBen = edge.capabilities(souls.Ben).find(c => c.id === `pick-up:${cup}`);
  assert.equal(cupAna?.available, false); assert.equal(cupAna.blocked.code, 'item.not-yours'); assert.match(cupAna.blocked.reason, /the bakers'\. Only the bakers can claim it/);
  assert.equal(cupBen?.available, true, 'a member of the owning group may take it');
- {const b = await refuse('take the cup from the lost and found', 'item.not-yours', souls.Ana); assert.match(b.reason, /apron-cup is the bakers'\. Only the bakers can claim it/);}
- results.unowned = await done('take the book from the lost and found', souls.Ana);
+ {const b = await refuse(`pick-up:${id('apron-cup')}`, 'item.not-yours', souls.Ana); assert.match(b.reason, /apron-cup is the bakers'\. Only the bakers can claim it/);}
+ results.unowned = await done(`pick-up:${id('book')}`, souls.Ana);
  assert.equal(item('book').support.by, souls.Ana.entityId, 'a thing nobody owns is anyone\'s');
- results.baker = await done('take the cup from the lost and found', souls.Ben);
+ results.baker = await done(`pick-up:${id('apron-cup')}`, souls.Ben);
  assert.equal(item('apron-cup').support.by, souls.Ben.entityId);
- results.anaBookDown = await done('put the book on the table', souls.Ana);
- results.bakerCupDown = await done('put the cup on the table', souls.Ben);
+ results.anaBookDown = await done(`put-on:${id('table')}`, souls.Ana);
+ results.bakerCupDown = await done(`put-on:${id('table')}`, souls.Ben);
  // every other way to handle a kept thing is the owner's too: Ana's drunk mug (owner by Soul id) is not Ben's to wash
  ok(god.act({ops: [{op: 'place', def: 'core/camp-sink@1', name: 'sink', p: [ax - 1.2, az + 2.6], r: Math.PI / 2},
   {op: 'place', def: 'core/cup@2', name: 'mug', in: {parent: 'lost-and-found', slot: 'in-1'}, p: [0, 0], owner: `soul:${souls.Ana.soulId}`, state: {tea: 0, brewedTick: 1}}]})); await tick(30);
@@ -154,18 +154,18 @@ test('lost-and-found: hand in, owner claim, finder named nearby only, group and 
  ok(god.act({ops: [{op: 'remove', id: id('mug')}]})); await tick(10);
 
  // refused: the lantern does not fit; then a full box
- results.lanternUp = await done('pick up the lantern', souls.Ana);
- {const b = await refuse('put the lantern in the lost and found', 'item.does-not-fit', souls.Ana); assert.match(b.reason, /\(0\.22 × 0\.45 × 0\.22 m\) does not fit in lost-and-found \(shelf\) \(up to 0\.30 × 0\.28 × 0\.30 m\)/);}
- results.lanternDown = await done('put the lantern on the table', souls.Ana);
+ results.lanternUp = await done(`pick-up:${id('lantern')}`, souls.Ana);
+ {const b = await refuse(`put-in:${boxId}`, 'item.does-not-fit', souls.Ana); assert.match(b.reason, /\(0\.22 × 0\.45 × 0\.22 m\) does not fit in lost-and-found \(shelf\) \(up to 0\.30 × 0\.28 × 0\.30 m\)/);}
+ results.lanternDown = await done(`put-on:${id('table')}`, souls.Ana);
  ok(god.act({ops: ['in-1', 'in-2', 'in-3'].map((slot, i) => ({op: 'place', def: 'core/cup@2', name: `found-cup-${i}`, in: {parent: 'lost-and-found', slot}, p: [0, 0]}))})); await tick(20);
  const full = await here(souls.Ben);
  assert.equal(row(full)?.state?.holds?.length, 3);
- results.bowlUp = await done('pick up the bowl', souls.Ana);
- await refuse('put the bowl in the lost and found', 'container.full', souls.Ana);
+ results.bowlUp = await done(`pick-up:${id('bowl')}`, souls.Ana);
+ await refuse(`put-in:${boxId}`, 'container.full', souls.Ana);
  // Ana hands her own bowl in: the record names her; her claim is hers
  ok(god.act({ops: [{op: 'remove', id: id('found-cup-0')}]})); await tick(10);
  // the claim holds from the moment the engine sets it down, before the model catches up at write-back
- {const r = await act('put the bowl in the lost and found', true, souls.Ana); let race = null;
+ {const r = await act(`put-in:${boxId}`, true, souls.Ana); let race = null;
   for (let n = 0; n < 1600 && !race; n++) {const sp = item('bowl').support; if (sp?.kind === 'resting-on' && sp.on === boxId) {const c = edge.capabilities(souls.Ben).find(c => c.id === `pick-up:${bowl}`); race = {modelInBox: ent('bowl').in.parent === boxId, offered: !!c, available: c?.available ?? null, code: c?.blocked?.code ?? null};} else await tick(1);}
   assert.ok(race && race.offered && race.available === false && race.code === 'item.not-yours', 'refused at once: ' + JSON.stringify(race));
   assert.equal(race.modelInBox, false, 'checked inside the write-back gap (the model still has it in her hand)');

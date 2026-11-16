@@ -160,9 +160,8 @@ come from each Soul's own event stream (`/v1/edge/wait`, `receipt.*` events with
 activity duration is its own column. The clock check samples every world's `/healthz` tick each second against
 monotonic time at the admin rate in the world's own database; nothing is clipped or reset.
 
-Full clock comes from existing switches only, set on the launcher: `SIM_UNWATCHED_PACE=1`,
-`SIM_WORLD_IDLE_EXIT_MIN=0`, `--sleep-ms 0`. The production defaults (quarter pace unwatched, sleep, idle exit) are
-#740's subject. Eyes rendering is off: image delivery is not covered here. The run is loopback through the launcher's
+Full clock comes from existing switches only, set on the launcher: `SIM_WORLD_IDLE_EXIT_MIN=0`, `--sleep-ms 0`. Since
+#2235 these are also the defaults, and the quarter pace unwatched is gone. Eyes rendering is off: image delivery is not covered here. The run is loopback through the launcher's
 proxy with dev auth: TLS, the public proxy, Clerk and the real network are not exercised.
 
 Outputs under `--out`: `receipt.json` (source, seed, schedule sha256, fixture sha256s, configuration, coverage; no

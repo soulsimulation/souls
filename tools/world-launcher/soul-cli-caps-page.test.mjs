@@ -1,5 +1,6 @@
 // 2.5.1 (L3 paged listings): a plain `caps` shows the world's page and says how many offers it left out
-// (notListed/note); `caps --search`, `--verb` and `--all` read the whole menu with ?all=1.
+// (notListed/note); `caps --verb` and `--all` read the whole menu with ?all=1. #1921: `caps --search` is the local
+// catalog's `find`, with no call on the world: each fake world here counts resolver and search requests, and ends at zero.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'node:http';
@@ -12,52 +13,61 @@ import {fileURLToPath} from 'node:url';
 const CLI = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const near = {id: 'sit:bench', verb: 'sit', label: 'Sit on the bench', available: true};
 const far = {id: 'walk:far-pier', verb: 'walk', label: 'Walk to the far pier', available: true};
+const catalog = (places) => ({contract: 'soul-catalog/1', worldId: 'w', scope: 'public', placeVerbs: ['walk'], anywhere: [], things: [], acts: [], kinds: {},
+  places: [{id: 'world', name: 'World', kind: 'region', parent: null, at: [0, 0]}, ...places.map((p) => ({kind: 'landmark', parent: 'world', ...p}))]});
+const resolverCalls = (seen) => seen.filter((u) => u.startsWith('/v1/edge/resolve') || (u.startsWith('/v1/edge/capabilities') && /[?&]search=/.test(u))).length;
 
-test('plain caps lists the page with notListed; search, verb and all read the whole menu', async (t) => {
+/** A world with a capabilities menu (`menu(url)`), a catalog and a live picture with this Soul at the origin. */
+async function world(t, menu, cat) {
   const seen = [], dir = mkdtempSync(join(tmpdir(), 'capspage-'));
   const server = createServer((req, res) => {
     const u = new URL(req.url, 'http://x'); seen.push(u.pathname + u.search);
+    if (u.pathname === '/v1/edge/catalog') { res.writeHead(200, {'content-type': 'application/json', etag: '"c1"'}); return res.end(JSON.stringify(cat)); }
     res.writeHead(200, {'content-type': 'application/json'});
+    if (u.pathname === '/v1/edge/live') return res.end(JSON.stringify({tick: 1, souls: [{id: 's_pip', name: 'Pip', at: [0, 0], place: 'world'}], things: {}, speech: []}));
     if (u.pathname !== '/v1/edge/capabilities') return res.end('{}');
-    res.end(JSON.stringify(u.searchParams.get('all') === '1' ? {tick: 1, capabilities: [near, far]}
-      : {tick: 1, capabilities: [near], omitted: {count: 1, byVerb: {walk: 1}, note: 'farther offers still work by id or in words'}}));
+    res.end(JSON.stringify(menu(u)));
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
+  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true}); assert.equal(resolverCalls(seen), 0, 'no call on the resolver or its search');});
   writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: 'http://127.0.0.1:' + server.address().port, soul: 's_pip', token: 'sim_fixture'}));
-  const run = (args) => new Promise((resolve, reject) => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (err, out, e) => err ? reject(new Error(e)) : resolve(JSON.parse(out))));
+  const run = (...args) => new Promise((resolve, reject) => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (err, out, e) => err ? reject(new Error(e)) : resolve(JSON.parse(out))));
+  await run('look');   // the local copy: catalog and live picture
+  return {seen, run};
+}
 
-  const page = await run(['caps']);
+test('plain caps lists the page with notListed; a search reads the local catalog; verb and all read the whole menu', async (t) => {
+  const {seen, run} = await world(t, (u) => u.searchParams.get('all') === '1' ? {tick: 1, capabilities: [near, far]}
+    : {tick: 1, capabilities: [near], omitted: {count: 1, byVerb: {walk: 1}, note: 'farther offers still work by id or in words'}},
+  catalog([{id: 'far-pier', name: 'Far Pier', at: [300, 0]}]));
+
+  const page = await run('caps');
   assert.equal(seen.at(-1), '/v1/edge/capabilities');
   assert.deepEqual(page.offers.map(o => o.id), ['sit:bench']);
   assert.equal(page.notListed, 1); assert.match(page.note, /farther/);
 
-  const found = await run(['caps', '--search', 'far pier']);
-  assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1&search=far%20pier', '2.24.7 (#1412): the words go to the world too');
-  assert.equal(found.offers[0].id, 'walk:far-pier'); assert.equal(found.notListed, undefined, 'the whole menu leaves nothing out');
+  const before = seen.length, found = await run('caps', '--search', 'far pier');
+  assert.equal(seen.length, before, '#1921: a search makes no call on the world');
+  assert.equal(found.offers[0].id, 'walk:far-pier'); assert.equal(found.notListed, undefined, 'the whole catalog leaves nothing out');
 
-  await run(['caps', '--verb', 'walk']); assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1');
-  await run(['caps', '--all']); assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1');
+  await run('caps', '--verb', 'walk'); assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1');
+  await run('caps', '--all'); assert.equal(seen.at(-1), '/v1/edge/capabilities?all=1');
 });
 
 test('#1268: a search shows the best dozen in short labels; --limit, --json, --verb and the plain page keep what they had', async (t) => {
   const label = (i) => `Walk to Pier ${i} [pier-${i}], ${'a long description of the water and the boards, '.repeat(4)}by the pond (${i} m)`;
   const menu = Array.from({length: 20}, (_, i) => ({id: `walk:pier-${i}`, verb: 'walk', label: label(i), available: true}));
-  const dir = mkdtempSync(join(tmpdir(), 'capssearch-'));
-  const server = createServer((req, res) => {res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({tick: 1, capabilities: menu}));});
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
-  writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: 'http://127.0.0.1:' + server.address().port, soul: 's_pip', token: 'sim_fixture'}));
-  const run = (...args) => new Promise((resolve, reject) => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (err, out, e) => err ? reject(new Error(e)) : resolve(JSON.parse(out))));
+  const name = (i) => `Pier ${i}, ${'a long name for the water and the boards, '.repeat(4)}`;
+  const {run} = await world(t, () => ({tick: 1, capabilities: menu}), catalog(Array.from({length: 20}, (_, i) => ({id: `pier-${i}`, name: name(i), at: [i, 0]}))));
 
   const found = await run('caps', '--search', 'pier');
   assert.equal(found.matching, 20); assert.equal(found.shown, 12); assert.equal(found.offers.length, 12); assert.match(found.more, /--limit 20/);
   assert.ok(found.offers.every(o => o.label.length <= 80 && !o.label.includes('[')), 'short labels');
-  assert.match(found.offers[3].label, /\(3 m\)$/, 'the distance stays');
+  assert.equal(found.offers[3].id, 'walk:pier-3'); assert.equal(found.offers[3].metres, 3, 'the distance stays');
 
   const more = await run('caps', '--search', 'pier', '--limit', '20');
   assert.equal(more.offers.length, 20); assert.equal(more.more, undefined);
-  assert.equal((await run('caps', '--search', 'pier', '--json')).offers[0].label, label(0), '--json has the world\'s label');
+  assert.equal((await run('caps', '--search', 'pier', '--json')).offers[0].label, name(0), '--json has the whole label');
 
   for (const args of [['caps'], ['caps', '--verb', 'walk'], ['caps', '--all']]) {
     const page = await run(...args);
@@ -66,55 +76,18 @@ test('#1268: a search shows the best dozen in short labels; --limit, --json, --v
   assert.equal((await run('caps', '--all', '--search', 'pier')).offers.length, 20, '--all keeps the catalogue limit');
 });
 
-// 2.24.7 (#1412, #1329 item 4): the world reads the words as resolve does and names the places first; an old world that
-// ignores `search` gets today's local ranking, with nothing new in the output.
-test('#1412: caps --search leads with the places the world names, prints its note, and degrades on an old world', async (t) => {
-  const menu = [near, far, {id: 'walk:green', verb: 'walk', label: 'Walk to the green, by the library steps', available: true}];
-  const library = {id: 'walk:eden-library-1', verb: 'walk', label: 'Walk to Eden Library 1 (278 m)', available: true, aliases: ['Eden Library', 'library', 'the stacks']};
-  const dir = mkdtempSync(join(tmpdir(), 'capsworld-')), seen = []; let old = false;
-  const server = createServer((req, res) => {
-    const u = new URL(req.url, 'http://x'), q = u.searchParams.get('search'); seen.push(u.search);
-    res.writeHead(200, {'content-type': 'application/json'});
-    if (old || q == null) return res.end(JSON.stringify({tick: 1, capabilities: menu}));
-    if (/library/.test(q)) return res.end(JSON.stringify({tick: 1, capabilities: [...menu, library], search: {query: q, places: ['walk:eden-library-1'], placesMatched: 1, truncated: false}}));
-    res.end(JSON.stringify({tick: 1, capabilities: menu, search: {query: q, places: [], placesMatched: 0, truncated: false, note: `No place you know is named "${q}"; capabilities lists the whole menu to match against.`}}));
-  });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
-  writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: 'http://127.0.0.1:' + server.address().port, soul: 's_pip', token: 'sim_fixture'}));
-  const run = (...args) => new Promise((resolve, reject) => execFile(process.execPath, [CLI, ...args], {cwd: dir}, (err, out, e) => err ? reject(new Error(e)) : resolve(JSON.parse(out))));
+test('#1921: bare words are a search too; a search that matches nothing says so; --verb filters the places out', async (t) => {
+  const {run} = await world(t, () => ({tick: 1, capabilities: [near, far]}),
+    catalog([{id: 'eden-library-1', name: 'Eden Library 1', aliases: ['Eden Library', 'the stacks'], at: [278, 0]}, {id: 'green', name: 'The Green', at: [9, 0]}]));
 
   const found = await run('caps', '--search', 'library');
-  assert.equal(seen.at(-1), '?all=1&search=library');
-  assert.deepEqual(found.offers.map(o => o.id), ['walk:eden-library-1', 'walk:green'], 'the place the world names leads; the menu match follows, once each');
-  assert.equal(found.placesMatched, 1); assert.equal(found.note, undefined);
-  assert.deepEqual((await run('caps', 'library')).offers.map(o => o.id), ['walk:eden-library-1', 'walk:green'], 'bare words are a search too');
+  assert.equal(found.offers[0].id, 'walk:eden-library-1');
+  assert.deepEqual((await run('caps', 'library')).offers.map(o => o.id), found.offers.map(o => o.id), 'bare words are a search too');
 
   const none = await run('caps', '--search', 'zeppelin');
-  assert.equal(none.matching, 0); assert.equal(none.placesMatched, 0); assert.match(none.note, /No place you know is named "zeppelin"/);
+  assert.equal(none.matching, 0); assert.match(none.note, /Nothing in this world's catalog matches "zeppelin"/);
 
-  old = true;
-  const before = await run('caps', '--search', 'library');
-  assert.deepEqual(before.offers.map(o => o.id), ['walk:green'], 'an old world: local ranking over the menu, as before');
-  assert.equal(before.placesMatched, undefined); assert.equal(before.note, undefined);
-  const nothing = await run('caps', '--search', 'zeppelin');
-  assert.deepEqual(Object.keys(nothing).sort(), ['matching', 'offers', 'shown', 'total'], 'no new fields from an old world');
-
-  old = false;
   const sit = await run('caps', '--search', 'library', '--verb', 'sit');
   assert.deepEqual(sit.offers, [], '--verb still filters the places out');
-  assert.equal(sit.placesMatched, 1); assert.match(sit.note, /knows a place named "library", but none is among --verb sit/, 'never "nothing matches" beside placesMatched 1');
-});
-
-// #1445 review: a world that sends both a page's omitted note and a search note: both reach the agent, the page's first.
-test('#1445: an omitted note and a search note are both kept', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'capsboth-'));
-  const server = createServer((req, res) => {res.writeHead(200, {'content-type': 'application/json'}); res.end(JSON.stringify({tick: 1, capabilities: [near],
-    omitted: {count: 3, note: 'farther offers still work by id or in words.'}, search: {query: 'zeppelin', places: [], placesMatched: 0, truncated: false, note: 'No place you know is named "zeppelin".'}}));});
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  t.after(async () => {server.closeAllConnections(); await new Promise(r => server.close(r)); rmSync(dir, {recursive: true, force: true});});
-  writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({world: 'http://127.0.0.1:' + server.address().port, soul: 's_pip', token: 'sim_fixture'}));
-  const out = await new Promise((resolve, reject) => execFile(process.execPath, [CLI, 'caps', '--search', 'zeppelin'], {cwd: dir}, (err, o, e) => err ? reject(new Error(e)) : resolve(JSON.parse(o))));
-  assert.equal(out.notListed, 3);
-  assert.equal(out.note, 'farther offers still work by id or in words. No place you know is named "zeppelin".');
+  assert.deepEqual((await run('caps', '--verb', 'walk', '--search', 'library')).offers.map(o => o.id), ['walk:eden-library-1'], 'and --verb walk keeps the walks to them');
 });

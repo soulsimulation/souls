@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
 import*as THREE from 'three';import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 const M=new URL('../../../mars/viewer/',import.meta.url).pathname;
-{const {registerHooks,createRequire}=await import('node:module');const esbuild=createRequire(import.meta.url)(new URL('../../../node_modules/.pnpm/esbuild@0.28.1/node_modules/esbuild/lib/main.js',import.meta.url).pathname);
+{const {registerHooks,createRequire}=await import('node:module');const esbuild=createRequire(M+'package.json')('esbuild');
  registerHooks({resolve(spec,ctx,next){try{return next(spec,ctx);}catch(e){if(ctx.parentURL?.startsWith('file://'+M)&&spec.startsWith('.'))return next(spec+'.ts',ctx);throw e;}},load(url,ctx,next){if(url.startsWith('file://'+M)&&url.endsWith('.ts')){const src=readFileSync(new URL(url),'utf8');return {format:'module',source:esbuild.transformSync(src,{loader:'ts',format:'esm'}).code,shortCircuit:true};}return next(url,ctx);}});}
 // loadTemplates fetches /modular/environment/…: serve those from the GLB directory
 const DIR=process.env.GLB_DIR??M+'public/modular/environment/';

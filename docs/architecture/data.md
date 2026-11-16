@@ -18,7 +18,7 @@ create their own versioned tables (`*_v1`) with `CREATE TABLE IF NOT EXISTS` whe
 | `talks`, `narratives` | rendered speech; narrator plans (central driver) | newest 20,000 talk lines |
 | `take_chunks`, `take_archives` | recorded pose chunks for the viewer; archive manifest | only with `TAKES_PERSIST=1` (off by default) |
 | `glitches_v1` | one row per refusal, recovery and halt: rung, rule, bodies, tick, evidence (`glitch.ts`) | operations data; replay never reads it |
-| `edge_clients_v1` | one row per Soul, client (its `x-soul-client` header, or `none`) and UTC day: first and last request, count (`client-version.ts`) | operations data, written at most once a minute and at shutdown |
+| `edge_clients_v1` | one row per Soul, client (its `x-soul-client` header when it is a short version string, else `invalid`; `none` without one) and UTC day: first and last request, count (`client-version.ts`) | operations data, written at most once a minute and at shutdown |
 | `render_scene_captures` | content-addressed public render scenes | canonical for the takes that cite them |
 | `intent_*`, `lifecycle_operations_v1`, `clock_frontiers_v1`, … | structured intent, Soul lifecycle and durable clock facts | canonical |
 

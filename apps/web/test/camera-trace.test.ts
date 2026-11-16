@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { CameraTrace, overrides, toJsonl, type TraceRecord } from '../src/camera-trace.ts';
+import * as THREE from 'three';
+import { CameraTrace, costSummary, overrides, percentile, toJsonl, type TraceRecord } from '../src/camera-trace.ts';
+import { WorldFollow } from '../src/WorldFollow.ts';
 
 const follow = (t: number, rule: string, eye: [number, number, number], desired: [number, number, number] = [0, 2, 8], extra: Record<string, unknown> = {}): TraceRecord =>
   ({ t, kind: 'frame', mode: 'follow', target: [0, 1, 0], eye, desired, rule: { name: rule, ...extra } });
@@ -49,4 +51,41 @@ test('T4: off by default: the trace is its own chunk, loaded only with ?camtrace
   assert.match(live, /has\('camtrace'\)\)void import\('\.\/camera-trace\.ts'\)/);
   assert.doesNotMatch(live, /^import [^;]*camera-trace/m, 'never a static import');
   assert.doesNotMatch(src, /fetch\(|sendBeacon|XMLHttpRequest|WebSocket|localStorage/, 'it never leaves the page');
+});
+
+test('#2201 A1: the cost meter keeps every frame\'s ms and rays; median and p95 are nearest-rank; the download closes with the summary', () => {
+  assert.equal(percentile([], .5), 0);
+  assert.equal(percentile([3, 1, 2], .5), 2);
+  assert.equal(percentile(Array.from({ length: 100 }, (_, i) => i + 1), .95), 95);
+  assert.deepEqual(costSummary([.2, .1, .4, .3], [10, 0, 30, 20]), { frames: 4, ms: { median: .2, p95: .4, max: .4 }, rays: { median: 10, p95: 30, max: 30 } });
+  let now = 0;
+  const trace = new CameraTrace(() => now), f = { mode: 'follow', target: [0, 1, 0] as const, eye: [0, 3, 8] as const, desired: null, rule: { name: 'glide' } };
+  for (let i = 0; i < 10; i++) { now += 16; trace.frame(f); trace.cost(.1 * (i + 1), i); }
+  assert.equal(trace.records.length, 1, 'unchanged frames are still deduplicated');
+  assert.equal(trace.costSummary().frames, 10, 'but every frame is metered');
+  const last = JSON.parse(trace.jsonl().trim().split('\n').at(-1)!);
+  assert.equal(last.kind, 'cost'); assert.equal(last.frames, 10); assert.equal(last.ms.p95, 1); assert.equal(last.rays.median, 4);
+  assert.deepEqual(overrides(JSON.parse(`[${trace.jsonl().trim().split('\n').join(',')}]`)), [], 'a cost record is never read as a frame');
+});
+
+test('#2201 A1: WorldFollow counts the sightline rays of each resolve call; a decoupled hold casts none', () => {
+  const g = new THREE.Group(), wall = new THREE.Mesh(new THREE.BoxGeometry(6, 4, .4), new THREE.MeshBasicMaterial());
+  wall.position.set(0, 2, 3); g.add(wall); g.updateWorldMatrix(true, true);
+  const follow = new WorldFollow(), target = new THREE.Vector3(0, 1, 0);
+  let offset = new THREE.Vector3(0, 3, 9);
+  offset = follow.resolve(target, offset, [g], 1 / 60);
+  assert.ok(follow.rays > 0, `the first frame searches: ${follow.rays} rays`);
+  const counts: number[] = [];
+  for (let i = 0; i < 60; i++) { offset = follow.resolve(target, offset, [g], 1 / 60); counts.push(follow.rays); }
+  assert.ok(counts.every((n) => Number.isInteger(n) && n >= 0));
+  assert.ok(Math.max(...counts) > Math.min(...counts), 'search frames cast more than glide frames');
+  follow.userInput(offset, offset.clone().multiplyScalar(1.5));   // a pull out decouples the camera
+  follow.resolve(target, offset.clone().multiplyScalar(1.5), [g], 1 / 60);
+  assert.equal(follow.rays, 0);
+});
+
+test('#2201 A2: a frame keeps its own step, so speeds read off the trace use the time the camera moved by', () => {
+  const trace = new CameraTrace(() => 5);
+  trace.frame({ mode: 'follow', target: [0, 1, 0], eye: [0, 3, 8], rule: { name: 'glide' }, dt: 1 / 30 });
+  assert.equal((trace.records[0] as { dt?: number }).dt, 1 / 30);
 });

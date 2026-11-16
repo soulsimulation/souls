@@ -130,9 +130,9 @@ export type PublicSoul = {
   intent: WireIntent | null; intentText: string; mood: string; energy: string; doing: string; native: boolean;
   /** LINK: the agent's self-authored public status line (≤140 chars, untrusted text), or null. */
   now?: {text: string; at: number} | null;
-  /** LINK (COMMON-LINK §2): the body follows the agent's presence. awake = connected and directed; idle = connected, the
-   *  idle reflex runs; zombie = disconnected, shuffling; asleep = disconnected, still. `doing` is the posture word (null when
-   *  directed); `since` (ms) when the state began. Edge worlds only. */
+  /** wind-down/1 (#2295): awake = the agent acted within the hour; idle = silent for an hour, walking out of town;
+   *  zombie = walking to its sleeping spot; asleep = lying there until the agent acts. `doing` is the posture word (null
+   *  when awake); `since` (ms) when the state began. Edge worlds only. */
   body?: {state: 'awake' | 'idle' | 'zombie' | 'asleep'; doing: 'standing' | 'sitting' | 'dozing' | 'drifting' | 'floating' | null; since: number};
   /** #456: present only while the world slows or refuses this Soul's own requests: the refusal's code and when (ms) it ends. */
   slowed?: {reason: 'soul.slow-down' | 'world.busy' | 'world.crowded'; until: number};

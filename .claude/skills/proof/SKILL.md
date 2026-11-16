@@ -133,7 +133,7 @@ them; a hit fails the take (exit 4, privacy kind `panel-text`) before anything i
 - Browsers: uses `PLAYWRIGHT_BROWSERS_PATH`, else `/opt/pw-browsers` when present. If Chromium is missing:
   `PLAYWRIGHT_BROWSERS_PATH="$PWD/.e2e/browsers" pnpm --filter mars-campus-viewer exec playwright install chromium`.
 - Playwright is resolved the same way the playtest harness does (`tools/playtest/lib/platform.mjs`: a global
-  `playwright`, else `@playwright/test` from `mars/viewer`). No GPU is needed; WebGL runs on SwiftShader.
+  `playwright`, else `@playwright/test` from `mars/viewer`). No GPU is needed; WebGL runs on SwiftShader. A busy machine drops frames: record on a GPU runner instead (`docs/testing.md#recording-a-proof-clip-on-a-gpu-runner`; `SIM_PROOF_GPU=hardware` makes the recorder use and name a hardware renderer).
 - `--max-seconds` defaults to the policy's `max_seconds`. Exit 3 means the journey ran past it: shorten it.
 - With ffmpeg: an mp4 with a thin progress line along the bottom edge and a small `m:ss.s / total` timecode chip at
   the bottom left. The recorder's Chromium draws the timecode, so it needs no ffmpeg `drawtext` or fonts; the
@@ -178,12 +178,13 @@ labels. The uploader blocks detected text leaks before uploading the batch; this
 node tools/proof/upload.mjs --pr $N --proof .e2e/journal/$ISSUE/proof.json .e2e/proof/$SLUG/desktop.mp4 .e2e/proof/$SLUG/phone.mp4
 ```
 
-- The default target is the PR's own prerelease `proofs-<n>` (tag on the default branch, created on first use);
-  one release per PR keeps each under GitHub's 1000-asset limit, which the old shared `proofs` release reached.
-  `--release <tag>` (or `SIM_PROOF_RELEASE`) names another release. The shared `proofs` release is full: on a branch
-  whose `upload.mjs` still defaults to it, run main's copy (`git show origin/main:tools/proof/upload.mjs > .local/upload-main.mjs`). Assets are named
-  `pr-<n>.<file>`, and a re-take gets `-2`, `-3`, so earlier takes, including failed ones, stay linkable.
-  `SIM_PROOF_UPLOAD_URL` (+ `SIM_PROOF_UPLOAD_TOKEN`) switches to another endpoint, such as a CDN.
+- Proof goes to the proof CDN: `https://assets.eden.art/proofs/pr-<n>/<file>`, uploaded with the R2 credentials the
+  CDN tools use (`EDEN_ASSETS_CREDENTIALS`, else the main checkout's `.local/project/team/secrets/eden-assets-r2.env`,
+  and `CF_ACCOUNT_ID` from `deploy.env`); it works from a worktree. Never GitHub releases: those are for versions of
+  the software, and `proof-ok` no longer counts links on them. A re-take gets `-2`, `-3`, so earlier takes, including
+  failed ones, stay linkable. Without the credentials (cloud sessions, outside contributors) the upload is blocked:
+  drag the clips into the PR description instead, and GitHub hosts them. `SIM_PROOF_UPLOAD_URL`
+  (+ `SIM_PROOF_UPLOAD_TOKEN`) switches to another endpoint.
 - With `--proof`, clip and image links are written into proof.json `media[]`, other files (logs, JSON) into
   `files[]`, and proof.json is uploaded last. Paste its link
   and the clip links into the PR's Proof section. The `journal` skill covers proof.json.
@@ -192,10 +193,10 @@ node tools/proof/upload.mjs --pr $N --proof .e2e/journal/$ISSUE/proof.json .e2e/
   `uncut` or `realSpeed` would stay unset is refused before anything is uploaded (`proof.media-incomplete`): keep the
   sidecar beside the clip, or state both in its media entry.
 - A clip whose sidecar records a privacy hit is refused, with or without `--proof` (`proof.clip-private`).
-- **Inline preview.** GitHub serves release assets as downloads, so an mp4 link never plays in the PR. For each
+- **Inline preview.** GitHub plays only its own attachments inline, so a CDN mp4 link never plays in the PR. For each
   video, `upload.mjs` makes a small animated GIF with ffmpeg (`<clip>.preview.gif`: 6 s at real speed from the clip's
   `arrived` mark, or from 0 for a `--from-load` take; at most 5 MB), uploads it beside the clip, records it as `media[].preview` and prints a line like
-  `[![desktop.mp4](…pr-412.desktop.preview.gif)](…pr-412.desktop.mp4)`. Paste that line: the preview plays in the
+  `[![desktop.mp4](…/pr-412/desktop.preview.gif)](…/pr-412/desktop.mp4)`. Paste that line: the preview plays in the
   PR and clicking it opens the full clip. When the change shows later in the clip, pick the window with
   `--preview-start <s>` (and `--preview-seconds <s>`). The preview is a pointer, not the proof: the uncut mp4 is.
   Always put an explicit **Full-resolution uncut video** link before each preview, stating the actual encoded

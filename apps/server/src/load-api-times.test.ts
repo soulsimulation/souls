@@ -1,9 +1,11 @@
 // #1750 A2/A3/A7: per-route server time (load/api-times.ts) and the stall line (load/stall-log.ts).
+// #1944 A4: an act's four parts (queue, handler, wait, commit) and the monitor's late-tick count (load/monitor.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Hono} from 'hono';
 import {Admission, admissionMiddleware} from './load/admission.ts';
-import {API_ROUTES, API_WINDOW_MS, BOUNDS_MS, apiOf, apiRoute, handlerMsOf, newSharedApi, recordApi, sharedApi} from './load/api-times.ts';
+import {API_ROUTES, API_WINDOW_MS, BOUNDS_MS, actTiming, apiOf, apiRoute, handlerMsOf, newSharedApi, recordApi, sharedApi} from './load/api-times.ts';
+import {LoadMonitor, type HostLike} from './load/monitor.ts';
 import {StallLog, stallText} from './load/stall-log.ts';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -121,4 +123,57 @@ test('a serving-warm wait (before admission) is said: Server-Timing warm;dur, in
   const r2 = await app.request('/v1/edge/converse', {method: 'POST', headers: {authorization: 'Bearer sim_w'}, body: '{}'});
   assert.doesNotMatch(r2.headers.get('server-timing') ?? '', /warm/);
   adm.close();
+});
+
+test('#1944 an act says its four parts: queue + handler + wait + commit = world within 1 ms, and they reach the histograms', async () => {
+  const adm = new Admission(), app = new Hono();
+  app.use('*', admissionMiddleware(adm, () => 'green', c => c.req.header('authorization')?.slice(7)));
+  // as the ledger marks it: bind and check inside the handler, settle's wait, then the tick (another async context) takes it
+  app.post('/v1/edge/act', async c => {
+    const t = actTiming.getStore()!; t.checkAt = performance.now(); t.bindMs += 3; t.routeMisses += 2;
+    await sleep(20); t.waitAt = performance.now();
+    await new Promise<void>(res => setTimeout(() => { t.takenAt = performance.now(); res(); }, 160));
+    await sleep(10); return c.json({accepted: true});
+  });
+  app.get('/v1/edge/here', c => { assert.equal(actTiming.getStore(), undefined, 'no marks outside an act'); return c.json({}); });
+  const before = apiOf(sharedApi).routes['edge:act']?.parts?.waitOver3TicksAll ?? 0;
+  assert.equal((await app.request('/v1/edge/here', {headers: {authorization: 'Bearer sim_parts'}})).status, 200);
+  const r = await app.request('/v1/edge/act', {method: 'POST', headers: {authorization: 'Bearer sim_parts'}, body: '{}'});
+  const st = r.headers.get('server-timing') ?? '', d = (k: string) => Number(new RegExp(`(?:^|, )${k};dur=([\\d.]+)`).exec(st)?.[1]);
+  const [world, queue, handler, wait, commit] = ['world', 'queue', 'handler', 'wait', 'commit'].map(d);
+  assert.ok(Math.abs(queue + handler + wait + commit - world) <= 1, st);
+  assert.ok(handler >= 18 && handler < 150 && wait >= 150 && commit >= 8 && commit < 150, st);
+  // check runs from the handler's check mark to the wait: the handler's 20 ms, inside handler. handler also holds the
+  // dispatch from the turn's start to that mark, which a loaded runner can stretch past 1 ms (6.3 ms in CI), so check is
+  // bounded by its own 20 ms, not by handler − 1
+  assert.equal(d('bind'), 3); assert.ok(d('check') >= 18 && d('check') <= handler, st); assert.match(st, /route-miss;desc=2/);
+  const p = apiOf(sharedApi).routes['edge:act']!.parts!;
+  assert.ok(p.wait.max >= 150 && p.commit.max >= 8 && p.handler.max >= 18, JSON.stringify(p));
+  assert.equal(p.waitOver3TicksAll, before + 1);
+  // parts are kept for edge:act only; a wait past three ticks (150 ms) is counted
+  const a = newSharedApi();
+  recordApi('edge:act', 1, 30, 1000, a, {handler: 30, wait: 0, commit: 0}); recordApi('edge:act', 1, 300, 1000, a, {handler: 20, wait: 200, commit: 80}); recordApi('edge:here', 0, 5, 1000, a, {handler: 5, wait: 99, commit: 0});
+  const q = apiOf(a, 1000).routes;
+  assert.equal(q['edge:act']!.parts!.waitOver3Ticks, 1); assert.equal(q['edge:act']!.parts!.commit.max, 80); assert.equal(q['edge:here']!.parts, undefined);
+  adm.close();
+});
+
+test('#1944 the monitor counts ticks that started over 25 ms late, the longest gap, tick p50/p99 and the levels per window', () => {
+  let mono = 0, wall = 1_000_000; const listeners: NonNullable<HostLike['listeners']> = [];
+  const host: HostLike = {engine: {world: {tick: 0}}, tickMs: [], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true, listeners};
+  const api = newSharedApi(), mon = new LoadMonitor({host, api, mono: () => mono, now: () => wall, drill: 'red', shared: new Float64Array(64)});
+  const tick = (start: number, own = 5) => { mono = start + own; host.tickMs.push(own); host.engine.world.tick++; mon.tickDone(); };
+  mon.sample();
+  for (let i = 0; i < 10; i++) tick(50 * i);                 // on time: 0 … 450
+  tick(700);                                                  // a 250 ms gap: due at 500, 200 ms late
+  tick(706); tick(712); tick(718); tick(724);                 // catching up back to back: due 550, 600, 650, 700 → 3 more late, the last 24 ms
+  tick(774, 40);                                              // on time again, a 40 ms tick
+  wall += 4000; mon.sample(); wall += 6000; mon.sample();
+  const w = apiOf(api, wall).ticks!;
+  assert.deepEqual({ticks: w.ticks, late: w.lateTicks, gap: w.longestGapMs, p50: w.tickMs.p50, p99: w.tickMs.p99, windowS: w.windowS}, {ticks: 16, late: 4, gap: 250, p50: 5, p99: 40, windowS: 10});
+  assert.deepEqual(w.levels, {green: 0, amber: 0, red: 1, black: 0});
+  // a paused clock owes nothing: the first tick after the pause is not late
+  host.paused = true; mon.sample(); host.paused = false; tick(5000); tick(5050);
+  wall += 10_000; mon.sample();
+  assert.equal(apiOf(api, wall).ticks!.lateTicks, 0);
 });

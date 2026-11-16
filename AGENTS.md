@@ -5,7 +5,7 @@ file. Keep it short: every rule here binds; detail lives in the linked docs.
 
 ## What this is
 
-Soul, the server and web app behind soul.game: persistent worlds, Souls driven by their owners' own agents at the
+Souls, the server and web app behind soul.game: persistent worlds, Souls driven by their owners' own agents at the
 edge, god mode for world creators, and a vendored deterministic engine under `mars/` (its invariants:
 [mars/AGENTS.md](mars/AGENTS.md)). **Code wins over docs**; fix a doc you find wrong. Start at
 [docs/README.md](docs/README.md). Checkout placement and recovery:
@@ -59,8 +59,11 @@ edge, god mode for world creators, and a vendored deterministic engine under `ma
 
 ## God mode build safety and seats
 
-- **BUILDSAFE:** god `commitBatch` repairs what an edit newly cuts off, in the same batch
-  (`apps/server/src/god/buildsafe-rule.ts`). Never add a separate after-the-fact walk fix.
+- **BUILDSAFE:** under legal-edits/1 (adopted at boot where the engine factory is described, so not Eden core), god
+  edits that would cut off or bury a Soul (stand where it stands, put it inside a building, change the seat, bed or
+  thing it uses) are refused, not repaired, while ways an edit newly cuts off are still repaired in the same batch
+  (`apps/server/src/god/engine-bridge.ts` `legalCheck`, `buildsafe-rule.ts`). Never add a separate after-the-fact
+  walk fix.
 - **SEATDEF:** seat heights come from the def's model geometry. A change is a new def revision; old revisions keep
   their bytes. A seat is refused only above the body's standing reach (`seat.out-of-reach`).
 
@@ -109,8 +112,10 @@ contract; fresh sessions recover its dated agenda and assignments before dispatc
   adds a changelog fragment in [`changes/`](changes/README.md) unless it is labelled `no-changelog`.
 - "Done" means walked on the real URL with real input; a scripted e2e alone doesn't count. Visual evidence is uncut,
   real-speed video. [docs/process/](docs/process/agent-lifecycle.md)
-- Bug fixes need no approval from Gene. A bug a lane finds while working a task is a new issue, not more work in
-  that pull request. Destructive production deletes need the maintainer's explicit yes.
+- Bug fixes need no approval from Gene. A defect a lane finds on the way is fixed in the same pull request, listed
+  under "Also fixed", when the fix is small (about 30 minutes or 50 lines), keeps the tier and stays in the area;
+  otherwise it gets its own small pull request, no issue. File an issue only for work that will not start today, needs
+  Gene's decision or exceeds about 2 hours. Destructive production deletes need the maintainer's explicit yes.
 - Issues state the problem and acceptance criteria before work starts. The PR is the journal entry: acceptance with
   evidence, proof, self-audit. [docs/process/agent-lifecycle.md](docs/process/agent-lifecycle.md#5-pull-request)
 - Repo skills in `.claude/skills/` (plain Markdown, readable by any agent): `journal`, `epic`, `triage`, `finish`,
@@ -126,7 +131,8 @@ re-read the agenda issue before dispatching anything.
   order, and every task. Dispatch only tasks listed there. New work enters by adding a task issue to it.
 - Dispatch one task issue per lane, in the agenda's order. Review each pull request against the issue's Acceptance
   and Touches, and send back work that goes beyond the acceptance. Never extend a task by message: edit the issue
-  or open a new one.
+  or open a new one. A follow-up dispatched from a finding carries its bounds in the dispatch brief; its PR is the
+  record.
 - Stay thin: dispatch, review, sign, keep the merge queue moving through a steward, and release. Do not do a
   lane's work. Stop dispatching while more than eight pull requests are ready and unmerged.
 - After each wave of dispatches and each release, post a checkpoint on the agenda issue; with each release, the

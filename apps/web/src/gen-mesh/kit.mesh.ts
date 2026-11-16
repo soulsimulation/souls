@@ -206,8 +206,9 @@ export function buildKit(input: unknown, ctx: Pick<MeshCtx, 'materials' | 'tint'
     if (role === 'flame') pivot.userData.flames = flameClusters(shapes, pv); // W2: where the animated fires go
     if (args.v !== 2) {
       const geos = shapes.map((sh) => { color.set(ctx.tint(sh.tint, sh.color ?? ctx.materials.colorOf(sh.material))); return placed(sh, args.round, args.v, color, pv); });
-      // W2: a flame glows in its own tint (vertex colour); the plain emissive class glows cream-white whatever the tint
-      const mesh = new THREE.Mesh(merge(geos), shapes.some((s) => s.glow) ? ctx.materials.get('emissive', undefined, { vertexColors: true, glow: 0.8, ...(role === 'flame' ? { vertexGlow: true } : {}) }) : ctx.materials.get('paint', undefined, { vertexColors: true }));
+      // W2: a flame glows in its own tint (vertex colour); the plain emissive class glows cream-white whatever the tint.
+      // #2281: so does a screen, or every TV channel is the same cream-white panel at night
+      const mesh = new THREE.Mesh(merge(geos), shapes.some((s) => s.glow) ? ctx.materials.get('emissive', undefined, { vertexColors: true, glow: 0.8, ...(role === 'flame' || role === 'screen' ? { vertexGlow: true } : {}) }) : ctx.materials.get('paint', undefined, { vertexColors: true }));
       mesh.castShadow = true; pivot.add(mesh);
     } else {
       const classes = new Map<string, THREE.BufferGeometry[]>();

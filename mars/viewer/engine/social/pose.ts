@@ -75,7 +75,7 @@ export const LIE_CLEARANCE = 0.9;
 /** An in-place dance keeps the standing body's root and ordinary standing footprint. */
 export const DANCE_CLEARANCE = HUMAN_RADIUS;
 
-type Params = { actor: string; activity: string; seconds: number; prop?: string; base?: 'sit' | 'idle'; seatHeight?: number; face?: Vec2;
+type Params = { actor: string; activity: string; seconds: number; /** wind-down/1 (#2295): under held-activity/1, held with no end. */ endless?: true; prop?: string; base?: 'sit' | 'idle'; seatHeight?: number; face?: Vec2;
   group?: string; pairedPolicy?: 'ready-v1'; windowPolicy?: 'once-v1'; waitSeconds?: number; alone?: 'start' | 'fail'; gap?: number; need?: number; hold?: string; release?: boolean;
   /** hotfix: stepping in or back for a paired gesture never brings this body closer to anyone else than it already is
    *  (once within arm's reach of them); prospective, set by edge plans, so earlier logs replay unchanged. */
@@ -98,7 +98,10 @@ type Exec = { id: string; p: Params; base: string; at: number[]; t: number; yaw:
   /** once-v1: this body arrived after its group's window had closed and does the pose alone. */
   late?: boolean;
   /** Entry 36 accompany: seconds since the last check found music (undefined: none heard yet), and whether any was. */
-  quiet?: number; heard?: boolean; gameRelease?: {at:number; frame:number; from:number; diagnostic?:Diagnostic} };
+  quiet?: number; heard?: boolean; gameRelease?: {at:number; frame:number; from:number; diagnostic?:Diagnostic};
+  /** held-activity/1 (#2294, runtime policy): a solo pose is held from tick `heldFrom` to tick `heldEnd`; nothing of it is written
+   *  in between (no `t` to add up), so the tick it ends is known when it starts. Absent: the historical running sum `t`. */
+  heldFrom?: number; heldEnd?: number };
 /** together/1 public body state while a grouped pose runs (the viewer may draw open arms while waiting). */
 export type TogetherState = { group: string; phase: 'waiting' | 'active'; until?: number; mobile: boolean; pairedPolicy?: 'ready-v1'; readyAt?: number; windowPolicy?: 'once-v1'; late?: true };
 const issue = (code: string, message: string, subjects: string[]): Diagnostic => ({ code: 'pose.' + code, message, subjects });
@@ -161,7 +164,7 @@ export const poseV1: ActionDef<Params, true, Exec> = {
   verb: 'pose_v1',
   navPure: true, // L4 audit: the step writes only its own actor's body (pose, human fields); it submits and cancels nothing
   description: 'activities/1: take a generic activity pose where you are (read, browse, write, play-piano, play-music, paint, eat, drink, cook, play-game, craft, post-letter, wave, use-computer, sing, listen, lift-weights over a seat or standing; sit-ground, lie, nap, pushups, situps, yoga on open ground, bench-press on a bench; dance, jump, stretch, jumping-jacks, pull-ups, dips standing; play-frisbee, play-petanque, play-volleyball as choreographed group games) for a number of seconds, optionally holding a prop and facing a point, then return to the base posture.',
-  schema: z.object({ actor: z.string().min(1).max(80), activity: z.enum(POSE_ACTIVITIES as [string, ...string[]]), seconds: z.number().min(0.5).max(3600), prop: z.enum(POSE_PROPS).optional(), base: z.enum(['sit', 'idle']).optional(), seatHeight: z.number().min(0).max(10).optional(), face: z.tuple([z.number(), z.number()]).optional(),
+  schema: z.object({ actor: z.string().min(1).max(80), activity: z.enum(POSE_ACTIVITIES as [string, ...string[]]), seconds: z.number().min(0.5).max(3600), endless: z.literal(true).optional(), prop: z.enum(POSE_PROPS).optional(), base: z.enum(['sit', 'idle']).optional(), seatHeight: z.number().min(0).max(10).optional(), face: z.tuple([z.number(), z.number()]).optional(),
     group: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/).optional(), pairedPolicy: z.literal('ready-v1').optional(), windowPolicy: z.literal('once-v1').optional(), waitSeconds: z.number().min(0).max(180).optional(), alone: z.enum(['start', 'fail']).optional(),
     gap: z.number().min(0.5).max(2.5).optional(), need: z.number().int().min(1).max(8).optional(), hold: z.enum(POSE_PROPS).optional(), release: z.boolean().optional(), clear: z.boolean().optional(),
     instrument: z.enum(POSE_INSTRUMENTS).optional(), seatTogether: z.boolean().optional(), throw: z.enum(RPS_SHAPES).optional(),
@@ -178,7 +181,9 @@ export const poseV1: ActionDef<Params, true, Exec> = {
     const a = rt.world.entities[p.actor], h = a.human!;
     const base = POSTURE.has(p.activity) ? 'idle' : h.activity === 'sit' || (h.baseActivity === 'sit' && OVERLAY.has(h.activity)) || p.base === 'sit' ? 'sit' : 'idle';
     const yaw = p.face && hypot(p.face[0] - a.pose.p[0], p.face[1] - a.pose.p[2]) > 0.05 ? heading([p.face[0] - a.pose.p[0], p.face[1] - a.pose.p[2]]) : null;
-    return { id, p: structuredClone(p), base, at: [...a.pose.p], t: 0, yaw, ...(p.group ? { phase: 'waiting' as const, waited: 0, mobile: !held(rt, p.actor) } : {}) };
+    // held-activity/1: a pose done alone, with no music to follow, ends `seconds` after it starts, on a tick known now
+    const hold = rt.services.heldActivitiesV1 === true && !p.group && !p.game && !p.accompany ? { heldFrom: rt.tick, heldEnd: rt.tick + heldTicksV1(p.seconds) } : {};
+    return { id, p: structuredClone(p), base, at: [...a.pose.p], t: 0, yaw, ...hold, ...(p.group ? { phase: 'waiting' as const, waited: 0, mobile: !held(rt, p.actor) } : {}) };
   },
   step(rt, ex, dt) {
     const a = rt.world.entities[ex.p.actor], h = a?.human;
@@ -197,6 +202,7 @@ export const poseV1: ActionDef<Params, true, Exec> = {
     if (ex.p.prop) h.prop = ex.p.prop; else if (h.holding) h.prop = h.holding; else delete h.prop;
     if ((ex.base === 'sit' || LYING.has(ex.p.activity)) && ex.p.seatHeight !== undefined && !held(rt, ex.p.actor)) h.seatHeight = ex.p.seatHeight; else delete h.seatHeight;
     if (ex.p.instrument) h.instrument = ex.p.instrument;
+    if (ex.heldEnd !== undefined) return ex.p.endless || rt.tick < ex.heldEnd ? { status: 'running', phase: 'posing' } : finish(rt, ex);
     ex.t += dt;
     if (ex.p.accompany) { const ended = accompanied(rt, ex, a, dt); if (ended) return ended; }
     if (ex.t + 1e-9 < ex.p.seconds) return { status: 'running', phase: 'posing' };
@@ -205,6 +211,13 @@ export const poseV1: ActionDef<Params, true, Exec> = {
   cancel(rt, ex) { if(ex.gameRelease||beginGameRelease(rt,ex,DT))return {ok:true,deferred:true}; if(ex.p.pairedPolicy)restorePaired(rt,ex);else restore(rt, ex); return { ok: true }; },
   resumable: true,
 };
+
+/** held-activity/1 (#2294): the ticks a held activity of `seconds` lasts (at least one). */
+export const heldTicksV1 = (seconds: number) => Math.max(1, Math.ceil(seconds / DT - 1e-6));
+/** held-activity/1: the tick a pose ends while it is held, or false when it is not held (a group, a game, music, a release). */
+export function poseHeldUntilV1(exec: unknown): number | null | false {
+  const ex = exec as Exec; return ex.heldEnd !== undefined && !ex.gameRelease ? ex.p.endless ? null : ex.heldEnd : false;
+}
 
 /** Entry 36: someone plays music a singer can sing along with (the viewer voices the piano's melody, or the drummer's
  *  piece on the same grid). Only these are heard in the viewer, so only these count. Read from `human.instrument`, which

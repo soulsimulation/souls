@@ -23,11 +23,11 @@ const world = (slug, extra = {}) => ({ slug, dataDir: mkdtempSync(join(tmpdir(),
 const later = (ms) => Date.now() + ms;
 test.after(async () => { for (const p of pools) await p.closeAll(); });
 
-test('the exit time: SIM_WORLD_IDLE_EXIT_MIN minutes, default 60, 0 = never', () => {
-  assert.equal(idleExitMs({}), 3_600_000);
+test('the exit time: SIM_WORLD_IDLE_EXIT_MIN minutes, default 0 = never (#2235: world time never stops)', () => {
+  assert.equal(idleExitMs({}), 0);
   assert.equal(idleExitMs({ SIM_WORLD_IDLE_EXIT_MIN: '2' }), 120_000);
   assert.equal(idleExitMs({ SIM_WORLD_IDLE_EXIT_MIN: '0' }), 0);
-  assert.equal(idleExitMs({ SIM_WORLD_IDLE_EXIT_MIN: 'soon' }), 3_600_000);
+  assert.equal(idleExitMs({ SIM_WORLD_IDLE_EXIT_MIN: 'soon' }), 0);
 });
 
 test('a world asleep for exitMs more exits, frees its slot, and its next request cold-boots it; a busy one stays', async () => {

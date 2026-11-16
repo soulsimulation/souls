@@ -341,6 +341,8 @@ const SEATED = new Set(['sit', 'sit-down', 'stand-up']);
 const OVERLAYS = new Set(['eat', 'serve', 'drink', ...ACTIVITY_OVERLAYS]);
 /** Soul Actions 44: the lips from the rig's head bone, in the body frame of a 1.75 m body (scaled by height). */
 const CUP_LIPS = { fwd: 0.1, up: 0.02 } as const;
+/** #2197: where the eating palm stops, from the head bone: in front of the chin, with the food above it at the lips. */
+const EAT_PALM = { fwd: 0.11, up: -0.06, side: 0.02 } as const;
 const RUN_SPEED = 2.3; // m/s: faster than any walk
 const INTERACT = new Set(['browse', 'post-letter', 'give', 'take', 'hand-over']);
 const PELVIS = 0.09; // m from the hip joints down to the sitting surface (thigh/buttock thickness)
@@ -1418,6 +1420,8 @@ export class HumanViews {
           const head=v.spine?.head?.getWorldPosition(V())??V().copy(h.position).addScaledVector(UP,1.525);
           t.copy(head).addScaledVector(_fwd,.125).addScaledVector(UP,.005).addScaledVector(_right,left?.14:.36);
         }
+        // #2197: the eating hand ends just below and in front of this rig's lips, so the food held up in its fingers meets the mouth
+        if(act.mouth&&!left&&v.spine?.head){const head=v.spine.head.getWorldPosition(V());t.lerp(head.addScaledVector(_fwd,EAT_PALM.fwd).addScaledVector(UP,EAT_PALM.up).addScaledVector(_right,EAT_PALM.side),act.mouth);}
         if (t.y < floor) t.y = floor;
         if (wgt <= 0) return;
         targets[i] = t;
@@ -1473,8 +1477,9 @@ export class HumanViews {
       if (!v.prop || v.prop.kind !== wantProp) { if (v.prop) h.remove(v.prop.obj); v.prop = { kind: wantProp, obj: makeProp(wantProp) }; h.add(v.prop.obj); }
       const hand = (side: 'left' | 'right') => { const i = v.arms.findIndex((_, k) => armSide(v, k) === side); return i >= 0 ? palm(v.arms[i], V()) : null; };
       let L = hand('left'), R = hand('right');
-      // a library eat / drink clip lifts one hand to the mouth: the item goes in that hand (the higher one over the clip)
-      if (lib.cur && (v.activity === 'eat' || v.activity === 'drink') && wantProp !== 'plate') {
+      // a library eat / drink clip lifts one hand to the mouth: the item goes in that hand (the higher one over the clip).
+      // Only when that clip owns the arms: seated, the sitting clip plays under the procedural frame, whose right hand rises.
+      if (clipBody && lib.cur && (v.activity === 'eat' || v.activity === 'drink') && wantProp !== 'plate') {
         const d = lib.cur.act.getClip().duration;
         let up = 0;
         for (const k of [0.2, 0.4, 0.6, 0.8]) { const p = clipProbe(v.rig.template, lib.cur.clip, Math.round(d * k * 10) / 10); if (p) up += p.wristL.y - p.wristR.y; }

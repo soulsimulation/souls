@@ -46,6 +46,13 @@ dispatches `main`'s copy of `merge-train.yml`, which does the work, so a PR neve
 can't dispatch, and GitHub runs no `pull_request` workflow for a PR with a merge conflict, so such a label waits for
 the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 
+**GitHub's merge queue is on.** The `main` ruleset requires it, so the train runs in queue mode (read on every pick;
+see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto-merge once its required checks are
+green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
+`proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
+queue drops loses the label with a comment giving the reason. The non-strict and strict landing below apply only
+when the ruleset does not require the queue.
+
 - **Non-strict**: a T0–T2 PR that touches no strict path, whose required checks are green on its current head, which
   GitHub reports mergeable without conflict, and while `main`'s CI is green, is squash-merged as is, even when it is
   behind `main`: steps 1 and 2 are skipped. `main`'s own CI is the safety net for the combination. Adding
@@ -70,9 +77,8 @@ The strict steps:
 
 1. **Rebase** the branch onto the current `main`.
 2. **Re-test**: the required checks (`ci-ok` from the `ci` workflow, `gitleaks`, `path-guard`, `scrub-guard`,
-   `proof-ok` and `fragment`) run on the rebased head, and the train waits for them there (a personal-account repo
-   has no GitHub merge queue; `merge-train.yml` is the queue), so a strict PR never lands tested only against an
-   older base. The newest workflow run at the head decides each check. A result from a run that was cancelled, that
+   `proof-ok` and `fragment`) run on the rebased head, and the train waits for them there, so a strict PR never
+   lands tested only against an older base. The newest workflow run at the head decides each check. A result from a run that was cancelled, that
    a newer run of the same workflow replaced, or that predates a re-run in progress is ignored, and a `cancelled`
    conclusion counts as pending, never as a failure. Until the replacing run reports, the check is pending within the
    train's bounded waits.
@@ -154,7 +160,7 @@ and a comment naming the files. To redo one by hand, run `gh workflow run restac
 
 There are no scheduled agents. Nothing wakes up on a timer to pick issues, open PRs or ship releases. A coordinator's
 bounded, expiring in-session watch is a wait, not a scheduled agent
-([development coordinator](development-coordinator.md#intake-and-dispatch)). The maintainer
+([development coordinator](development-coordinator.md#dispatch)). The maintainer
 sets priorities and may authorize a development owner to select and start bounded workers within that agenda.
 Sign-off follows the [approval matrix](#the-merge-train): the coordinator signs eligible T3 work; Gene retains
 T4, policy and the six reserved decision categories. The development coordinator runs releases end to end as

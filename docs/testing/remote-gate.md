@@ -28,7 +28,9 @@ from the CPU gate.
 
 Every PR and the merge queue run CI on the exact commits, and each push to `main` runs every `ci.yml` job. A full gate
 (#1463) takes the successful `ci.yml` run whose head is exactly the candidate (event `push` to `main`, preferred, or
-`merge_group`) as evidence for the steps CI runs with the same command, and runs only the rest on Modal. A step counts
+`merge_group`; a push the queue already covered, which ran `merge-group-covered` instead of the qualify jobs, defers
+to its merge-group run, [CI on main](../testing.md#ci-window)) as evidence for the steps CI runs with the same command,
+and runs only the rest on Modal. A step counts
 as covered only when all of these hold (`CI_COVERED` and `ciEvidence` in `release-gate.mjs`):
 
 - every CI job that runs it succeeded in that run, and the commit's `ci.yml` runs the step's command;
@@ -121,7 +123,12 @@ both workflows reach `modal_gates_per_day` (PROOF-POLICY.yml), keeps the baselin
 - A failure not listed in `quarantine.json`, even one added to the list in the same change.
 - Missing steps or logs, cancellations, timeouts (each V5 shard has a fixed time envelope).
 - Changed skips or TODOs, removed baseline assertions (unless a reviewed [rename](#renames) is satisfied), test files
-  that fail to load, dropped V6 scenarios.
+  that fail to load, dropped V6 scenarios. A test new since the baseline may skip or be TODO only when `quarantine.json`
+  lists it with that status and a reason; the receipt then counts it as quarantined.
+
+A blocked receipt never ships as is. When the maintainer accepts its removed assertions or unexpected skips, the release
+owner records that in an [accepted-exceptions](../release.md#accepted-exceptions) file bound to the receipt's sha256;
+the receipt itself is never edited, and new failures are never accepted.
 
 Failures are identified by raw TAP leaf ids, so a second failure in an already failing file cannot hide.
 
@@ -176,7 +183,7 @@ the cached baseline.
 | `apps/web/` | V1, V2, V3-bundle, V4 |
 | `packages/` | V1, V3-packages, V3-mars-engine, V3-walk, V5 |
 | `tools/world-launcher/` | V3-launcher-unit, V6 |
-| `tools/edge-skill/`, `tools/client-eval/` | V3-client-cli |
+| `tools/client-eval/` | V3-client-cli |
 | `tools/god-skill/` | V6 |
 | `tools/body-authoring/` (the source of the pinned shared presets) | V5 |
 | other `tools/`, `docs/`, root `*.md`, `LICENSE` | none |
@@ -243,7 +250,10 @@ tools/test-harness/remote-suite.sh <outDir> [--ref HEAD] [--baseline-ref main|no
 It ships `git archive <ref>` (plus the baseline for V4's failure-set comparison) and the committed harness to
 `modal_suite.py`, which builds a `node:<version>-bookworm` image with pinned pnpm. Each container runs
 `pnpm install --frozen-lockfile` and `one-validation.sh` with V7 and V8 skipped. Frozen fixtures also get a Git
-object pack with exactly the historical source files they declare (`historical-inputs.mjs`). The ref's
+object pack with exactly the historical source files they declare (`historical-inputs.mjs`). The archive has no
+tags, so the latest `v*` release tag's client `SOURCES.json` is staged beside it as `release-sources.json`;
+V3-launcher-unit reads it through `SOUL_RELEASE_SOURCES` to check that a changed frozen client file moved its
+version. The ref's
 `pnpm-lock.yaml` keys a prebuilt dependency layer, so an unchanged lockfile installs offline from it.
 
 The steps run as groups in parallel containers (`GROUPS`, `LARGE`, `V5_SHARDS` in `modal_suite.py`): one larger

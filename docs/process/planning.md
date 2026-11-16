@@ -20,6 +20,8 @@ and takes care of task selection and integration within that authorization.
 An aspiration does not need an issue for every imagined feature. Promote it when there is a useful next decision,
 investigation or implementation to assign. Keep speculative alternatives and non-goals in the design doc.
 Roadmap themes are not delivery dates or authorization. Do not maintain a second task-status table in the repo.
+A defect found while working needs no issue when it is fixed today in a small pull request (or under "Also fixed");
+file one only for work that will not start today, needs Gene's decision or is larger than about 2 hours.
 
 ## A small ready queue
 
@@ -71,8 +73,8 @@ self-appointing as release owner. Only the appointed release owner freezes and q
 
 ## Portable execution and handoff
 
-Use the [harness portability contract](coordinator-portability.md) when entering or transferring a coordinator.
-It maps the same agenda and evidence to native capabilities without requiring one provider's tool names or memory.
+Use the [development coordinator](development-coordinator.md#start-or-resume) rules when entering or transferring a
+coordinator. They map the same agenda and evidence to any harness without requiring one provider's tool names or memory.
 
 Claude Code and Codex follow the same AGENTS.md, lifecycle and Markdown skills. Provider memory and local chat
 history must not be the only record of a decision or unfinished work. Before stopping or switching owners, leave

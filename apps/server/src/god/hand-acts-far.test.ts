@@ -1,5 +1,5 @@
 // #1751 on a native world with the object framework: a hand-worked thing far away is out of the whole menu (as before),
-// its act sent by id is accepted and its plan walks there, and one in a secret place this Soul has not found stays unknown.
+// its act sent by id is accepted and its plan walks there. (#1262: no place is secret.)
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
@@ -14,7 +14,7 @@ import {registerEdgeComms} from '../edge/comms/index.ts';
 import {edgeSoulResolver} from '../edge/routes.ts';
 import type {EdgeSoul} from '../edge/contract.ts';
 
-test('a far hand-worked thing: left out of the whole menu, taken by id with a walk, unknown in a secret place', {timeout: 300_000}, async t => {
+test('a far hand-worked thing: left out of the whole menu, taken by id with a walk', {timeout: 300_000}, async t => {
   const f = fixture(':memory:', factory, {durableClockV1: true}); f.brain.quiesce();
   const god = new GodMode(f.db, {worldId: f.host.worldId, ownerId: 'dev:admin', tick: () => f.host.engine.world.tick, emit() {}}), edge = new EdgeLedger(f.host, f.db);
   new GroundHost(f.db, f.host, god); installGroundCapabilities(edge, god, f.host);
@@ -35,7 +35,7 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
   assert.equal(built.accepted, true, JSON.stringify(built)); await tick(8);
   await invite(f, 'ana'); const row = await accept(f.host, f.souls.create('dev:ana', {name: 'Ana', description: 'M5 far hand acts'}));
   const soul: EdgeSoul = {soulId: row.id, entityId: row.entity_id, name: row.name, owner: row.owner}; await tick(4); bridge.perceive.sync(true); edge.map();
-  const id = (name: string) => god.model.get(name)!.id, near = id('near-lamp'), far = id('far-lamp'), hidden = id('hidden-lamp');
+  const id = (name: string) => god.model.get(name)!.id, near = id('near-lamp'), far = id('far-lamp');
   const verb = (thing: string) => (god.model.entities.get(thing)!.state?.on ?? true) ? 'switch-off' : 'switch-on';
   const me = f.host.engine.world.entities[soul.entityId]!.pose.p;
   assert.ok(Math.hypot(90 - me[0]!, 0 - me[2]!) > 40, 'the far lamp is beyond the old 30 m sight');
@@ -82,8 +82,4 @@ test('a far hand-worked thing: left out of the whole menu, taken by id with a wa
   const made = god.act({ops: [{op: 'place', def: coreRef('desk-lamp'), name: 'new-lamp', p: [-60, -10]}]} as never); assert.equal(made.accepted, true);
   const fresh = id('new-lamp'), cold = await act(`object:${fresh}:${verb(fresh)}`);
   assert.equal(cold.accepted, true, JSON.stringify(cold).slice(0, 300));
-  assert.equal(edge.knowledge.setSecret('g-hollow', true), true); await tick(4); bridge.perceive.sync(true);
-  const no = await act(`object:${hidden}:${verb(hidden)}`);
-  assert.equal(no.accepted, false, JSON.stringify(no).slice(0, 300));
-  assert.equal(JSON.stringify(no).includes('hidden-lamp'), false, 'a secret place\'s thing is not named');
 });

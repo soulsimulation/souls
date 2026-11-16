@@ -4,6 +4,10 @@
 // #1968: ambient wakes (the rules an owner adds, and act-ended) reach a reader within the owner's budget, merged to one entry per
 // rule over it, and stay held until a command from another process reaches serve, or go back to the queue after HELD_MS. Each
 // handing to a reader is one delivery and is charged once: the budget's count is the deliveries made, never more than it allows.
+// #1931: speech in earshot not said to this Soul, an interested event starting, and a thing's state changing are three more
+// ambient kinds, through the same budget and delivery. A wake carrying another Soul's words is marked untrusted.
+import { thingState } from "./catalog.mjs";
+import { newerThan } from "./home.mjs";
 
 /** A rule added with `wake add` fires at most once per this many seconds unless it names its own --every. */
 export const WAKE_EVERY_S = 300;
@@ -14,11 +18,14 @@ const ENDED = new Set(["completed", "failed", "refused", "cancelled", "interrupt
 const FIRED_KEEP = 200;   // receipt ids act-ended has woken for, so one end wakes once (serve keeps the newest 200 ended receipts)
 /** Kinds that are always on: the three wakes serve had before rules. */
 export const ALWAYS = ["owner-message", "speech-to-me", "plan-stopped"];
-/** Kinds `wake add` takes. act-ended is on by default and can be removed and added again. */
-export const ADDABLE = ["act-ended", "soul-arrives", "place-busy"];
+/** Kinds `wake add` takes. act-ended, plan-finished and event-starting are on by default and can be removed and added again. */
+export const ADDABLE = ["act-ended", "plan-finished", "soul-arrives", "place-busy", "at", "every", "idle", "speech-near-me", "event-starting", "thing-state"];
+const DEFAULT_ON = ["act-ended", "plan-finished", "event-starting"];
+/** #1930: `wake add every <minutes>` takes at least this many. */
+export const EVERY_MIN = 5;
 
 export function fresh() {
-  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), { id: "act-ended", kind: "act-ended", every: 0 }], cursor: null, queue: [], next: 1 };
+  return { rules: [...ALWAYS.map((kind) => ({ id: kind, kind, always: true, every: 0 })), ...DEFAULT_ON.map((kind) => ({ id: kind, kind, every: 0 }))], cursor: null, queue: [], next: 1 };
 }
 
 /** Ambient wakes an hour per budget name; null is no limit. Until the owner chooses, `normal`. */
@@ -29,7 +36,7 @@ export const HELD_MS = 600_000;
 export const SPEAKER_MS = 60_000;
 const HOUR_MS = 3_600_000, DAY_MS = 86_400_000;
 
-const USAGE = `usage: wake | wake add <${ADDABLE.join("|")}> [params-json] [--every <seconds>] | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n>`;
+const USAGE = `usage: wake | wake add <${ADDABLE.filter((k) => k !== "at" && k !== "every").join("|")}> [params-json] [--every <seconds>] | wake add at <ISO time> | wake add every <minutes ≥ ${EVERY_MIN}> | wake remove <id> | wake budget <${Object.keys(BUDGETS).join("|")}|n> | wake budget --day <n> | wake away <on|off>`;
 /** `wake budget` arguments as a change: {hour} or {day}. Throws what is wrong. */
 export function parseBudget(argv) {
   const [a, b, ...extra] = argv;
@@ -49,11 +56,30 @@ export function parseRule(argv) {
   const [kind, text, ...extra] = rest;
   if (ALWAYS.includes(kind)) throw new Error(`${kind} is always on`);
   if (!ADDABLE.includes(kind) || extra.length) throw new Error(USAGE);
+  // #1930: a time and a period on the real clock, not JSON
+  if (kind === "at") {
+    const t = Date.parse(text ?? "");
+    if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d/.test(text ?? "") || Number.isNaN(t)) throw new Error("at takes an ISO time: wake add at 2026-11-12T09:00:00Z");
+    return { kind, params: { at: new Date(t).toISOString() }, every };
+  }
+  if (kind === "every") {
+    if (!/^\d{1,6}$/.test(text ?? "") || Number(text) < EVERY_MIN) throw new Error(`every takes whole minutes, at least ${EVERY_MIN}: wake add every 30`);
+    return { kind, params: { minutes: Number(text) }, every };
+  }
   let p = {};
   if (text !== undefined) { try { p = JSON.parse(text); } catch { throw new Error(`${kind}: params must be JSON`); } }
   if (!p || typeof p !== "object" || Array.isArray(p)) throw new Error(`${kind}: params must be a JSON object`);
   const id = (v) => typeof v === "string" && /^\S{1,100}$/.test(v);
-  if (kind === "act-ended") { if (Object.keys(p).length) throw new Error("act-ended takes no params"); return { kind, every }; }
+  if (["act-ended", "plan-finished", "event-starting", "speech-near-me"].includes(kind)) { if (Object.keys(p).length) throw new Error(`${kind} takes no params`); return { kind, every }; }
+  if (kind === "idle") {
+    if (Object.keys(p).some((k) => k !== "minutes") || !Number.isInteger(p.minutes) || p.minutes < EVERY_MIN) throw new Error(`idle takes {"minutes":<n>}, at least ${EVERY_MIN}`);
+    return { kind, params: { minutes: p.minutes }, every };
+  }
+  if (kind === "thing-state") {
+    const scalar = (v) => v === null || ["string", "number", "boolean"].includes(typeof v);
+    if (Object.keys(p).some((k) => !["thing", "field", "is"].includes(k)) || !id(p.thing) || !id(p.field) || ("is" in p && !scalar(p.is))) throw new Error('thing-state takes {"thing":"<thingId>","field":"<state field>","is":<value, optional>}');
+    return { kind, params: { thing: p.thing, field: p.field, ...("is" in p ? { is: p.is } : {}) }, every };
+  }
   if (kind === "soul-arrives") {
     const params = { who: p.who ?? "any", where: p.where ?? "here" };
     if (Object.keys(p).some((k) => !["who", "where"].includes(k)) || !id(params.who) || !id(params.where)) throw new Error('soul-arrives takes {"who":"any"|"<soulId>","where":"here"|"<placeId>"}');
@@ -68,6 +94,7 @@ export function change(wake, c) {
   const w = { ...fresh(), ...wake };
   if (!c) return { wake: w };
   if (c.budget) return { wake: { ...w, budget: { ...w.budget, ...c.budget } } };
+  if (c.away) return { wake: { ...w, awayOff: c.away === "off" } };
   if (c.add) {
     const rule = { id: `w${w.next ?? 1}`, ...c.add };
     return { wake: { ...w, rules: [...w.rules, rule], next: (w.next ?? 1) + 1 }, rule };
@@ -82,7 +109,7 @@ const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 /** What `wake` prints: each rule with its last match and last firing, how many wakes wait, and the budget. */
 export function view(wake, now = 0) {
   const w = { ...fresh(), ...wake };
-  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now) };
+  return { rules: w.rules.map((r) => ({ id: r.id, kind: r.kind, ...(r.params ? { params: r.params } : {}), ...(r.always ? { always: true } : {}), every: r.every ?? 0, ...(r.ended ? { ended: r.ended } : {}), lastMatch: iso(r.lastMatch), lastFired: iso(r.lastFired) })), queued: w.queue?.length ?? 0, budget: budgetView(w, now), away: w.awayOff ? "off" : "on" };
 }
 
 const perHour = (w) => { const h = w.budget?.hour ?? "normal"; return typeof h === "number" ? h : h in BUDGETS ? BUDGETS[h] : BUDGETS.normal; };
@@ -93,10 +120,12 @@ export function budgetView(wake, now) {
     deliveredLastHour: sent.filter((t) => now - t < HOUR_MS).length, deliveredLast24h: sent.filter((t) => now - t < DAY_MS).length };
 }
 
-/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. */
+/** Pure: fired wakes into the queue, one entry per rule: a count and the latest why. The always-on kinds stay out (#1981): the
+ *  owner's messages, speech to this Soul and the stopped plan reach a reader by their own paths, so an entry would wait for no one. */
 export function enqueue(queue, fired) {
   const q = (queue ?? []).map((x) => ({ ...x }));
   for (const f of fired) {
+    if (ALWAYS.includes(f.kind)) continue;
     const e = q.find((x) => x.id === f.id);
     if (e) Object.assign(e, { why: f.why, at: f.at, count: (e.count ?? 1) + (f.count ?? 1) }); else q.push({ ...f, count: f.count ?? 1 });
   }
@@ -137,6 +166,13 @@ export function confirm(wake, reader) {
   return held.length === (wake?.held?.length ?? 0) ? wake : { ...wake, held };
 }
 
+/** #1941: platform news serve raises as one ambient wake, within the budget: events, and releases this client is too old for.
+ *  The feed's text is the platform's, not a Soul's: the wake names the newest title and points at `news`. */
+export function newsWakes(items, version, at) {
+  const due = items.filter((i) => i.kind === "event" || (i.kind === "release" && newerThan(i.minClient, version)));
+  return due.length ? [{ id: "news", kind: "news", why: `platform news: ${due.at(-1).title} (read it with news)`, at, count: due.length }] : [];
+}
+
 const speaker = (a) => a.soulId ?? a.from ?? "someone";
 /** Pure: does any of these lines said to this Soul come from a speaker who has not woken it within SPEAKER_MS? */
 export const speechDue = (lines, spoke, now) => lines.some((a) => now - (spoke?.[speaker(a)] ?? -Infinity) >= SPEAKER_MS);
@@ -156,7 +192,9 @@ function after(list, cursorId, first) {
 const who = (live, id) => live.souls.find((r) => r.id === id)?.name ?? id;
 
 /** Pure: the rules against serve's state at `now` (ms). state: serve's state ({events, receipts, plan, planEnded, messages,
- *  addressed, addressedSeq, wake: {cursor}}) with `live` (the live copy's picture, or null) and `me` (this Soul's id).
+ *  addressed, addressedSeq, heard, heardSeq, lastCommandAt, wake: {cursor}}) with `live` (the live copy's picture, or null), `me`
+ *  (this Soul's id), `since` (when this serve started, ms: a time that passed before it is dropped, never fired late) and `catalog`
+ *  (the catalog's lookups, for thing-state, or null).
  *  Returns the rules with their last match, last firing and change state, the engine's cursor, and the wakes fired now. */
 export function evaluate(rules, state, now) {
   const prev = state.wake?.cursor ?? null, first = !prev;
@@ -164,18 +202,19 @@ export function evaluate(rules, state, now) {
   const newEvents = after(events, prev?.event, first);
   const newMessages = first ? [] : prev.message && messages.some((m) => m.id === prev.message) ? after(messages, prev.message, false) : messages.filter((m) => (m.seenAt ?? 0) > (prev.messageAt ?? 0));
   const newSpeech = first ? [] : addressed.filter((x) => x.seq > (prev.addressed ?? 0));
+  const newHeard = first ? [] : (state.heard ?? []).filter((x) => x.seq > (prev.heard ?? 0));
   const last = messages.at(-1);
-  const cursor = { event: events.at(-1)?.id ?? prev?.event ?? null, message: last?.id ?? prev?.message ?? null, messageAt: last?.seenAt ?? prev?.messageAt ?? 0, addressed: Math.max(state.addressedSeq ?? 0, prev?.addressed ?? 0) };
+  const cursor = { event: events.at(-1)?.id ?? prev?.event ?? null, message: last?.id ?? prev?.message ?? null, messageAt: last?.seenAt ?? prev?.messageAt ?? 0, addressed: Math.max(state.addressedSeq ?? 0, prev?.addressed ?? 0), heard: Math.max(state.heardSeq ?? 0, prev?.heard ?? 0) };
   const live = Array.isArray(state.live?.souls) ? state.live : null;
   const planReceipts = new Set([state.plan, ...(state.planEnded ?? [])].flatMap((p) => p?.steps ?? []).map((s) => s.receipt).filter(Boolean));
   const fired = [];
   const out = rules.map((r0) => {
     const r = { ...r0 };
-    const fire = (why) => {
+    const fire = (why, untrusted = false) => {
       r.lastMatch = now;
       if (r.every && r.lastFired && now - r.lastFired < r.every * 1000) return false;
       r.lastFired = now;
-      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString() });
+      fired.push({ id: r.id, kind: r.kind, why, at: new Date(now).toISOString(), ...(untrusted ? { untrusted: true } : {}) });
       return true;
     };
     if (r.kind === "owner-message") for (const m of newMessages) { if (!m.acked) fire(`the owner wrote (${m.id})`); }
@@ -201,6 +240,49 @@ export function evaluate(rules, state, now) {
         done.add(h.id); fire(`${x.capability ?? "your act"} ${x.phase}${x.reason ? `: ${x.reason}` : ""}`);
       }
       r.done = [...done].slice(-FIRED_KEEP);
+    } else if (r.kind === "plan-finished") {
+      // #1930: a plan that ended done or failed; one replaced (by a newer plan or body act the agent sent) wakes no one
+      const seed = first || !r.done, done = new Set(r.done ?? []);
+      for (const p of [state.plan, ...(state.planEnded ?? [])]) {
+        if (!p?.id || !["done", "failed"].includes(p.state) || done.has(p.id)) continue;
+        done.add(p.id);
+        if (!seed) fire(`plan ${p.id} ${p.state === "done" ? "finished" : "ended failed"}`);
+      }
+      r.done = [...done].slice(-FIRED_KEEP);
+    } else if (r.kind === "at") {
+      // #1930: once, at the time; a time that passed before this serve started, or before the rule was first seen, is dropped
+      const t = Date.parse(r.params.at);
+      r.from ??= now;
+      if (!r.ended && t < Math.max(state.since ?? 0, r.from)) r.ended = "dropped";
+      else if (!r.ended && now >= t && fire(`it is ${r.params.at}`)) r.ended = "fired";
+    } else if (r.kind === "every") {
+      // #1930: every n minutes from when the rule was first seen; times that passed while serve was not running are dropped
+      const ms = r.params.minutes * 60_000;
+      r.next ??= now + ms;
+      if (now >= r.next) {
+        if (r.next >= (state.since ?? 0)) fire(`every ${r.params.minutes} minutes`);
+        r.next += Math.ceil((now - r.next + 1) / ms) * ms;
+      }
+    } else if (r.kind === "idle") {
+      // #1930: no agent command and no running plan for that long; once, until the next agent command. Receipts are not read:
+      // a held sit stays `started`, and a seated Soul is idle.
+      if (state.plan?.state === "running") r.planAt = now;
+      const key = state.lastCommandAt ?? 0, quietSince = Math.max(key, state.since ?? 0, r.planAt ?? 0);
+      if (r.idleFor !== key && now - quietSince >= r.params.minutes * 60_000 && fire(`no command for ${r.params.minutes} minutes`)) r.idleFor = key;
+    } else if (r.kind === "speech-near-me") {
+      // #1931: the world's classified stream says it was said in earshot and not to this Soul; another Soul's words
+      for (const x of newHeard) if (x.kind === "speech.ambient" && x.soulId !== state.me) fire(`${x.from ?? "someone"} said nearby: "${String(x.text ?? "").slice(0, 100)}"`, true);
+    } else if (r.kind === "event-starting") {
+      // #1931: the world sends schedule.starting only to the Souls that marked the item interested; its title is a Soul's words
+      for (const x of newHeard) if (x.kind === "schedule.starting") fire(String(x.text ?? "an event you marked is starting").slice(0, 160), true);
+    } else if (r.kind === "thing-state" && live && state.catalog) {
+      // #1931: the field as the client reads it (the kind's defaults under the live states); the first look only takes it in
+      const t = state.catalog.things.get(r.params.thing), s = t ? thingState(state.catalog, t, live.things) : null;
+      if (s && r.params.field in s) {
+        const v = JSON.stringify(s[r.params.field]);
+        if (r.was !== undefined && v !== r.was && (!("is" in r.params) || v === JSON.stringify(r.params.is))) fire(`${r.params.thing} ${r.params.field} is now ${v.slice(0, 60)}`);
+        r.was = v;
+      }
     } else if (r.kind === "soul-arrives" && live) {
       const place = r.params.where === "here" ? live.souls.find((x) => x.id === state.me)?.place : r.params.where;
       if (place) {
@@ -216,4 +298,79 @@ export function evaluate(rules, state, now) {
     return r;
   });
   return { rules: out, cursor, fired };
+}
+
+// #1933: when nobody drives the Soul, its public line says the mind is away. Serve keeps in the wake state (`mind`) when a command
+// last reached it, when an acting one did, and since when a delivered wake or an owner message has waited on an acting one.
+/** Ten minutes with nobody driving and the mind counts as away. */
+export const AWAY_MS = 600_000;
+
+/** `wake away` arguments as a change. Throws the usage. */
+export function parseAway(argv) {
+  if (argv.length !== 1 || !["on", "off"].includes(argv[0])) throw new Error(USAGE);
+  return { away: argv[0] };
+}
+/** Pure: the wake state after serve saw, at `now`, "command" (any agent command; a listen --follow poll is one), "acting" (act,
+ *  say, ack, result or plan), or "owed" (a wake was delivered or an owner message arrived). */
+export function saw(wake, what, now) {
+  const m = { ...wake?.mind };
+  if (what === "owed") m.owed ??= now;
+  else { m.last = now; if (what === "acting") { m.acted = now; delete m.owed; } }
+  return { ...wake, mind: m };
+}
+/** Pure: since when nobody has driven, once that is `ms` or longer, else null: a wake or owner message no acting command answered,
+ *  or no command at all (`start`, serve's start, stands in for a command never seen). Null while the owner has this off. */
+export function awaySince(wake, now, start, ms = AWAY_MS) {
+  const m = wake?.mind ?? {};
+  if (wake?.awayOff) return null;
+  if (m.owed != null && now - m.owed >= ms) return m.owed;
+  const last = m.last ?? start;
+  return now - last >= ms ? last : null;
+}
+const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
+/** The away line: since when, or, with a heartbeat cadence recorded ({every} minutes, kept at {at}), about when it next checks. */
+export function awayText(since, heartbeat, now) {
+  const at = Date.parse(heartbeat?.at ?? ""), p = (heartbeat?.every ?? 0) * 60_000;
+  if (!(p > 0) || !Number.isFinite(at)) return `mind away since ${hhmm(since)} UTC`;
+  return `mind away, next check about ${hhmm(at + Math.max(1, Math.ceil((now - at) / p)) * p)} UTC`;
+}
+/** Pure: the mind went away: the away line that was set, and the line it replaced (null for none), kept. */
+export const wentAway = (wake, since, text, stored) => ({ ...wake, mind: { ...wake?.mind, away: { since, text, stored } } });
+// #2309: the world's wind-down (#2295, wind-down/1). An hour after the agent's last act the world walks the body out of town
+// (idle), half an hour later to open ground (zombie), where it sleeps (asleep) until the agent acts. Serve reads the world's
+// view of this Soul's body ({state, doing, since}: observe's self.body) and keeps it; look and the dashboard show it.
+export const WIND_DOWN_MS = 3_600_000, WIND_DOWN_OUT_MS = 1_800_000, BODY_READ_MS = 600_000;
+const PHASE = { awake: "owned", idle: "wandering out", zombie: "wandering out", asleep: "asleep" };
+const isoOf = (ms) => new Date(ms).toISOString();
+/** Pure: what look and the dashboard say of the body view serve kept (`read`: when it read it), or null for none. */
+export function bodyPhase(body, now) {
+  if (!body || !PHASE[body.state]) return null;
+  const since = Number(body.since) > 0 ? Number(body.since) : null, end = body.state === "awake" && since ? since + WIND_DOWN_MS : null;
+  return { phase: PHASE[body.state], ...(body.doing ? { doing: body.doing } : {}), ...(since ? { since: isoOf(since) } : {}),
+    ...(end ? { hourEndsAt: isoOf(end), minutesLeft: Math.max(0, Math.ceil((end - now) / 60_000)) } : {}),
+    ...(Number.isFinite(body.read) ? { readSecondsAgo: Math.max(0, Math.round((now - body.read) / 1000)) } : {}),
+    note: end ? "An hour after your last act the world walks your body out of town; an act keeps it, reading and listening do not."
+      : body.state === "asleep" ? "Asleep until you act; your next act wakes it." : "Walking out on its own; your next act brings it back." };
+}
+/** Pure: when serve reads the body again (observe is a heavy read): just after the world's next step is due, at the latest
+ *  `BODY_READ_MS` (× `scale`) on; never while asleep, which only an act ends (and an act asks again). */
+export function nextBodyRead(body, now, scale = 1) {
+  if (body?.state === "asleep") return Infinity;
+  const since = Number(body?.since) > 0 ? Number(body.since) : null, late = now + BODY_READ_MS * scale;
+  const due = !since ? late : body.state === "awake" ? since + WIND_DOWN_MS : body.state === "idle" ? since + WIND_DOWN_OUT_MS : late;
+  return Math.max(now + 5_000 * scale, Math.min(late, due + 5_000));
+}
+/** Pure: the body after an act the agent sent was accepted, as the world's rule takes it: owned again from now. `{body, read}`:
+ *  an owned body only moves its hour on (no read); any other phase is read again soon, to see the world bring it back. */
+export function actedBody(body, now) {
+  return body?.state === "awake" ? { body: { ...body, since: now }, read: false } : { body, read: true };
+}
+/** Pure: the mind is back (an acting command, serve --stop, `wake away off`). `line`: the public line now; `own`: the command sets
+ *  its own line. {wake, restore}: restore is the kept line to set again (null clears it), or undefined when nothing is set. The kept
+ *  line comes back only while the public line still says away, and a command's own line wins over it. */
+export function back(wake, line, own = false) {
+  const a = wake?.mind?.away;
+  if (!a) return { wake, restore: undefined };
+  const { away: _gone, ...mind } = wake.mind;
+  return { wake: { ...wake, mind }, restore: !own && line === a.text ? a.stored : undefined };
 }

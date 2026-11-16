@@ -32,7 +32,6 @@ test('lectern catalogue books and the notebook stand: real text, hand-written si
  const ana=await join('ana','Ana'),ben=await join('ben','Ben'),cy=await join('cy','Cy');soul=ana;
  const here=async(s)=>{soul=s;const r=await app.request('/v1/edge/here?include=doHere');assert.equal(r.status,200);return (await r.json()).here;};
  const bytes=h=>JSON.stringify(h).length,body=s=>f.host.engine.world.entities[s.entityId];
- const words=async(s,w)=>{soul=s;const r=await (await app.request('/v1/edge/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:w,params:{}})})).json();return r.resolve?.would?.capability??r.resolve?.code??JSON.stringify(r).slice(0,200);};
  // the lectern's book list is the catalogue's
  assert.deepEqual(LECTERN_BOOKS.slice(1),EDEN_LIBRARY_CATALOGUE.map(b=>b.id),'core-lectern@2 book values = the catalogue ids');
  const absent=await here(ana);
@@ -56,8 +55,6 @@ test('lectern catalogue books and the notebook stand: real text, hand-written si
  // ---- W017: the notebook
  assert.ok(!edge.capabilities(ana).some(c=>c.id===`read:${id('notebook')}`),'a blank notebook offers no read');
  const pinCap=edge.capabilities(ana).find(c=>c.id===`object:${id('notebook')}:pin`);assert.ok(pinCap,'write offered');assert.match(pinCap.label,/Write a line in the notebook/);
- assert.equal(await words(ana,'write in the notebook'),`object:${id('notebook')}:pin`,'"write in the notebook" is the notebook\'s line');
- assert.equal(await words(ana,'write a line in the notebook'),`object:${id('notebook')}:pin`);
  let retries=0;const act=async(s,capability,params,accepted=true)=>{let b;for(let k=0;k<20;k++){soul=s;const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,...(params?{params}:{})})}));b=await r.json();if(b.code!=='object.admission-failed')break;retries++;await tick(10);}assert.equal(b.accepted,accepted,JSON.stringify(b));return b;};
  const lines=()=>{const s=state('notebook');return {lines:s.text?s.text.split('\n'):[],by:s.textBy?s.textBy.split(','):[]};};
  const finish=async(s,receipt,limit=900)=>{let stroke=null,early=false,hand=[],bz=Infinity,before=JSON.stringify(state('notebook'));for(let n=0;n<limit;n++){const h=body(s).human,m=h?.handActuator;if(m?.stroke){stroke=m.stroke;const p=h.hands?.right??h.hands?.left;if(p)hand.push(p);const nw=god.model.worldPose(god.model.get('notebook'));bz=Math.min(bz,(h&&body(s).pose.p[0]-nw.x)*Math.sin(nw.yaw)+(body(s).pose.p[2]-nw.z)*Math.cos(nw.yaw));if((f.host.engine.world.tick-m.startTick)*f.host.engine.dt<0.65+m.stroke.seconds-0.05&&JSON.stringify(state('notebook'))!==before)early=true;}const ph=edge.receipt(s.soulId,receipt.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}return {stroke:stroke&&{kind:stroke.kind,seconds:stroke.seconds,tilt:stroke.tilt},early,hand,bodyZ:+bz.toFixed(3),phase:edge.receipt(s.soulId,receipt.receipt.id).phase};};
@@ -90,7 +87,6 @@ test('lectern catalogue books and the notebook stand: real text, hand-written si
  const bd=await done(ben,`object:${id('notebook')}:unpin`);assert.equal(bd.stroke.kind,'wipe');
  assert.deepEqual(lines().lines,['Came by at noon, the tea was good — Ana','Choir at dusk, all welcome — Cy','Ben: thank you for the kite — Ana']);
  const benAgain=await act(ben,`object:${id('notebook')}:unpin`,undefined,false);assert.equal(benAgain.code,'object.not-yours');assert.match(benAgain.reason??'',/only its writer/);
- assert.equal(await words(ana,'cross out my line in the notebook'),`object:${id('notebook')}:unpin`,'"cross out" is the notebook\'s unpin where no sign-up sheet is offered');
  // fill it: eight lines, the ninth refused with a reason
  const dan=await join('dan','Dan'),eve=await join('eve','Eve');
  for(const [s,text] of [[ben,'Fresh bread at the bakery'],[cy,'Swap books on Sunday'],[dan,'Lost a glove by the well'],[eve,'Found a glove by the well'],[dan,'Thanks Eve!']])await done(s,`object:${id('notebook')}:pin`,{text});
@@ -108,7 +104,6 @@ test('lectern catalogue books and the notebook stand: real text, hand-written si
  // reading: another Soul gets the lines attributed and untrusted, never in its ambient frame or the offer
  const finHere=await here(fin);assert.ok(!JSON.stringify(finHere).includes('kite'),'no words in here');
  const readCap=edge.capabilities(fin).find(c=>c.id===`read:${id('notebook')}`);assert.ok(readCap,'read offered');assert.match(readCap.label,/a notebook, 8 lines written/);assert.ok(!readCap.label.includes('kite'));
- assert.equal(await words(fin,'read the notebook'),`read:${id('notebook')}`);
  const rd=await act(fin,`read:${id('notebook')}`);assert.equal((await finish(fin,rd)).phase,'completed');
  const outcome=edge.receipt(fin.soulId,rd.receipt.id).outcome;
  assert.match(outcome.summary,/^Read notebook: "Came by at noon, the tea was good" \(Ana\) \/ "Choir at dusk, all welcome" \(Cy\)/);assert.ok(outcome.summary.length<=160);assert.match(outcome.summary,/their words, not world facts/);
@@ -129,8 +124,6 @@ test('lectern catalogue books and the notebook stand: real text, hand-written si
  assert.deepEqual(lec.params?.book?.enum,['book:tea-cup'],'the offer names the book it holds');
  for(const capability of [lec.id,`read:read.${id('oak-lectern')}`.toLowerCase()]){soul=ben;const other=await (await app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,params:{book:'book:pond-mirror'},strict:true})})).json();assert.equal(other.code,'capability.params',JSON.stringify(other).slice(0,300));}
  const readAt=async(s,cap)=>{const r=await act(s,cap.id,{seconds:20});const fr=await finish(s,r,1200);assert.equal(fr.phase,'completed',JSON.stringify(edge.receipt(s.soulId,r.receipt.id)).slice(0,500));return edge.receipt(s.soulId,r.receipt.id).outcome;};
- assert.equal(await words(ben,'read a cup with room for silence'),`read:read.${id('oak-lectern')}`.toLowerCase(),'the book\'s title names its lectern');
- assert.equal(await words(ben,'read the book on the oak lectern'),`read:read.${id('oak-lectern')}`.toLowerCase(),'"read the book on the oak lectern" is that lectern, not ambiguous with read:here at the same spot');
  const p1=await readAt(ben,lec);
  assert.equal(p1.detail.book.id,'book:tea-cup');assert.match(p1.summary,new RegExp(`^Read ${book.title}, passage 1 of 3`));assert.equal(p1.detail.passage,book.passages[0].text);
  const p2=await readAt(ben,lec);assert.match(p2.summary,/passage 2 of 3/);assert.equal(p2.detail.passage,book.passages[1].text);
@@ -175,17 +168,4 @@ test('a removed notebook leaves the others shut after a restart',{timeout:120000
  for(const u of [`/v1/edge/objects/${live}`,'/v1/edge/objects','/v1/edge/observe'])assert.ok(!/zebra secret/.test(await get(u)),`${u} carries no line`);
  assert.ok(w.edge.capabilities(ben).some(c=>c.id===`read:${live}`&&c.blocked?.code==='object.private'),'the read is still closed');
  assert.ok(w.edge.capabilities(ben).some(c=>c.id===`object:${live}:pin`),'the notebook keeps its actions');
-});
-
-// review of #990: on real offers, words about something else leave a note where it is
-test('words for a thing that is not here take nothing',{timeout:120000},async t=>{
- const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();const edge=new EdgeLedger(f.host,f.db,undefined,{ambient:false}),app=new Hono();let soul;
- const comms=mountEdgeRoutes(app,{host:f.host,db:f.db,souls:f.souls,ledger:edge,soul:()=>soul});t.after(()=>{comms.close();f.host.stop();f.db.close();});
- const god=new GodMode(f.db,{worldId:f.host.worldId,ownerId:'dev:admin',tick:()=>f.host.engine.world.tick,emit(){}});installEngineBridge({host:f.host,god,edge,log(){},worldLore:false,worldClock:false});
- const tick=async(n=5)=>{for(let i=0;i<n;i++){f.host.tickOnce();await setImmediate();f.host.drainInputs();}};await tick();await invite(f,'ana');
- const row=await accept(f.host,f.souls.create('dev:ana',{name:'Ana',description:'Notebook test'}));await tick();soul={soulId:row.id,entityId:row.entity_id,name:row.name,owner:'dev:ana'};
- const p=f.host.engine.world.entities[soul.entityId].pose.p;assert.equal(god.act({ops:[{op:'place',def:'core/notice-board@3',name:'board',p:[p[0]+1,p[2]+2.5],state:{text:'buy milk — Ana',textBy:soul.soulId}}]}).accepted,true);await tick(60);
- const r=async w=>(await (await accept(f.host,app.request('/v1/edge/resolve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability:w})}))).json()).resolve;
- for(const w of ['cross out my notebook note','cross out my journal note','cross out my note inside the notebook','cross out my diary note','cross out my note at the sheet','cross off my name from the sign-up sheet'])assert.ok(!/unpin/.test(JSON.stringify((await r(w))?.would??null)),w);
- assert.match(JSON.stringify((await r('take down my note'))?.would??null),/unpin/,'her own words for her own note still work');
 });

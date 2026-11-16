@@ -488,3 +488,28 @@ test('context waits for maintained publication, rechecks edits/access, and never
         finally { await stale.cache.close(); }
     } finally { await service.cache.close(); db.close(); }
 });
+test('#2192: pictures are content-keyed and cached immutable; the WebP copy is offered and served beside the PNG', async () => {
+    const { god, db } = fixture();
+    const app = new Hono(), seat = god.model.get('seat')!.id, plaza = god.model.get('plaza')!.id;
+    app.onError((e, c) => e instanceof ApiError ? c.json({ code: e.code }, e.status as 400) : c.json({ error: String(e) }, 500));
+    const webp = new Uint8Array([82, 73, 70, 70, 4, 0, 0, 0, 87, 69, 66, 80, 1]);
+    const service = mountContextViews(app, { god, edge: { places: { byId: new Map() }, knowledge: { knows: () => true } } as never,
+        contextReady: () => true, waitForContext: async () => {}, levelAt: () => 0, worldUrl: 'http://127.0.0.1:5980', soul: () => null, limit() {},
+        renderer: async input => ({ png: new Uint8Array([1]), ...((input.payload as { target: { ref: string } }).target.ref === seat ? { thumb: webp } : {}) }) });
+    const views = async () => (await (await app.request('/v1/world/context/views', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ refs: [seat, plaza] }) })).json()).views;
+    try {
+        await views(); await service.cache.settled();
+        const [a, b] = await views();
+        assert.equal(a.thumbBytes, undefined, 'storage detail stays internal');
+        assert.match(a.thumb, /^\/v1\/world\/context\/thumb\?ref=.+&key=[0-9a-f]{64}$/);
+        assert.equal(b.thumb, null, 'no WebP copy: the client shows the PNG');
+        const png = await app.request(a.url), thumb = await app.request(a.thumb);
+        assert.equal(png.status, 200);
+        assert.equal(png.headers.get('cache-control'), 'private, max-age=31536000, immutable');
+        assert.equal(thumb.status, 200);
+        assert.equal(thumb.headers.get('content-type'), 'image/webp');
+        assert.equal(thumb.headers.get('cache-control'), 'private, max-age=31536000, immutable');
+        assert.deepEqual(new Uint8Array(await thumb.arrayBuffer()), webp);
+        assert.equal((await app.request(a.thumb.replace(/key=[0-9a-f]+/, 'key=' + '0'.repeat(64)))).status, 404, 'another key is never served');
+    } finally { await service.close(); db.close(); }
+});

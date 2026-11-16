@@ -1,0 +1,58 @@
+{
+ "name": "mars-campus-1",
+ "recipe": "mars-campus",
+ "recordedAt": "2026-11-14",
+ "reader": {
+  "engine": "mars",
+  "worldKey": "mars",
+  "worldEngine": false
+ },
+ "worldId": "corpus-mars",
+ "seed": "corpus-mars",
+ "adopted": [
+  "bodyStepGuardV1",
+  "quarantineV1",
+  "refusalSettleV1",
+  "stairWayV1",
+  "quarantineMarkV1",
+  "standHeightV1",
+  "nonFiniteHoldV1",
+  "standHeightV2",
+  "itemApproachV1",
+  "carrierParkAwayV1",
+  "stallReleaseSupportV1",
+  "climbSpacingV1",
+  "heldActivitiesV1"
+ ],
+ "pins": [
+  {
+   "tick": 921,
+   "state": "a890ba069ae823e7dfda9d9330621e611c12a60a5c2cf53c7984b45c369a33e6",
+   "kernel": "7eaa57880eb16fcf8cf6e61225203adac2efe6e817c757a980044297ca8aee30",
+   "note": "a body, decisions, before the boot policies"
+  },
+  {
+   "tick": 1535,
+   "state": "bab9a4f3400450a0064f0ca167e5d49d466e93b3dbc07ff4d339cbe938a7c080",
+   "kernel": "a7f8be6275339c0255754c4341565100e02c1fe643f0802bb04ee91e1d2b0f74",
+   "note": "after the boot policies"
+  },
+  {
+   "tick": 2135,
+   "state": "cd630c82ad11f9972b16de7a814c038cbeddff5c01d108c63f7639673b8fc6e9",
+   "kernel": "e833c9f0377f694409bd454a29fbba0a4c954e0bc70780d1e6c1d2f821424f69",
+   "note": "after a retire"
+  }
+ ],
+ "head": {
+  "tick": 2053,
+  "seq": 91,
+  "state": "18b100844488bd278b9a6ad9b7f5e4a5dd3ef64dfcad432877ee733d823d7d5a",
+  "kernel": "e833c9f0377f694409bd454a29fbba0a4c954e0bc70780d1e6c1d2f821424f69",
+  "note": "boot head"
+ },
+ "snapshot": {
+  "tick": 1535,
+  "seq": 74
+ }
+}

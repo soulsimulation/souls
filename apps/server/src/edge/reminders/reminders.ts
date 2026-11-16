@@ -77,6 +77,13 @@ export class PersonalReminders{
    return {reminder:this.view(this.own(soulId,id)!),cancelled:row.state!=='delivered',alreadyDelivered:row.state==='delivered'};
   });
  }
+ /** #2297: the earliest due time of an active reminder, from the stored table: a real one's wall ms and a world one's world
+  * minute (each null when none). An undelivered outbox row is due at once (`now`). */
+ nextDue():{realMs:number|null;worldMinute:number|null;now:boolean}{
+  const r=this.db.prepare("SELECT MIN(CASE WHEN kind='real' THEN due_real_ms END) real_ms,MIN(CASE WHEN kind='world' THEN due_world_minute END) world_minute FROM edge_personal_reminders_v1 WHERE world_id=? AND state='active'").get(this.worldId) as {real_ms:number|null;world_minute:number|null};
+  const out=this.db.prepare('SELECT 1 FROM edge_personal_reminder_outbox_v1 WHERE world_id=? AND event_cursor IS NULL LIMIT 1').get(this.worldId);
+  return {realMs:r.real_ms??null,worldMinute:r.world_minute??null,now:!!out};
+ }
  /** Due marking/outbox retention is separate from atomic stream delivery, so a
   * process crash before draining has a durable pending event to retry. */
  collectDue(){

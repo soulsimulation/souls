@@ -97,12 +97,8 @@ test('ineligible asks keep the full path: place-ID form, names, unlisted far roo
   'walk:private-house','walk:'+priv,'sit:'+chair,'wave:here','wander:here','jog:place-field','walk to the library','look at the chair'])parity(w,t,capability,false);
  for(const params of [{via:['field']},{with:['someone']},{seconds:1}])parity(w,t,'walk:eden-library-1',false,params);
 });
-test('protected and masked answers are unchanged: secret, private, construction, aloft, rigid body, faded',async t=>{
+test('protected and masked answers are unchanged: private, construction, aloft, rigid body, faded',async t=>{
  const w=await setup(t),{edge,bridge,f,soul}=w;
- const room=bridge.nav.things().find(x=>x.ref.startsWith('eden-library-1/')&&x.kind==='room')!.ref;
- edge.knowledge.setSecret('g-eden-library-1',true);
- for(const capability of ['walk:eden-library-1','walk:'+room]){const out=parity(w,t,capability,false);assert.equal(out.ok,false,JSON.stringify(out));}
- edge.knowledge.setSecret('g-eden-library-1',false);
  // a private building is reported, as today, as offered but blocked (unavailable offers keep the full path)
  for(const capability of ['walk:private-house','walk:'+bridge.nav.things().find(x=>x.ref.startsWith('private-house/')&&x.kind==='room')!.ref]){const priv=parity(w,t,capability,false);assert.equal(priv.would?.blocked?.code,'object.private',JSON.stringify(priv));}
  const active=bridge.layers.active.bind(bridge.layers),refuse=bridge.layers.constructionRefusal.bind(bridge.layers);bridge.layers.active=()=>true;

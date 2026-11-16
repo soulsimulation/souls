@@ -39,13 +39,15 @@ export function applyFrame(copy, world, event, frame, receivedAt) {
   if (!live || live.epoch !== frame.epoch) return { whole: "epoch" };
   if (frame.check) {
     if (frame.seq !== live.seq) return frame.seq > live.seq ? { whole: "behind" } : { copy: null };
-    return liveHash(live) === frame.check ? { copy: { ...copy, receivedAt, pushed: true } } : { whole: "hash" };
+    // #1918: a check carries the world's clock; the copy keeps the newest (a whole picture carries it too)
+    return liveHash(live) === frame.check ? { copy: { ...copy, receivedAt, pushed: true, ...(frame.clock ? { live: { ...live, clock: frame.clock } } : {}) } } : { whole: "hash" };
   }
   if (frame.seq <= live.seq) return { copy: null };   // already applied
   if (frame.base !== live.seq) return { whole: "gap" };
   const souls = new Map((live.souls ?? []).map((r) => [r.id, r]));
   for (const id of frame.souls?.del ?? []) souls.delete(id);
-  for (const r of frame.souls?.set ?? []) souls.set(r.id, r);
+  // #1978: a changed row is merged over the one held: `now` and `about` come only when one changed, null when cleared
+  for (const r of frame.souls?.set ?? []) { const row = { ...souls.get(r.id), ...r }; for (const k of ["now", "about"]) if (row[k] === null) delete row[k]; souls.set(r.id, row); }
   const next = { ...live, seq: frame.seq, tick: frame.tick, at: frame.at, souls: [...souls.values()].sort((a, b) => (a.id < b.id ? -1 : 1)) };
   if (frame.catalog !== undefined) next.catalog = frame.catalog;
   if (frame.thingsMore !== undefined) next.thingsMore = frame.thingsMore;

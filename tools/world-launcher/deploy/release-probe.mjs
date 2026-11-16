@@ -44,6 +44,7 @@
 // at the start and the end (report.host), so a loaded workstation can be told apart from a slower release.
 import { createRequire } from 'node:module';
 import { recordWorldSockets } from './socket-observer.mjs';
+import { launchOptions } from './ship/browser.mjs';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
@@ -87,7 +88,7 @@ const browsers = []; let release = () => {};
 async function openBrowser() {
   if (leasePath && !browsers.length) { const { chromeLease } = await import(leasePath); release = await chromeLease('release-probe'); }   // one lease for the run
   const chromium = createRequire(join(ROOT, 'mars/viewer/package.json'))('@playwright/test').chromium;
-  const b = await chromium.launch({ channel: 'chrome', headless: true, args: ['--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
+  const b = await chromium.launch(launchOptions(['--ignore-gpu-blocklist', '--enable-unsafe-swiftshader']));
   browsers.push(b); return b;
 }
 const DEVICES = {

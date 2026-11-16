@@ -142,7 +142,7 @@ async function windowCode(page) {
 async function waitStatus(page, status, timeout = 60_000) { await page.waitForFunction((s) => document.querySelector('[data-approval]')?.getAttribute('data-approval-status') === s, status, { timeout, polling: 250 }); }
 async function newAgent(base, name) { const folder = mkdtempSync(join(tmpdir(), `soul-${name}-`)); await agent(folder, ['register', base]); return folder; }
 function worldDb() {
-  const found = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); const st = statSync(p); if (st.isDirectory()) walk(p); else if (/\.(db|sqlite)$/.test(f)) found.push(p); } };
+  const found = []; const walk = (d) => { for (const f of readdirSync(d)) { const p = join(d, f); const st = statSync(p); if (st.isDirectory()) walk(p); else if (f === 'sim.db') found.push(p); } };   // the live world DB only: the server's hourly backup-*.db holds the table too (V7, 0.127)
   walk(dataDir);
   for (const p of found) { try { const db = new DatabaseSync(p); db.exec('PRAGMA busy_timeout=5000'); const has = db.prepare("SELECT name FROM sqlite_master WHERE name='account_approvals_v1'").get(); if (has) return db; db.close(); } catch { /* not ours */ } }
   throw new Error('no world DB with account_approvals_v1 under ' + dataDir);

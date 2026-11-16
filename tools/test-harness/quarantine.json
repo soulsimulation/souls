@@ -72,6 +72,22 @@
       "reason": "Engine gap: tilted solar modules read flat (solar-panel 1.18x0.65 x8 + 1.18x1.02 x9, pinned 1.59x1.07 x10); plywood-4x8 89 (was 79, W51 re-seed).",
       "owner": "Gene: historical content, parked 2026-09-29 (mars/docs/engineering/OWNER_DECISIONS.md; LAST_MILE LM-182 / LM-184 classed content, engine halves included); re-run recipe HISTORICAL_CONTENT.md §4. Re-triaged by t4-quar 2026-10-21",
       "exit": "§d engine solar frame (solar-frame-45-2x4 + install_panel; a tilted module now reads as a flat 1.18 m panel); then re-pin counts"
+    },
+    {
+      "step": "V5-server-full",
+      "id": "equivalence: a world stopped and cold-booted, idle Souls with the edge ambient-life reflex, caught up by ticking, matches one ticked straight through",
+      "status": "todo",
+      "reason": "#2236: the edge ambient-life reflex keeps its idle clock in memory, so a reboot shifts the idle Souls' next acts; added by #2238 as todo until #2236 lands (accepted for 0.127 as an exception).",
+      "owner": "#2236",
+      "exit": "#2236 keeps the ambient-life idle clock across a restart; then drop the todo and this entry"
+    },
+    {
+      "step": "V5-server-full",
+      "id": "equivalence: a world that crashed and cold-booted, idle Souls with the edge ambient-life reflex, caught up by ticking, matches one ticked straight through",
+      "status": "todo",
+      "reason": "#2236: the edge ambient-life reflex keeps its idle clock in memory, so a reboot shifts the idle Souls' next acts; added by #2238 as todo until #2236 lands (accepted for 0.127 as an exception).",
+      "owner": "#2236",
+      "exit": "#2236 keeps the ambient-life idle clock across a restart; then drop the todo and this entry"
     }
   ],
   "scopeExclusions": [

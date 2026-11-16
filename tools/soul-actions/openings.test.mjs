@@ -60,11 +60,11 @@ test('tent flap and field gate by hand: words, contact, refusal, interruption, p
  const finish=async(r,name,want,limit=900)=>{let contact=false,early=false,contactTick=null,changeTick=null,handAt=null;for(let n=0;n<limit;n++){const m=body().human?.handActuator;if(m){contact=true;contactTick??=m.startTick;handAt??=m.at??m.target?.at??null;}if(state(name).open===want&&changeTick===null){changeTick=f.host.engine.world.tick;if(!contact)early=true;}const ph=edge.receipt(soul.soulId,r.receipt.id)?.phase;if(['completed','failed','cancelled','replaced'].includes(ph))break;await tick(1);}
   return {phase:edge.receipt(soul.soulId,r.receipt.id)?.phase,contact,early,handStart:contactTick,changed:changeTick,handAt};};
  // O5: an act interrupted before the contact changes nothing
- const cut=await act('open the tent flap');for(let n=0;n<600&&!body().human?.handActuator;n++)await tick(1);await tick(3);
+ const cut=await act(`object:${id('tent')}:open`);for(let n=0;n<600&&!body().human?.handActuator;n++)await tick(1);await tick(3);
  ok(await accept(f.host,edge.act(soul,{capability:'stand:here'})));await tick(60);assert.equal(state('tent').open,false,'interrupted before contact: the flap stays shut');
  assert.ok(['replaced','cancelled','failed'].includes(edge.receipt(soul.soulId,cut.receipt.id).phase));
  const results={};
- for(const [name,words,want] of [['tent','open the tent flap',true],['tent','close the tent flap',false],['tent','open the tent',true],['field-gate','open the field gate',true],['field-gate','close the field gate',false],['field-gate','open the gate',true]]){
+ for(const [name,want] of [['tent',true],['tent',false],['tent',true],['field-gate',true],['field-gate',false],['field-gate',true]]){const words=`object:${id(name)}:${want?'open':'close'}`;
   const r=await act(words);assert.match(r.receipt.capability,new RegExp(`object:${id(name)}:${want?'open':'close'}$`),words+' resolved to '+r.receipt.capability);
   assert.notEqual(state(name).open,want,'admission changes nothing remotely');const x=await finish(r,name,want);
   assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.ok(x.contact,'actual hand contact ran');assert.equal(x.early,false,'nothing changes before contact');assert.equal(state(name).open,want);
@@ -89,7 +89,7 @@ test('tent flap and field gate by hand: words, contact, refusal, interruption, p
  const sweepClear=(name,sx=1,sz=1)=>{const e=god.model.get(name),wp=god.model.worldPose(e),p=body().pose.p,lx=(p[0]-wp.x)*Math.cos(wp.yaw)-(p[2]-wp.z)*Math.sin(wp.yaw),lz=(p[0]-wp.x)*Math.sin(wp.yaw)+(p[2]-wp.z)*Math.cos(wp.yaw);return +(Math.hypot(lx+.5*sx,lz-1.15*sz)-1*sx).toFixed(3);};
  ok(god.act({ops:[{op:'set',id:'tent',state:{open:false}}]}));await tick(10);
  {const wp=god.model.worldPose(god.model.get('tent'));await relocate([wp.x-Math.sin(wp.yaw)*-3.2,wp.z-Math.cos(wp.yaw)*-3.2]);}
- {const r=await act('open the tent flap');const x=await finish(r,'tent',true);assert.equal(x.phase,'completed');assert.equal(x.early,false);x.clearOfSweep=sweepClear('tent');assert.ok(x.clearOfSweep>=.28,'front-on: clear of the flap sweep by a body radius: '+x.clearOfSweep);results['front-on:open the tent flap']=x;}
+ {const r=await act(`object:${id('tent')}:open`);const x=await finish(r,'tent',true);assert.equal(x.phase,'completed');assert.equal(x.early,false);x.clearOfSweep=sweepClear('tent');assert.ok(x.clearOfSweep>=.28,'front-on: clear of the flap sweep by a body radius: '+x.clearOfSweep);results['front-on:open the tent flap']=x;}
  // a stretched tent (sx 1.5, sz 1.5): the hand goes to the stretched toggle, the body stands outside the stretched footprint
  {const wp=god.model.worldPose(god.model.get('tent'));ok(god.act({ops:[{op:'place',def:'core/tent@2',name:'big-tent',p:[wp.x-7,wp.z],r:wp.yaw,params:{sx:1.5,sz:1.5}}]}));await tick(30);await relocate([wp.x-7-Math.sin(wp.yaw)*-4,wp.z-Math.cos(wp.yaw)*-4]);
   const r=await act(`object:${id('big-tent')}:open`);const x=await finish(r,'big-tent',true);assert.equal(x.phase,'completed',JSON.stringify(edge.receipt(soul.soulId,r.receipt.id)).slice(0,400));assert.equal(x.early,false);

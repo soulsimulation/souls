@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Option B (production on eden2; NOT run unless Codex chooses it): ship this worktree's HEAD to eden2 as a
 # world-launcher release and (by default) switch a stage to it.
-#   tools/world-launcher/deploy/release.sh [staging|production] [--no-activate] [--restart|--reload]   (--restart: no handover;
+#   tools/world-launcher/deploy/release.sh [staging|production] [--no-activate] [--restart|--reload] [--capacity <GB>]   (--restart: no handover;
 #   --reload: hand over even when this release changes keeper.mjs; the running keeper stays until the next restart)
 #   tools/world-launcher/deploy/release.sh --local <dir>     assemble only (Option A: run it on the laptop)
 #   tools/world-launcher/deploy/release.sh legacy [--no-activate|--local <dir>]   the original worlds at the site root:
@@ -18,10 +18,16 @@
 set -euo pipefail
 # The box: [SIM_DEPLOY_USER@]SIM_DEPLOY_HOST from the environment or deploy.env (deploy.env.example); only needed to upload.
 . "$(dirname "$0")/deploy-env.sh"
-STAGE=staging; ACTIVATE=1; LOCAL=""; RESTART=""; HOW=""; BASE="${SIM_WORLDS_BASE-/worlds}"
+STAGE=staging; ACTIVATE=1; LOCAL=""; RESTART=""; HOW=""; CAPACITY=""; BASE="${SIM_WORLDS_BASE-/worlds}"
 while [[ "$BASE" == */ ]]; do BASE="${BASE%/}"; done
 [[ -z "$BASE" || "$BASE" =~ ^/[a-z][a-z0-9-]{0,31}$ ]] || { echo "SIM_WORLDS_BASE must be / or one path segment"; exit 2; }
-while [ $# -gt 0 ]; do case "$1" in staging|production|legacy) STAGE="$1";; --no-activate) ACTIVATE=0;; --restart) RESTART=1; HOW=--restart;; --reload) HOW=--reload;; --local) LOCAL="$2"; shift;; *) echo "usage: $0 [staging|production|legacy] [--no-activate] [--restart|--reload] | --local <dir>"; exit 2;; esac; shift; done
+while [ $# -gt 0 ]; do case "$1" in staging|production|legacy) STAGE="$1";; --no-activate) ACTIVATE=0;; --restart) RESTART=1; HOW=--restart;; --reload) HOW=--reload;; --local) LOCAL="$2"; shift;; --capacity) CAPACITY="$2"; shift;; *) echo "usage: $0 [staging|production|legacy] [--no-activate] [--restart|--reload] [--capacity <GB>] | --local <dir>"; exit 2;; esac; shift; done
+# #2233 A5: --capacity <GB> sets once how much memory the stage's worlds may use (install.sh capacity; settings change only
+# on a restart, so the activation is a restart). Without it a release never changes the host's capacity.
+if [ -n "$CAPACITY" ]; then
+  [[ "$CAPACITY" =~ ^[0-9]+$ ]] && [ "$STAGE" != legacy ] && [ -z "$LOCAL" ] && [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || { echo "--capacity <GB>: a whole number, for staging or production, with install (not --local or SIM_RELEASE_NO_INSTALL)"; exit 2; }
+  RESTART=1; HOW=--restart
+fi
 # CDN1: the asset CDN switch (default on; SIM_ASSETS_CDN_ENABLED=0 turns it off for one release), see the web build below.
 CDN="${SIM_ASSETS_CDN_ENABLED-1}"
 case "$CDN" in 0|1) ;; *) echo "SIM_ASSETS_CDN_ENABLED must be 0 or 1 (got '$CDN')"; exit 2;; esac
@@ -123,7 +129,7 @@ echo "== install (user, dirs, unit; idempotent) and Linux dependencies"
 # legacy-setup.sh writes the legacy stage's own settings.
 # SIM_RELEASE_NO_INSTALL=1 (ship.sh --no-switch, #1402): stage without install.sh, so a rehearsal that never activates leaves
 # the host's unit files and timers exactly as they were; only the release's own dependencies are installed.
-INSTALL="bash $REL/tools/world-launcher/deploy/install.sh"; [ "$STAGE" != legacy ] && [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || INSTALL="id simworlds >/dev/null"
+INSTALL="bash $REL/tools/world-launcher/deploy/install.sh${CAPACITY:+ && bash $REL/tools/world-launcher/deploy/install.sh capacity $STAGE $CAPACITY}"; [ "$STAGE" != legacy ] && [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || INSTALL="id simworlds >/dev/null"
 ssh "$HOST" "set -e; $INSTALL; chown -R simworlds:simworlds $REL; touch $RELROOT/$BUILD.deps.log; chown simworlds:simworlds $RELROOT/$BUILD.deps.log;
   sudo -u simworlds -H bash -c 'set -euo pipefail; cd $REL; COREPACK_ENABLE_DOWNLOAD_PROMPT=0 nice -n 10 corepack pnpm install --frozen-lockfile --filter @souls/server... > $RELROOT/$BUILD.deps.log 2>&1 && mkdir -p apps/web/node_modules/@souls && ln -sfn ../../../../packages/world-compiler apps/web/node_modules/@souls/world-compiler' || { tail -20 $RELROOT/$BUILD.deps.log; exit 1; }"
 # The server imports apps/web/src/humanoid/look.ts (shared look rules), which imports @souls/world-compiler; the server-only

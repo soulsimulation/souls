@@ -1,5 +1,5 @@
-// DLG2: recent dialogue for a newly joined viewer. Spectators already receive every channel live
-// (doc 26 §10: say lines with who heard them, conversation turns); this replays the last lines from the
+// DLG2: recent dialogue for a newly joined viewer. Spectators receive say lines and out-loud conversation turns
+// live (doc 26 §10); a private conversation's turns are its members' only (#2269) and are never replayed. This replays the last lines from the
 // durable comms tables so a viewer's dialogue dock opens with history, also across server restarts.
 // Same shapes as the live `speech` / `conversation.turn` spectator messages, marked `replay: true`;
 // a replayed turn also carries the conversation's current `members` and `state`.
@@ -16,7 +16,7 @@ export function dialogueReplay(core: CommsCore, limit = DIALOGUE_REPLAY_LIMIT): 
   if (!(limit > 0)) return [];
   const {db, worldId} = core, ref = (soulId: string): Ref => ({soulId, name: core.nameOf(soulId)});
   const speech = db.prepare('SELECT id, soul_id, tick, at, channel, text, heard_by FROM edge_comms_speech WHERE world_id = ? ORDER BY at DESC, id DESC LIMIT ?').all(worldId, limit) as SpeechRow[];
-  const turns = db.prepare('SELECT conversation_id, seq, soul_id, tick, at, text FROM edge_comms_turns WHERE world_id = ? ORDER BY at DESC, seq DESC LIMIT ?').all(worldId, limit) as TurnRow[];
+  const turns = db.prepare("SELECT t.conversation_id, t.seq, t.soul_id, t.tick, t.at, t.text FROM edge_comms_turns t LEFT JOIN edge_comms_conversations c ON c.world_id = t.world_id AND c.id = t.conversation_id WHERE t.world_id = ? AND json_extract(c.body, '$.private') IS NOT 1 ORDER BY t.at DESC, t.seq DESC LIMIT ?").all(worldId, limit) as TurnRow[];
   const conversations = new Map<string, {state: string; members: Ref[]}>();
   const body = db.prepare('SELECT body FROM edge_comms_conversations WHERE world_id = ? AND id = ?');
   for (const id of new Set(turns.map(t => t.conversation_id))) {

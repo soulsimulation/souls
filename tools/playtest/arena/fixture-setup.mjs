@@ -11,13 +11,13 @@ export function checkStart(me, expected = {}) {
   if (expected.posture && !expected.posture.includes(me?.posture)) problems.push('initial posture differs');
   return problems;
 }
-/** CTRL-1 (#1093): `act` takes offered ids. Setup is scaffolding, not the agent under test: its words go through `resolve`
- *  and it sends the first available candidate. A client without candidates (the baseline) gets the words, as before. */
+/** CTRL-1 (#1093): `act` takes offered ids. Setup is scaffolding, not the agent under test: its words go through the
+ *  client's local `find` (#1921) and it sends the first row's act. A client without rows (the baseline) gets the words, as before. */
 async function offered(cli, intent, left) {
   const text = typeof intent === 'string' ? intent : JSON.stringify(intent);
   if (/^[a-z][\w-]*:\S+$/i.test(text)) return [text];
-  const r = (await cli(['resolve', text], left)).data, c = (r?.candidates ?? r?.did_you_mean)?.find((x) => x.available !== false);
-  return c ? [c.id, ...(c.args ? [JSON.stringify(c.args)] : [])] : [text];
+  const c = (await cli(['find', text], left)).data?.found?.find((x) => x.act);
+  return c ? [c.act] : [text];
 }
 export async function runFixtureSetup({ seat, setup, runDir, requestKey, now = Date.now }) {
   const started = now(), end = started + (setup.maxWallSec ?? 120) * 1000;

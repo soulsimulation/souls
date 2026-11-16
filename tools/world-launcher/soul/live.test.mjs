@@ -36,3 +36,21 @@ test("speech is kept by id: a line sent again is one line", () => {
   copy = wholeCopy(W, copy, { ...pic(2, [], { speech: [line, { id: "sp2", at: 2, text: "yo" }] }), epoch: "ep", seq: 2 }, 2);
   assert.deepEqual(copy.speech.map((l) => l.id), ["sp1", "sp2"]);
 });
+
+test("#1918: the copy keeps the world's clock from a whole picture and from each check, and it is not in the hash", () => {
+  const clock = (minuteOfDay, at) => ({ worldDateTime: "2026-10-03T07:00:00.000Z", time: "07:00", weekdayUTC: 6, minuteOfDay, paused: false, realMsPerWorldMinute: 2500, at });
+  const p1 = pic(1, [row("s_a", [1, 1])], { clock: clock(420, 1) });
+  let copy = applyFrame(null, W, "live.full", { ...p1, epoch: "ep", seq: 1 }, 1).copy;
+  assert.equal(copy.live.clock.minuteOfDay, 420);
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 1, check: worldHash(p1), clock: clock(422, 5001) }, 5001).copy;
+  assert.deepEqual(copy.live.clock, clock(422, 5001));
+  assert.equal(liveHash(copy.live), worldHash({ ...p1, clock: undefined }));
+});
+
+test("#1978: a changed row is merged: `now` and `about` left out are kept, null clears", () => {
+  let copy = applyFrame(null, W, "live.full", { ...pic(1, [{ ...row("s_a", [1, 1]), now: "rowing", about: "A miller." }]), epoch: "ep", seq: 1 }, 1).copy;
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 2, base: 1, tick: 2, at: 2, souls: { set: [row("s_a", [2, 2])], del: [] } }, 2).copy;
+  assert.deepEqual(copy.live.souls[0], { ...row("s_a", [2, 2]), now: "rowing", about: "A miller." }, "moving keeps both");
+  copy = applyFrame(copy, W, "live", { epoch: "ep", seq: 3, base: 2, tick: 3, at: 3, souls: { set: [{ ...row("s_a", [2, 2]), now: null }], del: [] } }, 3).copy;
+  assert.deepEqual(copy.live.souls[0], { ...row("s_a", [2, 2]), about: "A miller." }, "null clears the status line");
+});

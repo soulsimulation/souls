@@ -8,7 +8,7 @@
 import type { WorldHost } from '../world.ts';
 import type { EdgeLedger } from '../edge/ledger/ledger.ts';
 import type { EdgeCapability, EdgeSoul } from '../edge/contract.ts';
-import { config, KNOWN_WORLD_KEYS } from '../config.ts';
+import { KNOWN_WORLD_KEYS, worldConfig } from '../config.ts';
 import type { GodMode } from './god.ts';
 import { governanceOf, MAX_CLAUSE, type Governance } from './governance.ts';
 import { godFeature } from '../../../../tools/god-skill/lib/features.mjs';
@@ -25,7 +25,7 @@ export function installGovernance(god: GodMode, o: { host: WorldHost; edge?: Edg
     deliver: (soulId, kind, body) => { (edge?.comms as any)?.streams?.deliver?.(soulId, kind, host.engine.world.tick, body); },
   });
   // G5: the Constitution is switched off (tools/god-skill/lib/features.mjs): Souls are not offered amendments; the data stays
-  if (edge && (o.edgeHooks ?? (godFeature('constitution') && !(KNOWN_WORLD_KEYS as readonly string[]).includes(config.worldKey)))) hookEdge(edge, gov);
+  if (edge && (o.edgeHooks ?? (godFeature('constitution') && !(KNOWN_WORLD_KEYS as readonly string[]).includes(worldConfig(host).worldKey)))) hookEdge(edge, gov);
   return gov;
 }
 

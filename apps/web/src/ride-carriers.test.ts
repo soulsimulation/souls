@@ -2,7 +2,7 @@
 // D1: any native carrier is a ride (balloon, ferris wheel, carousel, punt), not only balloon-tagged things.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {isRideCarrierDef, carrierIdOf, recordedCarriers, carrierPoses} from './ride-carriers.ts';
+import {isRideCarrierDef, carrierIdOf, recordedCarriers, carrierPoses, hasOwnCars} from './ride-carriers.ts';
 import {isRideBalloonDef} from './gen-mesh/kits/ride-balloon.ts';
 import {ridingCarrier} from './WorldBroadcast.ts';
 
@@ -33,10 +33,27 @@ test('recorded carriers (a punt, a wheel car) are framed where the frame has the
   assert.ok(ridingCarrier([-20, 9.3, -9], poses)); assert.equal(ridingCarrier([-20, 0, -9], poses), null);
 });
 
+test('#2198: a big wheel with hanging gondolas is ridden in its own cars; the core wheel (round pods) still gets a drawn car', () => {
+  assert.equal(hasOwnCars({make: {kind: 'gen', args: {shapes: [{kind: 'box', role: 'wheel'}, {kind: 'box', role: 'gondola', pivot: [0, 2, 0]}]}}}), true);
+  assert.equal(hasOwnCars({make: {kind: 'gen', args: {shapes: [{kind: 'sphere', role: 'wheel'}]}}}), false);
+  assert.equal(hasOwnCars({make: {kind: 'mesh'}}), false);
+  assert.equal(hasOwnCars(undefined), false);
+});
+
 test('the card names a ride pose, never the idle doing; the server\'s body line reads as written', async () => {
   const {doingText} = await import('./place-names.ts');
   assert.equal(doingText('standing around', 'ride'), 'Riding');
   assert.equal(doingText('standing around', 'row'), 'Rowing');
   assert.equal(doingText('standing around', 'board'), 'Boarding');
   assert.equal(doingText('riding the ferris wheel', 'ride'), 'Riding the ferris wheel');
+});
+
+test('#1976: a wheel\'s car is drawn fixed to its rim by an arm to the wheel\'s plane; none while parked in front of it', async () => {
+  const {rimArm} = await import('./WorldRideCars.ts');
+  // a wheel at (12, 46) turned 0.3: its front is (sin 0.3, cos 0.3); its car faces into it (Core yaw -0.3 - pi/2, server god/rides.ts)
+  const w: [number, number] = [12, 46], yaw = -0.3 - Math.PI / 2, out = (d: number, y: number) => [w[0] + Math.sin(0.3) * d, y, w[1] + Math.cos(0.3) * d];
+  const on = rimArm(out(1.56, 1.15), yaw, w);
+  assert.ok(on !== null && Math.abs(on - 0.81) < 1e-9, `the arm reaches from the car's wall to the wheel's plane: ${on}`);
+  assert.equal(rimArm(out(5.6, 0), yaw, w), null, 'parked at its home in front of the wheel: no arm');
+  assert.equal(rimArm(out(1.56, 1.15), yaw + Math.PI, w), null, 'a car facing away from the wheel gets no arm');
 });

@@ -46,25 +46,25 @@ test('pinned notes: several authors, author-only take-down, full board, attribut
  // The runtime now waits that out for any verb; the retry stays only as a counter, asserted zero below (#424 F7).
  let makeWayRetries=0;const done=async(s,capability,params)=>{for(let k=0;;k++){const r=await act(s,capability,params);const fr=await finish(s,r),rc=edge.receipt(s.soulId,r.receipt.id);if(fr.phase==='failed'&&rc.code==='reservation.conflict'&&/:make-way:\d+/.test(rc.reason??'')&&k<3){makeWayRetries++;await tick(30);continue;}assert.equal(fr.phase,'completed',capability+' '+JSON.stringify(rc).slice(0,500));return fr;}};
  // validation
- for(const [text,why] of [['','required'],['x'.repeat(61),'too long'],['two\nlines','one line'],['bell\u0007','control']]){const b=await act(ana,'object:notes:pin',{text},false);assert.equal(b.code,'capability.params',why);}
+ for(const [text,why] of [['','required'],['x'.repeat(61),'too long'],['two\nlines','one line'],['bell\u0007','control']]){const b=await act(ana,`object:${id('notes')}:pin`,{text},false);assert.equal(b.code,'capability.params',why);}
  const notes=()=>{const s=state('notes');return {lines:s.text?s.text.split('\n'):[],by:s.textBy?s.textBy.split(','):[]};};
  // three Souls pin: each note appears only at the end of its stroke, signed, in order
  const runs=[];
- for(const [s,text] of [[ana,'Picnic at noon by the pond'],[ben,'Lost: a blue scarf, near the well'],[cy,'Choir practice, dusk, all welcome'],[ana,'Bring fruit if you can']]){const fr=await done(s,'object:notes:pin',{text});assert.equal(fr.early,false,'no note before the stroke ends');runs.push(fr);}
+ for(const [s,text] of [[ana,'Picnic at noon by the pond'],[ben,'Lost: a blue scarf, near the well'],[cy,'Choir practice, dusk, all welcome'],[ana,'Bring fruit if you can']]){const fr=await done(s,`object:${id('notes')}:pin`,{text});assert.equal(fr.early,false,'no note before the stroke ends');runs.push(fr);}
  assert.deepEqual(notes().lines,['Picnic at noon by the pond — Ana','Lost: a blue scarf, near the well — Ben','Choir practice, dusk, all welcome — Cy','Bring fruit if you can — Ana']);
  assert.deepEqual(notes().by,[ana.soulId,ben.soulId,cy.soulId,ana.soulId]);
  // per-Soul limit (2) and the authorship rule
- const third=await act(ana,'object:notes:pin',{text:'one too many'},false);assert.match(third.reason??'',/already have 2/);
+ const third=await act(ana,`object:${id('notes')}:pin`,{text:'one too many'},false);assert.match(third.reason??'',/already have 2/);
  // Ben can take down only his own; Cy's note stays
- const bd=await done(ben,'object:notes:unpin');assert.equal(bd.phase,'completed');assert.equal(bd.stroke.kind,'wipe');
+ const bd=await done(ben,`object:${id('notes')}:unpin`);assert.equal(bd.phase,'completed');assert.equal(bd.stroke.kind,'wipe');
  assert.deepEqual(notes().lines,['Picnic at noon by the pond — Ana','Choir practice, dusk, all welcome — Cy','Bring fruit if you can — Ana']);
- const benAgain=await act(ben,'object:notes:unpin',undefined,false);assert.match(benAgain.reason??'',/only its author/);
+ const benAgain=await act(ben,`object:${id('notes')}:unpin`,undefined,false);assert.match(benAgain.reason??'',/only its author/);
  // Ana takes down her latest note, not her first
- await done(ana,'object:notes:unpin');assert.deepEqual(notes().lines,['Picnic at noon by the pond — Ana','Choir practice, dusk, all welcome — Cy']);
+ await done(ana,`object:${id('notes')}:unpin`);assert.deepEqual(notes().lines,['Picnic at noon by the pond — Ana','Choir practice, dusk, all welcome — Cy']);
  // fill the board: six notes, the seventh is refused with a reason
- for(const [s,text] of [[ben,'Fresh bread at the bakery'],[cy,'Swap books on Sunday'],[ana,'Thank you for the picnic'],[ben,'Kite flying, windy hill']])await done(s,'object:notes:pin',{text});
+ for(const [s,text] of [[ben,'Fresh bread at the bakery'],[cy,'Swap books on Sunday'],[ana,'Thank you for the picnic'],[ben,'Kite flying, windy hill']])await done(s,`object:${id('notes')}:pin`,{text});
  assert.equal(notes().lines.length,6);
- const dan=await join('dan','Dan');const full=await act(dan,'object:notes:pin',{text:'room for me?'},false);assert.match(full.reason??'',/full/);
+ const dan=await join('dan','Dan');const full=await act(dan,`object:${id('notes')}:pin`,{text:'room for me?'},false);assert.match(full.reason??'',/full/);
  // reading: a fourth Soul gets the notes attributed and untrusted, never in its ambient frame or the offer
  const danHere=await here(dan);assert.ok(!JSON.stringify(danHere).includes('Picnic'),'no words in here');
  const readCap=edge.capabilities(dan).find(c=>c.id===`read:${id('notes')}`);assert.ok(readCap,'read offered');assert.match(readCap.label,/6 pinned notes/);assert.ok(!readCap.label.includes('Picnic'));
@@ -75,7 +75,7 @@ test('pinned notes: several authors, author-only take-down, full board, attribut
  assert.deepEqual(outcome.detail.sign.notes.map(n=>n.writtenBy.name),['Ana','Cy','Ben','Cy','Ana','Ben']);
  const nearFull=await here(ana);
  // entry 13's notice-board@2 still writes and wipes as before
- await done(ana,'object:old-board:write',{text:'Old board still works'});assert.equal(state('old-board').text,'Old board still works');
+ await done(ana,`object:${id('old-board')}:write`,{text:'Old board still works'});assert.equal(state('old-board').text,'Old board still works');
  // persistence
  const restored=WorldModel.fromSnapshot(JSON.parse(JSON.stringify(god.model.snapshot())),undefined,god.model.library);
  assert.equal(restored.get('notes').state.text,state('notes').text);assert.equal(restored.get('notes').state.textBy,state('notes').textBy);

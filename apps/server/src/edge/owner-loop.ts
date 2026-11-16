@@ -78,6 +78,8 @@ type Link = {scope: {scope: string; owner: string}; message: string; steps?: Mes
    *  completed aboard; `flew`: the ride left its boarding while this Soul was aboard; `said`: the aboard progress line is out. */
   ride?: {object: string; name: string; since?: number; flew?: true; said?: true}};
 const verbOf = (r: EdgeReceipt) => r.capability.split(':')[0];
+/** #2452: the acts an instruction to sit is done by once the body is seated. */
+const SITS = new Set(['sit', 'sit-ground']);
 /** What the owner still waits for, said plainly ("not resting yet"); `there` for any way of getting somewhere. */
 function pending(step: string[]) {
   const v = step[0];
@@ -239,6 +241,28 @@ export class OwnerLoop {
       try {this.sweepOne(tick, id, l);} catch {/* one link's fault never stops the others; it is looked at again next time */}
     }
   }
+  /** #2298: the next sweep tick (on its 20-tick grid) at which the sweep closes something: a replaced act's messages, an
+   *  overlong act, a ride past RIDE_TICKS or back on the ground, an end this process missed. Null: none. Never busy: a
+   *  still world is jumped to it, so its closures land on the tick a world ticked straight through gives them. */
+  nextDue(tick: number): number | null {
+    const grid = (t: number) => Math.ceil(Math.max(t, tick + 1) / SWEEP_TICKS) * SWEEP_TICKS;
+    let due: number | null = null;
+    const at = (t: number) => {const g = grid(t); due = due === null ? g : Math.min(due, g);};
+    for (const [id, l] of this.links) {
+      try {
+        if (l.gone !== undefined) {at(l.gone + GONE_TICKS); continue;}
+        const soul = l.scope.scope.slice(5), r = this.peek(soul, id);
+        if (!r) continue;   // dropped at the next sweep: nothing the owner sees
+        if (!OPEN.includes(r.phase)) {at(l.ride?.since !== undefined && this.world?.aboard?.(soul) ? l.ride.since + RIDE_TICKS : tick + 1); continue;}
+        if (l.late) continue;   // its end closes it (`ended`)
+        // #2452: a started sit closes its message once seated: each sweep looks until it is (holding needs a second of the
+        // pose); a sit not started yet waits as any act does
+        if (r.phase === 'started' && SITS.has(verbOf(r as EdgeReceipt))) {at(Math.max(tick + 1, r.acceptedTick + 20)); continue;}
+        at(r.acceptedTick + Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0)));
+      } catch {at(tick + 1);}
+    }
+    return due;
+  }
   private sweepOne(tick: number, id: string, l: Link) {
     const soul = l.scope.scope.slice(5), r = this.peek(soul, id);
     if (!r) {this.forget(id); return;}
@@ -250,6 +274,18 @@ export class OwnerLoop {
       return;
     }
     if (!OPEN.includes(r.phase)) {const full = this.read(soul, id); if (full) this.ended(full, tick); else this.forget(id); return;}
+    // #2452 (coordinator's decision): an instruction to sit is done once the Soul is seated. The sit goes on, timed or not; its
+    // end writes nothing more
+    if (!l.late && SITS.has(verbOf(r as EdgeReceipt)) && this.world?.holding?.(soul, id)) {
+      this.forget(id);
+      for (const one of [l, ...(l.also ?? [])]) {
+        // another act linked to this message still runs: it closes the message when it ends (#1295)
+        const other = this.running(one.scope, one.message, id);
+        if (other) this.inbox.serverProgress?.(one.scope, one.message, `now: sitting; ${other.capability} still going`);
+        else this.report(one, r as EdgeReceipt, {text: 'Sitting now.', outcome: 'done'});
+      }
+      return;
+    }
     // a timed act gets the time it asked for, and a minute more, before it counts as overlong
     const limit = Math.max(this.holdTicks, ...[l, ...(l.also ?? [])].map(x => x.timed ? x.timed * 20 + 1200 : 0));
     if (l.late || tick - r.acceptedTick < limit) return;

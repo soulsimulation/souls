@@ -16,7 +16,7 @@ test('Eden: an unknown id is refused without building a menu; on-demand ids are 
   await setImmediate(); host.drainInputs();
   const cat = ledgerCatalog(L).payload, me = L.body(soul.entityId).pose.p;
   const away = (at: [number, number]) => Math.hypot(at[0] - me[0], at[1] - me[2]);
-  const gate = (id: string) => {L.invalidateBodies(); return L.offerGate(soul, {capability: id});};
+  const gate = (id: string, params?: Record<string, unknown>) => {L.invalidateBodies(); return L.offerGate(soul, {capability: id, ...(params ? {params} : {})});};
 
   await t.test('A1/A3: an id the gate cannot bind moves no menu counter, keeps its code and names no others', () => {
     for (const id of ['walk:eden-no-such-place', 'eat:eat.e_no-such-spot', 'sit:no-such-thing', 'dance:nowhere', 'object:no-thing:open']) {
@@ -40,6 +40,7 @@ test('Eden: an unknown id is refused without building a menu; on-demand ids are 
     const room = 'walk:region-alpine-mountain-station/hall';
     assert.ok(!L.coreA.binds(soul).caps.some((c: {id: string}) => c.id === room) && !L.bindOne(soul, room), `${room} is off the menu here`);
     ids.push(...far.map(p => `walk:${p.id}`), ...seats.map(s => `sit:${s.id}`), room);
-    assert.deepEqual(ids.map(id => [id, gate(id)?.code ?? 'ok']).filter(([, code]) => code !== 'ok'), []);
+    // #1916: walk-to:here is taken with the point its schema requires
+    assert.deepEqual(ids.map(id => [id, gate(id, id === 'walk-to:here' ? {at: [0, 0]} : undefined)?.code ?? 'ok']).filter(([, code]) => code !== 'ok'), []);
   });
 });

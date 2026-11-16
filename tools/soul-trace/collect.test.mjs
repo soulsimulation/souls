@@ -12,6 +12,8 @@ import { claudeProject, collect, parseArgs } from './collect.mjs';
 
 const cli = fileURLToPath(new URL('../world-launcher/soul/eden.mjs', import.meta.url));
 const TOKEN = 'sim_s_ada_PLANTEDTOKEN0123';
+// The client's own version, as stamped at release (#1935): never a literal here.
+const CLIENT = JSON.parse(readFileSync(new URL('../world-launcher/soul/SOURCES.json', import.meta.url), 'utf8')).controllerCli.version;
 
 function world() {
   const server = createServer((req, res) => {
@@ -88,7 +90,7 @@ test('a session collected: records, serve log, this folder\'s transcripts only, 
     assert.equal(ends.receipts.r_1.body.receipt.phase, 'completed'); assert.equal(ends.receipts.r_1.body.auth, true);
     assert.equal(ends.messages.m_1.body.message.state, 'closed');
     const v = JSON.parse(readFileSync(join(out, 'versions.json'), 'utf8'));
-    assert.deepEqual(v.client.recorded, ['2.32.0']); assert.equal(v.world.build, 'b-test');
+    assert.deepEqual(v.client.recorded, [CLIENT]); assert.equal(v.world.build, 'b-test');
   } finally { s.done(); }
 });
 

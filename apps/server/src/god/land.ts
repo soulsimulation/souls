@@ -228,6 +228,6 @@ export function mountLandRoutes(app: Hono, d: { god: GodMode; requireGod: (c: Co
   app.post('/v1/god/land', async (c) => {
     limitGod(c, 'land', CREATION_LIMITS.landEditsPerMinute);
     let b: LandInput; try { b = await c.req.json(); } catch { throw new ApiError(400, 'bad-json', 'body must be JSON'); }
-    return c.json(d.god.as(callerOf(d.requireGod(c)), () => land(d.god, b)), 200, { 'cache-control': 'no-store' });
+    return c.json(await d.god.checked(() => d.god.as(callerOf(d.requireGod(c)), () => land(d.god, b))), 200, { 'cache-control': 'no-store' });   // legal-edits/1: waits for the edit's preview
   });
 }

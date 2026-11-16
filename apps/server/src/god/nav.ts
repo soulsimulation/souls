@@ -102,12 +102,16 @@ export type Thing = {
   /** Buildings: just inside the front door, and whether that door is open now. */
   inside?: Vec2;
   doorOpen?: boolean;
+  /** #2261 Buildings: their ground-floor doors to the outside, each the middle of its gap and its outward direction. */
+  doors?: { at: Vec2; out: Vec2 }[];
   /** Has a seat (sit:<id> is offered near it). */
   seat?: boolean;
   /** Piers, decks, bridges: standing points ON the deck, preferred in order (F1). */
   deck?: Vec2[];
   /** Rooms: where the building is entered from outside (its front door's approach), for the reachability check. */
   entry?: { p: Vec2; level: number };
+  /** Rooms of a door-fitted building (#2383): its front doorway holds a real door (closed). */
+  fitted?: true;
 };
 
 const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
@@ -115,6 +119,8 @@ const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
 const SERVICE_STAND_DISTANCE = 0.7;
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
+/** Rings (0.25 m) a thing's stand point is searched out to for standing room: 1.5 m. */
+const STAND_RINGS = 6;
 /** L8: nearest first, ties by ref, so "by the X" names do not depend on the things list's order (a boot's full pass and
  *  incremental passes built it differently: 472 built objects rewrote their `near` on every first boot after a copy). */
 const byDistanceThenRef = (a: { o: { ref: string }; d: number }, b: { o: { ref: string }; d: number }) => a.d - b.d || (a.o.ref < b.o.ref ? -1 : a.o.ref > b.o.ref ? 1 : 0);
@@ -297,7 +303,7 @@ export class GodNav {
       const front = pool.find(named) ?? [...pool].sort((a, b) => Math.hypot(b.at[0], b.at[1]) - Math.hypot(a.at[0], a.at[1]))[0];
       const stands: Vec2[] = [];
       const frontSlot = baked.slots.find((x) => x.kind === 'stand' && /front|door|entr/.test(x.id));
-      let inside: Vec2 | undefined, doorOpen = false;
+      let inside: Vec2 | undefined, doorOpen = false, fitted = false;
       if (front) {
         // An off-centre door need not face away from the building's centre. Its opening yaw is the outward normal
         // in the building frame; the same transform as the walls/slots then handles any enclosing world yaw.
@@ -305,14 +311,23 @@ export class GodNav {
         stands.push(toWorld(front.at[0] + ux * 1.2, front.at[1] + uz * 1.2));
         inside = toWorld(front.at[0] - ux * 1.0, front.at[1] - uz * 1.0);
         const st = ((e.state?.doors ?? {}) as Record<string, unknown>)[front.id];
-        doorOpen = st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def));
+        // #2383: a door-fitted revision's outside doorway holds a real door thing of its own (closed in an enclosed building), so
+        // the building is arrived at outside it: a goal just inside would end at the shut leaf, and the walk does not pass it
+        fitted = def.make.kind === 'gen' && def.make.args?.doorThings === true && front.exterior !== false;
+        doorOpen = !fitted
+          && (st === 'open' || (st === undefined && front.state !== 'closed' && !isShut(e, def)));
       }
+      // #2261: every door to the outside (only the front one when the openings do not say which are), in world terms
+      const exits = (outer.length ? outer : front ? [front] : []).map((o) => {
+        const at = toWorld(o.at[0], o.at[1]), ahead = toWorld(o.at[0] + Math.sin(o.yaw), o.at[1] + Math.cos(o.yaw));
+        return { at, out: [ahead[0] - at[0], ahead[1] - at[1]] as Vec2 };
+      });
       if (frontSlot) stands.push(toWorld(frontSlot.p[0], frontSlot.p[2]));
       // XP5 hook: the footprint's clear lane can be off-centre, or on an open side without a radial front door.
       if (def.make.kind === 'gen' && def.make.gen === 'kit/2' && def.make.args?.footprint && frontSlot) {
         const n: Vec2 = [Math.sin(frontSlot.yaw), Math.cos(frontSlot.yaw)];
         stands.unshift(toWorld(frontSlot.p[0], frontSlot.p[2]));
-        inside = toWorld(frontSlot.p[0] + n[0] * 2.2, frontSlot.p[2] + n[1] * 2.2); doorOpen = true;
+        inside = toWorld(frontSlot.p[0] + n[0] * 2.2, frontSlot.p[2] + n[1] * 2.2); doorOpen = true; fitted = false;
       }
       const roomRefs: string[] = [];
       for (const r of rooms) {
@@ -328,11 +343,11 @@ export class GodNav {
         const rname = r.name ?? r.id, floor = r.floor ?? 0;
         roomRefs.push(rref);
         out.push({ id: e.id, room: r.id, ref: rref, name: `${base.name} / ${humanTitle(r.id)}`, kind: 'room', what: `${rname} of ${base.name}${floor ? `, floor ${floor}` : ''}`,
-          words: [...new Set([...words(r.id), ...words(rname), ...base.words, 'room', 'inside'])], at, level: this.h.levelAt(at[0], at[1], ry), rise: r3((r.y ?? 0) * wp.s), floor, poly, roomFrame, ...(stands[0] ? { entry: { p: stands[0], level } } : {}) });
+          words: [...new Set([...words(r.id), ...words(rname), ...base.words, 'room', 'inside'])], at, level: this.h.levelAt(at[0], at[1], ry), rise: r3((r.y ?? 0) * wp.s), floor, poly, roomFrame, ...(stands[0] ? { entry: { p: stands[0], level } } : {}), ...(fitted ? { fitted: true as const } : {}) });
       }
       // the room the front door opens into goes first (the entrance)
       if (front) { const fa = toWorld(front.at[0], front.at[1]); roomRefs.sort((a, b) => { const A = out.find((t) => t.ref === a)!, B = out.find((t) => t.ref === b)!; return (A.level - B.level) || (polyDist(A.poly!, fa) - polyDist(B.poly!, fa)); }); }
-      out.unshift({ ...base, ref, kind: 'building', what: article(kind0), at: [wp.x, wp.z], level, stands, ...(inside ? { inside, doorOpen } : {}), rooms: roomRefs, words: [...base.words, 'building', 'house'] });
+      out.unshift({ ...base, ref, kind: 'building', what: article(kind0), at: [wp.x, wp.z], level, stands, ...(inside ? { inside, doorOpen } : {}), ...(exits.length ? { doors: exits } : {}), rooms: roomRefs, words: [...base.words, 'building', 'house'] });
       return out;
     }
     // seats: approach in front of each seat; stand slots (a fountain's rim): those points
@@ -461,8 +476,10 @@ export class GodNav {
     } else {
       // a door approach, a seat's front, a fountain's rim: the nearest to me with standing room; else around the thing
       const stands = [...(t.stands ?? [])].sort((a, b) => Math.hypot(a[0] - me[0], a[1] - me[1]) - Math.hypot(b[0] - me[0], b[1] - me[1]));
-      for (const s of stands) { goal = near(s, t.level, 6); if (goal) break; }
-      goal ??= near(t.at, t.level, 40);
+      for (const s of stands) { goal = this.standPoint(t, s, except); if (goal) break; }
+      // #1243: ... else, for a thing with stand points, the nearest spot to the thing itself, also in its own room (none
+      // there: no standing room); a thing with none (a lamp, an open pavilion's table) keeps the nearest spot
+      goal ??= t.stands?.length ? this.standPoint(t, t.at, except, 40) : near(t.at, t.level, 40);
       // a thing with no approach of its own: the main ground nearest it when the spot beside it is a pocket (a lamp behind
       // a fence, a shelf with a gap behind it), and a big structure from the main ground near it
       if (!t.stands?.length) goal = toMain(goal, t.big ? 80 : 3);
@@ -504,7 +521,11 @@ export class GodNav {
       const rooms = this.things().filter((x) => x.kind === 'room' && t.rooms?.includes(x.ref));
       const room = t.rooms?.length === 1 ? rooms[0] : rooms.filter((x) => x.rise !== undefined && x.rise >= 0 && x.rise < LOW_RISE_M && x.poly?.length)
         .sort((a, b) => (a.rise! - b.rise!) || polyDist(a.poly!, entrance!) - polyDist(b.poly!, entrance!) || a.ref.localeCompare(b.ref))[0];
-      const inner = room ? this.goal(room, me, except) : null;
+      // #2383: a door-fitted building's room is entered as an open doorway's was (no interior search from the door: the
+      // listing offers buildings ~130 m out, and a route search per building there kept ~16 more ground tiles per sweep);
+      // its centre's standing room when that lies in the room, else the room's own reach-checked goal
+      const c = room?.fitted && t.rooms?.length === 1 ? near(room.at, room.level, 40) : null;
+      const inner = room ? (c && room.poly && inPoly(c.p[0], c.p[1], room.poly) ? c : this.goal(room, me, except)) : null;
       goal = inner;
       if (!inner) this.blocked.set(t.ref, `The interior of ${t.ref} is not reachable right now; its entrance or the route inside is blocked.`);
       else this.blocked.delete(t.ref);
@@ -518,6 +539,32 @@ export class GodNav {
     }
     this.goals.set(key, { tick, key: positionKey, warm: !sawCold && this.navWarm(tick), goal });
     return goal;
+  }
+
+  /** #1243: the standing point for one of a thing's stand points `s`: the nearest clear spot within 1.5 m, on the stand's
+   *  own side of its room's wall. A search by distance alone doesn't know a wall: a kitchen stool's stand with no room for
+   *  a body by the counter found the wall's outer face 1 m away, a 30 m walk round to the door. When the nearest spot is
+   *  outside the room the stand is in, the nearest one inside it in the same rings; none: null (the next stand is tried). */
+  standPoint(t: Thing, s: Vec2, except?: string, rings = STAND_RINGS): { p: Vec2; level: number } | null {
+    const E = this.E, level = t.level, at = (p: Vec2 | null) => (p ? { p: [r2(p[0]), r2(p[1])] as Vec2, level } : null);
+    const p = E.standableNearV1!(s, level, except, 0.4, rings);
+    if (!p || Math.hypot(p[0] - s[0], p[1] - s[1]) < 1e-3) return at(p);
+    const room = this.roomAt(s, level);
+    if (!room || inPoly(p[0], p[1], room)) return at(p);
+    // the rings standableNearV1 walks (0.25 m apart, 8 points more each), from the one its answer was on: nearer rings had no clear spot
+    const scan = () => {
+      for (let ring = Math.round(Math.hypot(p[0] - s[0], p[1] - s[1]) / 0.25); ring <= rings; ring++) for (let k = 0, n = ring * 8; k < n; k++) {
+        const a = (k / n) * Math.PI * 2, q: Vec2 = [r3(s[0] + Math.cos(a) * ring * 0.25), r3(s[1] + Math.sin(a) * ring * 0.25)];
+        if (inPoly(q[0], q[1], room) && E.standableNearV1!(q, level, except, 0.4, 0)) return q;
+      }
+      return null;
+    };
+    return at(E.readPassV1 ? E.readPassV1(scan) : scan());
+  }
+
+  /** The outline of the room on `level` a point is in, if any. */
+  private roomAt(p: Vec2, level: number): Vec2[] | undefined {
+    return this.things().find((r) => r.kind === 'room' && r.level === level && r.poly && inPoly(p[0], p[1], r.poly))?.poly;
   }
 
   /** RESOLVE2: the nearest connected (walkable both ways from the main ground) standing spot on `g`'s level within `r` m
@@ -652,6 +699,44 @@ export class GodNav {
     }
     return {pick, here, myLevel, seated, exit};
   }
+  /** #2486: selectedWalks' pick entries whose thing's ref is in `refs`, in its order, without ranking every thing. The
+   *  ranking is by (distance, ref) and refs are unique, so the things no farther than the farthest wanted one (a grid
+   *  read, `within`) are exactly the ranking's prefix that decides whether, and where, each wanted thing is picked: its
+   *  rank against SHOW and the open places before it. The rooms of buildings within ROOMS_WITHIN come after, as there.
+   *  Null (rank as before) when the grid saw a thing with no finite outline, whose distance could not be ordered. */
+  private selectedRefs(soul: EdgeSoul, refs: ReadonlySet<string>) {
+    const me = this.E.world.entities[soul.entityId]; if (!me?.human) return null;
+    const here: Vec2 = [me.pose.p[0], me.pose.p[2]], myLevel = me.human.level ?? 0;
+    const seated = me.human.activity === 'sit' || me.human.baseActivity === 'sit';
+    const all = this.things();
+    const exit = myLevel === 0 ? null : all.find((t) => t.kind === 'room' && t.level === myLevel && t.poly && inPoly(here[0], here[1], t.poly) && t.entry && t.entry.level === 0)?.entry ?? null;
+    this.within(here, 0); if (this.grid!.bad) return null;
+    const ranked = (r: number, keep: (t: Thing) => boolean) => this.within(here, r).filter((t) => keep(t) && (t.kind !== 'room' || !!t.semanticPart))
+      .map((t) => ({ t, d: this.distance(t, here) })).filter((x) => x.d <= r).sort((a, b) => a.d - b.d || (a.t.ref < b.t.ref ? -1 : 1));
+    const wanted = [...refs].map((r) => this.thing(r)).filter((t): t is Thing => !!t && (t.kind !== 'room' || !!t.semanticPart)).map((t) => this.distance(t, here));
+    if (wanted.some((d) => Number.isNaN(d))) return null;
+    const pick: { t: Thing; d: number }[] = [];
+    if (wanted.length) {
+      let places = 0;
+      ranked(Math.max(...wanted), () => true).forEach((x, i) => {
+        const take = i < SHOW || (x.t.semanticPart && x.d <= ROOMS_WITHIN) || ((x.t.kind === 'building' || x.t.big) && x.d <= BUILDINGS_WITHIN)
+          || (places < PLACES_MAX && x.d <= PLACES_WITHIN && !!x.t.area && polyArea(x.t.area) >= PLACE_M2 && !!this.h.placeOf?.(x.t.ref) && ++places > 0);
+        if (take && refs.has(x.t.ref)) pick.push(x);
+      });
+    }
+    for (const { t, d } of ranked(ROOMS_WITHIN, (t) => t.kind === 'building')) {
+      const rooms = (t.rooms ?? []).map((r) => this.thing(r)).filter((r): r is Thing => !!r);
+      if (!rooms.some((r) => refs.has(r.ref))) continue;
+      const inside = d <= UPPER_ROOMS_WITHIN || myLevel !== 0 || rooms.some((r) => r.level === 0 && !!r.poly && inPoly(here[0], here[1], r.poly));
+      for (const rt of rooms) if (refs.has(rt.ref) && (rt.level === 0 || (rt.rise ?? 0) < LOW_RISE_M || inside)) pick.push({ t: rt, d: this.distance(rt, here) });
+    }
+    return { pick, here, myLevel, seated, exit };
+  }
+  /** Test hook (#2486 oracle): the pick entries of `refs`, bounded (selectedRefs) and from the whole ranking. */
+  pickOracleV1(soul: EdgeSoul, refs: ReadonlySet<string>) {
+    const pick = (s: { pick: { t: Thing; d: number }[] } | null) => s?.pick.filter((x) => refs.has(x.t.ref)).map((x) => [x.t.ref, x.d]) ?? null;
+    return { bounded: pick(this.selectedRefs(soul, refs)), full: pick(this.selectedWalks(soul)) };
+  }
 
   /** Continuity (warm after listen): the walk goals this Soul's listing would ask for (room reaches, standing points and
    *  the fine route tiles under them), one thing per step, so a sliced caller builds them between other requests instead
@@ -662,7 +747,13 @@ export class GodNav {
   }
 
   capabilities(soul: EdgeSoul, caps: EdgeCapability[], plans: Plans, focus?: MenuFocus | null) {
-    const selected=this.selectedWalks(soul);if(!selected)return;
+    // #2486: a focused build wants only the things wantsThing passes. None (an object, a spot, `sit-ground:here`): nothing
+    // to rank. Only walk/sit/hang-out/stroll ids (bindOne of one walk): their own entries of the ranking, found without
+    // ranking every thing (selectedRefs). Same offers in the same order either way (nav-focus-oracle.test.ts).
+    const refs = focus ? focusRefs(focus) : null;
+    if (refs && !refs.size && !focus!.verbs.size && !focus!.targets.size) return;
+    const selected = refs && refs.size && !focus!.verbs.size && !focus!.targets.size ? this.selectedRefs(soul, refs) ?? this.selectedWalks(soul) : this.selectedWalks(soul);
+    if (!selected) return;
     // srv-act-words (D): a focused words walk keeps only the walks its words can choose (focus.walkKeep, the ledger's test)
     const at={...selected,keep:focus?.walkKeep?.keep};
     for(const {t,d} of selected.pick)if(this.wantsThing(focus,t))this.offerWalk(soul,t,d,at,caps,plans);
@@ -987,16 +1078,17 @@ export class GodNav {
     const all = this.things();
     if (this.grid?.of !== all) {
       const cells = new Map<number, number[]>(), always: number[] = [];
+      let bad = false;
       all.forEach((t, i) => {
         const pts = t.area ?? t.path ?? t.poly ?? [t.at], pad = !t.area && t.path ? Math.max(0, (t.width ?? 3) / 2) : 0;
         let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-        for (const [x, z] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
-        if (!(x0 <= x1 && z0 <= z1) || !Number.isFinite(x0 + x1 + z0 + z1 + pad)) return;  // no outline: never within r
+        for (const [x, z] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; if (!Number.isFinite(x) || !Number.isFinite(z)) bad = true; }
+        if (!(x0 <= x1 && z0 <= z1) || !Number.isFinite(x0 + x1 + z0 + z1 + pad)) { bad = true; return; }  // no outline: never within r
         const i0 = Math.floor((x0 - pad) / NEAR_CELL), i1 = Math.floor((x1 + pad) / NEAR_CELL), j0 = Math.floor((z0 - pad) / NEAR_CELL), j1 = Math.floor((z1 + pad) / NEAR_CELL);
         if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4096) { always.push(i); return; }
         for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) { const k = cellKey(ci, cj), l = cells.get(k); if (l) l.push(i); else cells.set(k, [i]); }
       });
-      this.grid = { of: all, cells, always };
+      this.grid = { of: all, cells, always, bad };
     }
     const g = this.grid, m = r + 1, seen = new Set<number>(g.always);   // (+1 m: float slack; the caller's distance test decides)
     const i0 = Math.floor((at[0] - m) / NEAR_CELL), i1 = Math.floor((at[0] + m) / NEAR_CELL), j0 = Math.floor((at[1] - m) / NEAR_CELL), j1 = Math.floor((at[1] + m) / NEAR_CELL);
@@ -1004,7 +1096,8 @@ export class GodNav {
     for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) for (const i of g.cells.get(cellKey(ci, cj)) ?? []) seen.add(i);
     return [...seen].sort((a, b) => a - b).map((i) => all[i]);
   }
-  private grid: { of: Thing[]; cells: Map<number, number[]>; always: number[] } | null = null;
+  /** `bad`: some thing has no finite outline (never within r; selectedRefs then ranks every thing). */
+  private grid: { of: Thing[]; cells: Map<number, number[]>; always: number[]; bad: boolean } | null = null;
   /** "by the X" answers depend only on the named things (index version): remembered until the world changes (each
    *  label scanned every thing: ~0.25 s of every capabilities sweep in the Eden 2026 cafe). */
   private nearMemo = new Map<string, unknown>();
@@ -1018,6 +1111,12 @@ export class GodNav {
 
 const NEAR_CELL = 16;
 const cellKey = (i: number, j: number) => (i + 0x8000) * 0x10000 + (j + 0x8000);
+/** #2486: the things a focus names by a walk, sit, hang-out or stroll id (nav wantsThing's ids). */
+function focusRefs(f: MenuFocus): Set<string> {
+  const out = new Set<string>();
+  for (const id of f.ids) for (const v of ['walk:', 'sit:', 'hang-out:', 'stroll:']) if (id.startsWith(v)) out.add(id.slice(v.length));
+  return out;
+}
 function polyDist(poly: Vec2[], p: Vec2) { return inPoly(p[0], p[1], poly) ? 0 : nearestOn(poly, p, true).d; }
 
 function roomSamples(poly: Vec2[], at: Vec2, step = 0.6): Vec2[] {

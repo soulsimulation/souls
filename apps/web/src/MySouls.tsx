@@ -39,7 +39,7 @@ export function chipState(link:ReturnType<typeof ownerLink>,body:Body|null):Chip
 const CHIP_WORD:Record<ChipState,string>={pairing:'pairing request waiting',connected:'connected',zombie:'disconnected, zombie',asleep:'disconnected, asleep',disconnected:'disconnected'};
 const CHIP_MARK:Partial<Record<ChipState,{cls:string;text:string}>>={pairing:{cls:'my-souls-pair',text:'!'},asleep:{cls:'my-souls-zz',text:'zz'},zombie:{cls:'my-souls-zz my-souls-zombie',text:'≈'}};
 /** B3: a click opens the Soul's card (select) and flies the camera to follow it (follow → requestFollowSoul). */
-export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,recencyKey='sim.soul-recency.'+worldKey,selectedId}:{ids:readonly string[];souls:ReadonlyMap<string,PublicSoul>;select:(id:string)=>void;follow?:(id:string)=>void;present?:ReadonlySet<string>;api?:Api;bodies?:ReadonlyMap<string,Body>;newSoul?:ReactNode;recencyKey?:string;selectedId?:string|null}){
+export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,recencyKey='sim.soul-recency.'+worldKey,selectedId,reconnecting=false}:{ids:readonly string[];souls:ReadonlyMap<string,PublicSoul>;select:(id:string)=>void;follow?:(id:string)=>void;present?:ReadonlySet<string>;api?:Api;bodies?:ReadonlyMap<string,Body>;newSoul?:ReactNode;recencyKey?:string;selectedId?:string|null;reconnecting?:boolean}){
  const [recent,setRecent]=useState(()=>readSoulRecency(recencyKey));
  const remember=(id:string)=>setRecent(prev=>selectedSoulIds(id,prev,ids));
  useEffect(()=>{if(!ids.length)return;try{localStorage.setItem(recencyKey,JSON.stringify(recent.filter(id=>ids.includes(id))));}catch{}},[recent,recencyKey,ids.join(',')]);
@@ -60,7 +60,8 @@ export function MySouls({ids,souls,select,follow,present,api,bodies,newSoul,rece
      {pinned.length>MENU_SOULS_SHOWN&&<button type="button" className="hud-menu-row hud-menu-souls-more" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?'Show fewer':`Show ${hidden} more`}</button>}</div>}
    {newSoul&&<div className="hud-menu-new-soul" onClick={slot.close}>{newSoul}</div>}
   </div>,slot.el);
- return <div className="my-souls" aria-label="Your account Souls">{menuList}{pinned.length>3
+ // #2280: the last known list while the connection comes back (owned-souls-hold.ts): dimmed, never emptied
+ return <div className="my-souls" aria-label="Your account Souls" data-reconnecting={reconnecting?'1':undefined} aria-busy={reconnecting||undefined} title={reconnecting?'Reconnecting…':undefined}>{menuList}{pinned.length>3
   ? <NavbarMenu label="Your Souls" className="souls-menu" trigger={<span className="soul-avatar-pile">{pinned.slice(0,3).map((soul,i)=><span key={soul.id} style={{zIndex:3-i}} data-soul-id={soul.id}><SoulAvatar soul={soul}/></span>)}</span>}>
       {close=><>{pinned.map(soul=>chip(soul,close))}<div onClick={close}>{newSoul}</div></>}
     </NavbarMenu>

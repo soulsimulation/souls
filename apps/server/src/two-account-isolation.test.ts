@@ -22,7 +22,6 @@ import {tmpdir} from 'node:os';
 const factory = await marsFactory({...GREEN_FIELD_WORLD, safeCrewRemoval: true});
 const privateText = 'SYNTHETIC_ALICE_PRIVATE_INTENT';
 const privatePreview = 'synthetic-alice-unpublished-bench';
-const soulCLI = new URL('../../../tools/world-launcher/soul/eden-agent.mjs', import.meta.url).pathname;
 const godCLI = new URL('../../../tools/god-skill/eden-god.mjs', import.meta.url).pathname;
 
 async function world(t: TestContext, root: string, slug: string, port: number, owner: string) {
@@ -133,18 +132,9 @@ test('two dev-auth accounts cannot control, read private state, rename, delete o
   assert.equal((await a.request('/v1/god/preview/' + preview.id, ga)).status, 200, 'owner’s god token retains preview read');
   assert.ok(!(await (await a.request('/v1/world/snapshot', 'dev:bob')).text()).includes(privatePreview));
 
-  // A forged selected Soul ID in B's own folder is insufficient, even when
-  // passed through the actual downloadable CLI rather than hand-written HTTP.
-  const soulDir = join(root, 'bob-soul'), godDir = join(root, 'bob-god'); mkdirSync(soulDir); mkdirSync(godDir);
-  writeFileSync(join(soulDir, '.eden-agent.json'), JSON.stringify({world: a.url, identity: 'bob', soul: alice}), {mode: 0o600});
-  for (const args of [['pair-soul', alice], ['observe'], ['profile', 'name', 'Stolen Name']]) {
-    const result = await cli(soulCLI, soulDir, args); assert.ok(!result.out.includes(privateText));
-    if (args[0] === 'profile') {const value = JSON.parse(result.out); assert.equal(value.accepted, false); assert.equal(value.code, 'profile.not-owned');}
-    else {assert.equal(result.status, 1, result.out); assert.match(result.error, /not owned|HTTP 403/);}
-  }
-  // B can pair and use its own resident, so the negatives are not broken setup.
-  const ownPair = await cli(soulCLI, soulDir, ['pair-soul', bob]); assert.equal(ownPair.status, 0, ownPair.error);
-  const ownProfile = await cli(soulCLI, soulDir, ['profile']); assert.equal(JSON.parse(ownProfile.out).profile.soulId, bob);
+  // B's god token, through the actual downloadable god CLI rather than hand-written HTTP. (#1754: the legacy Soul CLI
+  // block is gone with that client; the same refusals are asserted over HTTP above.)
+  const godDir = join(root, 'bob-god'); mkdirSync(godDir);
   writeFileSync(join(godDir, '.eden-god.json'), JSON.stringify({world: a.url, identity: 'dev:bob', token: gb}), {mode: 0o600});
   for (const args of [['mint'], ['snapshot'], ['act', JSON.stringify({ops: [{op: 'remove', id: 'world'}]})]]) {
     const result = await cli(godCLI, godDir, args); assert.equal(result.status, 1, result.out); assert.match(result.error, /HTTP (401|403)/); assert.ok(!result.out.includes(privatePreview));

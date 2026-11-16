@@ -1,7 +1,7 @@
 // SOUL3 duration: {capability: 'sit down', params: {seconds: 10}} resolved to sit:here (the nearest free god-built seat)
 // and then sat the engine's default 60 s: a god-built seat's plan is one sit step with no rest after it, and the ledger
 // gave the seconds only to pose/rest/wander/gather steps. The seconds are the time seated: the walk to the seat comes
-// first and does not use them up. sit:here on such a seat now advertises that seat's own 1..600 s, 60 by default.
+// first and does not use them up. sit:here on such a seat now advertises that seat's own 1..3600 s (#2294), 60 by default.
 // Predeclared (20 ticks/s): seated 10 s = 200 ticks (accept 190..260) after a walk of > 20 ticks from 2.5 m; the default
 // 60 s = 1200 (1150..1300); sit:<seat> with 10 s the same 190..260; dance 5 s = 100 ticks (80..160, unchanged control);
 // a stand while seated ends a 600 s sit within 200 ticks, not completed.
@@ -55,7 +55,7 @@ test('seat duration: sit down with seconds sits that long once seated; default 6
   const {caps} = edge.coreA.binds(soul), here = caps.find(c => c.id === 'sit:here')!, bench = caps.find(c => c.verb === 'sit' && c.id !== 'sit:here')!;
   assert.equal(here.target?.id, bench.target?.id, 'sit:here is the bench');
   assert.deepEqual(here.params, bench.params, 'sit:here advertises the seat\'s own seconds');
-  assert.deepEqual(here.params, {seconds: {type: 'integer', min: 1, max: 600, default: 60}});
+  assert.deepEqual(here.params, {seconds: {type: 'integer', min: 1, max: 3600, default: 60}});
   // control: a timed dance keeps its seconds
   const dance = await act({capability: 'dance', params: {seconds: 5}}), d0 = tick();
   for (let i = 0; i < 4000 && open(dance.receipt.id); i++) await settle(1);
@@ -70,9 +70,9 @@ test('seat duration: sit down with seconds sits that long once seated; default 6
   assert.ok(dflt.seated >= 1150 && dflt.seated <= 1300, 'seated the default 60 s: ' + JSON.stringify(dflt));
   const byId = await timed({capability: bench.id, params: {seconds: 10}});
   assert.ok(byId.seated >= 190 && byId.seated <= 260, 'sit:<seat> 10 s: ' + JSON.stringify(byId));
-  // bounds: the seat's 1..600 integers; outside is refused, never clamped
+  // bounds: the seat's 1..3600 integers; outside is refused, never clamped
   await home();
-  for (const seconds of [0, 601, 2.5]) {
+  for (const seconds of [0, 3601, 2.5]) {
     const r = await accept(f.host, edge.act(soul, {capability: 'sit down', params: {seconds}})) as any;
     assert.equal(r.accepted, false, JSON.stringify(r)); assert.equal(r.code, 'capability.params');
   }

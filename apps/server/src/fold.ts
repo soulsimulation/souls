@@ -207,7 +207,7 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
     case 'rules': {
       if(e.payload?.lastRungInPlace){engine.stopAllV1?.(REWOUND);engine.containV1?.(e.payload.lastRungInPlace.contained??[]);return {};}
       if(e.payload?.quarantineV1){const q=e.payload.quarantineV1;if(!engine.stopBodiesV1||!engine.containV1)throw Error('quarantine.reader-required');engine.stopBodiesV1(q.bodies??[],QUARANTINED);for(const h of q.held??[]){if(!engine.holdBodyV1)throw Error('quarantine.reader-required');try{engine.holdBodyV1(h.id,h.pose);}catch{/* as live: a hold that fails costs only itself */}}if(q.standing?.length){if(!engine.markStandingV1)throw Error('quarantine.reader-required');for(const m of q.standing)engine.markStandingV1(m.id,m.pose);}engine.containV1(q.contained??[]);return {};}   // #1369
-      if(e.payload?.nonFiniteHoldV1){if(!engine.applyNonFiniteV1)throw Error('nonfinite-hold.reader-required');engine.applyNonFiniteV1(e.payload.nonFiniteHoldV1.patches??[],NONFINITE_HELD);return {};}   // #1496: the logged patches, as live wrote them; nothing is read again
+      if(e.payload?.nonFiniteHoldV1){const q=e.payload.nonFiniteHoldV1;if(!engine.applyNonFiniteV1)throw Error('nonfinite-hold.reader-required');engine.applyNonFiniteV1(q.patches??[],NONFINITE_HELD);if(q.standing?.length){if(!engine.markStandingV1)throw Error('nonfinite-hold.reader-required');for(const m of q.standing)engine.markStandingV1(m.id,undefined,m.fields);}return {};}   // #1496: the logged patches, as live wrote them; nothing is read again. #1513: and the standing marks it made, after them
       if(e.payload?.soulsRepairAdoptV1){if(Object.keys(e.payload).length!==1||!engine.adoptSoulsRepairV1)throw Error('souls-repair-adoption.reader-required');engine.adoptSoulsRepairV1(e.payload.soulsRepairAdoptV1);}   // #1323
       if(e.payload?.nativeSleepSnapshotPolicy){if(Object.keys(e.payload).length!==1||!engine.adoptNativeSleepSnapshotV1)throw Error('sleep-snapshot.reader-required');engine.adoptNativeSleepSnapshotV1(e.payload.nativeSleepSnapshotPolicy);}
       if(e.payload?.commonsNewcomerResources){if(Object.keys(e.payload).length!==1||!engine.adoptCommonsNewcomerResourcesV1)throw Error('newcomer-resources.reader-required');engine.adoptCommonsNewcomerResourcesV1(e.payload.commonsNewcomerResources);
@@ -290,6 +290,9 @@ export function foldEvent(engine: Engine, k: KState, e: LogEvent, counts: Record
       const rules = e.payload as { runtimePolicy?: {sleepBlockTicks:number;quietSeatCourtesy?:boolean}; dayConfig?: { origin: number; dayTicks: number }; quiet?: boolean; compact?: boolean; adoptCamp?: boolean; restockCamp?: boolean; anchors?: import('@souls/engine-contract').Anchor[]; soulId?: string; character?: string };
       if (rules?.runtimePolicy) {
         if (!engine.configureRuntimePolicy) throw Error('runtime-policy.unsupported');
+        // #2302 classroom-tv/1: the screens it marks are the ones its event logged, or the refold stops here
+        const tv = (e.payload as {classroomTvV1?: {screens?: string[]}} | null)?.classroomTvV1;
+        if (tv && JSON.stringify(engine.classroomTvScreensV1?.() ?? []) !== JSON.stringify(tv.screens ?? [])) throw Error('classroom-tv.screens-differ');
         engine.configureRuntimePolicy(rules.runtimePolicy);
         // #1521 stand-height/2's one-time repair, logged with its adoption: the same bodies to the same places, nothing read again
         const stood = (e.payload as {standHeightRepairV2?: {bodies?: {id: string; p: [number, number, number]}[]}} | null)?.standHeightRepairV2;

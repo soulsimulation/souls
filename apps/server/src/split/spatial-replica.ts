@@ -119,12 +119,12 @@ export class SpatialReplica {
   service(): Spatial { return this.sync(); }
   /** engine.reachV1 (B-facade item 2): the planner's route proof between two standing points, over the replica's service. */
   /** The planner's route between two standing points (proveUnreachable: a failing search ends early, same answer). */
-  routeV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }) {
-    return this.sync().route(this.world, HUMAN_PROFILE, { level: from.level ?? 0, p: from.p }, { level: to.level ?? 0, p: to.p }, { proveUnreachable: true }) as
+  routeV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }, doors?: 'pass') {
+    return this.sync().route(this.world, HUMAN_PROFILE, { level: from.level ?? 0, p: from.p }, { level: to.level ?? 0, p: to.p }, { proveUnreachable: true, ...(doors ? { doors } : {}) }) as
       { ok: true; route: { length: number; legs: { kind: string; level?: number; link?: { to: { level: number } } }[] } } | { ok: false; diagnostic: { code: string; message: string } };
   }
   reachV1(from: { p: Vec2; level?: number }, to: { p: Vec2; level?: number }): { ok: true; length: number; legs: number; levels: number[] } | { ok: false; code: string; message: string } {
-    const r = this.routeV1(from, to);
+    const r = this.routeV1(from, to, 'pass');   // doors-pass/1 (#2365), as engine.reachV1
     if (!r.ok) return { ok: false, code: r.diagnostic.code, message: r.diagnostic.message };
     const levels = [...new Set(r.route.legs.map((l) => l.kind === 'walk' ? l.level! : l.link!.to.level))];
     return { ok: true, length: Math.round(r.route.length * 100) / 100, legs: r.route.legs.length, levels };

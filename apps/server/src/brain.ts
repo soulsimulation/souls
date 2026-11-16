@@ -118,8 +118,10 @@ export class Brain {
     this.jev = new JevClient(cfg.typesafeKey, this.mode);
     this.jev.gate = this.paidGate;
     const t = db.brainToday(this.capSince); this.spentToday = t.cost; this.callsToday = t.calls; this.jevMsAvg = t.jevMs;
-    host.listeners.push({ afterTick: (tick) => this.afterTick(tick), onApplied: (e) => this.onApplied(e), onPlay: (v) => { for (const c of v.changes) if (c.op === 'say' && host.kernel.things[c.to]?.kind === 'soul') void this.speak(c.from, c.to, c.act, typeof c.about === 'string' ? c.about : undefined, c.manner); } });
-    this.maintenance=setInterval(() => { const t = this.db.brainToday(this.capSince); this.spentToday = t.cost; this.callsToday = t.calls; this.db.pruneBrainCalls(); }, 60_000);this.maintenance.unref();
+    host.listeners.push({ afterTick: (tick) => this.afterTick(tick), stillness: () => (this.cfg.mindDriver === 'edge' || this.quiescing || !host.minds.size ? [] : [{ name: 'brain.central', busy: true }]),   // #2298: central minds decide every tick
+      onApplied: (e) => this.onApplied(e), onPlay: (v) => { for (const c of v.changes) if (c.op === 'say' && host.kernel.things[c.to]?.kind === 'soul') void this.speak(c.from, c.to, c.act, typeof c.about === 'string' ? c.about : undefined, c.manner); } });
+    this.maintenance=setInterval(() => { if (host.silent?.()) return;   // #2303: no thought while silent; the budget gate reads the database itself
+      const t = this.db.brainToday(this.capSince); this.spentToday = t.cost; this.callsToday = t.calls; this.db.pruneBrainCalls(); }, 60_000);this.maintenance.unref();
   }
 
   setMode(m: 'live' | 'fake') { this.mode = m; this.jev.mode = this.cfg.typesafeKey ? m : 'fake'; }
@@ -311,9 +313,9 @@ export class Brain {
       ...(this.host.living ? { customs: this.host.living.customs } : {}),
       soul: {
         name: m.name, about: m.description, intent: intentText, ownerNote: m.intent?.text ?? m.intent?.note ?? null, hasIntent: retained.length>0||rules.length>0||!!m.intent && m.agendaPos < Math.max(1, m.agenda.length),
-        intentIsNew: m.life ? ['new-intent','new-intent-v2','plan-advanced'].includes(trigger) : URGENT.has(trigger), energy: energyWord(m.energy), where: physicalWhere??nameOf(k.things[m.soulId]?.at ?? s.region),
+        intentIsNew: m.life ? ['new-intent','new-intent-v2','plan-advanced'].includes(trigger) : URGENT.has(trigger), energy: energyWord(this.host.energyOf(m)), where: physicalWhere??nameOf(k.things[m.soulId]?.at ?? s.region),
         doing: eng.programOf(m.entityId) ? m.doing : ent?.human?.activity ?? 'standing around', recent: m.recent.slice(-3),
-        ...(m.life ? { needs: m.life.needs, journal: m.life.journal } : {}),
+        ...(m.life ? { needs: this.host.needsOf(m)!, journal: m.life.journal } : {}),
         ...(rules.length?{mandate:rules.map(r=>({id:r.id,words:r.words,strict:r.strict,understanding:r.understanding}))}:{}),
       },
       nearby: s.nearby.map((n) => ({ who: n.who, what: n.what, distance: n.distance, doing: n.doing })),
@@ -330,7 +332,7 @@ export class Brain {
   }
 
   private updateEnergy(m: Mind, ent: Entity, tick: number) {
-    if (m.life) { m.energy = m.life.needs.energy; return; }
+    if (m.life) { m.energy = this.host.energyOf(m); return; }
     const dt = (tick - m.lastEnergyTick) / TPS; m.lastEnergyTick = tick;
     const a = ent.human!.activity;
     // activity names differ by engine: the toy says rest/gather, Mars says sit/warm/watch/listen/talk/eat
@@ -538,12 +540,12 @@ export class Brain {
     const current=()=>{const row=this.db.soul(m.soulId);if(this.skipMind?.(m)||this.host.minds.get(m.soulId)!==m||!row||row.owner!==m.owner||row.entity_id!==m.entityId||row.world_id!==this.host.worldId||row.retired_at!==null||this.host.intentWillSeqOf(m.soulId)!==willSeq||this.host.intentHistoryOf(m.soulId).lastSeq!==historySeq)throw new StaleCompilation();return true as const;};
     if(episodePolicy){try{current();}catch(error){if(error instanceof StaleCompilation)return;throw error;}}
     const episodes=episodePolicy?purposeEpisodesV1(this.host,m,throughSeq):undefined;
-    let journal = episodes?episodeJournalV1(episodes):reflectInCode(m.name, m.life, m.agenda.slice(m.agendaPos).map(a => a.card));
+    let journal = episodes?episodeJournalV1(episodes):reflectInCode(m.name, m.life, m.agenda.slice(m.agendaPos).map(a => a.card), this.host.engine.world.tick);
     if (this.mode === 'live' && this.cfg.anthropicKey && !this.overBudget && this.gov.allow('narrator')) {
       try {
         const r = await callTool<{ journal: string }>({ gate: this.paidGate, apiKey: this.cfg.anthropicKey, model: this.cfg.narratorModel,
           system: 'Write a short first-person journal for this Soul: what happened, what remains unfinished, tendencies noticed, and what it wants tomorrow. Keep habits in prose. No timetable, schedule, executable plan or invented events. Never quote private owner instructions.',
-          messages: [{ role: 'user', content: JSON.stringify({ name: m.name, character: m.description, journal: m.life.journal, needs: m.life.needs, acts: m.life.acts,...(episodes?{recordedPurposeEpisodes:episodes,episodeMeaning:'Accepted is admission, not start. Semantic card play is not native completion. These are own recorded outcomes; prose is interpretation, not a new fact.'}:{}), unfinishedCards: m.agenda.slice(m.agendaPos).map(a => a.card) }) }],
+          messages: [{ role: 'user', content: JSON.stringify({ name: m.name, character: m.description, journal: m.life.journal, needs: this.host.needsOf(m), acts: m.life.acts,...(episodes?{recordedPurposeEpisodes:episodes,episodeMeaning:'Accepted is admission, not start. Semantic card play is not native completion. These are own recorded outcomes; prose is interpretation, not a new fact.'}:{}), unfinishedCards: m.agenda.slice(m.agendaPos).map(a => a.card) }) }],
           tool: { name: 'reflect', description: 'Write the journal', input_schema: { type: 'object', properties: { journal: { type: 'string', maxLength: 1200 } }, required: ['journal'] } }, maxTokens: 350 });
         if (typeof r.out.journal === 'string' && r.out.journal.trim()) journal = r.out.journal.slice(0, 1200);
         this.record({ tick: this.host.engine.world.tick, tier: 'reflection', subject: m.name, soulId: m.soulId, model: this.cfg.narratorModel, request: r.request, response: r.raw, applied: { day }, ms: r.ms, inputTokens: r.inputTokens, outputTokens: r.outputTokens, cachedTokens: r.cachedTokens, costUsd: r.costUsd, mode: 'live' });
@@ -886,7 +888,7 @@ export class Brain {
     const others = this.regions().filter((r) => r !== region).map((r) => { const n = [...this.host.minds.values()].filter((m) => w.entities[m.entityId] && eng.regionAt(w.entities[m.entityId].pose.p) === r).length; return `${nameOf(r)}: ${n} souls`; });
     return {
       region, label: nameOf(region), time: timeWord(w.env.datetime), weather: weatherWord(w.env.weather), places,
-      souls: here.slice(0, 20).map((m) => ({ name: m.name, about: m.description, intent: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(m.energy), doing: m.doing, wants_company: m.wantsCompany > 0.6 ? 'yes' : m.wantsCompany < 0.35 ? 'no' : 'maybe' })),
+      souls: here.slice(0, 20).map((m) => ({ name: m.name, about: m.description, intent: describeIntent(publicIntent(m.intent), nameOf), mood: m.mood, energy: energyWord(this.host.energyOf(m)), doing: m.doing, wants_company: m.wantsCompany > 0.6 ? 'yes' : m.wantsCompany < 0.35 ? 'no' : 'maybe' })),
       recent, neighbours: others, previous_summary: this.narratorState.lastSummary[region] ?? null,
     };
   }

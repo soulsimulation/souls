@@ -9,8 +9,9 @@ import {actionsOf,actuatedState} from './actuators.ts';
 import {isContactActuator,type ContactActuatorIntent,type ContactActuatorService} from './contact-actuator.ts';
 
 type Step={verb:string;params:Record<string,unknown>};
-type Engine={installDoorLockedV1?:(read:(id:string)=>boolean|null)=>void;closedDoorsOnWalkV1?:(actor:string,steps:Step[])=>{goal:[number,number];doors:string[];goalDoors?:()=>string[]}|null;walkFromReachesV1?:(actor:string,from:[number,number],steps:Step[])=>boolean};
-export type DoorPassage={door:string;name:string;steps:Step[];direct:Step[];open:ContactActuatorIntent;note:string;/** entry 32: the walk turns the lock first */ unlocked?:true};
+type Engine={installDoorLockedV1?:(read:(id:string)=>boolean|null)=>void;closedDoorsOnWalkV1?:(actor:string,steps:Step[],max?:number,behind?:boolean,out?:{reaches?:boolean})=>{goal:[number,number];doors:string[];goalDoors?:()=>string[]}|null;walkFromReachesV1?:(actor:string,from:[number,number],steps:Step[])=>boolean;
+ doorChainV1?:(actor:string,steps:Step[])=>{goal:[number,number];level:number;doors:{id:string;level:number;from:[number,number];to:[number,number]}[]}|null};
+export type DoorPassage={door:string;/** #2434: every door of a chain, in order (the first is `door`) */ doors?:string[];name:string;steps:Step[];direct:Step[];open:ContactActuatorIntent;note:string;/** entry 32: the walk turns the lock first */ unlocked?:true};
 export type DoorPassageRefusal={refuse:true;code:string;reason:string};
 /** How far past the door line the close is planned from (its far side). */
 const FAR=1;
@@ -25,22 +26,76 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
  /** Entry 32: a locked door refused to a walk, naming its owner (and that knocking is possible) when it has one. */
  const lockedReason=(id:string,soul:EdgeSoul,what:string,name:string)=>{const own=d.owner?.(id,soul);return own&&!own.mine?`The way to ${what} goes through ${name}, which is locked (${own.name}'s). It was not opened; knock to ask ${own.name} in.`:`The way to ${what} goes through ${name}, which is locked. It was not opened.`;};
  const lockedOf=(id:string)=>{const m=d.model(),e=m.entities.get(id),def=e&&m.resolvedDef(e.def);return e&&def?actuatedState(e,def).locked===true:null;};
- /** The passage for a plain walk (`steps`) whose destination no walk reaches now; null when no closed door explains it. */
- return (soul:EdgeSoul,steps:Step[],what:string):DoorPassage|DoorPassageRefusal|null=>{
-  const eng=d.engine(),found=eng.closedDoorsOnWalkV1?.(soul.entityId,steps);if(!found||!eng.walkFromReachesV1)return null;
+ /** #2434: the passage through every closed door on the way, in order: for each, the walk to its staging spot (on its
+  *  floor), the hand opening it, the step through, the hand closing it behind; then the walk on to the destination (the
+  *  plan's last walk_to). A door this Soul may not use refuses, naming it; null when no chain of doors reaches the goal. */
+ const chain=(soul:EdgeSoul,steps:Step[],what:string):DoorPassage|DoorPassageRefusal|null=>{
+  const eng=d.engine(),found=eng.doorChainV1?.(soul.entityId,steps);if(!found||!found.doors.length)return null;
+  const m=d.model(),last=[...steps].reverse().find(s=>s.verb==='walk_to'),gait=steps.find(s=>s.verb==='walk_to')?.params.gait;
+  if(!last)return null;
+  const legs:Step[]=[{verb:'stand',params:{}}],direct:Step[]=[{verb:'stand',params:{}}],names:string[]=[];let intent:ContactActuatorIntent|null=null;
+  for(const [k,dr] of found.doors.entries()){
+   const e=m.entities.get(dr.id),def=e&&m.resolvedDef(e.def);if(!e||!def)return null;
+   const name=e.name??dr.id,denied=d.access(dr.id,soul);
+   if(denied)return {refuse:true,code:denied.code,reason:`The way to ${what} goes through ${name}: ${denied.reason.replace(/[.\s]+$/,'')}. It was not opened.`};
+   const open=d.contact.plan(soul,dr.id,'open',{},{from:dr.from,open:false}),o=open?.params.opening;if(!open||!o)return null;
+   const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)],far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
+   const close=d.contact.plan(soul,dr.id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)return null;
+   if(close.noRoom)return {refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened: open it first, then walk through.`};
+   if(k===0){intent=d.contact.prepare(soul,dr.id,'open');if(!intent)return null;}
+   const level=dr.level,passage={door:[wp.x,wp.z] as [number,number],from:o.side};
+   const walk=(p:number[],extra:Record<string,unknown>={}):Step=>({verb:'walk_to',params:{to:[p[0],p[2]],standoff:0,level,...extra}});
+   const u=[Math.cos(wp.yaw),-Math.sin(wp.yaw)],stage=[wp.x+u[0]*STAGE[0]+n[0]*o.side*STAGE[1],0,wp.z+u[1]*STAGE[0]+n[1]*o.side*STAGE[1]];
+   const queue=QUEUE.map(([a,b])=>[+(wp.x+u[0]*a+n[0]*o.side*b).toFixed(3),+(wp.z+u[1]*a+n[1]*o.side*b).toFixed(3)]);
+   const through:Step[]=[{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(actuatorPoint(c,HAND_OPEN_ANGLE).root),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage}}}];
+   legs.push(walk(stage,{...(k===0&&gait?{gait}:{}),doorQueueV1:{door:dr.id,from:o.side,queue}}),...through);
+   direct.push(walk(actuatorPoint(o,o.from).root,k===0&&gait?{gait}:{}),...through);
+   names.push(name);
+  }
+  const rest:Step={...last,params:{...last.params,...(found.level?{level:found.level}:{})}};
+  legs.push(rest);direct.push(rest);
+  const list=names.length>1?`${names.slice(0,-1).join(', ')} and ${names.at(-1)}`:names[0];
+  return {door:found.doors[0].id,doors:found.doors.map(x=>x.id),name:names[0],open:intent!,note:`Through ${list}: opened ${names.length>1?'each':'it'} by hand on the way, and closed ${names.length>1?'each':'it'} behind unless someone was following.`,steps:legs,direct};
+ };
+ /** The passage for a plain walk (`steps`) whose destination no walk reaches now; null when no closed door explains it.
+  *  `behind`: the walk's ends are known to lie either side of a closed door (engine walkThroughDoorV1), though the walk's
+  *  own coarse plan of far ground may not see it (review of #2397). */
+ return (soul:EdgeSoul,steps:Step[],what:string,behind=false):DoorPassage|DoorPassageRefusal|null=>{
+  // #2434: a walk upstairs (its last walk_to on an upper floor, after a first leg to the front door's stand) is the chain's:
+  // the one-door search judges only the first leg, and would plan the door out of here and then meet the house's shut
+  // front door at its stand (the served clip world: "Through int-bakery-door-1", then route.unreachable at the front door)
+  const walks=steps.filter(s=>s.verb==='walk_to'),last=walks.at(-1)?.params.level,up=walks.length>1&&typeof last==='number'&&last!==0;
+  const plain:{reaches?:boolean}={},eng=d.engine(),found=up?null:eng.closedDoorsOnWalkV1?.(soul.entityId,steps,4,behind,plain);if(!eng.walkFromReachesV1)return null;
+  // #2438 review: a walk that reaches as it is needs no door, and searches no chain (it paid two more whole routes, on every
+  // walk while the labels were cold after a boot: m4-v1's median server time per call 1377 -> 2971 ms)
+  if(plain.reaches)return null;
+  if(!found)return chain(soul,steps,what);   // #2434: a destination upstairs, or no door named on the ground: the chain
   // entry 32: the hand step reads whether a door is still locked (a thumb-turn nobody needs any more is skipped)
   eng.installDoorLockedV1?.(lockedOf);
   let refusal:DoorPassageRefusal|null=null;
   for(const id of found.doors){
    const m=d.model(),e=m.entities.get(id),def=e&&m.resolvedDef(e.def);if(!e||!def)continue;
-   // a walk to the door itself (or to a spot at it) ends at the door, on this side: it is not a walk through it
-   const at=m.worldPose(e);if(steps.some(s=>s.verb==='walk_to'&&s.params.to===id)||Math.hypot(found.goal[0]-at.x,found.goal[1]-at.z)<1.5)continue;
+   // a walk to the door itself (or to a spot at it on this side) ends at the door: it is not a walk through it
+   const at=m.worldPose(e);if(steps.some(s=>s.verb==='walk_to'&&s.params.to===id))continue;
    if(!actionsOf(def).some(a=>a.name==='open'&&isContactActuator(def,a)))continue;
-   const open=d.contact.plan(soul,id,'open',{},{open:false}),o=open?.params.opening;if(!open||!o)continue;
-   const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)],far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
-   const close=d.contact.plan(soul,id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)continue;
-   // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
-   const end=actuatorPoint(c,0).root;if(!eng.walkFromReachesV1(soul.entityId,[end[0],end[2]],steps))continue;
+   const wp=m.worldPose(e),n:[number,number]=[Math.sin(wp.yaw),Math.cos(wp.yaw)];
+   // the side it is opened from: the Soul's own, else (#1964 A3: the kitchen's door faces away from her) the other one,
+   // walked round to; the first whose far side reaches the destination
+   type Side={open:NonNullable<ReturnType<typeof d.contact.plan>>;o:any;close:NonNullable<ReturnType<typeof d.contact.plan>>;c:any};
+   const side=(from?:[number,number]):Side|null=>{
+    const open=d.contact.plan(soul,id,'open',{},from?{open:false,from}:{open:false}),o=open?.params.opening;if(!open||!o)return null;
+    const far:[number,number]=[wp.x-n[0]*o.side*FAR,wp.z-n[1]*o.side*FAR];
+    // #2383: a goal near the door but past it (a small shop's floor just inside its door) is still a walk through it
+    if(Math.hypot(found.goal[0]-at.x,found.goal[1]-at.z)<1.5&&-o.side*((found.goal[0]-wp.x)*n[0]+(found.goal[1]-wp.z)*n[1])<0.3)return null;
+    const close=d.contact.plan(soul,id,'close',{},{from:far,open:true}),c=close?.params.opening;if(!close||!c||c.side===o.side)return null;
+    // does the far side reach the destination (the door's own gap stays shut in this check: the far side is beyond it)?
+    const end=actuatorPoint(c,0).root;return eng.walkFromReachesV1!(soul.entityId,[end[0],end[2]],steps)?{open,o,close,c}:null;
+   };
+   const mine=d.contact.plan(soul,id,'open',{},{open:false})?.params.opening;
+   // (only when the destination lies on her own side of it: a door between her and it is opened from where she is)
+   const flip=!!mine&&-mine.side*((found.goal[0]-wp.x)*n[0]+(found.goal[1]-wp.z)*n[1])<=0;
+   const got=side()??(flip?side([wp.x-n[0]*mine!.side*FAR,wp.z-n[1]*mine!.side*FAR]):null);if(!got)continue;
+   const {open,o,close,c}=got;
    const name=e.name??id,denied=d.access(id,soul);
    if(denied){refusal??={refuse:true,code:denied.code,reason:`The way to ${what} goes through ${name}: ${denied.reason.replace(/[.\s]+$/,'')}. It was not opened.`};continue;}
    // Entry 32, the safe way out: from inside (the back), a lockable door's thumb-turn opens for anyone, and its owner's
@@ -48,22 +103,27 @@ export function createDoorPassage(d:{engine:()=>Engine;model:()=>WorldModel;cont
    // lock it again from outside, and must not leave the owner's door open to all). Anyone else outside is refused.
    const lockedNow=actuatedState(e,def).locked===true,inside=o.side<0,own=lockedNow?d.owner?.(id,soul):null;
    if(lockedNow&&(!def.tags.includes('lockable')||(!inside&&own?.mine!==true))){refusal??={refuse:true,code:'door.locked',reason:lockedReason(id,soul,what,name)};continue;}
-   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened.`};continue;}
+   if(close.noRoom){refusal??={refuse:true,code:'contact.no-room',reason:`The way to ${what} goes through ${name}, and there is nowhere to stand clear of it once it is shut. It was not opened: open it first, then walk through.`};continue;}
    const unlock=lockedNow?d.contact.plan(soul,id,'unlock'):null;if(lockedNow&&!unlock)continue;
    const intent=d.contact.prepare(soul,id,'open');if(!intent)continue;
    const passage={door:[wp.x,wp.z] as [number,number],from:o.side};
    const rest=steps[0]?.verb==='stand'?steps.slice(1):steps,openAt=actuatorPoint(o,o.from).root,closeAt=actuatorPoint(c,HAND_OPEN_ANGLE).root;
-   const walk=(p:number[]):Step=>({verb:'walk_to',params:{to:[p[0],p[2]],standoff:0}});
+   // the way to the door at the pace asked (a run across the world runs to it); the short legs at the door are walked
+   const gait=steps.find(s=>s.verb==='walk_to')?.params.gait;
+   const walk=(p:number[]):Step=>({verb:'walk_to',params:{to:[p[0],p[2]],standoff:0,level:0}});   // the door is on the ground: from upstairs the leg walks down
    // The walk ends a step short of the door, in front of the latch side (out of the swing and of the way through); the hand
    // step takes the last metre itself once nobody else is at the door (a follower never walks into the leader's swing).
    const u=[Math.cos(wp.yaw),-Math.sin(wp.yaw)],stage=[wp.x+u[0]*STAGE[0]+n[0]*o.side*STAGE[1],0,wp.z+u[1]*STAGE[0]+n[1]*o.side*STAGE[1]];
    const queue=QUEUE.map(([a,b])=>[+(wp.x+u[0]*a+n[0]*o.side*b).toFixed(3),+(wp.z+u[1]*a+n[1]*o.side*b).toFixed(3)]);
    const turn:Step[]=unlock?[{verb:'mars:hand_actuator_v1',params:{...unlock.params,passage:{mode:'unlock',...passage}}}]:[];
-   const legs=(first:number[]):Step[]=>[{verb:'stand',params:{}},first===stage?{verb:'walk_to',params:{to:[stage[0],stage[2]],standoff:0,doorQueueV1:{door:id,from:o.side,queue}}}:walk(first),...turn,{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(closeAt),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage,...(lockedNow?{relock:true as const}:{})}}},...rest];
+   const legs=(first:number[]):Step[]=>[{verb:'stand',params:{}},first===stage?{verb:'walk_to',params:{to:[stage[0],stage[2]],standoff:0,level:0,...(gait?{gait}:{}),doorQueueV1:{door:id,from:o.side,queue}}}:walk(first),...turn,{verb:'mars:hand_actuator_v1',params:{...open.params,passage:{mode:'open',...passage}}},walk(closeAt),{verb:'mars:hand_actuator_v1',params:{...close.params,passage:{mode:'close',...passage,...(lockedNow?{relock:true as const}:{})}}},...rest];
    const note=lockedNow?`Through ${name}: unlocked it ${inside?'with the thumb-turn inside':'with your key'}, opened it by hand on the way, and it locked again as it was shut behind (unless someone was following).`:`Through ${name}: opened it by hand on the way, and closed it behind unless someone was following.`;
    return {door:id,name,open:intent,...(unlock?{unlocked:true as const}:{}),note,steps:legs(stage),direct:legs(openAt)};
   }
   if(refusal)return refusal;
+  // #2434: no ONE door opens the way: the doors in series (and on any floor) one walk passes, each opened by hand, passed
+  // and closed behind in turn (doorChainV1, as reach and the audit count them)
+  const chained=chain(soul,steps,what);if(chained)return chained;
   // No door on this side opens the way. When every door walling the destination's own side is locked or private (the
   // way would need it even after another door), refuse naming it, rather than walking round to the nearest point outside.
   const m=d.model(),goalSide=(found.goalDoors?.()??[]).filter(id=>!found.doors.includes(id)).flatMap(id=>{const e=m.entities.get(id),def=e&&m.resolvedDef(e.def);if(!e||!def)return [];

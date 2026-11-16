@@ -38,6 +38,12 @@ export function memAvailableMb() {
   return Math.round(freemem() / 2 ** 20);
 }
 
+/** #2233 A1: a process's proportional set size in MB (Linux /proc/<pid>/smaps_rollup: its own pages, shared ones split
+ *  between their users), or null where there is none (not Linux, the process gone). */
+export function pssMb(pid, read = (f) => readFileSync(`${process.env.SIM_PROC_ROOT ?? ''}${f}`, 'utf8')) {
+  try { const m = read(`/proc/${pid}/smaps_rollup`).match(/^Pss:\s+(\d+)\s+kB/m); return m ? Math.round(Number(m[1]) / 1024) : null; } catch { return null; }
+}
+
 /** Memory a world's pre-warmed (standby) process needs beside its running one: measured 230-240 MB for a new world and
  *  for the eden/mars forks (Node 22, code loaded, nothing opened), plus margin for the launcher's own overlap. */
 export const PREWARM_MB = 768;
@@ -92,13 +98,14 @@ export function productionSettings(cfg, origin) {
   const maxRunning = cfg.maxRunning ?? ports;
   const maxWorlds = cfg.maxWorlds ?? 200;
   for (const [k, v] of Object.entries({ maxRunning, maxWorlds })) if (!Number.isInteger(v) || v < 1) throw new Error(`launcher: ${k} must be a positive integer`);
+  if (cfg.worldsMemMb !== undefined && !(Number.isInteger(cfg.worldsMemMb) && cfg.worldsMemMb >= 0)) throw new Error('launcher: worldsMemMb must be a whole number of MB');
   if (ports > 0 && maxRunning > ports) throw new Error(`launcher: maxRunning ${maxRunning} exceeds the ${ports} child ports`);
   const base = (cfg.base ?? '').replace(/\/+$/, '');
   if (base && !/^\/[a-z][a-z0-9-]{0,31}$/.test(base)) throw new Error(`launcher: base must be one path segment like /worlds, got ${cfg.base}`);
   if (base && TAKEN_PREFIXES.includes(base)) throw new Error(`launcher: base ${base} belongs to the existing release`);
   return {
     base, devAuth, publicOrigin, authEnvFile: cfg.authEnvFile ?? null, maxWorlds, maxRunning,
-    minFreeMb: cfg.minFreeMb ?? 0, worldHeapMb: cfg.worldHeapMb ?? 0,
+    minFreeMb: cfg.minFreeMb ?? 0, worldHeapMb: cfg.worldHeapMb ?? 0, worldsMemMb: cfg.worldsMemMb ?? 0,   // #2233 A1: 0, no memory figure
     // #1649: the deploy stage (sim-worlds@<stage>.service sets SIM_STAGE=%i); `production` refuses dev-only world options
     stage: cfg.stage ?? (/^[a-z][a-z0-9-]{0,31}$/.test(process.env.SIM_STAGE ?? '') ? process.env.SIM_STAGE : null),   // keeper.mjs stageOf
   };
@@ -132,6 +139,15 @@ export function decorateCommand({ cmd, args, env }, s) {
   if (s.worldHeapMb) out.NODE_OPTIONS = `--max-old-space-size=${s.worldHeapMb}`;
   for (const [k, v] of Object.entries(WORLD_MALLOC_ENV)) if (out[k] === undefined) out[k] = v;
   return { cmd, args, env: out };
+}
+
+/** #2444: SIM_SHARDS, the worlds one shard program holds (tools/world-launcher/shard.mjs). Unset, empty or 0: off, every
+ *  world in its own process as before; 2 to 8: on (docs/design/world-cost.md: a shard holds quiet worlds, at most 8). */
+export function shardSize(v) {
+  if (v === undefined || v === null || v === '' || v === '0' || v === 0) return 0;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 2 || n > 8) throw new Error(`SIM_SHARDS must be 0 (off) or 2 to 8 worlds per shard, got ${v}`);
+  return n;
 }
 
 /** Keep one previous child log (`<slug>.log.1`) once the current one passes maxBytes. */

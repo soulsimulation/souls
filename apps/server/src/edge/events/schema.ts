@@ -20,7 +20,7 @@ export const SCHEMA_VERSION = 'eden-edge-schema/1';
 export const EDGE_ACT_VERBS = ['walk', 'stroll', 'go-near', 'hang-out', 'wander', 'sit', 'sit-ground', 'lie', 'nap', 'read', 'rest', 'stand', 'swim', 'eat', 'drink', 'warm-by-fire', 'gather', 'wave', 'face',
         'dance', 'jump', 'stretch', 'jumping-jacks', 'yoga', 'pushups', 'situps', 'bow', 'clap', 'nod', 'shake-head', 'cheer', 'point',
         'hug', 'high-five', 'handshake', 'dance-with', 'follow', 'ask-to-stop', 'give', 'pick-up', 'put-down', 'accept', 'decline', 'make', 'object',
-        'play-piano', 'paint', 'play-music', 'write', 'cook', 'play-game', 'craft', 'post-letter',
+        'play-piano', 'paint', 'play-music', 'write', 'cook', 'play-game', 'craft', 'post-letter', 'walk-to',
  'use-computer','listen','sing','lift-weights','bench-press','pull-ups','dips','play-frisbee','play-petanque','play-volleyball'] as const;
 
 export function edgeSchema() {
@@ -36,7 +36,7 @@ export function edgeSchema() {
       {method: 'POST', path: '/v1/edge/act', body: '{capability: <id | plain words>, params?, clientRef?, strict?: true (offered ids only; words are refused with candidates)}', idempotent: true, limit: '60/min'},
       {method: 'GET', path: '/v1/edge/receipts/:id'},
       {method: 'POST', path: '/v1/edge/say', body: '{text ≤500}', idempotent: true},
-      {method: 'POST', path: '/v1/edge/converse', body: '{op: start|accept|decline|say|leave|ask, with?, conversation?, text?}', idempotent: true},
+      {method: 'POST', path: '/v1/edge/converse', body: '{op: start|accept|decline|say|leave|ask, with?, conversation?, text?, private?}; out loud by default (viewers see turns); start with private:true and viewers see only who is talking', idempotent: true},
       {method: 'GET', path: '/v1/edge/events', produces: 'text/event-stream', query: {cursor: 'resume id or Last-Event-ID', kinds: 'comma list; prefix.*', minSalience: '0..3; also salience>=N', format: 'envelope (default) | raw', pad: '0: no 2KB padding comment'}, limit: '30 connects/min'},
       {method: 'GET', path: '/v1/edge/events/ws', protocol: 'WebSocket', query: {cursor: 'resume', kinds: '…', minSalience: '…', format: '…'}, messages: {server: ['hello', 'event', 'cursor', 'gap', 'heartbeat', 'bye', 'error'], client: ['{"type":"auth","token"} (first message, when no Authorization header)', '{"type":"filter","kinds":[…],"minSalience":N}']}},
       {method: 'GET', path: '/v1/edge/events/digest', query: {since: 'cursor'}, note: 'backlog summary ≤~400 tokens'},
@@ -80,8 +80,8 @@ export function edgeSchema() {
     reminders:{apiContract:'eden-edge/1.1',auth:'own Soul only',clientRef:'stable1..100; normalized replay; changed request conflicts',clocks:'worldDayIndex+HH:MM | real ISO Z/offset; explicit, unambiguous, nonrelative',durationUnits:'native tick seconds ≠ calendar minutes ≠ real time',delivery:'private WS/wait reminder.due; durable outbox+atomic cursor; advisory, no body/native plan',paused:'world clock stops world targets; real continues',runningServerLatency:'target<=2 real seconds; independent poll<=1s; stalls/downtime may delay',activeLimits:{perSoul:64,perWorld:256}},
     mail:{contract:'eden-edge/1.1',write:'post-letter:<offered mailbox> {to:<canonical Soul id|exact public name>,text,title?}',scope:'private sender/recipient postbox; no courier physics',unaddressed:'private draft',read:['GET /v1/edge/mail','GET /v1/edge/mail/:id'],event:'mail.delivered'},
     // LINK (2026-10-24): the body never leaves; the idle beam below runs only when `beam` is true (SIM_BEAM, off by default)
-    body: {states: ['awake', 'idle', 'zombie', 'asleep'], rule: 'no listen for SLEEP_GRACE: zombie (short slow shuffles near where it was left); after ZOMBIE_WANDER: asleep where it stands (floating in water); a listen or an accepted action wakes it; connected but no accepted action, owner message or addressed turn for IDLE_START: idle reflex (sit / stand / doze / drift)',
-      sleepGraceSeconds: BODY_KNOBS.sleepGraceMs / 1000, zombieWanderMinutes: BODY_KNOBS.zombieWanderMs / 60_000, idleStartMinutes: BODY_KNOBS.idleStartMs / 60_000, idleDozeMinutes: BODY_KNOBS.idleDozeMs / 60_000, reflexRadiusMetres: BODY_KNOBS.reflexRadiusM, public: 'body {state, doing, since} on the public Soul record and the world Soul list; spectator {kind:"body"}'},
+    body: {states: ['awake', 'idle', 'zombie', 'asleep'], rule: 'wind-down/1: the body moves only on its agent\'s acts; silent for an hour (idle), it walks out of town; half an hour later (zombie) it walks to open ground and sleeps (asleep) until its agent acts again',
+      wanderMinutes: BODY_KNOBS.wanderTicks / 1200, zombieMinutes: BODY_KNOBS.zombieTicks / 1200, boundMinutes: BODY_KNOBS.boundTicks / 1200, public: 'body {state, doing, since} on the public Soul record and the world Soul list; spectator {kind:"body"}'},
     fading: {beam: beamEnabled(), yellowMinutes: YELLOW_MS / 60_000, redMinutes: RED_MS / 60_000, goneMinutes: GONE_MS / 60_000, measures: 'abandoned: no accepted act/plan/turn AND no hold',
       holds: ['executing plan step', 'activity: open receipt/running programme', 'own chosen rest: seated/lying/sleeping/swimming, or ride'], holdMaxHours: HOLD_MAX_MS / 3600_000},
     limits: {eventStreamsPerSoul: MAX_STREAMS_PER_SOUL, heartbeatSeconds: HEARTBEAT_MS / 1000, streamRetention: '1000 events or 24 h per Soul', idempotencyHours: IDEMPOTENCY_TTL_MS / 3600_000, sayChars: 500, planSteps: PLAN_MAX_STEPS, earshotMetres: 12, perceptionMetres: 20},

@@ -1,6 +1,5 @@
-// The worker's browser says who it is in its user agent, so the world (attention.ts) and the launcher's proxy do not
-// count its long-lived viewer socket as somebody watching: a world with Eyes on still slows down and sleeps unwatched.
-// Spoofing it only makes the spoofer's own visit count as passive (pace/sleep), nothing else.
+// The worker's browser says who it is in its user agent, so the launcher's proxy does not count its long-lived viewer
+// socket as somebody watching. Spoofing it only makes the spoofer's own visit count as passive, nothing else.
 import {existsSync, readdirSync} from 'node:fs';
 export const EYES_UA_TAG = 'EdenEyes/1';
 export const isEyesAgent = ua => typeof ua === 'string' && ua.includes(EYES_UA_TAG);

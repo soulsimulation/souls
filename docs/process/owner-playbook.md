@@ -19,8 +19,8 @@ authorized agenda it can replace finished workers and select the next ready issu
 Tell it priorities, capacity and stop conditions; it persists changes so another session can resume. This does not
 require a separate supervisor service, and docs alone cannot supply an unavailable task-launch capability. Your
 coordinator stays engaged while the authorized agenda is running, using bounded waits and worker events; you can
-plan or ask questions while its lanes continue. Its [private manifest/state](coordinator-memory.md) preserves
-preferences, assignments and pending decisions for a fresh session.
+plan or ask questions while its lanes continue. Its [private state file](development-coordinator.md#state) and the
+agenda issue let a fresh session resume.
 
 The first-session prompt is orientation-only: it reads the rules, current project/release position and existing
 activity, gives you a compact report, then waits for your initial agenda and capacity. It does not dispatch workers

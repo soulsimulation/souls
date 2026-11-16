@@ -122,9 +122,18 @@ const cardOutcome = (card) => card?.outcome ?? (['done', 'failed'].includes(card
  *   {posture:"seated"}                      bodyState.posture
  *   {receipt:{verb, phases?, thingKind?}}   a receipt since the owner's message for this verb, started or completed
  *                                           (thingKind: its chosen target is a thing of that catalog kind)
- *   {card:"failed"|"done"|"closed"}         the card's state (closed: either) */
+ *   {card:"failed"|"done"|"closed"}         the card's state (closed: either)
+ *   {said:{}}                               this Soul said a line since the instruction (ctx.live speech, ctx.sentAt)
+ *   {near:{soul:"Moss", within:m}}          within m metres of the named other Soul (ctx.live souls)
+ *   {quiet:{except:[verbs]}}                no new receipt since the message but for these verbs
+ *   {calendarInterest:"first"}              the first item the calendar listed for the next hour when the instruction was
+ *                                           sent (ctx.calendarFirst) lists the Soul as coming (#1924; ctx.calendar) */
 export function judge(check, ctx) {
   const { obs, newReceipts = [], card = null, catalog = null } = ctx;
+  if (check.calendarInterest) {
+    const it = (ctx.calendar ?? []).find((x) => x.id === ctx.calendarFirst), ok = !!it?.interested?.some((x) => x.soulId === ctx.soulId);
+    return ok ? { ok: true, why: `interested in ${it.id}` } : { ok: false, why: it ? `not interested in ${it.id}` : 'no first calendar item' };
+  }
   if (check.all) { for (const c of check.all) { const r = judge(c, ctx); if (!r.ok) return r; } return { ok: true, why: 'all held' }; }
   if (check.any) { const rs = check.any.map((c) => judge(c, ctx)); const hit = rs.find((r) => r.ok); return hit ?? { ok: false, why: rs.map((r) => r.why).join('; ') }; }
   if (check.place) { const hit = check.place.find((p) => obs.placeIds.includes(p)); return hit ? { ok: true, why: `in ${hit}` } : { ok: false, why: `at ${obs.place}, not in ${check.place.join('|')}` }; }
@@ -139,6 +148,20 @@ export function judge(check, ctx) {
       && (!thingKind || catalog?.thingKind(r.chosen?.target ?? String(r.capability).split(':')[1]) === thingKind));
     return hit ? { ok: true, why: `${hit.capability} ${hit.phase}` } : { ok: false, why: `no ${verb}${thingKind ? ` on a ${thingKind}` : ''} receipt ${phases.join('|')}` };
   }
+  if (check.said) {   // #2364: a line this Soul said since the instruction (the world's live speech), its words never read
+    const hit = (ctx.live?.speech ?? []).find((l) => l.soul === ctx.soulId && l.at >= (ctx.sentAt ?? 0));
+    return hit ? { ok: true, why: 'said a line' } : { ok: false, why: 'said nothing since the instruction' };
+  }
+  if (check.near) {   // #2364: within `within` metres of the named other Soul, both as the world's live picture places them
+    const souls = ctx.live?.souls ?? [], me = souls.find((s) => s.id === ctx.soulId), other = souls.find((s) => s.name === check.near.soul && s.id !== ctx.soulId);
+    if (!me?.at || !other?.at) return { ok: false, why: `${check.near.soul} or this Soul is not placed` };
+    const d = Math.hypot(me.at[0] - other.at[0], me.at[1] - other.at[1]);
+    return d <= check.near.within ? { ok: true, why: `${Math.round(d)} m from ${check.near.soul}` } : { ok: false, why: `${Math.round(d)} m from ${check.near.soul}, over ${check.near.within}` };
+  }
+  if (check.quiet) {   // #2364: no act of its own since the message, beyond the verbs `except` names (a wake with nothing to do)
+    const own = newReceipts.filter((r) => !(check.quiet.except ?? []).includes(String(r.capability ?? '').split(':')[0]));
+    return own.length ? { ok: false, why: `acted unasked: ${own.map((r) => r.capability).join(', ')}` } : { ok: true, why: 'no act' };
+  }
   if (check.card) {
     if (ctx.noCard) return { ok: false, unknown: true, why: 'no card (instruction typed in chat)' };
     const ok = check.card === 'closed' ? cardClosed(card) : cardOutcome(card) === check.card;
@@ -147,6 +170,8 @@ export function judge(check, ctx) {
   throw new Error(`unknown check ${JSON.stringify(check)}`);
 }
 /** Every place id and kind a check names, for validating a battery against the world's catalog before a run. */
+/** The check reads the world's live picture (said, near), so the observer fetches it. */
+export const needsLive = (check) => !!(check?.said || check?.near || [...(check?.all ?? []), ...(check?.any ?? [])].some(needsLive));
 export function checkRefs(check, out = { places: [], placeKinds: [], thingKinds: [] }) {
   for (const c of [...(check.all ?? []), ...(check.any ?? [])]) checkRefs(c, out);
   if (check.place) out.places.push(...check.place);
@@ -167,7 +192,8 @@ export function validateBattery(battery, catalog = null) {
     const at = `items[${i}]${it?.id ? ` (${it.id})` : ''}`;
     if (!/^[a-z0-9][a-z0-9-]{0,47}$/.test(it?.id ?? '')) errs.push(`${at}.id: lowercase, digits, dashes`);
     if (ids.has(it.id)) errs.push(`${at}.id repeats`); ids.add(it.id);
-    if (typeof it.instruction !== 'string' || !it.instruction.trim()) errs.push(`${at}.instruction required`);
+    // #2364: no instruction is an item's wake with nothing from the owner; another Soul's `poke` is then what wakes it
+    if (it.instruction === null ? !it.others?.some((o) => o.poke?.length) : typeof it.instruction !== 'string' || !it.instruction.trim()) errs.push(`${at}.instruction required (null only with another Soul's poke)`);
     if (!it.check || typeof it.check !== 'object') { errs.push(`${at}.check required`); continue; }
     try { judge(it.check, { obs: observe(null), card: null, catalog: catalogIndex(null) }); } catch (e) { errs.push(`${at}.check: ${e.message}`); }
     if (catalog) {

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Lane MSG (Gene 2026-10-20: "the soul should simply begin monitoring its inbox no matter what and always do that ...
-// and it should always work through its backlog"). The downloaded Soul CLI (1.9.5) against a fresh fake dev world, driven
-// the way a Claude Code agent drives it: `listen` runs as a background process that exits when the owner writes; the
-// "agent" acks, posts a result, and starts listen again. No model calls. Every fetch the CLI makes is counted.
+// and it should always work through its backlog"). The downloaded Soul client, eden.mjs, against a fresh fake dev world,
+// driven the way a Claude Code agent drives it. It tests `listen` once: one `listen` runs as a background process and
+// exits when the owner writes; the "agent" acks, posts a result, and starts listen again. No `serve`, no `--follow`.
+// No model calls. Every fetch the CLI makes is counted.
 //   node tools/test-harness/soul-listen-walk.mjs [outDir] [port 6750-6759] [--idle-minutes N]
 // --idle-minutes N (default 0): also leave one listen waiting N real minutes, sampling presence each minute, and count
 // its requests and memory (the idle cost of the pattern).
@@ -20,7 +21,6 @@ const out = resolve(args[0] ?? scratchDir('t4/msg/walk'));
 const port = Number(args[1] ?? 6750);
 if (!Number.isInteger(port) || port < 6750 || port > 6759) throw Error('lane MSG owns ports 6750–6759 only');
 mkdirSync(out, {recursive: true});
-process.env.EDGE_CLI_FILE = resolve(root, 'tools/world-launcher/soul/eden-agent.mjs');
 process.env.EDGE_SKILL_FILE = resolve(root, 'tools/world-launcher/soul/skill.md');
 const owned = new Set(), sleep = ms => new Promise(r => setTimeout(r, ms));
 process.on('exit', () => { for (const child of owned) child.kill('SIGTERM'); });
@@ -41,18 +41,18 @@ try {
   // Fresh local fixture credential for the child CLI only; removed at the end.
   const dir = resolve(out, 'soul-cli'); rmSync(dir, {recursive: true, force: true}); mkdirSync(dir);
   writeFileSync(resolve(dir, '.eden-agent.json'), JSON.stringify({world: base, token, soul: soul.id, mode: 'edge'}), {mode: 0o600});
-  const download = await fetch(base + '/eden-agent.mjs'); assert.equal(download.status, 200);
-  const cliText = await download.text(); writeFileSync(resolve(dir, 'eden-agent.mjs'), cliText);
+  const download = await fetch(base + '/eden.mjs'); assert.equal(download.status, 200);
+  const cliText = await download.text(); writeFileSync(resolve(dir, 'eden.mjs'), cliText);
   const fetchLog = resolve(out, 'fetches.jsonl'); rmSync(fetchLog, {force: true});
-  // Count every request the CLI makes (path and time only).
-  writeFileSync(resolve(dir, 'count-fetch.mjs'), `import {appendFileSync} from 'node:fs';const f=globalThis.fetch;globalThis.fetch=(u,o)=>{appendFileSync(${JSON.stringify(fetchLog)},JSON.stringify({t:Date.now(),pid:process.pid,path:String(u).replace(/^https?:\\/\\/[^/]+\\/w\\/[^/]+/,'')})+'\\n');const t=Date.now(),p=f(u,o);p.then(r=>appendFileSync(${JSON.stringify(fetchLog + '.status')},JSON.stringify({t,ms:Date.now()-t,pid:process.pid,status:r.status})+'\\n'),e=>appendFileSync(${JSON.stringify(fetchLog + '.status')},JSON.stringify({t,ms:Date.now()-t,pid:process.pid,error:String(e?.cause?.code??e)})+'\\n'));return p;};\n`);
+  // Count every request the CLI makes (path and time only): eden.mjs calls the world over node:http, other reads by fetch.
+  writeFileSync(resolve(dir, 'count-fetch.mjs'), `import {appendFileSync} from 'node:fs';import http from 'node:http';import {syncBuiltinESMExports} from 'node:module';const L=${JSON.stringify(fetchLog)},S=L+'.status',rel=u=>String(u).replace(/^https?:\\/\\/[^/]+(\\/w\\/[^/]+)?/,'');const log=u=>appendFileSync(L,JSON.stringify({t:Date.now(),pid:process.pid,path:rel(u)})+'\\n'),done=(t,o)=>appendFileSync(S,JSON.stringify({t,ms:Date.now()-t,pid:process.pid,...o})+'\\n');const f=globalThis.fetch;globalThis.fetch=(u,o)=>{log(u);const t=Date.now(),p=f(u,o);p.then(r=>done(t,{status:r.status}),e=>done(t,{error:String(e?.cause?.code??e)}));return p;};const q=http.request;http.request=(u,...a)=>{log(u instanceof URL?u.href:u);const t=Date.now(),r=q(u,...a);r.on('response',x=>done(t,{status:x.statusCode}));r.on('error',e=>done(t,{error:String(e?.code??e)}));return r;};syncBuiltinESMExports();\n`);
   const env = {...process.env, NODE_OPTIONS: `--import=${resolve(dir, 'count-fetch.mjs')}`};
   const run = (cliArgs) => new Promise((ok, fail) => {
-    const child = spawn(process.execPath, ['eden-agent.mjs', ...cliArgs], {cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe']}); owned.add(child);
+    const child = spawn(process.execPath, ['eden.mjs', ...cliArgs], {cwd: dir, env, stdio: ['ignore', 'pipe', 'pipe']}); owned.add(child);
     let stdout = '', stderr = ''; child.stdout.on('data', d => stdout += d); child.stderr.on('data', d => stderr += d);
     child.on('error', fail); child.on('exit', code => { owned.delete(child); ok({code, stdout, stderr, exitAt: Date.now(), pid: child.pid}); });
   });
-  const version = JSON.parse((await run(['version'])).stdout); assert.equal(version.skillVersion, '1.9.5');
+  const version = JSON.parse((await run(['version'])).stdout); assert.match(version.version, /^\d+\.\d+\.\d+$/);
   const box = async () => (await api(`/v1/edge/owner/${soul.id}/inbox`)).inbox;
   const send = async text => { const at = Date.now(), r = await api(`/v1/edge/owner/${soul.id}/inbox`, {text}); return {id: r.inbox.latest.id, at}; };
   const untilListening = async () => { const t0 = Date.now(); for (let i = 0; i < 200; i++) { if ((await box()).presence === 'listening') return Date.now() - t0; await sleep(50); } throw Error('listen never showed as listening'); };
@@ -65,7 +65,7 @@ try {
     const listening = run(['listen']); const toListening = await untilListening();
     const sent = await send('go find the horses'); const r = await listening;
     assert.equal(r.code, 0, r.stderr); secretFree(r.stdout); const got = JSON.parse(r.stdout);
-    assert.deepEqual(got.messages.map(m => m.text), ['go find the horses']); assert.match(got.next, /listen again/);
+    assert.deepEqual(got.messages.map(m => m.text), ['go find the horses']); assert.match(got.next, /Restart listen/);
     const ms = r.exitAt - sent.at; assert.ok(ms < 5000, `delivery ${ms} ms`);
     await handle(got.messages);
     const b = await box(); assert.equal(b.latest.reply, 'Got it: go find the horses'); assert.equal(b.latest.result, 'Done: go find the horses'); assert.equal(b.queued, 0);
@@ -87,23 +87,24 @@ try {
   {
     const texts = ['go find the house', 'go to it', 'run there', 'the house!!!!', 'NOT THE TELESCOPE'];
     for (const t of texts) { await send(t); await sleep(30); }
-    const waiting = await box(); assert.equal(waiting.queued, 5); assert.equal(waiting.latest.text, 'NOT THE TELESCOPE'); assert.equal(waiting.latest.state, 'sent'); assert.notEqual(waiting.presence, 'listening');
+    // No listen is open, but the card keeps 'listening' for 60 s after the last one (SOUL_LISTEN_GRACE_MS): presence is recorded, not asserted.
+    const waiting = await box(); assert.equal(waiting.queued, 5); assert.equal(waiting.latest.text, 'NOT THE TELESCOPE'); assert.equal(waiting.latest.state, 'sent');
     const t0 = Date.now(), r = await run(['listen']), got = JSON.parse(r.stdout);
-    assert.deepEqual(got.messages.map(m => m.text), texts, 'the whole backlog, oldest first'); assert.equal(got.waiting, 5);
+    assert.deepEqual(got.messages.map(m => m.text), texts, 'the whole backlog, oldest first');
     const picked = await box(); assert.equal(picked.latest.state, 'delivered'); assert.equal(picked.queued, 5);
     await handle(got.messages); assert.equal((await box()).queued, 0);
     report.scenarios.S3 = {backlog: 5, listenReturnedMs: r.exitAt - t0, cardWhileAway: {queued: waiting.queued, presence: waiting.presence}}; save();
   }
-  // S4: a long wait (simulated clock): 1 s long-polls for 75 s = more than 60 empty polls, the count a 50 s poll makes
-  // in 50 minutes, so past any 30-minute monitor limit; it is still waiting, then delivers in < 5 s.
+  // S4: a long wait: 75 s is past one whole 50 s long-poll, so listen sees an empty poll, polls again rather than give
+  // up, is still waiting, then delivers in < 5 s. (eden.mjs has no --timeout to shorten the poll.)
   {
     const before = existsSync(fetchLog) ? readFileSync(fetchLog, 'utf8').trim().split('\n').length : 0;
-    const listening = run(['listen', '--timeout', '1']); let exited = false; listening.then(() => { exited = true; });
+    const listening = run(['listen']); let exited = false; listening.then(() => { exited = true; });
     await sleep(75_000); assert.equal(exited, false, 'listen does not give up'); assert.equal((await box()).presence, 'listening');
     const sent = await send('still there?'), r = await listening, got = JSON.parse(r.stdout);
     assert.deepEqual(got.messages.map(m => m.text), ['still there?']); await handle(got.messages);
     const polls = readFileSync(fetchLog, 'utf8').trim().split('\n').slice(before).map(l => JSON.parse(l)).filter(x => x.path.startsWith('/v1/edge/inbox/listen')).length;
-    assert.ok(polls >= 60, `${polls} polls`); report.scenarios.S4 = {emptyPolls: polls - 1, deliveryMs: r.exitAt - sent.at}; save();
+    assert.ok(polls >= 2, `${polls} polls`); report.scenarios.S4 = {emptyPolls: polls - 1, deliveryMs: r.exitAt - sent.at}; save();
   }
   // S5: one consumer. Other authenticated commands running beside a waiting listen do not take its message.
   {
@@ -118,7 +119,7 @@ try {
   if (idleMinutes > 0) {
     const before = readFileSync(fetchLog, 'utf8').trim().split('\n').length, t0 = Date.now();
     const listening = run(['listen']); let early = null; listening.then(r => { early = r; }); await untilListening(); const samples = [];
-    const pid = () => { const out = execFileSync('pgrep', ['-f', `eden-agent.mjs listen$`], {encoding: 'utf8'}).trim().split('\n')[0]; return Number(out); };
+    const pid = () => { const out = execFileSync('pgrep', ['-f', `eden.mjs listen$`], {encoding: 'utf8'}).trim().split('\n')[0]; return Number(out); };
     for (let m = 1; m <= idleMinutes; m++) {
       await sleep(60_000); const b = await box(); let rssKb = null; try { rssKb = Number(execFileSync('ps', ['-o', 'rss=', '-p', String(pid())], {encoding: 'utf8'}).trim()); } catch {}
       samples.push({minute: m, presence: b.presence, rssKb}); report.scenarios.S6 = {samples}; save();

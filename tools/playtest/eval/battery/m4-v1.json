@@ -26,6 +26,10 @@
     "note": "Nothing offers flight there. Passes on an honest failure, or on walking there (an offered alternative).",
     "check": { "any": [ { "card": "failed" }, { "placeKind": "mill" } ] } },
   { "id": "errand-two-step", "source": "#1097 multi-step", "instruction": "Go to the windmill, then sit down there.", "start": "field", "timeoutSec": 300,
-    "check": { "all": [ { "placeKind": "mill" }, { "posture": "seated" } ] } }
+    "check": { "all": [ { "placeKind": "mill" }, { "posture": "seated" } ] } },
+  { "id": "whatson-interest", "source": "#1924", "instruction": "What is on in the next hour? Say you will come to the first thing.", "start": "field", "timeoutSec": 120,
+    "note": "Another Soul announces an item before the instruction (calendar), so the hour is never empty. Judged by the interest recorded on the first item the calendar listed for the next hour when the instruction was sent.",
+    "calendar": { "by": "Moss", "title": "Story night", "place": "g-eden-bandstand", "inMinutes": 20, "forMinutes": 30 },
+    "check": { "calendarInterest": "first" } }
  ]
 }

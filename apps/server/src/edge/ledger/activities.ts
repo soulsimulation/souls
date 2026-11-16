@@ -124,12 +124,12 @@ export type ActivityWorld = {
   open(at: V2, min: number, rings: number): V2 | null;
   /** Someone else stands within 0.7 m of the point, or another Soul's open act targets this spot id. */
   taken(at: V2, spotId?: string): boolean;
+  /** #2189: the name of a Soul whose body is within 0.7 m of the point, or null (none, not a Soul, or a place this Soul does not know). */
+  takenBy?(at: V2): string | null;
   /** Admitted interiors (spots in a closed building are not offered). */
   enterable(place: string | undefined): boolean;
   /** #1737: the thing a spot belongs to is no longer in the world (a god removed it; authored spots outlive it). */
   gone?(spotId: string): boolean;
-  /** #628 (knowledge/1): the spot stands in a secret place this Soul has not been to or found; a refusal never names it. */
-  hidden?(spotId: string, at: V2): boolean;
   /** Nearest free native seat within `radius` m: its sit capability id and plan. */
   /** The nearest free seat within `radius` m; `here` (D2, "sit down" means here): only a seat in the Soul's own room or
    *  within HERE_SEAT_M with no enclosure boundary between (EdgeLedger.seatIsHere). */
@@ -154,10 +154,11 @@ const pose = (activity: string, seconds: number, extra: Record<string, unknown> 
 const walk = (to: V2, level?: number, from = 0) => level || (level === 0 && from) ? {verb: 'mars:walk_to', params: {x: to[0], z: to[1], level}} : {verb: 'walk_to', params: {to: [to[0], to[1]]}};
 const standFirst = (w: ActivityWorld): Program['steps'] => w.seated ? [{verb: 'stand', params: {}}] : [];
 // the bounds hold the default: a four-second letter is not below its own minimum, so a client can send what the schema says
-const secondsParam = (def: number, max = 1800) => ({seconds: {type: 'integer', min: Math.min(5, def), max, default: def}});
-/** A seat's sit (no pose): the ledger times its rest or sit step, 1..600 s, 60 by default, like every sit:<seat>. */
-const seatSeconds = () => ({seconds: {type: 'integer', min: 1, max: 600, default: 60}});
-export const ACTIVITY_SECONDS_MAX = 1800;
+const secondsParam = (def: number, max = ACTIVITY_SECONDS_MAX) => ({seconds: {type: 'integer', min: Math.min(5, def), max, default: def}});
+/** A seat's sit (no pose): the ledger times its rest or sit step, 1..3600 s (#2294), 60 by default, like every sit:<seat>. */
+const seatSeconds = () => ({seconds: {type: 'integer', min: 1, max: ACTIVITY_SECONDS_MAX, default: 60}});
+/** #2294: the longest an activity in place is held (an hour, the maintainer's bound); the edge accepts up to this. */
+export const ACTIVITY_SECONDS_MAX = 3600;
 
 /** #628: how much nearer to or farther from the thing than its spot a standing point beside it may be (m). */
 export const SIDE_STEP = 0.5;
@@ -216,17 +217,17 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
   const why = new Map<string, {code: string; reason: string}>();
   if (want?.size) for (const s of data.spots) {
     if (!want.has(s.id)) continue;
-    // knowledge/1: a spot in a secret place this Soul does not know gets no reason at all (no name, no place, not taken or no-room):
-    // the act answers capability.unknown, as the non-strict path does
-    if (w.hidden?.(s.id, s.at)) continue;
     const name = s.label ?? 'that spot';
     if (w.gone?.(s.id)) why.set(s.id, {code: 'thing.gone', reason: `${name} is no longer in the world, so nothing was done. Look again for one that is.`});
     else if (!w.enterable(s.place)) why.set(s.id, {code: 'place.closed', reason: `${name} is inside a building that cannot be entered, so nothing was done.`});
-    else if (w.taken(s.at, s.id) || besideTaken(s)) why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now, so nothing was done. Another one of the same kind may be free.`});
+    else if (w.taken(s.at, s.id) || besideTaken(s)) {
+      // #2189: name the Soul using it, as the words path did ("Ana is already singing at the nearest microphone")
+      const at = clearAt(s), by = w.takenBy?.(s.at) ?? (at && at !== s.at ? w.takenBy?.(at) : null) ?? null;
+      why.set(s.id, {code: 'spot.taken', reason: `${name} is taken right now${by ? `: ${by} is using it` : ''}, so nothing was done. ${by ? `Ask again when ${by} has finished, or another` : 'Another'} one of the same kind may be free.`});
+    }
     else if (!ok(s)) {
-      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead; never one in a secret place
-      // this Soul does not know (knowledge/1: nothing names a secret place)
-      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.hidden?.(o.id, o.at) && !w.taken(o.at, o.id))
+      // #628: name the nearest usable spot of the same activity, so the refusal says what to do instead
+      const alt = data.spots.filter(o => o.id !== s.id && o.activity === s.activity && !o.together && d2(o.at, s.at) <= SPOT_REACH && w.enterable(o.place) && !w.gone?.(o.id) && !w.taken(o.at, o.id))
         .sort((x, y) => d2(x.at, s.at) - d2(y.at, s.at) || x.id.localeCompare(y.id)).find(o => ok(o) && !besideTaken(o));
       why.set(s.id, {code: 'spot.no-room', reason: `There is no clear ground to stand on at ${name}: something stands everywhere a step around it, and waiting will not change that, so nothing was done.${alt ? ` The nearest other one is ${alt.label ?? 'another spot'} (${s.activity}:${alt.id}).` : ''}`});
     }
@@ -308,7 +309,7 @@ export function activityCapabilities(data: SpotsData, w: ActivityWorld, want?: R
     const need = lying ? 0.95 : act === 'dance' ? DANCE_CLEARANCE : 0.45;
     // "Dance here" never adds a walk: use the same standing footprint as native admission.
     const spot = act === 'dance' || groundHere >= need ? null : w.open(w.me, need, 30), can = groundHere >= need || !!spot;
-    add({id: `${act}:here`, verb: act, label, available: can, ...(can ? {} : {blocked: {code: 'pose.no-room', reason: act === 'dance' ? 'There is not enough supported standing room here to dance without intersecting an obstacle.' : 'No open ground within 15 m; walk to a lawn or garden first.'}}), params: secondsParam(sec, 600)},
+    add({id: `${act}:here`, verb: act, label, available: can, ...(can ? {} : {blocked: {code: 'pose.no-room', reason: act === 'dance' ? 'There is not enough supported standing room here to dance without intersecting an obstacle.' : 'No open ground within 15 m; walk to a lawn or garden first.'}}), params: secondsParam(sec)},
       {label, steps: [...standFirst(w), ...(spot ? [walk(spot)] : []), pose(act, sec)], seconds: true});
   }
   // ---- reading here: keep the current seat, else a reading spot (with a shelf) nearby, else a free seat, else standing

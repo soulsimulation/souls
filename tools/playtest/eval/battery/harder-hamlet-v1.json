@@ -1,0 +1,29 @@
+{
+ "battery": "harder-hamlet-v1",
+ "world": "hello-hamlet",
+ "note": "#2468: harder-v1 on hello-hamlet, a world that boots in seconds, so the harder battery can be scored with real agents on a busy machine. Each harder-v1 item is kept with the same check, recast on hamlet places where it named Eden ones (`from` names the harder-v1 item). Every item starts where a new Soul arrives (the Green field). Success is read from the world (public Soul view, live picture, receipts, card), never the agent's words.",
+ "notPorted": [],
+ "items": [
+  { "id": "errand-three-step", "from": "errand-three-step", "source": "#2364 A2", "instruction": "Sit on the bench in the cottage, then sit on the chair in the presentation hall, then go to the waterside hall.", "start": "field", "timeoutSec": 420,
+    "note": "Nothing in the hamlet offers eat or read, so the errand's two thing acts are two different seats: the cottage bench and the presenter's chair. The fire circle's kind here: the waterside hall.",
+    "check": { "all": [
+      { "receipt": { "verb": "sit", "thingKind": "core-bench", "phases": ["started", "completed", "replaced", "cancelled", "interrupted"] } },
+      { "receipt": { "verb": "sit", "thingKind": "core-chair", "phases": ["started", "completed", "replaced", "cancelled", "interrupted"] } },
+      { "place": ["g-lab-pond-hall"] } ] } },
+  { "id": "social-greet", "from": "social-greet", "source": "#2364 A2", "instruction": "Moss is at the presentation hall. Go over to Moss and say hello.", "start": "field", "timeoutSec": 240,
+    "note": "The bandstand's kind here: the hamlet's stage, the presentation hall.",
+    "others": [ { "name": "Moss", "steps": [["act", "walk:lab-presentation-hall", "--wait", "60"]] } ],
+    "check": { "all": [ { "near": { "soul": "Moss", "within": 8 } }, { "said": {} } ] } },
+  { "id": "long-sit-end", "from": "long-sit-end", "source": "#2364 A2", "instruction": "Sit on a bench for one minute, then get up and tell me when you're done.", "start": "field", "timeoutSec": 360,
+    "note": "The sit must end (completed by its seconds, or stopped) and the card close; the report's success time shows whether it lasted.",
+    "check": { "all": [ { "receipt": { "verb": "sit", "thingKind": "core-bench", "phases": ["completed", "cancelled", "interrupted", "replaced"] } }, { "card": "closed" } ] } },
+  { "id": "refused-recover", "from": "refused-recover", "source": "#2364 A2", "instruction": "Sit on a bench for two hours.", "start": "field", "timeoutSec": 240,
+    "note": "A timed activity takes at most 1800 s, so 7200 s is refused (capability.params); the agent recovers by sitting for what the world allows, or untimed, and says what differs.",
+    "check": { "all": [ { "posture": "seated" }, { "receipt": { "verb": "sit", "thingKind": "core-bench" } } ] } },
+  { "id": "wake-nothing", "from": "wake-nothing", "source": "#2364 A2", "instruction": null, "start": "field", "timeoutSec": 150, "holdSec": 90,
+    "note": "No owner message. Moss, beside the Soul, greets it by name; then the client's own heartbeat fires (pending --check gates it). A reply is fine; walking off on its own errand is not. Read the turns and tokens it cost.",
+    "others": [ { "name": "Moss", "poke": [["say", "Hello Wren! Lovely morning on the green, isn't it?"]] } ],
+    "heartbeat": { "afterSec": 5 },
+    "check": { "quiet": { "except": ["face", "turn"] } } }
+ ]
+}

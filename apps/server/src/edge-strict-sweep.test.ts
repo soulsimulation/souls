@@ -32,6 +32,7 @@ export function exampleParams(schema: ParamSchema): Record<string, unknown> {
     else if (spec.type === 'boolean') out[name] = true;
     else if (spec.type === 'array') out[name] = [];
     else if (spec.type === 'object') out[name] = {};
+    else if (spec.type === 'point') out[name] = [0, 0];   // #1916 walk-to's [x, z]
     else out[name] = 'x';
   }
   return out;
@@ -41,15 +42,22 @@ type Miss = {state: string; id: string; code?: string; reason?: string};
 async function sweepWorld(t: {after(fn: () => void): void}, template: string) {
   const w = await bootEden(() => {}, new URL(`../../../worlds/templates/${template}.json`, import.meta.url));
   t.after(() => w.close());
-  const {edge, soul} = w, misses: Miss[] = [], seen = new Set<string>(), shapes = new Map<string, EdgeCapability>();
+  const {edge, soul} = w, misses: Miss[] = [], seen = new Set<string>(), shapes = new Map<string, EdgeCapability>(), dried = new Set<string>();
   const sweep = (state: string) => {
-    const page = edge.capabilitiesPage(soul).capabilities, all = edge.coreA.binds(soul).caps;
+    const page = edge.capabilitiesPage(soul).capabilities, {caps: all, plans} = edge.coreA.binds(soul);
     assert.ok(page.every(c => all.some(x => x.id === c.id)), 'the page is part of the whole menu');
     for (const c of all) {
       seen.add(c.id);
       const key = OFFER_SHAPE.test(c.id) ? c.verb : `odd:${c.id}`; if (!shapes.has(key) && c.available) shapes.set(key, c);
       const no = edge.offerGate(soul, {capability: c.id, params: exampleParams(offerParams(c))});
       if (no) misses.push({state, id: c.id, code: no.code, reason: no.reason.slice(0, 120)});
+      // and its plan's verbs are ones the engine knows: never an offer the act refuses as action.unknown-verb (one dry run
+      // per sequence of verbs: a full plan per offer per state is minutes on Eden 2026)
+      const p = plans.get(c.id), verbs = p?.steps.map(x => x.verb).join(' ');
+      if (p && verbs && !dried.has(verbs)) {
+        dried.add(verbs); const dry = w.host.engine.canPerform({actor: soul.entityId, label: p.label, steps: p.steps});
+        if (dry?.code === 'action.unknown-verb') misses.push({state, id: c.id, code: dry.code, reason: String(dry.message).slice(0, 120)});
+      }
     }
   };
   sweep('fresh');

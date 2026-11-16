@@ -5,10 +5,13 @@
 // geometric buckets (x1.25 from 0.1 ms to ~100 s, then open; a quantile is its bucket's upper bound, capped at the max), over the last 5 to 10 minutes (two
 // rotating 5-minute windows) and since the process started. A long-poll (`listen`, `wait`) records how late it answered
 // past its own timeout, not the time it was held open, so a due return that left late shows as late.
+// #1944: `edge:act` also keeps its time after admission in three parts (handler, wait, commit: actTiming below), and the
+// monitor publishes its last 10-second tick window here (publishTickWindow), so both reach live.json from the watchdog.
+import {AsyncLocalStorage} from 'node:async_hooks';
 
 export const API_ROUTES = [
   'edge:act', 'edge:say', 'edge:converse', 'edge:objects/:id/act', 'edge:plan', 'edge:around',
-  'edge:here', 'edge:observe', 'edge:capabilities', 'edge:view', 'edge:objects', 'edge:resolve',
+  'edge:here', 'edge:observe', 'edge:capabilities', 'edge:view', 'edge:objects',
   'edge:listen', 'edge:wait', 'edge:inbox/:id', 'edge:inbox/:id/ack', 'edge:inbox/:id/result', 'edge:receipts/:id',
   'edge:catalog', 'edge:live', 'edge:public', 'edge:other', 'god:read', 'god:write', 'god:other', 'world:other',
 ] as const;
@@ -44,7 +47,16 @@ const KINDS = 2, WINDOWS = 3, ALL = 2;           // windows 0 and 1 rotate; 2 is
 const SERIES = API_BUCKETS + 1;                  // the buckets, then the max
 const HEAD = 4;                                  // [0] current window (0|1), [1] its start, [2] the other's start (0 = none), [3] process start
 const at = (route: number, kind: number, win: number) => HEAD + ((route * KINDS + kind) * WINDOWS + win) * SERIES;
-export const API_SLOTS = HEAD + API_ROUTES.length * KINDS * WINDOWS * SERIES;
+// #1944 A2: edge:act's parts (handler, wait, commit) in the same windows, then per window the acts whose wait passed
+// three ticks, then the last tick window (TICK_FIELDS)
+const PARTS = ['handler', 'wait', 'commit'] as const;
+const PART0 = HEAD + API_ROUTES.length * KINDS * WINDOWS * SERIES;
+const partAt = (k: number, win: number) => PART0 + (k * WINDOWS + win) * SERIES;
+const OVER0 = PART0 + PARTS.length * WINDOWS * SERIES;
+const TICK_FIELDS = ['at', 'windowMs', 'ticks', 'p50', 'p99', 'late', 'longestGapMs', 'green', 'amber', 'red', 'black',
+  'holdService', 'holdLoop', 'holdHeap', 'holdDwell', 'enterService', 'enterLoop', 'enterHeap', 'enterQueue', 'enterRed'] as const;
+const TICK0 = OVER0 + WINDOWS;
+export const API_SLOTS = TICK0 + TICK_FIELDS.length;
 export const newSharedApi = () => new Float64Array(new SharedArrayBuffer(API_SLOTS * Float64Array.BYTES_PER_ELEMENT));
 /** The process's own histograms, read by the watchdog thread (watchdog.ts passes the buffer). */
 export const sharedApi = newSharedApi();
@@ -56,8 +68,15 @@ function bucketOf(ms: number): number {
 }
 function add(a: Float64Array, base: number, ms: number) { a[base + bucketOf(ms)]++; if (ms > a[base + API_BUCKETS]) a[base + API_BUCKETS] = ms; }
 
-/** Record one answer. Never throws (a bad value is dropped): instrumentation never fails a request. */
-export function recordApi(route: ApiRoute, queueMs: number, handlerMs: number, now = Date.now(), a: Float64Array = sharedApi) {
+/** #1944: an act's time after admission: `handler` up to the point the ledger's settle starts waiting, `wait` from there
+ *  until the tick takes the decision, `commit` from there to the answer (applying it inside drainInputs, perform included). */
+export type ActParts = {handler: number; wait: number; commit: number};
+/** An act's wait counts as long past three ticks (at 50 ms). */
+export const WAIT_OVER_MS = 150;
+
+/** Record one answer (`parts`: edge:act's own, when its handler ran). Never throws (a bad value is dropped):
+ *  instrumentation never fails a request. */
+export function recordApi(route: ApiRoute, queueMs: number, handlerMs: number, now = Date.now(), a: Float64Array = sharedApi, parts?: ActParts) {
   try {
     const r = IDX.get(route); if (r === undefined || !Number.isFinite(queueMs) || !Number.isFinite(handlerMs)) return;
     if (!a[3]) a[3] = now;
@@ -66,15 +85,29 @@ export function recordApi(route: ApiRoute, queueMs: number, handlerMs: number, n
     else if (now - a[1] >= API_WINDOW_MS) {        // rotate: the other window is cleared and becomes current
       const next = cur ? 0 : 1;
       for (let i = 0; i < API_ROUTES.length; i++) for (let k = 0; k < KINDS; k++) a.fill(0, at(i, k, next), at(i, k, next) + SERIES);
+      for (let k = 0; k < PARTS.length; k++) a.fill(0, partAt(k, next), partAt(k, next) + SERIES);
+      a[OVER0 + next] = 0;
       a[2] = a[1]; a[1] = now; a[0] = cur = next;
     }
-    for (const w of [cur, ALL]) { add(a, at(r, 0, w), Math.max(0, queueMs)); add(a, at(r, 1, w), Math.max(0, handlerMs)); }
+    const p = parts && route === 'edge:act' && PARTS.every(k => Number.isFinite(parts[k])) ? parts : null;
+    for (const w of [cur, ALL]) {
+      add(a, at(r, 0, w), Math.max(0, queueMs)); add(a, at(r, 1, w), Math.max(0, handlerMs));
+      if (p) { PARTS.forEach((k, i) => add(a, partAt(i, w), Math.max(0, p[k]))); if (p.wait > WAIT_OVER_MS) a[OVER0 + w]++; }
+    }
   } catch { /* never fails a request */ }
 }
 
 export type Quantiles = {p50: number; p99: number; p999: number; max: number};
-export type ApiRouteStats = {n: number; queue: Quantiles; handler: Quantiles; nAll: number; handlerAll: Quantiles};
-export type ApiBlock = {windowS: number; sinceS: number; bucketX: 1.25; routes: Partial<Record<ApiRoute, ApiRouteStats>>};
+/** edge:act only (#1944): its parts over the same windows, and how many acts waited past three ticks (window, since start). */
+export type ActPartStats = {handler: Quantiles; wait: Quantiles; commit: Quantiles; waitOver3Ticks: number; waitOver3TicksAll: number};
+export type ApiRouteStats = {n: number; queue: Quantiles; handler: Quantiles; nAll: number; handlerAll: Quantiles; parts?: ActPartStats};
+/** #1944 A3: the monitor's last completed tick window: the tick's own ms, ticks that started over 25 ms after they were
+ *  due, the longest start-to-start gap, and the share of the window at each load level. `at` = its end (epoch ms). */
+export type TickWindow = {at: number; windowS: number; ticks: number; tickMs: {p50: number; p99: number}; lateTicks: number; longestGapMs: number;
+  levels: {green: number; amber: number; red: number; black: number};
+  /** #2124: seconds at amber per signal that held it (monitor.ts AmberHold; one sample can count under several), and the entries into amber per cause. */
+  amberS: {service: number; loop: number; heap: number; dwell: number}; amberEntries: {service: number; loop: number; heap: number; queue: number; red: number}};
+export type ApiBlock = {windowS: number; sinceS: number; bucketX: 1.25; routes: Partial<Record<ApiRoute, ApiRouteStats>>; ticks?: TickWindow};
 
 const r1 = (x: number) => Math.round(10 * x) / 10;
 function quantiles(a: Float64Array, bases: number[]): {n: number; q: Quantiles} {
@@ -99,8 +132,42 @@ export function apiOf(a: Float64Array = sharedApi, now = Date.now()): ApiBlock {
     const queue = quantiles(a, wins.map(w => at(r, 0, w))), handler = quantiles(a, wins.map(w => at(r, 1, w)));
     routes[API_ROUTES[r]] = {n: handler.n, queue: queue.q, handler: handler.q, nAll: all.n, handlerAll: all.q};
   }
-  const from = a[2] || a[1];
-  return {windowS: from ? Math.round((now - from) / 1000) : 0, sinceS: a[3] ? Math.round((now - a[3]) / 1000) : 0, bucketX: 1.25, routes};
+  const act = routes['edge:act'];
+  if (act && quantiles(a, [partAt(0, ALL)]).n) {
+    const [handler, wait, commit] = PARTS.map((_, k) => quantiles(a, wins.map(w => partAt(k, w))).q);
+    act.parts = {handler, wait, commit, waitOver3Ticks: wins.reduce((n, w) => n + a[OVER0 + w], 0), waitOver3TicksAll: a[OVER0 + ALL]};
+  }
+  const from = a[2] || a[1], ticks = tickWindowOf(a);
+  return {windowS: from ? Math.round((now - from) / 1000) : 0, sinceS: a[3] ? Math.round((now - a[3]) / 1000) : 0, bucketX: 1.25, routes, ...(ticks ? {ticks} : {})};
+}
+
+/** #1944 A3: the monitor publishes each completed tick window (monitor.ts). */
+export function publishTickWindow(w: TickWindow, a: Float64Array = sharedApi) {
+  const v = {at: w.at, windowMs: 1000 * w.windowS, ticks: w.ticks, p50: w.tickMs.p50, p99: w.tickMs.p99, late: w.lateTicks, longestGapMs: w.longestGapMs, ...w.levels,
+    holdService: w.amberS.service, holdLoop: w.amberS.loop, holdHeap: w.amberS.heap, holdDwell: w.amberS.dwell,
+    enterService: w.amberEntries.service, enterLoop: w.amberEntries.loop, enterHeap: w.amberEntries.heap, enterQueue: w.amberEntries.queue, enterRed: w.amberEntries.red};
+  TICK_FIELDS.forEach((k, i) => { a[TICK0 + i] = v[k]; });
+}
+function tickWindowOf(a: Float64Array): TickWindow | undefined {
+  const f = (k: typeof TICK_FIELDS[number]) => a[TICK0 + TICK_FIELDS.indexOf(k)];
+  if (!f('at')) return undefined;
+  const sh = (k: 'green' | 'amber' | 'red' | 'black') => Math.round(100 * f(k)) / 100;
+  return {at: f('at'), windowS: r1(f('windowMs') / 1000), ticks: f('ticks'), tickMs: {p50: r1(f('p50')), p99: r1(f('p99'))}, lateTicks: f('late'), longestGapMs: r1(f('longestGapMs')),
+    levels: {green: sh('green'), amber: sh('amber'), red: sh('red'), black: sh('black')},
+    amberS: {service: r1(f('holdService')), loop: r1(f('holdLoop')), heap: r1(f('holdHeap')), dwell: r1(f('holdDwell'))},
+    amberEntries: {service: f('enterService'), loop: f('enterLoop'), heap: f('enterHeap'), queue: f('enterQueue'), red: f('enterRed')}};
+}
+
+/** #1944 A1: marks an act request leaves as it runs (admission.ts starts one per POST /v1/edge/act; the ledger fills it).
+ *  Outside an act request getStore() is undefined, so a mark elsewhere costs one lookup. performance.now() ms; 0 = unset. */
+export type ActTiming = {bindMs: number; checkAt: number; routeMisses: number; waitAt: number; takenAt: number};
+export const actTiming = new AsyncLocalStorage<ActTiming>();
+export const newActTiming = (): ActTiming => ({bindMs: 0, checkAt: 0, routeMisses: 0, waitAt: 0, takenAt: 0});
+/** The parts of an act answered at `end`, its turn having started at `start`: they sum to end − start. `check` runs from
+ *  the feasibility check to the wait (or the answer); `bind` is the time spent binding the offer. */
+export function actPartsOf(t: ActTiming, start: number, end: number): ActParts & {bind: number; check: number; routeMisses: number} {
+  const waitAt = t.waitAt ? Math.min(end, Math.max(start, t.waitAt)) : end, takenAt = t.takenAt ? Math.min(end, Math.max(waitAt, t.takenAt)) : end;
+  return {handler: waitAt - start, wait: takenAt - waitAt, commit: end - takenAt, bind: t.bindMs, check: t.checkAt ? Math.max(0, waitAt - t.checkAt) : 0, routeMisses: t.routeMisses};
 }
 
 /** The handler time to record for an answer: a long-poll's lateness past its own timeout, otherwise the time itself. */

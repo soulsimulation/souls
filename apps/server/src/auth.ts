@@ -26,6 +26,8 @@ export class Auth {
    * Old worlds (eden/mars/littlemartians) keep main's legacy agent-local projection unchanged. */
   get production(){return this.cfg.authProvider==='clerk'&&this.cfg.worldEngine===true;}
   legacyOwnerAllowed?:(ownerId:string)=>boolean;
+  /** #2243: the shared account registry's database (account grants live there), or null in a world without one. */
+  get registryDb(){return this.registry?.db??null;}
   devAuth: boolean;
   cfg: Config; db: Db;
   constructor(cfg: Config, db: Db) {
@@ -34,8 +36,8 @@ export class Auth {
     if(cfg.authProvider==='clerk'&&!cfg.accountAuthRequired)throw Error('Clerk activation requires ACCOUNT_AUTH_REQUIRED=1');
     // New worlds: Clerk is production mode, and production never takes dev identities.
     const newWorldClerk=cfg.authProvider==='clerk'&&cfg.worldEngine===true;
-    if(newWorldClerk&&process.env.DEV_AUTH==='1')throw Error('DEV_AUTH=1 with AUTH_PROVIDER=clerk on a world-engine world: refusing to start');
-    this.cfg = cfg; this.db = db; this.devAuth = !newWorldClerk && process.env.DEV_AUTH === '1';
+    if(newWorldClerk&&cfg.env.DEV_AUTH==='1')throw Error('DEV_AUTH=1 with AUTH_PROVIDER=clerk on a world-engine world: refusing to start');
+    this.cfg = cfg; this.db = db; this.devAuth = !newWorldClerk && cfg.env.DEV_AUTH === '1';
     // "Bearer dev:admin" is an admin when dev auth is on. It must never be on for a public site.
     if (this.devAuth && cfg.publicUrl.startsWith('https://')) throw new Error('DEV_AUTH=1 with a public https PUBLIC_URL: refusing to start');
   }
@@ -80,7 +82,7 @@ export class Auth {
     }
     if (this.devAuth && token.startsWith('dev:')) {
       // Public exposure (EDGE_PUBLIC=1): only self-generated agent identities; never admin or chosen names.
-      if (process.env.EDGE_PUBLIC === '1' && !/^dev:agent-[0-9a-f]{24}$/.test(token)) return null;
+      if (this.cfg.env.EDGE_PUBLIC === '1' && !/^dev:agent-[0-9a-f]{24}$/.test(token)) return null;
       const id = `dev:${token.slice(4, 40)}`;
       if (!this.db.user(id)) this.db.upsertUser({ id, email: `${token.slice(4)}@dev.local`, wallet: null, role: token === 'dev:admin' ? 'admin' : 'user' });
       return this.db.user(id)!;

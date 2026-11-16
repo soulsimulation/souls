@@ -16,14 +16,14 @@ for (const [label, at] of [['host browse would start inside a nudge', [70.5, -5.
     const w = await coreAWorld(2), [a, b] = w.souls; t.after(w.close);
     const place = 'eden-library-1';
     for (const s of [a, b]) {
-      const go = await w.http(s, 'POST', '/v1/edge/act', {verb: 'go', target: {place}});
+      const go = await w.http(s, 'POST', '/v1/edge/act', {capability: `walk:${place}`});
       assert.equal(go.body.accepted, true, JSON.stringify(go.body));
       await w.ticks(2400, () => !w.open(s, go.body.receipt.id));
       assert.equal(w.receipt(s, go.body.receipt.id).phase, 'completed', 'initial library walk completes');
     }
     if (at) {await w.put(b, [...at]); await w.ticks(40);}
     for (const s of [a, b]) assert.ok(['idle', 'wait'].includes(w.body(s).human.activity), `${s.name} is idle before the request`);
-    const host = await w.http(a, 'POST', '/v1/edge/act', {verb: 'read', target: {place, seconds: 60, with: b.name}});
+    const host = await w.http(a, 'POST', '/v1/edge/act', {capability: `read:${place}`, params: {seconds: 60, with: b.name}});
     assert.equal(host.body.accepted, true, JSON.stringify(host.body));
     const inv = w.ledger.together.invitesFor(b.soulId)[0]; assert.ok(inv, 'the shared read invites the guest'); assert.equal(inv.seconds, 60);
     const guest = await w.http(b, 'POST', '/v1/edge/act', {capability: 'accept:' + inv.id});
@@ -73,7 +73,7 @@ for (const [label, at] of [['host browse would start inside a nudge', [70.5, -5.
 
 test('shared read guest spot: own free spot beside the host destination (same room, 0.5-4 m), never the host\'s own, unavailable, far, other-room, other-level, level-aware or unknown-room spots', async t => {
   const w = await coreAWorld(3), [a, b, c] = w.souls; t.after(w.close);
-  const host = await w.http(a, 'POST', '/v1/edge/act', {verb: 'read', target: {place: 'eden-library-1', seconds: 60, with: b.name}});
+  const host = await w.http(a, 'POST', '/v1/edge/act', {capability: 'read:eden-library-1', params: {seconds: 60, with: b.name}});
   assert.equal(host.body.accepted, true, JSON.stringify(host.body));
   const inv = w.ledger.together.invitesFor(b.soulId)[0], at = inv.meetAt!; assert.ok(at, 'the read invitation carries the host destination');
   const level = w.body(a).human.level ?? 0, room = (q: [number, number]) => w.ledger.places.containing(q[0], q[1], level)[0]?.id, hostRoom = room(at);

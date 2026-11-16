@@ -12,7 +12,8 @@ import { now, sleep } from '../lib/clock.mjs';
 import * as claude from './adapters/claude-headless.mjs';
 import * as codex from './adapters/codex-headless.mjs';
 import * as scriptedOwner from './adapters/scripted-owner.mjs';
-import { worldBudgetFor, priceDriftOf, callUsd } from './world-budget.mjs';
+import { worldBudgetFor, priceDriftOf, callUsd, tokensUsd, CODEX_USD_PER_MTOK } from './world-budget.mjs';
+const TOKEN_PRICED = { 'codex-headless': CODEX_USD_PER_MTOK };   // #2381: adapters that report tokens and no dollars
 import { assertSeatHome } from './seat-home.mjs';
 import { recordOn } from '../record/switch.mjs';
 
@@ -37,7 +38,7 @@ export function splitRendered(md) {
   return out.map(({ turn, text }) => ({ turn, text }));
 }
 
-export const SOUL_CLI = { file: 'eden.mjs', fallbackFile: 'eden-agent.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
+export const SOUL_CLI = { file: 'eden.mjs', listen: (after) => ['listen', ...(after ? ['--after', after] : [])], status: ['status'], parseStatus: parseJsonStatus };
 
 export class Seat {
   constructor({ dir, seat, worldBase, rails = {}, cli = SOUL_CLI, allowedTools, kind = 'soul', budget = null, infraFile = null }) {
@@ -48,7 +49,7 @@ export class Seat {
     this.rails = { maxTurnsPerRequest: 6, maxTurnWallSec: 240, ...rails };
     // 2026-10-26 (round 2): seats sometimes call the CLI by its absolute path and write the skill under .claude/; both were
     // refused by the allowlist and the seat never paired (fix-d3d trio r1, round2 run 1). Allow them for this folder only.
-    this.allowedTools = [...(allowedTools ?? claude.DEFAULT_ALLOWED), `Bash(node ${this.folder}/eden.mjs:*)`, `Bash(node ${this.folder}/eden-agent.mjs:*)`,
+    this.allowedTools = [...(allowedTools ?? claude.DEFAULT_ALLOWED), `Bash(node ${this.folder}/eden.mjs:*)`,
       `Write(${this.folder}/.claude/**)`, `Edit(${this.folder}/.claude/**)`, 'Write(./.claude/**)', 'Edit(./.claude/**)'];
     this.turnN = 0; this.chain = Promise.resolve(); this.listener = null; this.waking = false; this.stopped = false;
     this.lastListenId = null; this.wakesSinceRequest = 0; this.cumulative = null; this.listenFailures = 0;
@@ -105,7 +106,7 @@ export class Seat {
 
   /** Run the seat's own CLI in its folder (read-only commands only: status). Never logs credentials: these print none. */
   async cliJson(args, maxWallMs = 20000) {
-    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile && existsSync(join(this.folder, this.cli.fallbackFile)) ? this.cli.fallbackFile : null;
+    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : null;
     if (!file) return { ok: false, reason: `no ${this.cli.file} in folder` };
     const r = await run('node', [file, ...args], { cwd: this.folder, maxWallMs });
     return { file, ...(this.cli.parseStatus ?? parseJsonStatus)(r.stdout, r.code, r.stderr) };
@@ -150,8 +151,10 @@ export class Seat {
     this.inTurn = true;
     const n = ++this.turnN, started = now();
     try { onStart?.({ turn: n, reason, startedAt: started.t, startMono: started.mono }); } catch { /* observer hook is best effort */ }
-    // #1098: a live seat with no real cost report (Codex) can't be held to the world budget, so under one it is refused
-    const noCost = this.budget && this.info.adapter !== 'claude-headless' ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
+    // #1098: a live seat with no cost report can't be held to the world budget, so under one it is refused; #2381: one that
+    // reports tokens (Codex) is priced from them
+    const tokenPrice = TOKEN_PRICED[this.info.adapter] ?? null;
+    const noCost = this.budget && this.info.adapter !== 'claude-headless' && !tokenPrice ? { ok: false, reason: `world budget: ${this.info.adapter} reports no turn cost, so it can't run under a world budget` } : null;
     const ctxBefore = this.info.sessionContextTokens ?? null;   // the session's context at its last call (null: no call yet)
     if (this.info.seatCheck && !this.info.seatCheck.ok) {   // #1687: a seat that failed its first-call check takes no further live turn
       const ended = now(); this.inTurn = false;
@@ -186,7 +189,7 @@ export class Seat {
     // keeps the priced last call. The limit: an in-flight call that cost more than that reads low by the difference, at most one
     // observation plus one output ($0.073 at the defaults). A kill on a seat's last turn, or a new session, stays counted.
     const sessionCost = this.info.adapter === 'claude-headless' ? r.usage?.costUsd ?? null : null;
-    let turnCost = r.usage?.costUsd ?? null;
+    let turnCost = r.usage?.costUsd ?? (tokenPrice && r.usage ? tokensUsd(r.usage, tokenPrice) : null);
     if (r.timedOut) turnCost = null;
     else if (sessionCost != null) {
       const sid = r.sessionId ?? this.info.sessionId, prev = this.info.sessionCostUsd?.[sid] ?? 0;
@@ -275,7 +278,7 @@ export class Seat {
     }
     this.rails.maxTurnWallSec = savedCap;
     this.info.onboard = { ok: !!paired, pairedWithinSec: paired ? Math.round(pairedMs / 1000) : null, timeoutSec, onboardTurnWallMs: turn?.wallMs ?? null, attempts,
-      cliFile: paired ? (existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile) : null, lastStatus: paired ? null : last };
+      cliFile: paired && existsSync(join(this.folder, this.cli.file)) ? this.cli.file : null, lastStatus: paired ? null : last };
     if (paired && paired.soul) { this.info.soulId = paired.soul.id; this.info.soulName = paired.soul.name ?? name; }
     this.save(); if (paired) this.ownerSettings();
     return { ok: !!paired, soulId: this.info.soulId, soulName: this.info.soulName, turn, status: paired ?? last };
@@ -294,8 +297,7 @@ export class Seat {
   wakeLoop() { if (!this.info.wake) return false; this.waking = true; this.startListen(); return true; }
   startListen() {
     if (this.listener || this.stopped || !this.waking) return;
-    const file = existsSync(join(this.folder, this.cli.file)) ? this.cli.file : this.cli.fallbackFile;
-    const args = [file, ...this.cli.listen(this.lastListenId)];
+    const args = [this.cli.file, ...this.cli.listen(this.lastListenId)];
     const cmdLine = `node ${args.join(' ')}`;
     const startedAt = now();
     // Soul Runs diagnostics (#752): a traced seat's harness listen carries the same passive preload as its commands, so

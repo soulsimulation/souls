@@ -1,7 +1,9 @@
 import {mountSoulRuntimePublication} from './soul-runtime-publication.ts';
 import {mountClientCounter, type EdgeClients} from './client-version.ts';
+import {mountClientMinimum} from './client-minimum.ts';
 import {soulClientManifest} from './soul-client-manifest.ts';
 import {mountContextViews} from './god/context-views.ts';
+import {worldDayOf} from './god/poster-boards.ts';
 import {AutoPortraits} from './portrait/auto-portraits.ts';
 import {SoulProfiles} from './soul-profile.ts';
 import {WorldAccounts} from './accounts/service.ts';
@@ -50,12 +52,12 @@ import {mountStationRoutesV2} from './station-routes-v2.ts';
 import type {EdgeLedger} from './edge/ledger/ledger.ts';
 import {mountEdgeRoutes,edgeSoulResolver} from './edge/routes.ts';
 import {EDGE_CONTRACT, EdgeError} from './edge/contract.ts';
-import {mountSecretPlaceRoutes} from './edge/perception/secret-routes.ts';
 import { mountGodRoutes } from './god/routes.ts';
 import { RefusalLog, floodGuard } from './flood.ts';
 import { poolOf } from './god/builds.ts';
 import {VerifyUse} from './god/verify-use.ts';
 import { mountModeration } from './moderation/routes.ts';
+import { defaultSiteLog } from './moderation/store.ts';
 import { mountEdgeSnapshot, safeKey, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
 import { withInlineConfig, withWorldMeta } from './inline-config.ts';
 import { mountSharedLibraryRoutes } from './god/shared-library.ts';
@@ -63,7 +65,7 @@ import { mountArtRoutes } from './art/routes.ts';
 import { createPaintingService } from './art/painting-completion.ts';
 import { defaultAssetDir } from './god/assets.ts';
 import { mountEnvRoutes } from './god/world-env.ts';
-import { mountJoinRoutes, PUBLISHED_SOUL_CLI, safeWorldName } from './god/join.ts';
+import { mountJoinRoutes, safeWorldName } from './god/join.ts';
 import type { GodMode } from './god/god.ts';
 import {Travel,TravelError,launcherSite,TRAVEL_CONTRACT} from './travel/travel.ts';
 import { bodyRefResolvers } from './edge/body/routes.ts';
@@ -74,23 +76,27 @@ import {mountSoulNow} from './soul-now-routes.ts';
 import {soulLink} from './soul-link.ts';
 import {mountOperatorSouls} from './op-souls.ts';
 import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
+import {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
+export {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
 /** #1326: the edge writes that wait on the clock (an act's body, a plan's acts): refused with 503 world.stalled while it is
  *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
 const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
+// #894: the world page and its public guides may be indexed; every other answer carries X-Robots-Tag (buildApp)
+const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
 
-/** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; resolve; and
+/** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
  *  on the tick thread. World-relative paths, as admission classifies them. */
 export function servingRead(method: string, path: string, view?: string): boolean {
   if (method === 'GET') return (path === '/v1/edge/here' && view !== 'body') || path === '/v1/edge/observe' || path === '/v1/edge/capabilities' || path === '/v1/edge/around';
-  return method === 'POST' && (path === '/v1/edge/resolve' || path === '/v1/edge/act' || path === '/v1/edge/converse');
+  return method === 'POST' && (path === '/v1/edge/act' || path === '/v1/edge/converse');
 }
 /** Continuity (warm after listen): a listing read waits for a running serving warm (EdgeLedger.whenServing, which has a
  *  ceiling) before it goes on. Mounted BEFORE admission, so the wait is never a request in flight (no soul.busy for it)
  *  nor billed as the request's own time; nothing to wait for: no extra turn. */
 export type ServingWarmState = {kind: 'boot' | 'rewarm'; ageMs: number} | null;
 export function servingWait(whenServing: (ceilingMs?: number) => Promise<void> | null, state: () => ServingWarmState = () => null, level: () => Level = () => 'green',
-  o: {bootWaitMs?: number; busyForMs?: number} = {}): MiddlewareHandler {
+  o: {bootWaitMs?: number; busyForMs?: number; api?: Float64Array} = {}): MiddlewareHandler {
   const bootWaitMs = o.bootWaitMs ?? SERVING_BOOT_WAIT_MS, busyForMs = o.busyForMs ?? SERVING_WAIT_MS;
   // #1750: the wait is said (Server-Timing `warm;dur`, and the route's queue time in /healthz `api`): it happens before
   // admission, so without this it was invisible on the world's side of an answer. During the boot warm a read waits at
@@ -106,7 +112,7 @@ export function servingWait(whenServing: (ceilingMs?: number) => Promise<void> |
     (c.set as (k: string, v: unknown) => void)(WARM_WAIT_KEY, ms);
     const now = state();
     if (!boot || now?.kind !== 'boot' || now.ageMs >= busyForMs) return next();
-    const route = apiRoute(c.req.method, c.req.path); if (route) recordApi(route, ms, 0);
+    const route = apiRoute(c.req.method, c.req.path); if (route) recordApi(route, ms, 0, undefined, o.api);
     return c.json({contract: EDGE_CONTRACT, error: {code: 'world.busy', message: 'the world is still warming up after starting; ask again in 2 s'}, world: worldBlock(level(), 2)}, 503,
       {'Retry-After': '2', 'Cache-Control': 'no-store', 'X-Sim-Load': level(), 'Server-Timing': `world;dur=${ms.toFixed(1)}, queue;dur=0.0, warm;dur=${ms.toFixed(1)}`});
   };
@@ -123,27 +129,38 @@ export function limitBody(maxSize: number, onError: (c: Context) => Response | P
     return bytes > maxSize ? onError(c) : next();
   };
 }
-type Deps = { cfg: Config; db: Db; host: WorldHost; auth: Auth; hub: Hub; brain: Brain; souls: Souls; takes?: TakeArchive; station?:CandidateStationV1; stationV2?:CandidateStationV2; intentV2?:IntentControlV2; edge?:EdgeLedger; god?: GodMode; contextReady?:()=>boolean; contextWait?:(signal:AbortSignal)=>Promise<void>; contextLevelAt?:(x:number,z:number,y:number)=>number; load?:{admission?:Admission;monitor:LoadMonitor;crowded?:(soulId:string)=>{position:number;eta_s:number}|null} };
+/** #2378: a listener step skipped as a restart loop's, while it is skipped (public: its id and tick numbers only). */
+const quarantineOf = (h: WorldHost) => { const q = h.quarantinedStep; return q && h.engine.world.tick < q.untilTick ? {quarantine: {step: `step ${q.id.toString(16).padStart(8, '0')}`, fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths}} : {}; };
+type Deps = { cfg: Config; db: Db; host: WorldHost; auth: Auth; hub: Hub; brain: Brain; souls: Souls; takes?: TakeArchive; station?:CandidateStationV1; stationV2?:CandidateStationV2; intentV2?:IntentControlV2; edge?:EdgeLedger; god?: GodMode; contextReady?:()=>boolean; contextWait?:(signal:AbortSignal)=>Promise<void>; contextLevelAt?:(x:number,z:number,y:number)=>number; load?:{admission?:Admission;monitor:LoadMonitor;api?:Float64Array;faults?:()=>Record<string,number>;crowded?:(soulId:string)=>{position:number;eta_s:number}|null} };
 
 export function buildApp(d: Deps) {
   if(d.station&&d.station.host!==d.host)throw new Error('station must belong to selected host');
   if(d.stationV2&&d.stationV2.host!==d.host)throw new Error('V2 station must belong to selected host');
   if(d.intentV2&&(d.intentV2.host!==d.host||d.intentV2.brain!==d.brain||d.intentV2.souls!==d.souls))throw new Error('intent transport must belong to selected host');
   const app = new Hono();
+  // #1006: the shared security headers (security-headers.ts), mounted first so every answer carries them: every route,
+  // an unknown path, the early middleware's refusals and onError. #894: the world page and its public guides may be
+  // indexed (the launcher marks every response of an unlisted world noindex itself); the API, MCP, health, debug and any
+  // query-string variant never are. A route's own CSP keeps its directives and gains frame-ancestors.
+  app.use('*', async (c, next) => {
+    await next();
+    if (!((c.req.method === 'GET' || c.req.method === 'HEAD') && INDEXABLE.has(c.req.path) && !c.req.url.includes('?'))) c.header('X-Robots-Tag', SECURITY_HEADERS['X-Robots-Tag']);
+    c.header('X-Frame-Options', SECURITY_HEADERS['X-Frame-Options']); c.header('Content-Security-Policy', withFrameAncestors(c.res.headers.get('content-security-policy')));
+  });
   // #1774 A4: a dev world's per-request record for playtests (load/request-record.ts); unset, nothing is mounted
-  const requestRecord = requestRecordFile(process.env, d.auth.devAuth);
+  const requestRecord = requestRecordFile(d.cfg.env, d.auth.devAuth);
   if (requestRecord) app.use('*', requestRecordMiddleware(requestRecord));
-  if(d.cfg.accountAuthRequired)d.souls.accounts??=new WorldAccounts(d.host,d.souls);
+  if(d.cfg.accountAuthRequired)d.souls.accounts??=new WorldAccounts(d.host,d.souls,d.auth.registryDb);
   if(d.souls.accounts)d.auth.legacyOwnerAllowed=owner=>d.souls.ownedRows(owner).length>0;
   d.host.profileWorldPath=d.cfg.worldPath;
   const profiles=new SoulProfiles(d.host,d.souls);
   // resident looks v2: automatic portraits for humanoid looks (SIM_AUTO_PORTRAITS=0 turns them off)
-  const portraits=new AutoPortraits(d.host);profiles.autoBytes=(id,hash)=>portraits.bytes(id,hash);
+  const portraits=new AutoPortraits(d.host);profiles.autoBytes=(id,hash)=>portraits.bytes(id,hash);(app as unknown as {portraits?: AutoPortraits}).portraits=portraits;   // #2444: disposed when the world stops
   const bearer = (c: Context) => c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
   // P2 runaway-agent protection: overall buckets per god token and per visitor address, before anything else answers
   // (SIM_FLOOD=0 turns it off for a local experiment)
   const refusals = new RefusalLog();   // every 429/413 this world answers, in its log without flooding it
-  if (process.env.SIM_FLOOD !== '0') app.use('*', floodGuard({ log: refusals, godPool: (t) => { const who = d.god?.godIdentity(t); return who ? poolOf(who) : hashToken(t); } }));
+  if (d.cfg.env.SIM_FLOOD !== '0') app.use('*', floodGuard({ log: refusals, godPool: (t) => { const who = d.god?.godIdentity(t); return who ? poolOf(who) : hashToken(t); } }));
   // SEC2 2026-10-21: a ceiling on every request body before any route reads one. Routes mounted above the /v1/* 64 KB
   // limit below (edge, travel, art, moderation) otherwise read a chunked body (no content-length) without bound: one
   // anonymous 200 MB POST to /v1/edge/say grew a world by ~90-500 MB. Tighter route limits still apply; god routes keep
@@ -154,15 +171,15 @@ export function buildApp(d: Deps) {
   // #1326 (registered before the edge routes, which answer and end the chain): a stalled clock (it owes ticks and none has completed past its threshold) is said, never hidden behind a 200
   // with the old tick. An act that would wait on the clock is refused before it writes anything; an edge read that
   // answers meanwhile carries `world.stalled` and the tick's age (the long-polls end early: comms wait, inbox listen).
-  if (d.load?.monitor) { const mon = d.load.monitor; setClockSource(() => mon.clock()); }
+  if (d.load?.monitor) { const mon = d.load.monitor, clock = () => mon.clock(); app.use('*', async (c, next) => { setClockSource(c, clock); await next(); }); }   // #2416: this world's clock
   app.use('/v1/edge/*', async (c, next) => {
-    const before = clockNow();
+    const before = clockNow(c);
     if (before?.stalled && c.req.method === 'POST' && STALL_REFUSED.has(c.req.path.replace(/^.*(?=\/v1\/edge\/)/, ''))) {
       const world = clockBlockOf(before)!;
       return c.json({contract: EDGE_CONTRACT, error: {code: 'world.stalled', message: 'the world\'s clock has stopped moving; nothing was done, try again shortly'}, world}, 503, {'Retry-After': '5', 'Cache-Control': 'no-store'});
     }
     await next();
-    const after = clockNow();
+    const after = clockNow(c);
     if (!after?.stalled || c.res.status !== 200 || !(c.res.headers.get('content-type') ?? '').includes('application/json')) return;
     // a cacheable answer (an ETag, or a Cache-Control that isn't no-store) is left as it is: a cache must never keep the stall
     const cache = c.res.headers.get('cache-control');
@@ -175,15 +192,16 @@ export function buildApp(d: Deps) {
       c.res = new Response(JSON.stringify({...body, world}), {status: 200, headers});
     } catch { /* not a JSON object: left as it is */ }
   });
-  if (d.edge) { const edge = d.edge, mon = d.load?.monitor; app.use('/v1/edge/*', servingWait((ms) => edge.whenServing(ms), () => edge.servingWarmState(), () => mon?.level ?? 'green')); }
+  if (d.edge) { const edge = d.edge, mon = d.load?.monitor; app.use('/v1/edge/*', servingWait((ms) => edge.whenServing(ms), () => edge.servingWarmState(), () => mon?.level ?? 'green', {api: d.load?.api})); }
   // srv-load (LOAD-CONTRACT §2): heavy Soul/god requests queue for the admission dispatcher; edge answers carry X-Sim-Load
   // #456: the public Soul's `slowed`, from the admission's refusals addressed to that Soul (load/soul-slowed.ts)
   slowedFromRefusals({admission: d.load?.admission, soulOf: t => d.souls.soulFromToken(t)?.id ?? null, host: d.host});
   if (d.load?.admission) { const load = d.load, admission = d.load.admission; app.use('*', admissionMiddleware(admission, () => load.monitor.level, bearer, t => d.souls.soulFromToken(t)?.owner,
     load.crowded ? t => { const id = d.souls.soulFromToken(t)?.id; return id ? load.crowded!(id) : null; } : undefined)); }
   (app as unknown as {edgeClients?: EdgeClients}).edgeClients = mountClientCounter(app, d.db.db, c => d.souls.soulFromToken(bearer(c))?.id ?? null); // #1936: x-soul-client per Soul and day
+  mountClientMinimum(app, {served: () => soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile), isSoul: c => !!d.souls.soulFromToken(bearer(c))}); // #1937: a too-old client is told the command that fixes it
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
-  const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId });
+  const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId, siteLog: defaultSiteLog(d.cfg.env) });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
   const godForKey = d.god, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version() }) : null;
   if (currentSnapshotKey) mountEdgeSnapshot(app, currentSnapshotKey);
@@ -197,15 +215,15 @@ export function buildApp(d: Deps) {
   // Travel (M3, travel/): a Soul whose body is in another world acts there; here only its travel calls answer.
   let travel: Travel | undefined;
   const travelGate = (resolve: ReturnType<typeof edgeSoulResolver>) => (c: Context) => { const s = resolve(c), t = travel?.inc(s.soulId); if (t && (t.state === 'away' || t.state === 'departing')) throw new EdgeError(409, t.state === 'away' ? 'travel.away' : 'travel.departing', `${s.name} is ${t.state === 'away' ? 'in' : 'on the way to'} ${t.at}: act there, or travel home (POST /v1/edge/travel {"to":"home"})`); return s; };
-  if (d.edge) { if (d.edge.host !== d.host) throw new Error('edge ledger must belong to selected host'); const comms = mountEdgeRoutes(app, { host: d.host, db: d.db, souls: d.souls, build: d.cfg.build, soul: travelGate(edgeSoulResolver(d.host, d.souls, bearer)), ledger: d.edge, ownerInbox, ownerSoul: async (c, id) => { try { const {u} = await profileIdentity(c); const s = ownSoul(u, id); return {soulId: s.id, entityId: s.entity_id, name: s.name, owner: s.owner}; } catch (e) { if (e instanceof ApiError) throw new EdgeError(e.status, e.code, e.message); throw e; } } }, {evidenceCapture:process.env.SIM_CONTINUITY_EVIDENCE_CONFIG?{configPath:process.env.SIM_CONTINUITY_EVIDENCE_CONFIG,devAuth:d.auth.devAuth,bindHost:d.cfg.host}:undefined}); comms.onSpectator(m => d.hub?.broadcast?.(m as never)); d.load?.monitor.register('eyes', l => comms.eyes.setLoadLevel(l)); d.hub?.joinMessages?.push(() => comms.spectatorJoin()); d.hub?.upgradeHandlers?.push((req, socket, head) => comms.events.upgrade(req, socket, head)); }
+  if (d.edge) { if (d.edge.host !== d.host) throw new Error('edge ledger must belong to selected host'); const comms = mountEdgeRoutes(app, { host: d.host, db: d.db, souls: d.souls, build: d.cfg.build, soul: travelGate(edgeSoulResolver(d.host, d.souls, bearer)), ledger: d.edge, ownerInbox, ownerSoul: async (c, id) => { try { const {u} = await profileIdentity(c); const s = ownSoul(u, id); return {soulId: s.id, entityId: s.entity_id, name: s.name, owner: s.owner}; } catch (e) { if (e instanceof ApiError) throw new EdgeError(e.status, e.code, e.message); throw e; } } }, {evidenceCapture:d.cfg.env.SIM_CONTINUITY_EVIDENCE_CONFIG?{configPath:d.cfg.env.SIM_CONTINUITY_EVIDENCE_CONFIG,devAuth:d.auth.devAuth,bindHost:d.cfg.host}:undefined}); comms.onSpectator(m => d.hub?.broadcast?.(m as never)); d.load?.monitor.register('eyes', l => comms.eyes.setLoadLevel(l)); d.hub?.joinMessages?.push(() => comms.spectatorJoin()); d.hub?.upgradeHandlers?.push((req, socket, head) => comms.events.upgrade(req, socket, head)); }
   if (d.edge && d.god) {
     const comms = (d.edge as unknown as {comms?: {fading?: ConstructorParameters<typeof Travel>[0]['fading']}}).comms, god = d.god;
-    travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
-      site: launcherSite(process.env.SIM_SITE_URL, process.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
+    travel = new Travel({ host: d.host, db: d.db, souls: d.souls, fading: comms?.fading ?? null, slug: d.cfg.worldKey, name: d.cfg.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey,
+      site: launcherSite(d.cfg.env.SIM_SITE_URL, d.cfg.env.SIM_SITE_KEY), invalidateBodies: () => d.edge?.invalidateBodies(),
       resolveBodyRef: (ref, owner) => bodyRefResolvers.get(d.host)?.(ref, owner) ?? {ok: false, code: 'body.ref-unsupported', reason: 'This world cannot resolve carried body references'} });
     d.edge.travelLogOf = (soulId) => { const row = d.db.soul(soulId), t = row ? travel!.identity(row) : null; return t ? t.log.filter((e) => e.kind === 'travel' && e.from === d.cfg.worldKey).map((e) => ({at: e.at, to: e.toName, from: e.fromName})) : []; };
     travel.onLeave = (soulId, at, world) => d.edge?.noteTravel(soulId, at, world);
-    mountTravelRoutes(app, { travel, siteKey: process.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
+    mountTravelRoutes(app, { travel, siteKey: d.cfg.env.SIM_SITE_KEY, baseOf: (c) => baseOf(c),
       tokenSoul: (c) => { const s = d.souls.soulFromToken(bearer(c)); if (!s) { const r = d.souls.controlRefusal(bearer(c)); throw new TravelError(401, r.code, r.message, r.extra); } return s; },
       ownerSoul: async (c, id) => { const u = await requireUser(c); return ownSoul(u, id); },
       isGod: async (c) => { const t = bearer(c); if (t?.startsWith('god_')) { const w = god.godIdentity(t); return !!w && !w.child; } const u = t ? await d.auth.userFromToken(t) : null; return !!u && !!god.owner && u.id === god.owner; } });
@@ -237,19 +255,19 @@ export function buildApp(d: Deps) {
   const body = async (c: Context) => { try { return await c.req.json(); } catch { throw new ApiError(400, 'bad-json', 'body must be JSON'); } };
   const limitIp = (c: Context, key: string, max: number, windowMs: number) => { const l = d.souls.limits.allow(`${key}:${ip(c)}`, max, windowMs); if (!l.ok) throw new ApiError(429, 'rate-limited', 'too many requests', { retry_after: l.retryAfter }); };
 
-  const worldName = process.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  const worldName = d.cfg.env.WORLD_NAME?.slice(0, 60) || d.cfg.worldKey.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
   /** The title a visitor sees (viewer arrival card, Explore, welcome-back), served in /v1/config so the first frame never shows a slug. */
   const displayWorldName = d.god ? safeWorldName(worldName) : d.cfg.worldKey === 'littlemartians' ? 'Little Martians' : d.cfg.worldKey[0].toUpperCase() + d.cfg.worldKey.slice(1);
   // the world's one skill (/SKILL.md) and who lives here (/v1/world/souls): lane P2
-  if (d.god) { mountJoinRoutes(app, { worldName, baseOf, soulCliUrl: (c) => (d.cfg.cliFile ? baseOf(c) + '/eden-agent.mjs' : PUBLISHED_SOUL_CLI), souls: () => d.db.liveSouls(d.host.worldId).filter((s) => !travel?.isAway(s.id)), nowOf: (id) => d.host.nowOf(id), bodyOf: (id) => d.edge?.bodyRule?.view(id) ?? null, poseOf: (id) => { const p = (d.host.engine.world.entities as Record<string, { pose?: { p?: number[] } } | undefined>)[id]?.pose?.p; return p ? { x: p[0], y: p[1], z: p[2] } : null; } }); }
+  if (d.god) { mountJoinRoutes(app, { worldName, baseOf, souls: () => d.db.liveSouls(d.host.worldId).filter((s) => !travel?.isAway(s.id)), nowOf: (id) => d.host.nowOf(id), bodyOf: (id) => d.edge?.bodyRule?.view(id) ?? null, poseOf: (id) => { const p = (d.host.engine.world.entities as Record<string, { pose?: { p?: number[] } } | undefined>)[id]?.pose?.p; return p ? { x: p[0], y: p[1], z: p[2] } : null; } }); }
   const godRoutes = d.god ? mountGodRoutes(app, { god: d.god, worldName, requireUser, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, baseOf, limitIp, verifyUse: new VerifyUse(d.host, d.souls, d.god, d.edge), lookWorldUrl: `http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}` /* W2 remote looks */ }) : null;
-  if(d.god&&d.edge)mountContextViews(app,{god:d.god,edge:d.edge,build:d.cfg.build,artOriginals:{dir:join(defaultAssetDir(),'art'),basePath:d.cfg.worldPath},levelAt:d.contextLevelAt,contextReady:d.contextReady,waitForContext:d.contextWait,worldUrl:`http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}`,soul:c=>{const token=bearer(c);if(!token)return null;return travelGate(edgeSoulResolver(d.host,d.souls,bearer))(c).soulId;},limit:c=>limitIp(c,'context-views',120,60000)});
-  if (d.god && d.edge) { const god = d.god; mountSecretPlaceRoutes(app, { ledger: d.edge, requireGod: (c) => { const who = god.godIdentity(bearer(c)); if (!who) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); if (who.child) throw new ApiError(403, 'helper.scope', 'helper tokens cannot change secret places'); } }); }  // knowledge/1; WD7: helpers refused
-  if (d.god) { const god = d.god; mountSharedLibraryRoutes(app, { god, slug: d.cfg.worldKey, dir: process.env.SIM_LIBRARY_DIR, requireGod: (c) => { if (!god.godFromToken(bearer(c))) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); } }); }  // M4 shared library
-  if (d.god) { const god = d.god; mountArtRoutes(app, { model: () => god.model, godAct: (ops, note) => god.act({ ops }, note), engineAct: (ops, note) => god.engineAct(ops, note), isGod: (c) => { const w = god.godIdentity(bearer(c)); return !!w && !w.child; }, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, owner: () => god.owner, baseOf, limitIp, dir: join(defaultAssetDir(), 'art') }); }  // W6 art: frames, screens, gallery walls
+  if(d.god&&d.edge)(app as unknown as {contextViews?: {close(): Promise<void>}}).contextViews=mountContextViews(app,{god:d.god,edge:d.edge,build:d.cfg.build,artOriginals:{dir:join(defaultAssetDir(d.cfg.env),'art'),basePath:d.cfg.worldPath},levelAt:d.contextLevelAt,contextReady:d.contextReady,waitForContext:d.contextWait,worldUrl:`http://127.0.0.1:${d.cfg.port}${d.cfg.worldPath}`,soul:c=>{const token=bearer(c);if(!token)return null;return travelGate(edgeSoulResolver(d.host,d.souls,bearer))(c).soulId;},limit:c=>limitIp(c,'context-views',120,60000)});
+  // #1262: the god route that marked a place secret (secret-routes.ts) is unmounted; no place is secret
+  if (d.god) { const god = d.god; mountSharedLibraryRoutes(app, { god, slug: d.cfg.worldKey, dir: d.cfg.env.SIM_LIBRARY_DIR, requireGod: (c) => { if (!god.godFromToken(bearer(c))) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); } }); }  // M4 shared library
+  if (d.god) { const god = d.god; mountArtRoutes(app, { model: () => god.model, godAct: (ops, note) => god.act({ ops }, note), engineAct: (ops, note) => god.engineAct(ops, note), isGod: (c) => { const w = god.godIdentity(bearer(c)); return !!w && !w.child; }, soulFromBearer: (c) => { const s = d.souls.soulFromToken(bearer(c)); return s ? { id: s.id, name: s.name } : null; }, owner: () => god.owner, baseOf, limitIp, dir: join(defaultAssetDir(d.cfg.env), 'art') }); }  // W6 art: frames, screens, gallery walls
   if (d.god && d.edge) {
     const god = d.god;
-    d.edge.painting = createPaintingService({ model: () => god.model, dir: join(defaultAssetDir(), 'art'), basePath: d.cfg.worldPath, worldId: d.host.worldId, commit: (ops, note, complete, durable) => god.engineAct(ops, note, complete, durable) });
+    d.edge.painting = createPaintingService({ model: () => god.model, worldDay: () => worldDayOf(d.host), dir: join(defaultAssetDir(d.cfg.env), 'art'), basePath: d.cfg.worldPath, worldId: d.host.worldId, commit: (ops, note, complete, durable) => god.engineAct(ops, note, complete, durable) });
   }
   if (d.god) { const god = d.god; mountEnvRoutes(app, { host: d.host, god, requireGod: (c) => { const who = god.godIdentity(bearer(c)); if (!who) throw new ApiError(401, 'unauthorized', 'missing or invalid god token'); if (who.child) throw new ApiError(403, 'helper.scope', 'helper tokens cannot change the environment'); return who; } }); }  // R4-LIVE env setter; WD7: helpers refused, edits attributed
 
@@ -258,10 +276,6 @@ export function buildApp(d: Deps) {
     console.error('[http]', err);
     return c.json({ ok: false, code: 'internal', message: 'internal error' }, 500);
   });
-  // #894: the world page and its public guides may be indexed (the launcher marks every response of an unlisted world
-  // noindex itself); the API, MCP, health, debug and any query-string variant never are.
-  const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
-  app.use('*', async (c, next) => { await next(); if (!((c.req.method === 'GET' || c.req.method === 'HEAD') && INDEXABLE.has(c.req.path) && !c.req.url.includes('?'))) c.header('X-Robots-Tag', 'noindex, nofollow'); c.header('X-Frame-Options', 'DENY'); c.header('Content-Security-Policy', "frame-ancestors 'none'"); });
   // A halted durable clock cannot serve an unacknowledged body/head or accept
   // more control. Generic unavailable response carries no private row/error.
   app.use('*',async(c,next)=>{
@@ -284,10 +298,10 @@ export function buildApp(d: Deps) {
   // ---- public
   mountWelcomeRoutes(app,d);
   // lane OPS2: operator commands for TEST Souls (the launcher only, with the site key: op-souls.ts)
-  mountOperatorSouls(app,{db:d.db,worldId:d.host.worldId,souls:d.souls,inbox:ownerInbox,god:d.god,siteKey:process.env.SIM_SITE_KEY,body:()=>d.edge?.bodyRule??null});
+  mountOperatorSouls(app,{db:d.db,worldId:d.host.worldId,souls:d.souls,inbox:ownerInbox,god:d.god,siteKey:d.cfg.env.SIM_SITE_KEY,body:()=>d.edge?.bodyRule??null});
   // #1875: whether a Soul's control is held now, so an agent in another folder asks before taking it over.
   const controlOf=(soulId:string)=>{const row=d.db.soul(soulId);if(!row)return null;const l=soulLink(d.souls,ownerInbox,row,null);return {held:!!l.holder,state:l.state,since:l.since};};
-  if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp,control:controlOf});
+  if(d.souls.accounts)mountAccountRoutes(app,{accounts:d.souls.accounts,auth:d.auth,baseOf:d.cfg.authProvider==='clerk'?()=>publicWorldBase(d.cfg):baseOf,limit:limitIp,control:controlOf,agentOf:soulId=>{const row=d.db.soul(soulId);return row?soulLink(d.souls,ownerInbox,row,null).holder:null;},refreshMe:owner=>d.hub.refreshMe(owner)});
   mountStationRoutesV2(app,d.stationV2);
   // lane DASH: tickMs = the last ~20 s of ticks (avg/max ms against the 50 ms budget); clockRate < 1 = the clock is dilated (behind)
   // srv-load: O(1) from the load monitor's last 250 ms sample (tick times + the `load` block); the watchdog thread's
@@ -295,15 +309,17 @@ export function buildApp(d: Deps) {
   app.get('/healthz', (c) => { const mon = d.load?.monitor; let tickMs: {avg: number; max: number; n: number};
     if (mon) { const t = mon.tickStats; tickMs = {avg: t.avg, max: t.max, n: t.n}; }
     else { const ms = d.host.tickMs, n = ms.length; let sum = 0, max = 0; for (const x of ms) { sum += x; if (x > max) max = x; } tickMs = { avg: n ? Math.round(10 * sum / n) / 10 : 0, max: Math.round(10 * max) / 10, n }; }
+    // #2366: `faults` counts the world's own contained faults by name (world.fault.tick, .step, .timer, …) since it started
     // #1326: the tick's wall age, and `stalled` once the clock owes ticks and none has completed past its threshold
     const clock = mon?.clock();
     return c.json({ ok: true, tick: d.host.engine.world.tick, clients: d.hub.clients.size, paused: d.host.paused, halted: !d.host.clockAvailable, glitches: d.host.glitches, build: d.cfg.build, worldId: d.host.worldId,
-      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
-      ...(mon ? {load: mon.health()} : {}), api: apiOf() }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
+      tickMs, clockRate: d.host.clockRate, baseRate: d.host.baseRate, ...(d.host.owedTicks > 0 ? {catchingUp: {ticksOwed: d.host.owedTicks}} : {}), ...(clock?.tickAgeMs != null ? {tickAgeMs: clock.tickAgeMs} : {}), stalled: !!clock?.stalled, ...(clock?.slowed ? {slowed: true} : {}),
+      skip: d.host.skipStats,   // #2298 A5: ticks computed and jumped, jumps, the last horizon
+      ...(mon ? {load: mon.health()} : {}), ...(d.load?.faults && Object.keys(d.load.faults()).length ? {faults: d.load.faults()} : {}), ...quarantineOf(d.host), api: apiOf(d.load?.api) }, 200, mon ? {'X-Sim-Load': mon.level} : undefined); });
   // lane W1: the same config goes into the world page's <head> (inline-config.ts)
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
   const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile); return soulClient ? {soulClient} : {}; };
-  const configOf = (c: Context) => ({ ...soulClientField(), authProvider:d.cfg.authProvider, authenticationOrigin:d.cfg.authProvider==='clerk'&&d.auth.ready?new URL(d.cfg.publicUrl).origin:'', clerkPublishableKey:d.cfg.authProvider==='clerk'?d.cfg.clerkPublishableKey:'', clerkIssuer:d.cfg.authProvider==='clerk'?d.cfg.clerkIssuer:'', ...(d.cfg.authProvider==='clerk'&&d.cfg.clerkSatelliteDomain?{clerkSatellite:{domain:d.cfg.clerkSatelliteDomain,signInUrl:d.cfg.clerkSignInUrl}}:{}), privyAppId:d.cfg.authProvider==='privy'?d.cfg.privyAppId:'', publicUrl: baseOf(c), worldURL:baseOf(c), instructionsURL:baseOf(c)+'/instructions.md', accountAuthRequired:d.cfg.accountAuthRequired, accountApproval:d.souls.accounts?{contract:'account-soul-approval/1',start:'/v1/agent/approval/start',poll:'/v1/agent/approval/poll',cancel:'/v1/agent/approval/cancel'}:null, soulProfile:{contract:'soul-profile/1',auth:'owner',edit:'PATCH /v1/souls/:id/profile',photo:'POST /v1/souls/:id/photo',resetPhoto:'DELETE /v1/souls/:id/photo',autoPortrait:portraits.enabled,photoFormat:'PNG RGB/RGBA8',maxPhotoBytes:262144,maxPhotoDimension:512}, worldId: d.host.worldId, worldKey: d.cfg.worldSlug ?? d.cfg.worldKey, worldEngine: d.cfg.worldEngine, worldName: displayWorldName, worldPath: d.cfg.worldPath, authReady: d.auth.ready, devAuth: d.auth.devAuth, inviteRequired: d.cfg.inviteRequired, build: d.cfg.build });
+  const configOf = (c: Context) => ({ ...soulClientField(), authProvider:d.cfg.authProvider, authenticationOrigin:d.cfg.authProvider==='clerk'&&d.auth.ready?new URL(d.cfg.publicUrl).origin:'', clerkPublishableKey:d.cfg.authProvider==='clerk'?d.cfg.clerkPublishableKey:'', clerkIssuer:d.cfg.authProvider==='clerk'?d.cfg.clerkIssuer:'', ...(d.cfg.authProvider==='clerk'&&d.cfg.clerkSatelliteDomain?{clerkSatellite:{domain:d.cfg.clerkSatelliteDomain,signInUrl:d.cfg.clerkSignInUrl}}:{}), privyAppId:d.cfg.authProvider==='privy'?d.cfg.privyAppId:'', publicUrl: baseOf(c), worldURL:baseOf(c), instructionsURL:baseOf(c)+'/instructions.md', accountAuthRequired:d.cfg.accountAuthRequired, accountApproval:d.souls.accounts?{contract:'account-soul-approval/1',start:'/v1/agent/approval/start',poll:'/v1/agent/approval/poll',cancel:'/v1/agent/approval/cancel'}:null, ...(d.souls.accounts?{accountLogin:true}:{}), soulProfile:{contract:'soul-profile/1',auth:'owner',edit:'PATCH /v1/souls/:id/profile',photo:'POST /v1/souls/:id/photo',resetPhoto:'DELETE /v1/souls/:id/photo',autoPortrait:portraits.enabled,photoFormat:'PNG RGB/RGBA8',maxPhotoBytes:262144,maxPhotoDimension:512}, worldId: d.host.worldId, worldKey: d.cfg.worldSlug ?? d.cfg.worldKey, worldEngine: d.cfg.worldEngine, worldName: displayWorldName, worldPath: d.cfg.worldPath, authReady: d.auth.ready, devAuth: d.auth.devAuth, inviteRequired: d.cfg.inviteRequired, build: d.cfg.build });
   app.get('/v1/config', (c) => c.json(configOf(c)));
   const safeConfig = (c: Context) => { try { return configOf(c); } catch { return null; } };  // the page never fails because of it
   app.get('/v1/world', (c) => c.json(d.souls.worldSummary()));
@@ -351,8 +367,8 @@ export function buildApp(d: Deps) {
   app.get('/cards.md', (c) => c.text(cardGrammar(d.host.engine.describeVerbs().filter((v) => v.verb !== 'do_activity')), 200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'public, max-age=60' }));
   // N1 nav diagnostics, served only with SIM_NAV_DEBUG (the e2es set it): the failed-search memo's counts, and one probe
   // walk from (sx,sz) on level sl to (gx,gz) on gl for an r m-radius body (nothing moves).
-  if (process.env.SIM_NAV_DEBUG) app.get('/v1/debug/nav', (c) => c.json({ stranded: strandedMetrics() }, 200, { 'Cache-Control': 'no-store' }));
-  if (process.env.SIM_NAV_DEBUG) app.get('/v1/debug/route', (c) => {
+  if (d.cfg.env.SIM_NAV_DEBUG) app.get('/v1/debug/nav', (c) => c.json({ stranded: strandedMetrics() }, 200, { 'Cache-Control': 'no-store' }));
+  if (d.cfg.env.SIM_NAV_DEBUG) app.get('/v1/debug/route', (c) => {
     const n = (k: string, v = 0) => { const x = Number(c.req.query(k)); return Number.isFinite(x) ? x : v; };
     const rt = (d.host.engine as unknown as { rt?: { world: unknown; services: { spatial?: { route: Function } } } }).rt, sp = rt?.services.spatial;
     if (!rt || !sp) return c.json({ error: 'no spatial service' }, 404);
@@ -383,7 +399,8 @@ export function buildApp(d: Deps) {
     try{const code=c.req.query('for')??null,text=fillInstructions(readFileSync(d.cfg.instructionsFile,'utf8'),baseOf(c),displayWorldName,code,publicWorldBase(d.cfg));return c.text(text,200,{'content-type':'text/markdown; charset=utf-8','cache-control':code?'no-store':'public, max-age=60'});}
     catch{return c.json({ok:false,code:'instructions-unavailable'},503);}
   });
-  app.get('/eden-agent.mjs', c => { if (!d.cfg.cliFile) throw new ApiError(404, 'not-found', 'no agent CLI is published on this world'); let js: string; try { js = readFileSync(d.cfg.cliFile, 'utf8'); } catch { throw new ApiError(404, 'not-found', 'agent CLI unavailable'); } return c.body(js, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=60' }); });
+  // #1754: the legacy client is retired. Its path answers 404 here, before the web app's catch-all, so no world serves it.
+  app.get('/eden-agent.mjs', () => { throw new ApiError(404, 'not-found', 'the legacy client is retired: fetch /eden.mjs'); });
   app.get('/eden.mjs', c => { if (!d.cfg.controllerCliFile) throw new ApiError(404, 'not-found', 'no controller CLI is published on this world'); let js: string; try { js = readFileSync(d.cfg.controllerCliFile, 'utf8'); } catch { throw new ApiError(404, 'not-found', 'controller CLI unavailable'); } return c.body(js, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=60' }); });
   mountSoulRuntimePublication(app,()=>d.cfg.controllerCliFile);
   app.get('/v1/skill.md', skill);
@@ -543,7 +560,12 @@ export function buildApp(d: Deps) {
     const p = setIntentSchema.safeParse(await body(c)); if (!p.success) throw new ApiError(400, 'invalid', 'body must be { intent: { agenda: [{card, target?, of?}], note? } } or { intent: { goal, target?, note? } }; see /skill.md');
     const guard=d.souls.ownerControlGuard(s,u.id);return controlReply(c,guard,async()=>{const r=await d.souls.setIntent(s,p.data.intent,'web',guard);return {ok:true,intent:r.intent,text:r.text,tick:r.event.tick,seq:r.event.seq};});
   });
-  app.post('/v1/souls/:id/pair', async (c) => { const account=d.cfg.accountAuthRequired?await d.auth.accountFromToken(bearer(c)):null;if(d.cfg.accountAuthRequired&&!account)throw new ApiError(401,'account-signin-required','Sign in to delegate a Soul.');if(account)d.souls.accounts!.verifySession(account.identity);const u = await requireUser(c); d.souls.requireInvited(u); return c.json({ ok: true, ...d.souls.pairCode(ownSoul(u, c.req.param('id')), baseOf(c), u) }); });
+  app.post('/v1/souls/:id/pair', async (c) => { const account=d.cfg.accountAuthRequired?await d.auth.accountFromToken(bearer(c)):null;if(d.cfg.accountAuthRequired&&!account)throw new ApiError(401,'account-signin-required','Sign in to delegate a Soul.');if(account)d.souls.accounts!.verifySession(account.identity);const u = await requireUser(c); d.souls.requireInvited(u); const soul=ownSoul(u, c.req.param('id'));
+    // #2050: the #2401 move rule here too. With no agent connected the code is free; while one is connected the ask is
+    // refused naming its device, and only move (eden.mjs: --move) forces it.
+    const move=(await c.req.json().catch(()=>null))?.move===true,link=move?null:soulLink(d.souls,ownerInbox,soul,null);
+    if(link?.state==='connected'){const label=link.holder?.label?.trim()||'another device';throw new ApiError(409,'soul.held-elsewhere',`This Soul's agent is connected now from ${label}. Run there, or ask again with move (eden.mjs: --move), which disconnects it.`,{heldBy:label});}
+    return c.json({ ok: true, ...d.souls.pairCode(soul, baseOf(c), u) }); });
   app.post('/v1/souls/:id/revoke', async (c) => { const account=d.cfg.accountAuthRequired?await d.auth.accountFromToken(bearer(c)):null;if(d.cfg.accountAuthRequired&&!account)throw new ApiError(401,'account-signin-required','Sign in to revoke a Soul.');if(account)d.souls.accounts!.verifySession(account.identity);const u = await requireUser(c),s=ownSoul(u,c.req.param('id'));if(account)d.souls.accounts!.revoke(account.identity,s.id);else d.db.setSoulToken(s.id, null); return c.json({ ok: true }); });
   app.post('/v1/souls/:id/shot', async (c) => {
     const u = await requireUser(c); const s = ownSoul(u, c.req.param('id')); const m = d.host.minds.get(s.id); if (!m) throw new ApiError(409, 'not-in-world', 'not in the world');

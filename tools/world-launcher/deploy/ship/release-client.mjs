@@ -11,7 +11,8 @@
 //     feed-post): the client version, the changelog link (<origin>/changelog#v<release>, the release's id in the feed) and
 //     minClient when SOUL_CLIENT_MIN was raised since the last release. Idempotent: when the feed already holds a release
 //     item with that link, it posts nothing. --port talks to a launcher on this machine; --ssh runs the same program on
-//     the production host against its live launcher (the route is loopback only).
+//     the production host against its live launcher (the route is loopback only). For a release already tagged, run it
+//     from a checkout of v<release> (release.yml feed_only=true).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +34,9 @@ if (!['stamp', 'feed'].includes(cmd) || !/^[0-9]+(\.[0-9]+){1,2}$/.test(version 
     + '       release-client.mjs feed --version <release> --origin <https origin> (--port <p> [--base /] | --ssh <target>)');
   process.exit(2);
 }
-let last; try { last = git('describe', '--tags', '--abbrev=0', '--match', 'v*', 'HEAD'); } catch { fail('no v* tag reachable from HEAD: no last release to compare with'); }
+// the last release before this one: v<release> itself is skipped, so a feed post for an already-tagged release (release.yml
+// feed_only, from a checkout of its tag) compares with the release before it, as the ship's own post did
+let last; try { last = git('describe', '--tags', '--abbrev=0', '--match', 'v*', '--exclude', `v${version}`, 'HEAD'); } catch { fail('no v* tag reachable from HEAD: no last release to compare with'); }
 
 if (cmd === 'stamp') {
   const lastClient = CLI_LINE.exec(at(last, `${SOUL}eden.mjs`) ?? '')?.[1], nowClient = CLI_LINE.exec(head(`${SOUL}eden.mjs`))?.[1];

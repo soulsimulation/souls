@@ -452,6 +452,8 @@ export async function say(...words){
 // proximity, self-invitation and live-Soul checks. Keep the old single form.
 export const CONVERSATION_MAX_INVITEES=8;
 export function conversationStartBody(arg,...text){
+ // #2269: out loud by default (world viewers can read it); --private keeps the turns to members.
+ const isPrivate=text.includes('--private')||arg==='--private';if(arg==='--private'){arg=text[0];text=text.slice(1);}text=text.filter(t=>t!=='--private');
  let invitees,opening=text;
  if(arg==='--with'||Array.isArray(arg)){
   const list=Array.isArray(arg)?arg:text[0]?.split(',');opening=Array.isArray(arg)?text:text.slice(1);
@@ -462,11 +464,11 @@ export function conversationStartBody(arg,...text){
   if(typeof arg!=='string'||!arg.trim())throw new Error('usage: converse start <soulId> [text] | converse start --with <soulId>,<soulId> [text]');
   invitees=[arg];
  }
- return {op:'start',with:invitees,...(opening.length?{text:opening.join(' ')}:{})};
+ return {op:'start',with:invitees,...(opening.length?{text:opening.join(' ')}:{}),...(isPrivate?{private:true}:{})};
 }
-/** converse start <soulId> [text] | start --with <soulId>,<soulId> [text] | accept/decline/leave/ask <cv> | say <cv> <text> */
+/** converse start <soulId> [text] [--private] | start --with <soulId>,<soulId> [text] | accept/decline/leave/ask <cv> | say <cv> <text> */
 export async function converse(op,arg,...text){
- if(!op)throw new Error('usage: converse list | turns <conversationId> [--after N] | start <soulId> [text] | start --with <soulId>,<soulId> [text] | accept|decline|leave|ask <conversationId> | say <conversationId> <text>');
+ if(!op)throw new Error('usage: converse list | turns <conversationId> [--after N] | start <soulId> [text] [--private] | start --with <soulId>,<soulId> [text] | accept|decline|leave|ask <conversationId> | say <conversationId> <text>');
  const body=['list','turns'].includes(op)?null:op==='start'?conversationStartBody(arg,...text):op==='say'?{op,conversation:arg,text:text.join(' ')}:{op,conversation:arg};
  if(await mode()!=='edge')return {ok:false,reason:'This world does not offer conversations yet.'};
  if(op==='list'){if(arg!==undefined||text.length)throw new Error('usage: converse list');return ok(await call('/v1/edge/conversations'),'converse list');}
@@ -724,8 +726,8 @@ Steps:
 {"act":"<plain words or a capability id>","params":{...}} = an ordered body step (code dispatches it after the previous step terminates; intentional replacement still follows native admission and safe-stop). An activity somewhere else walks there by itself ("read a book in the library", "go for a swim", "warm up by the fire", "ride the balloon"): use a separate walk when the owner explicitly sequences arrival before another step. Plain words work: "sit down", "read a book in the library", "lie down on the grass", "take a nap", "walk to the bandstand", "take a walk through the park", "go for a swim", "warm up by the fire", "ride the balloon", "dance", "use a computer", "play the drums", "play petanque with Pell", "do a bench press", "walk to the harbour", "do some pushups", "go near Pell", "wave to Pell", "bow", "clap"; together: "hug Mira", "high five Mira", "dance with Mira", "follow Mira", "read a book in the library with Mira", "go for a balloon ride with Mira"; things: "pick up a flower" (or a book, a cup of tea, something to eat, a letter, a tool, a frisbee), "give Mira the flower", "put it down", "eat it". Ids shown in DO HERE / ON NOW also work ("walk:eden-bandstand", "sit:here"); never invent an id. Timed activities take {"seconds":N}; walks take {"via":["the park"]} to pass through places first; any activity takes {"with":["<name>"]} to invite others.
 {"say":"<text>"} = public speech heard within about 12 m or in the same room.
 {"converse":"accept"|"decline"|"leave","id":"<conversationId>"}
-{"converse":"start","with":"<soulId>","text":"<opening line>"} = invite someone within 6 m to a private chat.
-{"converse":"start","with":["<soulId>","<soulId>"],"text":"<opening line>"} = invite up to 8 distinct nearby Souls to the SAME private conversation. They must independently accept; an invitation is not joined membership.
+{"converse":"start","with":"<soulId>","text":"<opening line>"} = invite someone within 6 m to a conversation, out loud: world viewers can read it. Add "private":true to keep it to members (viewers see only that you talk).
+{"converse":"start","with":["<soulId>","<soulId>"],"text":"<opening line>"} = invite up to 8 distinct nearby Souls to the SAME conversation. They must independently accept; an invitation is not joined membership.
 {"converse":"say","id":"<conversationId>","text":"<text>"}
 {"object":"<objectId>","action":"<action>","params":{...}} e.g. chess move {"from":"e2","to":"e4"}, project contribute {"text":"...","effort":5}, a calendar item "interest".
 {"mark":"note"|"sign"|"offering"|"proposal","title":"<at most 60 chars>","text":"<at most 300 chars>"} and {"project":"<title>","text":"<what it is>"} leave lasting things where you stand.
@@ -1044,7 +1046,7 @@ export async function live(...argv){
  /** Small models sometimes wrap speech as an act ({"act":"say","params":{"text":…}}); treat it as what they meant. */
  function normaliseStep(st){if(!st||typeof st!=='object')return {};const v=String(st.act??'').trim(),p=st.params??{};
   if(/^say$/i.test(v))return {say:p.text??st.text??''};
-  if(/^converse/i.test(v))return {...st,act:undefined,params:undefined,converse:p.op??v.split(/[\s:./]+/)[1]??'say',withNames:p.withNames??st.withNames,identityBasis:p.identityBasis??st.identityBasis,with:p.with??st.with,id:p.id??p.conversation??st.id,text:p.text??st.text};
+  if(/^converse/i.test(v))return {...st,act:undefined,params:undefined,converse:p.op??v.split(/[\s:./]+/)[1]??'say',withNames:p.withNames??st.withNames,identityBasis:p.identityBasis??st.identityBasis,with:p.with??st.with,id:p.id??p.conversation??st.id,text:p.text??st.text,private:p.private??st.private};
   if(/^[a-z-]+$/.test(v)&&typeof (p.to??p.target??p.place)==='string'){const {to,target,place,...rest}=p;return {...st,act:`${v}:${to??target??place}`,params:rest};}
   return st;}
  const identityEvidence=openLiveSoulEvidence({worldId:initialBoot.worldId,scope:s.world+'|'+s.soul,call,here:()=>lastHere,conversations:()=>conversations.snapshot()});

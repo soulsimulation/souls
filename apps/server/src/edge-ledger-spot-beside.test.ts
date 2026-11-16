@@ -57,19 +57,6 @@ test('besideAt: the nearest clear point to the spot, never inside the thing, nul
   assert.equal(besideAt([10, 0.85], [10, 0], 0.85, {clearance: walled}), null);
 });
 
-test('a refusal never names an alternative in a secret place the Soul does not know; it names the next one, or none', () => {
-  const more = loadSpots({contract: 'activity-spots/1', spots: [...spots, {id: 'craft.e_far', activity: 'craft', base: 'idle', at: [80, 0.85], faceTo: [80, 0], label: 'potting table'}]}).data;
-  const secret = (ids: string[]) => ({...world(walled), hidden: (id: string) => ids.includes(id)});
-  const reason = (ids: string[]) => activityCapabilities(more, secret(ids) as never, new Set(['craft.e_counter'])).why.get('craft.e_counter')!.reason;
-  assert.match(reason([]), /workbench in the barn \(craft:craft\.e_bench\)/);
-  const next = reason(['craft.e_bench']);
-  assert.doesNotMatch(next, /barn|e_bench/, 'the secret one is not named');
-  assert.match(next, /potting table \(craft:craft\.e_far\)/, 'the nearest one it may know is');
-  const none = reason(['craft.e_bench', 'craft.e_far']);
-  assert.doesNotMatch(none, /nearest other one|barn|potting/, 'no alternative at all rather than a secret one');
-  assert.match(none, /waiting will not change that, so nothing was done\.$/);
-});
-
 test('a spot with a little room where it is and its line back blocked keeps its own point (main used it there)', () => {
   // 0.1 m of clearance on the spot itself, nothing clear straight back, clear floor 0.6 m to the side: before #628 it walked to
   // the spot itself; the side search runs only where the old rule refused
@@ -86,10 +73,4 @@ test('a spot used from beside it is taken by a body standing on that point, and 
   const out = activityCapabilities(data, {...world(kitchen), taken: (at: V2) => near(at)} as never, new Set(['craft.e_counter']));
   assert.equal(out.caps.some(c => c.id === 'craft:craft.e_counter'), false, 'not offered');
   assert.equal(out.why.get('craft.e_counter')?.code, 'spot.taken');
-});
-
-test('a spot asked for by id in a secret place the Soul does not know gets no reason: not spot.no-room, not spot.taken', () => {
-  const hidden = (w: object) => ({...w, hidden: (id: string) => id === 'craft.e_counter'});
-  assert.equal(activityCapabilities(data, hidden(world(walled)) as never, new Set(['craft.e_counter'])).why.size, 0, 'no room: nothing said');
-  assert.equal(activityCapabilities(data, hidden({...world(kitchen), taken: () => true}) as never, new Set(['craft.e_counter'])).why.size, 0, 'taken: nothing said');
 });

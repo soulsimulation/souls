@@ -213,6 +213,12 @@ screenshots or transcripts. Machines without the original run folders can then r
 - **Use a quiet machine.** The machine gate requires a 1-minute load under 10 and at least 6 GB of reclaimable memory.
   A loaded machine produces slow client calls and false failures. `replay-set` waits for the gate (`--gate-wait-min`,
   default 30) and stops if it never clears. `--force-machine` continues and records the breach.
+- **On a busy machine, use the hamlet battery.** Eden 2026 takes minutes to boot on a loaded host, so the m4-v1 score
+  then measures the host. `soul-eval.mjs run --battery m4-hamlet-v1 --seat <seat>` runs the m4-v1 items that have a
+  place of their kind in `hello-hamlet`, which boots in seconds; the battery file lists the items it leaves out and
+  why. Each episode's world boot time is in the report. Use m4-v1 on Eden 2026 for the full score on a quiet host.
+  `--battery harder-hamlet-v1` is the same port of harder-v1 (errands, a greeting, a refusal to recover from);
+  `harder-hamlet-v2` (#2477) has the same checks, with the cottage bench's wording and the 3600 s cap fixed.
 - **Two repeats per arm.** Compare arms only on like-for-like repeats (scripted replay against scripted replay),
   and fix acceptance bars and budgets before the baseline is measured.
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the
@@ -225,10 +231,26 @@ load, the meetup workload, the slopes tick profile) go to the `souls-timed` self
 `timed-run` workflow (`.github/workflows/timed-run.yml`): `ref`, `command` (`walk`, `eval-scripted`, `eval-load`,
 `bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
 own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
-put the world on two of the runner's four physical cores and the load generator on the other two, recorded in
-`timed-run.json`. The runners use a dedicated, unprivileged account: the
+put the world on two of the runner's physical cores and the load generator on the rest (one on a three-core runner, two
+on a four-core one), the split recorded in `timed-run.json`. An `eval-load` artifact also carries each world's own log
+(`eval-load/n<souls>-r<repeat>/server/world.log`), and `eval-load.log` names a world that exited on its own (exit code,
+signal) and its resident memory every 30 s. The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
 workstation.
+
+A counted scenario playtest (a T3 change's two repeats per arm) runs on runners in parallel instead of the workstation
+lock. Declare the bar on the issue first, as for a workstation run: the scenario, `base` and candidate branches, the
+items, the pass rule per cell and the load rule. Then dispatch `command=counted`, `ref` = the candidate branch,
+`base` = the base branch (`main` or an `agent/<name>` branch), `repeats` = cells per arm and
+`args=--scenario stair-foot`, with `runner=hosted` (the GitHub-hosted runners) or `souls-timed`:
+`gh workflow run timed-run.yml -f command=counted -f ref=agent/<n>-x -f base=main -f repeats=2 -f args='--scenario stair-foot' -f runner=hosted`.
+Each cell (`base-1`, `cand-1`, `base-2`, …) is its own job on its own runner, all at once. Its artifact
+`timed-run-counted-<run>-<cell>` holds the files the workstation session writes: `counted/<cell>/run.json`, its log,
+`<cell>.scores.json`, `<cell>.class.json` and the replay's `probe.log`. `timed-run.json` records the commit, the kit's
+sha256s, and the 1- and 5-minute load at the start and end of the cell with the runner's CPU count. The kit comes from
+`tools/playtest/counted/<scenario>/` at the workflow's commit, so both arms run the same bytes. The stair kit is #1367's
+declared kit byte for byte. Its starting load is recorded, not gated, since the items pass or fail. Pair `base-k` with
+`cand-k` and score them by the declared rule.
 
 ## Request ceilings on local test worlds
 

@@ -129,6 +129,21 @@
     ]
    },
    {
+    "match": "^What is on in the next hour",
+    "do": [
+     [
+      "whatson",
+      "--hours",
+      "1"
+     ],
+     [
+      "calendar",
+      "interest",
+      "{{prev.on[0].id}}"
+     ]
+    ]
+   },
+   {
     "match": "^Go into the West Lake",
     "do": [
      [

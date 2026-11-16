@@ -7,6 +7,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout } from 'node:timers/promises';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { acquireLock } from '../../../../tools/god-skill/lib/locks.mjs';
 const exec = promisify(execFile);
 export function hostRenderLockPath(env = process.env, platform = process.platform) {
@@ -20,6 +21,13 @@ export function hostRenderLockPath(env = process.env, platform = process.platfor
         throw new Error('Configure SIM_RENDER_LOCK_DIR outside systemd PrivateTmp for all world units');
     return join(tmpdir(), 'sim-host-render-slot');
 }
+/** #2444 shards: the world a call runs for, in a program of several worlds. The shard program (tools/world-launcher/shard.mjs)
+ *  starts each world inside it, so the world's timers, requests and promises carry it; unset in a program of one world. */
+export const renderWorld = new AsyncLocalStorage<string>();
+/** The slot's liveness is checked by pid, and a shard's pid outlives a world it stops. #2469: a slot is freed only by its
+ *  own render's end (every caller releases in `finally`), never by its world's stop while the render is mid-way (#2444
+ *  freed it then, and a second render could start beside the first). A stopped world's renders end with its stop: its
+ *  context views abort them (context-views.ts `close`), so its slot does not outlive them. */
 export async function hostRenderSlot(signal: AbortSignal) {
     const path = hostRenderLockPath();
     let nextIdentityCheck = 0;

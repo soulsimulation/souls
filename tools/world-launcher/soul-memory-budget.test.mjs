@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROJECTION_BUDGETS } from '../edge-skill/memory-folder.mjs';
+import { PROJECTION_BUDGETS } from './soul/memory-folder.mjs';
 import { BRIEF_BYTES } from './soul/brief.mjs';
 import { openSoulMemory } from './soul/memory.mjs';
 

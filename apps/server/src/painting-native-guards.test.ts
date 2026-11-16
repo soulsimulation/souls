@@ -63,11 +63,14 @@ test('a genuine native completion with an adversarially displaced body cannot pu
   const farOffer=w.edge.painting!.prepare(w.soul,w.target,picture,{face:[3,0],stand:[3,1.7],level:0});assert.ok('ok'in farOffer);if('ok'in farOffer)assert.equal(farOffer.code,'painting.not-reached','an over-retreated clearAt approach refuses consistently at admission');
   assert.deepEqual(w.god.model.entities.get(w.target)!.state,canvas);assert.equal(readdirSync(w.art).length,1);
 });
-test('the exact active native painting receipt and program survive a SQLite/snapshot restart and finish once',async t=>{
+// #2051: an act in flight at a restart ends at boot (receipt.lost-on-restart) and its programme is stopped; it no
+// longer resumes. The unfinished painting is never published, and the canvas keeps the last finished one.
+test('an active native painting at a SQLite/snapshot restart ends lost-on-restart and publishes nothing',async t=>{
   const w=await world(t),first=await w.start('Original');assert.equal((await w.finish(first)).phase,'completed');const before={...w.god.model.entities.get(w.target)!.state};
   const id=await w.start('After restart',30);await w.until(()=>w.host.engine.world.entities[w.soul.entityId].human?.activity==='paint');
   const pending=w.edge.receipt(w.soul.soulId,id)!;assert.equal(pending.phase,'started');assert.ok(pending.programId);const program=pending.programId,head=w.host.engine.stateHash();
-  w.restart();assert.equal(w.host.engine.stateHash(),head);assert.equal(w.host.engine.programOf(w.soul.entityId),program);assert.equal(w.edge.receipt(w.soul.soulId,id)!.phase,'started');assert.deepEqual(w.god.model.entities.get(w.target)!.state,before);
-  const done=await w.finish(id);assert.equal(done.phase,'completed',JSON.stringify(done));assert.equal(done.programId,program);assert.equal(w.god.model.entities.get(w.target)!.state!.title,'After restart');
-  assert.equal(w.god.store.edits(30).filter(e=>e.note?.startsWith('painting/1 ')&&e.note.includes(id)).length,1);assert.equal(readdirSync(w.art).length,2);
+  w.restart();assert.equal(w.host.engine.stateHash(),head);assert.equal(w.host.engine.programOf(w.soul.entityId),program);assert.deepEqual(w.god.model.entities.get(w.target)!.state,before);
+  const done=w.edge.receipt(w.soul.soulId,id)!;assert.equal(done.phase,'failed',JSON.stringify(done));assert.equal(done.code,'receipt.lost-on-restart');assert.equal(done.programId,program);
+  await w.until(()=>w.host.engine.programOf(w.soul.entityId)!==program);assert.deepEqual(w.god.model.entities.get(w.target)!.state,before);
+  assert.equal(w.god.store.edits(30).filter(e=>e.note?.startsWith('painting/1 ')&&e.note.includes(id)).length,0);assert.equal(readdirSync(w.art).length,1);
 });

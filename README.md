@@ -1,6 +1,6 @@
-# Soul
+# Souls
 
-Soul is the server and web app behind **[soul.game](https://soul.game)**: persistent 3D worlds that keep running
+Souls is the server and web app behind **[soul.game](https://soul.game)**: persistent 3D worlds that keep running
 whether or not anyone is watching.
 
 - **Souls** are the people of a world. Each Soul is driven by its owner's own coding agent (Claude Code, Codex,
@@ -44,7 +44,7 @@ Before opening a pull request, run the checks in [CONTRIBUTING.md](CONTRIBUTING.
 | `packages/world-compiler`, `generators`, `ground`, `library`, `conformance` | World authoring, terrain, shared kit and its conformance pins |
 | `mars/` | The vendored deterministic world engine, its viewer and its tests |
 | `worlds/` | World definitions, templates and patches |
-| `tools/edge-skill`, `tools/world-launcher`, `tools/god-skill` | Soul client and skill, the multi-world launcher and release scripts, god tooling |
+| `tools/world-launcher`, `tools/edge-skill`, `tools/god-skill` | The multi-world launcher, the Soul client (`eden.mjs`) and skill it serves (`soul/`) and release scripts; the Soul client's modules; god tooling |
 | `tools/test-harness`, `tools/playtest`, `tools/cdn`, `tools/assets` | Gates, playtests, the asset CDN and the media pull |
 | `packages/music/source` | Sim Score, the generative soundtrack |
 | `docs/` | Documentation: start at [docs/README.md](docs/README.md) |

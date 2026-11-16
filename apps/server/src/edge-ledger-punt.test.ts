@@ -26,8 +26,9 @@ test('row a pond loop with a companion: ordinary commands, held seat, water refu
   const run=async(n:number,until:()=>boolean)=>{for(let i=0;i<n&&!until();i++){f.host.tickOnce();if(i%20===0){await setImmediate();f.host.drainInputs();}}return until();};
   const world=f.host.engine.world as any,boat=()=>world.entities['eden-punt'],body=(i:number)=>world.entities[rows[i].entity_id],receipt=(i:number,id:string)=>ledger.receipt(rows[i].id,id)!;
   assert.ok(await run(80,()=>!!boat()?.carrier&&comms.objects.all().some(o=>o.id==='ride-eden-punt')),'admitted native water automatically installs its ordinary ride object');
-  const first=await call(0,'POST','/v1/edge/act',{capability:'row a boat on the pond with ben'});
-  assert.equal(first.accepted,true,JSON.stringify(first));assert.equal(first.resolved?.to,'object:ride-eden-punt:join');
+  // #1911: the offered join, with ben invited, is what "row a boat on the pond with ben" reads as
+  const first=await call(0,'POST','/v1/edge/act',{capability:'object:ride-eden-punt:join',params:{with:'ben'}});
+  assert.equal(first.accepted,true,JSON.stringify(first));assert.equal(first.receipt.capability,'object:ride-eden-punt:join');
   assert.equal((await call(1,'GET','/v1/edge/observe')).invites?.[0]?.what,'ride');
   assert.ok(await run(3000,()=>body(0).human.carrier?.phase==='seated'),JSON.stringify(receipt(0,first.receipt.id)));
   assert.equal(receipt(0,first.receipt.id).phase,'started','boarding is progress, not a completed rowing loop');
@@ -36,7 +37,7 @@ test('row a pond loop with a companion: ordinary commands, held seat, water refu
   assert.equal(receipt(0,first.receipt.id).phase,'started','unsupported early start must preserve the active rowing receipt');
   assert.equal((await call(0,'GET','/v1/edge/observe')).self.state,'rowing');
   const stranger=await call(2,'POST','/v1/edge/act',{capability:'object:ride-eden-punt:join'});assert.equal(stranger.accepted,false);assert.equal(stranger.code,'ride.full');
-  const second=await call(1,'POST','/v1/edge/act',{capability:'yes'});assert.equal(second.accepted,true,JSON.stringify(second));
+  const second=await call(1,'POST','/v1/edge/act',{capability:`accept:${ledger.together.invitesFor(rows[1].id)[0]!.id}`});assert.equal(second.accepted,true,JSON.stringify(second));
   assert.ok(await run(3000,()=>body(1).human.carrier?.phase==='seated'),JSON.stringify(receipt(1,second.receipt.id)));
   assert.equal(body(0).human.activity,'row');assert.equal(body(1).human.activity,'row');
   assert.ok(await run(200,()=>boat().carrier.phase==='aloft'));
@@ -45,5 +46,14 @@ test('row a pond loop with a companion: ordinary commands, held seat, water refu
   assert.equal(receipt(0,first.receipt.id).phase,'started');
   assert.ok(await run(4000,()=>receipt(0,first.receipt.id).phase==='completed'&&receipt(1,second.receipt.id).phase==='completed'),JSON.stringify([receipt(0,first.receipt.id),receipt(1,second.receipt.id)]));
   for(const i of [0,1]){assert.equal(body(i).human.carrier,undefined);assert.ok(body(i).pose.p[0]>-46);assert.equal(body(i).human.shore?.depthMetres,0);}
+  // #2303: a carrier changed since its last frame is a deadline on the 10-tick grid, so a silent world lands there and the
+  // ride object's events (the ashore line) go out on the same tick as in a world ticked straight through
+  while(f.host.engine.world.tick%10!==3)f.host.tickOnce();
+  assert.equal(ledger.rideFrameDue(f.host.engine.world.tick),null,'every carrier framed');
+  (ledger as any).rideKey.set('eden-punt','stale');
+  const now=f.host.engine.world.tick,due={tick:ledger.rideFrameDue(now)!};   // (stillParts reports it as edge.ride-frame; this ledger is ambient, so busy)
+  assert.equal(due.tick,now+7,'due at the next frame tick');
+  while(f.host.engine.world.tick<due.tick)f.host.tickOnce();
+  assert.equal(ledger.rideFrameDue(f.host.engine.world.tick),null,'framed at that tick');
   assert.deepEqual(f.host.engine.runtime.violations,[]);assert.equal(f.db.paidCost(),0);
 });

@@ -1,12 +1,16 @@
 // #1936: which client each Soul runs. Every client request says `x-soul-client: <version>`; an authenticated Soul request
 // is counted here in memory, one count per Soul, client and UTC day, and the counts go to edge_clients_v1 at most once a
-// minute and at shutdown. No request waits on the database. A request without the header counts as client `none`; any
-// other value (a tool's `bench/1`, say) is kept as given.
+// minute and at shutdown. No request waits on the database. A request without the header counts as client `none`; a short
+// version string (at most 32 of `0-9A-Za-z.+-/`, a tool's `bench/1` included) is kept as given; anything else counts as
+// `invalid` (#2014), so junk values add one row per Soul and day, and the request is still served.
 import type {Context, Hono, MiddlewareHandler} from 'hono';
 import type {DatabaseSync} from 'node:sqlite';
 
 export const CLIENT_HEADER = 'x-soul-client';
 export const CLIENT_FLUSH_MS = 60_000;
+const CLIENT_RE = /^[0-9A-Za-z][0-9A-Za-z.+/-]{0,31}$/;
+/** The value recorded for a header: `none`, the header itself when it is a short version string, or `invalid`. */
+export const clientOf = (header: string | undefined): string => !header ? 'none' : CLIENT_RE.test(header) ? header : 'invalid';
 
 type Count = {soul: string; client: string; day: string; first: number; last: number; n: number};
 
@@ -19,7 +23,7 @@ export class EdgeClients {
     this.timer = everyMs > 0 ? setInterval(() => this.flush(), everyMs) : null; this.timer?.unref();
   }
   note(soul: string, header: string | undefined, at = Date.now()): void {
-    const client = header || 'none', day = new Date(at).toISOString().slice(0, 10), key = `${soul}\n${client}\n${day}`;
+    const client = clientOf(header), day = new Date(at).toISOString().slice(0, 10), key = `${soul}\n${client}\n${day}`;
     const c = this.counts.get(key);
     if (c) { c.last = at; c.n++; } else this.counts.set(key, {soul, client, day, first: at, last: at, n: 1});
   }

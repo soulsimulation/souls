@@ -50,6 +50,7 @@ test('rock-paper-scissors and holding hands with consent', {timeout:600000}, asy
  assert.ok(!/Far |far_|holding hands|offers you/.test(JSON.stringify(far)),'no names, no lines');
  // acting
  let retries=0;
+ const answer=(s,verb,on='inv_')=>{soul=s;return edge.capabilities(s).find(c=>c.id.startsWith(verb+':'+on))?.id??verb;};
  const act=async(s,capability,params,ok=true)=>{let b;for(let k=0;k<20;k++){soul=s;const r=await accept(f.host,app.request('/v1/edge/act',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({capability,...(params?{params}:{})})}));b=await r.json();if(b.code!=='object.admission-failed')break;retries++;await tick(10);}assert.equal(b.accepted,ok,capability+' '+JSON.stringify(b).slice(0,400));return b;};
  const receipt=(s,b)=>edge.receipt(s.soulId,b.receipt.id);
  const until=async(cond,limit=1200)=>{for(let n=0;n<limit;n++){if(cond())return n;await tick(1);}return -1;};
@@ -57,24 +58,24 @@ test('rock-paper-scissors and holding hands with consent', {timeout:600000}, asy
  const messages=s=>f.db.db.prepare('SELECT kind,body FROM edge_comms_stream WHERE world_id=? AND soul_id=? ORDER BY seq').all(f.host.worldId,s.soulId).map(r=>({kind:r.kind,...JSON.parse(r.body)}));
  const report={status:'fail',hereBytes:{},checks:[],refusals:{},lines:{}};
  // ---- rock-paper-scissors, declined first (polite, final)
- const r0=await act(ana,'play rock-paper-scissors with Ben',{shape:'rock'});
+ const r0=await act(ana,`rps:${ben.soulId}`,{shape:'rock'});
  assert.ok(await until(()=>edge.together.invitesFor(ben.soulId).length>0)>=0);
  const benOffer=await here(ben);report.lines.rpsOffer=benOffer.me.offer;
  assert.match(benOffer.me.offer??'',/^Ana offers you a game of rock-paper-scissors: accept with your throw or decline \(\d+ s\)$/);
  assert.ok(!(await here(cy)).me.offer,'the bystander sees no offer');
  assert.equal(sz(await here(cy)),sz(absent),'+0 for the bystander while an offer is pending to someone else');
  assert.ok(!/"rock"|throw":|"host"/.test(JSON.stringify([benOffer,messages(ben)])),'the offerer\'s throw is nowhere in Ben\'s view');
- const decline=await act(ben,'decline');
+ const decline=await act(ben,answer(ben,'decline'));
  assert.ok(await until(()=>ended(ana,r0))>=0);assert.equal(receipt(ana,r0).code,'invite.declined');
- const afterDecline=await act(ben,'accept',{shape:'paper'},false),byId=await act(ben,`accept:${edge.together.inviteForReceipt(r0.receipt.id).id}`,{shape:'paper'},false);report.refusals.afterDecline={words:[afterDecline.code,afterDecline.reason],id:byId.code};
- assert.equal(afterDecline.code,'invite.none','declining is final for that offer');assert.equal(byId.code,'capability.unknown');
+ const byId=await act(ben,`accept:${edge.together.inviteForReceipt(r0.receipt.id).id}`,{shape:'paper'},false);report.refusals.afterDecline={id:byId.code};
+ assert.equal(byId.code,'capability.unknown','declining is final for that offer');
  // ---- rps refused without a throw, then played
- report.refusals.noThrow=(await act(ana,'play rock-paper-scissors with Ben',undefined,false)).code;assert.equal(report.refusals.noThrow,'rps.choose');
+ report.refusals.noThrow=(await act(ana,`rps:${ben.soulId}`,undefined,false)).code;assert.equal(report.refusals.noThrow,'rps.choose');
  await tick(30);
- const r1=await act(ana,'play rock-paper-scissors with Ben',{shape:'scissors'});
+ const r1=await act(ana,`rps:${ben.soulId}`,{shape:'scissors'});
  assert.ok(await until(()=>edge.together.invitesFor(ben.soulId).length>0)>=0);
- report.refusals.acceptNoThrow=(await act(ben,'accept',undefined,false)).code;assert.equal(report.refusals.acceptNoThrow,'rps.choose');
- const r2=await act(ben,'accept',{shape:'paper'});
+ report.refusals.acceptNoThrow=(await act(ben,answer(ben,'accept'),undefined,false)).code;assert.equal(report.refusals.acceptNoThrow,'rps.choose');
+ const r2=await act(ben,answer(ben,'accept'),{shape:'paper'});
  const states=[];for(let n=0;n<900&&!(ended(ana,r1)&&ended(ben,r2));n++){await tick(1);const A=body(ana).human,B=body(ben).human;if(A.rps||B.rps)states.push({tick:W().tick,a:structuredClone(A.rps),b:structuredClone(B.rps),d:Math.hypot(body(ana).pose.p[0]-body(ben).pose.p[0],body(ana).pose.p[2]-body(ben).pose.p[2])});}
  assert.equal(receipt(ana,r1).phase,'completed');assert.equal(receipt(ben,r2).phase,'completed');
  const both=states.filter(s=>s.a&&s.b);assert.ok(both.length>80);
@@ -88,26 +89,26 @@ test('rock-paper-scissors and holding hands with consent', {timeout:600000}, asy
  assert.match(receipt(ana,r1).outcome?.summary??'',/You win/);
  report.lines.rpsResult=[resA.text,resB.text];
  // ---- lapse
- const r3=await act(ana,'play rock-paper-scissors with Ben',{shape:'rock'});
+ const r3=await act(ana,`rps:${ben.soulId}`,{shape:'rock'});
  assert.ok(await until(()=>ended(ana,r3),900)>=0);assert.equal(receipt(ana,r3).code,'invite.expired');assert.ok(!(await here(ben)).me.offer,'the lapsed offer line is gone');
  // ---- holding hands: offer, nobody moved before accepting, withdraw
  await tick(20);const benAt0=at(ben),benYaw0=body(ben).pose.yaw;
- const h1=await act(ana,'offer Ben my hand');
+ const h1=await act(ana,`hold-hands:${ben.soulId}`);
  assert.ok(await until(()=>body(ana).human.handHold?.offered!==undefined)>=0,'Ana holds out her hand');
  const benHand=await here(ben);report.lines.handOffer=benHand.me.offer;assert.match(benHand.me.offer??'',/^Ana offers you a hand to hold: accept or decline \(\d+ s\)$/);
  assert.deepEqual(at(ben),benAt0,'Ben does not move before accepting');assert.equal(body(ben).pose.yaw,benYaw0);
  assert.match((await here(ana)).me.activity.kind,/inviting/);
- await act(ana,'withdraw my offer');
+ await act(ana,answer(ana,'withdraw'));
  assert.ok(await until(()=>ended(ana,h1))>=0);assert.equal(receipt(ana,h1).code,'invite.withdrawn');
  assert.ok(await until(()=>body(ana).human.handHold?.release!==undefined)>=0,'the offered hand comes back down');
  assert.ok(!(await here(ben)).me.offer,'the withdrawn offer line is gone');assert.match(messages(ben).at(-1)?.text??'',/withdrew the offer/);
  assert.deepEqual(at(ben),benAt0,'still not moved');
  // ---- offer again, take her hand
  await tick(60);
- const h2=await act(ana,'offer Ben my hand');assert.ok(await until(()=>edge.together.invitesFor(ben.soulId).length>0)>=0);
+ const h2=await act(ana,`hold-hands:${ben.soulId}`);assert.ok(await until(()=>edge.together.invitesFor(ben.soulId).length>0)>=0);
  await until(()=>body(ana).human.handHold?.offered!==undefined);
  assert.deepEqual(at(ben),benAt0,'not moved while offered');
- const h3=await act(ben,'take her hand');
+ const h3=await act(ben,answer(ben,'accept'));
  assert.ok(await until(()=>ended(ana,h2)&&ended(ben,h3))>=0);assert.equal(receipt(ana,h2).phase,'completed');assert.equal(receipt(ben,h3).phase,'completed');
  const A=body(ana),B=body(ben),gap=Math.hypot(A.pose.p[0]-B.pose.p[0],A.pose.p[2]-B.pose.p[2]);
  assert.ok(gap>=.58&&gap<=.68,'side by side '+gap);assert.ok(Math.abs(A.pose.yaw-B.pose.yaw)<=.1,'same way');
@@ -118,7 +119,7 @@ test('rock-paper-scissors and holding hands with consent', {timeout:600000}, asy
  const [mx,mz]=[(A.pose.p[0]+B.pose.p[0])/2,(A.pose.p[2]+B.pose.p[2])/2],fx=Math.cos(A.pose.yaw),fz=Math.sin(A.pose.yaw);
  const goal=[mx+fx*6-fz*2,mz+fz*6+fx*2];
  assert.equal(god.act({ops:[{op:'place',def:'core/zone@1',name:'lawn',shape:{area:[[goal[0]-1.5,goal[1]-1.5],[goal[0]+1.5,goal[1]-1.5],[goal[0]+1.5,goal[1]+1.5],[goal[0]-1.5,goal[1]+1.5]]}},{op:'place',def:'core/zone@1',name:'orchard',shape:{area:[[mx-fz*-8-1.5,mz+fx*-8-1.5],[mx-fz*-8+1.5,mz+fx*-8-1.5],[mx-fz*-8+1.5,mz+fx*-8+1.5],[mx-fz*-8-1.5,mz+fx*-8+1.5]]}}]}).accepted,true);await tick(45);
- const w1=await act(ana,'walk to the lawn');
+ const w1=await act(ana,'walk:lawn');
  let lag=0,lat=0,speedGap=0,moving=0,turnSeen=false;
  for(let n=0;n<1200&&!ended(ana,w1);n++){await tick(1);const a=A.pose.p,b=B.pose.p,yf=[Math.cos(A.pose.yaw),Math.sin(A.pose.yaw)],d=[b[0]-a[0],b[2]-a[2]];
   if(A.human.task&&f.host.engine.runtime.records.get(A.human.task)?.verb==='hand_hold_v1')turnSeen=true;
@@ -128,9 +129,9 @@ test('rock-paper-scissors and holding hands with consent', {timeout:600000}, asy
  assert.ok(edge.together.handsWith(ana.entityId),'still holding hands at the lawn');
  report.walk={moving,lag:+lag.toFixed(4),lateral:+lat.toFixed(4),speedGap:+speedGap.toFixed(4),turnedTogether:turnSeen};
  // ---- Ana walks on to the orchard with Ben; on the way Ben is told to go to Cy instead: he lets go first, then goes
- const w3=await act(ana,'walk to the orchard');
+ const w3=await act(ana,'walk:orchard');
  assert.ok(await until(()=>(B.human.speed??0)>.5,400)>=0,'walking together again');await tick(30);
- const w2=await act(ben,'go near Cy');
+ const w2=await act(ben,`go-near:${cy.soulId}`);
  assert.ok(await until(()=>B.human.handHold?.release!==undefined,200)>=0,'he lets go first');
  const releasedAt=W().tick,startPos=[...B.pose.p];
  assert.ok(await until(()=>B.human.task&&f.host.engine.runtime.records.get(B.human.task)?.verb==='walk_to'&&Math.hypot(B.pose.p[0]-startPos[0],B.pose.p[2]-startPos[2])>.05,400)>=0);
@@ -141,10 +142,10 @@ test('rock-paper-scissors and holding hands with consent', {timeout:600000}, asy
  assert.ok(await until(()=>ended(ana,w3),1200)>=0);assert.equal(receipt(ana,w3).phase,'completed','Ana walks on alone');
  assert.ok(!edge.together.handsWith(ana.entityId),'nobody pulls anyone along');
  // ---- once more by hand: Ben offers, Ana takes it, then Ana lets go
- const h4=await act(ben,'hold hands with Ana');assert.ok(await until(()=>edge.together.invitesFor(ana.soulId).length>0,400)>=0);
- const h5=await act(ana,'accept');assert.ok(await until(()=>ended(ben,h4)&&ended(ana,h5),1200)>=0);assert.equal(receipt(ana,h5).phase,'completed',JSON.stringify([receipt(ana,h5),receipt(ben,h4),at(ana),at(ben),at(cy)]));
+ const h4=await act(ben,`hold-hands:${ana.soulId}`);assert.ok(await until(()=>edge.together.invitesFor(ana.soulId).length>0,400)>=0);
+ const h5=await act(ana,answer(ana,'accept'));assert.ok(await until(()=>ended(ben,h4)&&ended(ana,h5),1200)>=0);assert.equal(receipt(ana,h5).phase,'completed',JSON.stringify([receipt(ana,h5),receipt(ben,h4),at(ana),at(ben),at(cy)]));
  assert.ok(edge.together.handsWith(ben.entityId));
- const lg=await act(ana,'let go of his hand');assert.ok(await until(()=>ended(ana,lg))>=0);assert.equal(receipt(ana,lg).phase,'completed');
+ const lg=await act(ana,answer(ana,'let-go','here'));assert.ok(await until(()=>ended(ana,lg))>=0);assert.equal(receipt(ana,lg).phase,'completed');
  assert.ok(!edge.together.handsWith(ben.entityId)&&!edge.together.handsWith(ana.entityId));
  assert.match(messages(ben).filter(m=>m.kind==='hands.released').at(-1)?.text??'',/Ana let go of your hand/);
  await tick(60);

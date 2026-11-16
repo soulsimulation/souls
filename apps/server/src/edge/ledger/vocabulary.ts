@@ -286,7 +286,8 @@ export function parseCapability(input: string, verbs: Set<string>): {verb: strin
   if (LEISURE_LEAD.test(raw)) for (const [re, v] of LEISURE_OBJECTS) if (verbs.has(v) && re.test(raw.toLowerCase())) return {verb: v, rest: raw.toLowerCase().replace(re, ' ').replace(LEISURE_LEAD, ' ').split(/[^a-z0-9.-]+/).filter(w => w && !FILLER.has(w) && !STOP.has(w)).join(' ')};
   for (let n = Math.min(4, words.length); n >= 1; n--) {
     const v = canon(words.slice(0, n).join('-')), rest = words.slice(n).join(' ');
-    if (!verbs.has(v)) continue;
+    // #1916: "walk to the pond" is a walk; walk-to:here is acted on by id with a point, never read from words
+    if (!verbs.has(v) || v === 'walk-to') continue;
     // "sit on the grass" is sitting on the ground, not on a seat called grass.
     if (v === 'sit' && verbs.has('sit-ground') && /\b(?:ground|grass|floor|lawn|sand)\b/i.test(rest)) return {verb: 'sit-ground', rest: ''};
     return {verb: v, rest};
