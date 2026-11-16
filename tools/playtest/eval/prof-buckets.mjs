@@ -109,6 +109,10 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     const k = `${where} | ${caller ? at(caller) : '-'}`; syncMemo.set(leafId, k); return k;
   };
   const syncBy = new Map();
+  // N4 step 0 (throwaway): inclusive ms per app frame under each route.* group (and nav.sync samples under a route frame)
+  const routeFrames = new Map(), rfMemo = new Map();
+  const rfKeys = (leafId) => { if (rfMemo.has(leafId)) return rfMemo.get(leafId); const ks = new Set(); let cls = ''; for (let x = leafId; x != null; x = parent.get(x)) { const n = byId.get(x).callFrame.functionName; if (n === 'n4LongRoute') { cls = 'long:'; break; } if (n === 'n4ShortRoute') { cls = 'short:'; break; } } for (let x = leafId; x != null; x = parent.get(x)) { const f = byId.get(x).callFrame, rel = relOf(f.url); if (/^(apps|packages|mars)\//.test(rel)) { const l = `${f.functionName || '(anon)'} ${rel.split('/').pop()}:${f.lineNumber + 1}`; ks.add(l); if (cls) ks.add(cls + l); } } if (cls) ks.add(cls + '(total)'); const out = [...ks]; rfMemo.set(leafId, out); return out; };
+  const underRoute = (leafId) => { for (let x = leafId; x != null; x = parent.get(x)) if (ROUTE.has(byId.get(x).callFrame.functionName)) return true; return false; };
   const tot = new Map(), holds = [];
   // #2592 (`step0`): JS tasks, each a run of busy samples under one child of (root) (GC samples stay in the task they
   // interrupt). A loop turn is at least as long as its longest task, so these are a lower bound on loop delay.
@@ -124,6 +128,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     busy += dt; const g = classify(node.id);
     tot.set(g, (tot.get(g) ?? 0) + dt);
     if (g === 'nav.sync') { const k = syncWhere(node.id); syncBy.set(k, (syncBy.get(k) ?? 0) + dt); }
+    if (g.startsWith('route.') || ((g === 'nav.sync' || g === 'gc') && underRoute(node.id))) { const key = g.startsWith('route.') ? g : g + '(under route)'; let m = routeFrames.get(key); if (!m) routeFrames.set(key, (m = new Map([['(total)', 0]]))); m.set('(total)', m.get('(total)') + dt); for (const k of rfKeys(node.id)) m.set(k, (m.get(k) ?? 0) + dt); }
     if (!cur) cur = { at: t - dt, ms: 0, by: new Map(), tasks: 0, longestTask: 0 }; cur.ms += dt; cur.by.set(g, (cur.by.get(g) ?? 0) + dt);
     const rc = g === 'gc' && task ? task.root : rootChild(node.id);
     if (task && task.root !== rc) closeTask();
@@ -195,6 +200,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     navSyncBy: [...syncBy].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => { const [where, caller] = k.split(' | '); return { where, caller, ms: r1(ms) }; }),
     holds: { overMs: holdMs, n: holds.length, ms: r1(holds.reduce((s, h) => s + h.ms, 0)), bySource: Object.fromEntries([...bySource].sort((a, b) => b[1].ms - a[1].ms).map(([g, e]) => [g, { n: e.n, ms: r1(e.ms), maxMs: r1(e.maxMs) }])) },
     step0,
+    routeFrames: Object.fromEntries([...routeFrames].map(([g, m]) => [g, [...m].sort((a, b) => b[1] - a[1]).slice(0, 150).map(([k, ms]) => [k, Math.round(10 * ms) / 10])])),
   };
 }
 

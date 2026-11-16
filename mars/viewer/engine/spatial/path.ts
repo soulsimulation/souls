@@ -92,6 +92,8 @@ export type RouteOpts = {
 /** Corridor planner: coarse cell size (m) and fine-search halo around the coarse path (m). */
 export const CORRIDOR_CELL = 0.5;
 export const CORRIDOR_HALO = 1.5;
+/** N4 step 0 (throwaway instrumentation): corridor searches and their fallbacks to exact. */
+const n4c = { calls: 0, fallback: 0, coarseFail: 0, fineFail: 0 };
 
 /** A link direction prepare() dropped for lack of room at its approach (recorded only with `nameObstacles`). */
 type Dropped = { level: number; at: Vec2[]; farLevel: number; far: Vec2 };
@@ -125,6 +127,8 @@ export function findRoute(grids: GridSet, scene: SpatialScene, profile: AgentPro
   if ('ok' in prep) return prep;
   if (opts.planner === 'corridor') {
     const r = corridorRoute(grids, scene, profile, start, goal, opts, prep);
+    n4c.calls++; if (!r) n4c.fallback++;
+    if (n4c.calls % 200 === 0) console.log(`[n4-corridor] calls ${n4c.calls} fallback ${n4c.fallback} coarseFail ${n4c.coarseFail} fineFail ${n4c.fineFail}`);
     if (r) return r;
   }
   const found = search(grids, prep, opts, null);
@@ -563,7 +567,7 @@ function corridorRoute(grids: GridSet, scene: SpatialScene, profile: AgentProfil
   const cPrep = prepare(coarse, scene, profile, { level: start.level, p: centreOf(prep.gs, prep.s) }, { level: goal.level, p: centreOf(prep.gg, prep.gt) }, { ...opts, goalTolerance: 0 });
   if ('ok' in cPrep) return null;
   const cFound = search(coarse, cPrep, opts, null);
-  if (!cFound || 'ok' in cFound) return null;
+  if (!cFound || 'ok' in cFound) { n4c.coarseFail++; return null; }
   const { B, lvIds } = prep;
   const S = scratchFor(prep.total);
   if (!S.mask) S.mask = new Uint32Array(S.total);
@@ -580,7 +584,7 @@ function corridorRoute(grids: GridSet, scene: SpatialScene, profile: AgentProfil
     for (let j = j0; j < j1; j++) for (let i = i0, row = B[lv] + j * g.nx; i < i1; i++) S.mask[row + i] = mgen;
   }
   const found = search(grids, prep, opts, { stamp: S.mask, gen: mgen });
-  if (!found || 'ok' in found) return null;
+  if (!found || 'ok' in found) { n4c.fineFail++; return null; }
   return assemble(grids, prep, start, goal, found, cFound.expanded + found.expanded);
 }
 

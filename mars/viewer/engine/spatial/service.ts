@@ -810,6 +810,10 @@ export class Spatial {
     return null;
   }
   route(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
+    // N4 step 0 (throwaway): the profile splits route work by the straight-line length of the request
+    return n4Count('route', start, goal) ? n4LongRoute(() => this.route0(world, profile, start, goal, opts)) : n4ShortRoute(() => this.route0(world, profile, start, goal, opts));
+  }
+  private route0(world: WorldState, profile: AgentProfile, start: Place, goal: Place, opts?: RouteOpts): RouteResult {
     const m = this.routeMemo;
     if (!m) return this.routeNow(world, profile, start, goal, opts);
     return this.readPass(world, () => this.routeKept(m, world, profile, start, goal, opts));   // one sync for the lookup and the search
@@ -915,6 +919,9 @@ export class Spatial {
 
   /** One-off route treating standing people as temporary obstacles (a walker blocked by someone not moving). */
   routeAround(world: WorldState, profile: AgentProfile, start: Place, goal: Place, people: AroundPerson[], explainUnusable?: (linkId: string) => boolean): RouteResult {
+    return n4Count('around', start, goal) ? n4LongRoute(() => this.routeAround0(world, profile, start, goal, people, explainUnusable)) : n4ShortRoute(() => this.routeAround0(world, profile, start, goal, people, explainUnusable));
+  }
+  private routeAround0(world: WorldState, profile: AgentProfile, start: Place, goal: Place, people: AroundPerson[], explainUnusable?: (linkId: string) => boolean): RouteResult {
     const run = () => {
       // paged ground: a far goal is approached a chunk at a time (the people only matter near the walker)
       let rest: Place | undefined;
@@ -1074,3 +1081,15 @@ export type StaticExportV1 = StaticSceneV1 & {
   /** Catalogue defs with a seat slot (god defs register into the catalogue at run time, so the worker cannot read it). */
   seatDefs: string[];
 };
+
+// N4 step 0 (throwaway instrumentation, never merged): request counts by straight-line length, and named frames for the profile.
+export const N4_LONG_M = 40;
+const n4 = { route: [0, 0], around: [0, 0], n: 0 };
+function n4Count(kind: 'route' | 'around', start: Place, goal: Place): boolean {
+  const long = start.level !== goal.level || hypot(goal.p[0] - start.p[0], goal.p[1] - start.p[1]) > N4_LONG_M;
+  n4[kind][long ? 1 : 0]++;
+  if (++n4.n % 500 === 0) console.log(`[n4-len] route short ${n4.route[0]} long ${n4.route[1]}; around short ${n4.around[0]} long ${n4.around[1]}`);
+  return long;
+}
+function n4LongRoute<T>(f: () => T): T { return f(); }
+function n4ShortRoute<T>(f: () => T): T { return f(); }
