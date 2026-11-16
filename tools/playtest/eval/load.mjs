@@ -20,6 +20,13 @@
 // planner's sync and audit, and long holds by source, beside the means of the world's own parts (live.json sums) and the
 // time admission charged each act. `--menu-stats` runs the world with EDGE_MENU_STATS=1 and folds its menu counters over
 // the load window into the report, with builds per act. Without these flags nothing else changes.
+// #2509 `--raw-from <k>`: Souls k and above (1-based) are raw-HTTP Souls in this process (no `serve`, no CLI per act): each
+// joins from its own documentation-range address (x-forwarded-for, so one address's pairing limit does not pace setup), 8
+// at a time; reads the catalog and live picture once; acts by catalog id with an idempotency key and the client's retry
+// rules (../../bench/capacity/meetup/client-soul.mjs), reading each act's receipt once. Its acts are the paced loop's,
+// drawn from the same seeded draws a real Soul in its place would make; the differences are in rawDifferences below. The
+// report gives the driver's processor share, and acts achieved against intended and act wait per tenth of agents by
+// activity, busiest first. `--shape uniform` is the paced loop; the uneven shapes come from #2556's shapes module.
 // #2533: `--scan-census` runs the world with SIM_L4_STATS=1 and SIM_L4_SCAN_SITES=1 and reads the planner's static scans
 // from its `[l4]` lines (engine-bridge.ts, one a minute): scans and trusted syncs a second, ms a scan, and the scan sites
 // (service.ts navChanged: the first frame outside the spatial service, a minute's top 8). With `--profile` the report adds
@@ -36,6 +43,8 @@ import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
 import { bucketProfile, perAct, readProfile, ACT_GROUPS } from './prof-buckets.mjs';
+import { clientCall, clientHeaders, actBody, startPicture } from '../../bench/capacity/meetup/client-soul.mjs';
+import { randomBytes } from 'node:crypto';
 
 const PROF_HOOK = new URL('./prof-hook.mjs', import.meta.url).pathname;
 
@@ -130,13 +139,97 @@ async function soulLoop({ folder, until, r, counts, acts = [] }) {
   }
 }
 
+/** #2509: raw Soul i's address: the documentation ranges (192.0.2/24, 198.51.100/24, 203.0.113/24), one per Soul. */
+export function docAddress(i) {
+  if (!(i >= 0 && i < 762)) throw new Error('raw Souls: at most 762 documentation addresses');
+  const [net, k] = i < 254 ? ['192.0.2', i] : i < 508 ? ['198.51.100', i - 254] : ['203.0.113', i - 508];
+  return `${net}.${k + 1}`;
+}
+/** What a raw Soul does unlike the real client, for the report. */
+export const rawDifferences = 'Raw Souls: no `serve` daemon or long-polls, no owner messages (cards go to real Souls only), no `look`/`find`/`pending`; a word is resolved from the catalog once (its places, spots and seats by name), not from the nearest rows the CLI\'s `find` ranks; each act reads its receipt once.';
+/** #2509: the catalog's ids for each paced word (as `find <word>` would offer them, without the CLI's nearest-first order). */
+export function wordIds(cat) {
+  const places = cat?.places ?? [], acts = (cat?.acts ?? []).filter((a) => !a.with && !a.needs), things = cat?.things ?? [];
+  const named = (w) => { const re = new RegExp(w.replace(/[^a-z ]/g, '').split(' ').join('.?'), 'i'); return [...places.filter((p) => re.test(`${p.name ?? ''} ${p.ref ?? p.id}`)).map((p) => `walk:${p.ref ?? p.id}`), ...acts.filter((a) => re.test(`${a.label ?? ''} ${a.id}`)).map((a) => a.id)]; };
+  const verb = (v) => acts.filter((a) => a.verb === v).map((a) => a.id);
+  return { bandstand: named('bandstand'), windmill: named('windmill'), 'fire circle': named('fire circle'), lake: named('lake'), library: named('library'), pond: named('pond'), garden: [...verb('garden'), ...named('garden')],
+    'sit on the floor': ['sit-ground:here'], eat: verb('eat'), read: verb('read'), bench: [...verb('sit'), ...things.filter((t) => t.seat).map((t) => `sit:${t.id}`)], music: [...verb('play-music'), ...verb('listen')] };
+}
+const timingOf = (h) => Object.fromEntries([...String(h ?? '').matchAll(/([a-z-]+);dur=([\d.]+)/g)].map((m) => [m[1], Number(m[2])]));
+/** #2509: a raw Soul joins: create (waiting out a pending arrival), pair, token. Dev identity, its own address. */
+export async function rawJoin(base, i, { call = clientCall } = {}) {
+  const soul = { i, address: docAddress(i), identity: 'agent-' + randomBytes(12).toString('hex') };
+  const dev = { ...clientHeaders(soul), authorization: `Bearer dev:${soul.identity}` }, name = `Load ${i}`;
+  const c = await call(`${base}/v1/souls`, { method: 'POST', headers: dev, body: { name } });
+  let id = c.data?.soul?.id ?? null;
+  if (!id && c.status === 503 && c.data?.lifecycle?.requestId) {
+    for (const until = Date.now() + 180_000; !id && Date.now() < until;) {
+      await sleep(2000);
+      const r = await call(`${base}/v1/lifecycle/${c.data.lifecycle.requestId}`, { headers: dev }), lc = r.data?.lifecycle;
+      if (lc?.state === 'admitted' && lc.ready) id = lc.soulId ?? c.data.lifecycle.soulId;
+      else if (lc?.state === 'refused' || r.status === 404) break;
+    }
+  }
+  if (!id) throw new Error(`raw Soul ${i}: create ${c.status} ${c.code ?? ''}`);
+  const code = (await call(`${base}/v1/souls/${id}/pair`, { method: 'POST', headers: dev, body: {} })).data?.code;
+  const t = code ? await call(`${base}/v1/agent/pair`, { method: 'POST', headers: clientHeaders(soul, { auth: false }), body: { code, agent: 'eval-load raw' } }) : null;
+  if (!t?.data?.token) throw new Error(`raw Soul ${i}: pair ${t?.status ?? 'no code'} ${t?.code ?? ''}`);
+  return { ...soul, soulId: id, token: t.data.token };
+}
+/** #2509: the paced loop for a raw Soul, with the same draws as pacedLoop (first offset, gap, word, row) and no owner
+ *  messages. Each act: POST /v1/edge/act by catalog id (keyed), then its receipt once. Trace records as the client's. */
+export async function rawPacedLoop({ base, soul, ids, until, r, counts, acts = [], http = [], actSec, call = clientCall }) {
+  let next = Date.now() + r() * actSec * 1000;
+  for (let n = 0; ; n++) {
+    await sleep(Math.max(0, next - Date.now()));
+    if (Date.now() >= until) break;
+    next = Math.max(Date.now(), next + actSec * 1000 * (0.5 + r()));
+    const word = PACED_WORDS[Math.floor(r() * PACED_WORDS.length)], rows = ids[word] ?? [];
+    if (!rows.length) continue;
+    const id = rows[Math.floor(r() * Math.min(3, rows.length))], key = `raw-${soul.i}-${n}-${Date.now()}`, t0 = Date.now();
+    const a = await call(`${base}/v1/edge/act`, { method: 'POST', headers: clientHeaders(soul, { key }), body: actBody(id, key) });
+    counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++;
+    const tm = timingOf(a.timing);
+    http.push({ v: 'soul-trace/1', kind: 'http', at: t0, method: 'POST', route: '/v1/edge/act', status: a.status, durationMs: Date.now() - t0, serverMs: tm.world, queuedMs: tm.queue, facts: { accepted: a.data?.accepted, code: a.data?.code ?? a.code } });
+    acts.push({ cap: capabilityOf({ act: id }), t0, t1: Date.now() });
+    const rid = a.data?.receipt?.id;
+    if (rid) { const t1 = Date.now(), g = await call(`${base}/v1/edge/receipts/${rid}`, { headers: clientHeaders(soul) }); counts.cmds++; http.push({ v: 'soul-trace/1', kind: 'http', at: t1, method: 'GET', route: `/v1/edge/receipts/${rid}`, status: g.status, durationMs: Date.now() - t1, serverMs: timingOf(g.timing).world, queuedMs: timingOf(g.timing).queue }); }
+  }
+}
+/** #2509: per tenth of agents by activity (intended acts, then achieved; busiest first): agents, intended and achieved
+ *  acts, act queue p50 and the slow-down refusals (an active agent held back by its own budget). */
+export function byTenth(agents) {
+  const s = [...agents].sort((a, b) => b.intended - a.intended || b.achieved - a.achieved), out = [];
+  for (let t = 0; t < Math.min(10, s.length); t++) {
+    const g = s.slice(Math.round(t * s.length / Math.min(10, s.length)), Math.round((t + 1) * s.length / Math.min(10, s.length))), waits = g.flatMap((x) => x.waits).sort((a, b) => a - b), intended = g.reduce((t, x) => t + x.intended, 0), achieved = g.reduce((t, x) => t + x.achieved, 0);
+    out.push({ tenth: out.length + 1, agents: g.length, raw: g.filter((x) => x.raw).length, intended, achieved, share: intended ? Math.round(1000 * achieved / intended) / 1000 : null, waitP50: waits.length ? waits[Math.floor(0.5 * (waits.length - 1))] : null, slowDown: g.reduce((t, x) => t + x.slowDown, 0) });
+  }
+  return out;
+}
+/** #2509: act queue p50 of the real and of the raw agents (ms), for comparing the two drivers on one world. */
+export function waitByDriver(agents) {
+  const p50 = (xs) => { const v = xs.flatMap((x) => x.waits).sort((a, b) => a - b); return v.length ? { n: v.length, p50: v[Math.floor(0.5 * (v.length - 1))] } : null; };
+  return { real: p50(agents.filter((x) => !x.raw)), raw: p50(agents.filter((x) => x.raw)) };
+}
+/** One agent's numbers from its act calls (trace records) for byTenth. */
+const agentOf = (http, intended, raw) => { const calls = http.filter((x) => x.method === 'POST' && /\/v1\/edge\/act(?:\?|$)/.test(x.route ?? '')); return { intended, achieved: calls.length, raw, waits: calls.map((x) => x.queuedMs).filter(Number.isFinite), slowDown: calls.filter((x) => (x.facts?.code ?? '') === 'soul.slow-down').length }; };
+/** #2509: --shape: `uniform` is the paced loop; an uneven shape needs #2556's shapes module, not on this branch yet. */
+async function shapeOf(name) {
+  if (!name || name === 'uniform') return null;
+  const mod = new URL('../../bench/capacity/profiles/shapes.mjs', import.meta.url);
+  if (!existsSync(mod.pathname)) throw new Error(`--shape ${name}: the shapes module (tools/bench/capacity/profiles/shapes.mjs) is not here yet`);
+  throw new Error(`--shape ${name}: driving a shape's schedule is not wired yet`);
+}
+
 export async function runLoad(o) {
   const sizes = String(o.souls ?? '12,24').split(',').map(Number).filter((n) => n > 0);
   const first = Number(o['first-repeat'] ?? 1), repeats = Number(o.repeats ?? 1), durSec = Number(o['duration-sec'] ?? 120), cardSec = Number(o['card-sec'] ?? 30), actSec = o['act-sec'] != null ? Number(o['act-sec']) : null, port = Number(o.port ?? 18780);
   const serverRoot = resolve(o['server-root'] ?? REPO), faultSec = o['fault-every-sec'] != null ? Number(o['fault-every-sec']) : null;
   if (faultSec) process.env.SIM_FAULT_INJECT = '1';
   if (o['hang-kill-sec'] != null) process.env.SIM_HANG_KILL_MS = String(1000 * Number(o['hang-kill-sec']));
-  const profile = !!o.profile, menuStats = !!o['menu-stats'], census = !!o['scan-census'];
+  const profile = !!o.profile, menuStats = !!o['menu-stats'], census = !!o['scan-census'], rawFrom = o['raw-from'] != null ? Number(o['raw-from']) : Infinity;
+  if (!(rawFrom >= 1)) throw new Error('--raw-from <first raw Soul, 1-based>');
+  await shapeOf(o.shape);
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
@@ -158,15 +251,22 @@ export async function runLoad(o) {
     try {
       // setup is paced at 6 Souls per 30 s: all Souls share one address, and a world pairs at most 20 in any 60 s from one
       // address (POST /v1/agent/pair). Setup is not measured.
-      for (let i = 0; i < n; i += 6) { const b0 = Date.now(); await Promise.all(Array.from({ length: Math.min(6, n - i) }, async (_, j) => {
+      const real = Math.min(n, rawFrom - 1), setup0 = Date.now();
+      for (let i = 0; i < real; i += 6) { const b0 = Date.now(); await Promise.all(Array.from({ length: Math.min(6, real - i) }, async (_, j) => {
         const k = i + j, folder = join(dir, 'souls', `s${k}`); mkdirSync(folder, { recursive: true });
         const identity = newIdentity(); writeFileSync(join(folder, '.eden-agent.json'), JSON.stringify({ identity }) + '\n', { mode: 0o600 });
         const fake = { folder, base: w.base, info: {}, save() {} };
         const s = await prepareFolder(fake, { name: `Load ${k}` });
         souls[k] = { folder, identity, soulId: s.soulId, acts: [] };
-      })); if (i + 6 < n) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
-      log(`n${n} r${rep}: ${souls.length} Souls serving; load for ${durSec} s`);
-      const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 };
+      })); if (i + 6 < real) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
+      // #2509: raw Souls, 8 at a time, each from its own address; one catalog and live picture each
+      for (let i = real; i < n; i += 8) await Promise.all(Array.from({ length: Math.min(8, n - i) }, async (_, j) => {
+        const s = await rawJoin(w.base, i + j), pic = await startPicture(w.base, s);
+        souls[i + j] = { ...s, raw: true, ids: wordIds(pic.catalog), acts: [], http: [] };
+      }));
+      const setupS = Math.round((Date.now() - setup0) / 1000);
+      log(`n${n} r${rep}: ${souls.length} Souls serving (${n - real} raw) after ${setupS} s of setup; load for ${durSec} s`);
+      const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 }, cpu0 = driverCpu();
       // #1944 A3: each tick window that ended during the load (live.json is rewritten every 2 s; a window lasts 10 s)
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const worldLog = join(dir, 'server', 'world.log'), sums0 = actSums(readLive(liveFile)), logAtStart = menuStats ? logSize(worldLog) : 0;
@@ -175,9 +275,10 @@ export async function runLoad(o) {
       let censusFrom = null; const censusTimer = census ? setTimeout(() => { censusFrom = logSize(worldLog); }, 60000) : null;
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const faults = faultSec ? (async () => { for (let at = t0; at < until; at += faultSec * 1000) { await sleep(Math.max(0, at - Date.now())); await injectThrow(port); } })() : null;
-      const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
-      await Promise.all(souls.map((s, k) => (actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
+      const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.filter((s) => !s.raw).map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
+      await Promise.all(souls.map((s, k) => (s.raw ? rawPacedLoop({ base: w.base, soul: s, ids: s.ids, until, r: rng(1000 * rep + k), counts, acts: s.acts, http: s.http, actSec: actSec ?? 10 }) : actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards; await faults;
+      const driver = driverCpuSince(cpu0);   // #2509: the driver's processor share over the load
       if (profile) writeFileSync(join(profDir, 'prof.stop'), '');   // #2508: the profile covers the load, not the settle after it
       const logAtEnd = menuStats ? logSize(worldLog) : 0, censusTo = census ? logSize(worldLog) : 0; clearTimeout(censusTimer);
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
@@ -185,14 +286,16 @@ export async function runLoad(o) {
       if (profile || menuStats) server.meter = await meterOf({ sums0, sums1: actSums(live), menu0: menuStats ? menuStatsAfter(worldLog, logAtStart) : null, menu1: menuStats ? await menuStatsAfterWait(worldLog, logAtEnd) : null, profDir: profile ? profDir : null, serverRoot });
       if (census) server.scanCensus = censusFrom == null ? { error: 'the load was shorter than a minute' } : scanCensusOf(worldLog, censusFrom, censusTo);
       const http = [], pairs = [];
+      const agents = [];
       for (const [k, s] of souls.entries()) {
+        if (s.raw) { const own = httpSince(s.http, t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); agents.push(agentOf(own, actSec ? durSec / actSec : 0, true)); continue; }
         await cliJson(s.folder, ['serve', '--stop']);
         const f = join(runtimeDir(s.folder, s.soulId), '.eden-report.jsonl');
-        if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); }
+        if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); agents.push(agentOf(own, actSec ? durSec / actSec : 0, false)); }
       }
       const routes = routeStats(http);
       const intended = actSec ? Math.round(n * durSec / actSec) : null;
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, driver, ...(n > real ? { raw: n - real, setupS, rawDifferences, tenths: byTenth(agents), waitByDriver: waitByDriver(agents) } : { setupS }), intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       clearInterval(rss); stopping = true;
@@ -207,6 +310,23 @@ export async function runLoad(o) {
   return result;
 }
 
+/** #2509: the driver's processor use: this process's own (user + system, its reaped children included), and on Linux every
+ *  process on this process's CPUs (/proc/stat), which under timed-run are the load generator's own cores (the world is
+ *  pinned to others): the `serve` daemons and `eden.mjs` calls too. */
+function driverCpu() {
+  const own = process.cpuUsage(), self = (() => { try { const f = readFileSync('/proc/self/stat', 'utf8').split(') ').at(-1).split(' '); return (Number(f[11]) + Number(f[12]) + Number(f[13]) + Number(f[14])) * 10; } catch { return null; } })();   // utime, stime, cutime, cstime (10 ms ticks)
+  let cpus = null, stat = null;
+  try { const m = /^Cpus_allowed_list:\s*(\S+)/m.exec(readFileSync('/proc/self/status', 'utf8')); cpus = m ? m[1].split(',').flatMap((r) => { const [a, b = a] = r.split('-').map(Number); return Array.from({ length: b - a + 1 }, (_, k) => a + k); }) : null; stat = readFileSync('/proc/stat', 'utf8'); } catch { /* not Linux */ }
+  return { at: Date.now(), own, children: self, cpus, stat };
+}
+function driverCpuSince(a) {
+  const b = driverCpu(), wall = b.at - a.at, r2 = (x) => Math.round(100 * x) / 100;
+  const per = (text) => Object.fromEntries(text.split('\n').filter((l) => /^cpu\d+ /.test(l)).map((l) => { const [k, ...v] = l.trim().split(/\s+/), n = v.map(Number), idle = n[3] + (n[4] ?? 0), total = n.slice(0, 8).reduce((x, y) => x + y, 0); return [Number(k.slice(3)), [total - idle, total]]; }));
+  let cores = null;
+  if (a.stat && b.stat && a.cpus) { const x = per(a.stat), y = per(b.stat); cores = r2(a.cpus.reduce((sum, c) => { const d = y[c] && x[c] ? y[c][1] - x[c][1] : 0; return sum + (d > 0 ? (y[c][0] - x[c][0]) / d : 0); }, 0)); }
+  const ownMs = (b.own.user - a.own.user + b.own.system - a.own.system) / 1000;
+  return { wallS: Math.round(wall / 1000), harnessCores: r2(ownMs / wall), harnessWithChildrenCores: a.children != null && b.children != null ? r2((b.children - a.children) / wall) : null, generatorCpus: a.cpus?.length ?? null, generatorCores: cores };
+}
 /** #2508: live.json's since-start act sums (api-times.ts `parts.sums`), or null on a world without them. */
 const actSums = (live) => live?.api?.routes?.['edge:act']?.parts?.sums ?? null;
 const logSize = (file) => { try { return statSync(file).size; } catch { return 0; } };
@@ -335,6 +455,14 @@ export function renderLoad(result) {
       const sum = (key) => { const t = {}; for (const w of tw) for (const [k, v] of Object.entries(w[key] ?? {})) t[k] = Math.round(10 * ((t[k] ?? 0) + v)) / 10; return t; };
       const held = sum('amberS'), entered = sum('amberEntries'), list = (t, u = '') => Object.entries(t).map(([k, v]) => `${k} ${v}${u}`).join(', ') || 'none';
       L.push('', `What held amber, over these windows (a second can count under several signals; \`dwell\` = every signal under the band, the 30 s calm running): ${list(held, ' s')}. Entries into amber by cause (\`red\` = the step down from red): ${list(entered)}.`);
+    }
+    if (a.driver) L.push('', `Driver (#2509): this process ${a.driver.harnessCores} of a core${a.driver.harnessWithChildrenCores != null ? ` (${a.driver.harnessWithChildrenCores} with its finished children)` : ''}${a.driver.generatorCores != null ? `; everything on its ${a.driver.generatorCpus} CPUs (the serve daemons and CLI calls too) ${a.driver.generatorCores} of a core` : ''}, over ${a.driver.wallS} s.`);
+    if (a.raw) {
+      const wd = a.waitByDriver;
+      L.push('', `Raw Souls (#2509): ${a.raw} of ${a.souls}; setup took ${a.setupS} s. ${a.rawDifferences}`);
+      if (wd?.real && wd?.raw) L.push('', `Act queue p50: real Souls ${wd.real.p50} ms (${wd.real.n} acts), raw Souls ${wd.raw.p50} ms (${wd.raw.n} acts): raw ${Math.round(100 * (wd.raw.p50 - wd.real.p50) / wd.real.p50)} % against real.`);
+      L.push('', 'Per tenth of agents by activity (busiest first): acts achieved against intended, act queue p50 (ms), and slow-down refusals (an agent held back by its own budget).', '', '| tenth | agents (raw) | intended | achieved | share | queue p50 | slow-down |', '|---|---|---|---|---|---|---|');
+      for (const t of a.tenths) L.push(`| ${t.tenth} | ${t.agents} (${t.raw}) | ${Math.round(t.intended)} | ${t.achieved} | ${t.share == null ? '' : Math.round(100 * t.share) + ' %'} | ${t.waitP50 ?? ''} | ${t.slowDown} |`);
     }
     if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
     if (a.server?.meter) L.push(...renderMeter(a.server.meter));
