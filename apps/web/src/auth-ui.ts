@@ -41,9 +41,9 @@ export function clerkOriginRoute(authenticationOrigin:string|undefined,currentOr
  const fragment=approval?'#approve/'+approval:!oldWorld&&/^#godpair\/[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(hash)?hash:soul?'#'+soulFragment(soul):hash==='#join'?'#join':'#watch';
  return {initialize:currentOrigin===origin.origin,signInUrl:origin.origin+path.replace(/\/$/,'')+fragment};
 }
-/** P1 phones: whether a Clerk world page loads its sign-in before the arrival (else once the card has gone): Clerk's
- *  own redirect parameters, a fragment that is a sign-in step (approval, pairing, join, a tab) rather than watching
- *  or a Soul link, or a browser that is probably signed in. */
+/** Whether a Clerk world page needs Clerk now (#2516 `worldClerkNow`): Clerk's own redirect parameters, a fragment
+ *  that is a sign-in step (approval, pairing, join, a tab) rather than watching or a Soul link, or a browser that is
+ *  probably signed in. */
 export function clerkNow(href:string,hash:string,cookie=''):boolean{
  return /[?&#]__clerk|__session=|__dev_session/.test(href)||!(hash===''||hash==='#'||hash==='#watch'||!!soulFromFragment(hash))||clerkSignedInHint(cookie);
 }
@@ -63,4 +63,16 @@ export function clerkHomeRoute(authenticationOrigin:string|undefined,currentOrig
 export function homeClerkNow(href:string,cookie:string,askedAt:number|null,now:number):boolean{
  return /[?&#]__clerk/.test(href)||clerkSignedInHint(cookie)||askedAt!==null&&now-askedAt>=0&&now-askedAt<600_000;
 }
+/** #2516: a sign-in the person asked for on a world page (Sign in, New Soul, a claim), kept in `sessionStorage` across
+ *  Clerk's sync and the primary's sign-in page: `{t, sent}`, `sent` once the sign-in page was opened. index.html's
+ *  `clerk-presync` reads the same key. */
+export const WORLD_SIGNIN='soul.world-signin';
+/** #2516: whether a world page loads Clerk, and so (signed out on a satellite) whether `clerk-presync` syncs first.
+ *  `clerkNow`, or a sign-in asked for on this tab in the last ten minutes. Otherwise Clerk is never fetched: an
+ *  anonymous visit loads once and never calls the provider. index.html's `clerk-presync` is the same rule in plain JS. */
+export function worldClerkNow(href:string,hash:string,cookie:string,askedAt:number|null,now:number):boolean{
+ return clerkNow(href,hash,cookie)||signInAsked(askedAt,now);
+}
+/** A sign-in asked for at `askedAt` still counts (ten minutes; never one from the future). */
+export function signInAsked(askedAt:number|null,now:number):boolean{return askedAt!==null&&now-askedAt>=0&&now-askedAt<600_000;}
 export function unsignedPreviewAuth(signInUrl:string|null,login:()=>void){return {ready:true,authed:false,label:null,signInUrl:signInUrl??undefined,login,logout:()=>{},getToken:async()=>null,debug:{privyUserId:null,wallet:null,linked:[]}};}
