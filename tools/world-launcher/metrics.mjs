@@ -64,7 +64,10 @@ function registry() {
  *          listenHeld = { served, refused, gone, ended, seconds } (lane srv-shed) → sim_world_listen_held_total{world,outcome},
  *          sim_world_listen_held_seconds_sum/_count{world}
  *          (status from the launcher's pool; live = readLive(world.dataDir) or null)
- *  launcher: {build?, maxRunning?, maxWorlds?, memAvailableMb?}
+ *          viewers = the launcher's open viewer sockets for the world (its `live` map) → sim_world_viewers{world} (#2541)
+ *  launcher: {build?, maxRunning?, maxWorlds?, memAvailableMb?, loopDelayP99Ms?, worldsCreated?, diskFreeBytes?, diskSizeBytes?}
+ *          (#2541: the launcher's own event-loop delay p99 since the last scrape, worlds created since it started, and the
+ *          free and total bytes of the disk its data is on)
  *  clientErrors: the clientErrors() table (client-errors.mjs) or null
  */
 export function metricsText({ worlds = [], launcher = {}, clientErrors = null, now = Date.now() } = {}) {
@@ -76,6 +79,10 @@ export function metricsText({ worlds = [], launcher = {}, clientErrors = null, n
   g('sim_launcher_max_running', 'Cap on running worlds.', {}, launcher.maxRunning);
   g('sim_launcher_max_worlds', 'Cap on worlds.', {}, launcher.maxWorlds);
   g('sim_host_mem_available_bytes', 'MemAvailable of the host as the launcher sees it.', {}, num(launcher.memAvailableMb) === null ? null : launcher.memAvailableMb * 1048576);
+  g('sim_launcher_event_loop_delay_p99_seconds', 'Event loop delay p99 of the launcher itself since the previous scrape.', {}, num(launcher.loopDelayP99Ms) === null ? null : launcher.loopDelayP99Ms / 1000);
+  c('sim_site_worlds_created_total', 'Worlds created on this site since the launcher started.', {}, launcher.worldsCreated);
+  g('sim_host_disk_free_bytes', 'Free bytes (for an unprivileged user) on the disk the launcher data is on.', {}, launcher.diskFreeBytes);
+  g('sim_host_disk_size_bytes', 'Total bytes of the disk the launcher data is on.', {}, launcher.diskSizeBytes);
   g('sim_metrics_scrape_timestamp_seconds', 'When this scrape was rendered (a dead-man reads it).', {}, now / 1000);
 
   for (const w of worlds) {
@@ -98,6 +105,7 @@ export function metricsText({ worlds = [], launcher = {}, clientErrors = null, n
       r.add('sim_world_listen_held_seconds', 'summary', 'Seconds listen/wait long-polls spent held for a slot.', L, lh.seconds, '_sum');
       r.add('sim_world_listen_held_seconds', 'summary', 'Seconds listen/wait long-polls spent held for a slot.', L, lh.ended, '_count');
     }
+    g('sim_world_viewers', 'Viewer sockets open on the world at the launcher.', L, w.viewers);
     g('sim_world_last_boot_seconds', 'Seconds the world\'s last boot took (start to healthy).', L, num(w.lastBootMs) === null ? null : w.lastBootMs / 1000);
     // Stage B (lane B-port): C2 reads the launcher sent to the world's read workers, and those it then asked main (a
     // worker error, a 5xx or no answer in 2 s); only for worlds with read workers on

@@ -30,10 +30,10 @@ function retryAfterMs(r, d) {
 }
 /** One call with the client's retry rules. `jitter` is the caller's [0,1) source (seeded in the meetup bench). The
  *  optional `deadlineMs` and `signal` end the call early (status -1). → {status, code, data, bytes, busy, failed,
- *  waitMs, refusals}: status -1 timed out, 0 nothing answered. */
+ *  waitMs, refusals, timing}: status -1 timed out, 0 nothing answered; `timing` the last answer's Server-Timing. */
 export async function clientCall(url, { method = 'GET', headers, body, jitter = Math.random, deadlineMs = Infinity, signal = null } = {}) {
   const t = performance.now(), tryMs = method === 'GET' ? 25_000 : 40_000, refusals = [];
-  let status = 0, code = null, data = null, bytes = 0, busy = 0, failed = 0, waitMs = 0;
+  let status = 0, code = null, data = null, bytes = 0, busy = 0, failed = 0, waitMs = 0, timing = null;
   const wait = async (ms) => { const w0 = performance.now(); await sleep(Math.min(ms, deadlineMs - (performance.now() - t))); waitMs += performance.now() - w0; };
   for (;;) {
     const left = deadlineMs - (performance.now() - t); if (left <= 0 || signal?.aborted) { status = -1; break; }
@@ -43,7 +43,7 @@ export async function clientCall(url, { method = 'GET', headers, body, jitter = 
     // and the call ended with status 0 ("unreachable") though the world was never asked again.
     try {
       r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.any([AbortSignal.timeout(Math.ceil(Math.min(left, tryMs))), ...(signal ? [signal] : [])]) });
-      const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; try { data = JSON.parse(text); } catch { data = null; }
+      const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; timing = r.headers.get('server-timing'); try { data = JSON.parse(text); } catch { data = null; }
     } catch (e) {
       if (++failed >= 6 || signal?.aborted) { status = e?.name === 'TimeoutError' || signal?.aborted ? -1 : 0; break; }
       await wait(jitter() * Math.min(60_000, 1000 * 2 ** (failed - 1))); continue;
@@ -54,7 +54,7 @@ export async function clientCall(url, { method = 'GET', headers, body, jitter = 
     if (later && busy < 3) { busy++; const ra = retryAfterMs(r, data); await wait(Math.min(60_000, ra ?? Math.max(1000, jitter() * Math.min(60_000, 1000 * 2 ** (busy + 1)))) * (1 + 0.2 * jitter())); continue; }
     break;
   }
-  return { status, code, data, bytes, busy, failed, waitMs: Math.round(waitMs), refusals };
+  return { status, code, data, bytes, busy, failed, waitMs: Math.round(waitMs), refusals, timing };   // #2509: the last answer's Server-Timing
 }
 /** The Soul's start: the public catalog and the live picture, once each. → the catalog (null when it did not answer). */
 export async function startPicture(base, soul) {

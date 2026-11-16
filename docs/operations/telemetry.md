@@ -21,6 +21,8 @@ node tools/world-launcher/telemetry.mjs report --dir <launcher data>/telemetry -
 node tools/world-launcher/telemetry.mjs close  --dir <launcher data>/telemetry                    # roll up and prune now
 ```
 
+On the host, the `sim-worlds-telemetry@<stage>` unit runs the collector with alerts and the problems file, once the maintainer enables it ([below](#the-unit)).
+
 `--url` must be a loopback address. The launcher answers `/__sim/metrics` to direct loopback requests only. The
 collector stops cleanly on SIGINT/SIGTERM, and on restart it continues the current hour, recording the restart as a
 boundary.
@@ -47,6 +49,19 @@ boundary.
   each removal.
 - Only files inside `--dir` are ever removed. A failed write is counted and the collector carries on; the game never
   waits on telemetry.
+
+### The series a spike needs
+
+The launcher exports four series for a spike (#2541), next to the world series from `live.json`:
+
+| Series | Type | What |
+|---|---|---|
+| `sim_world_viewers{world}` | gauge | viewer sockets open on the world at the launcher (its `live` map); 0 is a reading |
+| `sim_launcher_event_loop_delay_p99_seconds` | gauge | the launcher process's own event-loop delay p99 since the previous scrape |
+| `sim_site_worlds_created_total` | counter | worlds created on the site since the launcher started (sign-ups and operator creations) |
+| `sim_host_disk_free_bytes`, `sim_host_disk_size_bytes` | gauge | free and total bytes of the disk the launcher data is on |
+
+Labels are the world slug only: never a Soul id, account id or address.
 
 Size, measured with a synthetic scrape of 400 registered worlds (20 running): about 7 KB per scrape before gzip. At
 15 s that is about 43 MB per day before gzip, well inside the cap.
@@ -118,7 +133,7 @@ Each rule has three windows, which give it hysteresis:
 - **Clear window:** the condition must stay clear for this long before the rule resolves. The default is 60 s.
 - **Clear threshold** (optional): a firing rule only counts as clear once its value is back past this threshold.
 
-A running world without a rule's series becomes `unknown` after the hold window, never healthy. A world that is not running is not judged, except for crash loops. Nothing is sent anywhere: delivery and dead-man alerting belong to #461, and a monitor on the same host cannot detect that host failing.
+A running world without a rule's series becomes `unknown` after the hold window, never healthy. A world that is not running is not judged, except for crash loops. A firing rule reaches a person through the public health check ([below](#reaching-a-person)). Nothing is sent from the host itself: a monitor on the same host cannot report that host failing, and the outside check can.
 
 ### Rules
 
@@ -134,8 +149,41 @@ A running world without a rule's series becomes `unknown` after the hold window,
 | `refusals` | world | any increase of `sim_world_refused_total` or `sim_world_shed_total` (fires at once; clears after 5 quiet minutes) | — |
 | `stale-live` | world | `live.json` older than 30 s (fires at once) | — |
 | `crash-loop` | any world | at least 3 non-planned restarts within 10 min (fires at once; clears after 10 min) | — |
+| `viewers-high` | world | more than 1,000 viewer sockets on one world (fires at once). Information only: it never pages. | — |
+| `launcher-loop-stall` | fleet | the launcher's own event-loop delay p99 > 0.25 s | 0.15 s |
+| `worlds-created` | fleet | more than 10 worlds created in the last hour (fires at once). Counted across launcher restarts; creations before the collector's first scrape are not counted. | — |
+| `disk-free` | fleet | under 20 % of the data disk free | — |
 | `host-memory` | fleet | host memory available < 1 GiB | 1.5 GiB |
 | `telemetry-gap` | collector | no answered scrape for more than 2.5 × the cadence. This covers failed scrapes, a silent collector seen by a later `alerts` run, and an empty store. | — |
+
+Every rule pages except `refusals` and `viewers-high`, which are recorded in `alerts.jsonl` only. `refusals` fires on any refused request, which is the ceilings doing their job, not an incident.
+
+### Reaching a person
+
+With `--problems <data>/alert-problems.json`, the collector rewrites that file after every scrape. It holds `{at, everyMs, problems}`, with one problem per firing rule that pages, coded `alert:<rule>` (for example `alert:disk-free`).
+
+- The launcher reads the file on every `/__sim/healthz`. A firing rule makes `hostOk` false and puts its code in `hostCodes` at once, and the code goes when the rule resolves.
+- `deploy/host-health.mjs` (every 10 min) folds the same codes into `host-health.json` and logs an ALERT line in `host-health.log`. For an alert, healthz trusts the file it reads itself over this timer copy, so a resolved alert clears at once.
+- A file older than 4 scrapes and at least 2 min means the collector died, and it shows as `alert:stale`. A clean stop (SIGTERM, `systemctl stop`) removes the file, so a stopped collector is never mistaken for a dead one.
+- With no file (the collector not enabled), nothing changes.
+
+The outside check watches `hostOk` on the public healthz, and that is how the alert leaves the machine. Setting it up is a hands-on step outside this repository.
+
+The same health check also covers the hourly off-site backup. While `sim-worlds-backup-hourly@<stage>.timer` is enabled, a last run that did not succeed (a timeout, or a FAILED database, which exits 1) raises `backup-hourly:<stage>`, as the nightly run raises `backup:<stage>`. The owners' health page shows the failure, with the failed database from `backup-hourly-last.json` when the run wrote one.
+
+### The unit
+
+`deploy/sim-worlds-telemetry@.service` runs `telemetry.mjs collect --launcher-args --alerts --problems ...` as `simworlds`. It writes to `/srv/sim-worlds-data/<stage>/telemetry` and to `alert-problems.json` beside it. `--launcher-args` takes the launcher's port and base from `SIM_WORLDS_ARGS` in `/etc/sim-worlds/<stage>.conf`, so the unit needs no port of its own.
+
+`install.sh` installs the unit on every release and never enables it. Enabling it is the maintainer's step, on the host:
+
+```bash
+systemctl enable --now sim-worlds-telemetry@production
+systemctl status sim-worlds-telemetry@production
+cat /srv/sim-worlds-data/production/alert-problems.json     # {"at": ..., "problems": []} when all is well
+```
+
+To stop it, run `systemctl disable --now sim-worlds-telemetry@production`. The clean stop removes `alert-problems.json`.
 
 ### Changing the rules
 
@@ -147,7 +195,7 @@ The launcher does not export process CPU, process RSS, cgroup CPU or memory pres
 
 ### Cost
 
-With 400 registered worlds (20 running), evaluation after each scrape takes 40 ms at the median and at most 80 ms at the end of an hour. That is under 0.6 % of one core at the 15 s cadence. The state file is about 40 KB.
+With 400 registered worlds (20 running), evaluation after each scrape takes 40 ms at the median and at most 80 ms at the end of an hour. That is under 0.6 % of one core at the 15 s cadence. The state file is about 40 KB. With the four spike rules (#2541), measured back to back against the rules before them over one synthetic hour (240 scrapes, two repeats each), the median was 40.8 ms against 39.0 ms and the maximum 76–79 ms against 73–80 ms.
 
 ## Cost and the context packet
 

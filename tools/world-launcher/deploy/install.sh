@@ -124,5 +124,8 @@ install -m 644 "$HERE/sim-worlds-backup@.service" /etc/systemd/system/sim-worlds
 install -m 644 "$HERE/sim-worlds-backup@.timer" /etc/systemd/system/sim-worlds-backup@.timer
 install -m 644 "$HERE/sim-worlds-health@.service" /etc/systemd/system/sim-worlds-health@.service
 install -m 644 "$HERE/sim-worlds-health@.timer" /etc/systemd/system/sim-worlds-health@.timer
+# #2541: the telemetry collector and its alerts. Installed, never enabled here (this runs on every release): enabling is
+# the maintainer's step, docs/operations/telemetry.md.
+install -m 644 "$HERE/sim-worlds-telemetry@.service" /etc/systemd/system/sim-worlds-telemetry@.service
 systemctl daemon-reload
-echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,health}@.{service,timer} (nothing started)"
+echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,health}@.{service,timer}, sim-worlds-telemetry@.service (nothing started)"
