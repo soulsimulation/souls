@@ -217,7 +217,8 @@ screenshots or transcripts. Machines without the original run folders can then r
   then measures the host. `soul-eval.mjs run --battery m4-hamlet-v1 --seat <seat>` runs the m4-v1 items that have a
   place of their kind in `hello-hamlet`, which boots in seconds; the battery file lists the items it leaves out and
   why. Each episode's world boot time is in the report. Use m4-v1 on Eden 2026 for the full score on a quiet host.
-  `--battery harder-hamlet-v1` is the same port of harder-v1 (errands, a greeting, a refusal to recover from).
+  `--battery harder-hamlet-v1` is the same port of harder-v1 (errands, a greeting, a refusal to recover from);
+  `harder-hamlet-v2` (#2477) has the same checks, with the cottage bench's wording and the 3600 s cap fixed.
 - **Two repeats per arm.** Compare arms only on like-for-like repeats (scripted replay against scripted replay),
   and fix acceptance bars and budgets before the baseline is measured.
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the
