@@ -209,7 +209,8 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   type SnapshotRequest = (reason: string, o?: { now?: boolean }) => { tick: number; pending: boolean } | null;
   const plannedSnapshot = (reason: string) => { try { const req = (host as unknown as { requestSnapshot?: SnapshotRequest }).requestSnapshot; if (req) req.call(host, reason, { now: true }); else host.saveSnapshot(true); } catch (e) { console.error('[load] planned snapshot failed', e); } };
   // srv-load: the load sensor (load/monitor.ts) and in-world admission (load/admission.ts; SIM_ADMISSION=0 turns it off).
-  // Black for 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once, no backoff penalty).
+  // Black for 60 s with no tick completed in those 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once,
+  // no backoff penalty). A busy world that still ticks stays up at black (#2622).
   const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission({ api: load.api, quietTickMs: () => load.shared[S.quietTickMs] });
   const drill = config.env.SIM_LOAD_DRILL_LEVEL as 'amber' | 'red' | 'black' | undefined;   // drill: hold a level (L1 tests 'planned' restarts with black)
   const monitor = new LoadMonitor({ host, shared: load.shared, api: load.api, drill: drill && ['amber', 'red', 'black'].includes(drill) ? drill : undefined, blackLimitMs: Number(config.env.SIM_LOAD_BLACK_MS) || 60_000, queue: () => admission?.queueStats() ?? { depth: 0, oldestMs: 0 }, shed: () => ({ reads: admission?.shed.reads ?? 0, acts: admission?.shed.acts ?? 0 }),

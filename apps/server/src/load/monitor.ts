@@ -196,7 +196,7 @@ export type MonitorOpts = {
   baselineMs?: number;
   souls?: () => {awake: number; waiting: number; connected: number};
   onLevel?: (from: Level, to: Level, s: Signals) => void;
-  /** Black for this long → planned restart (main.ts: snapshot, exit 75). */
+  /** Black for this long with no tick completed in it (#2622) → planned restart (world-main.ts: snapshot, exit 75). */
   onBlackTooLong?: () => void; blackLimitMs?: number;
   shared?: Float64Array; now?: () => number; sampleMs?: number;
   /** Loop-delay window (default 5 s; tests shorten it). */
@@ -349,7 +349,11 @@ export class LoadMonitor {
     this.holds = to === 'amber' ? this.state.amberHolds(judged) : [];
     if (to === 'black') {
       this.blackSince ??= now;
-      if (now - this.blackSince >= (this.o.blackLimitMs ?? 60_000)) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
+      // #2622: only a world that has stopped making progress restarts: its clock owes ticks and has completed none for the
+      // limit (the stall clock above: paused, halted, asleep or just started owes none). A busy world still ticking stays
+      // up at black, admission refusing softly, until it recovers. The drill exercises the restart path whatever the ticks.
+      const limit = this.o.blackLimitMs ?? 60_000, stuck = !!this.o.drill || (a[S.stallMs] > 0 && now - a[S.tickAt] >= limit);
+      if (now - this.blackSince >= limit && stuck) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
     } else this.blackSince = null;
     const shed = this.o.shed?.() ?? {reads: 0, acts: 0};
     a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
