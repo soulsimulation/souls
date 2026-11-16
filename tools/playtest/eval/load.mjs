@@ -306,7 +306,10 @@ export async function runLoad(o) {
       })); if (i + 6 < real) await sleep(Math.max(0, b0 + 30000 - Date.now())); }
       // #2509: raw Souls, 8 at a time, each from its own address; one catalog and live picture each
       for (let i = real; i < n; i += 8) await Promise.all(Array.from({ length: Math.min(8, n - i) }, async (_, j) => {
-        const s = await rawJoin(w.base, i + j), pic = await startPicture(w.base, s);
+        // a world still laying out its places answers the catalog `world.starting`: ask again until it has one
+        const s = await rawJoin(w.base, i + j); let pic = await startPicture(w.base, s);
+        for (const until = Date.now() + 120_000; !pic.catalog && Date.now() < until;) { await sleep(2000); pic = await startPicture(w.base, s); }
+        if (!pic.catalog) throw new Error(`raw Soul ${i + j}: no catalog (${pic.catalogStatus})`);
         souls[i + j] = { ...s, raw: true, ids: wordIds(pic.catalog), ...(shape ? { shapeIds: shapeIds(pic.catalog, radiusM) } : {}), acts: [], http: [] };
       }));
       const plan = shape ? shapePlan(shape, n - real, durSec, rep) : null, fallback = {};
