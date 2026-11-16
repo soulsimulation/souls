@@ -656,15 +656,22 @@ have it: `tools/worlds/fit-doors-v1.mjs` and then `tools/worlds/fit-doors.mjs` r
 write the outside doors in one batch after everything else, each at its building's settled height (an inside or upstairs
 door is its building's child). A door stands at that height and never cuts a foundation pad into the slope (it would
 re-settle its building away from it). A live world keeps its drawn doorways: live-world door migration
-(`door-fit/1`, then `door-fit/2`, the last boot rules) is off until a fit can run in slices under 1 s, and runs only with
-`DOOR_FIT_BOOT=1`. With it on, a world gets it once at boot, one building at a time, each its own
-recorded edit, with the world serving between them; a restart part way through goes on where it stopped. A building the
-world refuses to fit is tried again at the next boot. A prop moves only where it touches no body, no other solid and no
-doorway, and leaves every door of its building workable by hand. Door-fit/2 then walks from outside each building's
-front door to both sides of each new door: a door whose frame cuts off a side that was reached before its fit is taken
-out again, its doorway left bare. When a fit moves a prop, it also walks to each thing, seat and bed of the building, on every floor: a move that cuts off
-anything reached before (a prop moved onto a stair's foot cuts off the floor above) is undone, and the door it was moved
-for is held back. Each fit edit is sent on to the engine as it is made, so the walk checks judge the world as fitted. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
+(`door-fit/2` alone, the last boot rule: it fits every building door-fit/1 would, and checks each fit) runs only with `DOOR_FIT_BOOT=1`, off until it is switched on per
+world ([door-fit in live worlds](../design/door-fit-live.md)). With it on, a world gets it once, after the other boot rules
+and without holding them up, one building at a time, each its own recorded edit, with the world serving between them; a
+restart part way through goes on where it stopped. A fit edit that would re-settle anything around its building (a
+padded neighbour) is refused, and that building keeps its drawn doorways. Each fit edit is checked as a god edit is (BUILDSAFE): an edit that
+would move, bury or cut off a Soul, or change what one uses, is not made, and the building is tried again at the next
+boot, as one with a body standing in a doorway is (the bodies are read again for each building). A prop moves only where
+it touches no body, no other solid and no doorway, and leaves every door of its building workable by hand. Door-fit/2
+then walks from outside each building's front door (or, when it has none yet, from outside the outside doorway its fit
+plans) to both sides of each new door, and to each thing, seat, bed and body of the building, on every floor, after the
+engine has taken the edit in. Anything reached before and not after undoes the prop moves first, then takes the new doors
+out one by one (the door whose side is cut, else the one nearest the front); if it is still cut off with every new door
+out, the whole fit is undone and the building keeps its drawn doorways. An engine that has not taken the edit in after
+three waits is never judged on: the fit is undone and tried again at the next boot. Each fit edit's own diff is sent on to
+the engine as it is made. Live-fitted doors are their building's children, so they move with it (door-fit/1's doors are
+made its children by door-fit/2); a template's outside doors are still world-root until the templates are refitted. A walk to a door-fitted building (`walk:<building>`) ends outside its front door, or in its
 room when it has one.
 
 A walk through such a door is planned from the Soul's own floor: from upstairs, the first leg walks down the stairs to

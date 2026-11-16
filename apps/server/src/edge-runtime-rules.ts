@@ -31,7 +31,7 @@ export async function enableEdgeRuntimeRules(host: WorldHost, worldKey: string):
  *  quarantine/1, #1334 hold-settle/1, #1428 stair-way/1, #1440 quarantine-mark/1, #1454 stand-height/1, #1496 nonfinite-hold/1, #1513 nonfinite-mark/1, #1521 stand-height/2, #1216 item-approach/1, #2196 park-away/1, #2133 stall-release-support/1, #1530 climb-spacing/1, #2294 held-activity/1, #2296 need-anchor/1, #1952 wait-bound/1, #1288 wait-bound/2, legal-edits/1, #2188 legal-edits/2 (over legal-edits/1), board-path/1, #2302 classroom-tv/1, #2155 wait-bound/3, #2426 cede-passage/1, #2383 door-fit/1 and #2434 door-fit/2 (last) on every world. A failed edge rule does not keep the guard out. Hold-settle/1 comes
  *  after the guard (its settle stands bodies where the guard would) and after quarantine/1, which worlds booted on main
  *  already logged in that place. */
-export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string; god?: () => GodMode | undefined; doorFit?: boolean }): Promise<void> {
+export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?: Promise<unknown>; edge: boolean; worldKey: string; god?: () => GodMode | undefined; doorFit?: boolean; /** #2462: hears the door fits' own promise (they run on after the boot rules) */ doorFits?: (p: Promise<void>) => void }): Promise<void> {
   await opts.after?.catch(() => undefined);
   if (opts.edge) await enableEdgeRuntimeRules(host, opts.worldKey).catch((e) => console.error('[world] an edge runtime rule could not be adopted:', String(e).slice(0, 300)));
   await host.enableBodyStepGuardV1('world').catch((e) => console.error('[world] body-step-guard/1 could not be adopted:', String(e).slice(0, 300)));
@@ -59,14 +59,31 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
   await host.enableClassroomTvV1('world').catch((e) => console.error('[world] classroom-tv/1 could not be adopted:', String(e).slice(0, 300)));   // #2302
   await host.enableWaitBoundV3('world').catch((e) => console.error('[world] wait-bound/3 could not be adopted:', String(e).slice(0, 300)));   // #2155
   await host.enableCedePassageV1('world').catch((e) => console.error('[world] cede-passage/1 could not be adopted:', String(e).slice(0, 300)));   // #2426
-  // #2383 and #2434, last, and opt-in (`doorFit`: the world config's doorFitBoot, DOOR_FIT_BOOT=1). Off by default, because
-  // one building's fit edit can hold the world's thread for seconds (up to 15.9 s on Eden, past the serving watchdog), so a
-  // live world keeps its drawn doorways; templates, and so new worlds, carry the real doors already.
+  // #2383 and #2434, last, and opt-in (`doorFit`: the world config's doorFitBoot, DOOR_FIT_BOOT=1). Off by default until it
+  // is switched on per world (docs/design/door-fit-live.md); templates, and so new worlds, carry the real doors already.
+  // #2462: the fits run on after the boot rules, in slices, so nothing after them (the classroom TV) waits minutes for them
   if (opts.doorFit) {
-    await enableDoorFitV1(host, opts.god?.()).catch((e) => console.error('[world] door-fit/1 could not be adopted:', String(e).slice(0, 300)));
-    await enableDoorFitV2(host, opts.god?.()).catch((e) => console.error('[world] door-fit/2 could not be adopted:', String(e).slice(0, 300)));
+    // #2462 (A3): a live world runs door-fit/2 alone. It fits every building door-fit/1 would (a first revision moves
+    // straight to its every-doorway revision, its outside doors with the rest) and checks each fit, which door-fit/1
+    // never did: on bench-eden door-fit/1 alone cut off 19 places. A world door-fit/1 already fitted keeps its doors
+    const fits = (async () => {
+      await enableDoorFitV2(host, opts.god?.()).catch((e) => console.error('[world] door-fit/2 could not be adopted:', String(e).slice(0, 300)));
+    })();
+    opts.doorFits?.(fits);
   }
 }
+
+/** #2462: how long (ms) one turn of a fit may hold the world's thread (#2433's turn budget); a longer one is logged. */
+export const DOOR_FIT_TURN_MS = 100;
+/** A fit's slice hook: logs each turn over the budget and keeps the longest, for the fit's summary line. */
+function fitTurns(rule: string) {
+  const longest = { ms: 0, what: '' }, over: string[] = [];
+  return { longest, over, slice: (ms: number, what: string) => { if (ms > longest.ms) { longest.ms = ms; longest.what = what; } if (ms > DOOR_FIT_TURN_MS) { over.push(what); console.log(`[world] ${rule}: one turn held the thread ${Math.round(ms)} ms (${what})`); } },
+    line: () => `[world] ${rule}: longest turn ${Math.round(longest.ms)} ms (${longest.what}), ${over.length} over ${DOOR_FIT_TURN_MS} ms` };
+}
+/** The bodies standing about (a Soul's or a resident's), not every posed thing: a bench by a door does not hold it open. */
+const standingBodies = (host: WorldHost) => () => Object.values((host.engine.world as unknown as { entities: Record<string, { human?: unknown; pose?: { p?: number[] } }> }).entities)
+  .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
 
 /** #2434 door-fit/2, once per world, after door-fit/1: its buildings move to their every-doorway revision with a real
  *  hand-operated door in every doorway that has none (inside, upstairs, the courtyard doors door-fit/1 held back in
@@ -75,14 +92,15 @@ export async function adoptBootRuntimePoliciesV1(host: WorldHost, opts: { after?
 export function doorFitV2(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { doorFitV2?: boolean } | undefined)?.doorFitV2 === true; }
 export async function enableDoorFitV2(host: WorldHost, god: GodMode | undefined, author = 'operator:door-fit'): Promise<unknown> {
   if (doorFitV2(host) || !god) return;
-  const bodies = Object.values((host.engine.world as unknown as { entities: Record<string, { human?: unknown; pose?: { p?: number[] } }> }).entities)
-    .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
   const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
   spatial?.sync(host.engine.world);
   // review of #2438: in slices, one building at a time, while the world serves; the rules event once it is all done
-  const r = await fitWorldDoorsV2(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles, { walk: engineDoorReach(host, god) });
+  // #2462: the bodies are read again for each building; outside doors are the building's own, so they follow it
+  const turns = fitTurns('door-fit/2');
+  const r = await fitWorldDoorsV2(god, standingBodies(host), (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles, { walk: engineDoorReach(host, god), follow: true, slice: turns.slice });
+  console.log(turns.line());
   if (r.left.length || r.kept.length) return;
-  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV2: true }, doorFitV2: { buildings: r.buildings, doors: r.doors, flipped: r.flipped.length, moved: r.moved.length, held: r.held.length },
+  return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV2: true }, doorFitV2: { buildings: r.buildings, doors: r.doors, flipped: r.flipped.length, moved: r.moved.length, held: r.held.length, ...(r.refused.length ? { refused: r.refused.slice(0, 64) } : {}) },
     why: 'door-fit/2 (#2434): every remaining building doorway (inside, upstairs, in series, by a prop) holds a real door a Soul opens by hand; fitted by a recorded engine edit just before this event' });
 }
 
@@ -102,13 +120,16 @@ export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | unde
   const levelsAt = (y: number, base: number) => y < base + 1 ? [0] : sp.scene.levels.filter((l) => l.id !== 0 && Math.abs(l.y - y) <= 0.6).sort((a, b) => Math.abs(a.y - y) - Math.abs(b.y - y) || a.id - b.id).map((l) => l.id);
   return {
     settle: () => engineSettled(god.model, 10000),
-    front(id) {
-      const b = god.model.entities.get(id); if (!b?.name) return null;
+    front(id, ways) {
+      const b = god.model.entities.get(id); if (!b) return null;
       const bw = god.model.worldPose(b);
-      const d = [...god.model.entities.values()].filter((x) => x.in.parent === 'world' && opRef(x.def) === DOOR_FIT_DOOR && (x.name ?? '').startsWith(`${b.name}-door-`))
+      // #2462: the first outside ground-floor doorway its fit plans (a door stands in it as the doorway does, or none yet:
+      // the review found a building with no outside door yet got no check), else its own door-fit/1 outside door
+      const way = ways?.find((x) => x.exterior && x.floor === 0);
+      const d = way || !b.name ? undefined : [...god.model.entities.values()].filter((x) => x.in.parent === 'world' && opRef(x.def) === DOOR_FIT_DOOR && (x.name ?? '').startsWith(`${b.name}-door-`))
         .sort((x, y) => (x.name! < y.name! ? -1 : 1))[0];
-      if (!d) return null;
-      const w = god.model.worldPose(d), n: [number, number] = [Math.sin(w.yaw) * 1.3, Math.cos(w.yaw) * 1.3];
+      if (!d && !way) return null;
+      const w = way ? { x: way.p[0], z: way.p[1], yaw: way.r } : god.model.worldPose(d!), n: [number, number] = [Math.sin(w.yaw) * 1.3, Math.cos(w.yaw) * 1.3];
       const p: [number, number] = [w.x + n[0], w.z + n[1]], q: [number, number] = [w.x - n[0], w.z - n[1]];
       return engine.standableNearV1!(Math.hypot(p[0] - bw.x, p[1] - bw.z) > Math.hypot(q[0] - bw.x, q[1] - bw.z) ? p : q, 0, undefined, HUMAN_RADIUS + 0.05, 6);
     },
@@ -122,6 +143,9 @@ export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | unde
     // #2438: the seats and berths the walk audit checks (their approach points), so a prop moved onto a seat's way is seen
     seats: (near) => (engine.navTargetsV1?.((at) => near(at[0], at[1])) ?? []).filter((x) => x.kind !== 'region').map((x) => ({ id: x.id, p: x.p, level: x.level ?? 0 })),
     reachAt: (from, p, level) => engine.reachV1!({ p: from, level: 0 }, { p, level }).ok,
+    // #2462: the bodies standing near now, on their floor
+    bodies: (near) => Object.entries((engine.world as { entities: Record<string, { human?: { level?: number }; pose?: { p?: number[] } }> }).entities)
+      .flatMap(([id, e]) => e.human && e.pose?.p && near(e.pose.p[0]!, e.pose.p[2]!) ? [{ id, p: [e.pose.p[0]!, e.pose.p[2]!] as [number, number], level: e.human.level ?? 0, y: e.pose.p[1] ?? 0 }] : []),
   };
 }
 
@@ -132,14 +156,14 @@ export function engineDoorReach(host: WorldHost, god: GodMode): DoorReach | unde
 export function doorFitV1(host: Pick<WorldHost, 'extra'>): boolean { return (host.extra.runtimePolicy as { doorFitV1?: boolean } | undefined)?.doorFitV1 === true; }
 export async function enableDoorFitV1(host: WorldHost, god: GodMode | undefined, author = 'operator:door-fit'): Promise<unknown> {
   if (doorFitV1(host) || !god) return;
-  // the bodies standing about (a Soul's or a resident's), not every posed thing: a bench by a door does not hold it open
-  const bodies = Object.values((host.engine.world as unknown as { entities: Record<string, { human?: unknown; pose?: { p?: number[] } }> }).entities)
-    .flatMap((e): [number, number][] => e.human && e.pose?.p ? [[e.pose.p[0]!, e.pose.p[2]!]] : []);
+  const bodies = standingBodies(host)();
   // the walk graph's solids as they stand: a door a hand cannot work for one of them is held back (door-fit.ts)
   const spatial = (host.engine as unknown as { rt?: { services?: { spatial?: { sync(w: unknown): void; scene: { obstacles: HandObstacle[] } } } } }).rt?.services?.spatial;
   spatial?.sync(host.engine.world);
   // review of #2438: in slices, one building at a time, while the world serves; the rules event once it is all done
-  const r = await fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles);
+  const turns = fitTurns('door-fit/1');
+  const r = await fitWorldDoorsV1(god, bodies, (m) => console.log(`[world] ${m}`), spatial?.scene.obstacles, { slice: turns.slice });
+  console.log(turns.line());
   // a building left (seated in) or refused this boot is tried again at the next: the event waits for both
   if (r.left.length || r.kept.length) return;
   return host.enqueue('rules', author, { runtimePolicy: { sleepBlockTicks: 1200, ...host.extra.runtimePolicy as object, doorFitV1: true }, doorFitV1: { buildings: r.buildings, doors: r.doors, series: r.series.length, held: r.held.length },

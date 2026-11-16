@@ -239,9 +239,12 @@ test('door-fit off: booting Eden from before the fit adopts nothing and adds no 
 test('door-fit on (DOOR_FIT_BOOT=1): the boot rules run the sliced fits', { timeout: 300000 }, async (t) => {
   const { w } = await before(t, fitted);
   const seq0 = w.god.model.editSeq;
-  await ticking(w.host, adoptBootRuntimePoliciesV1(w.host, { edge: false, worldKey: 'eden', doorFit: loadConfig({ DOOR_FIT_BOOT: '1' }).doorFitBoot, god: () => w.god }));
-  assert.equal(doorFitV1(w.host), true, 'door-fit/1 adopted');
+  // #2462: the boot rules do not wait for the fits; they run on after them
+  let fits: Promise<void> | undefined;
+  await ticking(w.host, adoptBootRuntimePoliciesV1(w.host, { edge: false, worldKey: 'eden', doorFit: loadConfig({ DOOR_FIT_BOOT: '1' }).doorFitBoot, god: () => w.god, doorFits: (p) => fits = p }));
+  await ticking(w.host, fits!);
+  assert.equal(doorFitV1(w.host), false, '#2462: a live world runs door-fit/2 alone');
   assert.equal(doorFitV2(w.host), true, 'door-fit/2 adopted');
-  assert.ok(w.god.model.editSeq >= seq0 + 6, 'recorded edits, one per building per fit');
+  assert.ok(w.god.model.editSeq >= seq0 + 3, 'recorded edits, one per building');
   assert.equal([...w.god.model.entities.values()].filter((e) => doorFitted(e.def) || ALL_DOORS_FROM.has(e.def.replace('core-', 'core/'))).length, 0, 'every building on its every-doorway revision');
 });
