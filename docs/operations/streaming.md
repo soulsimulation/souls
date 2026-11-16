@@ -3,6 +3,28 @@
 A live stream of one world runs on a Mac at an event: Chrome for Testing shows the world in its own window, OBS
 captures that window and its sound and sends them to X. Nobody works the OBS window; a script starts, checks and stops it.
 
+## Quick start
+
+Do the one-time setup below once. Then, for each stream, in Terminal on the stream machine:
+
+```sh
+# 1. Fetch the tool (any checkout of this repo has it at tools/stream/stream.mjs).
+mkdir -p ~/.souls && cd ~/.souls
+gh api 'repos/soulsimulation/souls/contents/tools/stream/stream.mjs' -H 'Accept: application/vnd.github.raw' > stream.mjs
+
+# 2. Rehearse: record a minute to a file, check it, stop. Needs no X key.
+node stream.mjs start https://soul.game/w/<world>/ --record
+node stream.mjs status        # fps 30, encoder skipped 0, bitrate about 8000 kbps, an audio level
+node stream.mjs stop          # prints the recording's path; watch it, then delete it
+
+# 3. Go live (with the Live Studio source set to private first, for a test).
+node stream.mjs start https://soul.game/w/<world>/
+node stream.mjs status        # as often as you like; "dropped" counts network losses
+node stream.mjs stop
+```
+
+`<world>` is the world's path on soul.game, for example `eden`. Each X stream ends after 24 h at the latest.
+
 ## Stream tool
 
 `tools/stream/stream.mjs` is one dependency-free Node script (Node 22 or later). It runs **on the stream machine**,
@@ -14,8 +36,10 @@ so copy that one file there; it needs nothing else from the repo.
 2. In OBS, open **Tools → WebSocket Server Settings**, tick **Enable WebSocket server**, keep port 4455, and set a
    password.
 3. In **System Settings → Privacy & Security → Screen & System Audio Recording**, allow OBS.
-4. On X, live streaming needs a Premium account. In Media Studio, open **Producer** (X Live Studio), create a source
-   and copy its server URL and stream key.
+4. On X, live streaming from software needs a Premium account. In **Creator Studio → Live Studio**, choose
+   **New Livestream**, create a source and copy its RTMPS server URL and stream key. A source can be reused for
+   later streams; set the broadcast to private for a test. X's guidance (checked November 2026): H.264 Main or High,
+   up to 1080p60 at 12 Mbps recommended, keyframe every 3 s, AAC up to 128 kbps, at most 24 h per stream.
 5. Put the secrets in a file **outside the repository**, readable only by you, by default `~/.souls/stream.env`:
 
    ```sh
