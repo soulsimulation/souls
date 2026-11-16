@@ -18,6 +18,7 @@
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
+//   GET  /__sim/whoami           {address}: the address this request is keyed on (first X-Forwarded-For entry, else the peer)
 //   GET  /__sim/healthz          {ok, build, worlds, running, caps, memAvailableMb} (also /healthz); clientErrorsNew = error kinds
 //                                pages first reported since this build went live (client-errors.mjs)
 //   GET  /__sim/glitches         loopback: every world's recoveries and halts by rule and rung; ?world=<slug>[&limit=N] adds its records
@@ -105,7 +106,7 @@ import { healthDash } from './health-dash.mjs';
 import { readGlitches } from './glitches.mjs';
 import { usageRollup } from './usage.mjs';
 import { ownerOverview } from './owner-overview.mjs';
-import { connect } from 'node:net';
+import { connect, isIP } from 'node:net';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
@@ -1474,6 +1475,13 @@ export async function openLauncher(cfg = {}) {
         json(res, 200, { ok: true, worlds }); return;
       }
       if (path === '/__sim/usage' && req.method === 'GET') { json(res, ...(direct(req) ? usage.report(url.searchParams.get('days') ?? undefined, registry.worlds.filter((w) => w.test === true).map((w) => w.slug)) : [404, { ok: false, code: 'not-found' }])); return; }   // #1942, loopback only
+      // #2513: the address this request is keyed on: the first X-Forwarded-For entry behind the proxy (as the flood guard
+      // and the ceilings take it), else the TCP peer. Public, since it is the caller's own address; never a header
+      // verbatim: anything that is not an address answers null. deploy/caddy/check-soul-game.mjs compares it from outside.
+      if (path === '/__sim/whoami' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const xff = behindProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '', a = xff || (req.socket.remoteAddress ?? '');
+        json(res, 200, { address: isIP(a) ? a : null }); return;
+      }
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
         const running = registry.worlds.filter((w) => pool.status(w.slug).status === 'running').length;
         const host = hostHealth(dataDir); // deploy/host-health.mjs (timer): `hostOk` (+ short `hostCodes` when not ok) public, the numbers loopback-only
