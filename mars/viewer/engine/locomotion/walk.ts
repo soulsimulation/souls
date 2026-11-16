@@ -1451,7 +1451,7 @@ function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   const first = orec.diagnostic.code === 'traffic.yield' || ex.actor < who ? who : ex.actor;
   const mover = waited < 3 * FACEOFF_TICKS ? first : first === who ? ex.actor : who;
   const forEx = mover === who ? ex : oex, moverEx = mover === who ? oex : ex;
-  stepAside(rt, moverEx, forEx);
+  stepAside(rt, mover, moverEx, forEx);
 }
 
 /** #2596 cycle-recover/1: the deadlock recovery's answer to a two-body wait cycle that routing round the other did not break (one waits at
@@ -1469,14 +1469,14 @@ function stepAsideInCycle(rt: Runtime, ex: Exec): { mover: string; for: string }
     if (!oex || oex.actor !== who || oex.detour || oex.cancelTo || rt.records.get(ot!)?.status !== 'blocked') continue;
     const pairs: [Exec, Exec][] = atEnd(oex) && !atEnd(ex) ? [[oex, ex], [ex, oex]] : [[ex, oex], [oex, ex]];
     // the clear-of-the-way test reads the other's walk leg (pointAt): both stand on walk legs
-    for (const [m, f] of pairs) if (able(m) && f.route.legs[f.leg]?.kind === 'walk' && stepAside(rt, m, f)) return { mover: m.actor, for: f.actor };
+    for (const [m, f] of pairs) if (able(m) && f.route.legs[f.leg]?.kind === 'walk' && stepAside(rt, m.actor, m, f)) return { mover: m.actor, for: f.actor };
   }
   return null;
 }
 
-/** `moverEx`'s walker steps to the nearest free spot clear of what is left of `forEx`'s way (a faceoff detour). */
-function stepAside(rt: Runtime, moverEx: Exec, forEx: Exec): boolean {
-  const mover = moverEx.actor;
+/** `mover` (walking `moverEx`) steps to the nearest free spot clear of what is left of `forEx`'s way (a faceoff detour). The
+ *  id is passed, not read from `moverEx.actor`: a carry's gathering walkers share one exec, whose actor may be another member. */
+function stepAside(rt: Runtime, mover: string, moverEx: Exec, forEx: Exec): boolean {
   const m = rt.world.entities[mover], o = rt.world.entities[forEx.actor];
   if (!m?.human || m.human.grip) return false;
   const g = spatial(rt, mover).level(m.human.level);

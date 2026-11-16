@@ -64,11 +64,14 @@ hit, so the hard separation layer rarely fires.
   its child. The item's own record reads `running` while it walks, so wait-bound/1 never read that walk; a held approach
   (waiting, not named a deadlock) kept its receipt `started`. Now the bound stops only the approach walk, and the item step
   fails `route.blocked` with the walk's reason ("wait-bound/3: the walk made no headway for a minute: ...").
-- **cede-passage/1** (#2426, adopted at boot last, after wait-bound/3): a walker at the end of its walk leg does not take up a single-file
+- **cede-passage/1** (#2426, adopted at boot after wait-bound/3): a walker at the end of its walk leg does not take up a single-file
   passage it does not hold while the body standing there is yielding to it (W38's own test). Before it, two walkers whose
   legs ended in one passage, each waiting for such a body, took turns holding it: one let it go for the body to make way,
   and the other took it the same tick, so the bodies always found it held and never moved (a shared bay's joist crew
   stalled at 22 of 32 for good). A walker whose spot is held by a body yielding to anyone else enters as before.
+- **cycle-recover/1** (#2596, adopted at boot after cede-passage/1): a two-body wait cycle asks the deadlock recovery for its
+  attempt after 3 s unchanged instead of 10 s, and when routing round the other does not break it, one of the pair steps
+  aside and walks on once the other has passed (see "Persistent waits and bounded recovery").
 
 ## Speed limits and invariants
 
