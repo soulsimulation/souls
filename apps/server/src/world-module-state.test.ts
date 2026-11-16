@@ -44,7 +44,6 @@ const ALLOWED: Record<string, [number, string]> = {
   'apps/server/src/god/engine-bridge.ts': [1, KEYED],
   'apps/server/src/god/god.ts': [2, KEYED],
   'apps/server/src/god/governance.ts': [1, KEYED],
-  'apps/server/src/god/host-render-slot.ts': [1, 'heldBy (#2444): the render slots each world holds, by its id; a world that stops releases its own'],
   'apps/server/src/god/ingestion.ts': [1, KEYED],
   'apps/server/src/god/mirror.ts': [7, `${KEYED}; lastGroundHashed: ${LATER}`],
   'apps/server/src/god/nav.ts': [1, 'NO_SERVICE_POINTS: a readonly empty list'],
