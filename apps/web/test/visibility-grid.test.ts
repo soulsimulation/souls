@@ -48,6 +48,18 @@ test('rendered visibility answers the same with the grid as over every object', 
   }
 });
 
+test('a custom raycast among the occluders (no instance caches) answers clearance and rays like every object', () => {
+  // The page's scenery holds custom raycasts; then a query takes no instance caches, and every path must still answer.
+  const root = town(4), odd = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), material);
+  odd.raycast = function (r, out) { THREE.Mesh.prototype.raycast.call(this, r, out); }; odd.position.set(3, 1, 3); root.add(odd); root.updateWorldMatrix(true, true);
+  const grid = new WorldRenderedVisibility(), all = new WorldRenderedVisibility(); everyObject(all); grid.prepare([root]); all.prepare([root]);
+  const r = rng(11);
+  for (let k = 0; k < 100; k++) {
+    const a = [-60 + r() * 120, r() * 6, -60 + r() * 120], b = [-60 + r() * 120, r() * 6, -60 + r() * 120];
+    assert.deepEqual(grid.evaluate(() => [grid.clear(a, .8), grid.reach(a, b), grid.around(a, 12, 3)]), all.evaluate(() => [all.clear(a, .8), all.reach(a, b), all.around(a, 12, 3)]), `ray ${k}`);
+  }
+});
+
 test('Broadcast makes the same choices with the grid, frame for frame', () => {
   const scene = { bounds: [-40, -40, 40, 40] as [number, number, number, number], levels: [], surfaces: [], obstacles: [], links: [] };
   const cast: Record<string, [number, number, number, string]> = { a: [0, 0, 0, 'talk'], b: [1.4, .6, 3, 'listen'], c: [.5, 1.8, 2, 'listen'], d: [-1.2, 1, 1, 'idle'], w: [-14, -4, 1.2, 'walk'] };
