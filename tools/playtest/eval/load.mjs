@@ -466,7 +466,7 @@ export function renderLoad(result) {
     if (a.raw) {
       const wd = a.waitByDriver;
       L.push('', `Raw Souls (#2509): ${a.raw} of ${a.souls}; setup took ${a.setupS} s. ${a.rawDifferences}`);
-      if (wd?.real && wd?.raw) L.push('', `Act queue p50: real Souls ${wd.real.p50} ms (${wd.real.n} acts), raw Souls ${wd.raw.p50} ms (${wd.raw.n} acts): raw ${Math.round(100 * (wd.raw.p50 - wd.real.p50) / wd.real.p50)} % against real.`);
+      if (wd?.real && wd?.raw) L.push('', `Act queue p50: real Souls ${wd.real.p50} ms (${wd.real.n} acts), raw Souls ${wd.raw.p50} ms (${wd.raw.n} acts)${wd.real.p50 > 0 ? `: raw ${Math.round(100 * (wd.raw.p50 - wd.real.p50) / wd.real.p50)} % against real` : ''}.`);
       L.push('', 'Per tenth of agents by activity (busiest first): acts achieved against intended, act queue p50 (ms), and slow-down refusals (an agent held back by its own budget).', '', '| tenth | agents (raw) | intended | achieved | share | queue p50 | slow-down |', '|---|---|---|---|---|---|---|');
       for (const t of a.tenths) L.push(`| ${t.tenth} | ${t.agents} (${t.raw}) | ${Math.round(t.intended)} | ${t.achieved} | ${t.share == null ? '' : Math.round(100 * t.share) + ' %'} | ${t.waitP50 ?? ''} | ${t.slowDown} |`);
     }
