@@ -234,7 +234,11 @@ load, the meetup workload, the slopes tick profile) go to the `souls-timed` self
 `bench-client`, `meetup` or `slopes-profile`), `repeats` (1 to 3) and allowlisted `args`. Each runner has cores of its
 own and takes one job; a run records its starting load and does not start while its own cores are busy. The last four
 put the world on two of the runner's physical cores and the load generator on the rest (one on a three-core runner, two
-on a four-core one), the split recorded in `timed-run.json`. An `eval-load` artifact also carries each world's own log
+on a four-core one), the split recorded in `timed-run.json`. For those, `cores` sets a core plan instead:
+`world=N` or `world=N,launcher=M` physical cores, with the load drivers on the rest. The launcher processes are then
+pinned apart, as the world's are. A plan that does not fit the runner's own cores is refused before the run starts.
+Each run's `cpuSplit` records the plan and each group's busy share of its own CPUs (`busy.<group>.mean` over the run,
+`peak5s` its busiest 5 s). An `eval-load` artifact also carries each world's own log
 (`eval-load/n<souls>-r<repeat>/server/world.log`), and `eval-load.log` names a world that exited on its own (exit code,
 signal) and its resident memory every 30 s.
 

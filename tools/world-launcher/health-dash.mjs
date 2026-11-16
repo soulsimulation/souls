@@ -266,7 +266,9 @@ export function healthDash(o) {
     const st = stages().map((s) => {
       const k = s.self ? keeper : readJson(join(s.dir, 'keeper.json'));
       return { stage: s.stage, self: s.self, build: s.self ? o.build : k?.active?.build ?? null, since: k?.active?.since ?? null,
-        backup: lastBackup(s.dir, s.stage, host?.backups?.[s.stage], backupRoot), timer: host?.backups?.[s.stage] ?? null };
+        backup: lastBackup(s.dir, s.stage, host?.backups?.[s.stage], backupRoot), timer: host?.backups?.[s.stage] ?? null,
+        // #2541: the hourly off-site run's own record and unit (a timeout leaves no record, only the unit's result)
+        hourly: readJson(join(s.dir, 'backup-hourly-last.json')), hourlyTimer: host?.backupsHourly?.[s.stage] ?? null };
     });
     const mem = memory();
     const errs = o.errors.summary({ limit: 20 });
@@ -308,6 +310,8 @@ export function healthDash(o) {
     }
     for (const s of d.stages) {
       if (s.backup && s.backup.ok === false) bad(`${s.stage} backup failed${s.backup.error ? `: ${String(s.backup.error).slice(0, 120)}` : ''}`);
+      const hu = s.hourlyTimer?.enabled && s.hourlyTimer.result && s.hourlyTimer.result !== 'success' ? s.hourlyTimer.result : null, hr = s.hourly?.ok === false ? s.hourly.error ?? s.hourly.failed?.[0] ?? 'see backup-hourly-last.json' : null;
+      if (hu || hr) bad(`${s.stage} hourly backup failed: ${String(hr ?? hu).slice(0, 120)}${hu && hr ? ` (unit: ${hu})` : ''}`);
       // No backup seen at all (a new stage before its first night) is not an alert: the page says when the first record comes.
       if (s.timer?.enabled && s.backup?.at && ago(s.backup.at) > 26) warn(`${s.stage}: no backup in ${Number.isFinite(ago(s.backup.at)) ? `${Math.round(ago(s.backup.at))} h` : 'its record'}`);
     }

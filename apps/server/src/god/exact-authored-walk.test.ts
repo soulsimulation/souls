@@ -13,6 +13,7 @@ import {registerEdgeComms} from '../edge/comms/index.ts';
 import {edgeSoulResolver} from '../edge/routes.ts';
 import {readHumanCapabilitiesV1} from '../human-capabilities.ts';
 import type {EdgeSoul} from '../edge/contract.ts';
+import {menuStats,PLAN_ONCE,PLAN_ONCE_ORACLE} from '../edge/ledger/menu-stats.ts';
 
 async function setup(t:test.TestContext){
  const f=fixture(':memory:',factory,{durableClockV1:true});f.brain.quiesce();
@@ -217,4 +218,21 @@ test('god object capability wrapper preserves a selected object and its place ou
  assert.deepEqual([...places.keys()],['projection-object'],'the caller receives the selected object place');
  assert.equal(typeof places.get('projection-object'),'string');
  assert.equal(tableReads,0,'selected-object lookup never reads the whole object table');
+});
+test('#2527: an exact walk takes the strict gate\'s bind from the same turn and builds no second copy',{skip:!PLAN_ONCE&&'SIM_PLAN_ONCE=0 turns the reuse off'},async t=>{
+ const {f,edge,soul}=await setup(t),L=edge as any;let builds=0;
+ const build=L.exactWalkBuild.bind(L);L.exactWalkBuild=(...args:any[])=>{builds++;return build(...args);};
+ const miss0=menuStats.one.oracleMiss;
+ // as the act route runs it: the gate, then the act, with no await in between
+ edge.invalidateBodies();assert.equal(edge.offerGate(soul,{capability:'walk:eden-library-1'}),null);
+ const exact0=menuStats.one.exact,turn0=menuStats.one.exactTurn,pending=edge.act(soul,{capability:'walk:eden-library-1',clientRef:'gate-then-act'});
+ assert.equal(menuStats.one.exactTurn-turn0,1,'the gate\'s bind is taken');assert.equal(menuStats.one.exact,exact0,'not counted as a projection built');
+ assert.equal(builds,PLAN_ONCE_ORACLE?1:0,'no second build (the oracle alone builds one, to compare)');
+ const out=await accept(f.host,pending);assert.equal(out.accepted,true,JSON.stringify(out));if(!out.accepted)return;
+ assert.deepEqual(out.receipt.chosen,{capability:'walk:eden-library-1',target:'g-eden-library-1',kind:'place',place:'g-eden-library-1'});
+ // an await between the gate and the act ends the turn: the act projects its walk as before
+ edge.invalidateBodies();assert.equal(edge.offerGate(soul,{capability:'walk:place-field'}),null);await Promise.resolve();
+ const exact1=menuStats.one.exact,turn1=menuStats.one.exactTurn,b1=builds,again=await accept(f.host,edge.act(soul,{capability:'walk:place-field',clientRef:'gate-await-act'}));
+ assert.equal(again.accepted,true,JSON.stringify(again));assert.equal(menuStats.one.exactTurn,turn1,'no reuse across an await');assert.equal(menuStats.one.exact-exact1,1);assert.equal(builds-b1,1);
+ assert.equal(menuStats.one.oracleMiss,miss0,'no reuse differed from the projection it replaces');
 });

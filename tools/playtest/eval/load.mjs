@@ -33,6 +33,11 @@
 // One call at a time per Soul, in order: an act due while the last is still out starts when it is answered, and acts
 // not started by the end of the window are not achieved. Real Souls keep the paced loop. The report prints what the
 // schedule offered and tenths of agents by their intended acts.
+// #2533: `--scan-census` runs the world with SIM_L4_STATS=1 and SIM_L4_SCAN_SITES=1 and reads the planner's static scans
+// from its `[l4]` lines (engine-bridge.ts, one a minute): scans and trusted syncs a second, ms a scan, and the scan sites
+// (service.ts navChanged: the first frame outside the spatial service, a minute's top 8). With `--profile` the report adds
+// the profile's nav.sync by who asked (prof-buckets.mjs navSyncBy). Only lines whose whole minute lies inside the load
+// window count, so a census wants a load of at least 120 s. Nothing in the world changes but those two debug switches.
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -273,7 +278,7 @@ export async function runLoad(o) {
   if (o['hang-kill-sec'] != null) process.env.SIM_HANG_KILL_MS = String(1000 * Number(o['hang-kill-sec']));
   // #2556: a shape drives raw Souls, so with one and no --raw-from every Soul is raw
   const shape = shapeOf(o.shape), radiusM = shape ? (SHAPES.agents[shape].place?.radiusM?.value ?? 30) : null;
-  const profile = !!o.profile, menuStats = !!o['menu-stats'], rawFrom = o['raw-from'] != null ? Number(o['raw-from']) : shape ? 1 : Infinity;
+  const profile = !!o.profile, menuStats = !!o['menu-stats'], census = !!o['scan-census'], rawFrom = o['raw-from'] != null ? Number(o['raw-from']) : shape ? 1 : Infinity;
   if (!(rawFrom >= 1)) throw new Error('--raw-from <first raw Soul, 1-based>');
   if (shape && sizes.some((n) => n < rawFrom)) throw new Error(`--shape ${shape} drives raw Souls: every --souls size must reach --raw-from`);
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
@@ -284,9 +289,10 @@ export async function runLoad(o) {
     // a world that exits on its own says how (code, signal) and its resident memory every 30 s, in this log (Linux /proc)
     let stopping = false;
     // #2508: the profiler hook and the menu counters reach the world through its environment, only while it starts
-    const profDir = join(dir, 'server', 'prof'), envWas = { NODE_OPTIONS: process.env.NODE_OPTIONS, SIM_PROF_DIR: process.env.SIM_PROF_DIR, EDGE_MENU_STATS: process.env.EDGE_MENU_STATS };
+    const profDir = join(dir, 'server', 'prof'), envWas = { NODE_OPTIONS: process.env.NODE_OPTIONS, SIM_PROF_DIR: process.env.SIM_PROF_DIR, EDGE_MENU_STATS: process.env.EDGE_MENU_STATS, SIM_L4_STATS: process.env.SIM_L4_STATS, SIM_L4_SCAN_SITES: process.env.SIM_L4_SCAN_SITES };
     if (profile) { mkdirSync(profDir, { recursive: true }); process.env.NODE_OPTIONS = `${envWas.NODE_OPTIONS ? envWas.NODE_OPTIONS + ' ' : ''}--import=${PROF_HOOK}`; process.env.SIM_PROF_DIR = profDir; }
     if (menuStats) process.env.EDGE_MENU_STATS = '1';
+    if (census) { process.env.SIM_L4_STATS = '1'; process.env.SIM_L4_SCAN_SITES = '1'; }
     let w;
     try { w = await startWorld({ serverRoot, slug: 'eden-load', port, genesis: 'worlds/templates/eden-2026.json', dataDir: join(dir, 'server', 'data'), log: join(dir, 'server', 'world.log'),
       onSpawn: (c) => c.on('exit', (code, signal) => { if (!stopping) log(`n${n} r${rep}: the world exited on its own (code ${code}, signal ${signal}); see n${n}-r${rep}/server/world.log`); }) }); }
@@ -321,6 +327,8 @@ export async function runLoad(o) {
       const liveFile = join(dir, 'server', 'data', 'live.json'), tickWindows = new Map();
       const worldLog = join(dir, 'server', 'world.log'), sums0 = actSums(readLive(liveFile)), logAtStart = menuStats ? logSize(worldLog) : 0;
       if (profile) writeFileSync(join(profDir, 'prof.start'), '');
+      // #2533: an [l4] line logged after this offset (a minute into the load) covers a minute inside the load window
+      let censusFrom = null; const censusTimer = census ? setTimeout(() => { censusFrom = logSize(worldLog); }, 60000) : null;
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const faults = faultSec ? (async () => { for (let at = t0; at < until; at += faultSec * 1000) { await sleep(Math.max(0, at - Date.now())); await injectThrow(port); } })() : null;
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.filter((s) => !s.raw).map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
@@ -328,10 +336,11 @@ export async function runLoad(o) {
       await cards; await faults;
       const driver = driverCpuSince(cpu0);   // #2509: the driver's processor share over the load
       if (profile) writeFileSync(join(profDir, 'prof.stop'), '');   // #2508: the profile covers the load, not the settle after it
-      const logAtEnd = menuStats ? logSize(worldLog) : 0;
+      const logAtEnd = menuStats ? logSize(worldLog) : 0, censusTo = census ? logSize(worldLog) : 0; clearTimeout(censusTimer);
       await sleep(2500); clearInterval(watch);   // the watchdog's next live.json has the last acts
       const live = readLive(liveFile), server = { act: actPartsOfLive(live), tickWindows: [...tickWindows.values()].sort((x, y) => x.at - y.at) };
       if (profile || menuStats) server.meter = await meterOf({ sums0, sums1: actSums(live), menu0: menuStats ? menuStatsAfter(worldLog, logAtStart) : null, menu1: menuStats ? await menuStatsAfterWait(worldLog, logAtEnd) : null, profDir: profile ? profDir : null, serverRoot });
+      if (census) server.scanCensus = censusFrom == null ? { error: 'the load was shorter than a minute' } : scanCensusOf(worldLog, censusFrom, censusTo);
       const http = [], pairs = [];
       const agents = [];
       for (const [k, s] of souls.entries()) {
@@ -423,6 +432,48 @@ export function recoveryLines(file) {
   const recoveries = [...text.matchAll(/\[world\] recovery hold (\d+) ms at tick (\d+): (\d+) replays \(([^)]*) ticks\)[^;\n]*(?:; since the last snapshot (\d+) ticks, (\d+) ms of wall, (\d+) ms of steps \(its cost (\d+) ms\))?/g)].map((m) => ({ holdMs: Number(m[1]), tick: Number(m[2]), replays: Number(m[3]), replayTicks: m[4] === 'none' ? [] : m[4].split(', ').map(Number), ...(m[5] ? { sinceSnapshot: { ticks: Number(m[5]), wallMs: Number(m[6]), stepMs: Number(m[7]), snapshotCostMs: Number(m[8]) } } : {}) }));
   return { recoveries, kills: [...text.matchAll(/watchdog: (world\.killed\.[a-z]+)/g)].map((m) => m[1]) };
 }
+/** #2533: one `[l4]` line's scan sites (`<caller> <file>:<line>=<n>`, space-separated; a caller may hold a space), each
+ *  key reduced to file names (an anonymous frame prints its whole URL). */
+export function scanSitesOf(part) {
+  const xs = String(part ?? '').split(/=(\d+)(?: |$)/), out = [];
+  for (let i = 0; i + 1 < xs.length; i += 2) out.push([xs[i].trim().replace(/\S*\/([^/\s]+)/g, '$1'), Number(xs[i + 1])]);
+  return out;
+}
+/** #2533: the `[l4]` lines of `file` between byte offsets `from` and `to`: scans, their ms, trusted syncs, the seconds the
+ *  lines cover, and the scan sites they list (the first frame outside the spatial service; each line lists its minute's
+ *  top 8 and clears, so `listedShare` is the share of the scans they name). */
+export function scanCensusOf(file, from, to) {
+  let text = ''; try { text = readFileSync(file).subarray(from, to).toString('utf8'); } catch { return { error: 'no world log' }; }
+  const lines = text.split('\n').filter((l) => l.includes('[l4] cpu '));
+  if (!lines.length) return { error: 'no [l4] line inside the load window' };
+  let sec = 0, scans = 0, scanMs = 0, trusted = 0; const sites = new Map();
+  for (const l of lines) {
+    const w = /over (\d+) s/.exec(l), s = /nav scans (\d+) (\d+) ms trusted (\d+)/.exec(l);
+    if (!w || !s) continue;
+    sec += Number(w[1]); scans += Number(s[1]); scanMs += Number(s[2]); trusted += Number(s[3]);
+    const part = /; scan sites (.*?)(?:; live |$)/.exec(l)?.[1] ?? '';
+    for (const [k, n] of scanSitesOf(part)) sites.set(k, (sites.get(k) ?? 0) + n);
+  }
+  const r1 = (x) => Math.round(10 * x) / 10, per = (x) => (sec ? r1(x / sec) : null), listed = [...sites.values()].reduce((a, b) => a + b, 0);
+  return { lines: lines.length, sec, scans, scanMs, trusted, scansPerSec: per(scans), scanMsPerSec: per(scanMs), msPerScan: scans ? Math.round(1000 * scanMs / scans) / 1000 : null, trustedPerSec: per(trusted),
+    listedShare: scans ? Math.round(1000 * listed / scans) / 1000 : null,
+    sites: [...sites].sort((a, b) => b[1] - a[1]).map(([site, n]) => ({ site, scansPerSec: per(n) })) };
+}
+/** #2533: an arm's scan census as report lines, with the profile's nav.sync by who asked when the arm has one. */
+export function renderCensus(c, navSyncBy, totalMs) {
+  const L = ['', '### The planner\'s scans (#2533: the SIM_L4_SCAN_SITES census, from the world\'s [l4] lines)'];
+  if (c.error) L.push('', `Census: ${c.error}.`);
+  else {
+    L.push('', `${c.lines} line(s), ${c.sec} s inside the load window: ${c.scansPerSec} scans a second, ${c.msPerScan} ms a scan (${c.scanMsPerSec} ms a second), ${c.trustedPerSec} trusted syncs a second. The listed sites (the first frame outside the spatial service) name ${Math.round(100 * c.listedShare)} % of the scans.`,
+      '', '| caller | scans a second |', '|---|---|');
+    for (const x of c.sites) L.push(`| \`${x.site}\` | ${x.scansPerSec} |`);
+  }
+  if (navSyncBy?.length && totalMs) {
+    L.push('', 'The profile\'s nav.sync by who asked (a tick: the runtime frame > the action step or pass it called; outside a tick: the innermost server frame), ms per second of clock:', '', '| asked from | caller | ms a second |', '|---|---|---|');
+    for (const x of navSyncBy) L.push(`| \`${x.where}\` | \`${x.caller}\` | ${Math.round(10000 * x.ms / totalMs) / 10} |`);
+  }
+  return L;
+}
 /** #2508: an arm's act meter as report lines. */
 export function renderMeter(m) {
   const L = ['', `### The act meter (#2508): ${m.acts} acts answered in the load window`];
@@ -473,6 +524,7 @@ export function renderLoad(result) {
     if (a.shape) L.push('', `Shape **${a.shape.name}** (#2556; seed \`${a.shape.seed}\`) drives the ${a.shape.raw} raw Souls; real Souls keep the paced loop. Offered: ${a.shape.offered}. Gathered walks go to ${a.shape.named ?? 'no place'} and ${Math.max(0, a.shape.gathered - 1)} places near it; ${a.counts.says ?? 0} of the acts were speech. Kinds the world does not offer, sent as walks: ${Object.entries(a.shape.fallback).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}.`);
     if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
     if (a.server?.meter) L.push(...renderMeter(a.server.meter));
+    if (a.server?.scanCensus) L.push(...renderCensus(a.server.scanCensus, a.server.meter?.profile?.navSyncBy, a.server.meter?.profile?.totalMs));
     const al = a.actLatency;
     if (al?.server) L.push('', `Act calls (client trace, ${al.server.n}; ${Math.round(100 * a.counts.acts / a.durationSec) / 100} acts/s): server time p50 ${al.server.p50}, p95 ${al.server.p95}, p99 ${al.server.p99}, max ${al.server.max} ms; of it queue p50 ${al.queue?.p50 ?? ''}, p95 ${al.queue?.p95 ?? ''}, p99 ${al.queue?.p99 ?? ''} ms.`);
     if (a.slowActs?.length) {

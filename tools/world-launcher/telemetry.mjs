@@ -8,12 +8,14 @@
 //   node tools/world-launcher/telemetry.mjs report --dir <d> [--range 1h|24h|7d|<iso>..<iso>] [--json]
 //   node tools/world-launcher/telemetry.mjs close --dir <d>        roll up, gzip and prune finished hours now
 //   node tools/world-launcher/telemetry.mjs alerts --dir <d> [--rules <file.json>] [--json]   evaluate alert rules (#739)
-//   collect ... --alerts [--rules <file.json>]                        the same evaluation after every scrape
+//   collect ... --alerts [--rules <file.json>] [--problems <data>/alert-problems.json]   the same evaluation after every
+//        scrape; --problems writes the firing rules that page as host problem codes (alert:<rule>, #2541) for healthz
+//   collect --launcher-args ...   the --url from $SIM_WORLDS_ARGS (--port, --base), as the sim-worlds-telemetry@ unit runs it
 //   node tools/world-launcher/telemetry.mjs cost --dir <d> --cost <private cost.json> [--range 24h] [--json]
 //   node tools/world-launcher/telemetry.mjs packet --dir <d> [--cost <file>] [--bench <dir>] [--range 24h] [--json]   context packet
 //   node tools/world-launcher/telemetry.mjs units --dir <d> --cost <file> [--range 24h] [--json]   unit costs (#739 S3)
 //   node tools/world-launcher/telemetry.mjs scenarios --cost <file> --bench <capacity-qualify dir> [--worlds 10,50,100,200,400] [--json]
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
@@ -44,6 +46,13 @@ export async function scrapeOnce(store, url, { now = Date.now, timeoutMs = 10_00
   } catch (e) { store.append({ t, ok: false, error: e?.name === 'TimeoutError' ? 'timeout' : String(e?.cause?.code ?? e?.message ?? e) }); return false; }
 }
 
+/** #2541: the launcher's loopback metrics URL from its own arguments (/etc/sim-worlds/<stage>.conf SIM_WORLDS_ARGS). */
+export function metricsUrlFromArgs(args = '') {
+  const port = /(?:^|\s)--port[= ](\d+)/.exec(args)?.[1], base = /(?:^|\s)--base[= ](\/[^\s]*)/.exec(args)?.[1] ?? '';
+  if (!port) throw new Error('--launcher-args: no --port in SIM_WORLDS_ARGS');
+  return `http://127.0.0.1:${port}${base.replace(/\/$/, '')}/__sim/metrics`;
+}
+
 export function openStore(dir, o = {}) { return new Store(dir, { ...o, reduceHour }); }
 const readJson = (file, what) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch (e) { throw new Error(`${what} ${file}: ${e.message}`); } };
 /** The cost section for a report window: the private cost file applied to the window's world-hours. */
@@ -69,22 +78,25 @@ async function main() {
   }
   const dir = opt('dir'); if (!dir) throw new Error('--dir <telemetry directory> is required');
   if (cmd === 'collect') {
-    const url = opt('url'); if (!url || !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//.test(url)) throw new Error('--url must be the launcher\'s loopback /__sim/metrics');
+    const url = flag('launcher-args') ? metricsUrlFromArgs(process.env.SIM_WORLDS_ARGS) : opt('url'); if (!url || !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//.test(url)) throw new Error('--url must be the launcher\'s loopback /__sim/metrics');
     const everyMs = num('every', DEFAULTS.everyMs / 1000) * 1000;
     const store = openStore(dir, { everyMs, fineDays: num('fine-days', DEFAULTS.fineDays), rollupDays: num('rollup-days', DEFAULTS.rollupDays), maxBytes: num('max-bytes', DEFAULTS.maxBytes) });
     try { store.close(Date.now()); } catch { store.state.loss.failedWrites++; }   // finish hours a previous run left open; never fatal
     if (flag('once')) { await scrapeOnce(store, url, { timeoutMs: Math.min(10_000, everyMs) }); store.saveState(); return; }
     const rules = flag('alerts') ? rulesFrom(opt('rules')) : null;   // read once: a bad rules file stops here, not mid-run
+    const problems = rules ? opt('problems', null) : null;
     let stop = false; const quit = () => { stop = true; }; process.on('SIGINT', quit); process.on('SIGTERM', quit);
     const t0 = Date.now(); let k = 0;
     while (!stop) {
       await scrapeOnce(store, url, { timeoutMs: Math.min(10_000, everyMs) });
       store.state.collector = { rssMb: Math.round(process.memoryUsage().rss / 2 ** 20), at: Date.now(), everyMs };
       if (k === 0) store.saveState();
-      if (rules) try { catchUp(dir, { rules, everyMs, lookbackMs: 3 * everyMs }); } catch { store.state.loss.failedWrites++; }   // alerts never stop the collector
+      if (rules) try { catchUp(dir, { rules, everyMs, lookbackMs: 3 * everyMs, problems }); } catch { store.state.loss.failedWrites++; }   // alerts never stop the collector
       const next = t0 + ++k * everyMs; await new Promise((r) => setTimeout(r, Math.max(0, next - Date.now())));   // fixed cadence: a slow scrape does not shift the grid
     }
-    store.saveState(); return;
+    store.saveState();
+    if (problems) rmSync(problems, { force: true });   // a clean stop is not a stale collector (a crash leaves it: alert:stale)
+    return;
   }
   if (cmd === 'close') { const s = openStore(dir); s.close(Date.now()); return; }   // the collector's own options (state.json); do not run while it is collecting
   if (cmd === 'report') {
@@ -92,7 +104,7 @@ async function main() {
     process.stdout.write(flag('json') ? JSON.stringify(r, null, 1) + '\n' : text(r)); return;
   }
   if (cmd === 'alerts') {
-    const s = openStore(dir), r = catchUp(dir, { rules: rulesFrom(opt('rules')), everyMs: s.o.everyMs });
+    const s = openStore(dir), r = catchUp(dir, { rules: rulesFrom(opt('rules')), everyMs: s.o.everyMs, problems: opt('problems', null) });
     if (flag('json')) { process.stdout.write(JSON.stringify(r, null, 1) + '\n'); return; }
     const line = (e) => `${new Date(e.t).toISOString()} ${e.rule}${e.world ? ` ${e.world}` : ''}: ${e.from} -> ${e.to} (${e.what} ${e.value ?? 'missing'}, threshold ${e.threshold})`;
     process.stdout.write([`${r.rows} new row(s), ${r.events.length} transition(s)`, ...r.events.map(line),

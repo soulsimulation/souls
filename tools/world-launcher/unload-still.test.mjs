@@ -2,11 +2,11 @@
 // that answer the still contract of #2241 (GET /__sim/still) from a file each test writes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { advanceClock, openLauncher } from './launcher.mjs';
+import { advanceClock, launcherSettings, openLauncher } from './launcher.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const BASE = await testPort(8);
@@ -182,6 +182,28 @@ test('#2367 A2: a load with no room waits, then answers world.waking with a retr
   } finally { await L.close(); }
 });
 
+// The 0.130 switch: deploy/install.sh unload-still writes <data>/launcher-settings.json; every launcher reads it once at
+// its start. A reload is a new launcher process (keeper.mjs forks launcher.mjs from the stage link with the same args), so
+// opening a launcher again on the same data dir is what a reload does.
+test('launcher-settings.json: absent is the default, 1 turns unloading on, an explicit --unload-still wins, a bad value is the default, a reload reads a new value', { timeout: 30_000 }, async () => {
+  const dataDir = join(dir, 'settings'), file = join(dataDir, 'launcher-settings.json'); mkdirSync(dataDir, { recursive: true });
+  const said = async (o) => { const lines = []; const L = await open({ dataDir, unloadStill: undefined, log: (s) => lines.push(String(s)), ...o }); await L.close(); return lines.filter((l) => /^(unload-still |launcher-settings)/.test(l)); };
+  assert.deepEqual(launcherSettings(dataDir), {}, 'absent');
+  assert.deepEqual(await said(), ['unload-still 0 (the default)']);
+  writeFileSync(file, '{"unloadStill":1}\n');
+  assert.deepEqual(launcherSettings(dataDir), { unloadStill: true });
+  assert.deepEqual(await said(), ['launcher-settings.json: unloadStill 1', 'unload-still 1 (launcher-settings.json)'], 'a new launcher (a reload) reads it');
+  assert.deepEqual(await said({ unloadStill: false }), ['unload-still 0 (the --unload-still arg)'], '--unload-still 0 wins over the file');
+  writeFileSync(file, '{"unloadStill":"yes"}');
+  assert.deepEqual(await said(), ['launcher-settings.json: unloadStill must be 0 or 1 (got "yes"); the args\' defaults apply', 'unload-still 0 (the default)']);
+  writeFileSync(file, '{not json');
+  assert.match((await said())[0], /launcher-settings\.json unreadable/);
+  writeFileSync(file, '{"unloadStill":0}');
+  assert.deepEqual(await said(), ['launcher-settings.json: unloadStill 0', 'unload-still 0 (launcher-settings.json)']);
+  rmSync(file);
+  assert.deepEqual(await said(), ['unload-still 0 (the default)'], 'removed: the default again');
+});
+
 // #2475: a world unloaded to make room while not still was recorded "due at once" and then skipped by the alarm, so its
 // reminder waited for a visitor (the #2301 re-run: 84 reminders undelivered) and its live poll got a stale picture
 test('#2475: a world unloaded for room while not still is served "unloaded" with its clock moved on, and its alarm loads it once there is room: its reminder arrives within 60 s', { timeout: 60_000 }, async (t) => {
@@ -214,6 +236,39 @@ test('#2475: a world unloaded for room while not still is served "unloaded" with
     assert.ok(at >= dueAt && at - dueAt <= 60_000, `delivered ${at - dueAt} ms after its due time`);
     t.diagnostic(`delivered ${at - dueAt} ms after its due time`);
   } finally { await L.close(); }
+});
+
+// #2490: the #2301 re-run's shared instant (101 reminders due together, room for about 19, 4 loads at once) delivered late
+// (p50 59 s, max 281 s) with a fixed 30 s lead. Here 50 unloaded worlds (each load about 1 s), room for 6, a 0.5 s lead.
+test('#2490 A1: 50 reminders due at one instant on a small-room pool each land within 60 s of due: loads start early by the queue ahead, never unload one another before due', { timeout: 120_000 }, async (t) => {
+  const N = 50, dataDir = join(dir, 'burst'), dueAt = Date.now() + 20_000, slugs = Array.from({ length: N }, (_, i) => `b${String(i + 1).padStart(2, '0')}`);
+  const outOf = (slug) => join(dir, `burst-${slug}.txt`), firstLine = (slug) => { try { return Number(readFileSync(outOf(slug), 'utf8').trim().split('\n')[0]); } catch { return null; } };
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', worlds: slugs.map((slug) => ({ slug, name: slug, template: 'hello-hamlet', port: null, createdAt: Date.now(), unlisted: false })) }));
+  writeFileSync(join(dataDir, 'horizons.json'), JSON.stringify(Object.fromEntries(slugs.map((s) => [s, { still: true, untilWallMs: dueAt, moveWallMs: null, at: Date.now() }]))));
+  for (const s of slugs) { writeFileSync(dueFile(s), JSON.stringify({ dueAt, out: outOf(s) })); still(s, { untilWallMs: dueAt }); }
+  const lines = []; process.env.FAKE_BOOT_MS = '1000';
+  const L = await open({ dataDir, keepAlive: false, idleMs: 0, stillLeadMs: 500, stillLoadMs: 1200, stillDueGraceMs: 500, usageStartMs: 600_000, log: (s) => lines.push({ at: Date.now(), s: String(s) }) });
+  try {
+    L.pool.o.pss = () => 300; L.pool.o.worldsMemMb = 2000;   // room for 6 (5 x 300 MB + one loading at 310 MB; a 7th is 2110)
+    const delivered = new Map();
+    while (delivered.size < N && Date.now() < dueAt + 60_000) {
+      L.still.alarms();
+      // a delivered reminder leaves the world's horizon (its still answer no longer says it)
+      for (const s of slugs) if (!delivered.has(s)) { const at = firstLine(s); if (at) { delivered.set(s, at); still(s); } }
+      await wait(100);
+    }
+    const late = slugs.map((s) => (delivered.has(s) ? delivered.get(s) - dueAt : null)).sort((a, b) => a - b);
+    t.diagnostic(`delivered ${delivered.size} of ${N}; late min ${late[0]} p50 ${late[N >> 1]} max ${late.at(-1)} ms; load ${L.pool.loadMs?.()} ms`);
+    assert.equal(delivered.size, N, 'every reminder delivered');
+    for (const x of late) assert.ok(x >= 0 && x <= 60_000, `delivered ${x} ms after its due time`);
+    // the lead scales with the queue: the room was full of worlds already running at the due instant, the first load
+    // was asked for well before a fixed lead (0.5 s) would have, and nothing loaded early was unloaded for room before due
+    assert.ok(late.filter((x) => x < 500).length >= 6, `${late.filter((x) => x < 500).length} on time: the whole room was loaded before due`);
+    const first = lines.find((l) => / loads \(listener/.test(l.s));
+    assert.ok(first && dueAt - first.at > 3000, `first alarm load ${first ? dueAt - first.at : '?'} ms before due`);
+    assert.deepEqual(lines.filter((l) => l.at < dueAt && /unloaded to make room/.test(l.s)).map((l) => l.s), [], 'no early load unloaded another before due');
+  } finally { delete process.env.FAKE_BOOT_MS; await L.close(); }
 });
 
 test('--unload-still 0 (the default): nothing is read, recorded or unloaded', { timeout: 30_000 }, async () => {

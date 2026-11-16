@@ -18,6 +18,6 @@ test('the world page carries its config first thing in <head>, script-safe even 
 
 test('http.ts serves the page with the same config object the /v1/config route answers', () => {
   const src = readFileSync(new URL('./http.ts', import.meta.url), 'utf8');
-  assert.match(src, /app\.get\('\/v1\/config', \(c\) => c\.json\(configOf\(c\)\)\);/);
+  assert.match(src, /app\.get\('\/v1\/config', \(c\) => c\.json\(configOf\(c\), /);   // #2515: + the edge header without a token
   assert.match(src, /c\.html\(withInlineConfig\(withSnapshotKey\(withWorldClock\(currentIndex\(\), worldClockNow\(\), worldSoulsNow\(\)\), safeKey\(currentSnapshotKey\), godRoutes\?\.partRefs\(\)\), safeConfig\(c\)\)/);  // P7: + the parts' refs; P7d: + the world's clock and Souls
 });

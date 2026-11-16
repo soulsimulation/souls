@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- soul.game while the launcher cannot answer (soul-game.caddy's handle_errors). No requests of its own; the one script
+     reloads the page after a random 3 to 8 s, so visitors waiting together do not all return at the same moment. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Souls · back in a moment</title>
+<noscript><meta http-equiv="refresh" content="6"></noscript>
+<style>
+  :root { color-scheme: light dark; --bg: #fafaf7; --fg: #1d1e1c; --dim: #6b6d68; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #101110; --fg: #ecece8; --dim: #9a9c96; } }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; background: var(--bg); color: var(--fg); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; text-align: center; padding: 0 16px; }
+  h1 { font-size: 1.4rem; font-weight: 600; margin: 0 0 .4rem; }
+  p { margin: 0; color: var(--dim); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Back in a moment</h1>
+  <p>This world is restarting. The page reloads on its own.</p>
+</main>
+<script>setTimeout(function () { location.reload(); }, 3000 + Math.floor(Math.random() * 5000));</script>
+</body>
+</html>
