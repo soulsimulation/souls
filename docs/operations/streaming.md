@@ -125,7 +125,7 @@ When the page has no `window.__soulsStream` (soul.game before `?stream=1` shippe
 | `SOULS_STREAM_DIR` | `~/.souls/stream` | state, Chrome for Testing and its profile, `watch.log` |
 | `SOULS_STREAM_CDP_PORT` | `9333` | Chrome's DevTools port (localhost only) |
 | `SOULS_STREAM_RECORD_DIR` | OBS's recording folder | where `--record` files go (`.mkv`); created if missing |
-| `OBS_WEBSOCKET_URL` | `ws://127.0.0.1:4455` | OBS's websocket |
+| `OBS_WEBSOCKET_URL` | OBS on this machine, port 4455 | OBS's websocket |
 
 ### OBS 33 faults the tool works around
 
