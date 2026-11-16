@@ -8,6 +8,7 @@
 // searches. Refused (birth.arrival-unavailable) only when the world has no standing ground at all.
 import { nativeBirthPlacement, type ArrivalPocket, type ArrivalSpot, type NativeBirthPlacement } from '@souls/engine-mars';
 import type { BirthNearV1 } from '@souls/engine-contract';
+import { worldConfig } from './config.ts';
 import type { WorldHost } from './world.ts';
 
 type ArrivalEngine = { arrivalSearchV1?(label?: string): ArrivalSpot | null; arrivalPocketV1?(p: [number, number], label?: string): ArrivalPocket; arrivalBlockedV1?(): boolean };
@@ -33,12 +34,12 @@ function searchFor(host: WorldHost, who: BirthIdentity, probe: NativeBirthPlacem
 
 /** Place a native birth, moving it off a blocked arrival point when needed. Read-only (on the live engine, A13). */
 export function planNativeBirth(host: WorldHost, who: BirthIdentity): BirthPlan {
-  const first = nativeBirthPlacement(host.engine, host.factory, who);
+  const first = nativeBirthPlacement(host.engine, host.factory, who, worldConfig(host).env.SIM_BIRTH_PROBE);
   if (first.outcome !== 'ready' && !(first.outcome === 'unavailable' && first.diagnostic.code === 'birth.arrival-unavailable')) return { probe: first };
   const near = searchFor(host, who, first);
   if (near === undefined) return { probe: first };
   if (near === 'none') return { probe: first.outcome === 'unavailable' ? { ...first, diagnostic: { code: 'birth.arrival-unavailable', message: 'no free walkable ground in this world' } } : first };
-  return { probe: nativeBirthPlacement(host.engine, host.factory, { ...who, near: near satisfies BirthNearV1 }), near };
+  return { probe: nativeBirthPlacement(host.engine, host.factory, { ...who, near: near satisfies BirthNearV1 }, worldConfig(host).env.SIM_BIRTH_PROBE), near };
 }
 
 /** A direct create's birth-near/1 hint at the arrival point itself, without `first` (MarsEngine.arrivalCrowdV1): in a world

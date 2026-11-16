@@ -117,17 +117,17 @@ test('A13 oracle: existing, conflicting and deferred births answer as the probe 
 });
 
 test('A13: the birth path never snapshots or restores; SIM_BIRTH_PROBE=1 decides by the probe, =oracle throws on a difference',()=>{
-  const was=process.env.SIM_BIRTH_PROBE;let restores=0,snapshots=0;
+  let restores=0,snapshots=0;
   const counted={...factory,restore:(s:Parameters<typeof factory.restore>[0])=>{restores++;return factory.restore(s);}};
   const e=factory.create(factory.genesis('oracle-modes'));e.spawnHuman({id:'h_A',label:'Alice',soul:'s_A'});
   const snap=e.snapshot.bind(e);e.snapshot=()=>{snapshots++;return snap();};
   const m=e as unknown as {birthPlacementV1:(r:unknown)=>unknown},own=m.birthPlacementV1;
   try{
-    delete process.env.SIM_BIRTH_PROBE;const p=nativeBirthPlacement(e,counted,request);assert.equal(p.outcome,'ready');assert.equal(restores+snapshots,0);
-    process.env.SIM_BIRTH_PROBE='1';assert.deepEqual(nativeBirthPlacement(e,counted,request),p);assert.equal(restores,1);
-    process.env.SIM_BIRTH_PROBE='oracle';assert.deepEqual(nativeBirthPlacement(e,counted,request),p);assert.equal(restores,2);
-    m.birthPlacementV1=()=>({ok:true,p:[9,0,9]});assert.throws(()=>nativeBirthPlacement(e,counted,request),/differs from the detached probe/);
-  }finally{if(was===undefined)delete process.env.SIM_BIRTH_PROBE;else process.env.SIM_BIRTH_PROBE=was;e.snapshot=snap;m.birthPlacementV1=own;}
+    const p=nativeBirthPlacement(e,counted,request);assert.equal(p.outcome,'ready');assert.equal(restores+snapshots,0);
+    assert.deepEqual(nativeBirthPlacement(e,counted,request,'1'),p);assert.equal(restores,1);
+    assert.deepEqual(nativeBirthPlacement(e,counted,request,'oracle'),p);assert.equal(restores,2);
+    m.birthPlacementV1=()=>({ok:true,p:[9,0,9]});assert.throws(()=>nativeBirthPlacement(e,counted,request,'oracle'),/differs from the detached probe/);
+  }finally{e.snapshot=snap;m.birthPlacementV1=own;}
 });
 
 // #2624 review: on whole (non-paged) ground the live search grew the ground window to an arrival point far from every
@@ -137,13 +137,10 @@ test('A13: on whole (non-paged) ground the birth decides by the probe and leaves
   const m=await loadMars(),f=await marsFactory({...GREEN_FIELD_WORLD,arrival:[300,0],reference:[302,0]}),fact=groundFact(emptyGround(1000),4,{paged:false});
   const mk=()=>{const w=f.genesis('a13-whole') as {entities:Record<string,unknown>};w.entities.h_home=m.human('h_home',0,0,{label:'Home'});
     const e=f.create(w as never) as Engine&{installGroundV1(f:unknown):unknown};e.installGroundV1(fact);for(let t=0;t<3;t++)e.step();return e;};
-  const a=mk(),b=mk(),nav=navOf(a),was=process.env.SIM_BIRTH_PROBE;
-  try{
-    for(const mode of [undefined,'oracle']){
-      if(mode===undefined)delete process.env.SIM_BIRTH_PROBE;else process.env.SIM_BIRTH_PROBE=mode;
-      const {contract:_c,base:_b,...probe}=probeNativeHumanBirth(a,f,request);assert.deepEqual(nativeBirthPlacement(a,f,request),probe);
-    }
-  }finally{if(was===undefined)delete process.env.SIM_BIRTH_PROBE;else process.env.SIM_BIRTH_PROBE=was;}
+  const a=mk(),b=mk(),nav=navOf(a);
+  for(const mode of [undefined,'oracle']){
+    const {contract:_c,base:_b,...probe}=probeNativeHumanBirth(a,f,request);assert.deepEqual(nativeBirthPlacement(a,f,request,mode),probe);
+  }
   assert.throws(()=>placeNativeHumanBirth(a,request),/needs paged ground or none/);
   assert.equal(navOf(a),nav);assert.equal(navOf(a),navOf(b));
   for(const e of [a,b])assert.equal(e.perform({actor:'h_home',label:'walk',steps:[{verb:'walk_to',params:{to:[-100,0,0]}}]}).ok,true);

@@ -71,11 +71,11 @@ export function livePlacementExact(engine:Engine):boolean {
   const ground=(engine.world as {groundV1?:{nav?:string}}).groundV1;return !ground||ground.nav==='paged/1';
 }
 
-/** The birth path's one entry. SIM_BIRTH_PROBE=1 decides by the detached probe instead (the A/B "off" arm);
- * SIM_BIRTH_PROBE=oracle decides on the live engine and throws on any difference from the probe. Read per call.
+/** The birth path's one entry. `mode` is the world's SIM_BIRTH_PROBE (the server passes worldConfig(host).env, read per
+ * call): '1' decides by the detached probe instead (the A/B "off" arm, the rollback); 'oracle' decides on the live engine
+ * and throws on any difference from the probe; anything else, the live engine.
  * A world on whole (non-paged) ground always decides by the probe (livePlacementExact). */
-export function nativeBirthPlacement(engine:Engine,factory:EngineFactory,raw:unknown):NativeBirthPlacement {
-  const mode=process.env.SIM_BIRTH_PROBE;
+export function nativeBirthPlacement(engine:Engine,factory:EngineFactory,raw:unknown,mode?:string):NativeBirthPlacement {
   if(mode==='1'||!livePlacementExact(engine))return withoutBase(probeNativeHumanBirth(engine,factory,raw));
   const live=placeNativeHumanBirth(engine,raw);
   if(mode==='oracle'){

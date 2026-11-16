@@ -4,6 +4,7 @@ import { nativeBirthPlacement } from '@souls/engine-mars';
 import { planNativeBirth } from './arrival-placement.ts';
 import { soulLifecycleSchema, ownerLifecycleListSchema, type SoulLifecycle } from '@souls/protocol';
 import { LifecycleJournal, type LifecycleOperation, type LifecycleScope } from './lifecycle-journal.ts';
+import { worldConfig } from './config.ts';
 import type { WorldHost } from './world.ts';
 
 class LifecycleDeferred extends Error {}
@@ -167,7 +168,7 @@ export class LifecycleRunner {
     checks();
     this.spendProbe();
     const {probe:preview,near}=planNativeBirth(this.host,who);
-    const probe=()=>{checks();this.spendProbe();return nativeBirthPlacement(this.host.engine,this.host.factory,{...who,...(near?{near}:{})});};
+    const probe=()=>{checks();this.spendProbe();return nativeBirthPlacement(this.host.engine,this.host.factory,{...who,...(near?{near}:{})},worldConfig(this.host).env.SIM_BIRTH_PROBE);};
     if(preview.outcome==='deferred')return;
     if(preview.outcome==='unavailable'&&preview.diagnostic.code==='birth.arrival-unavailable'){
       this.journal.refuseArrival(s,op.requestId,()=>{
