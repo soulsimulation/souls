@@ -6,7 +6,7 @@
 // the screen as its width (GoatCounter's phone/tablet/desktop split). Three events, counts only: "enter world <slug>"
 // (the arrival card went), "soul paired" (a Soul approved for an agent, once per approval), "god connected" (a world's god approved).
 // Off: on local and private hosts (dev, tests, e2e), under automation (navigator.webdriver: every Playwright walk, the
-// release probe, poster, stall and cdn-walk of ship.sh), on ?shot looks, in a browser that set localStorage
+// release probe, poster, stall and cdn-walk of ship.sh), on ?shot looks and ?stream feeds (#2492), in a browser that set localStorage
 // skipgc=t (GoatCounter's own opt-out), and in a build with SIM_GOATCOUNTER=off (vite.config.ts; a code or a full
 // count URL selects another site, default `simeden`).
 import { whenMarked } from './arrival-marks.ts';
@@ -68,7 +68,7 @@ function counting(): string | null {
   endpoint = null;
   try {
     if (typeof location === 'undefined' || typeof navigator === 'undefined' || navigator.webdriver) return null;
-    if (localHost(location.hostname) || new URLSearchParams(location.search).has('shot')) return null;
+    if (localHost(location.hostname) || new URLSearchParams(location.search).has('shot') || new URLSearchParams(location.search).has('stream')) return null;
     try { if (localStorage.getItem('skipgc') === 't') return null; } catch { /* storage blocked: still counted */ }
     try { width = screen.width; } catch { /* no screen */ }
     endpoint = countEndpoint(typeof __SIM_GOATCOUNTER__ === 'string' ? __SIM_GOATCOUNTER__ : undefined);

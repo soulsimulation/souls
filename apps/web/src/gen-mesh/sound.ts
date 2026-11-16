@@ -25,7 +25,7 @@ import { kettleHeat, type WorldModel } from '@souls/world-compiler';
 import { accompanistOf, crackle, drumHits, PIANO_FADE, pianoEndAt, pianoNotes, pianoReadyAt, recordNotes, sungNotes, type Accompanist } from '../../../../mars/viewer/app/engine-view/piano-score.ts';
 import { RADIO_STATIONS, stationEvents, TUNE, type RadioEvent } from './radio-stations.ts';
 import { makeSinger, micChain, type Singer } from './voice.ts';
-import { ambienceAt, condition, distanceTo, emittersOf, exposureAt, falloff, Movement, notesToSound, QueuedNotes, treeIndex, treesOf, type Emitter, type Resident, type SoundKind, type Source, type TreeIndex } from './sound-plan.ts';
+import { ambienceAt, condition, DEFAULT_SETTINGS, distanceTo, emittersOf, exposureAt, falloff, Movement, notesToSound, QueuedNotes, treeIndex, treesOf, type Emitter, type Resident, type SoundKind, type Source, type TreeIndex } from './sound-plan.ts';
 import { nightOf } from './motion.ts';
 import { sharedCoverProbe, type CoverProbe } from '../world-env.ts';
 import { arrivalOver } from '../arrival-marks.ts';
@@ -617,12 +617,17 @@ function step(host: Host) {
 
 // Listener preferences are shared with the React navbar; no separate floating controls.
 const setSettings = setAudioSettings;
+/** #2492 ?stream=1 (stream-mode.ts, as `__edenSound.startNow`): the soundscape and the music start without a gesture where
+ *  the browser allows autoplay, at the default settings whatever the stored ones (which stay as they are), and stay there
+ *  (a stream has no mute UI). Called again, it wakes a suspended context. */
+let pinned = false;
+function startSoundNow() { pinned = true; settings = { ...settings, ...DEFAULT_SETTINGS }; unlock(); musicGesture(); applyMaster(); musicSync(); }
 
 /** Starts once per page; idles until a world-engine world publishes its host object. */
 export function startSoundLayer() {
   if (typeof window === 'undefined' || (window as unknown as { __edenSound?: unknown }).__edenSound) return;
   settings = audioSettings();
-  subscribeAudioSettings(()=>{settings=audioSettings();applyMaster();lastAmb=0;musicSync();});
+  subscribeAudioSettings(()=>{if(!pinned)settings=audioSettings();applyMaster();lastAmb=0;musicSync();});
   const w = window as unknown as { __soulsEntity?: Host; __edenSound?: unknown };
   w.__edenSound = {
     state: () => ({ ctx: ctx?.state ?? 'none', muted: settings.muted, music: settings.music, volume: settings.volume, covered, flute: fluteAudio.state(), piano: { near: pianoNear, scheduled: pianoDone.size }, jukebox: { near: jukeboxNear, ids: jukeboxIds.size, scheduled: jukeboxDone.size }, drums: { near: drumsNear, scheduled: drumDone.size },
@@ -658,6 +663,7 @@ export function startSoundLayer() {
     mute: (m: boolean) => setSettings({ muted: m }),
     music: (m: boolean) => setSettings({ music: m }),
     unlock,
+    startNow: startSoundNow,
     /** Recorded ambient beds on/off (A/B listening and level checks); the speaker's mute is the user control. */
     beds: (on: boolean) => { bedsOn = on; },
     /** The soundscape's output plus the music as one MediaStream (recordings for review); null before the first unlock. */
