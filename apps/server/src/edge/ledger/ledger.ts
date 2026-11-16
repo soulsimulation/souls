@@ -144,6 +144,8 @@ function countFocusMiss(mine: Map<string, unknown> | undefined, kept: {tick: num
 }
 const OPEN: EdgeReceipt['phase'][] = ['waiting', 'started'];
 /** #1381: the explicit stop of the act under way, and the words that mean it while an act is open. */
+/** #2597: an exact walk id (`walk:<place, thing or room ref>`), the shape idOnDemand offers on demand. */
+const WALK_ID = /^walk:[^\s:]+$/;
 const STOP_CURRENT = 'stop:current', STOP_WORDS = /^(?:please\s+)?(?:stop|pause|halt|cancel|wait,?\s+(?:stop|pause))(?:,?\s+(?:stop|pause|it|that|now|please|what\s+(?:i'?m|you'?re|i\s+am|you\s+are)\s+doing|the\s+(?:act|action)))*[.!]*$/i;
 /** #1272: acts that go on over time and do nothing new when asked again. Answers, stands and hand acts do something each time. */
 const REPEATABLE = new Set(['walk', 'jog', 'run', 'stroll', 'go-near', 'hang-out', 'wander', 'swim', 'sit', 'sit-ground', 'lie', 'nap', 'rest', 'read']);
@@ -2275,6 +2277,8 @@ export class EdgeLedger implements EdgeLedgerHooks {
   private actMenu(soul: EdgeSoul, asked: string, params: unknown): {caps: EdgeCapability[]; plans: Plans; partial?: true; words?: {caps: EdgeCapability[]; exact: boolean}; pre?: ReturnType<EdgeLedger['resolveOnDemand']>} {
     const via = !!params && typeof params === 'object' && (params as {via?: unknown}).via !== undefined;
     if (!via && /^[a-z][\w-]*:\S+$/i.test(asked)) {const one = this.bindOne(soul, asked); if (one) return {caps: [one.cap], plans: new Map(one.plan ? [[asked, one.plan]] : []), partial: true};}
+    // #2597: an exact walk id the menu does not list: its on-demand offer, resolved as the whole menu would (`pre`)
+    if (!via && WALK_ID.test(asked)) {const od = this.unlistedOnDemand(soul, asked, true); if (od) return {caps: od.caps, plans: od.plans, partial: true, pre: od};}
     // srv-act-words: words of a common shape resolve on a focused build of the verbs they can read
     if (!via) {const f = this.wordsFocused(soul, asked); if (f) return {caps: f.caps, plans: f.plans, partial: true, pre: f.pre};}
     // L3 (b): words resolve on the words menu; the offer they choose is rebuilt exactly before it is acted on (exactWords)
@@ -3725,26 +3729,7 @@ export class EdgeLedger implements EdgeLedgerHooks {
       const cap = f ? more.find(c => c.id === f.id) : undefined;
       if (f && cap && !this.secretOffer(soul, cap)) return {v: {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label})${f.note}.`}, caps: more, plans: morePlans};
     }
-    // SOULSIM-E: an id-shaped walk/run/jog (`walk:land-botanic-koi-pond`, as resolve answers) to a place the listing
-    // leaves out gets the same on-demand offer as its words; the words reach it through the vocabulary, the id may not
-    const byId = exact ? null : /^(walk|jog|run):([^\s:/]+)$/.exec(text.trim());
-    const placeId = byId ? [byId[2], 'g-' + byId[2]].find(id => this.places.byId.has(id)) : undefined;
-    if (byId && placeId && this.walkOnDemand) {
-      const verb = byId[1] as 'walk' | 'jog' | 'run', more = [...caps], morePlans = new Map(plans);
-      // (a pond's walk goes to its shore, g-<pond>.shore-bank: the place itself, else its sub-places, as the words' walk does)
-      const offer = (id: string) => verb === 'walk' ? this.walkOnDemand!(soul, id, more, morePlans) : !!this.gaitOnDemand?.(soul, id, verb, more, morePlans);
-      const sub = (id: string) => id.startsWith(placeId + '.') || this.places.byId.get(id)?.parent === placeId;
-      const added = offer(placeId) || [...this.places.byId.keys()].some(id => sub(id) && offer(id));
-      const cap = added ? more.find(c => c.id === text.trim()) ?? more.find(c => c.verb === verb && c.target?.kind === 'place' && (c.target.id === placeId || sub(c.target.id))) : undefined;
-      if (cap && !this.secretOffer(soul, cap)) return {v: cap.id === text.trim() ? {kind: 'exact', cap} : {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label}).`}, caps: more, plans: morePlans};
-    }
-    // Re-offer an exact named walk, or an explicitly selected real semantic seat.
-    // The normal GodNav plan, route checks and launch admission remain authoritative.
-    const byRef = exact || !this.walkRefOnDemand ? null : /^(?:walk|sit):([^\s:]+)$/.exec(text.trim());
-    if (byRef && (!text.trim().startsWith('sit:') || [...this.places.byId.values()].some(p => p.parts?.some(part => part.sit === text.trim() && knownPart(this,soul,p,part))))) {
-      const more = [...caps], morePlans = new Map(plans), cap = this.walkRefOnDemand!(soul, byRef[1]!, more, morePlans) ? more.find(c => c.id === text.trim()) : undefined;
-      if (cap && !this.secretOffer(soul, cap)) return {v: {kind: 'exact', cap}, caps: more, plans: morePlans};
-    }
+    {const r = exact ? null : this.idOnDemand(soul, text, caps, plans); if (r) return r;}
     let v: VocabResult = exact ? {kind: 'exact', cap: exact} : resolveCapability(text, this.vocabulary(soul, caps));
     // RESOLVE (SOULSIM-E "go to the horse" ended at the west lawn's centre, ~10 m from the horse): words that named only a place
     // whose description lists them name a thing: the nearest one so named, next to it
@@ -3827,10 +3812,53 @@ export class EdgeLedger implements EdgeLedgerHooks {
     if (this.spotPlaces?.from !== spots) {const m = new Map<string, string>(); for (const s of [...spots.spots, ...spots.shelves]) if (s.place) m.set(s.id, s.place); this.spotPlaces = {from: spots, m};}
     return this.spotPlaces.m.get(id) ?? this.spotPlaces.m.get(id.replace(/\.(?:p\d+|triangle)$/, ''));
   }
+  /** resolveOnDemand's on-demand offer of an id-shaped walk (#2597: also read alone): a far place's walk/run/jog by its id,
+   *  then a named thing's or room's walk (or a semantic seat) by its ref; null when neither offers it. `caps` and `plans`
+   *  are copied, never written. An offer a listed one has the id of is not made again (offerWalk), so a caller that passes
+   *  fewer offers than the whole menu must check the ids it gets are not listed. */
+  private idOnDemand(soul: EdgeSoul, text: string, caps: EdgeCapability[], plans: Plans, seen?: {byIdAdded?: boolean; from?: 'id' | 'ref'}): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} | null {
+    // SOULSIM-E: an id-shaped walk/run/jog (`walk:land-botanic-koi-pond`, as resolve answers) to a place the listing
+    // leaves out gets the same on-demand offer as its words; the words reach it through the vocabulary, the id may not
+    const byId = /^(walk|jog|run):([^\s:/]+)$/.exec(text.trim());
+    const placeId = byId ? [byId[2], 'g-' + byId[2]].find(id => this.places.byId.has(id)) : undefined;
+    if (byId && placeId && this.walkOnDemand) {
+      const verb = byId[1] as 'walk' | 'jog' | 'run', more = [...caps], morePlans = new Map(plans);
+      // (a pond's walk goes to its shore, g-<pond>.shore-bank: the place itself, else its sub-places, as the words' walk does)
+      const offer = (id: string) => verb === 'walk' ? this.walkOnDemand!(soul, id, more, morePlans) : !!this.gaitOnDemand?.(soul, id, verb, more, morePlans);
+      const sub = (id: string) => id.startsWith(placeId + '.') || this.places.byId.get(id)?.parent === placeId;
+      const added = offer(placeId) || [...this.places.byId.keys()].some(id => sub(id) && offer(id)); if (seen) seen.byIdAdded = added;
+      const cap = added ? more.find(c => c.id === text.trim()) ?? more.find(c => c.verb === verb && c.target?.kind === 'place' && (c.target.id === placeId || sub(c.target.id))) : undefined;
+      if (cap && !this.secretOffer(soul, cap)) {if (seen) seen.from = 'id'; return {v: cap.id === text.trim() ? {kind: 'exact', cap} : {kind: 'alias', cap, note: `${text} is ${cap.id} (${cap.label}).`}, caps: more, plans: morePlans};}
+    }
+    // Re-offer an exact named walk, or an explicitly selected real semantic seat.
+    // The normal GodNav plan, route checks and launch admission remain authoritative.
+    const byRef = !this.walkRefOnDemand ? null : /^(?:walk|sit):([^\s:]+)$/.exec(text.trim());
+    if (byRef && (!text.trim().startsWith('sit:') || [...this.places.byId.values()].some(p => p.parts?.some(part => part.sit === text.trim() && knownPart(this,soul,p,part))))) {
+      const more = [...caps], morePlans = new Map(plans), cap = this.walkRefOnDemand!(soul, byRef[1]!, more, morePlans) ? more.find(c => c.id === text.trim()) : undefined;
+      if (cap && !this.secretOffer(soul, cap)) {if (seen) seen.from = 'ref'; return {v: {kind: 'exact', cap}, caps: more, plans: morePlans};}
+    }
+    return null;
+  }
+  /** #2597: resolveOnDemand(asked) on the whole menu, for an exact walk id the menu does not list (the caller has asked
+   *  bindOne), without building that menu: the on-demand offer idOnDemand makes from no offers. It is the whole menu's
+   *  answer when every offer it made is one the menu does not list (offerWalk makes no offer the menu has the id of, so on
+   *  the whole menu the same offers are made, in the same order) and, with `exactOnly`, when it is the asked id itself
+   *  (an alias would be the first walk to that place in the menu's order, which may be a listed one). Null otherwise:
+   *  the caller reads the whole menu, as before. */
+  private unlistedOnDemand(soul: EdgeSoul, asked: string, exactOnly: boolean): {v: VocabResult; caps: EdgeCapability[]; plans: Plans} | null {
+    // (`byIdAdded` with no answer from it: the by-id offer was a secret one, where the whole menu's first walk to that place
+    // could be a listed one and answer instead: read the whole menu)
+    const seen: {byIdAdded?: boolean; from?: 'id' | 'ref'} = {}, r = this.idOnDemand(soul, asked, [], new Map(), seen);
+    if (!r || r.v.kind === 'unknown' || (exactOnly && r.v.kind !== 'exact') || (seen.byIdAdded && seen.from !== 'id')) return null;
+    for (const c of r.caps) if (c.id !== asked && this.bindOne(soul, c.id)) return null;
+    return r;
+  }
   /** SOULSIM-E: true when `asked` is an id the listing leaves out that resolveOnDemand offers (a far place's walk/run). Act
    *  and resolve let such an id through their place and strict/1 checks, which read the listing only. */
   onDemandId(soul: EdgeSoul, asked: string, caps?: EdgeCapability[], plans?: Plans): boolean {
     if (!/^(?:walk|jog|run|sit):/.test(asked)) return false;
+    // #2597: an exact walk id, asked without a menu: its one offer (bindOne), else its on-demand offer, with no whole menu
+    if (!(caps && plans) && WALK_ID.test(asked)) {if (this.bindOne(soul, asked)) return false; if (this.unlistedOnDemand(soul, asked, false)) return true;}
     const b = caps && plans ? {caps, plans} : this.binds(soul); if (b.caps.some(c => c.id === asked)) return false;
     const od = this.resolveOnDemand(soul, asked, b.caps, b.plans); return od.caps !== b.caps && od.v.kind !== 'unknown';
   }
