@@ -26,7 +26,13 @@
 // rules (../../bench/capacity/meetup/client-soul.mjs), reading each act's receipt once. Its acts are the paced loop's,
 // drawn from the same seeded draws a real Soul in its place would make; the differences are in rawDifferences below. The
 // report gives the driver's processor share, and acts achieved against intended and act wait per tenth of agents by
-// activity, busiest first. `--shape uniform` is the paced loop; the uneven shapes come from #2556's shapes module.
+// activity, busiest first. `--shape uniform` is the paced loop.
+// #2556 `--shape <everyday|event|...>`: the raw Souls follow the shapes module's seeded schedule (one per repeat): who is
+// present when (an arrival after the start re-reads the catalog and live picture once), each agent's own act times, the
+// act kinds (speech by the say route, gestures and the rest by catalog id) and the walks gathered near one named place.
+// One call at a time per Soul, in order: an act due while the last is still out starts when it is answered, and acts
+// not started by the end of the window are not achieved. Real Souls keep the paced loop. The report prints what the
+// schedule offered and tenths of agents by their intended acts.
 import { join, resolve, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, copyFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
@@ -38,7 +44,8 @@ import { sendCard } from '../arena/owner.mjs';
 import { prepareFolder, runtimeDir } from './episode.mjs';
 import { httpSince, routeStats, refusalCounts } from './measure.mjs';
 import { bucketProfile, perAct, readProfile, ACT_GROUPS } from './prof-buckets.mjs';
-import { clientCall, clientHeaders, actBody, startPicture } from '../../bench/capacity/meetup/client-soul.mjs';
+import { clientCall, clientHeaders, actBody, startPicture, catalogIds, SAY_PATH, sayBody } from '../../bench/capacity/meetup/client-soul.mjs';
+import { SHAPES, schedule, describe } from '../../bench/capacity/profiles/shapes.mjs';
 import { randomBytes } from 'node:crypto';
 
 const PROF_HOOK = new URL('./prof-hook.mjs', import.meta.url).pathname;
@@ -181,14 +188,55 @@ export async function rawPacedLoop({ base, soul, ids, until, r, counts, acts = [
     next = Math.max(Date.now(), next + actSec * 1000 * (0.5 + r()));
     const word = PACED_WORDS[Math.floor(r() * PACED_WORDS.length)], rows = ids[word] ?? [];
     if (!rows.length) continue;
-    const id = rows[Math.floor(r() * Math.min(3, rows.length))], key = `raw-${soul.i}-${n}-${Date.now()}`, t0 = Date.now();
-    const a = await call(`${base}/v1/edge/act`, { method: 'POST', headers: clientHeaders(soul, { key }), body: actBody(id, key) });
-    counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++;
-    const tm = timingOf(a.timing);
-    http.push({ v: 'soul-trace/1', kind: 'http', at: t0, method: 'POST', route: '/v1/edge/act', status: a.status, durationMs: Date.now() - t0, serverMs: tm.world, queuedMs: tm.queue, facts: { accepted: a.data?.accepted, code: a.data?.code ?? a.code } });
-    acts.push({ cap: capabilityOf({ act: id }), t0, t1: Date.now() });
-    const rid = a.data?.receipt?.id;
-    if (rid) { const t1 = Date.now(), g = await call(`${base}/v1/edge/receipts/${rid}`, { headers: clientHeaders(soul) }); counts.cmds++; http.push({ v: 'soul-trace/1', kind: 'http', at: t1, method: 'GET', route: `/v1/edge/receipts/${rid}`, status: g.status, durationMs: Date.now() - t1, serverMs: timingOf(g.timing).world, queuedMs: timingOf(g.timing).queue }); }
+    await rawAct({ base, soul, id: rows[Math.floor(r() * Math.min(3, rows.length))], key: `raw-${soul.i}-${n}-${Date.now()}`, counts, acts, http, call });
+  }
+}
+/** One raw act: POST /v1/edge/act by catalog id (keyed), then its receipt once. Trace records as the client's. */
+async function rawAct({ base, soul, id, key, counts, acts, http, call }) {
+  const t0 = Date.now(), a = await call(`${base}/v1/edge/act`, { method: 'POST', headers: clientHeaders(soul, { key }), body: actBody(id, key) });
+  counts.cmds++; counts.acts++; if (a.data?.accepted === false) counts.refused++;
+  const tm = timingOf(a.timing);
+  http.push({ v: 'soul-trace/1', kind: 'http', at: t0, method: 'POST', route: '/v1/edge/act', status: a.status, durationMs: Date.now() - t0, serverMs: tm.world, queuedMs: tm.queue, facts: { accepted: a.data?.accepted, code: a.data?.code ?? a.code } });
+  acts.push({ cap: capabilityOf({ act: id }), t0, t1: Date.now() });
+  const rid = a.data?.receipt?.id;
+  if (rid) { const t1 = Date.now(), g = await call(`${base}/v1/edge/receipts/${rid}`, { headers: clientHeaders(soul) }); counts.cmds++; http.push({ v: 'soul-trace/1', kind: 'http', at: t1, method: 'GET', route: `/v1/edge/receipts/${rid}`, status: g.status, durationMs: Date.now() - t1, serverMs: timingOf(g.timing).world, queuedMs: timingOf(g.timing).queue }); }
+}
+/** #2556: a GET with its trace record (an arrival's catalog and live picture). */
+async function rawRead({ base, soul, route, counts, http, call }) {
+  const t0 = Date.now(), g = await call(`${base}${route}`, { headers: clientHeaders(soul, { auth: false }) }); counts.cmds++;
+  http.push({ v: 'soul-trace/1', kind: 'http', at: t0, method: 'GET', route, status: g.status, durationMs: Date.now() - t0, serverMs: timingOf(g.timing).world, queuedMs: timingOf(g.timing).queue });
+}
+/** #2556: a shape's ids by act kind from the catalog (client-soul.mjs catalogIds), with `gathered`: the walk to one named
+ *  place (the bandstand, else the first walk in id order) and to every place whose outline's centre is within `radiusM`
+ *  of that place's. `named` is that place's walk. */
+export function shapeIds(cat, radiusM = 30) {
+  const ids = catalogIds(cat), places = cat?.places ?? [], walkOf = (p) => `walk:${p.ref ?? p.id}`;
+  const centre = (p) => (p?.outline?.length ? [p.outline.reduce((t, q) => t + q[0], 0) / p.outline.length, p.outline.reduce((t, q) => t + q[1], 0) / p.outline.length] : null);
+  const named = places.find((p) => /bandstand/i.test(`${p.name ?? ''} ${p.ref ?? p.id}`) && ids.walk.includes(walkOf(p))) ?? places.find((p) => walkOf(p) === [...ids.walk].sort()[0]);
+  const c = centre(named), near = c ? places.filter((p) => p !== named && ids.walk.includes(walkOf(p)) && centre(p) && Math.hypot(centre(p)[0] - c[0], centre(p)[1] - c[1]) <= radiusM).map(walkOf) : [];
+  return { ...ids, named: named ? walkOf(named) : null, gathered: named ? [walkOf(named), ...near] : [] };
+}
+/** #2556: a raw Soul driven by its agent of a shape's schedule ({stays, acts}; times in s from `t0`, local wall ms). One call
+ *  at a time, in order; an arrival after the start reads the catalog and live picture once; each act by its kind: speech
+ *  to the say route, a walk spread or gathered, the rest by an id of that kind (`pick` chooses). A kind the world does
+ *  not offer is sent as a spread walk and counted in `fallback`. Nothing starts at or after `until`. */
+export async function rawShapedLoop({ base, soul, ids, agent, t0, until, counts, acts = [], http = [], fallback = {}, call = clientCall }) {
+  const events = [...agent.stays.filter(([a]) => a > 0).map(([at]) => ({ at, arrive: true })), ...agent.acts].sort((x, y) => x.at - y.at || (y.arrive ? 1 : 0) - (x.arrive ? 1 : 0));
+  for (const [n, x] of events.entries()) {
+    if (t0 + x.at * 1000 >= until) break;
+    await sleep(Math.max(0, t0 + x.at * 1000 - Date.now()));
+    if (Date.now() >= until) break;
+    if (x.arrive) { for (const route of ['/v1/edge/catalog', '/v1/edge/live']) await rawRead({ base, soul, route, counts, http, call }); continue; }
+    const key = `raw-${soul.i}-${n}-${Date.now()}`;
+    if (x.kind === 'say') {
+      const t1 = Date.now(), a = await call(`${base}${SAY_PATH}`, { method: 'POST', headers: clientHeaders(soul, { key }), body: sayBody('hello from the load shapes') }), tm = timingOf(a.timing);
+      counts.cmds++; counts.acts++; counts.says = (counts.says ?? 0) + 1;
+      http.push({ v: 'soul-trace/1', kind: 'http', at: t1, method: 'POST', route: SAY_PATH, status: a.status, durationMs: Date.now() - t1, serverMs: tm.world, queuedMs: tm.queue, facts: { code: a.data?.code ?? a.code } });
+      continue;
+    }
+    let pool = x.kind === 'walk' ? (x.place === 'gathered' ? ids.gathered : ids.walk) : ids[x.kind];
+    if (!pool?.length) { fallback[x.kind] = (fallback[x.kind] ?? 0) + 1; pool = ids.walk.length ? ids.walk : ['sit-ground:here']; }
+    await rawAct({ base, soul, id: pool[x.pick % pool.length], key, counts, acts, http, call });
   }
 }
 /** #2509: per tenth of agents by activity (intended acts, then achieved; busiest first): agents, intended and achieved
@@ -207,14 +255,15 @@ export function waitByDriver(agents) {
   return { real: p50(agents.filter((x) => !x.raw)), raw: p50(agents.filter((x) => x.raw)) };
 }
 /** One agent's numbers from its act calls (trace records) for byTenth. */
-const agentOf = (http, intended, raw) => { const calls = http.filter((x) => x.method === 'POST' && /\/v1\/edge\/act(?:\?|$)/.test(x.route ?? '')); return { intended, achieved: calls.length, raw, waits: calls.map((x) => x.queuedMs).filter(Number.isFinite), slowDown: calls.filter((x) => (x.facts?.code ?? '') === 'soul.slow-down').length }; };
-/** #2509: --shape: `uniform` is the paced loop; an uneven shape needs #2556's shapes module, not on this branch yet. */
-async function shapeOf(name) {
+const agentOf = (http, intended, raw) => { const calls = http.filter((x) => x.method === 'POST' && /\/v1\/edge\/(?:act|say)(?:\?|$)/.test(x.route ?? '')); return { intended, achieved: calls.length, raw, waits: calls.map((x) => x.queuedMs).filter(Number.isFinite), slowDown: calls.filter((x) => (x.facts?.code ?? '') === 'soul.slow-down').length }; };
+/** --shape: `uniform` (or none) is the paced loop (null); any other shape of the shapes module is its name. */
+export function shapeOf(name) {
   if (!name || name === 'uniform') return null;
-  const mod = new URL('../../bench/capacity/profiles/shapes.mjs', import.meta.url);
-  if (!existsSync(mod.pathname)) throw new Error(`--shape ${name}: the shapes module (tools/bench/capacity/profiles/shapes.mjs) is not here yet`);
-  throw new Error(`--shape ${name}: driving a shape's schedule is not wired yet`);
+  if (!SHAPES.agents[name]) throw new Error(`--shape ${name}: known shapes ${Object.keys(SHAPES.agents).join(', ')}`);
+  return name;
 }
+/** #2556: the raw Souls' schedule for one repeat: `rawN` agents over `seconds`, seeded by the repeat. */
+export const shapePlan = (shape, rawN, seconds, rep) => schedule(shape, rawN, seconds, `eval-load|${rep}`);
 
 export async function runLoad(o) {
   const sizes = String(o.souls ?? '12,24').split(',').map(Number).filter((n) => n > 0);
@@ -222,9 +271,11 @@ export async function runLoad(o) {
   const serverRoot = resolve(o['server-root'] ?? REPO), faultSec = o['fault-every-sec'] != null ? Number(o['fault-every-sec']) : null;
   if (faultSec) process.env.SIM_FAULT_INJECT = '1';
   if (o['hang-kill-sec'] != null) process.env.SIM_HANG_KILL_MS = String(1000 * Number(o['hang-kill-sec']));
-  const profile = !!o.profile, menuStats = !!o['menu-stats'], rawFrom = o['raw-from'] != null ? Number(o['raw-from']) : Infinity;
+  // #2556: a shape drives raw Souls, so with one and no --raw-from every Soul is raw
+  const shape = shapeOf(o.shape), radiusM = shape ? (SHAPES.agents[shape].place?.radiusM?.value ?? 30) : null;
+  const profile = !!o.profile, menuStats = !!o['menu-stats'], rawFrom = o['raw-from'] != null ? Number(o['raw-from']) : shape ? 1 : Infinity;
   if (!(rawFrom >= 1)) throw new Error('--raw-from <first raw Soul, 1-based>');
-  await shapeOf(o.shape);
+  if (shape && sizes.some((n) => n < rawFrom)) throw new Error(`--shape ${shape} drives raw Souls: every --souls size must reach --raw-from`);
   const out = resolve(o.out ?? join(REPO, '.local/soul-eval', `load-${new Date().toISOString().replace(/[:.]/g, '-')}`));
   mkdirSync(out, { recursive: true });
   const arms = [];
@@ -256,8 +307,10 @@ export async function runLoad(o) {
       // #2509: raw Souls, 8 at a time, each from its own address; one catalog and live picture each
       for (let i = real; i < n; i += 8) await Promise.all(Array.from({ length: Math.min(8, n - i) }, async (_, j) => {
         const s = await rawJoin(w.base, i + j), pic = await startPicture(w.base, s);
-        souls[i + j] = { ...s, raw: true, ids: wordIds(pic.catalog), acts: [], http: [] };
+        souls[i + j] = { ...s, raw: true, ids: wordIds(pic.catalog), ...(shape ? { shapeIds: shapeIds(pic.catalog, radiusM) } : {}), acts: [], http: [] };
       }));
+      const plan = shape ? shapePlan(shape, n - real, durSec, rep) : null, fallback = {};
+      if (plan) log(`n${n} r${rep}: ${describe(plan.summary, `shape ${shape}`)}`);
       const setupS = Math.round((Date.now() - setup0) / 1000);
       log(`n${n} r${rep}: ${souls.length} Souls serving (${n - real} raw) after ${setupS} s of setup; load for ${durSec} s`);
       const t0 = Date.now(), until = t0 + durSec * 1000, counts = { cmds: 0, acts: 0, refused: 0, closed: 0, cards: 0, cardErrors: 0 }, cpu0 = driverCpu();
@@ -268,7 +321,7 @@ export async function runLoad(o) {
       const watch = setInterval(() => { const w = readLive(liveFile)?.api?.ticks; if (w?.at > t0 && w.at <= until + 2000) tickWindows.set(w.at, w); }, 4000);
       const faults = faultSec ? (async () => { for (let at = t0; at < until; at += faultSec * 1000) { await sleep(Math.max(0, at - Date.now())); await injectThrow(port); } })() : null;
       const cards = (async () => { while (Date.now() + cardSec * 1000 < until) { await sleep(cardSec * 1000); await Promise.all(souls.filter((s) => !s.raw).map((s) => sendCard({ base: w.base, soulId: s.soulId, identity: s.identity, text: 'Look around.' }).then(() => counts.cards++, () => counts.cardErrors++))); } })();
-      await Promise.all(souls.map((s, k) => (s.raw ? rawPacedLoop({ base: w.base, soul: s, ids: s.ids, until, r: rng(1000 * rep + k), counts, acts: s.acts, http: s.http, actSec: actSec ?? 10 }) : actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
+      await Promise.all(souls.map((s, k) => (s.raw && plan ? rawShapedLoop({ base: w.base, soul: s, ids: s.shapeIds, agent: plan.agents[k - real], t0, until, counts, acts: s.acts, http: s.http, fallback }) : s.raw ? rawPacedLoop({ base: w.base, soul: s, ids: s.ids, until, r: rng(1000 * rep + k), counts, acts: s.acts, http: s.http, actSec: actSec ?? 10 }) : actSec ? pacedLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts, actSec }) : soulLoop({ folder: s.folder, until, r: rng(1000 * rep + k), counts, acts: s.acts }))));
       await cards; await faults;
       const driver = driverCpuSince(cpu0);   // #2509: the driver's processor share over the load
       if (profile) writeFileSync(join(profDir, 'prof.stop'), '');   // #2508: the profile covers the load, not the settle after it
@@ -279,14 +332,15 @@ export async function runLoad(o) {
       const http = [], pairs = [];
       const agents = [];
       for (const [k, s] of souls.entries()) {
-        if (s.raw) { const own = httpSince(s.http, t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); agents.push(agentOf(own, actSec ? durSec / actSec : 0, true)); continue; }
+        if (s.raw) { const own = httpSince(s.http, t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); agents.push(agentOf(own, plan ? plan.agents[k - real].acts.length : actSec ? durSec / actSec : 0, true)); continue; }
         await cliJson(s.folder, ['serve', '--stop']);
         const f = join(runtimeDir(s.folder, s.soulId), '.eden-report.jsonl');
         if (existsSync(f)) { mkdirSync(join(dir, 'trace'), { recursive: true }); copyFileSync(f, join(dir, 'trace', `s${k}.jsonl`)); const own = httpSince(readJsonl(f), t0); http.push(...own); pairs.push({ acts: s.acts, http: own }); agents.push(agentOf(own, actSec ? durSec / actSec : 0, false)); }
       }
       const routes = routeStats(http);
-      const intended = actSec ? Math.round(n * durSec / actSec) : null;
-      arms.push({ souls: n, repeat: rep, durationSec: durSec, counts, driver, ...(n > real ? { raw: n - real, setupS, rawDifferences, tenths: byTenth(agents), waitByDriver: waitByDriver(agents) } : { setupS }), intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
+      const intended = plan ? Math.round(plan.summary.acts + (actSec ? real * durSec / actSec : 0)) : actSec ? Math.round(n * durSec / actSec) : null;
+      const shaped = plan ? { shape: { name: shape, seed: plan.seed, raw: n - real, offered: describe(plan.summary), summary: { ...plan.summary, perS: undefined }, named: souls[real]?.shapeIds?.named ?? null, gathered: souls[real]?.shapeIds?.gathered?.length ?? 0, fallback } } : {};
+      arms.push({ souls: n, repeat: rep, durationSec: durSec, ...shaped, counts, driver, ...(n > real ? { raw: n - real, setupS, rawDifferences, tenths: byTenth(agents), waitByDriver: waitByDriver(agents) } : { setupS }), intendedActs: intended, achievedShare: intended ? Math.round(1000 * counts.acts / intended) / 1000 : null, calls: http.length, routes, refusals: refusalCounts(http), server, slowActs: slowActs(pairs), actQueueMs: actQueue(pairs), actLatency: actLatency(pairs), actSec, held: routes.every((x) => x.levelMs == null || (x.serverMs.p999 ?? 0) <= x.levelMs), ...(faultSec ? recoveryLines(join(dir, 'server', 'world.log')) : {}) });
       log(`n${n} r${rep}: ${http.length} calls, ${counts.acts} acts, ${counts.closed} messages closed; level held on every route: ${arms.at(-1).held}`);
     } finally {
       clearInterval(rss); stopping = true;
@@ -413,6 +467,7 @@ export function renderLoad(result) {
       L.push('', 'Per tenth of agents by activity (busiest first): acts achieved against intended, act queue p50 (ms), and slow-down refusals (an agent held back by its own budget).', '', '| tenth | agents (raw) | intended | achieved | share | queue p50 | slow-down |', '|---|---|---|---|---|---|---|');
       for (const t of a.tenths) L.push(`| ${t.tenth} | ${t.agents} (${t.raw}) | ${Math.round(t.intended)} | ${t.achieved} | ${t.share == null ? '' : Math.round(100 * t.share) + ' %'} | ${t.waitP50 ?? ''} | ${t.slowDown} |`);
     }
+    if (a.shape) L.push('', `Shape **${a.shape.name}** (#2556; seed \`${a.shape.seed}\`) drives the ${a.shape.raw} raw Souls; real Souls keep the paced loop. Offered: ${a.shape.offered}. Gathered walks go to ${a.shape.named ?? 'no place'} and ${Math.max(0, a.shape.gathered - 1)} places near it; ${a.counts.says ?? 0} of the acts were speech. Kinds the world does not offer, sent as walks: ${Object.entries(a.shape.fallback).map(([k, v]) => `${k} ${v}`).join(', ') || 'none'}.`);
     if (a.intendedActs) L.push('', `Acts: ${a.counts.acts} achieved of ${a.intendedActs} intended (${Math.round(100 * a.achievedShare)} %)${a.achievedShare < 0.95 ? ': **under-driven** (under 95 %)' : ''}.`);
     if (a.server?.meter) L.push(...renderMeter(a.server.meter));
     const al = a.actLatency;

@@ -249,7 +249,7 @@ Raw Souls get no owner messages, and the report says how else they differ. Every
 - acts achieved against intended;
 - act queue per tenth of agents by activity, busiest first, with the slow-down refusals that held an agent back.
 
-`--souls` goes up to 500. `--shape uniform` is the paced loop. The uneven shapes plug in from the shapes module.
+`--souls` goes up to 500. `--shape uniform` is the paced loop. Any other shape of `tools/bench/capacity/profiles/shapes.mjs` (`everyday`, `event`) drives the raw Souls by its seeded schedule: arrivals and stays, each agent's act times and kinds, walks gathered near one named place. Without `--raw-from` a shape makes every Soul raw. The report prints what the schedule offered.
 
 The runners use a dedicated, unprivileged account: the
 args allowlist is not a security boundary, since a branch's own scripts run. Live-model seats and GPU work stay on a
