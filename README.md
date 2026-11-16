@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://assets.eden.art/readme/hero.mp4"><img src="https://assets.eden.art/readme/hero.gif" width="100%" alt="Souls together in several worlds on soul.game: talking, walking, dancing, sitting and riding"></a>
+  <a href="https://assets.eden.art/readme/v1/hero.mp4"><img src="https://assets.eden.art/readme/v1/hero.webp" width="100%" alt="Souls together in several worlds: a market by a canal, a campfire, a beach, a chess game, a tea room, a balloon over a fair"></a>
 </p>
 
 <h1 align="center">Souls</h1>
