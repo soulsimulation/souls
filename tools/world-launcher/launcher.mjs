@@ -18,6 +18,7 @@
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
+//   GET  /__sim/whoami           {address}: the address this request is keyed on (first X-Forwarded-For entry, else the peer)
 //   GET  /__sim/healthz          {ok, build, worlds, running, caps, memAvailableMb} (also /healthz); clientErrorsNew = error kinds
 //                                pages first reported since this build went live (client-errors.mjs)
 //   GET  /__sim/glitches         loopback: every world's recoveries and halts by rule and rung; ?world=<slug>[&limit=N] adds its records
@@ -108,7 +109,7 @@ import { healthDash } from './health-dash.mjs';
 import { readGlitches } from './glitches.mjs';
 import { usageRollup } from './usage.mjs';
 import { ownerOverview } from './owner-overview.mjs';
-import { connect } from 'node:net';
+import { connect, isIP } from 'node:net';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
@@ -134,6 +135,17 @@ import { opSoul, opSetTest } from './op-souls.mjs';
 import { accountSouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
+/** <data>/launcher-settings.json (written by deploy/install.sh unload-still), read once at each launcher's start, so a
+ *  reload (the keeper's new generation) picks up a change without touching the stage's conf: { unloadStill: 0|1 }.
+ *  Absent: {}. Unreadable or a bad value: {} (the args' defaults), said in the log. */
+export function launcherSettings(dataDir, log = () => {}) {
+  const f = join(dataDir, 'launcher-settings.json');
+  let j; try { j = JSON.parse(readFileSync(f, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') log(`launcher-settings.json unreadable (${e.message}); the args' defaults apply`); return {}; }
+  const v = j?.unloadStill;
+  if (v !== 0 && v !== 1 && v !== true && v !== false) { log(`launcher-settings.json: unloadStill must be 0 or 1 (got ${JSON.stringify(v)}); the args' defaults apply`); return {}; }
+  log(`launcher-settings.json: unloadStill ${v ? 1 : 0}`);
+  return { unloadStill: v === 1 || v === true };
+}
 /** The world's heap cap (lane L1, LOAD-CONTRACT §4: per world from the registry, registry.mjs worldHeapMb). A node child gets
  *  it as its own command-line flag, so a NODE_OPTIONS the auth env file sets (tests' preloads) still applies and a heap
  *  flag there loses to this one; any other command gets it in NODE_OPTIONS. */
@@ -328,7 +340,10 @@ export async function openLauncher(cfg = {}) {
    *  alarm loads it at moveWallMs, or at untilWallMs while a resident reads it. Times are cfg-overridable for tests.
    *  #2367 A1: the alarm loads it leadMs before its next deadline of any kind (a reminder, a plan step, a body's move:
    *  untilWallMs), listener or not, so the deadline is met by the world running, not by its next visitor. */
-  const unloadStill = cfg.unloadStill === true;
+  // the 0.130 switch: an explicit cfg.unloadStill (--unload-still) wins; else <data>/launcher-settings.json, read once here
+  const fileSettings = cfg.unloadStill !== undefined ? {} : launcherSettings(dataDir, log);
+  const unloadStill = cfg.unloadStill !== undefined ? cfg.unloadStill === true : fileSettings.unloadStill === true;
+  log(`unload-still ${unloadStill ? 1 : 0} (${cfg.unloadStill !== undefined ? 'the --unload-still arg' : fileSettings.unloadStill !== undefined ? 'launcher-settings.json' : 'the default'})`);
   // #2490: dueGraceMs, how long past its deadline (or its late load) an alarm-loaded world is kept from being unloaded to
   // make room; loadMs, the load time the alarm plans with until the pool has measured some (ChildPool.loadMs)
   const STILL = { dueGraceMs: cfg.stillDueGraceMs ?? 5000, loadMs: cfg.stillLoadMs ?? 5000, leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
@@ -1556,6 +1571,13 @@ export async function openLauncher(cfg = {}) {
         json(res, 200, { ok: true, worlds }); return;
       }
       if (path === '/__sim/usage' && req.method === 'GET') { json(res, ...(direct(req) ? usage.report(url.searchParams.get('days') ?? undefined, registry.worlds.filter((w) => w.test === true).map((w) => w.slug)) : [404, { ok: false, code: 'not-found' }])); return; }   // #1942, loopback only
+      // #2513: the address this request is keyed on: the first X-Forwarded-For entry behind the proxy (as the flood guard
+      // and the ceilings take it), else the TCP peer. Public, since it is the caller's own address; never a header
+      // verbatim: anything that is not an address answers null. deploy/caddy/check-soul-game.mjs compares it from outside.
+      if (path === '/__sim/whoami' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const xff = behindProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '', a = xff || (req.socket.remoteAddress ?? '');
+        json(res, 200, { address: isIP(a) ? a : null }); return;
+      }
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
         const running = registry.worlds.filter((w) => pool.status(w.slug).status === 'running').length;
         const host = hostHealth(dataDir); // deploy/host-health.mjs (timer): `hostOk` (+ short `hostCodes` when not ok) public, the numbers loopback-only
