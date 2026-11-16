@@ -123,12 +123,12 @@ test('the OBS and Chrome settings match the acceptance', () => {
 });
 
 test('cftDownload picks the stable Chrome for Testing build for this Mac', () => {
-  const versions = { channels: { Stable: { version: '157.0.1.2', downloads: { chrome: [
+  const versions = { channels: { Stable: { version: '157-stable-test', downloads: { chrome: [
     { platform: 'linux64', url: 'https://example.invalid/linux64.zip' },
     { platform: 'mac-arm64', url: 'https://example.invalid/mac-arm64.zip' },
     { platform: 'mac-x64', url: 'https://example.invalid/mac-x64.zip' },
   ] } } } };
-  assert.deepEqual(cftDownload(versions, 'arm64'), { version: '157.0.1.2', platform: 'mac-arm64', url: 'https://example.invalid/mac-arm64.zip', app: join('chrome-mac-arm64', 'Google Chrome for Testing.app') });
+  assert.deepEqual(cftDownload(versions, 'arm64'), { version: '157-stable-test', platform: 'mac-arm64', url: 'https://example.invalid/mac-arm64.zip', app: join('chrome-mac-arm64', 'Google Chrome for Testing.app') });
   assert.equal(cftDownload(versions, 'x64').platform, 'mac-x64');
   assert.throws(() => cftDownload({ channels: {} }, 'arm64'), /no Chrome for Testing build/);
 });
