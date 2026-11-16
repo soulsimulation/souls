@@ -35,6 +35,9 @@
 //   POST /__sim/op/set-claimable operator only: {slug, claimable} → a world with no god that nobody may claim (false)
 //   POST /__sim/op/set-unlisted  operator only: {slug, unlisted} → left out of worlds.json (the public list), still served
 //   POST /__sim/op/set-heap      operator only: {slug, worldHeapMb: MB|null} → that world's heap cap from its next boot
+//   POST /__sim/op/set-site      operator only: {uploads?, creation?: boolean} → #2540 site switches, at once (worlds.json
+//                                `site`, an audit row): off answers POST to the upload routes 503 site.uploads-paused and
+//                                POST /__sim/worlds 503 site.creation-paused, with Retry-After; healthz `site` shows both
 //   POST /__sim/op/set-read-workers operator only: {slug, readWorkers: 0-4|null} → Stage B read workers from its next boot
 //                                (0 = off; null = the launcher's default: 1 with SIM_READ_WORKER=1, else off)
 //                                at its URL (listing.mjs; bench worlds and "… (scratch)" names are unlisted by default)
@@ -239,6 +242,13 @@ const BUILD = (() => { try { return readFileSync(join(dirname(fileURLToPath(impo
 const CLAIM_PATHS = new Set(['/v1/god/claim', '/v1/god/mint', '/v1/god/pair/approve']);
 const sameName = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 const direct = (req) => !req.headers['x-forwarded-for'] && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+/** #2540: a world's upload routes (POST): god assets, art media, bodies. The world thumbnail is the launcher's own route. */
+const UPLOAD_ROUTE = /^\/v1\/(?:god\/assets|art\/media|edge\/body\/uploads)\/?$/;
+/** #2540: the operator's switches (op.mjs set-site): a named, retriable answer, never a failure midway. */
+const SITE_PAUSED = {
+  uploads: [refusalBody('site.uploads-paused', 'Uploads are paused on this site for now; everything else in the world works as usual. Nothing was stored. Try again in 10 minutes.', 600_000, 'site'), { 'retry-after': '600', 'cache-control': 'no-store' }],
+  creation: [refusalBody('site.creation-paused', 'New worlds are paused on this site for now; existing worlds are open as usual. Nothing was made. Try again in 10 minutes.', 600_000, 'site'), { 'retry-after': '600', 'cache-control': 'no-store' }],
+};
 
 /**
  * @param {{ port?: number, dataDir?: string, range?: [number, number], root?: string, webDir?: string,
@@ -1021,6 +1031,8 @@ export async function openLauncher(cfg = {}) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
       json(res, 404, { ok: false, code: 'world.not-served', slug }); return;
     }
+    // #2540: uploads paused site-wide: a POST to one of the world's upload routes is answered here (reads and everything else pass)
+    if (req.method === 'POST' && UPLOAD_ROUTE.test(url.pathname.slice(wp(slug).length)) && !registry.site().uploads) { res.shouldKeepAlive = false; json(res, 503, ...SITE_PAUSED.uploads); return; }
     // lane L1 (LOAD-CONTRACT §4): the Soul API of a world just restarted or at red/black is answered here at once, and
     // that of a booting world waits here for it (#2231), both before the ceilings: a boot is not a client's fault
     const edgeRest = url.pathname.slice(wp(slug).length) || '/', edgeCls = !retried && edgeRest.startsWith('/v1/edge/') ? requestClass(edgeRest, req.method) : null;
@@ -1324,6 +1336,7 @@ export async function openLauncher(cfg = {}) {
         json(res, 403, { ok: false, code: 'creation.elsewhere', message: 'This server keeps the original worlds. Make new worlds at /worlds/.', url: '/worlds/' }); return;
       }
       if (path === '/__sim/worlds' && req.method === 'POST') {
+        if (!registry.site().creation) { res.shouldKeepAlive = false; json(res, 503, ...SITE_PAUSED.creation); return; }   // #2540
         const chunks = []; let n = 0;
         for await (const c of req) { n += c.length; if (n > 16_384) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { json(res, 400, { ok: false, code: 'bad-json' }); return; }
@@ -1342,7 +1355,7 @@ export async function openLauncher(cfg = {}) {
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { json(res, 400, { ok: false, code: 'bad-json' }); return; }
         const out = await opCreateWorld(body); json(res, out[0], out[1]); return;
       }
-      const forkOp = path.match(/^\/__sim\/op\/(register-fork|remove-fork|set-claimable|set-unlisted|set-heap|set-read-workers|set-limits|resume-world|archive-world|restore-world|list-archive|audit)$/)?.[1];
+      const forkOp = path.match(/^\/__sim\/op\/(register-fork|remove-fork|set-claimable|set-unlisted|set-heap|set-read-workers|set-limits|set-site|resume-world|archive-world|restore-world|list-archive|audit)$/)?.[1];
       if (forkOp && req.method === 'POST') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'local-only', message: 'operator commands are accepted only from this machine' }); return; }
         const chunks = []; for await (const c of req) chunks.push(c);
@@ -1358,6 +1371,8 @@ export async function openLauncher(cfg = {}) {
           'archive-world': (b) => { const w = registry.get(typeof b?.slug === 'string' ? b.slug : ''); return w ? archive(w, 'operator', b?.reason) : [404, { ok: false, code: 'not-found', message: 'no world by that slug' }]; },
           'restore-world': (b) => { const r = restoreWorld({ registry, dataDir }, b?.id, 'operator'); if (r[0] === 200) log(`restored ${r[1].slug} from ${r[1].id} (operator)`); return r; },
           'list-archive': () => [200, { ok: true, archive: listArchive(dataDir) }],
+          // #2540: the site switches (uploads, creation: true on, false paused), at once, kept in worlds.json, audited
+          'set-site': (b) => { const ch = Object.fromEntries(['uploads', 'creation'].filter((k) => b?.[k] !== undefined).map((k) => [k, b[k]])); if (!Object.keys(ch).length || Object.values(ch).some((v) => typeof v !== 'boolean')) return [400, { ok: false, code: 'bad-site', message: 'uploads, creation: true (on) or false (off)' }]; const before = registry.site(), site = registry.setSite(ch); audit(dataDir, { op: 'set-site', by: 'operator', before, site }); log(`site ${JSON.stringify(site)} (operator)`); return [200, { ok: true, site }]; },
           'audit': (b) => [200, { ok: true, audit: readAudit(dataDir, typeof b?.slug === 'string' ? b.slug : undefined) }] })[forkOp](body); json(res, out[0], out[1]); return;
       }
       // lane OPS2: the operator's TEST-Soul commands and the test-world flag (op-souls.mjs), direct loopback only
@@ -1388,6 +1403,7 @@ export async function openLauncher(cfg = {}) {
       const thumbOwn = path.match(/^\/__sim\/worlds\/([a-z][a-z0-9-]{0,31})\/thumbnail$/);
       if (thumbOwn) {
         if (req.method !== 'POST' && req.method !== 'DELETE') { json(res, 405, { ok: false, code: 'method', message: 'POST a JPEG, or DELETE' }, { allow: 'POST, DELETE' }); return; }
+        if (req.method === 'POST' && !registry.site().uploads) { res.shouldKeepAlive = false; json(res, 503, ...SITE_PAUSED.uploads); return; }   // #2540
         const w = registry.get(registry.resolveSlug(thumbOwn[1]) ?? ''); if (!w || closing.has(w.slug)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         if (Number(req.headers['content-length']) > THUMB.maxBytes) { res.shouldKeepAlive = false; json(res, ...TOO_BIG); return; }
         // the body is read only after the owner is known: nobody else makes the launcher hold half a megabyte
@@ -1479,7 +1495,7 @@ export async function openLauncher(cfg = {}) {
         // lane L1: the guard's findings now, not at the timer's next run: wedged, held, crashloop, bootSlow, halted (codes public, texts loopback)
         const worldProblems = pool.problems(), wcodes = [...new Set(worldProblems.map((x) => x.code))];
         const hostOk = (host ? host.ok : true) && !wcodes.length, hostCodes = [...new Set([...(host && !host.ok ? host.codes ?? [] : []), ...wcodes])];
-        json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, ...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), loads: pool.loadStats(), ...(host ? { host } : {}) } : {}) }); return;
+        json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, site: registry.site() /* #2540 */,...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), loads: pool.loadStats(), ...(host ? { host } : {}) } : {}) }); return;
       }
       const to = redirects?.target(req, path, url);
       if (to) { res.writeHead(302, { location: to, 'cache-control': 'no-store' }).end(); return; }
