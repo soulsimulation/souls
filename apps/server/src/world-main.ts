@@ -399,7 +399,10 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     host.owedTicks = 0;
     const ms = performance.now() - at;
     if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
-    if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
+    // still behind (a host slower than the wall at the tail): the clock's first frames run what is owed, never dropped
+    const behind = owed > 0 && !host.paused && host.clockAvailable;
+    if (behind) host.oweToClock(owed);
+    if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): ${behind ? 'the clock runs them first' : 'not run'}`);
   }
   // a Soul whose birth threw at boot replay or that a rewind left out is born again (WorldHost.unbornV1), once the clock runs
   const startClock = () => { wallClock.start(); host.start(); souls.rebirthUnborn(); };

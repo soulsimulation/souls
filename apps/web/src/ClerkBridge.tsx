@@ -1,4 +1,4 @@
-// P1 phones: Clerk for a world page, loaded on its own after the arrival (main.tsx ClerkWorld). It renders nothing on
+// P1 phones: Clerk for a world page, loaded on its own only when the page needs it (main.tsx ClerkWorld, #2516). It renders nothing on
 // screen: it mounts ClerkProvider beside the world's Shell (a sibling, so the Shell never remounts when it arrives) and
 // hands the signed-in state up through onAuth once Clerk has loaded. The world's socket never waited for Clerk (useSouls
 // re-hellos when a session lands).

@@ -269,6 +269,8 @@ export class MicroCache {
     this.flying.set(key, p);
     return { ...(await p), cache: 'miss' };
   }
+  /** The answer kept under `key` if it is younger than `ttlMs`, else null (#2515: the world page, which the launcher keeps itself). */
+  peek(key, ttlMs) { const e = this.m.get(key); if (!e || this.now() - e.at >= ttlMs) return null; this.hits++; return e.r; }
   keep(key, r) {
     this.drop(key); this.m.set(key, { at: this.now(), r }); this.bytes += r.body.length;
     while (this.m.size > this.maxEntries || this.bytes > this.maxTotalBytes) this.drop(this.m.keys().next().value);
