@@ -53,15 +53,18 @@ fi
 # `bash install.sh unload-still <stage> <0|1>`: whether still worlds leave memory (docs/architecture/worlds.md), and nothing
 # else. 1 writes <data>/launcher-settings.json ({"unloadStill":1}, atomic, owner simworlds); 0 removes it (the default, off).
 # The stage's data dir is its conf's --data. Each launcher reads the file once at its start, so a reload (keeper handover)
-# picks it up; an explicit --unload-still in the conf wins over it. The conf is never touched (ship's drift guard hashes
-# it). Run only by name (release.sh and ship.sh --unload-still call it before the activation). SIM_ETC points it at a
-# scratch conf; SIM_SETTINGS_DATA names the data dir instead of the conf's --data (ship.sh passes its own; tests).
+# picks it up. It refuses, changing nothing, when the conf sets --unload-still itself (that arg would win over the file) or
+# names another --data than SIM_SETTINGS_DATA, so a release can never silently leave the setting unread. The conf is
+# never touched (ship's drift guard hashes it). Run only by name (release.sh and ship.sh --unload-still call it before the
+# activation). SIM_ETC points it at a scratch conf; SIM_SETTINGS_DATA names the data dir (ship.sh passes its own; tests).
 if [ "${1:-}" = unload-still ]; then
   STAGE="${2:-}"; V="${3:-}"
   case "$STAGE" in staging|production) ;; *) echo "usage: $0 unload-still <staging|production> <0|1>"; exit 2;; esac
   case "$V" in 0|1) ;; *) echo "unload-still: the value must be 0 or 1 (got '$V')"; exit 2;; esac
   CONF="${SIM_ETC:-/etc/sim-worlds}/$STAGE.conf"; ARGS="$(sed -n 's/^SIM_WORLDS_ARGS=//p' "$CONF" 2>/dev/null || true)"
-  DATA="${SIM_SETTINGS_DATA:-$(printf '%s\n' "$ARGS" | sed -nE 's/(^|.* )--data ([^ ]+).*/\2/p')}"
+  CONFDATA="$(printf '%s\n' "$ARGS" | sed -nE 's/(^|.* )--data ([^ ]+).*/\2/p')"; DATA="${SIM_SETTINGS_DATA:-$CONFDATA}"
+  if printf '%s\n' "$ARGS" | grep -qE '(^| )--unload-still '; then echo "unload-still: $CONF sets --unload-still itself, which would win over the file; nothing changed"; exit 1; fi
+  if [ -n "$CONFDATA" ] && [ -n "${SIM_SETTINGS_DATA:-}" ] && [ "$CONFDATA" != "$SIM_SETTINGS_DATA" ]; then echo "unload-still: $CONF reads --data $CONFDATA, not $SIM_SETTINGS_DATA; nothing changed"; exit 1; fi
   [ -n "$DATA" ] && [ -d "$DATA" ] || { echo "unload-still: no data dir for $STAGE (no --data in $CONF, no SIM_SETTINGS_DATA); nothing changed"; exit 1; }
   FILE="$DATA/launcher-settings.json"
   WAS="$(cat "$FILE" 2>/dev/null || echo '(none: the default, off)')"
@@ -72,7 +75,6 @@ if [ "${1:-}" = unload-still ]; then
   else rm -f "$FILE"; fi
   NOW="$(cat "$FILE" 2>/dev/null || echo '(none: the default, off)')"
   echo "unload-still $STAGE: $FILE"; echo "    was  $WAS"; echo "    now  $NOW"
-  if printf '%s\n' "$ARGS" | grep -qE '(^| )--unload-still '; then echo "  note: $CONF sets --unload-still itself, which wins over this file"; fi
   echo "takes effect when the stage's launcher next starts: the next reload (handover) or restart of sim-worlds@$STAGE"
   exit 0
 fi

@@ -95,8 +95,22 @@ preactivate() {
   say "   + SHIP_PREACTIVATE_CMD"; [ "$DRY" = 1 ] || bash -c "$SHIP_PREACTIVATE_CMD" || die "SHIP_PREACTIVATE_CMD refused the activation (the workstation's probe is not watching); nothing changed"
 }
 stop_probe() { [ -n "$PROBE_PID" ] && kill -0 "$PROBE_PID" 2>/dev/null || return 0; say "   stopping the release probe"; touch "$PDIR/stop"; wait "$PROBE_PID" 2>/dev/null; PROBE_PID=""; }
+# --unload-still: what the host's settings file said before this run wrote it (0 or 1; empty until written, or once restored)
+UNLOAD_WAS=""
+settings_cmd() { printf 'SIM_ETC=%q SIM_SETTINGS_DATA=%q bash %q unload-still production %s' "$(dirname "$HOST_CONF")" "$HOST_DATA" "$REL/tools/world-launcher/deploy/install.sh" "$1"; }
+settings_note() {
+  [ -n "$UNLOAD_WAS" ] || return 0
+  say "   settings: $HOST_DATA/launcher-settings.json now says unload-still $UNLOAD (it said $UNLOAD_WAS before this run); the next launcher start obeys it"
+  say "   to revert it, on the host: $(settings_cmd "$UNLOAD_WAS"), or ship the next release with --unload-still $UNLOAD_WAS"
+}
+# nothing was activated (a refused or never-started activation): put the file back as it was, so "nothing changed" holds
+settings_restore() {
+  [ -n "$UNLOAD_WAS" ] || return 0
+  if rsh "$(settings_cmd "$UNLOAD_WAS")" > /dev/null 2>&1; then say "   settings: launcher-settings.json restored to unload-still $UNLOAD_WAS"; UNLOAD_WAS=""
+  else say "   settings: COULD NOT restore launcher-settings.json"; fi
+}
 die() {
-  say ""; say "STOPPED at step $CUR: $*"; say "   live now: $LIVE"; stop_probe
+  say ""; say "STOPPED at step $CUR: $*"; say "   live now: $LIVE"; settings_note; stop_probe
   [ -f "$OUT/ROLLBACK.txt" ] && { say "   rollback, only if you decide to:"; sed 's/^/     /' "$OUT/ROLLBACK.txt"; }
   [ "$DRY" = 1 ] || { printf '%s STOPPED %s\n' "$CUR" "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"; result stopped "$CUR${DETAIL:+ $DETAIL}"; }
   exit 1
@@ -258,7 +272,11 @@ elif [ "$STARTED" = 1 ]; then
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
   preactivate
   # the setting the new launcher reads at its start (the reload below starts it); a data-dir file, outside the conf's hash
-  if [ -n "$UNLOAD" ]; then x rsh "SIM_SETTINGS_DATA=$(printf '%q' "$HOST_DATA") bash $REL/tools/world-launcher/deploy/install.sh unload-still production $UNLOAD" || die "install.sh unload-still failed; nothing was activated"; fi
+  if [ -n "$UNLOAD" ]; then
+    WAS_FILE="$([ "$DRY" = 1 ] || rsh "cat $(printf '%q' "$HOST_DATA/launcher-settings.json") 2>/dev/null || true")"
+    if [ "$DRY" = 0 ]; then case "$WAS_FILE" in *'"unloadStill":1'*|*'"unloadStill": 1'*|*'"unloadStill":true'*) UNLOAD_WAS=1;; *) UNLOAD_WAS=0;; esac; fi
+    x rsh "$(settings_cmd "$UNLOAD")" || { settings_restore; die "install.sh unload-still failed; nothing was activated"; }
+  fi
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
   # from here a stop is not "before the release": the host may have switched (release.yml reads this marker)
   [ "$DRY" = 1 ] || date -u +%FT%TZ > "$OUT/ACTIVATING"
@@ -267,9 +285,9 @@ elif [ "$STARTED" = 1 ]; then
   DETAIL="exit $rc"; WAS="${A%% *}"
   case "$rc" in
     0) DETAIL="";;
-    80) LIVE="$WAS: nothing changed"; die "a guard on the host refused the activation (exit 80); nothing changed";;
+    80) LIVE="$WAS: nothing changed"; settings_restore; die "a guard on the host refused the activation (exit 80); nothing changed";;
     81) LIVE="$WAS, by the host's rollback: confirm with healthz"; die "the activation or its health check failed (exit 81); the host rolled code back to $WAS";;
-    82) LIVE="$WAS, by the stage link: confirm with healthz"; die "the activation failed (exit 82); the stage link is on $WAS, because activate.sh rolled back or never moved it, so no further rollback ran";;
+    82) LIVE="$WAS, by the stage link: confirm with healthz"; settings_restore; die "the activation failed (exit 82); the stage link is on $WAS, because activate.sh rolled back or never moved it, so no further rollback ran";;
     90) LIVE="UNKNOWN: the rollback failed. Read the stage link and healthz now"; die "ROLLBACK FAILED (exit 90): the activation failed and so did the rollback to $WAS. Act now";;
     91) LIVE="UNKNOWN: the stage link is neither $BUILD nor $WAS. Read it and healthz now"; die "the activation failed and the stage link is unexpected (exit 91); the host made no further change";;
     *) LIVE="UNKNOWN: read the stage link and healthz now"; die "the host's outcome is unknown (exit $rc): the connection may have dropped mid-activation, and the host may have rolled back or be rolling back";;
@@ -299,6 +317,13 @@ if step healthz "public healthz reports this build, every world and hostOk"; the
   if [ "$DRY" = 0 ]; then
     W="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1])).remote.worlds" "$OUT/snapshot.json")"
     node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong$([ "$NOSWITCH" = 1 ] && echo ' (the live build, no switch)' || echo ' after activation')"
+  fi
+  # --unload-still: the launcher the reload started says where its setting came from (0 removes the file: the default).
+  # Missing is a named warning in the evidence, never a rollback
+  if [ -n "$UNLOAD" ] && [ "$NOSWITCH" = 0 ]; then
+    WANT="unload-still $UNLOAD ($([ "$UNLOAD" = 1 ] && echo launcher-settings.json || echo 'the default'))"
+    SINCE="$(sed 's/T/ /; s/Z$/ UTC/' "$OUT/ACTIVATING" 2>/dev/null || echo '-1h')"
+    live unload-still-log "$OUT/unload-still.log" rsh "journalctl -u $(printf '%q' "$HOST_UNIT") --since $(printf '%q' "$SINCE") --no-pager -o cat | grep -F $(printf '%q' "$WANT")"
   fi
   done_step
 fi

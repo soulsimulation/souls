@@ -244,6 +244,7 @@ ship.sh's `ROLLBACK.txt` says: the previous release's own `activate.sh productio
 on that build with every registered world. It refuses, changing nothing (exit 80), unless the live build is `from`,
 the host's `production.previous` is `build`, and `releases/<build>` is staged. When the host is already on `build` it
 only verifies. It never touches a backup, a database, the registry, auth or host settings, and it deletes nothing.
+A code rollback leaves `<data>/launcher-settings.json` as it is: builds before 0.130 ignore it, and any later 0.130+ build obeys it.
 
 The site's public changelog page (`<base>/changelog`, currently `https://soul.game/changelog`) is `CHANGELOG.md`
 rendered into the web build (`apps/web/changelog.html`, `apps/web/src/changelog-page.ts`). So that the page shows the
@@ -270,7 +271,7 @@ the repository root (copy [`deploy.env.example`](../deploy.env.example); the env
 ## ship.sh
 
 ```sh
-tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--from <step>] [--out <dir>] [--accept-host-codes <code,...>]
+tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--from <step>] [--out <dir>] [--accept-host-codes <code,...>] [--unload-still <0|1>]
 ```
 
 It asks nothing: ssh runs in batch mode, and it never prompts. Before the release is live, any failure stops the run.
@@ -286,6 +287,7 @@ Afterwards, a failed check is recorded and the later checks still run, so the ow
 | `--from <step>` | Resumes at `snapshot`, `stage`, `rehearse`, `backup`, `probe-start`, `healthz`, `walks`, `poster`, `stall` or `cdn-walk`, with the same `--out`. Activation always follows a fresh probe, so resume it `--from probe-start`. The guards run on every resume. |
 | `--out <dir>` | Output folder (default `$SHIP_OUT_ROOT/<label>`). A folder that already holds a run is refused without `--from`. |
 | `--accept-host-codes <code,...>` | The snapshot normally needs public healthz `hostOk`. With this list it passes while `hostOk` is false only if every `hostCodes` entry is listed, such as `halted` for a release that fixes a halted world. The list is printed and recorded in `snapshot.json` (`acceptedHostCodes`); any other code still refuses, and the drift checks compare `hostCodes` too. |
+| `--unload-still <0\|1>` | Right before the activation, after the drift check and the pre-activation check, `1` writes and `0` removes the host's `<data>/launcher-settings.json` (`install.sh unload-still`). The reload starts a new launcher, and it reads the file. The conf is not touched. `install.sh` refuses, and the run stops with nothing activated, when the conf sets `--unload-still` itself or reads another `--data`. Every stop after the write says what the file now holds and prints the command that reverts it. A refused activation (exit 80, or 82) puts the file back as it was. After the activation, the healthz step checks that the new launcher logged `unload-still N (...)`; a missing line is the named warning `unload-still-log`, never a rollback. `--dry-run` and `--no-switch` only say what they would write. |
 
 There is no host option. The host and operator paths come from the environment or the untracked `deploy.env`:
 
@@ -329,7 +331,7 @@ The activation's stop reports what the host's exit says, and `ship-result.json`'
 
 | Exit | What happened | What is live |
 |---|---|---|
-| 80 | A guard on the host refused | The previous build; nothing changed |
+| 80 | A guard on the host refused | The previous build; nothing changed (with `--unload-still`, ship.sh first puts `launcher-settings.json` back as it was, and says so) |
 | 81 | The activation or its health check failed; the rollback returned success | The previous build; confirm with healthz |
 | 82 | The activation failed; the stage link is on the previous build, because `activate.sh` rolled back or never moved it | The previous build by the link; confirm with healthz |
 | 90 | The activation failed and the rollback failed | Unknown; act now |
@@ -549,6 +551,8 @@ reloads by itself (#2368); its next page load takes the new bundle (`useSouls.ts
 
   Do not move the stage link yourself first: activate.sh records `<stage>.previous` only when the link still points
   at the old release.
+- A code rollback leaves `<data>/launcher-settings.json` (`--unload-still`) as it is: builds before 0.130 ignore it, and a
+  later 0.130+ build obeys it. Change it with `install.sh unload-still production <0|1>` or the next release's `unload_still`.
 - Rollback changes code only. World databases keep every accepted event; never restore an older database to make old
   code run. Restoring data is a separate, deliberate operation ([disaster recovery](operations/disaster-recovery.md)).
 

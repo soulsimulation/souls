@@ -131,9 +131,6 @@ import { opSoul, opSetTest } from './op-souls.mjs';
 import { accountSouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
-/** The world's heap cap (lane L1, LOAD-CONTRACT §4: per world from the registry, registry.mjs worldHeapMb). A node child gets
- *  it as its own command-line flag, so a NODE_OPTIONS the auth env file sets (tests' preloads) still applies and a heap
- *  flag there loses to this one; any other command gets it in NODE_OPTIONS. */
 /** <data>/launcher-settings.json (written by deploy/install.sh unload-still), read once at each launcher's start, so a
  *  reload (the keeper's new generation) picks up a change without touching the stage's conf: { unloadStill: 0|1 }.
  *  Absent: {}. Unreadable or a bad value: {} (the args' defaults), said in the log. */
@@ -145,6 +142,9 @@ export function launcherSettings(dataDir, log = () => {}) {
   log(`launcher-settings.json: unloadStill ${v ? 1 : 0}`);
   return { unloadStill: v === 1 || v === true };
 }
+/** The world's heap cap (lane L1, LOAD-CONTRACT §4: per world from the registry, registry.mjs worldHeapMb). A node child gets
+ *  it as its own command-line flag, so a NODE_OPTIONS the auth env file sets (tests' preloads) still applies and a heap
+ *  flag there loses to this one; any other command gets it in NODE_OPTIONS. */
 export function withHeap(d, heapMb) {
   const flag = `--max-old-space-size=${heapMb}`;
   // one cap only: any heap flag already in the child's NODE_OPTIONS goes (an env file's loses to the command line anyway)

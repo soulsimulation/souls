@@ -31,7 +31,7 @@ fi
 # --unload-still <0|1> writes (1) or removes (0) the stage's <data>/launcher-settings.json during install (install.sh
 # unload-still), before the activation; the new launcher reads it at its start, so a reload (handover) is enough.
 if [ -n "$UNLOAD" ]; then
-  [[ "$UNLOAD" =~ ^[01]$ ]] && [ "$STAGE" != legacy ] && [ -z "$LOCAL" ] && [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || { echo "--unload-still <0|1>: 0 or 1, for staging or production, with install (not --local or SIM_RELEASE_NO_INSTALL)"; exit 2; }
+  [[ "$UNLOAD" =~ ^[01]$ ]] && [ "$STAGE" != legacy ] && [ -z "$LOCAL" ] && [ "$ACTIVATE" = 1 ] && [ "${SIM_RELEASE_NO_INSTALL:-0}" != 1 ] || { echo "--unload-still <0|1>: 0 or 1, for staging or production, with install and the activation (not --local, --no-activate or SIM_RELEASE_NO_INSTALL: the next launcher start would pick it up unannounced)"; exit 2; }
 fi
 # CDN1: the asset CDN switch (default on; SIM_ASSETS_CDN_ENABLED=0 turns it off for one release), see the web build below.
 CDN="${SIM_ASSETS_CDN_ENABLED-1}"

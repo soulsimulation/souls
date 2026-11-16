@@ -45,7 +45,9 @@ function setup() {
   writeFileSync(join(data, 'keeper.json'), JSON.stringify({ keeper: { pid: 4242, sha: sha256(keeperSource) }, active: { build: PREV } }));
   writeFileSync(conf, 'PORT=1\n');
   // systemctl start is the health timer's oneshot (#1356): it rewrites host health, which clears a stale code unless still-halted
-  script(join(fakebin, 'systemctl'), `case "$1" in start) printf 'systemctl\\t%s\\n' "$*" >> ${log}; [ ! -e ${t}/fail-refresh ] || exit 1; [ -e ${t}/still-halted ] || rm -f ${t}/host-codes;; *) echo 4242;; esac`);
+  // the unit's journal: the new launcher's start line for the --unload-still check (no-unload-log: it never said it)
+  script(join(fakebin, 'journalctl'), `[ -e ${t}/no-unload-log ] || { [ -e ${data}/launcher-settings.json ] && echo '[launcher] unload-still 1 (launcher-settings.json)' || echo '[launcher] unload-still 0 (the default)'; }`);
+  script(join(fakebin, 'systemctl'),`case "$1" in start) printf 'systemctl\\t%s\\n' "$*" >> ${log}; [ ! -e ${t}/fail-refresh ] || exit 1; [ -e ${t}/still-halted ] || rm -f ${t}/host-codes;; *) echo 4242;; esac`);
   // host-codes (a JSON array) makes public healthz report hostOk false with those codes
   script(join(fakebin, 'curl'), `[ ! -e ${t}/fail-health ] || exit 1\nif [ -e ${t}/host-codes ]; then hc="\\"hostOk\\":false,\\"hostCodes\\":$(cat ${t}/host-codes)"; else hc='"hostOk":true'; fi\nprintf '{"ok":true,%s,"auth":"clerk","maxWorlds":100,"maxRunning":16,"worlds":2,"build":"%s"}' "$hc" "$(basename "$(readlink ${root}/production)")"`);
   if (spawnSync('sh', ['-c', 'command -v sha256sum']).status !== 0) script(join(fakebin, 'sha256sum'), 'exec shasum -a 256 "$@"');
@@ -568,20 +570,24 @@ test('install.sh unload-still: 1 writes the settings file, again replaces it, 0 
   r = run(['production', '0']); assert.equal(r.status, 0, 'absent and 0: left alone'); assert.ok(!existsSync(file));
   for (const bad of [['production', '2'], ['production', 'yes'], ['production'], ['legacy', '1']]) { r = run(bad); assert.equal(r.status, 2, bad.join(' ')); assert.ok(!existsSync(file), `${bad.join(' ')}: nothing written`); }
   assert.equal(sha256(readFileSync(conf, 'utf8')), confSha, 'the conf is never touched');
-  // an explicit --unload-still in the conf wins over the file, and says so; SIM_SETTINGS_DATA names the data dir (ship.sh)
-  writeFileSync(conf, `SIM_WORLDS_ARGS=${args} --unload-still 0\n`);
-  r = run(['production', '1']); assert.match(r.stdout, /sets --unload-still itself, which wins over this file/);
+  // refused, nothing changed: a conf that sets --unload-still itself (it would win over the file), or reads another --data
+  // than SIM_SETTINGS_DATA (ship.sh's), so a release never silently leaves the setting unread
   const other = join(t, 'other'); mkdirSync(other);
+  r = run(['production', '1'], { SIM_SETTINGS_DATA: other }); assert.equal(r.status, 1); assert.match(r.stdout, /reads --data .*, not .*; nothing changed/);
+  assert.ok(!existsSync(join(other, 'launcher-settings.json')) && !existsSync(file));
+  r = run(['production', '1'], { SIM_SETTINGS_DATA: data }); assert.equal(r.status, 0, 'the same data dir: fine'); rmSync(file);
+  writeFileSync(conf, `SIM_WORLDS_ARGS=${args} --unload-still 0\n`);
+  for (const v of ['1', '0']) { r = run(['production', v]); assert.equal(r.status, 1, v); assert.match(r.stdout, /sets --unload-still itself, which would win over the file; nothing changed/); assert.ok(!existsSync(file)); }
   r = run(['staging', '1'], { SIM_SETTINGS_DATA: other });
   assert.equal(r.status, 0, r.stdout); assert.ok(existsSync(join(other, 'launcher-settings.json')), 'no staging conf: the data dir given');
   r = run(['staging', '1']);
   assert.equal(r.status, 1, 'no conf and no data dir: refused'); assert.match(r.stdout, /nothing changed/);
 });
 
-test('release.sh --unload-still refuses a bad value, --local and a stage without install, before anything runs', () => {
-  for (const [args, env] of [[['staging', '--unload-still', '2'], {}], [['--local', join(tmpdir(), 'never'), '--unload-still', '1'], {}], [['production', '--no-activate', '--unload-still', '1'], { SIM_RELEASE_NO_INSTALL: '1' }], [['legacy', '--unload-still', '1'], {}]]) {
+test('release.sh --unload-still refuses a bad value, --local, --no-activate and a stage without install, before anything runs', () => {
+  for (const [args, env] of [[['staging', '--unload-still', '2'], {}], [['--local', join(tmpdir(), 'never'), '--unload-still', '1'], {}], [['production', '--no-activate', '--unload-still', '1'], {}], [['production', '--unload-still', '1'], { SIM_RELEASE_NO_INSTALL: '1' }], [['legacy', '--unload-still', '1'], {}]]) {
     const r = spawnSync('bash', [join(HERE, 'deploy/release.sh'), ...args], { env: { ...process.env, SIM_DEPLOY_ENV: '/nonexistent', SIM_DEPLOY_HOST: '', ...env }, encoding: 'utf8' });
-    assert.equal(r.status, 2, args.join(' ')); assert.match(r.stdout, /--unload-still <0\|1>: 0 or 1, for staging or production, with install/);
+    assert.equal(r.status, 2, args.join(' ')); assert.match(r.stdout, /--unload-still <0\|1>: 0 or 1, for staging or production, with install and the activation/);
   }
   assert.match(readFileSync(join(HERE, 'deploy/release.sh'), 'utf8'), /\$\{UNLOAD:\+ && bash \$REL\/tools\/world-launcher\/deploy\/install\.sh unload-still \$STAGE \$UNLOAD\}/, 'run during install, before the activation');
 });
@@ -593,6 +599,16 @@ test('ship.sh --unload-still: written on the host right before the activation (w
   const calls = s.calls(), write = calls.indexOf('install.sh unload-still production 1');
   assert.ok(write > calls.indexOf('compact-backup.sh') && write < calls.indexOf('activate\t'), 'after the backup and the probe, before the reload');
   assert.match(r.stdout, /unload-still 1: writes <data>\/launcher-settings\.json right before the activation/);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^unload-still-log 0$/m, 'the new launcher said it read the file');
+  // the new launcher never said so: a named warning in the evidence, not a rollback
+  s = setup(); writeFileSync(join(s.t, 'no-unload-log'), ''); r = s.run([...s.base, '--unload-still', '1']);
+  assert.equal(r.status, 1); assert.match(r.stdout, /FAILED unload-still-log/);
+  assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', s.build), 'still live');
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live-with-failures');
+  // --dry-run: the plan names the write and the check, and nothing is written
+  s = setup(); r = s.run([...s.base, '--dry-run', '--unload-still', '1']);
+  assert.match(r.stdout, /install\.sh\\? unload-still\\? production\\? 1/); assert.match(r.stdout, /journalctl.*unload-still\\*\\? 1/);
+  assert.ok(!existsSync(join(s.t, 'host/data/launcher-settings.json'))); assert.ok(!r.stdout.includes(HOST));
   s = setup(); r = s.run([...s.base, '--no-switch', '--unload-still', '1'], { SHIP_RECEIPTS: '' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.ok(!existsSync(join(s.t, 'host/data/launcher-settings.json')), '--no-switch writes nothing');
@@ -600,4 +616,31 @@ test('ship.sh --unload-still: written on the host right before the activation (w
   assert.match(r.stdout, /\(install\.sh unload-still production 1 is not run\)/);
   s = setup(); r = s.run([...s.base, '--unload-still', 'yes']);
   assert.equal(r.status, 2); assert.match(r.stdout + r.stderr, /--unload-still: 0 or 1/); assert.equal(s.calls(), '', 'nothing ran');
+});
+
+test('ship.sh --unload-still: a stop after the write says what the file holds and how to revert it; a refused or never-started activation (80, 82) or a refused write restores it', () => {
+  const file = (s) => join(s.t, 'host/data/launcher-settings.json');
+  for (const [name, flags, restored] of [['80', ['tamper-manifest'], true], ['82', ['fail-before-link'], true], ['81', ['fail-activate'], false], ['90', ['fail-activate', 'fail-rollback'], false], ['91', ['stray-link'], false], ['255', ['ssh-drop'], false]]) {
+    const s = setup(); for (const f of flags) writeFileSync(join(s.t, f), '');
+    const r = s.run([...s.base, '--unload-still', '1']);
+    assert.equal(r.status, 1, name); assert.match(r.stdout, /STOPPED at step activate/, name);
+    if (restored) {
+      assert.ok(!existsSync(file(s)), `${name}: back to no file`); assert.match(r.stdout, /launcher-settings\.json restored to unload-still 0/, name);
+      assert.doesNotMatch(r.stdout, /now says unload-still/, name);
+    } else {
+      assert.equal(readFileSync(file(s), 'utf8'), '{"unloadStill":1}\n', `${name}: the file stays`);
+      assert.match(r.stdout, /launcher-settings\.json now says unload-still 1 \(it said 0 before this run\)/, name);
+      assert.match(r.stdout, /to revert it, on the host: .*install\.sh unload-still production 0, or ship the next release with --unload-still 0/, name);
+    }
+    assert.ok(!r.stdout.includes(HOST), name);
+  }
+  // a file that said 1 before is put back to 1
+  let s = setup(); writeFileSync(file(s), '{"unloadStill":1}\n'); writeFileSync(join(s.t, 'tamper-manifest'), '');
+  let r = s.run([...s.base, '--unload-still', '0']);
+  assert.equal(r.status, 1); assert.equal(readFileSync(file(s), 'utf8'), '{"unloadStill":1}\n'); assert.match(r.stdout, /restored to unload-still 1/);
+  // install.sh refuses (the conf sets --unload-still itself): stopped before the activation, nothing written
+  s = setup(); writeFileSync(join(s.t, 'host/production.conf'), 'SIM_WORLDS_ARGS=--port 1 --unload-still 0\n');
+  r = s.run([...s.base, '--unload-still', '1']);
+  assert.equal(r.status, 1); assert.match(r.stdout, /install\.sh unload-still failed; nothing was activated/);
+  assert.ok(!existsSync(file(s))); assert.doesNotMatch(s.calls(), /^activate\t/m);
 });
