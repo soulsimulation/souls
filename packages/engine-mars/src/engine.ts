@@ -2244,6 +2244,33 @@ export class MarsEngine implements Engine {
   }
   spawnHuman({ id, label, soul, near }: { id: string; label: string; soul: string; near?: BirthNearV1 }): string {
     if (this.ents[id]) return id;
+    const { spot, body } = this.birthSpotV1(id, label, near);
+    if (!spot) throw new Error('no free standing room at the arrival point');
+    const e = this.m.human(id, spot[0], spot[1], { label, provenance: { origin: 'simulation', confidence: 'hypothetical' } });
+    if(this.rt.world.groundV1){const g=(this.rt.services.spatial as Spatial).ground!;e.pose.p[1]=standOn(g,spot[0],spot[1]);}
+    e.human.soul = soul; if(body)e.body=body;
+    this.ents[id] = e; this.m.canonicalEntityOrder(this.rt.world);
+    this.out.changes.push([this.rt.tick, id, 'present', e]);
+    return id;
+  }
+  /** A13 (#2621): where spawnHuman would stand a new body now, and the verdict the detached birth probe gives there
+   *  (humanBirthIssue), without creating it: the search the apply runs, on the live engine. Its only write is the trial
+   *  body each ring spot is planned with, removed before the next (a new id, so the table's order is unchanged). Replaces a
+   *  full-world snapshot and restore per birth (probeNativeHumanBirth, kept as the test oracle). */
+  birthPlacementV1({ id, label, near }: { id: string; label: string; near?: BirthNearV1 }): { ok: true; p: [number, number, number] } | { ok: false; diagnostic: Diag } {
+    if (this.ents[id]) throw new Error('birth placement is for a new body');
+    const { spot, body } = this.birthSpotV1(id, label, near);
+    if (!spot) return { ok: false, diagnostic: { code: 'birth.arrival-unavailable', message: 'no free standing room at the arrival point' } };
+    const spatial = this.rt.services.spatial as Spatial;
+    const p: [number, number, number] = [spot[0], this.rt.world.groundV1 ? standOn(spatial.ground!, spot[0], spot[1]) : 0, spot[1]];
+    // humanBirthIssue, for the body spawnHuman would make (level 0, its body's radius)
+    spatial.sync(this.rt.world);
+    const grid = spatial.levelAt(0, [p[0], p[2]]), radius = body?.family === 'floater' ? body.radius : HUMAN_RADIUS;
+    if (!grid || clearanceAt(grid, [p[0], p[2]]) < radius) return { ok: false, diagnostic: { code: 'birth.arrival-unavailable', message: 'No safe standing room at the arrival point.' } };
+    return { ok: true, p };
+  }
+  /** spawnHuman's placement search, changing nothing (see birthPlacementV1). */
+  private birthSpotV1(id: string, label: string, near?: BirthNearV1): { spot: [number, number] | null; body?: { family: string; model: string; radius: number; hoverHeight: number } } {
     const [ax, az] = this.rt.world.groundV1 ? groundArrival(this.rt, this.cfg.arrival) : this.cfg.arrival;
     const body=this.cfg.scene==='littlemartians'&&['Verdelis','Kalama','Kweku','Mycos','Ada','Shuijing','Nyx'].includes(label)?{family:'floater',model:label.toLowerCase(),radius:.35,hoverHeight:1.45}:undefined;
     const people = listEntities(this.ents).filter((e: any) => e.kind === 'human').map((e: any) => [e.pose.p[0], e.pose.p[2]] as [number, number]);
@@ -2272,13 +2299,7 @@ export class MarsEngine implements Engine {
     // birth-near/1: a built-over arrival no longer refuses the birth: the nearest clear standing ground to the
     // arrival point, else to the hinted start. Events without `near` keep the original refusal.
     if (!spot && near) spot = this.freeStandingNearV1([ax, az], body?.radius ?? HUMAN_RADIUS) ?? (near.first ? null : this.freeStandingNearV1(near.at, body?.radius ?? HUMAN_RADIUS));
-    if (!spot) throw new Error('no free standing room at the arrival point');
-    const e = this.m.human(id, spot[0], spot[1], { label, provenance: { origin: 'simulation', confidence: 'hypothetical' } });
-    if(this.rt.world.groundV1){const g=(this.rt.services.spatial as Spatial).ground!;e.pose.p[1]=standOn(g,spot[0],spot[1]);}
-    e.human.soul = soul; if(body)e.body=body;
-    this.ents[id] = e; this.m.canonicalEntityOrder(this.rt.world);
-    this.out.changes.push([this.rt.tick, id, 'present', e]);
-    return id;
+    return { spot, body };
   }
   /** arrival-search/1 (lane ARR): the standing geometry a new body of `label` reads (see arrival-search.ts). Read-only. */
   private arrivalGroundV1(label?: string): { g: ArrivalGround; at: [number, number] } {
