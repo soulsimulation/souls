@@ -47,16 +47,20 @@ doors a hand cannot work either way, doors held by name in `DOOR_FIT_HELD`, and 
 
 ## Before switching it on
 
-For each live world, on a local copy of its production snapshot (read-only, never written back; how snapshots are kept
-is in [operations](../operations.md)), booted with `BRAIN_MODE=fake`, an isolated `DATA_DIR` and `DOOR_FIT_BOOT=1`:
+Tests never use production data. The measurement (#2462 A3) runs on the walk gate's fixture worlds
+(`tools/test-harness/walk/fixtures/`: eden-2026, bench-eden, bench-hamlet) and on a fake-mind Eden 2026 world, from
+before any door fit, with Souls placed inside and beside buildings. Each world boots with fake minds, the fits run as
+the boot runs them, and four bars are scored:
 
 1. The fit completes, and its rules events are logged.
-2. The walk audit after the fit is no worse than before it, per world (`tools/test-harness/walk/walk.mjs` on the copy).
-3. Every Soul's position is still reached (the walk audit's per-Soul targets, before and after).
-4. The longest turn the fit logs, and the slowest building's edit, are recorded. Bar: no turn over the budget. A
-   world that misses it stays off until a single fit edit costs less.
+2. The walk audit after the fit is no worse than before it (the walk gate's own comparison).
+3. Every Soul that could walk before the fit still can (`navCheckV1` on each body, before and after).
+4. The longest turn the fit logs, and the slowest building's edit, are recorded. Bar: no turn over the budget. Until
+   a single fit edit costs less, a world like the one that misses it stays off.
 
-Only a world that meets all four is proposed for switching on.
+Only when all four hold is a world proposed for switching on. For a production world, the release owner then rehearses
+its first boot on the host with `DOOR_FIT_BOOT=1` ([boot rehearsal](../operations.md): the original is opened read-only
+and the copy is deleted).
 
 ## Switching on
 
