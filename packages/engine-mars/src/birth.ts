@@ -59,15 +59,24 @@ export function placeNativeHumanBirth(engine:Engine,raw:unknown):NativeBirthPlac
   }
   // As the probe: a birth waits out native activity that has no exact resumable checkpoint (no rule change here).
   if(!engine.canSnapshot?.())return {request,outcome:'deferred',diagnostic:{code:'birth.checkpoint-required',message:'Current native activity has no exact resumable checkpoint.'}};
+  if(!livePlacementExact(engine))throw new Error('Live birth placement needs paged ground or none: whole ground grows its window to the search');
   const r=(engine as unknown as MarsEngine).birthPlacementV1(request);
   return r.ok?{request,outcome:'ready',position:[...r.p]}:{request,outcome:'unavailable',diagnostic:{code:r.diagnostic.code,message:r.diagnostic.message}};
 }
 
+/** The live search leaves the navigation as it found it (its epoch, its ground window) only on a world with no ground or
+ * with paged ground (#2624 review): whole (non-paged) ground grows its one window to cover the trial body, moving the
+ * epoch, and a later walk could then be planned differently live than on replay. Those worlds keep the probe. */
+export function livePlacementExact(engine:Engine):boolean {
+  const ground=(engine.world as {groundV1?:{nav?:string}}).groundV1;return !ground||ground.nav==='paged/1';
+}
+
 /** The birth path's one entry. SIM_BIRTH_PROBE=1 decides by the detached probe instead (the A/B "off" arm);
- * SIM_BIRTH_PROBE=oracle decides on the live engine and throws on any difference from the probe. Read per call. */
+ * SIM_BIRTH_PROBE=oracle decides on the live engine and throws on any difference from the probe. Read per call.
+ * A world on whole (non-paged) ground always decides by the probe (livePlacementExact). */
 export function nativeBirthPlacement(engine:Engine,factory:EngineFactory,raw:unknown):NativeBirthPlacement {
   const mode=process.env.SIM_BIRTH_PROBE;
-  if(mode==='1')return withoutBase(probeNativeHumanBirth(engine,factory,raw));
+  if(mode==='1'||!livePlacementExact(engine))return withoutBase(probeNativeHumanBirth(engine,factory,raw));
   const live=placeNativeHumanBirth(engine,raw);
   if(mode==='oracle'){
     const probe=withoutBase(probeNativeHumanBirth(engine,factory,raw));

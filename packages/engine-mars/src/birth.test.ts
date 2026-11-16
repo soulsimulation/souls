@@ -2,6 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { marsFactory, GREEN_FIELD_WORLD, EDEN_COMMONS_WORLD, EDEN_SAFE_COMMONS_WORLD } from './engine.ts';
 import { probeNativeHumanBirth, placeNativeHumanBirth, nativeBirthPlacement } from './birth.ts';
+import { groundFact } from './ground-bridge.ts';
+import { loadMars } from './load.ts';
+import { emptyGround } from '../../ground/src/index.ts';
 import type { Engine } from '@souls/engine-contract';
 const factory=await marsFactory(GREEN_FIELD_WORLD);
 const request={id:'h_new',label:'New',soul:'s_new'};
@@ -67,11 +70,17 @@ test('checkpoint corruption and unexpected native faults propagate instead of be
 
 // A13 (#2621): the birth path places on the live engine (placeNativeHumanBirth); the detached probe is its oracle.
 type Request={id:string;label:string;soul:string;near?:{at:[number,number];first?:boolean}};
-/** The live placement equals the probe's outcome (placement or refusal, same diagnostic), and neither changes the world. */
+/** The navigation's epoch and ground windows: derived state the state hash cannot see (#2624 review). */
+const navOf=(e:Engine)=>{const sp=(e as unknown as {rt:{services:{spatial:{epoch:unknown;ground?:{window?:unknown;windows?:unknown}}}}}).rt.services.spatial;
+  return JSON.stringify({epoch:sp.epoch,window:sp.ground?.window??null});};
+/** The live placement equals the probe's outcome (placement or refusal, same diagnostic), neither changes the world, and
+ *  the live placement leaves the navigation as it found it once synced (the probe's own snapshot syncs the live scene to
+ *  the world, as any step does; a fresh world's first sync moves the epoch 0 -> 1). */
 function agrees(e:Engine,f:typeof factory,raw:Request){
   const hash=e.stateHash(),tick=e.world.tick;
-  const {contract:_c,base:_b,...probe}=probeNativeHumanBirth(e,f,raw),placed=placeNativeHumanBirth(e,raw);
-  assert.deepEqual(placed,probe,JSON.stringify(raw));assert.equal(e.stateHash(),hash);assert.equal(e.world.tick,tick);
+  const {contract:_c,base:_b,...probe}=probeNativeHumanBirth(e,f,raw),nav=navOf(e);
+  const placed=placeNativeHumanBirth(e,raw);
+  assert.deepEqual(placed,probe,JSON.stringify(raw));assert.equal(e.stateHash(),hash);assert.equal(e.world.tick,tick);assert.equal(navOf(e),nav,'navigation moved');
   return placed;
 }
 test('A13 oracle: the live placement equals the detached probe on every birth while a crowd fills the arrival point',async t=>{
@@ -119,4 +128,25 @@ test('A13: the birth path never snapshots or restores; SIM_BIRTH_PROBE=1 decides
     process.env.SIM_BIRTH_PROBE='oracle';assert.deepEqual(nativeBirthPlacement(e,counted,request),p);assert.equal(restores,2);
     m.birthPlacementV1=()=>({ok:true,p:[9,0,9]});assert.throws(()=>nativeBirthPlacement(e,counted,request),/differs from the detached probe/);
   }finally{if(was===undefined)delete process.env.SIM_BIRTH_PROBE;else process.env.SIM_BIRTH_PROBE=was;e.snapshot=snap;m.birthPlacementV1=own;}
+});
+
+// #2624 review: on whole (non-paged) ground the live search grew the ground window to an arrival point far from every
+// body and moved the epoch, so a later far walk was refused live (ground.too-far) and admitted on replay. Such a world
+// keeps the probe, and its navigation and later walks are those of a world that never placed a birth.
+test('A13: on whole (non-paged) ground the birth decides by the probe and leaves the navigation as it was',async()=>{
+  const m=await loadMars(),f=await marsFactory({...GREEN_FIELD_WORLD,arrival:[300,0],reference:[302,0]}),fact=groundFact(emptyGround(1000),4,{paged:false});
+  const mk=()=>{const w=f.genesis('a13-whole') as {entities:Record<string,unknown>};w.entities.h_home=m.human('h_home',0,0,{label:'Home'});
+    const e=f.create(w as never) as Engine&{installGroundV1(f:unknown):unknown};e.installGroundV1(fact);for(let t=0;t<3;t++)e.step();return e;};
+  const a=mk(),b=mk(),nav=navOf(a),was=process.env.SIM_BIRTH_PROBE;
+  try{
+    for(const mode of [undefined,'oracle']){
+      if(mode===undefined)delete process.env.SIM_BIRTH_PROBE;else process.env.SIM_BIRTH_PROBE=mode;
+      const {contract:_c,base:_b,...probe}=probeNativeHumanBirth(a,f,request);assert.deepEqual(nativeBirthPlacement(a,f,request),probe);
+    }
+  }finally{if(was===undefined)delete process.env.SIM_BIRTH_PROBE;else process.env.SIM_BIRTH_PROBE=was;}
+  assert.throws(()=>placeNativeHumanBirth(a,request),/needs paged ground or none/);
+  assert.equal(navOf(a),nav);assert.equal(navOf(a),navOf(b));
+  for(const e of [a,b])assert.equal(e.perform({actor:'h_home',label:'walk',steps:[{verb:'walk_to',params:{to:[-100,0,0]}}]}).ok,true);
+  for(let t=0;t<20;t++){a.step();b.step();}
+  assert.equal(a.stateHash(),b.stateHash());
 });

@@ -5,18 +5,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { probeNativeHumanBirth, placeNativeHumanBirth } from '@souls/engine-mars';
+import { probeNativeHumanBirth, placeNativeHumanBirth, livePlacementExact } from '@souls/engine-mars';
 import type { Engine, EngineFactory } from '@souls/engine-contract';
 import { bootEden } from '../test/eden-capabilities-timing.ts';
 
 const NO_EDEN = existsSync(new URL('../../../worlds/templates/eden-2026.json', import.meta.url)) ? false : 'needs worlds/templates/eden-2026.json (lane/engine content)';
 type Request = { id: string; label: string; soul: string; near?: { at: [number, number]; first?: boolean } };
 
+/** The navigation's epoch and whole-ground window: derived state the state hash cannot see (#2624 review). */
+const navOf = (e: Engine) => { const sp = (e as unknown as { rt: { services: { spatial: { epoch: number; ground?: { window?: unknown } } } } }).rt.services.spatial; return JSON.stringify({ epoch: sp.epoch, window: sp.ground?.window ?? null }); };
 function agrees(e: Engine, f: EngineFactory, raw: Request) {
   const hash = e.stateHash(), tick = e.world.tick;
-  const { contract: _c, base: _b, ...probe } = probeNativeHumanBirth(e, f, raw), placed = placeNativeHumanBirth(e, raw);
+  const { contract: _c, base: _b, ...probe } = probeNativeHumanBirth(e, f, raw), nav = navOf(e), placed = placeNativeHumanBirth(e, raw);
   assert.deepEqual(placed, probe, JSON.stringify(raw));
-  assert.equal(e.stateHash(), hash); assert.equal(e.world.tick, tick);
+  assert.equal(e.stateHash(), hash); assert.equal(e.world.tick, tick); assert.equal(navOf(e), nav, 'the live placement moved the navigation');
   return placed;
 }
 
@@ -25,6 +27,7 @@ test('A13 oracle on Eden 2026: the live birth placement equals the detached prob
   t.after(() => w.close());
   w.brain.quiesce();
   const e = w.host.engine, f = w.host.factory, ana = e.world.entities[w.soul.entityId]!, at: [number, number] = [ana.pose.p[0], ana.pose.p[2]];
+  assert.equal(livePlacementExact(e), true, 'Eden 2026 is on paged ground: births place on the live engine');
   const walk = e.perform({ actor: w.soul.entityId, label: 'walk', steps: [{ verb: 'walk_to', params: { to: [at[0] + 12, 0, at[1] + 8] } }] } as never) as { ok: boolean };
   assert.equal(walk.ok, true);
   const counts: Record<string, number> = {};

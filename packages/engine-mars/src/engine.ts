@@ -2254,9 +2254,11 @@ export class MarsEngine implements Engine {
     return id;
   }
   /** A13 (#2621): where spawnHuman would stand a new body now, and the verdict the detached birth probe gives there
-   *  (humanBirthIssue), without creating it: the search the apply runs, on the live engine. Its only write is the trial
-   *  body each ring spot is planned with, removed before the next (a new id, so the table's order is unchanged). Replaces a
-   *  full-world snapshot and restore per birth (probeNativeHumanBirth, kept as the test oracle). */
+   *  (humanBirthIssue), without creating it: the search the apply runs, on the live engine. It puts a trial body on each
+   *  ring spot it plans from, removed before the next (a new id, so the table's order is unchanged), and syncs the
+   *  navigation to it. With no ground or paged ground that sync leaves the epoch and the windows as they were; whole
+   *  (non-paged) ground grows its one window and moves the epoch, so the caller (livePlacementExact in birth.ts) keeps the
+   *  probe there. Replaces a full-world snapshot and restore per birth (probeNativeHumanBirth, kept as the test oracle). */
   birthPlacementV1({ id, label, near }: { id: string; label: string; near?: BirthNearV1 }): { ok: true; p: [number, number, number] } | { ok: false; diagnostic: Diag } {
     if (this.ents[id]) throw new Error('birth placement is for a new body');
     const { spot, body } = this.birthSpotV1(id, label, near);

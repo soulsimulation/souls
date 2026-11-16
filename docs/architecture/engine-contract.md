@@ -413,6 +413,10 @@ The Mars engine is hard-forked under `mars/viewer/engine`. `load.ts` imports tha
   strict gate's offer for the act in the same synchronous turn. `SIM_PLAN_ONCE=0` turns both off;
   `SIM_PLAN_ONCE_ORACLE=1` compares every reuse with a fresh computation and logs `[plan-once-oracle]` on a difference.
   The viewer's engine does not keep routes.
+- **Birth placement (#2621).** A lifecycle birth is placed on the live engine (`nativeBirthPlacement`: `spawnHuman`'s
+  own search, no snapshot or restore); a world on whole (non-paged) ground keeps the detached probe. `SIM_BIRTH_PROBE=1`
+  decides by the probe again (the rollback); `SIM_BIRTH_PROBE=oracle` checks every placement against it and throws on a
+  difference.
 - **Broadcast.** Moving bodies send two-point keyframe paths every 5 ticks; activity and seat changes are field changes.
 - **Snapshot** format `sim-mars-snapshot/1`: Mars's own snapshot plus the adapter's programs and world configuration.
   A program whose actions cannot be serialized defers the checkpoint; replay of the logged suffix continues it.
