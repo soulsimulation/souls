@@ -2,6 +2,11 @@
 //  hang-at&tick=N&ticks=K  a step (one listener's afterTick, named `fault-inject hang-at`) that never returns at ticks N to
 //                  N+K-1 (K default 1), on every boot: kept in <DATA_DIR>/fault-at.json, and the listener claims N as a
 //                  deadline so a catch-up lands on it (a restart loop; a durable-clock world dies one tick later each boot)
+//  throw           #2458: the next tick's engine step throws `fault-inject.thrown` (once), inside the tick: the world
+//                  recovers it as an engine fault (WorldHost.stepFaultV1), and its log has the recovery's hold line
+//  throw-at&tick=N[&replayMs=K]  #2458: the engine step from tick N throws so on every boot that steps it live (kept in
+//                  <DATA_DIR>/fault-throw.json), as a deterministic engine error would: a restart meets it again. Each tick
+//                  a recovery replays takes at least K ms (default 0), as on a busy world
 //  corrupt         a Soul's body broken in memory (its pose no number), as invariant corruption is: under quarantine/1
 //                  (adopted first, as edge worlds do) the world holds that body and runs on
 import {readFileSync, writeFileSync} from 'node:fs';
@@ -12,12 +17,25 @@ export function installFaultInject(host: WorldHost, dataDir: string) {
   const file = join(dataDir, 'fault-at.json');
   let at: number | null = null, ticks = 1;
   try { const j = JSON.parse(readFileSync(file, 'utf8')); at = Number(j.tick); ticks = Number(j.ticks) || 1; if (!Number.isFinite(at)) at = null; } catch { at = null; }
+  const throwFile = join(dataDir, 'fault-throw.json');
+  let throwAt: number | null = null, throwNext = false, replayMs = 0;
+  try { const j = JSON.parse(readFileSync(throwFile, 'utf8')); throwAt = Number(j.tick); replayMs = Number(j.replayMs) || 0; if (!Number.isFinite(throwAt)) throwAt = null; } catch { throwAt = null; }
   host.listeners.push({
     name: 'fault-inject hang-at',
     afterTick: (t) => { if (at !== null && t >= at && t < at + ticks) for (;;) { /* stuck, every boot that runs this tick */ } },
-    stillness: (t) => (at !== null && t < at + ticks - 1 ? [{name: 'fault-inject', tick: Math.max(at, t + 1)}] : []),
+    stillness: (t) => [...(at !== null && t < at + ticks - 1 ? [{name: 'fault-inject', tick: Math.max(at, t + 1)}] : []), ...(throwAt !== null && t <= throwAt ? [{name: 'fault-inject', tick: throwAt + 1}] : [])],
   });
+  host.stepFaultV1 = (t, replay) => {
+    if (replay) { for (const end = performance.now() + replayMs; performance.now() < end;) { /* a busy world's replayed tick */ } return; }
+    if (throwNext) { throwNext = false; throw new Error('fault-inject.thrown: an injected engine error inside the tick (#2458)'); }
+    if (t === throwAt) throw new Error(`fault-inject.thrown: an injected engine error at tick ${t}, on every boot (#2458)`);
+  };
   return (kind: string, q: URLSearchParams): boolean => {
+    if (kind === 'throw') { throwNext = true; return true; }
+    if (kind === 'throw-at') {
+      const tick = Number(q.get('tick')); if (!(tick > host.engine.world.tick)) return false;
+      throwAt = tick; replayMs = Math.max(0, Number(q.get('replayMs')) || 0); writeFileSync(throwFile, JSON.stringify({tick, replayMs})); return true;
+    }
     if (kind === 'hang-at') {
       const tick = Number(q.get('tick')), k = Math.max(1, Math.floor(Number(q.get('ticks')) || 1)); if (!(tick > host.engine.world.tick)) return false;
       at = tick; ticks = k; writeFileSync(file, JSON.stringify({tick, ticks: k})); return true;

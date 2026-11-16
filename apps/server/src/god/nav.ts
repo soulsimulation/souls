@@ -119,6 +119,8 @@ const NO_SERVICE_POINTS: readonly ActivityServicePoint[] = [];
 const SERVICE_STAND_DISTANCE = 0.7;
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
+/** Rings (0.25 m) a thing's stand point is searched out to for standing room: 1.5 m. */
+const STAND_RINGS = 6;
 /** L8: nearest first, ties by ref, so "by the X" names do not depend on the things list's order (a boot's full pass and
  *  incremental passes built it differently: 472 built objects rewrote their `near` on every first boot after a copy). */
 const byDistanceThenRef = (a: { o: { ref: string }; d: number }, b: { o: { ref: string }; d: number }) => a.d - b.d || (a.o.ref < b.o.ref ? -1 : a.o.ref > b.o.ref ? 1 : 0);
@@ -474,8 +476,10 @@ export class GodNav {
     } else {
       // a door approach, a seat's front, a fountain's rim: the nearest to me with standing room; else around the thing
       const stands = [...(t.stands ?? [])].sort((a, b) => Math.hypot(a[0] - me[0], a[1] - me[1]) - Math.hypot(b[0] - me[0], b[1] - me[1]));
-      for (const s of stands) { goal = near(s, t.level, 6); if (goal) break; }
-      goal ??= near(t.at, t.level, 40);
+      for (const s of stands) { goal = this.standPoint(t, s, except); if (goal) break; }
+      // #1243: ... else, for a thing with stand points, the nearest spot to the thing itself, also in its own room (none
+      // there: no standing room); a thing with none (a lamp, an open pavilion's table) keeps the nearest spot
+      goal ??= t.stands?.length ? this.standPoint(t, t.at, except, 40) : near(t.at, t.level, 40);
       // a thing with no approach of its own: the main ground nearest it when the spot beside it is a pocket (a lamp behind
       // a fence, a shelf with a gap behind it), and a big structure from the main ground near it
       if (!t.stands?.length) goal = toMain(goal, t.big ? 80 : 3);
@@ -535,6 +539,32 @@ export class GodNav {
     }
     this.goals.set(key, { tick, key: positionKey, warm: !sawCold && this.navWarm(tick), goal });
     return goal;
+  }
+
+  /** #1243: the standing point for one of a thing's stand points `s`: the nearest clear spot within 1.5 m, on the stand's
+   *  own side of its room's wall. A search by distance alone doesn't know a wall: a kitchen stool's stand with no room for
+   *  a body by the counter found the wall's outer face 1 m away, a 30 m walk round to the door. When the nearest spot is
+   *  outside the room the stand is in, the nearest one inside it in the same rings; none: null (the next stand is tried). */
+  standPoint(t: Thing, s: Vec2, except?: string, rings = STAND_RINGS): { p: Vec2; level: number } | null {
+    const E = this.E, level = t.level, at = (p: Vec2 | null) => (p ? { p: [r2(p[0]), r2(p[1])] as Vec2, level } : null);
+    const p = E.standableNearV1!(s, level, except, 0.4, rings);
+    if (!p || Math.hypot(p[0] - s[0], p[1] - s[1]) < 1e-3) return at(p);
+    const room = this.roomAt(s, level);
+    if (!room || inPoly(p[0], p[1], room)) return at(p);
+    // the rings standableNearV1 walks (0.25 m apart, 8 points more each), from the one its answer was on: nearer rings had no clear spot
+    const scan = () => {
+      for (let ring = Math.round(Math.hypot(p[0] - s[0], p[1] - s[1]) / 0.25); ring <= rings; ring++) for (let k = 0, n = ring * 8; k < n; k++) {
+        const a = (k / n) * Math.PI * 2, q: Vec2 = [r3(s[0] + Math.cos(a) * ring * 0.25), r3(s[1] + Math.sin(a) * ring * 0.25)];
+        if (inPoly(q[0], q[1], room) && E.standableNearV1!(q, level, except, 0.4, 0)) return q;
+      }
+      return null;
+    };
+    return at(E.readPassV1 ? E.readPassV1(scan) : scan());
+  }
+
+  /** The outline of the room on `level` a point is in, if any. */
+  private roomAt(p: Vec2, level: number): Vec2[] | undefined {
+    return this.things().find((r) => r.kind === 'room' && r.level === level && r.poly && inPoly(p[0], p[1], r.poly))?.poly;
   }
 
   /** RESOLVE2: the nearest connected (walkable both ways from the main ground) standing spot on `g`'s level within `r` m
