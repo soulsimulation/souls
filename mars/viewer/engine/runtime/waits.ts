@@ -58,8 +58,9 @@ export function mutualWaits(rt: Runtime, mover: string): string[] {
   return own.blockers.filter((b) => { const o = samples!.get(b); return !!o && o.tick >= rt.tick - 1 && o.blockers.includes(mover); });
 }
 
-/** #2596: a wait cycle never clears by itself, so its members ask for recovery once the cycle has stood unchanged this
- *  long (3 s), not at DEADLOCK_TICKS like a wait on someone who may still move. The 10-s report is unchanged. */
+/** #2596 cycle-recover/1 (`services.cycleRecoverV1`): a wait cycle that has stood unchanged this long (3 s) rarely clears by
+ *  itself (in the 12-variant fire-ring jam, one did, at 70 ticks), so its members ask for recovery then, not at DEADLOCK_TICKS
+ *  like a wait on someone who may still move. The 10-s report is unchanged. Without the policy, exactly as before. */
 export const CYCLE_RECOVER_TICKS = 60;
 
 /** Request at most one actual planner attempt per unchanged mover episode. Deferred budget admission is bounded. */
@@ -68,7 +69,7 @@ export function recoverPersistentWaits(rt: Runtime, recover: (owner: string, mov
   if (!state) return;
   // last tick's cycles (deadlockDiagnostics runs after this): members of one that has stood CYCLE_RECOVER_TICKS
   const cyclic = new Set<string>();
-  for (const [key, episode] of state.episodes) if (rt.tick - episode.since >= CYCLE_RECOVER_TICKS) for (const member of JSON.parse(key) as string[]) cyclic.add(member);
+  if (rt.services.cycleRecoverV1 === true) for (const [key, episode] of state.episodes) if (rt.tick - episode.since >= CYCLE_RECOVER_TICKS) for (const member of JSON.parse(key) as string[]) cyclic.add(member);
   for (const sample of [...state.samples.values()].sort((a, b) => a.mover < b.mover ? -1 : a.mover > b.mover ? 1 : 0)) {
     const held = rt.tick - sample.since + 1;
     if (sample.tick !== rt.tick || !rt.isActive(sample.owner) || (held < DEADLOCK_TICKS && !(cyclic.has(sample.mover) && held >= CYCLE_RECOVER_TICKS))) continue;

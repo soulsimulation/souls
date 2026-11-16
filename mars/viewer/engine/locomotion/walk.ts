@@ -335,7 +335,7 @@ export const walkTo: ActionDef<WalkParams, Route, Exec> = {
       if (!takeReplan(rt, false)) return { status: 'deferred', diagnostic: { code: 'deadlock.recovery-budget', message: 'walker recovery waits for existing planner budget', subjects: [mover] } };
       if (retryPeople(rt, ex, rt.world.entities[ex.actor])) return { status: 'attempted', diagnostic: { code: 'deadlock.replanned', message: 'existing person/load planner found a route from the current pose', subjects: [mover] } };
     }
-    const aside = stepAsideInCycle(rt, ex);
+    const aside = rt.services.cycleRecoverV1 === true ? stepAsideInCycle(rt, ex) : null;   // #2596 cycle-recover/1
     if (aside) return { status: 'attempted', diagnostic: { code: 'deadlock.stepped-aside', message: `${aside.mover} steps aside for ${aside.for} to pass, then walks on`, subjects: [mover, aside.mover, aside.for] } };
     if (!replannable) return unavailable('walker has no remaining applicable person/load replan; occupied goals and stairs require clearance');
     return { status: 'attempted', diagnostic: { code: 'deadlock.replan-refused', message: 'existing person/load planner found no safe route', subjects: [mover] } };
@@ -1435,7 +1435,8 @@ export const POSE_DEFER_S = 5;
  * ~2.5 min, W47's release only swapping the two roles every 3 s). After FACEOFF_TICKS one of them steps aside to the
  * nearest free spot clear of the other's remaining way (`makeWay` with `clearOf`), waits there until the other has
  * passed, then walks on: first the one yielding the passage (or, two plain person-waits, the later id); if that one
- * finds no spot within 3·FACEOFF_TICKS, the other. Mars/Eden/LM native worlds (no entity physics) are unchanged.
+ * finds no spot within 3·FACEOFF_TICKS, the other. Mars/Eden/LM native worlds (no entity physics) do not run this; under
+ * #2596 cycle-recover/1 their two-body cycles take the same step aside from the deadlock recovery (`stepAsideInCycle`).
  */
 function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   const f = ex.faceoff;
@@ -1453,16 +1454,19 @@ function resolveFaceoff(rt: Runtime, ex: Exec, who: string) {
   stepAside(rt, moverEx, forEx);
 }
 
-/** #2596: the deadlock recovery's answer to a two-body wait cycle that routing round the other did not break (one waits at
+/** #2596 cycle-recover/1: the deadlock recovery's answer to a two-body wait cycle that routing round the other did not break (one waits at
  *  its walk's end for the other to leave its spot, the other for it to get out of the way; or two face to face). One of
  *  the pair steps aside as in `resolveFaceoff` and walks on once the other has passed: the one standing at the end of its
  *  walk first (it comes back to the same spot), else the walker being recovered; if that one finds no spot, the other. */
 function stepAsideInCycle(rt: Runtime, ex: Exec): { mover: string; for: string } | null {
+  // a carry's gathering walkers share one walk exec under the carry's id: the clear-of-the-way test would read another
+  // crew member's way, so only a walk's own exec takes part
+  if (walkExecs(rt).get(ex.id) !== ex) return null;
   const atEnd = (x: Exec) => x.leg === x.route.legs.length - 1 && x.s >= x.total - 1e-6;
   const able = (x: Exec) => x.phase === 'walk' && x.route.legs[x.leg]?.kind === 'walk' && !x.detour && !x.cancelTo;
   for (const who of mutualWaits(rt, ex.actor)) {
     const ot = rt.world.entities[who]?.human?.task, oex = ot ? walkExecs(rt).get(ot) : undefined;
-    if (!oex || oex.detour || oex.cancelTo || rt.records.get(ot!)?.status !== 'blocked') continue;
+    if (!oex || oex.actor !== who || oex.detour || oex.cancelTo || rt.records.get(ot!)?.status !== 'blocked') continue;
     const pairs: [Exec, Exec][] = atEnd(oex) && !atEnd(ex) ? [[oex, ex], [ex, oex]] : [[ex, oex], [oex, ex]];
     // the clear-of-the-way test reads the other's walk leg (pointAt): both stand on walk legs
     for (const [m, f] of pairs) if (able(m) && f.route.legs[f.leg]?.kind === 'walk' && stepAside(rt, m, f)) return { mover: m.actor, for: f.actor };
