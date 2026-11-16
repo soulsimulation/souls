@@ -23,6 +23,9 @@ export const CSS_WIDTH = 960, CSS_HEIGHT = 540; // a 2x screen turns this into 1
 export const STALL_MS = 10_000; // page frames stuck this long: reload
 export const RELOAD_EVERY_MS = 4 * 3600_000;
 export const OUTPUT_GRACE_MS = 5000;
+// Each failed start pops a modal OBS dialog on the stream machine's screen, so restarts back off and give up.
+export const RESTART_DELAYS_MS = [0, 30_000, 120_000]; // wait before attempts 1, 2 and 3 (after the grace)
+export const RESTART_STABLE_MS = 60_000; // an output up this long counts as recovered: the attempts reset
 export const CHROME_FLAGS = [
   '--no-first-run', '--no-default-browser-check', '--autoplay-policy=no-user-gesture-required',
   '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling',
@@ -245,10 +248,24 @@ export function watchDecision(w, { now, frames, outputActive, outputReconnecting
   if (now - w.lastReloadAt >= RELOAD_EVERY_MS) actions.push({ do: 'reload', why: 'scheduled (every 4 h)' });
   else if (now - Math.max(w.lastProgressAt, w.lastReloadAt) >= STALL_MS) actions.push({ do: 'reload', why: `page frames stalled for ${Math.round((now - w.lastProgressAt) / 1000)} s` });
   // An output that is down (not reconnecting by itself) for OUTPUT_GRACE_MS gets restarted; one bad read does nothing.
+  // At most RESTART_DELAYS_MS.length attempts, each later than the last; then one give-up and no more tries.
+  w.restarts ??= 0;
   if (outputActive === false && !outputReconnecting) {
     w.outputDownSince ??= now;
-    if (now - w.outputDownSince >= OUTPUT_GRACE_MS) { actions.push({ do: 'restart-output', why: 'output stopped or disconnected' }); w.outputDownSince = undefined; }
-  } else if (outputActive !== undefined) w.outputDownSince = undefined;
+    w.upSince = undefined;
+    const due = Math.max(w.outputDownSince + OUTPUT_GRACE_MS, (w.lastRestartAt ?? -Infinity) + (RESTART_DELAYS_MS[w.restarts] ?? 0));
+    if (w.restarts < RESTART_DELAYS_MS.length && now >= due) {
+      w.restarts++; w.lastRestartAt = now;
+      actions.push({ do: 'restart-output', why: `output stopped or disconnected (attempt ${w.restarts} of ${RESTART_DELAYS_MS.length})` });
+    } else if (w.restarts >= RESTART_DELAYS_MS.length && !w.gaveUp) {
+      w.gaveUp = true;
+      actions.push({ do: 'give-up', why: `output still down after ${w.restarts} restarts; not retrying (fix OBS, then run stop and start)` });
+    }
+  } else if (outputActive) {
+    w.outputDownSince = undefined;
+    w.upSince ??= now;
+    if (now - w.upSince >= RESTART_STABLE_MS) { w.restarts = 0; w.gaveUp = false; }
+  }
   for (const a of actions) if (a.do === 'reload') w.lastReloadAt = now;
   return actions;
 }
@@ -299,6 +316,10 @@ async function start({ url, record }) {
   if (readState()) throw new Error('a stream is already set up here; run `stop` first');
   const port = cdpPort();
   const dir = stateDir();
+  const recordDir = env.SOULS_STREAM_RECORD_DIR && resolve(env.SOULS_STREAM_RECORD_DIR);
+  if (recordDir) {
+    try { mkdirSync(recordDir, { recursive: true }); } catch (e) { throw new Error(`cannot create the recording folder SOULS_STREAM_RECORD_DIR (${e.code ?? e.message})`); }
+  }
   mkdirSync(dir, { recursive: true });
 
   // 1. Chrome for Testing: its own profile, an app window on the stream URL, no throttling when covered or in the background.
@@ -347,7 +368,7 @@ async function start({ url, record }) {
   if (!profiles.profiles.includes(NAME)) await obs.call('CreateProfile', { profileName: NAME });
   await switchTo(obs, 'profile', NAME);
   for (const [parameterCategory, parameterName, parameterValue] of PROFILE_PARAMS) await obs.call('SetProfileParameter', { parameterCategory, parameterName, parameterValue });
-  if (env.SOULS_STREAM_RECORD_DIR) await obs.call('SetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'FilePath', parameterValue: env.SOULS_STREAM_RECORD_DIR });
+  if (recordDir) await obs.call('SetProfileParameter', { parameterCategory: 'SimpleOutput', parameterName: 'FilePath', parameterValue: recordDir });
   await obs.call('SetVideoSettings', { baseWidth: WIDTH, baseHeight: HEIGHT, outputWidth: WIDTH, outputHeight: HEIGHT, fpsNumerator: FPS, fpsDenominator: 1 });
   // OBS picks the output mode and encoder when a profile is activated, so switch away and back.
   await switchTo(obs, 'profile', user.profile);
@@ -390,6 +411,10 @@ async function start({ url, record }) {
   // 4. Start the output, then the watchdog in the background.
   const oc = outputCalls(record);
   await obs.call(oc.start);
+  // OBS answers StartRecord/StartStream before it knows whether the output opened (a bad path only shows a dialog).
+  let active = false;
+  for (let i = 0; i < 10 && !active; i++) { await wait(500); active = (await obs.call(oc.status)).outputActive; }
+  if (!active) throw new Error(`OBS did not start the ${oc.label} within 5 s (look for an OBS dialog${record ? ', for example about the recording path' : ''}); run stop`);
   log(`${oc.label} started`);
   obs.close();
   const logPath = join(dir, 'watch.log');
@@ -485,8 +510,8 @@ async function watch() {
       } else if (a.do === 'restart-output' && obs) {
         log(`watchdog: restart ${oc.label}: ${a.why}`);
         const r = await obs.raw(oc.start);
-        log(r.requestStatus.result ? `watchdog: ${oc.label} restarted` : `watchdog: restart failed: ${r.requestStatus.code} ${r.requestStatus.comment ?? ''}`);
-      }
+        log(r.requestStatus.result ? `watchdog: ${oc.label} start requested` : `watchdog: restart failed: ${r.requestStatus.code} ${r.requestStatus.comment ?? ''}`);
+      } else if (a.do === 'give-up') log(`watchdog: ${a.why}`);
     }
     await wait(2000);
   }

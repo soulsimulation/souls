@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
-  parseArgs, parseEnvFile, cftDownload, chooseScreen, OUTPUT_GRACE_MS, loadSecrets, redact, log, obsAuth, pickWindow, captureTransform, streamUrl, watchDecision,
+  parseArgs, parseEnvFile, cftDownload, chooseScreen, OUTPUT_GRACE_MS, RESTART_DELAYS_MS, RESTART_STABLE_MS, loadSecrets, redact, log, obsAuth, pickWindow, captureTransform, streamUrl, watchDecision,
   STALL_MS, RELOAD_EVERY_MS, PROFILE_PARAMS, CHROME_FLAGS,
 } from './stream.mjs';
 
@@ -131,4 +131,33 @@ test('cftDownload picks the stable Chrome for Testing build for this Mac', () =>
   assert.deepEqual(cftDownload(versions, 'arm64'), { version: '157-stable-test', platform: 'mac-arm64', url: 'https://example.invalid/mac-arm64.zip', app: join('chrome-mac-arm64', 'Google Chrome for Testing.app') });
   assert.equal(cftDownload(versions, 'x64').platform, 'mac-x64');
   assert.throws(() => cftDownload({ channels: {} }, 'arm64'), /no Chrome for Testing build/);
+});
+
+test('watchdog: output restarts back off, stop after 3 attempts with one give-up, and reset once the output holds', () => {
+  const w = { lastFrames: undefined, lastProgressAt: 0, lastReloadAt: 0 };
+  const seen = [];
+  // The output never comes back: poll every 2 s for 10 minutes, frames flowing so no reloads.
+  for (let now = 0; now <= 600_000; now += 2000) {
+    for (const a of watchDecision(w, { now, frames: now, outputActive: false })) seen.push([now, a.do]);
+  }
+  assert.deepEqual(seen.map(([, d]) => d), ['restart-output', 'restart-output', 'restart-output', 'give-up']);
+  const t = seen.map(([n]) => n);
+  assert.ok(t[0] >= OUTPUT_GRACE_MS);
+  assert.ok(t[1] - t[0] >= RESTART_DELAYS_MS[1] && t[2] - t[1] >= RESTART_DELAYS_MS[2], 'each attempt waits longer');
+  // Once it runs for RESTART_STABLE_MS, a later drop gets fresh attempts.
+  let now = 602_000;
+  for (; now <= 602_000 + RESTART_STABLE_MS; now += 2000) assert.deepEqual(watchDecision(w, { now, frames: now, outputActive: true }), []);
+  const after = [];
+  for (let end = now + 10_000; now <= end; now += 2000) after.push(...watchDecision(w, { now, frames: now, outputActive: false }).map((a) => a.do));
+  assert.deepEqual(after, ['restart-output']);
+});
+
+test('watchdog: a restart that holds only briefly does not reset the attempt count', () => {
+  const w = { lastFrames: undefined, lastProgressAt: 0, lastReloadAt: 0 };
+  let restarts = 0;
+  for (let now = 0; now <= 1_200_000; now += 2000) {
+    const up = Math.floor(now / 20_000) % 2 === 1; // up 20 s, down 20 s, forever
+    restarts += watchDecision(w, { now, frames: now, outputActive: up }).filter((a) => a.do === 'restart-output').length;
+  }
+  assert.equal(restarts, RESTART_DELAYS_MS.length);
 });
