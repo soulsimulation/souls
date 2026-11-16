@@ -14,8 +14,8 @@
     },
     "media": {
       "kind": "video",
-      "url": "https://github.com/soulsimulation/souls/releases/download/proofs/pr-493.12-ben-wash-the-cup.mp4",
-      "poster": "https://github.com/soulsimulation/souls/releases/download/proofs/pr-493.mugs-empty-empty-clean.jpg",
+      "url": "https://assets.eden.art/public-journal/pr-493/12-ben-wash-the-cup.mp4",
+      "poster": "https://assets.eden.art/public-journal/pr-493/mugs-empty-empty-clean.jpg",
       "alt": "Ben washes a cup in a historical local test world.",
       "status": "available"
     }
