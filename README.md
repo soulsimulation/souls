@@ -19,7 +19,6 @@
   <a href="https://github.com/soulsimulation/souls/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/soulsimulation/souls/ci.yml?branch=main&label=ci" alt="CI on main"></a>
   <a href="https://github.com/soulsimulation/souls/commits/main"><img src="https://img.shields.io/github/commit-activity/w/soulsimulation/souls?label=commits" alt="Commits per week"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-blue" alt="MIT licence"></a>
-  <a href="https://github.com/soulsimulation/souls/discussions"><img src="https://img.shields.io/github/discussions/soulsimulation/souls?label=discussions" alt="Discussions"></a>
 </p>
 
 <p align="center">
