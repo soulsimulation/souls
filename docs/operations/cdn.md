@@ -207,9 +207,41 @@ the launcher keyed that request on (an entry that is not an address answers `nul
 the `ip=` line of `/cdn-cgi/trace` on the same name), `forged` (the same with a forged `X-Forwarded-For`), `viewer`
 (a viewer WebSocket gets its welcome), `agent` (a request with no browser headers to `/__sim/healthz` and a token-less
 `POST /w/<world>/v1/edge/act` get the launcher's JSON, not a challenge), `events` (the first event of
-`/w/<world>/v1/edge/events` within 5 s) and `ranges` (the snippet's ranges equal the published lists). It prints each
-problem and PASS or FAIL. Tests: `node --test tools/world-launcher/check-soul-game.test.mjs` (A1/A2 need `caddy` on
-`PATH` or in `$CADDY`).
+`/w/<world>/v1/edge/events` within 5 s), `ranges` (the snippet's ranges equal the published lists) and `cache` (the
+cache rule below: the world page's script bundle, its first snapshot part, a release-stable file, `--stable`, default
+`/mars-assets/draco/draco_decoder.wasm`, and the snapshot under the page's own key, each requested twice with the
+second a `HIT`; the snapshot under a stale key is `no-store` and never a hit). It prints each problem and PASS or FAIL;
+`--points cache` runs one point. Edge caches are per site, so a hit here says nothing about other locations. Tests:
+`node --test tools/world-launcher/check-soul-game.test.mjs` (A1/A2 need `caddy` on `PATH` or in `$CADDY`) and
+`node --test tools/cdn/origin-cache.test.mjs` (the rule, and the `cache` point through a stand-in CDN).
+
+### The cache rule
+
+A CDN caches by file extension by default and never JSON or extension-less paths, so the content-addressed parts,
+profile photos and the snapshot would read `DYNAMIC`, and the release's `cdn-walk` fails any hashed or release-stable
+response that does (`tools/cdn/origin-cache.mjs`). One cache rule in the `soul.game` zone fixes that. Its paths are
+`CDN_CACHE_RULE` in `origin-cache.mjs`, derived from the same classes the release checks plus the keyed snapshot; the
+test checks that this page carries `cdnRuleExpression()` exactly:
+
+```
+http.host eq "soul.game" and ((http.request.uri.path strict wildcard "/w/*/v1/world/part/*" or http.request.uri.path strict wildcard "/w/*/v1/souls/*/profile-photo/*" or http.request.uri.path strict wildcard "/w/*/v1/world/snapshot") or ((http.request.uri.path strict wildcard "/assets/*" or http.request.uri.path strict wildcard "/w/*/assets/*" or http.request.uri.path strict wildcard "/w/*/art/*" or http.request.uri.path strict wildcard "/modular/*" or http.request.uri.path strict wildcard "/mars-assets/*" or http.request.uri.path strict wildcard "/world-assets/*" or http.request.uri.path strict wildcard "*.wasm" or http.request.uri.path strict wildcard "*.woff" or http.request.uri.path strict wildcard "*.woff2" or http.request.uri.path strict wildcard "*.ttf" or http.request.uri.path strict wildcard "*.otf") and not http.request.uri.path contains "/v1/" and not http.request.uri.path contains "/__sim/"))
+```
+
+| Setting | Value |
+|---|---|
+| Cache eligibility | Eligible for cache |
+| Edge TTL | Use cache-control header if present, bypass cache if not |
+| Browser TTL | Respect origin TTL |
+| Cache key | The default (the query string is part of it: the snapshot's `v=` key is) |
+
+The rule only makes these paths eligible; the origin's `Cache-Control` decides. Bundles, stored objects, parts, art and
+photos are `immutable` for a year, release-stable files keep an hour or more, and the snapshot is
+`public, max-age=0, s-maxage=86400` only when `?v=` is the world's current key (`apps/server/src/edge-snapshot.ts`),
+`no-store` otherwise, so a stale or invented key never enters the cache. A `no-store`, `private` or header-less answer
+on an eligible path is never kept. No path that can answer per user is eligible: the static patterns never match under
+`/v1/` or `/__sim/`, and the three API reads are public by design (moderation-filtered, no auth read). The page,
+`/v1/config` and the world list stay outside it. Add no rule that bypasses everything else: other paths keep the CDN's
+default, which also respects the origin's headers.
 
 ### Hands-on steps, in this order
 
@@ -247,7 +279,8 @@ The release never writes Caddy's configuration. Do these once, after a release t
    INSTALL
    ```
 
-   Before the record is proxied, the check fails only `address` (no trace page yet); `forged` must already pass.
+   Before the record is proxied, the check fails only `address` (no trace page yet) and `cache` (no cache status);
+   `forged` must already pass.
 2. **Turn off bot challenges and script rewriting** in the CDN zone: no Bot Fight Mode, managed challenge, Browser
    Integrity Check or challenge rule on `/v1/*`, `/w/*/v1/*`, `/__sim/*` or the page, and no Rocket Loader, Email
    Obfuscation, minification or injected scripts on any path. Agents' command-line clients, the release's health
@@ -255,7 +288,8 @@ The release never writes Caddy's configuration. Do these once, after a release t
    script order.
 3. **Keep the sign-in records unproxied** (DNS only): Clerk's records for the domain must answer from Clerk.
 4. **TLS mode Full (strict)**: the CDN connects to the origin over HTTPS and checks Caddy's certificate.
-5. **Switch the `soul.game` record to proxied, together with E2's cache rules** (never one without the other).
+5. **Switch the `soul.game` record to proxied, together with [the cache rule](#the-cache-rule)** (never one without
+   the other: without the rule the next release's `cdn-walk` fails).
 6. **Soak**: run `check-soul-game.mjs` from outside until it prints PASS, then keep it and the release's health checks
    running through a busy period. The CDN restarts sockets without notice, so viewer bars are measured at the origin.
 7. **Last, restrict the firewall** so ports 80 and 443 accept only the ranges in `cdn-trust.snippet`. Leave SSH as it

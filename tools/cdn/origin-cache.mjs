@@ -48,3 +48,34 @@ export function originCacheProblem({ path, status, headers }) {
   if ((cf === 'DYNAMIC' || cf === 'BYPASS') && !revalidated) return `Cloudflare ${cf} for an origin ${cls} asset: ${path}`;
   return null;
 }
+
+// The CDN cache rule for soul.game (E2): the paths a shared cache may keep, derived from the classes above (in their
+// root-launcher form; soul.game has no /worlds prefix) plus the keyed snapshot (apps/server/src/edge-snapshot.ts). The
+// rule only makes a path eligible; the origin's Cache-Control decides (edge TTL "use the header if present, bypass if
+// not"), so a no-store, private or header-less answer on an eligible path is never kept. No path that can answer per
+// user is listed: the static patterns never match under /v1/ or /__sim/, and the three API reads are public by design
+// (moderation-filtered, no auth read). docs/operations/cdn.md carries cdnRuleExpression() verbatim (the test checks).
+export const CDN_CACHE_RULE = {
+  host: 'soul.game',
+  // static files: Vite bundles and content-addressed objects (HASHED 1, 2, 4), release-stable files (STABLE)
+  files: ['/assets/*', '/w/*/assets/*', '/w/*/art/*', '/modular/*', '/mars-assets/*', '/world-assets/*', '*.wasm', '*.woff', '*.woff2', '*.ttf', '*.otf'],
+  // public reads: snapshot parts (HASHED 3), profile photos (HASHED 5), the snapshot (s-maxage only for the current ?v= key)
+  api: ['/w/*/v1/world/part/*', '/w/*/v1/souls/*/profile-photo/*', '/w/*/v1/world/snapshot'],
+  never: ['/v1/', '/__sim/'],   // no static pattern matches a path containing these
+};
+// The CDN's `strict wildcard`: `*` is any run of characters, slashes included; the rest is literal and case-sensitive,
+// matched against the whole path without its query string.
+const wild = (pattern) => new RegExp('^' + pattern.split('*').map((s) => s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+const RULE_FILES = CDN_CACHE_RULE.files.map(wild), RULE_API = CDN_CACHE_RULE.api.map(wild);
+/** Whether the documented rule makes a path eligible for the CDN's cache (the origin's headers still decide). */
+export function cdnCacheEligible(path) {
+  const p = path.split('?')[0];
+  if (RULE_API.some((r) => r.test(p))) return true;
+  return RULE_FILES.some((r) => r.test(p)) && !CDN_CACHE_RULE.never.some((s) => p.includes(s));
+}
+/** The rule as the CDN's filter expression, exactly as docs/operations/cdn.md gives it. */
+export function cdnRuleExpression() {
+  const any = (list) => list.map((x) => `http.request.uri.path strict wildcard "${x}"`).join(' or ');
+  const not = CDN_CACHE_RULE.never.map((x) => `not http.request.uri.path contains "${x}"`).join(' and ');
+  return `http.host eq "${CDN_CACHE_RULE.host}" and ((${any(CDN_CACHE_RULE.api)}) or ((${any(CDN_CACHE_RULE.files)}) and ${not}))`;
+}
