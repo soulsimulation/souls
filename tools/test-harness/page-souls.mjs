@@ -77,7 +77,7 @@ export function renderReport(res) {
     '| Souls | tier | camera | rep | frame p50 | frame p95 | fps | >33 ms | draws p50 | tris p50 (k) | GPU ms p50 | heap MB | geometries / textures | long tasks (n / ms / max) | Souls in page | load 1m |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'];
   for (const r of res.rows) {
     if (r.error) { L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.repeat} | error: ${String(r.error).replace(/\|/g, '/').slice(0, 120)} |||||||||||||`); continue; }
-    L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.repeat} | ${r.frame.p50} | ${r.frame.p95} | ${r.frame.fps} | ${r.frame.over33} | ${r.draws.p50 ?? ''} | ${r.draws.trisP50k ?? ''} | ${r.gpu.p50 ?? '-'} | ${r.mem.heapMB ?? ''} | ${r.mem.geometries ?? ''} / ${r.mem.textures ?? ''} | ${r.long.n} / ${r.long.totalMs} / ${r.long.max} | ${r.page.souls ?? ''} | ${r.host.load1} |`);
+    L.push(`| ${r.souls} | ${r.tier} | ${r.camera} | ${r.repeat} | ${r.frame.p50} | ${r.frame.p95} | ${r.frame.fps} | ${r.frame.over33} | ${r.draws.p50 ?? ''} | ${r.draws.trisP50k ?? ''} | ${r.gpu.p50 ?? '-'} | ${r.mem.heapMB ?? ''} | ${r.mem.geometries ?? ''} / ${r.mem.textures ?? ''} | ${r.long.n} / ${r.long.totalMs} / ${r.long.max} | ${r.page.souls ?? ''} | ${r.host.start.load1} |`);
   }
   L.push('', 'Size at which the median frame time passes 33 ms (30 frames a second):', '');
   for (const [k, v] of Object.entries(res.crossings)) L.push(`- ${k}: ${v}`);
