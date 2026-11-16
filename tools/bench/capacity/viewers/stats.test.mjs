@@ -87,6 +87,7 @@ test('#2511 first motion: a take with a chunk, read from the head of the message
   assert.deepEqual(firstMotion(m, [], 0, 10_000), { n: 2, missed: 1, p50S: 3, p95S: 'none' });
   assert.deepEqual(firstMotion(m.slice(0, 2), [{ at: 9000 }], 0, 10_000), { n: 2, missed: 0, p50S: 1, p95S: 3 });   // waiting under 5 s: not yet a miss
   assert.deepEqual(firstMotion([], [], 0, 10_000), { n: 0, missed: 0, p50S: null, p95S: null });
+  assert.equal(firstMotion([{ at: 1, ms: 7770 }], [], 0, 10).p50S, 7.77);   // no float tail (run 43826328779 printed 7.7700000000000005)
 });
 
 test('#2511 one window: viewers held, churn, acts against intended, heap', () => {
@@ -102,4 +103,8 @@ test('#2511 one window: viewers held, churn, acts against intended, heap', () =>
   const zero = windowFigures({ samples: samples.map((s) => ({ ...s, viewersLive: 0 })), acts: [], v0: c(0, 0, 0), v1: c(0, 0, 0), viewers: 0, calls: [], from: 1000, to: 21_000 });
   assert.equal(zero.viewersOut.bytesPerViewerPerS, null);
   assert.equal(zero.actsAchieved.intended, null);
+  // the world restarted inside the window (runs 43826332638, 43826345411): no CPU share across two processes
+  const again = windowFigures({ samples: samples.map((s, i) => ({ ...s, pid: i < 2 ? 10 : 11, cpuS: [50, 60, 1][i] })), acts: [], v0: c(0, 0, 0), v1: c(0, 0, 0), viewers: 200, calls: [], from: 1000, to: 21_000 });
+  assert.deepEqual([again.world.cpuShare, again.world.restarted], [null, true]);
+  assert.equal(w.world.restarted, false);
 });

@@ -44,6 +44,8 @@ export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to,
   const bytes = v1.bytes - v0.bytes;
   // cores used over the window by one sampled process clock (`cpuS`, `launcherCpuS`, `driverCpuS`); null without two readings
   const share = (k) => (first && last && Number.isFinite(first[k]) && Number.isFinite(last[k]) && last.at > first.at ? r3((last[k] - first[k]) / ((last.at - first.at) / 1000)) : null);
+  // #2511: a world process that restarted inside the window (another pid) has no CPU share across it; say so instead
+  const restarted = new Set(inW.map((s) => s.pid).filter(Number.isInteger)).size > 1;
   // #2511: viewers actually held over the window (sampled), and per-viewer rates over that mean, not over the target
   const live = inW.map((s) => s.viewersLive).filter(Number.isFinite), held = live.length ? live.reduce((x, y) => x + y, 0) / live.length : viewers;
   const heaps = inW.map((s) => s.live?.heap?.usedMb).filter(Number.isFinite), intended = actSec && souls ? (souls * secs) / actSec : null;
@@ -61,7 +63,7 @@ export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to,
     amberS: { service: r1(sum('service')), loop: r1(sum('loop')), heap: r1(sum('heap')), dwell: r1(sum('dwell')) },
     acts: { n: a.length, ok: ok.length, queueMs: { p50: r1(quantile(ok.map((x) => x.queueMs), 0.5)), p95: r1(quantile(ok.map((x) => x.queueMs), 0.95)) },
       handlerMs: { p50: r1(quantile(handler, 0.5)), p99: r1(quantile(handler, 0.99)) }, waitMs: { p50: r1(quantile(ok.map((x) => x.waitMs), 0.5)), p99: r1(quantile(ok.map((x) => x.waitMs), 0.99)) }, clientMs: { p50: r1(quantile(ok.map((x) => x.clientMs), 0.5)), p99: r1(quantile(ok.map((x) => x.clientMs), 0.99)) }, refused: refusedActs },
-    world: { cpuShare: share('cpuS'), rssMb: r1(last?.rssMb ?? null), heapUsedMb: last?.live?.heap?.usedMb ?? null },
+    world: { cpuShare: restarted ? null : share('cpuS'), restarted, rssMb: r1(last?.rssMb ?? null), heapUsedMb: last?.live?.heap?.usedMb ?? null },
     launcher: { cpuShare: share('launcherCpuS'), rssMb: r1(last?.launcherRssMb ?? null) },
     driver: { cpuShare: share('driverCpuS') },
     viewersOut: { bytesPerViewerPerS: held ? Math.round(bytes / held / secs) : null, messagesPerViewerPerS: held ? r1((v1.messages - v0.messages) / held / secs) : null,
@@ -116,6 +118,6 @@ export function takesChunks(s) {
 export function firstMotion(motion, waiting, from, to) {
   const inW = motion.filter((m) => m.at >= from && m.at <= to), seen = inW.filter((m) => m.ms != null).map((m) => m.ms).sort((x, y) => x - y);
   const missed = inW.length - seen.length + waiting.filter((w) => w.at >= from && w.at <= to - 5000).length, all = seen.length + missed;
-  const q = (p) => { if (!all) return null; const i = Math.min(all - 1, Math.max(0, Math.ceil(p * all) - 1)); return i < seen.length ? r1(seen[i] / 100) / 10 : 'none'; };
+  const q = (p) => { if (!all) return null; const i = Math.min(all - 1, Math.max(0, Math.ceil(p * all) - 1)); return i < seen.length ? Math.round(seen[i] / 10) / 100 : 'none'; };
   return { n: seen.length, missed, p50S: q(0.5), p95S: q(0.95) };
 }
