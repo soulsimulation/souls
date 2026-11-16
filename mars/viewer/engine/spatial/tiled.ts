@@ -355,14 +355,25 @@ export class GroundNav {
 
   /** One tile's fine level-0 raster: ground media, then obstacles in the body band above the ground there, then the exact EDT. */
   fineTile(tx: number, tz: number, rel: Obstacle[], key = this.keyOf(tx, tz, rel), keep = true): FineTile {
-    return drain(this.fineTileSteps(tx, tz, rel, key, keep));
+    const b0 = this.stats.fineBuilds, t0 = performance.now();
+    const t = drain(this.fineTileSteps(tx, tz, rel, key, keep));
+    if (this.stats.fineBuilds !== b0) { const ms = performance.now() - t0, A = GroundNav.a11; A.syncBuilds++; A.syncBuildMs += ms; if (ms >= 100) A.syncBuilds100++; if (ms > A.syncBuildMax) A.syncBuildMax = ms; }
+    return t;
   }
+  /** #2601 Step 0 (measurement branch only): misses by kind and a shadow LRU per candidate size. */
+  static a11 = { keptReads: 0, keptHits: 0, cold: 0, rebuilt: 0, transient: 0, transientHits: 0, syncBuilds: 0, syncBuildMs: 0, syncBuilds100: 0, syncBuildMax: 0,
+    seen: new Set<string>(), sizes: [24, 32, 41, 48, 64, 96, 128, 256], shadow: [24, 32, 41, 48, 64, 96, 128, 256].map(() => new Map<string, 1>()), shadowHits: [0, 0, 0, 0, 0, 0, 0, 0] };
   /** A resumable cold tile. No partial raster enters the cache; synchronous callers drain the same builder.
    * The caller must abandon an unfinished iterator if its field or obstacle inputs change (NavConnectivity checks epochs).
    * The EDT runs in pieces of 64 lines (edtSteps). The crop and a cold GroundField.mediaTile remain atomic, so this is not
    * a hard wall-time bound. */
   *fineTileSteps(tx: number, tz: number, rel: Obstacle[], key = this.keyOf(tx, tz, rel), keep = true): Generator<void, FineTile> {
     const hit = this.fine.get(key);
+    { const A = GroundNav.a11;
+      if (keep) { A.keptReads++; if (hit) A.keptHits++;
+        for (let i = 0; i < A.sizes.length; i++) { const m = A.shadow[i], cap = Math.max(A.sizes[i], this.fineMax); if (m.has(key)) { m.delete(key); m.set(key, 1); A.shadowHits[i]++; } else { m.set(key, 1); while (m.size > cap) m.delete(m.keys().next().value!); } }
+        if (!hit) { if (A.seen.has(key)) A.rebuilt++; else { A.cold++; A.seen.add(key); } } }
+      else if (hit) A.transientHits++; else A.transient++; }
     // keep = false reads a hit without refreshing it: the audit's sweep must not age the tiles the engine's windows use
     if (hit) { if (keep) { this.fine.delete(key); this.fine.set(key, hit); } this.stats.fineHits++; return hit; }
     this.stats.fineBuilds++;

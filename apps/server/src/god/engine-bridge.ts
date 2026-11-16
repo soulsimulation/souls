@@ -51,6 +51,8 @@ import { GodActivitySpots } from './activity-spots.ts';
 import { GodMeals } from './meals.ts';
 import { installGodRides } from './rides.ts';
 import { releaseBigScratch } from '../../../../mars/viewer/engine/spatial/path.ts';
+import { GroundNav } from '../../../../mars/viewer/engine/spatial/tiled.ts';
+import { NavConnectivity } from '../../../../mars/viewer/engine/spatial/connectivity.ts';
 import { MAX_LEVEL_ID } from '../../../../mars/viewer/engine/spatial/types.ts';
 import { pointInObb, type OBB2 } from '../../../../mars/viewer/engine/core/math.ts';
 import { installWorldLore } from './world-lore.ts';
@@ -178,6 +180,24 @@ export type BridgeOptions = { host: WorldHost; god: GodMode; edge?: EdgeLedger; 
 /** What the boot record says about one snapshot: written by `build`, the engine's physics derived from the god model at
  *  `editSeq` with nothing pending, and the door facts the derive would have found (the only state a skipped derive keeps). */
 export type BootRecordV1 = { contract: 'boot-reconcile/1'; worldId: string; build: string; tick: number; stateHash: string; editSeq: number; physicsHash: string; doorIds: string[]; gated: string[]; /** deriveInputs() */ inputs: string };
+
+/** #2601 Step 0 (measurement branch only): one `[a11] {json}` line a minute: fine-tile reads, hits and builds by kind, the
+ *  shadow LRUs' hits per size, the connectivity label cache's, floor and piece builds, the fine cache's size and the heap. */
+let a11Last: Record<string, number> = {};
+function a11Line(b: EngineBridge): string {
+  const g = ((b.host.engine as unknown as { rt?: { services?: { spatial?: { ground?: GroundNav } } } }).rt?.services?.spatial?.ground);
+  const A = GroundNav.a11, C = NavConnectivity.a11, st = g?.stats ?? ({} as Record<string, number>);
+  const cur: Record<string, number> = { fineBuilds: st.fineBuilds ?? 0, fineHits: st.fineHits ?? 0, floorBuilds: st.floorBuilds ?? 0, floorHits: st.floorHits ?? 0, pieceBuilds: st.pieceBuilds ?? 0, pieceHits: st.pieceHits ?? 0,
+    keptReads: A.keptReads, keptHits: A.keptHits, cold: A.cold, rebuilt: A.rebuilt, transient: A.transient, transientHits: A.transientHits, syncBuilds: A.syncBuilds, syncBuildMs: A.syncBuildMs, syncBuilds100: A.syncBuilds100,
+    labelReads: C.reads, labelHits: C.hits };
+  A.sizes.forEach((n, i) => { cur[`shadow${n}`] = A.shadowHits[i]; }); C.sizes.forEach((n, i) => { cur[`label${n}`] = C.shadowHits[i]; });
+  const out: Record<string, number> = {}; for (const k in cur) out[k] = Math.round(cur[k] - (a11Last[k] ?? 0));
+  a11Last = cur;
+  const fine = (g as unknown as { fine?: Map<string, unknown> } | undefined)?.fine;
+  out.syncBuildMax = Math.round(A.syncBuildMax); A.syncBuildMax = 0;
+  out.fineSize = fine?.size ?? -1; out.fineMax = g?.fineMax ?? -1; out.seen = A.seen.size; out.heapMB = Math.round(process.memoryUsage().heapUsed / 2 ** 20);
+  return `[a11] ${JSON.stringify(out)}`;
+}
 
 /** Load lane L4: per-step ms of the bridge's tick work, the tick-ms distribution and the derived-work counters since the
  *  last line. Only built with SIM_L4_STATS=1. */
@@ -1267,7 +1287,9 @@ export class EngineBridge {
     if (this.evacuatedEdit !== this.editTick && tick - this.editTick >= 10) { this.evacuatedEdit = this.editTick; this.evacuateSites(); if (S) t = S.add('evacuate', t); }
     if (this.rescued !== this.editTick && tick - this.editTick >= 10 && (tick - this.editTick >= 20 || tick - this.rescuedAt >= 40)) { this.rescuedAt = tick; this.rescueTrapped(); if (S) t = S.add('rescue', t); }
     if (S && S.due()) this.log(S.line(this));
+    if (performance.now() - this.a11At >= 60_000) { this.a11At = performance.now(); this.log(a11Line(this)); }
   }
+  private a11At = performance.now();
   private loadStats = process.env.SIM_L4_STATS === '1' ? new BridgeStats() : null;
   private perceiveSync(now = false) { try { if (now) this.perceive.sync(); else this.perceive.ensure(); } catch (e) { this.log(`perceive: ${(e as Error).message}`); } }
   /** G1 (tranche 2026-10-19): what Souls perceive of god edits (built objects, the places layer) catches up off the

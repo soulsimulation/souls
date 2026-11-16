@@ -133,6 +133,8 @@ export class NavConnectivity {
   private base = new Map<string, number>();
   private rootSize = new Map<number, number>();
   private lru = new Map<string, RasterLabels>();
+  /** #2601 Step 0 (measurement branch only): label reads, hits and a shadow LRU per candidate size. */
+  static a11 = { reads: 0, hits: 0, sizes: [8, 16, 24, 32, 48], shadow: [8, 16, 24, 32, 48].map(() => new Map<string, 1>()), shadowHits: [0, 0, 0, 0, 0] };
   private mediaMemo = new Map<string, 0 | 1 | 2>();
   /** Level-0 labels changed since the last join (a budgeted update can stop part way). */
   private dirty = true;
@@ -382,6 +384,8 @@ export class NavConnectivity {
     const b = this.base.get(id)!;
     if (t.uniform === 1) return { tile: id, b, label: 0, clear: 9 };
     let hit = this.patchTiles?.get(t.key) ?? this.lru.get(t.key);
+    { const A = NavConnectivity.a11; A.reads++; if (hit) A.hits++;
+      for (let i = 0; i < A.sizes.length; i++) { const m = A.shadow[i]; if (m.has(t.key)) { m.delete(t.key); m.set(t.key, 1); A.shadowHits[i]++; } else { m.set(t.key, 1); while (m.size > A.sizes[i]) m.delete(m.keys().next().value!); } } }
     if (!hit) {
       const g = this.spatial.ground!, te = g.tileEntry(tx, tz, this.scene.obstacles);
       if (te.key !== t.key) return OFF;   // the world changed since update(): unlabelled
