@@ -92,7 +92,8 @@ Music switch shows what is actually sounding: Off, Starting…, On, or **Tap to 
 back. That happens when `play()` was refused or a context stayed suspended or interrupted, as on iOS after the page was
 in the background. The speaker button then carries an amber dot. Any tap resumes the contexts and retries from the same
 place. A held-back piece is never counted as a broken file (#1389). Preferences persist in the browser; the existing file/synthesis playback, positional
-world sounds, ducking and tab audio focus remain in use. Muting effects silences world sounds while leaving music's
+world sounds, ducking and tab audio focus remain in use. Only one Souls tab sounds at a time: the newest one seen,
+focused or touched. It keeps sounding while hidden, so switching to another site or app changes nothing you hear (#2467). Muting effects silences world sounds while leaving music's
 switch independent. A previously saved master mute migrates to both switches off, preserving silence. Menus support Tab, arrow keys, Escape, outside clicks and touch.
 
 ## The world launcher (`tools/world-launcher`)
