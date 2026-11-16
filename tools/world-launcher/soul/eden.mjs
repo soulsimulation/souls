@@ -3668,7 +3668,7 @@ return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, h
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.36.0";
+const VERSION = "2.36.1";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
