@@ -1,6 +1,7 @@
 import type {EdgeLedger} from '../ledger/ledger.ts';
 import type {EdgeCapability,EdgeSoul} from '../contract.ts';
 import {strictCheck} from '../intents/strict.ts';
+import {isRigidBody} from '../body/actions.ts';
 import {resolveBootPlace,normalizedPlaceName,type KnownBootPlace,type DestinationCapability} from './place-resolution.ts';
 // Declared name aliases are public authored vocabulary, never fuzzy choices.
 const ALIASES:Readonly<Record<string,readonly string[]>>={
@@ -27,15 +28,31 @@ export function offersOfVerb(L:EdgeLedger,soul:EdgeSoul,verb:string):EdgeCapabil
  if(verb==='walk'&&typeof L.bindFocus==='function')return L.bindFocus(soul,{ids:new Set(),verbs:new Set(['walk']),targets:new Set()}).caps;
  return L.coreA.binds(soul).caps;
 }
+/** #2528 (design step 3): the walk offers an act on `walk:<place id>` that is not offered reads, as the whole walk listing
+ *  holds them: every walk to that place (resolvePlaceForVerb, by id) and every walk to a thing whose label is the asked
+ *  words (offeredWalkObject). GodNav builds no other walk (focus.walkKeep: no standing point, no route check); the world's
+ *  other walks are built as before. A body whose menu renames its walks after they are built (shapeRigidCapabilities: a
+ *  floater, a creature, a declared profile) keeps every thing walk, since its labels are not yet final there. */
+export function placeIdWalks(L:EdgeLedger,soul:EdgeSoul,placeId:string,input:string):EdgeCapability[]{
+ const q=normalizedPlaceName(input),me=(L.mw.world.entities as Record<string,{body?:{family?:string;actionProfile?:string}}|undefined>)[soul.entityId];
+ const renames=isRigidBody(me as never)||!!me?.body?.actionProfile;
+ const keep=(c:Pick<EdgeCapability,'label'|'target'>)=>c.target?.kind==='place'?c.target.id===placeId:c.target?.kind==='object'&&(renames||thingLabelIs(c.label,q));
+ return L.bindFocus(soul,{ids:new Set(),verbs:new Set(['walk']),targets:new Set(),walkKeep:{sig:`2528|${placeId}|${renames?1:0}|${q}`,keep}}).caps;
+}
+/** offeredWalkObject's match of a thing walk's label: the words exactly, or with an article. */
+const thingLabelIs=(label:string,q:string)=>{const l=normalizedPlaceName(label);return l===q||q==='the '+l;};
 export function destinationOffers(caps:readonly EdgeCapability[],verb:string):DestinationCapability[]{return caps.filter(c=>c.verb===verb&&c.target?.kind==='place').map(c=>({id:c.id,placeId:c.target!.id,available:c.available,blocked:c.blocked}));}
-export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,verb='walk',known?:()=>KnownBootPlace[]){
- const caps=offersOfVerb(L,soul,verb),offers=destinationOffers(caps,verb);
+export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,verb='walk',known?:()=>KnownBootPlace[],walks?:{place:string;caps:()=>EdgeCapability[]}){
  const places=known?.()??knownBootPlaces(L,soul.soulId);
  // #2124: the tries below read only `ok` and `chosen`, so they skip the refusal's similarity hints (most of an act on a far
  // place's id at 24 Souls: three tries, the on-demand one succeeding); a refusal returned is asked again in full, as before
  // #2528: an input that is a known place's id resolves to that place whatever the others are called (`ok`, `chosen` and the
  // code read here depend on it alone), so these tries read it alone instead of normalising every place's names three times
  const byId=typeof input==='string'?places.find(p=>p.id===input.trim()):undefined,tries=byId?[byId]:places;
+ // #2528 (step 3): ... and, without hints, they read only that place's offers: `walks` (placeIdWalks) holds every walk to
+ // it, so they read those; the full walk listing is built only for a refusal's hints (`all`)
+ let full:EdgeCapability[]|null=null;const all=()=>full??=offersOfVerb(L,soul,verb);
+ const caps=walks&&verb==='walk'&&byId?.id===walks.place?walks.caps():all(),offers=destinationOffers(caps,verb);
  let resolved=resolveBootPlace(input,tries,offers,'auto',false);
  // F6 (SOULSIM-H): a known place the listing leaves out for distance only (a far building's room: rooms are listed within
  // 80 m) gets its one walk on demand, as words do: the capability it names is then acted as offered (see explicitPlaceCapability)
@@ -43,11 +60,11 @@ export function resolvePlaceForVerb(L:EdgeLedger,soul:EdgeSoul,input:unknown,ver
   const named=resolveBootPlace(input,tries,tries.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),more=[...caps];
   if(named.ok&&places.find(p=>p.id===named.chosen.place)?.access==='admitted'&&L.walkOnDemand(soul,named.chosen.place,more,new Map())){const again=resolveBootPlace(input,tries,destinationOffers(more,verb),'auto',false);if(again.ok)resolved=again;}
  }
- if(!resolved.ok)resolved=resolveBootPlace(input,places,offers);
+ if(!resolved.ok)resolved=resolveBootPlace(input,places,destinationOffers(all(),verb));
  // #2452: refreshing changes nothing here (the world just said what it offers now): the refusal names the nearest place a walk
  // reaches instead, as `next`; a client whose copy is stale says to refresh itself
  if(!resolved.ok&&verb==='walk'&&resolved.code==='place.unwalkable'){
-  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),near=named.ok?nearestOffer(L,named.chosen.place,offers):null;
+  const named=resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})),'auto',false),near=named.ok?nearestOffer(L,named.chosen.place,destinationOffers(all(),verb)):null;
   return {...resolved,reason:resolved.reason.replace(/; refresh capabilities\.$/,'.')+` No walk reaches it from the destinations offered now${near?`; the nearest place one reaches is ${near.label} (${near.id})`:''}.`,...(near?{next:near.id}:{})};
  }
  return resolved;
@@ -64,8 +81,8 @@ function nearestOffer(L:EdgeLedger,placeId:string,offers:readonly DestinationCap
 export function lookupPlaceIdentity(L:EdgeLedger,input:unknown,soulId?:string){const places=knownBootPlaces(L,soulId).map(p=>({...p,access:'admitted' as const}));return resolveBootPlace(input,places,places.map(p=>({placeId:p.id,id:p.id,available:true})));}
 /** Legacy go-to-object names remain distinct from authored place names. Exact
  * offered labels win over aliases, but same-stage ambiguity never picks nearest. */
-export function offeredWalkObject(L:EdgeLedger,soul:EdgeSoul,input:string,known?:()=>KnownBootPlace[]){
- const q=normalizedPlaceName(input),caps=offersOfVerb(L,soul,'walk').filter(c=>c.target?.kind==='object');
+export function offeredWalkObject(L:EdgeLedger,soul:EdgeSoul,input:string,known?:()=>KnownBootPlace[],walks?:()=>EdgeCapability[]){
+ const q=normalizedPlaceName(input),caps=(walks?.()??offersOfVerb(L,soul,'walk')).filter(c=>c.target?.kind==='object');
  const exact=caps.filter(c=>normalizedPlaceName(c.label)===q),objects=exact.length?exact:caps.filter(c=>q==='the '+normalizedPlaceName(c.label));
  if(!objects.length)return null;
  const places=known?.()??knownBootPlaces(L,soul.soulId);
@@ -90,13 +107,16 @@ export function explicitPlaceCapability(L:EdgeLedger,soul:EdgeSoul,asked:string,
  if(verb==='walk'&&target.includes('/')&&L.onDemandId?.(soul,asked))return null;
  // #2528: the Soul's known places, built once for this act (each step below built them again: two or three times an act)
  let kp:KnownBootPlace[]|null=null;const known=()=>kp??=knownBootPlaces(L,soul.soulId);
- if(verb==='walk'){const object=offeredWalkObject(L,soul,target,known);if(object)return object.ok?null:object;}
+ // #2528 (step 3): a known place's id builds, of every walk, only that place's and the thing walks its words could name
+ const place=verb==='walk'&&typeof L.bindFocus==='function'?known().find(p=>p.id===target.trim())?.id:undefined;
+ let pw:EdgeCapability[]|null=null;const walks=place?{place,caps:()=>pw??=placeIdWalks(L,soul,place,target)}:undefined;
+ if(verb==='walk'){const object=offeredWalkObject(L,soul,target,known,walks?.caps);if(object)return object.ok?null:object;}
  // (#2528: ids first, the same answer: a known place's id needs no name normalised)
  const q=normalizedPlaceName(target),named=known().some(p=>p.id===target)||known().some(p=>normalizedPlaceName(p.name)===q||p.aliases.some(a=>normalizedPlaceName(a)===q));
  // Preserve strict/1 unknown-ID diagnostics without blocking declared idlike aliases. #2528: the whole menu only for a refusal
  if(!named){const strict=strictCheck(L,soul,asked,caps);if(strict)return L.onDemandId?.(soul,asked)?null:{ok:false as const,...strict};}
  if(!named&&verb!=='walk'&&verb!=='stroll'&&verb!=='gather'&&verb!=='hang-out')return null;
- const r=resolvePlaceForVerb(L,soul,target,verb,known);
+ const r=resolvePlaceForVerb(L,soul,target,verb,known,walks);
  // F6: the asked ID is itself the walk offered on demand: act/resolve read it as an offered ID (it is not in the listing)
  return r.ok&&r.chosen.capability===asked?null:r;
 }

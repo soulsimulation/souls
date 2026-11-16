@@ -1,5 +1,6 @@
 // #2528 A1: an act's place capability (explicitPlaceCapability) builds the Soul's known places once, the whole menu only
-// when a refusal needs its "did you mean" list, and no walk offer it does not read. The oracle: over a corpus from Eden
+// when a refusal needs its "did you mean" list, and no walk offer it does not read (an id that is a known place's: that
+// place's walks and the thing walks whose label could be the id, placeIdWalks). The oracle: over a corpus from Eden
 // 2026 (every offered walk id, known places by id that are not offered, unknown ids and words, and ambiguous words: names
 // two places share, and things whose walk label is also a place's name or alias), the capability or refusal, with its code
 // and did_you_mean list, equals the path as it was before (frozen below, verbatim but for imports).
@@ -88,7 +89,7 @@ function oldExplicitPlaceCapability(L: EdgeLedger, soul: EdgeSoul, asked: string
 /** Every case's answer by both paths, compared whole (ok, code, reason, did_you_mean, chosen, next), with ms by kind, and
  *  the refusal codes seen. A `cold` kind takes a tick before each case, so the new path meets no menu built this tick (its
  *  focused builds run, as in an act), and the old path then reads the same state. */
-function compare(L: EdgeLedger, soul: EdgeSoul, corpus: Record<string, string[]>, what: string, tick: () => void) {
+function compare(L: EdgeLedger, soul: EdgeSoul, corpus: Record<string, string[]>, what: string, tick: () => void, need = ['place.ambiguous', 'capability.unknown']) {
   const bad: string[] = [], ms: Record<string, {old: number; now: number; n: number}> = {}, codes = new Set<string>();
   for (const [kind, ids] of Object.entries(corpus)) for (const asked of ids) {
     if (kind.startsWith('cold')) tick();
@@ -96,11 +97,11 @@ function compare(L: EdgeLedger, soul: EdgeSoul, corpus: Record<string, string[]>
     const t0 = performance.now(), b = JSON.stringify(explicitPlaceCapability(L, soul, asked)), t1 = performance.now(), a = JSON.stringify(oldExplicitPlaceCapability(L, soul, asked)), t2 = performance.now();
     const m = ms[kind] ??= {old: 0, now: 0, n: 0}; m.now += t1 - t0; m.old += t2 - t1; m.n++;
     if (a !== b) bad.push(`${kind} ${asked}: was ${a.slice(0, 240)} | now ${b.slice(0, 240)}`);
-    const code = (JSON.parse(a) as {code?: string} | null)?.code; if (code) codes.add(code);
+    const code = (JSON.parse(a) as {code?: string} | null)?.code; codes.add(code ?? (a === 'null' ? 'null' : 'ok'));
   }
   assert.deepEqual(bad.slice(0, 6), [], `${what}: ${bad.length} answers differ`);
   // the refusals the change could drop are in the corpus and answered (the issue's footgun: place.ambiguous)
-  for (const c of ['place.ambiguous', 'capability.unknown']) assert.ok(codes.has(c), `${what}: no answer was ${c}`);
+  for (const c of need) assert.ok(codes.has(c), `${what}: no answer was ${c}`);
   return Object.fromEntries(Object.entries(ms).map(([k, m]) => [k, `${m.n} cases, ms per case was ${(m.old / m.n).toFixed(2)} now ${(m.now / m.n).toFixed(2)}`]));
 }
 
@@ -133,6 +134,19 @@ function corpusOf(L: EdgeLedger, soul: EdgeSoul): Record<string, string[]> {
   };
 }
 
+/** #2528 step 3's boundary: an asked id that is a known place's id and also a thing walk's label (exactly, after an article,
+ *  in other case), where that thing walk is offered now or is not (`earlier`: labels of an earlier listing, at other
+ *  distances). Eden 2026 has no such id, so a place is added for each (no outline, no region: scenery) and removed after;
+ *  without step 3's label test the act would refuse it place.unwalkable instead of acting on the thing's walk. */
+function labelPlaceCases(L: EdgeLedger, soul: EdgeSoul, earlier: readonly string[] = []) {
+  const now = L.coreA.binds(soul).caps.filter(c => c.verb === 'walk' && c.target?.kind === 'object').map(c => c.label), listed = new Set(now);
+  const offered = now.filter((_, i) => i % 3 === 0).flatMap(l => [l, 'the ' + l, l.toUpperCase()]), gone = [...new Set(earlier)].filter(l => !listed.has(l)).slice(0, 40);
+  const added = [...new Set([...offered, ...gone])].filter(id => !L.places.byId.has(id));
+  added.forEach((id, i) => L.places.byId.set(id, {id, name: `Label place ${i}`, kind: 'area', parent: null, polygon: [], level: 0, enclosed: false, capacity: null, starting: false}));
+  return {labels: now, undo: () => {for (const id of added) L.places.byId.delete(id);},
+    corpus: {'place id is an offered thing walk\'s label': offered.map(l => 'walk:' + l), 'place id is a thing walk label not offered now': gone.map(l => 'walk:' + l)}};
+}
+
 test('#2528 A1: an act\'s place capability or refusal is the old path\'s, over Eden 2026\'s places, things and words', {timeout: 900_000, skip: NO_EDEN}, async t => {
   const w = await bootEden(); t.after(() => w.close());
   const L = w.edge as unknown as EdgeLedger, host = w.host, soul = w.soul as EdgeSoul;
@@ -144,11 +158,20 @@ test('#2528 A1: an act\'s place capability or refusal is the old path\'s, over E
   t.diagnostic(JSON.stringify(Object.fromEntries(Object.entries(corpus).map(([k, v]) => [k, v.length]))));
   const tick = () => host.tickOnce();
   t.diagnostic('arrival ' + JSON.stringify(compare(L, soul, corpus, 'arrival', tick)));
+  const labelled = (what: string, earlier?: string[]) => {
+    const c = labelPlaceCases(L, soul, earlier);
+    try {t.diagnostic(`${what}, label ids ` + JSON.stringify(compare(L, soul, c.corpus, `${what}, label ids`, tick, ['null'])));} finally {c.undo();}
+    return c;
+  };
+  const first = labelled('arrival');
+  assert.ok(first.corpus['place id is an offered thing walk\'s label'].length > 10, 'Eden 2026 offers thing walks');
   // and after a walk (another place, other offers)
   const go = L.coreA.binds(soul).caps.filter(c => c.verb === 'walk' && c.available && c.target?.kind === 'place')[5];
   if (go) {
     const r = await (await import('../../../test/native-owner-fixture.ts')).accept(host, L.act(soul, {capability: go.id})) as {accepted?: boolean}; assert.equal(r.accepted, true);
     for (let i = 0; i < 12 && L.openReceipts(soul.soulId).length; i++) await run(25);
     t.diagnostic(`after ${go.id} ` + JSON.stringify(compare(L, soul, corpusOf(L, soul), `after ${go.id}`, tick)));
+    const after = labelled(`after ${go.id}`, first.labels);
+    assert.ok(after.corpus['place id is a thing walk label not offered now'].length > 0, 'the walk changed which thing walks are offered');
   }
 });
