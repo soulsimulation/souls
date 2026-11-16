@@ -29,7 +29,10 @@ loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds
 Each settings file holds one line, `SIM_WORLDS_ARGS=...`: the port, the world port range, data directory, public
 origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`, `--world-heap-mb`, `--create-limit`).
 `--unload-still 1` lets still worlds leave memory and come back on a request or their alarm
-([worlds](architecture/worlds.md), #2299); it stays off (`0`, the default) in production until its proof task has passed.
+([worlds](architecture/worlds.md), #2299). Off by default. Without the arg, the launcher takes the setting from
+`<data>/launcher-settings.json` (`{"unloadStill":1}`), which it reads once at its start, so a reload picks up a change.
+`install.sh unload-still <stage> <0|1>` writes or removes that file; a release sets it with
+[`unload_still`](release.md#the-release-workflow).
 Their recorded horizons are `<data>/horizons.json`.
 At most `--load-parallel` worlds load at once (default 4); the rest wait in order: a Soul's act or a god call, a
 visitor's connection, an alarm for a listening agent, a wind-down alarm, then anything else (keep-alive, monitors),

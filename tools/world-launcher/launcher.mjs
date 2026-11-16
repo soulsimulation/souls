@@ -134,6 +134,17 @@ import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThum
 /** The world's heap cap (lane L1, LOAD-CONTRACT §4: per world from the registry, registry.mjs worldHeapMb). A node child gets
  *  it as its own command-line flag, so a NODE_OPTIONS the auth env file sets (tests' preloads) still applies and a heap
  *  flag there loses to this one; any other command gets it in NODE_OPTIONS. */
+/** <data>/launcher-settings.json (written by deploy/install.sh unload-still), read once at each launcher's start, so a
+ *  reload (the keeper's new generation) picks up a change without touching the stage's conf: { unloadStill: 0|1 }.
+ *  Absent: {}. Unreadable or a bad value: {} (the args' defaults), said in the log. */
+export function launcherSettings(dataDir, log = () => {}) {
+  const f = join(dataDir, 'launcher-settings.json');
+  let j; try { j = JSON.parse(readFileSync(f, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') log(`launcher-settings.json unreadable (${e.message}); the args' defaults apply`); return {}; }
+  const v = j?.unloadStill;
+  if (v !== 0 && v !== 1 && v !== true && v !== false) { log(`launcher-settings.json: unloadStill must be 0 or 1 (got ${JSON.stringify(v)}); the args' defaults apply`); return {}; }
+  log(`launcher-settings.json: unloadStill ${v ? 1 : 0}`);
+  return { unloadStill: v === 1 || v === true };
+}
 export function withHeap(d, heapMb) {
   const flag = `--max-old-space-size=${heapMb}`;
   // one cap only: any heap flag already in the child's NODE_OPTIONS goes (an env file's loses to the command line anyway)
@@ -311,7 +322,10 @@ export async function openLauncher(cfg = {}) {
    *  alarm loads it at moveWallMs, or at untilWallMs while a resident reads it. Times are cfg-overridable for tests.
    *  #2367 A1: the alarm loads it leadMs before its next deadline of any kind (a reminder, a plan step, a body's move:
    *  untilWallMs), listener or not, so the deadline is met by the world running, not by its next visitor. */
-  const unloadStill = cfg.unloadStill === true;
+  // the 0.130 switch: an explicit cfg.unloadStill (--unload-still) wins; else <data>/launcher-settings.json, read once here
+  const fileSettings = cfg.unloadStill !== undefined ? {} : launcherSettings(dataDir, log);
+  const unloadStill = cfg.unloadStill !== undefined ? cfg.unloadStill === true : fileSettings.unloadStill === true;
+  log(`unload-still ${unloadStill ? 1 : 0} (${cfg.unloadStill !== undefined ? 'the --unload-still arg' : fileSettings.unloadStill !== undefined ? 'launcher-settings.json' : 'the default'})`);
   const STILL = { leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
   const horizonsFile = join(dataDir, 'horizons.json');
   const horizons = new Map((() => { try { return Object.entries(JSON.parse(readFileSync(horizonsFile, 'utf8'))); } catch { return []; } })());

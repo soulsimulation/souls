@@ -55,7 +55,7 @@ function setup() {
   // build, browser and manifest tools
   script(join(t, 'stubs/node'), `printf 'node\\t%s\\n' "$*" >> ${log}\nif [ -n "\${STUB_FAIL:-}" ] && [[ "$*" == *"$STUB_FAIL"* ]]; then exit 1; fi\ncase "$1" in *release-probe.mjs)\n  while [ $# -gt 0 ]; do [ "$1" = --out ] && out="$2"; shift; done\n  mkdir -p "$out"; touch "$out/ready"\n  for i in $(seq 1 600); do { [ -e "$out/released" ] || [ -e "$out/stop" ]; } && break; sleep 0.05; done\n  exit "\${STUB_PROBE_RC:-0}";;\nesac\nexit 0`);
   script(join(t, 'stubs/python'), `printf 'python\\t%s\\n' "$*" >> ${log}`);
-  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s noinstall=%s\\n' "$*" "$SIM_WORLDS_BASE" "\${SIM_RELEASE_NO_INSTALL:-}" >> ${log}\n[ -z "\${STUB_EYES_WARN:-}" ] || echo "WARN edenEyes: degraded (\$STUB_EYES_WARN)"\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
+  script(join(t, 'stubs/release'), `printf 'release\\t%s base=%s noinstall=%s\\n' "$*" "$SIM_WORLDS_BASE" "\${SIM_RELEASE_NO_INSTALL:-}" >> ${log}\n[ -z "\${STUB_EYES_WARN:-}" ] || echo "WARN edenEyes: degraded (\$STUB_EYES_WARN)"\nmkdir -p ${t}/lane/${build} ${root}/releases/${build}/tools/world-launcher/deploy\necho manifest > ${t}/lane/${build}/RELEASE-MANIFEST.json\necho manifest > ${root}/releases/${build}/RELEASE-MANIFEST.json\nprintf '${keeperSource}' > ${root}/releases/${build}/tools/world-launcher/keeper.mjs\ncp ${root}/releases/${PREV}/tools/world-launcher/deploy/activate.sh ${root}/releases/${build}/tools/world-launcher/deploy/activate.sh\ncp ${join(HERE, 'deploy/install.sh')} ${root}/releases/${build}/tools/world-launcher/deploy/install.sh\nR=${root}/releases/${build}; mkdir -p $R/apps/server/src $R/node_modules; : > $R/apps/server/src/main.ts; echo ${build} > $R/BUILD\necho 'export const defaultCommand = (w) => ({ env: { WORLD_KEY: w.slug, ANTHROPIC_API_KEY: "never-written" } });' > $R/tools/world-launcher/children.mjs\ncp ${t}/fake-boot-rehearsal.mjs $R/tools/world-launcher/deploy/boot-rehearsal.mjs`);
   // the staged tree's boot-rehearsal.mjs: a world whose data dir has a halt-<dir> flag halts, a nofinish-<dir> one crashes
   writeFileSync(join(t, 'fake-boot-rehearsal.mjs'), `import { existsSync, readFileSync, appendFileSync } from 'node:fs'; import { basename, dirname } from 'node:path';
 const a = process.argv.slice(2), db = a[a.indexOf('--db') + 1], dir = basename(dirname(db)), envf = a.includes('--env-file') ? a[a.indexOf('--env-file') + 1] : null;
@@ -547,4 +547,57 @@ test('#1438 B1: the real pre-activation check refuses a stale ready and a failed
   assert.equal(c.r.status, 1); assert.doesNotMatch(c.s.calls(), /^activate\t/m);
   c = check([{ context: 'release/eyes', state: 'pending', description: 'run=5.1 ready', updated_at: ago(20_000) }]);
   assert.equal(c.r.status, 0, c.r.stdout); assert.equal(c.live, join(c.s.root, 'releases', c.s.build)); assert.ok(existsSync(join(c.s.out, 'ACTIVATING')));
+});
+
+// The 0.130 switch: install.sh unload-still writes or removes <data>/launcher-settings.json (the launcher reads it at its
+// start, so the activation's reload picks it up) and never touches the conf, which ship's drift guard hashes.
+test('install.sh unload-still: 1 writes the settings file, again replaces it, 0 removes it or leaves none, a bad value or stage is refused; the conf is never touched', () => {
+  const t = mkdtempSync(join(tmpdir(), 'unload-still-')), etc = join(t, 'etc'), data = join(t, 'data'), conf = join(etc, 'production.conf'), file = join(data, 'launcher-settings.json');
+  mkdirSync(etc); mkdirSync(data);
+  const args = `--base / --port 4620 --data ${data} --max-worlds 60`; writeFileSync(conf, `PORT=1\nSIM_WORLDS_ARGS=${args}\n`);
+  const confSha = sha256(readFileSync(conf, 'utf8'));
+  const run = (a, env = {}) => spawnSync('bash', [join(HERE, 'deploy/install.sh'), 'unload-still', ...a], { env: { ...process.env, SIM_ETC: etc, ...env }, encoding: 'utf8' });
+  let r = run(['production', '1']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(file, 'utf8'), '{"unloadStill":1}\n');
+  assert.match(r.stdout, /was {2}\(none: the default, off\)\n {4}now {2}\{"unloadStill":1\}/);
+  assert.match(r.stdout, /takes effect when the stage's launcher next starts: the next reload \(handover\) or restart/);
+  r = run(['production', '1']); assert.equal(r.status, 0); assert.match(r.stdout, /was {2}\{"unloadStill":1\}/, 'set again: replaced, the same');
+  assert.deepEqual(readdirSync(data), ['launcher-settings.json'], 'no temp file left (atomic write)');
+  r = run(['production', '0']); assert.equal(r.status, 0); assert.ok(!existsSync(file), '0 removes it'); assert.match(r.stdout, /now {2}\(none: the default, off\)/);
+  r = run(['production', '0']); assert.equal(r.status, 0, 'absent and 0: left alone'); assert.ok(!existsSync(file));
+  for (const bad of [['production', '2'], ['production', 'yes'], ['production'], ['legacy', '1']]) { r = run(bad); assert.equal(r.status, 2, bad.join(' ')); assert.ok(!existsSync(file), `${bad.join(' ')}: nothing written`); }
+  assert.equal(sha256(readFileSync(conf, 'utf8')), confSha, 'the conf is never touched');
+  // an explicit --unload-still in the conf wins over the file, and says so; SIM_SETTINGS_DATA names the data dir (ship.sh)
+  writeFileSync(conf, `SIM_WORLDS_ARGS=${args} --unload-still 0\n`);
+  r = run(['production', '1']); assert.match(r.stdout, /sets --unload-still itself, which wins over this file/);
+  const other = join(t, 'other'); mkdirSync(other);
+  r = run(['staging', '1'], { SIM_SETTINGS_DATA: other });
+  assert.equal(r.status, 0, r.stdout); assert.ok(existsSync(join(other, 'launcher-settings.json')), 'no staging conf: the data dir given');
+  r = run(['staging', '1']);
+  assert.equal(r.status, 1, 'no conf and no data dir: refused'); assert.match(r.stdout, /nothing changed/);
+});
+
+test('release.sh --unload-still refuses a bad value, --local and a stage without install, before anything runs', () => {
+  for (const [args, env] of [[['staging', '--unload-still', '2'], {}], [['--local', join(tmpdir(), 'never'), '--unload-still', '1'], {}], [['production', '--no-activate', '--unload-still', '1'], { SIM_RELEASE_NO_INSTALL: '1' }], [['legacy', '--unload-still', '1'], {}]]) {
+    const r = spawnSync('bash', [join(HERE, 'deploy/release.sh'), ...args], { env: { ...process.env, SIM_DEPLOY_ENV: '/nonexistent', SIM_DEPLOY_HOST: '', ...env }, encoding: 'utf8' });
+    assert.equal(r.status, 2, args.join(' ')); assert.match(r.stdout, /--unload-still <0\|1>: 0 or 1, for staging or production, with install/);
+  }
+  assert.match(readFileSync(join(HERE, 'deploy/release.sh'), 'utf8'), /\$\{UNLOAD:\+ && bash \$REL\/tools\/world-launcher\/deploy\/install\.sh unload-still \$STAGE \$UNLOAD\}/, 'run during install, before the activation');
+});
+
+test('ship.sh --unload-still: written on the host right before the activation (whose conf and drift guards still pass), only said with --no-switch, refused when not 0 or 1', () => {
+  let s = setup(), r = s.run([...s.base, '--unload-still', '1']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(readFileSync(join(s.t, 'host/data/launcher-settings.json'), 'utf8'), '{"unloadStill":1}\n');
+  const calls = s.calls(), write = calls.indexOf('install.sh unload-still production 1');
+  assert.ok(write > calls.indexOf('compact-backup.sh') && write < calls.indexOf('activate\t'), 'after the backup and the probe, before the reload');
+  assert.match(r.stdout, /unload-still 1: writes <data>\/launcher-settings\.json right before the activation/);
+  s = setup(); r = s.run([...s.base, '--no-switch', '--unload-still', '1'], { SHIP_RECEIPTS: '' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!existsSync(join(s.t, 'host/data/launcher-settings.json')), '--no-switch writes nothing');
+  assert.doesNotMatch(s.calls(), /install\.sh unload-still/);
+  assert.match(r.stdout, /\(install\.sh unload-still production 1 is not run\)/);
+  s = setup(); r = s.run([...s.base, '--unload-still', 'yes']);
+  assert.equal(r.status, 2); assert.match(r.stdout + r.stderr, /--unload-still: 0 or 1/); assert.equal(s.calls(), '', 'nothing ran');
 });

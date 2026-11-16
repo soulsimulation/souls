@@ -3,7 +3,7 @@
 # release is live and says what is live, and after it is live it keeps collecting evidence and reports every failure.
 #
 #   tools/world-launcher/deploy/ship.sh --label <version> --sha <full sha> [--dry-run | --no-switch] [--no-eyes] [--from <step>] [--out <dir>]
-#                                       [--accept-host-codes <code,...>]
+#                                       [--accept-host-codes <code,...>] [--unload-still <0|1>]
 #     --label    the release, such as 0.123. Backups are pre-r0123-production-*, the outputs <out>
 #     --sha      the commit to ship: must be HEAD, clean and on origin/main
 #     --dry-run  prints every step and its commands; touches nothing remote and writes nothing. Exit 1 if a guard would stop
@@ -18,6 +18,10 @@
 #     --out      outputs (default $SHIP_OUT_ROOT/<label>)
 #     --accept-host-codes  the snapshot passes with hostOk false only when every public hostCode is in this list, such as
 #                halted for a release that fixes a halted world (#1356). Recorded in snapshot.json; any other code refuses
+#     --unload-still  1 writes, 0 removes, the host's <data>/launcher-settings.json (deploy/install.sh unload-still) right
+#                before the activation, so the new launcher the reload starts reads it. The conf is not touched, so the
+#                drift guard stands. --dry-run and --no-switch only say what they would write. A rollback is code only:
+#                the file stays (a build from before 0.130 does not read it)
 #
 # The host and every operator path come from the environment or an untracked deploy.env (docs/release.md has the table).
 # Steps: preflight snapshot stage rehearse backup probe-start activate probe-check healthz walks poster stall cdn-walk
@@ -38,15 +42,16 @@ STEPS="snapshot stage rehearse backup probe-start healthz walks poster stall cdn
 EYES_STEPS="probe-start probe-check walks poster stall"
 
 usage() { sed -n '5,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
-LABEL=""; SHA=""; DRY=0; NOSWITCH=0; NOEYES=0; FROM=""; OUT=""; ACCEPT=""
+LABEL=""; SHA=""; DRY=0; NOSWITCH=0; NOEYES=0; FROM=""; OUT=""; ACCEPT=""; UNLOAD=""
 while [ $# -gt 0 ]; do case "$1" in
-  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --no-eyes) NOEYES=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;;
+  --label) LABEL="${2:-}"; shift;; --sha) SHA="${2:-}"; shift;; --dry-run) DRY=1;; --no-switch) NOSWITCH=1;; --no-eyes) NOEYES=1;; --from) FROM="${2:-}"; shift;; --out) OUT="${2:-}"; shift;; --accept-host-codes) ACCEPT="${2:-}"; shift;; --unload-still) UNLOAD="${2:-}"; shift;;
   *) usage;; esac; shift; done
 [ -n "$LABEL" ] && [ -n "$SHA" ] || usage
 [ "$DRY$NOSWITCH" != 11 ] || { echo "--dry-run and --no-switch: pick one"; exit 2; }
 case "$LABEL" in *[!A-Za-z0-9._-]*) echo "--label: letters, digits, ., - and _ only"; exit 2;; esac
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "--sha: the full 40-character commit"; exit 2; }
 [[ -z "$ACCEPT" || "$ACCEPT" =~ ^[a-z][a-zA-Z0-9:_-]*(,[a-z][a-zA-Z0-9:_-]*)*$ ]] || { echo "--accept-host-codes: comma-separated host codes, such as halted"; exit 2; }
+[[ -z "$UNLOAD" || "$UNLOAD" =~ ^[01]$ ]] || { echo "--unload-still: 0 or 1"; exit 2; }
 if [ -n "$FROM" ]; then case " $STEPS " in *" $FROM "*) ;; *) echo "--from: one of $STEPS (activation always runs with a fresh probe, from probe-start)"; exit 2;; esac; fi
 TAG="${LABEL//./}"; BUILD="we-${SHA:0:12}"; OUT="${OUT:-$OUT_ROOT/$LABEL}"; PDIR="$OUT/probe"; REL="$HOST_ROOT/releases/$BUILD"; MANIFEST="$RELEASE_DIR/$BUILD/RELEASE-MANIFEST.json"
 HOST="$(deploy_target 2>/dev/null)" || HOST=""
@@ -116,6 +121,7 @@ say "ship $BUILD (label $LABEL)$([ "$DRY" = 1 ] && echo ' -- DRY RUN: nothing re
 [ "$NOEYES" = 0 ] || say "   --no-eyes: the probe, walks, poster and stall run on a GPU workstation (ship/eyes.mjs), not here"
 say "   outputs $OUT${FROM:+; resuming at $FROM}"
 [ -z "$ACCEPT" ] || say "   accepting host codes at the snapshot: $ACCEPT (recorded in snapshot.json; any other code refuses)"
+[ -z "$UNLOAD" ] || say "   unload-still $UNLOAD: $([ "$UNLOAD" = 1 ] && echo writes || echo removes) <data>/launcher-settings.json right before the activation$([ "$NOSWITCH" = 1 ] && echo ' (--no-switch: not written)')"
 
 # ---- 1 preflight: every guard, on every run, resumed or not ---------------------------------------------------------
 N=1; CUR=preflight; say ""; say "== [1/$NSTEPS] preflight: guards (local only)"
@@ -239,6 +245,7 @@ if step activate "$ACT_WHAT" && [ "$NOSWITCH" = 1 ]; then
     drift
   fi
   preactivate
+  [ -z "$UNLOAD" ] || say "   + (install.sh unload-still production $UNLOAD is not run)"
   say "   + (host-activate.sh is not run)"; released
   [ "$DRY" = 1 ] || printf 'activate skipped-no-switch %s\n' "$(date -u +%H:%M:%SZ)" >> "$OUT/STEPS.txt"
 elif [ "$STARTED" = 1 ]; then
@@ -250,6 +257,8 @@ elif [ "$STARTED" = 1 ]; then
     A="$(node -p 'const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.argv[1])),u=JSON.parse(fs.readFileSync(process.argv[2]));[s.previousBuild,u.manifestSha256,s.remote.worlds,s.remote.configurationSha256].join(" ")' "$OUT/snapshot.json" "$OUT/upload-receipt.json")"
   else A='<previous> <manifest sha256> <worlds> <config sha256>'; fi
   preactivate
+  # the setting the new launcher reads at its start (the reload below starts it); a data-dir file, outside the conf's hash
+  if [ -n "$UNLOAD" ]; then x rsh "SIM_SETTINGS_DATA=$(printf '%q' "$HOST_DATA") bash $REL/tools/world-launcher/deploy/install.sh unload-still production $UNLOAD" || die "install.sh unload-still failed; nothing was activated"; fi
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
   # from here a stop is not "before the release": the host may have switched (release.yml reads this marker)
   [ "$DRY" = 1 ] || date -u +%FT%TZ > "$OUT/ACTIVATING"
