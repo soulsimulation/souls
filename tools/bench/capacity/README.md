@@ -129,6 +129,37 @@ node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n6 --sho
 node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n1,n24,n50,n100 --raw-from 4 [--profile stress] --out <dir>
 ```
 
+## Load shapes (`profiles/shapes.json`, #2556)
+
+One shared, seeded description of uneven load, so every scaling measurement runs an even arm and an uneven one and
+two runs of the same shape replay the same load. The numbers are in [`profiles/shapes.json`](profiles/shapes.json),
+each with its source or marked as an estimate; they are judgement, not data, and change there with evidence, never
+in a bench. [`profiles/shapes.mjs`](profiles/shapes.mjs) turns a shape, a count of joined Souls, a window and a seed
+into a schedule:
+
+```js
+import { schedule, describe } from './profiles/shapes.mjs';
+const s = schedule('event', 100, 600, seed);   // 'uniform' takes { actSec } as a fifth argument (--act-sec)
+// s.agents[i] = { arrive, leave, stays: [[from, to)], acts: [{ at, kind, place, pick, crowd? }] }, seconds from the start
+console.log(describe(s.summary, 'event'));      // what was offered: acts a second, busiest tenth, largest burst, arrivals
+```
+
+| shape | present | rate per agent | in time | arriving and leaving | crowds | place | mix |
+|---|---|---|---|---|---|---|---|
+| `uniform` | all | equal (`--act-sec`) | today's paced loop | all from the start | none | spread | the paced loop's |
+| `everyday` | 25 % | log-normal, median 1 per 30 s, capped at 1 per 2 s | runs of 1–4 acts 2–4 s apart, then a pause | from the start | none | spread | the paced loop's |
+| `event` | 80 % | the same | the same | half ramp in over 2 min; every 5 min a tenth leave and others return | 30 % of those present act within 2 s, every 45–120 s | 60 % of walks near one named place | social: speech, gestures, sitting, short walks |
+
+The schedule is open loop: an act is due at its time whether or not the last one was answered, so a bench reports
+achieved against intended (`summary.perS` is the intended count for each second). `kind` is a kind of
+`meetup/client-soul.mjs` `catalogIds` (`walk`, `sit`, `sit-ground`, `read`, `eat`, `play-music`, `gesture`) or `say`
+(speech, sent to `SAY_PATH` with `sayBody`); `place` is `spread` (a walk target around the map), `gathered` (a walk
+target within `place.radiusM` of the bench's one named place) or null; `pick` chooses among the bench's ids for that
+kind. Agents' rates are stratified over the log-normal, so every seed carries the whole tail. At 100 joined Souls over
+10 minutes (seeds 1–40) `event` offers about 5.4 acts a second, the busiest tenth of present agents make 43 % of them
+and the largest one-second burst is 4.6 times the mean; `everyday` offers about 1.7. The `viewers` section gives
+arrival rate, waves and a heavy-tailed stay (median 60 s) for the viewer benches.
+
 ## Meetup workload (CW1, #735: 50 Souls across 10 worlds)
 
 `meetup/` is the near-term product as a workload: ten substantial worlds from `worlds/templates/` behind the
