@@ -196,24 +196,32 @@ export type DoorFitReport = { buildings: number; doors: number; left: string[]; 
  *  refused (`bodies.refuse`); under legal-edits/1 its preview breaking a rule on a Soul, or a Soul in its way or using what
  *  it changes, refuses it (`bodies.legal`, its preview waited for off the tick thread, at most three rounds); and without
  *  legal-edits/1 an edit the walk-out planner would walk a resident out of the way for is refused too (`bodies.prepare`,
- *  dry: it moves nobody), since a fit never walks anyone. `inverse` undoes the edit (the fit's revert). */
-export async function fitAct(god: GodMode, ops: Op[], note: string): Promise<{ r: Result; inverse: Op[] }> {
+ *  dry: it moves nobody, and one that leaves a resident stuck in its way), since a fit never walks anyone; and the god's
+ *  own guard (`actGuard`: no deck or stair flight someone stands on is moved or removed under them). `inverse` undoes the
+ *  edit. A `cleanup` edit (a door taken out again, a prop move or the whole fit undone: it puts back what was there before
+ *  the fit) is gated only by `bodies.refuse` and `actGuard`, so a Soul who stepped near meanwhile does not keep a cut-off
+ *  building fitted. */
+export async function fitAct(god: GodMode, ops: Op[], note: string, o: { cleanup?: boolean } = {}): Promise<{ r: Result; inverse: Op[]; diff?: Diff }> {
   try {
     for (let round = 0; ; round++) {
       let pending = false, diff: Diff | undefined, inverse: Op[] = [];
       const r = god.engineAct(ops, note, undefined, undefined, (before, after, d, inv) => {
         diff = d; inverse = inv;
+        const guard = god.actGuard?.({ ops }); if (guard) return guard;
         const b = god.bodies; if (!b) return null;
         const own = b.refuse?.(after, d, ops); if (own) return { accepted: false, failures: [own] };
+        if (o.cleanup) return null;
         const legal = b.legal?.(before, after, d);
         if (legal === 'pending') { pending = true; return { accepted: false, failures: [{ op: -1, code: FIT_PENDING, field: 'legal-edits/1', detail: 'checked off the tick thread first' }] }; }
         if (legal) return { accepted: false, failures: legal };
-        const moved = b.prepare?.(before, after, d, ops, { dry: true }).moved ?? [];
+        // dry, the plan's warnings are the residents stuck in its way (it has nowhere to walk them)
+        const plan = b.prepare?.(before, after, d, ops, { dry: true }), moved = plan?.moved ?? [], stuck = plan?.warnings ?? [];
+        if (stuck.length) return { accepted: false, failures: stuck.map((w): Failure => ({ op: -1, code: 'body.in-the-way', field: 'door-fit', detail: w })) };
         return moved.length ? { accepted: false, failures: moved.map((m): Failure => ({ op: -1, code: 'body.in-the-way', entity: m.body, field: 'door-fit', detail: `${m.name} is in this fit's way (${m.reason}).` })) } : null;
       });
       if (pending && round < 3 && god.bodies?.legalRun) { const refused = await god.bodies.legalRun(); if (refused) return { r: { accepted: false, failures: refused }, inverse: [] }; continue; }
       if (r.accepted && diff) projectProviders.get(god.model)?.(diff);
-      return { r, inverse };
+      return r.accepted ? { r, inverse, diff } : { r, inverse: [] };
     }
   } finally { god.bodies?.legalDone?.(); }
 }
@@ -409,8 +417,9 @@ function* fitOps2(god: GodMode, e: Entity, bodies: Vec2[], all: readonly HandObs
   return { ...fit, held, flipped, moved, moves, freed, adopted: adopted.length, ops: ops(), fresh: () => read.every((x) => m.entities.get(x.id) === x) && m.subtree(e.id).length === sub.length };
 }
 
-/** How long (ms) a slice of a boot fit may hold the thread before it turns the event loop. */
-const SLICE_MS = 100;
+/** How long (ms) a slice of a boot fit runs before it turns the event loop (#2462: half #2433's 100 ms turn budget,
+ *  as a step already begun runs on past it). */
+const SLICE_MS = 50;
 /** Runs generator `g` to its end, turning the event loop whenever a slice has held the thread `SLICE_MS`. */
 async function sliced<T>(g: Generator<void, T>, what: string, o: FitSlices, pause: () => Promise<void>): Promise<T> {
   let t = performance.now();
@@ -506,7 +515,7 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
     const standing = walk?.bodies ? walk.bodies(() => true).map((b): [number, number, number] => [b.p[0], b.p[1], b.y]) : bodiesNow().map((b): [number, number, number] => [b[0], b[1], NaN]);
     const inWay = fit.placed.find((w) => standing.some(([x, z, y]) => (Number.isNaN(y) || Math.abs(y - w.y) < 1.5) && pointGap(wayRect(w), x, z) < HUMAN_RADIUS));
     if (inWay) { out.left.push(id); log(`door-fit/2: ${path} left for a later boot (a body stands in a doorway a door goes in, at ${inWay.p.map((n) => Math.round(n * 10) / 10).join(', ')})`); o.slice?.(performance.now() - t, id); await pause(); continue; }
-    const { r, inverse } = await fitAct(god, fit.ops, note(fit.doors.length));
+    const { r, inverse, diff } = await fitAct(god, fit.ops, note(fit.doors.length));
     o.slice?.(performance.now() - t, `${id} edit`); await pause();
     if (!r.accepted) {
       const seated = bodyRefusal(r.failures);
@@ -514,15 +523,28 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
       log(`door-fit/2: ${path} ${seated ? 'left for a later boot (a body in its way)' : 'keeps its revision this boot, tried again at the next'}: ${JSON.stringify(r.failures ?? []).slice(0, 300)}`);
       continue;
     }
-    // every edit this fit made, so the whole of it can be undone
-    const edits: Op[][] = [inverse];
+    // every edit this fit made, so the whole of it can be undone, and what each left (review of #2462: the whole fit is
+    // undone only while the building and what the fit changed stand as the fit left them, so nothing done since is lost)
+    const edits: Op[][] = [inverse], mine = new Map<string, Entity | undefined>();
+    let subAfter = '';
+    const made = (d?: Diff) => { for (const x of d?.removes ?? []) mine.set(x, undefined); for (const x of d?.upserts ?? []) mine.set(x.id, god.model.entities.get(x.id)); subAfter = god.model.subtree(id).join(); };   // (a removed-and-restored id is an upsert)
+    made(diff);
+    const asLeft = () => god.model.subtree(id).join() === subAfter && [...mine].every(([k, v]) => god.model.entities.get(k) === v);
+    /** Undoes the whole fit (a cleanup edit, tried up to three times while a Soul steps clear); false when it cannot be. */
     const undoAll = async (why: string) => {
-      t = performance.now();
-      const { r: ur } = await fitAct(god, edits.slice().reverse().flat(), `door-fit/2 (#2462): ${path}'s fit undone, ${why}`);
-      o.slice?.(performance.now() - t, `${id} undo`); await pause();
-      log(ur.accepted ? `door-fit/2: ${path}'s fit undone: ${why}` : `door-fit/2: ${path}'s fit should be undone (${why}) but could not be: ${JSON.stringify(ur.failures ?? []).slice(0, 300)}`);
-      return ur.accepted;
+      for (let k = 0; k < 3; k++) {
+        if (!asLeft()) { log(`door-fit/2: ${path}'s fit should be undone (${why}) but the building changed since, so it is left as it is`); return false; }
+        t = performance.now();
+        const { r: ur } = await fitAct(god, edits.slice().reverse().flat(), `door-fit/2 (#2462): ${path}'s fit undone, ${why}`, { cleanup: true });
+        o.slice?.(performance.now() - t, `${id} undo`); await pause();
+        if (ur.accepted) { log(`door-fit/2: ${path}'s fit undone: ${why}`); return true; }
+        log(`door-fit/2: ${path}'s fit should be undone (${why}) but could not be${k < 2 ? ', tried again' : ''}: ${JSON.stringify(ur.failures ?? []).slice(0, 300)}`);
+        await settled();
+      }
+      return false;
     };
+    /** A fit that cuts something off and cannot be undone is never counted as fitted: named, and the rules event waits. */
+    const notUndone = (why: string): 'kept' => { out.refused.push(`${path} (${why}, and its fit could not be undone)`); return 'kept'; };
     const doors: (PlaceOp | null)[] = [...fit.doors];
     const findDoor = (d: PlaceOp, q: Vec2) => [...god.model.subtree(id).map((y) => god.model.entities.get(y)!), ...[...god.model.entities.values()].filter((y) => y.in.parent === 'world')]
       .find((y) => opRef(y.def) === DOOR_FIT_DOOR && (d.name ? y.name === d.name : (() => { const w = god.model.worldPose(y); return Math.hypot(w.x - q[0], w.z - q[1]) < 0.01; })()));
@@ -561,7 +583,7 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
         return null;
       };
       for (;;) {
-        if (!(await settled())) { outcome = (await undoAll('the engine had not taken it in, so its reach could not be judged')) ? 'kept' : 'fitted'; break; }
+        if (!(await settled())) { const why = 'the engine had not taken it in, so its reach could not be judged'; outcome = (await undoAll(why)) ? 'kept' : notUndone(why); break; }
         const cut = await cutNow();
         if (!cut) break;
         // #2438: a prop moved clear of a door must not cut off anything reached before the fit: every prop this fit moved
@@ -574,10 +596,10 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
             const k = doors.indexOf(f.door), x = k >= 0 ? findDoor(f.door, fit.placed[k]!.p) : undefined;
             if (x) undo.push({ op: 'remove', id: x.id } as Op);
           }
-          const { r: ur, inverse: ui } = await fitAct(god, [...new Map(undo.map((u) => [JSON.stringify(u), u])).values()], `door-fit/2 (#2434): ${fit.freed.length} prop move(s) undone and the door(s) they freed taken out, a move cuts off a way reached before`);
+          const { r: ur, inverse: ui, diff: ud } = await fitAct(god, [...new Map(undo.map((u) => [JSON.stringify(u), u])).values()], `door-fit/2 (#2434): ${fit.freed.length} prop move(s) undone and the door(s) they freed taken out, a move cuts off a way reached before`, { cleanup: true });
           o.slice?.(performance.now() - t, `${id} undo moves`); await pause();
-          if (!ur.accepted) { log(`door-fit/2: a prop move cuts off a way but could not be undone: ${JSON.stringify(ur.failures ?? []).slice(0, 300)}`); outcome = (await undoAll(`${cut.what} is cut off and the prop moves could not be undone`)) ? 'kept' : 'fitted'; break; }
-          edits.push(ui);
+          if (!ur.accepted) { log(`door-fit/2: a prop move cuts off a way but could not be undone: ${JSON.stringify(ur.failures ?? []).slice(0, 300)}`); outcome = (await undoAll(`${cut.what} is cut off and the prop moves could not be undone`)) ? 'kept' : notUndone(`${cut.what} is cut off`); break; }
+          edits.push(ui); made(ud);
           for (const f of fit.freed) {
             const k = doors.indexOf(f.door);
             if (k >= 0) { doors[k] = null; fit.held.push(`${f.label} (moving its prop clear cuts off a way reached before)`); }
@@ -588,13 +610,13 @@ export async function fitWorldDoorsV2(god: GodMode, bodies: Vec2[] | (() => Vec2
         }
         // the door whose side is cut, else the one nearest the front, is taken out again
         const k = cut.door ?? order.find((j) => doors[j]);
-        if (k === undefined) { outcome = (await undoAll(`${cut.what} is cut off with every new door out`)) ? (cut.body ? 'left' : 'refused') : 'fitted'; if (outcome === 'refused') out.refused.push(`${path} (${cut.what} is cut off with every new door out)`); break; }
+        if (k === undefined) { outcome = (await undoAll(`${cut.what} is cut off with every new door out`)) ? (cut.body ? 'left' : 'refused') : notUndone(`${cut.what} is cut off with every new door out`); if (outcome === 'refused') out.refused.push(`${path} (${cut.what} is cut off with every new door out)`); break; }
         const d = doors[k]!, x = findDoor(d, fit.placed[k]!.p);
         t = performance.now();
-        const { r: rr, inverse: ri } = x ? await fitAct(god, [{ op: 'remove', id: x.id } as Op], `door-fit/2 (#2434): ${d.name ?? x.id} taken out again, its frame cuts off a way reached before`) : { r: { accepted: false, failures: [] } as Result, inverse: [] };
+        const { r: rr, inverse: ri, diff: rd } = x ? await fitAct(god, [{ op: 'remove', id: x.id } as Op], `door-fit/2 (#2434): ${d.name ?? x.id} taken out again, its frame cuts off a way reached before`, { cleanup: true }) : { r: { accepted: false, failures: [] } as Result, inverse: [], diff: undefined };
         o.slice?.(performance.now() - t, `${id} take out`); await pause();
-        if (!rr.accepted) { log(`door-fit/2: ${d.name ?? '?'} cuts off ${cut.what} but could not be taken out: ${JSON.stringify((rr as { failures?: unknown }).failures ?? []).slice(0, 300)}`); outcome = (await undoAll(`${cut.what} is cut off and ${d.name ?? 'a door'} could not be taken out`)) ? 'kept' : 'fitted'; break; }
-        edits.push(ri);
+        if (!rr.accepted) { log(`door-fit/2: ${d.name ?? '?'} cuts off ${cut.what} but could not be taken out: ${JSON.stringify((rr as { failures?: unknown }).failures ?? []).slice(0, 300)}`); outcome = (await undoAll(`${cut.what} is cut off and ${d.name ?? 'a door'} could not be taken out`)) ? 'kept' : notUndone(`${cut.what} is cut off`); break; }
+        edits.push(ri); made(rd);
         fit.held.push(`${d.name ?? x!.id} (its frame cuts off ${cut.what}, reached before)`);
         doors[k] = null;
       }

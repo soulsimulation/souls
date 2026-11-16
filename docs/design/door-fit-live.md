@@ -18,7 +18,8 @@ What one building's fit guarantees (#2462):
 - **BUILDSAFE.** The edit is checked on the would-be world before it commits, as a god edit is. It is not made when it
   edits a resident's body, when legal-edits/1 refuses it (its preview breaks a rule on a Soul, a Soul is in its way or
   uses what it changes), or, in a world without legal-edits/1, when the walk-out planner would have to walk somebody out
-  of its way. A fit never walks anyone. The building is tried again at the next boot.
+  of its way, or would leave one stuck in it. The god's own guard holds too: no deck or stair flight someone stands on
+  is moved or removed under them. A fit never walks anyone. The building is tried again at the next boot.
 - **Bodies.** The bodies are read again for each building. A doorway with a body standing in it gets no door this
   boot. A prop never moves onto a body.
 - **Reach.** The engine must have taken the edit in before anything is judged: three waits, then the fit is undone and
@@ -27,12 +28,15 @@ What one building's fit guarantees (#2462):
   drawn doorways. The walk goes to both sides of each new door, and to each thing, seat, bed and body of the building
   on every floor that was reached before the fit. Anything reached before and not after undoes the prop moves first.
   Then the new doors come out one by one: the door whose side is cut, else the one nearest the front. If something is
-  still cut off with every new door out, the whole fit is undone.
+  still cut off with every new door out, the whole fit is undone. These clean-up edits put back what was there, so they
+  are checked only against a resident's own body and the god's deck guard. The whole fit is undone only while the
+  building and everything the fit changed stand as the fit left them. A fit that cannot be undone (a Soul on the deck,
+  or the building changed since) is never counted as fitted: it is named in the rules event, and the event waits a boot.
 - **The engine is told.** Each edit's own diff (entities, defs, tiles) goes to the engine as it is made.
 - **Doors follow.** A live-fitted door is its building's child, and door-fit/2 makes door-fit/1's doors its children
   too, so a later edit that moves the building moves its doors. A template's outside doors are world-root until the
   templates are refitted.
-- **Turns.** Each slice is cut at 100 ms (#2433's turn budget). A turn over it is logged with what held it, and each
+- **Turns.** Each slice is cut at 50 ms, half #2433's 100 ms turn budget. A turn over the budget is logged with what held it, and each
   fit ends with its longest turn (`[world] door-fit/N: longest turn … ms`). One building's edit is a single turn and
   cannot be cut. Before #2443 it took up to 15.9 s on Eden. #2443 removed the cause: re-settling every padded neighbour
   on the edit's tiles. Whether one edit now stays under the budget on each live world is what the measurement below
@@ -64,8 +68,9 @@ and watchdog heartbeats while it fits.
 
 1. **Stop.** Unset `DOOR_FIT_BOOT` and restart. No further building is fitted. Buildings already fitted keep their
    doors, and the world serves as before.
-2. **Undo one building.** Each fit edit is in the journal as an engine edit with a `door-fit/` note. Its inverse (the
-   old revision and contents, by the same ids) can be applied as one engine edit. No tool does this yet; write one only
+2. **Undo one building.** The journal holds each fit edit's ops, with a `door-fit/` note, but no inverse (an engine
+   edit is journaled with none). Rebuilding a building's old state means taking its old revision from
+   `DOOR_FIT_FROM`/`ALL_DOORS_FROM` read backwards and its contents from the ops. No tool does this yet; write one only
    if a fitted building is found wrong.
 3. **Restore.** Restoring the world's snapshot from before the switch rewinds everything since, Souls' time included.
    It is a destructive production step and needs the maintainer's explicit yes.

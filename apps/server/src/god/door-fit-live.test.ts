@@ -163,6 +163,54 @@ test('#2462 cut off: a fit that cuts a way off with every new door out is undone
   assert.ok(logs.some((m) => /fit undone/.test(m)));
 });
 
+test('#2462 review: a cut-off fit that cannot be undone is never counted as fitted, and is named', { timeout: 120000 }, async (t) => {
+  const { w, god, house, solids } = await cottage(t);
+  const real = engineDoorReach(w.host, god)!;
+  let edited = false;
+  const act = god.engineAct.bind(god);
+  god.engineAct = ((ops, note, ...rest) => { const x = act(ops, note, ...rest); if (x.accepted && note.startsWith('door-fit/2 (#2434): 1 building')) edited = true; return x; }) as typeof god.engineAct;
+  const cut: DoorReach = { ...real, reach: () => true, seats: () => [{ id: 'house#seat-up', p: [10, 10], level: 1 }], reachAt: () => !edited };
+  // a Soul sits down in the house once it is fitted: the undo (it would change what she uses) is refused every time
+  const refuse = god.bodies!.refuse;
+  god.bodies!.refuse = (after, diff, ops, o) => edited && ops.length > 1 ? { op: -1, code: 'body.in-use', detail: 'test: seated in it' } : refuse?.(after, diff, ops, o) ?? null;
+  const r = await ticking(w.host, fitWorldDoorsV2(god, [], () => {}, solids(), { walk: cut }));
+  assert.equal(r.buildings, 0, 'not counted as fitted');
+  assert.deepEqual(r.kept, [house.id], 'the rules event waits');
+  assert.match(r.refused[0] ?? '', /its fit could not be undone/);
+});
+
+test('#2462 review: the whole fit is not undone once the building changed since the fit (nothing done since is lost)', { timeout: 120000 }, async (t) => {
+  const { w, god, house, solids } = await cottage(t);
+  const real = engineDoorReach(w.host, god)!, logs: string[] = [];
+  let calls = 0, moved = false;
+  // the engine settles for the baseline, then not after the edit; meanwhile the god renames the house
+  const lateLag: DoorReach = { ...real, settle: async () => { if (++calls === 1) return real.settle(); if (!moved) { moved = true; const m = god.engineAct([{ op: 'set', id: house.id, name: 'renamed' }] as never, 'test: the god renames it') as { accepted: boolean }; assert.equal(m.accepted, true, JSON.stringify(m)); } return false; } };
+  const r = await ticking(w.host, fitWorldDoorsV2(god, [], (m) => logs.push(m), solids(), { walk: lateLag }));
+  assert.equal(r.buildings, 0);
+  assert.ok(logs.some((m) => /the building changed since, so it is left as it is/.test(m)), logs.join('\n'));
+  assert.equal(god.model.entities.get(house.id)!.name, 'renamed', 'the god\'s edit stands');
+});
+
+test('#2462 review: the god\'s own guard (a deck someone stands on) refuses a fit edit too', { timeout: 120000 }, async (t) => {
+  const { w, god, house, solids, doors } = await cottage(t);
+  const seq0 = god.model.editSeq;
+  god.actGuard = () => ({ accepted: false, failures: [{ op: 0, code: 'connector.joined', detail: 'test: someone stands on its deck' }] });
+  const r = await ticking(w.host, fitWorldDoorsV2(god, [], () => {}, solids()));
+  assert.deepEqual(r.kept, [house.id]);
+  assert.equal(god.model.editSeq, seq0);
+  assert.equal(doors().length, 0);
+});
+
+test('#2462 review: a building whose reach cannot be checked (no outside doorway to walk from) is refused, named', { timeout: 120000 }, async (t) => {
+  const { w, god, house, solids, doors } = await cottage(t);
+  const real = engineDoorReach(w.host, god)!, seq0 = god.model.editSeq;
+  const r = await ticking(w.host, fitWorldDoorsV2(god, [], () => {}, solids(), { walk: { ...real, front: () => null } }));
+  assert.match(r.refused[0] ?? '', /no outside doorway to check its reach from/);
+  assert.equal(god.model.editSeq, seq0);
+  assert.equal(doors().length, 0);
+  assert.equal(god.model.entities.get(house.id)!.def, house.def);
+});
+
 test('#2462 never strands a Soul: a body reached before and not after undoes the fit, tried again at the next boot', { timeout: 120000 }, async (t) => {
   const { w, god, house, solids, doors, def0 } = await cottage(t);
   const real = engineDoorReach(w.host, god)!;
@@ -171,7 +219,9 @@ test('#2462 never strands a Soul: a body reached before and not after undoes the
   god.engineAct = ((ops, note, ...rest) => { const x = act(ops, note, ...rest); if (x.accepted && note.startsWith('door-fit/2 (#2434): 1 building')) edited = true; return x; }) as typeof god.engineAct;
   // a Soul upstairs in the house, reached from the street before the fit and not after it
   const stranded: DoorReach = { ...real, reach: () => true, seats: () => [], bodies: () => [{ id: 'h_ada', p: [9, 9], level: 1, y: 3 }], reachAt: () => !edited };
+  const seq0 = god.model.editSeq;
   const r = await ticking(w.host, fitWorldDoorsV2(god, [], () => {}, solids(), { walk: stranded }));
+  assert.ok(edited && god.model.editSeq > seq0 + 1, 'the fit was made, then undone');
   assert.deepEqual(r.left, [house.id], 'left for a later boot');
   assert.equal(god.model.entities.get(house.id)!.def, def0);
   assert.equal(doors().length, 0);
