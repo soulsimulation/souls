@@ -90,7 +90,7 @@ function stack(broken = null) {
     if (path === '/cdn-cgi/trace') return res.end(`fl=1\nh=soul.game\nip=${VISITOR}\nts=1\n`);
     if (path === '/__sim/whoami') {
       const xff = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
-      return j(200, { address: broken === 'address' ? '162.158.1.1' : broken === 'forged' && xff ? xff : VISITOR });   // 'address': keyed on the CDN
+      return j(200, { address: broken === 'address' ? '192.0.2.10' : broken === 'forged' && xff ? xff : VISITOR });   // 'address': keyed on the CDN's own address
     }
     if (path === '/__sim/healthz') return broken === 'agent' ? res.writeHead(403, { 'content-type': 'text/html', 'cf-mitigated': 'challenge' }).end('<title>Just a moment...</title>') : j(200, { ok: true });
     if (path === '/w/eden/v1/edge/act' && req.method === 'POST') return j(401, { ok: false, code: 'auth.required' });
@@ -123,7 +123,7 @@ test('A3: the check passes against a stack that keeps all six points', async (t)
 
 test('A3: each of the six points, broken alone, fails the check for its own reason', async () => {
   const want = {
-    address: /^address: the launcher keyed 162\.158\.1\.1, the CDN saw 198\.51\.100\.5$/,
+    address: /^address: the launcher keyed 192\.0\.2\.10, the CDN saw 198\.51\.100\.5$/,
     forged: /^forged: the launcher keyed the forged X-Forwarded-For 203\.0\.113\.77$/,
     viewer: /^viewer: no welcome in 1500 ms$/,
     agent: /^agent: GET \/__sim\/healthz: challenged \(cf-mitigated: challenge\)/,
