@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// #2308: what 1, 50 and 200 viewers cost one world with Souls walking. One local Eden 2026 world (genesis from the
+// #2308: what 1, 50 and 200 (up to 2,000) viewers cost one world with Souls walking. One local Eden 2026 world (genesis from the
 // template) behind the checkout's own launcher, fake minds, Eyes off, an isolated data dir under --out. 12 Souls join
 // with the world's own CLI, then walk by catalog id (raw HTTP, the client's headers, one act every 6–10 s). Viewers are
 // what the web page's entry opens (apps/web/src/snapshot-prefetch.ts), no browser: GET /v1/world/snapshot?defs=ref&cols=1,
@@ -37,8 +37,9 @@ const MARS_WEB = join(ROOT, 'mars/viewer/dist'), KIT = join(ROOT, 'apps/web/dist
 for (const [p, fix] of [[MARS_WEB, 'pnpm build:viewer'], [KIT, 'pnpm --filter @souls/web build']]) if (!existsSync(p)) throw new Error(`missing ${relative(ROOT, p)}: run \`${fix}\` in the checkout`);
 const { anonymousHello } = await import(pathToFileURL(join(ROOT, 'packages/client/src/hello.ts')).href);
 const HELLO = anonymousHello(true);
-// a documentation address per viewer (RFC 5737), so the launcher's per-address ceilings see distinct visitors
-const addressOf = (i) => `${['198.51.100', '203.0.113', '192.0.2'][Math.floor(i / 250)]}.${(i % 250) + 1}`;
+// a documentation address per viewer (RFC 5737), so the launcher's per-address ceilings see distinct visitors; past 750
+// viewers, the benchmarking range (RFC 2544, 198.18.0.0/15)
+const addressOf = (i) => (i < 750 ? `${['198.51.100', '203.0.113', '192.0.2'][Math.floor(i / 250)]}.${(i % 250) + 1}` : `198.18.${Math.floor((i - 750) / 250)}.${((i - 750) % 250) + 1}`);
 
 // ------------------------------------------------------------------ the world's process
 const CLK_TCK = Number(sh('getconf', ['CLK_TCK']) ?? 100) || 100;
@@ -156,7 +157,12 @@ async function repeat(k) {
   let sampler;
   try {
     await bootLauncher(dir, run); out.bootS = run.launcher.bootS; log(`r${k}: world up in ${out.bootS} s`);
-    sampler = setInterval(() => { const pid = run.launcher.worldPid(); run.samples.push({ at: Date.now(), live: run.launcher.live(), ...(pid ? proc(pid) : {}) }); }, SAMPLE_MS);
+    // the launcher (every viewer's socket passes through it) and this driver are sampled too, so a saturated proxy or
+    // driver is told apart from a saturated world
+    sampler = setInterval(() => {
+      const pid = run.launcher.worldPid(), l = proc(run.launcher.child.pid), d = process.cpuUsage();
+      run.samples.push({ at: Date.now(), live: run.launcher.live(), ...(pid ? proc(pid) : {}), launcherCpuS: l.cpuS, launcherRssMb: l.rssMb, driverCpuS: (d.user + d.system) / 1e6 });
+    }, SAMPLE_MS);
     const souls = [];
     for (let i = 0; i < SOULS; i += 4) souls.push(...await Promise.all(Array.from({ length: Math.min(4, SOULS - i) }, (_, j) => joinSoul(run, i + j))));
     // the catalog may answer 503 while the world settles after the joins: ask again for up to 5 min
@@ -177,7 +183,7 @@ async function repeat(k) {
       w.openingS = Math.round((from - opening) / 1000); w.callsByPath = {};
       for (const c of run.calls.slice(calls0)) { const p = (w.callsByPath[c.path] ??= { n: 0, world: 0 }); p.n++; if (c.status && c.cache !== 'hit' && c.cache !== 'shared') p.world++; }
       out.windows.push(w);
-      log(`r${k} n${n}: tick p50/p99 ${w.tickMs.p50}/${w.tickMs.p99} ms, service ${w.tickService.mean}, act queue p50/p95 ${w.acts.queueMs.p50}/${w.acts.queueMs.p95} ms, amber ${w.levels.amber}, cpu ${w.world.cpuShare}, rss ${w.world.rssMb} MB, ${w.viewersOut.bytesPerViewerPerS} B/s per viewer`);
+      log(`r${k} n${n}: tick p50/p99 ${w.tickMs.p50}/${w.tickMs.p99} ms, service ${w.tickService.mean}, act queue p50/p95 ${w.acts.queueMs.p50}/${w.acts.queueMs.p95} ms, amber ${w.levels.amber}, cpu ${w.world.cpuShare}, rss ${w.world.rssMb} MB, launcher cpu ${w.launcher.cpuShare}, driver cpu ${w.driver.cpuShare}, ${w.viewersOut.bytesPerViewerPerS} B/s per viewer`);
     }
   } catch (e) { out.error = clean(e.message ?? e); log(`r${k}: ${out.error}`); }
   finally { clearInterval(sampler); await stopAll(run); }
@@ -192,9 +198,9 @@ for (let k = 1; k <= REPEATS; k++) repeats.push(await repeat(k));
 receipt.loadAfter = loadavg().map((x) => +x.toFixed(2));
 writeFileSync(join(OUT, 'results.json'), JSON.stringify({ receipt, repeats }, null, 1) + '\n');
 const f = (x) => (x == null ? '—' : String(x)), obj = (o) => Object.entries(o ?? {}).map(([a, b]) => `${a} ${b}`).join(', ') || '0';
-const rows = repeats.flatMap((r) => (r.error && !r.windows.length ? [`| r${r.repeat} | error: ${r.error.slice(0, 120)} |`] : r.windows.map((w) => `| r${r.repeat} | ${w.viewers} | ${f(w.tickMs.p50)} / ${f(w.tickMs.p99)} | ${f(w.tickService.mean)} (min ${f(w.tickService.min)}) | ${f(w.acts.queueMs.p50)} / ${f(w.acts.queueMs.p95)} | ${f(w.acts.handlerMs.p50)} / ${f(w.acts.handlerMs.p99)} | ${f(w.levels.amber)} | ${obj(w.amberS)} | ${f(w.world.cpuShare)} | ${f(w.world.rssMb)} | ${f(w.viewersOut.bytesPerViewerPerS)} | ${w.viewerCalls.worldCalls} of ${w.viewerCalls.http} | acts ${obj(w.acts.refused)}; viewers ${obj(w.viewerCalls.refusals)}; ws refused ${w.viewersOut.wsRefused}, closed ${w.viewersOut.wsCloses} |`)));
+const rows = repeats.flatMap((r) => (r.error && !r.windows.length ? [`| r${r.repeat} | error: ${r.error.slice(0, 120)} |`] : r.windows.map((w) => `| r${r.repeat} | ${w.viewers} | ${f(w.tickMs.p50)} / ${f(w.tickMs.p99)} | ${f(w.tickService.mean)} (min ${f(w.tickService.min)}) | ${f(w.acts.queueMs.p50)} / ${f(w.acts.queueMs.p95)} | ${f(w.acts.handlerMs.p50)} / ${f(w.acts.handlerMs.p99)} | ${f(w.levels.amber)} | ${obj(w.amberS)} | ${f(w.world.cpuShare)} | ${f(w.world.rssMb)} | ${f(w.launcher.cpuShare)} / ${f(w.launcher.rssMb)} | ${f(w.driver.cpuShare)} | ${f(w.viewersOut.bytesPerViewerPerS)} | ${w.viewerCalls.worldCalls} of ${w.viewerCalls.http} | acts ${obj(w.acts.refused)}; viewers ${obj(w.viewerCalls.refusals)}; ws refused ${w.viewersOut.wsRefused}, closed ${w.viewersOut.wsCloses} |`)));
 writeFileSync(join(OUT, 'REPORT.md'), [`# Viewers on one world (#2308)`, '', `commit ${f(receipt.commit?.slice(0, 9))} · node ${process.version} · ${receipt.cpus} CPUs · load ${receipt.loadBefore.join(' ')} → ${receipt.loadAfter.join(' ')} · ${SOULS} Souls walking · ${receipt.windowS} s windows${SHORT ? ' · SHORT (indicative)' : ''}`, '',
-  '| repeat | viewers | tick p50 / p99 ms | tick service | act queue p50 / p95 ms | act handler p50 / p99 ms | amber share | amber s per signal | world CPU (cores) | RSS MB | bytes/s per viewer | world calls by viewers | refusals |',
-  '|---|---|---|---|---|---|---|---|---|---|---|---|---|', ...rows].join('\n') + '\n');
+  '| repeat | viewers | tick p50 / p99 ms | tick service | act queue p50 / p95 ms | act handler p50 / p99 ms | amber share | amber s per signal | world CPU (cores) | RSS MB | launcher CPU (cores) / RSS MB | driver CPU (cores) | bytes/s per viewer | world calls by viewers | refusals |',
+  '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|', ...rows].join('\n') + '\n');
 log('done: REPORT.md');
 if (repeats.some((r) => r.error)) process.exitCode = 1;
