@@ -7,19 +7,36 @@
 //                                            walk's step (a detour, stepping aside, a wait's re-plan), a paged walk's next
 //                                            chunk, and any other
 //   act.commit(tick), tick                   the tick applying inputs (drainInputs), and the rest of the tick
-//   nav.sync, nav.audit                      the planner's page sync and scans (syncPaged, navScan, navChanged), and the
-//                                            connectivity audit (navWarmV1, fineTileSteps, labelComponents)
+//   nav.sync                                 the planner's page sync and scans (syncPaged, navScan, navChanged)
+//   nav.warm, nav.tile, nav.label            the connectivity audit (navWarmV1, with the sync it starts with, or a fine
+//                                            tile or labels built inside connectivity.ts update/compile); a fine tile built
+//                                            on demand outside it (fineTileSteps, e.g. fineTile -> drain); a tile's labels
+//                                            built on demand outside it (labelComponents, e.g. a label-cache miss in check)
+//   Until the split (M4's and A9's tables, #2592) these three were one group, `nav.audit`: the samples with navWarmV1,
+//   fineTileSteps or labelComponents on the stack. nav.audit = nav.warm + nav.tile + nav.label, sample for sample, and
+//   perAct's navAuditMsPerSec stays that sum.
 //   gc, snapshot, req <route>, req (middleware/unknown), other <frame>
 // #2533: nav.sync's samples also by who asked (`navSyncBy`): the action step or pass a tick ran the sync in, or the server
 // frame outside a tick, and the first frame outside the spatial service.
 // Long holds: runs of busy samples (no idle between) of at least `holdMs`, each named by the group that took most of it.
 // #2592 `step0`: each hold of 1 s or more split into JS tasks (one long task, or back-to-back work), tasks of 50, 100, 250
 // and 1000 ms or more by the group that took most of each, and the 25 longest tasks with their app frames (inclusive ms).
+// #2592 attribution: each task of 100 ms or more gets a cause, from its main group's samples only:
+//   nav.*   who asked: the first app frame outside the spatial service (and the engine's nav*V1 wrappers), going out
+//           from the outermost frame of the group (navWarmV1 or connectivity update, fineTileSteps, labelComponents,
+//           the sync's frame);
+//   others  the frame just under the group's entry (the innermost tick frame for tick, act.commit(tick) and route.*;
+//           the outermost bind or check frame for act.bind and act.check; the act's function for act.handler-other;
+//           the root for the rest), then down the heaviest child while it holds at least 50 % of the task; the deepest
+//           app frame on that path.
+// `causes` lists the top 10 causes per group by total ms, with counts. `longTasks` keeps every such task compactly (its
+// cause, groups and the heaviest path's app frames), so later runs need no .cpuprofile (load.mjs deletes it).
 import { readFileSync } from 'node:fs';
 
 const ROUTE_RE = /app\.(get|post|put|delete|patch|all)\(\s*['"`]([^'"`]+)/i;
 const SNAP = new Set(['captureCheckpoint', 'captureSnapshot', 'schedulePeriodicSnapshot', 'snapshotView', 'writeSnapshot', 'persistSnapshot']);
-const AUDIT = new Set(['navWarmV1', 'fineTileSteps', 'labelComponents']);
+/** The connectivity audit's build (connectivity.ts): a fine tile or labels built under it are the audit's own. */
+const AUDIT_BUILD = new Set(['update', 'compile']);
 const SYNC = new Set(['navScan', 'syncPaged', 'navChanged']);
 const BIND = new Set(['bindOne', 'bindsCore', 'bindsTail', 'binds']);
 const CHECK = new Set(['canPerform', 'routeProblem', 'previewAdmission', 'offerGate']);
@@ -52,13 +69,14 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     if (memo.has(leafId)) return memo.get(leafId);
     const ids = []; for (let x = leafId; x != null; x = parent.get(x)) ids.push(x);
     const frames = ids.map((id) => byId.get(id).callFrame), names = new Set(frames.map((f) => f.functionName));
-    let route = null, req = false, tick = false, drain = false, outer = null;
+    let route = null, req = false, tick = false, drain = false, outer = null, build = false;
     for (let j = frames.length - 1; j >= 0; j--) {
       const f = frames[j], rel = relOf(f.url);
       const r = routeAt(f.url, f.lineNumber); if (r) route = r;
       if (/hono/.test(rel) || /^apps\/server\/src\/(http|load\/admission)\.ts$/.test(rel)) req = true;
       if (TICK.has(f.functionName)) tick = true;
       if (f.functionName === 'drainInputs') drain = true;
+      if (AUDIT_BUILD.has(f.functionName) && rel.endsWith('spatial/connectivity.ts')) build = true;
       if (!outer && /^(apps|packages|mars)\//.test(rel)) outer = `${f.functionName || '(anon)'} ${rel}:${f.lineNumber + 1}`;
     }
     const any = (s) => { for (const n of s) if (names.has(n)) return true; return false; };
@@ -66,7 +84,9 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     let g;
     if (frames[0].functionName === '(garbage collector)') g = 'gc';
     else if (any(SNAP)) g = 'snapshot';
-    else if (any(AUDIT)) g = 'nav.audit';
+    else if (names.has('navWarmV1') || (build && (names.has('fineTileSteps') || names.has('labelComponents')))) g = 'nav.warm';
+    else if (names.has('fineTileSteps')) g = 'nav.tile';
+    else if (names.has('labelComponents')) g = 'nav.label';
     else if (any(SYNC)) g = 'nav.sync';
     else if (route === 'POST /v1/edge/act' || (!tick && !route && any(ACT_FN))) g = any(BIND) ? 'act.bind' : any(CHECK) ? 'act.check' : 'act.handler-other';
     else if (tick) g = any(ROUTE) ? routeKind() : drain ? 'act.commit(tick)' : 'tick';
@@ -125,6 +145,48 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     holdsOver1s: holds.filter((h) => h.ms >= 1000).map((h) => ({ atS: r1(h.at / 1000), ms: r1(h.ms), tasks: h.tasks, longestTaskMs: r1(h.longestTask), groups: top(h.by, 5) })),
     longestTasks: [...tasks].sort((a, b) => b.ms - a.ms).slice(0, 25).map((tk) => ({ atS: r1(tk.at / 1000), ms: r1(tk.ms), groups: top(tk.by, 4), frames: framesOf(tk, 12) })),
   };
+  // #2592 attribution (see the header): each task of 100 ms or more, its cause from its main group's samples
+  const rootId = p.nodes.find((n) => !parent.has(n.id)).id;
+  const pathOf = (leaf) => { const out = []; for (let x = leaf; x != null; x = parent.get(x)) out.push(x); return out.reverse(); };
+  const fnOf = (id) => byId.get(id).callFrame.functionName, relId = (id) => relOf(byId.get(id).callFrame.url);
+  const isApp = (id) => /^(apps|packages|mars)\//.test(relId(id));
+  const label = (id) => { const f = byId.get(id).callFrame; return `${f.functionName || '(anon)'} ${relId(id).split('/').slice(-2).join('/')}:${f.lineNumber + 1}`; };
+  const NAV_OF = { 'nav.warm': (id) => fnOf(id) === 'navWarmV1' || (AUDIT_BUILD.has(fnOf(id)) && relId(id).endsWith('spatial/connectivity.ts')),
+    'nav.tile': (id) => fnOf(id) === 'fineTileSteps', 'nav.label': (id) => fnOf(id) === 'labelComponents', 'nav.sync': (id) => SYNC.has(fnOf(id)) };
+  const ENTRY = { tick: [TICK, 'in'], 'act.commit(tick)': [TICK, 'in'], 'act.bind': [BIND, 'out'], 'act.check': [CHECK, 'out'], 'act.handler-other': [ACT_FN, 'out'], snapshot: [SNAP, 'out'] };
+  const entryIn = (g, P) => {
+    const [set, way] = ENTRY[g] ?? (g.startsWith('route.') ? [TICK, 'in'] : [null]); if (!set) return 0;
+    let e = -1; for (let k = 0; k < P.length; k++) if (set.has(fnOf(P[k]))) { e = k; if (way === 'out') break; }
+    return Math.max(e, 0);
+  };
+  const askedBy = (g, P) => {
+    const o = P.findIndex(NAV_OF[g]);
+    for (let k = o - 1; k >= 0; k--) if (isApp(P[k]) && !relId(P[k]).includes('/engine/spatial/') && !/^(nav\w*V1|connectivityV1)$/.test(fnOf(P[k]))) return label(P[k]);
+    return '-';
+  };
+  const heaviest = (inc, from, keep) => { const out = []; for (let cur = from; ;) { let best = null; for (const c of byId.get(cur).children ?? []) if ((inc.get(c) ?? 0) > (inc.get(best) ?? 0)) best = c; if (best == null || !keep(best, out.length)) return out; out.push(best); cur = best; } };
+  const causeOf = (tk, g) => {
+    const leaves = [...tk.leaf].filter(([id]) => g === 'gc' || classify(id) === g), all = new Map(), by = new Map(), inc = new Map(), entries = new Map();
+    for (const [leaf, ms] of leaves) {
+      const P = pathOf(leaf); for (const id of P) all.set(id, (all.get(id) ?? 0) + ms);
+      if (NAV_OF[g]) { const k = askedBy(g, P); by.set(k, (by.get(k) ?? 0) + ms); continue; }
+      const e = entryIn(g, P); entries.set(P[e], (entries.get(P[e]) ?? 0) + ms); for (let k = e + 1; k < P.length; k++) inc.set(P[k], (inc.get(P[k]) ?? 0) + ms);
+    }
+    const path = heaviest(all, rootId, () => true).filter(isApp).slice(-12).map((id) => [label(id), r1(all.get(id))]);
+    if (NAV_OF[g]) return { cause: top(by, 1)[0]?.[0] ?? '-', path };
+    const E = top(entries, 1)[0]?.[0]; if (E == null) return { cause: '-', path };
+    const down = heaviest(inc, E, (id, n) => n === 0 || inc.get(id) >= tk.ms / 2), app = down.filter(isApp);
+    return { cause: label(app.at(-1) ?? down[0] ?? E), path };
+  };
+  const longTasks = [], causes = {};
+  for (const tk of tasks) {
+    if (tk.ms < 100) continue;
+    const g = mainOf(tk.by), { cause, path } = causeOf(tk, g), c = (causes[g] ??= new Map()), e = c.get(cause) ?? { n: 0, ms: 0 };
+    e.n++; e.ms += tk.ms; c.set(cause, e);
+    longTasks.push({ atS: r1(tk.at / 1000), ms: r1(tk.ms), group: g, cause, groups: top(tk.by, 3), path });
+  }
+  step0.causes = Object.fromEntries(Object.entries(causes).map(([g, c]) => [g, [...c].sort((a, b) => b[1].ms - a[1].ms).slice(0, 10).map(([k, e]) => [k, e.n, r1(e.ms)])]));
+  step0.longTasks = longTasks;
   const bySource = new Map();
   for (const h of holds) { const [src] = [...h.by].sort((a, b) => b[1] - a[1])[0]; const e = bySource.get(src) ?? { n: 0, ms: 0, maxMs: 0 }; e.n++; e.ms += h.ms; e.maxMs = Math.max(e.maxMs, h.ms); bySource.set(src, e); }
   return {
@@ -144,7 +206,7 @@ export function perAct(b, acts) {
   const route = ['route.first', 'route.people', 'route.detour', 'route.chunk', 'route.other'].reduce((s, k) => s + g(k), 0);
   const sec = b.totalMs / 1000;
   return { acts, ...per, 'act.route(tick)': acts ? r1(route / acts) : null, handlerSide: acts ? r1((g('act.bind') + g('act.check') + g('act.handler-other')) / acts) : null,
-    navSyncMsPerSec: sec ? r1(g('nav.sync') / sec) : null, navAuditMsPerSec: sec ? r1(g('nav.audit') / sec) : null, busyShare: b.totalMs ? Math.round(1000 * b.busyMs / b.totalMs) / 1000 : null };
+    navSyncMsPerSec: sec ? r1(g('nav.sync') / sec) : null, navAuditMsPerSec: sec ? r1((g('nav.warm') + g('nav.tile') + g('nav.label')) / sec) : null, busyShare: b.totalMs ? Math.round(1000 * b.busyMs / b.totalMs) / 1000 : null };
 }
 
 export const readProfile = (file) => JSON.parse(readFileSync(file, 'utf8'));
