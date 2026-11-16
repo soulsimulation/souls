@@ -125,7 +125,7 @@ test('the four capacity commands: their own allowlisted args (bare flags include
   assert.deepEqual(cap('bench-client', '--arms n1,n100 --short --profile stress --raw-from 4').args, ['--arms', 'n1,n100', '--short', '--profile', 'stress', '--raw-from', '4']);
   assert.deepEqual(cap('meetup', '--short --profile even').args, ['--short', '--profile', 'even']);
   assert.deepEqual(cap('slopes-profile').args, []);
-  for (const [c, a] of [['eval-load', '--souls 0'], ['eval-load', '--souls 101'], ['eval-load', '--souls 6,6'], ['eval-load', '--keep-data'], ['eval-load', '--server-root /x'],
+  for (const [c, a] of [['eval-load', '--souls 0'], ['eval-load', '--souls 501'], ['eval-load', '--raw-from 0'], ['eval-load', '--shape lumpy'], ['eval-load', '--souls 6,6'], ['eval-load', '--keep-data'], ['eval-load', '--server-root /x'],
     ['eval-load', '--duration-sec 5'], ['eval-load', '--out /x'], ['bench-client', '--arms hostile'], ['bench-client', '--arms n0'], ['bench-client', '--profile x'],
     ['bench-client', '--cpus 0-1'], ['bench-client', '--slice id'], ['bench-client', '--root /x'], ['bench-client', '--short --short'], ['bench-client', '--world-env A=1'],
     ['meetup', '--profile slopes'], ['meetup', '--active-min 19'], ['meetup', '--browser'], ['meetup', '--qualifying-executor'], ['meetup', '--short x'],
