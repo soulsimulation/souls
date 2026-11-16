@@ -28,6 +28,8 @@ const TICK = new Set(['tickOnceInner', 'tickOnce', 'advanceStep']);
 const ACT_FN = new Set(['actWork', 'actOnce', 'launch', 'acceptInvite', 'openShared', 'performBodies', 'offerGate']);
 const BREAK = new Set(['(idle)', '(program)', '(root)']);
 /** The groups a report lists for an act, in order (the clock cost of one act, by part). */
+/** #2528: functions whose inclusive clock ms an act's samples (act.*) spend under them, whichever group a sample is in. */
+export const UNDER = ['explicitPlaceCapability', 'offeredWalkObject', 'knownBootPlaces', 'strictCheck', 'resolvePlaceForVerb', 'resolveBootPlace'];
 export const ACT_GROUPS = ['act.bind', 'act.check', 'act.handler-other', 'route.first', 'route.people', 'route.detour', 'route.chunk', 'route.other', 'act.commit(tick)'];
 
 /** The profile `p` (parsed), its samples in groups. `repo`: the server's checkout, to name request routes and frames. */
@@ -71,7 +73,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     else g = 'other ' + (outer ?? frames[0].functionName);
     memo.set(leafId, g); return g;
   };
-  const tot = new Map(), holds = [];
+  const tot = new Map(), under = new Map(), holds = [];
   let cur = null, busy = 0, total = 0;
   const close = () => { if (cur && cur.ms >= holdMs) holds.push(cur); cur = null; };
   for (let i = 0; i < p.samples.length; i++) {
@@ -79,6 +81,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); continue; }
     busy += dt; const g = classify(node.id);
     tot.set(g, (tot.get(g) ?? 0) + dt);
+    if (g.startsWith('act.')) { const on = new Set(); for (let x = node.id; x != null; x = parent.get(x)) on.add(byId.get(x).callFrame.functionName); for (const f of UNDER) if (on.has(f)) under.set(f, (under.get(f) ?? 0) + dt); }
     if (!cur) cur = { ms: 0, by: new Map() }; cur.ms += dt; cur.by.set(g, (cur.by.get(g) ?? 0) + dt);
   }
   close();
@@ -88,6 +91,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
   return {
     totalMs: r1(total), busyMs: r1(busy),
     groups: Object.fromEntries([...tot.entries()].sort((a, b) => b[1] - a[1]).map(([g, ms]) => [g, r1(ms)])),
+    under: Object.fromEntries(UNDER.map((f) => [f, r1(under.get(f) ?? 0)])),
     holds: { overMs: holdMs, n: holds.length, ms: r1(holds.reduce((s, h) => s + h.ms, 0)), bySource: Object.fromEntries([...bySource].sort((a, b) => b[1].ms - a[1].ms).map(([g, e]) => [g, { n: e.n, ms: r1(e.ms), maxMs: r1(e.maxMs) }])) },
   };
 }
@@ -99,7 +103,7 @@ export function perAct(b, acts) {
   const per = Object.fromEntries(ACT_GROUPS.map((k) => [k, acts ? r1(g(k) / acts) : null]));
   const route = ['route.first', 'route.people', 'route.detour', 'route.chunk', 'route.other'].reduce((s, k) => s + g(k), 0);
   const sec = b.totalMs / 1000;
-  return { acts, ...per, 'act.route(tick)': acts ? r1(route / acts) : null, handlerSide: acts ? r1((g('act.bind') + g('act.check') + g('act.handler-other')) / acts) : null,
+  return { acts, ...per, under: Object.fromEntries(Object.entries(b.under ?? {}).map(([f, ms]) => [f, acts ? r1(ms / acts) : null])), 'act.route(tick)': acts ? r1(route / acts) : null, handlerSide: acts ? r1((g('act.bind') + g('act.check') + g('act.handler-other')) / acts) : null,
     navSyncMsPerSec: sec ? r1(g('nav.sync') / sec) : null, navAuditMsPerSec: sec ? r1(g('nav.audit') / sec) : null, busyShare: b.totalMs ? Math.round(1000 * b.busyMs / b.totalMs) / 1000 : null };
 }
 

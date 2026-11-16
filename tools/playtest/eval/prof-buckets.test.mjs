@@ -35,3 +35,8 @@ test('#2508: every sample goes to one group; the tick\'s route searches by kind;
   assert.match(lines, /\| route\.people \| 10 \|/);
   assert.match(lines, /sum to 24 ms per act; admission charged 24 ms per act \(0 %\)/);
 });
+
+test('#2528: an act\'s clock ms under a named function, inclusive, whichever group; tick samples are not an act\'s', () => {
+  const b = bucketProfile(profileOf([[['actWork', 'explicitPlaceCapability', 'offeredWalkObject', 'bindOne'], 6], [['actWork', 'explicitPlaceCapability', 'knownBootPlaces'], 4], [['tickOnce', 'knownBootPlaces'], 9]]), '/repo');
+  assert.deepEqual(perAct(b, 2).under, { explicitPlaceCapability: 5, offeredWalkObject: 3, knownBootPlaces: 2, strictCheck: 0, resolvePlaceForVerb: 0, resolveBootPlace: 0 });
+});

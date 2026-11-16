@@ -258,6 +258,7 @@ export function renderMeter(m) {
       '| part | clock ms per act |', '|---|---|');
     for (const k of ACT_GROUPS) L.push(`| ${k} | ${q[k] ?? ''} |`);
     L.push(`| act.route(tick), all kinds | ${q['act.route(tick)'] ?? ''} |`, '',
+      `Under (#2528: an act's samples with the function on the stack, inclusive, clock ms per act): ${Object.entries(q.under ?? {}).map(([f, ms]) => `${f} ${ms}`).join(', ') || 'none'}.`, '',
       `Handler-side parts (bind + check + rest) sum to ${h} ms per act${c ? `; admission charged ${c} ms per act (${c ? Math.round(100 * (h - c) / c) : ''} %)` : ''}. The planner: nav.sync ${q.navSyncMsPerSec} ms and nav.audit ${q.navAuditMsPerSec} ms per second of clock.`,
       '', `Long holds (busy runs of ${p.holds.overMs} ms or more): ${p.holds.n}, ${p.holds.ms} ms in all; by source: ${Object.entries(p.holds.bySource).map(([g, e]) => `${g} ${e.n} (${e.ms} ms, longest ${e.maxMs})`).join(', ') || 'none'}.`,
       '', `Every group, ms over the window: ${Object.entries(p.groups).slice(0, 24).map(([g, ms]) => `${g} ${ms}`).join(', ')}.`);
