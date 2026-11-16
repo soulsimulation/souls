@@ -88,6 +88,30 @@
       "reason": "#2236: the edge ambient-life reflex keeps its idle clock in memory, so a reboot shifts the idle Souls' next acts; added by #2238 as todo until #2236 lands (accepted for 0.127 as an exception).",
       "owner": "#2236",
       "exit": "#2236 keeps the ambient-life idle clock across a restart; then drop the todo and this entry"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "id": "A1: the site file and the trust snippet pass caddy validate in the production layout",
+      "status": "skip",
+      "reason": "needs caddy, not in CI or gate images: skips without a `caddy` binary on PATH or in $CADDY (#2567); runs wherever one is installed",
+      "owner": "#2567",
+      "exit": "a caddy binary in the CI and gate images (or the test made install-free); then drop this entry"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "id": "A2: through Caddy, a trusted peer is keyed to CF-Connecting-IP whatever X-Forwarded-For says; anyone else to the peer",
+      "status": "skip",
+      "reason": "needs caddy, not in CI or gate images: skips without a `caddy` binary on PATH or in $CADDY (#2567); runs wherever one is installed",
+      "owner": "#2567",
+      "exit": "a caddy binary in the CI and gate images (or the test made install-free); then drop this entry"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "id": "ship.sh --unload-still: an old settings file that cannot be read fails closed, never \"no file\", so a restore never deletes a 1",
+      "status": "skip",
+      "reason": "skips as root only (the remote gate's containers): chmod 000 does not stop root reading the file; every non-root run (CI's launcher job, local) runs it (#2557)",
+      "owner": "#2557",
+      "exit": "the gate's containers run tests as a non-root user, or the test makes the file unreadable in a way root cannot read; then drop this entry"
     }
   ],
   "scopeExclusions": [
