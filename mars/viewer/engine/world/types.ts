@@ -242,8 +242,8 @@ export type Environment = {
 export type WorldState = {
   /** #1150 rung 3: rule breaks the world could not repair, kept visible. */
   containedV1?: { code: string; subjects: string[]; until?: number }[];
-  /** #1440: bodies held by a standing mark (quarantine/1 `standing`), absent when none. */
-  standingHoldsV1?: Record<string, { pose: { p: [number, number, number]; yaw: number; level: number }; last: number }>;
+  /** #1440: bodies held by a standing mark (quarantine/1 `standing`), absent when none. #1513: an object's mark (nonfinite-hold/1 `standing`) has `fields` instead. */
+  standingHoldsV1?: Record<string, { pose?: { p: [number, number, number]; yaw: number; level: number }; fields?: { path: string[]; value?: number; pose?: unknown; support?: string }[]; last: number }>;
   schema: typeof WORLD_SCHEMA;
   base: BaseRef;
   tick: number;
