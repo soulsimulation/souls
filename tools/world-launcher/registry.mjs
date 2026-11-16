@@ -93,6 +93,9 @@ export class Registry {
   }
   update(slug, patch) { const w = this.get(slug); if (!w) return null; Object.assign(w, patch); this.save(); return w; }
   remove(slug) { this.worlds = this.worlds.filter((w) => w.slug !== slug); this.save(); }
+  /** #2540: the operator's site switches, kept in worlds.json (`site`; absent = on), so they survive a restart and go into the backup. */
+  site() { return { uploads: this.extra.site?.uploads !== false, creation: this.extra.site?.creation !== false }; }
+  setSite(patch) { this.extra = { ...this.extra, site: { ...this.site(), ...patch } }; this.save(); return this.site(); }
   worldDir(slug, entry = this.get(slug)) { return join(this.dataDir, 'worlds', entry ? dataSlugOf(entry) : slug); }
   save() {
     if (this.frozen) return;   // handing over to a newer launcher (keeper.mjs): it owns the file now
