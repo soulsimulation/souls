@@ -600,11 +600,15 @@ test('ship.sh --unload-still: written on the host right before the activation (w
   assert.ok(write > calls.indexOf('compact-backup.sh') && write < calls.indexOf('activate\t'), 'after the backup and the probe, before the reload');
   assert.match(r.stdout, /unload-still 1: writes <data>\/launcher-settings\.json right before the activation/);
   assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^unload-still-log 0$/m, 'the new launcher said it read the file');
-  // the new launcher never said so: a named warning in the evidence, not a rollback
+  // the new launcher never said so: a named warning only (annotated, in POSTLIVE.txt), not a failed check, not a rollback,
+  // so the release still publishes
   s = setup(); writeFileSync(join(s.t, 'no-unload-log'), ''); r = s.run([...s.base, '--unload-still', '1']);
-  assert.equal(r.status, 1); assert.match(r.stdout, /FAILED unload-still-log/);
+  assert.equal(r.status, 0, r.stdout); assert.match(r.stdout, /WARNING unload-still-log/); assert.match(r.stdout, /^::warning::unload-still-log: /m);
+  assert.doesNotMatch(r.stdout, /FAILED unload-still-log/);
+  assert.match(readFileSync(join(s.out, 'POSTLIVE.txt'), 'utf8'), /^unload-still-log warning$/m);
   assert.equal(readlinkSync(join(s.root, 'production')), join(s.root, 'releases', s.build), 'still live');
-  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live-with-failures');
+  assert.equal(JSON.parse(readFileSync(join(s.out, 'ship-result.json'), 'utf8')).status, 'live');
+  assert.match(s.calls(), /journalctl -u .* --since @\d+/, 'the journal from a minute before the activation');
   // --dry-run: the plan names the write and the check, and nothing is written
   s = setup(); r = s.run([...s.base, '--dry-run', '--unload-still', '1']);
   assert.match(r.stdout, /install\.sh\\? unload-still\\? production\\? 1/); assert.match(r.stdout, /journalctl.*unload-still\\*\\? 1/);
@@ -643,4 +647,13 @@ test('ship.sh --unload-still: a stop after the write says what the file holds an
   r = s.run([...s.base, '--unload-still', '1']);
   assert.equal(r.status, 1); assert.match(r.stdout, /install\.sh unload-still failed; nothing was activated/);
   assert.ok(!existsSync(file(s))); assert.doesNotMatch(s.calls(), /^activate\t/m);
+  assert.doesNotMatch(r.stdout, /now says|COULD NOT/, 'nothing was written, so nothing is claimed or restored');
+  // the old file cannot be read (here: no read permission): fail closed, never "no file", so a restore never deletes a 1
+  s = setup(); writeFileSync(file(s), '{"unloadStill":1}\n'); chmodSync(file(s), 0o000);
+  try {
+    r = s.run([...s.base, '--unload-still', '0']);
+    assert.equal(r.status, 1); assert.match(r.stdout, /could not read launcher-settings\.json on the host; nothing changed/);
+    assert.doesNotMatch(s.calls(), /install\.sh unload-still|^activate\t/m);
+  } finally { chmodSync(file(s), 0o644); }
+  assert.equal(readFileSync(file(s), 'utf8'), '{"unloadStill":1}\n');
 });

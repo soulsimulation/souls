@@ -273,13 +273,23 @@ elif [ "$STARTED" = 1 ]; then
   preactivate
   # the setting the new launcher reads at its start (the reload below starts it); a data-dir file, outside the conf's hash
   if [ -n "$UNLOAD" ]; then
-    WAS_FILE="$([ "$DRY" = 1 ] || rsh "cat $(printf '%q' "$HOST_DATA/launcher-settings.json") 2>/dev/null || true")"
-    if [ "$DRY" = 0 ]; then case "$WAS_FILE" in *'"unloadStill":1'*|*'"unloadStill": 1'*|*'"unloadStill":true'*) UNLOAD_WAS=1;; *) UNLOAD_WAS=0;; esac; fi
-    x rsh "$(settings_cmd "$UNLOAD")" || { settings_restore; die "install.sh unload-still failed; nothing was activated"; }
+    SF="$(printf '%q' "$HOST_DATA/launcher-settings.json")"; READ_SF="if [ -e $SF ]; then cat $SF; else echo NOFILE; fi"; PREV_UNLOAD=""; WAS_FILE=""
+    if [ "$DRY" = 0 ]; then
+      # fail closed: a file (or a connection) that cannot be read is never taken for "no file"
+      WAS_FILE="$(rsh "$READ_SF")" && [ -n "$WAS_FILE" ] || die "could not read launcher-settings.json on the host; nothing changed"
+      case "$WAS_FILE" in *'"unloadStill":1'*|*'"unloadStill": 1'*|*'"unloadStill":true'*) PREV_UNLOAD=1;; *) PREV_UNLOAD=0;; esac
+    fi
+    # the previous value is kept for the stops below only once the write succeeded (install.sh refuses before it writes)
+    if x rsh "$(settings_cmd "$UNLOAD")"; then [ "$DRY" = 1 ] || UNLOAD_WAS="$PREV_UNLOAD"
+    else
+      NOW_FILE="$(rsh "$READ_SF")" || NOW_FILE="(unreadable)"
+      if [ "$NOW_FILE" != "$WAS_FILE" ]; then UNLOAD_WAS="$PREV_UNLOAD"; settings_restore; fi
+      die "install.sh unload-still failed; nothing was activated"
+    fi
   fi
   LIVE="the activation started: check healthz; the host rolls back by itself on failure"
   # from here a stop is not "before the release": the host may have switched (release.yml reads this marker)
-  [ "$DRY" = 1 ] || date -u +%FT%TZ > "$OUT/ACTIVATING"
+  [ "$DRY" = 1 ] || { date -u +%FT%TZ > "$OUT/ACTIVATING"; date -u +%s > "$OUT/activating-epoch"; }
   rc=0; x_in "$SHIPD/host-activate.sh" rsh "bash -s -- $(quote "$HOST_ROOT" "$HOST_DATA" "$HOST_CONF" "$HOST_UNIT" "$ORIGIN" "$BUILD") $A" || rc=$?
   # The host's exit is the only account of what happened (ship/host-activate.sh). Never claim a rollback it didn't report.
   DETAIL="exit $rc"; WAS="${A%% *}"
@@ -319,11 +329,21 @@ if step healthz "public healthz reports this build, every world and hostOk"; the
     node "$VERDICT" health "$OUT/live-health.json" "$([ "$NOSWITCH" = 1 ] && prev_build || echo "$BUILD")" "$W" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || die "healthz is wrong$([ "$NOSWITCH" = 1 ] && echo ' (the live build, no switch)' || echo ' after activation')"
   fi
   # --unload-still: the launcher the reload started says where its setting came from (0 removes the file: the default).
-  # Missing is a named warning in the evidence, never a rollback
+  # Missing is a named warning only: recorded in POSTLIVE.txt and annotated, never a failed check (the release still
+  # publishes) and never a rollback. The journal is read from a minute before the activation.
   if [ -n "$UNLOAD" ] && [ "$NOSWITCH" = 0 ]; then
     WANT="unload-still $UNLOAD ($([ "$UNLOAD" = 1 ] && echo launcher-settings.json || echo 'the default'))"
-    SINCE="$(sed 's/T/ /; s/Z$/ UTC/' "$OUT/ACTIVATING" 2>/dev/null || echo '-1h')"
-    live unload-still-log "$OUT/unload-still.log" rsh "journalctl -u $(printf '%q' "$HOST_UNIT") --since $(printf '%q' "$SINCE") --no-pager -o cat | grep -F $(printf '%q' "$WANT")"
+    EPOCH="$(cat "$OUT/activating-epoch" 2>/dev/null || true)"; SINCE="$([[ "$EPOCH" =~ ^[0-9]+$ ]] && echo "@$(( EPOCH - 60 ))" || echo '-1h')"
+    JQ="journalctl -u $(printf '%q' "$HOST_UNIT") --since $(printf '%q' "$SINCE") --no-pager -o cat | grep -F $(printf '%q' "$WANT")"
+    say "   + $(quote rsh "$JQ") > $OUT/unload-still.log"
+    if [ "$DRY" = 0 ]; then
+      if rsh "$JQ" > "$OUT/unload-still.log" 2>&1; then printf 'unload-still-log 0\n' >> "$OUT/POSTLIVE.txt"; say "   the new launcher said: $WANT"
+      else
+        printf 'unload-still-log warning\n' >> "$OUT/POSTLIVE.txt"
+        say "   WARNING unload-still-log: no '$WANT' line from the new launcher in the unit's journal; check it by hand (not a failed check)"
+        echo "::warning::unload-still-log: no '$WANT' line from the new launcher in the unit's journal; check it by hand"
+      fi
+    fi
   fi
   done_step
 fi
