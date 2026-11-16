@@ -33,7 +33,7 @@ test('the upgrade answer is read once its head is complete; the first frames aft
   assert.equal(parseUpgrade(Buffer.from('HTTP/1.1 503 Service Unavailable\r\n\r\n')).status, 503);
 });
 test('the upgrade offers compression and carries the viewer\'s own address; client frames are masked', () => {
-  const r = upgradeRequest({ host: 'h:1', path: '/w/x/ws?hello=%7B%7D', address: '198.18.0.1', key: 'k' });
+  const r = upgradeRequest({ host: 'h:1', path: '/w/x/ws?hello=%7B%7D', address: '198.18.0.1', key: 'k' });   // scrub-guard: allow (RFC 2544 benchmarking range, the bench's own viewer addresses)
   assert.match(r, /^GET \/w\/x\/ws\?hello=%7B%7D HTTP\/1\.1\r\n/); assert.match(r, /\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n/);
   assert.match(r, /\r\nX-Forwarded-For: 198\.18\.0\.1\r\n\r\n$/);
   assert.doesNotMatch(upgradeRequest({ host: 'h', path: '/', address: 'a', deflate: false }), /permessage-deflate/);
