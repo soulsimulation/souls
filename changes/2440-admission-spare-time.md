@@ -1,4 +1,4 @@
 ---
 type: perf
 ---
-In a busy world, a Soul's action is answered in about a second when the world has time to spare, instead of waiting up to 20 seconds.
+In a busy world, about five times as many of Souls' actions now go through, instead of being turned away after a 20-second wait.
