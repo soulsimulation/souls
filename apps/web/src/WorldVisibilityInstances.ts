@@ -29,6 +29,9 @@ export class WorldVisibilityInstances {
  private cache=new Map<THREE.InstancedMesh,Cache>();
  private proxy?:THREE.Mesh;
  private query?:Map<THREE.InstancedMesh,Cache|undefined>;
+ private members?:Set<THREE.InstancedMesh>;
+ /** The current query's validated cache for an instanced member (validated on first use); undefined for a non-member. */
+ private queried(mesh:THREE.InstancedMesh){const q=this.query!;if(q.has(mesh))return q.get(mesh);if(!this.members?.has(mesh))return undefined;const c=this.prepare(mesh);q.set(mesh,c);return c;}
  private queryObjects?:readonly THREE.Object3D[];
  private queryDepth=0;
  /** Bounds passes taken (one per outermost withQuery; tests and frame-cost readouts). */
@@ -36,6 +39,9 @@ export class WorldVisibilityInstances {
  // World bounding spheres per query object (x,y,z,r; NaN = never pre-rejected).
  private bounds?:Float64Array;
  private boundsObjects?:readonly THREE.Object3D[];
+ // #2617: the query objects' bounds in an XZ grid, so a ray visits only the objects whose spheres it can pass.
+ private grid?:Grid;private built?:{bounds:Float64Array;grid:Grid};
+ private seen=new Uint32Array(0);private seenGen=0;
  private sphere=new THREE.Sphere();
  private local=new THREE.Matrix4();
  private ray=new THREE.Ray();
@@ -48,7 +54,7 @@ export class WorldVisibilityInstances {
  private entry=new THREE.Vector3();
  private segment=new THREE.Box3();
  private stack=new Int32Array(256);
- reset(){this.generation++;this.bounds=undefined;this.boundsObjects=undefined;this.cache.clear();this.meshCells.clear();this.cellProxy=undefined;this.proxy=undefined;this.query=undefined;this.queryObjects=undefined;this.hits.length=0;}
+ reset(){this.generation++;this.bounds=undefined;this.boundsObjects=undefined;this.grid=undefined;this.built=undefined;this.cache.clear();this.meshCells.clear();this.cellProxy=undefined;this.proxy=undefined;this.query=undefined;this.members=undefined;this.queryObjects=undefined;this.hits.length=0;}
  /** Keep validated caches for meshes still collected; every use still revalidates them. */
  retain(objects:readonly THREE.Object3D[]){const keep=new Set(objects);for(const mesh of [...this.cache.keys()])if(!keep.has(mesh))this.cache.delete(mesh);for(const mesh of [...this.meshCells.keys()])if(!keep.has(mesh))this.meshCells.delete(mesh);}
  private cellsOf(mesh:THREE.Mesh):Cells|null{
@@ -134,9 +140,12 @@ export class WorldVisibilityInstances {
   const setup0=performance.now();VIS_STATS.queries++;VIS_STATS.objects=objects.length;
   const previous=this.query,previousObjects=this.queryObjects,generation=this.generation;
   const stock=objects.every(o=>STOCK_RAYCASTS.has(o.raycast));
-  this.query=stock&&!previous?new Map(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh).map(o=>[o,this.prepare(o)])):undefined;
-  this.queryObjects=objects;const previousBounds=this.bounds,previousBoundsObjects=this.boundsObjects;this.bounds=boundsOf(objects);this.boundsObjects=objects;this.stats.boundsPasses++;this.queryDepth++;VIS_STATS.setupMs+=performance.now()-setup0;
-  try{return run();}finally{this.queryDepth--;if(this.generation===generation){this.query=previous;this.queryObjects=previousObjects;this.bounds=previousBounds;this.boundsObjects=previousBoundsObjects;}}
+  // #2617: each instanced member is validated when a ray first reaches it in this query (most never are), not up front;
+  // nothing changes the scene inside a synchronous query, so the answer is the same.
+  const previousMembers=this.members;this.members=stock&&!previous?new Set(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh)):undefined;
+  this.query=this.members?new Map():undefined;
+  this.queryObjects=objects;const previousBounds=this.bounds,previousBoundsObjects=this.boundsObjects,previousGrid=this.grid;this.bounds=boundsOf(objects);this.boundsObjects=objects;this.grid=undefined;this.stats.boundsPasses++;this.queryDepth++;VIS_STATS.setupMs+=performance.now()-setup0;
+  try{return run();}finally{this.queryDepth--;if(this.generation===generation){this.query=previous;this.members=previousMembers;this.queryObjects=previousObjects;this.bounds=previousBounds;this.boundsObjects=previousBoundsObjects;this.grid=previousGrid;}}
  }
  // Exact stock Mesh near/far sphere rejection.
  private misses(sphere:THREE.Sphere,raycaster:THREE.Raycaster){
@@ -148,16 +157,44 @@ export class WorldVisibilityInstances {
   out.length=0;const objects=this.queryObjects,b=this.boundsObjects===objects?this.bounds:undefined;if(!objects)return out;
   for(let i=0;i<objects.length;i++){const R=b?b[i*4+3]:NaN;if(R>=0){const dx=b![i*4]-p.x,dy=b![i*4+1]-p.y,dz=b![i*4+2]-p.z;if(dx*dx+dy*dy+dz*dz>(R+r)*(R+r))continue;}
    // Validated instances: keep the mesh only if some chunk sphere reaches p.
-   const c=objects[i] instanceof THREE.InstancedMesh?this.query?.get(objects[i] as THREE.InstancedMesh):undefined;
+   const c=objects[i] instanceof THREE.InstancedMesh?this.queried(objects[i] as THREE.InstancedMesh):undefined;
    if(c&&!c.chunks.some(k=>k.sphere.center.distanceToSquared(p)<=(k.sphere.radius+r)**2))continue;
    out.push(i);}
   return out;
+ }
+ /** #2617: indices (ascending) of the current query objects a ray's [near,far] segment can meet: those whose bounding
+  * sphere's XZ square (padded) lies in a grid cell the segment's XZ path crosses, and every object without known bounds
+  * or too large for the grid. A superset of the objects intersect() would not pre-reject, in the same order, so a loop
+  * over it finds exactly the hits a loop over every object finds. All objects when there is no finite segment. */
+ along(raycaster:THREE.Raycaster,out:number[]):number[]{
+  out.length=0;const objects=this.queryObjects;if(!objects)return out;
+  const far=raycaster.far,near=raycaster.near,o=raycaster.ray.origin,d=raycaster.ray.direction;
+  const b=this.boundsObjects===objects?this.bounds:undefined;
+  if(!b||!Number.isFinite(far)||!Number.isFinite(near)||!(o.x+o.z+d.x+d.z>-Infinity&&o.x+o.z+d.x+d.z<Infinity)){for(let i=0;i<objects.length;i++)out.push(i);return out;}
+  // Built once per outermost query, and kept while every object's bounds stay the same (scenery mostly stands still).
+  const g=this.grid??(this.grid=this.built&&this.built.bounds.length===b.length&&sameArray(this.built.bounds,b,b.length)?this.built.grid:(this.built={bounds:b,grid:gridOf(b,objects.length)}).grid);
+  if(this.seen.length<objects.length)this.seen=new Uint32Array(objects.length);if(++this.seenGen>=0xffffffff){this.seen.fill(0);this.seenGen=1;}const gen=this.seenGen;
+  const take=(cell:number)=>{for(let k=g.start[cell],e=g.start[cell+1];k<e;k++){const i=g.items[k];if(this.seen[i]!==gen){this.seen[i]=gen;out.push(i);}}};
+  for(let k=0;k<g.always.length;k++){const i=g.always[k];this.seen[i]=gen;out.push(i);}
+  // The segment's XZ path, column by column along its longer axis; each column's span on the other axis (padded).
+  const ax=o.x+d.x*near,az=o.z+d.z*near,bx=o.x+d.x*far,bz=o.z+d.z*far,xMajor=Math.abs(bx-ax)>=Math.abs(bz-az);
+  const u0=xMajor?ax:az,u1=xMajor?bx:bz,v0=xMajor?az:ax,v1=xMajor?bz:bx,uOrg=xMajor?g.x0:g.z0,vOrg=xMajor?g.z0:g.x0,nu=xMajor?g.nx:g.nz,nv=xMajor?g.nz:g.nx;
+  const lo=Math.min(u0,u1),hi=Math.max(u0,u1),c0=Math.max(0,Math.floor((lo-uOrg)/g.size)),c1=Math.min(nu-1,Math.floor((hi-uOrg)/g.size));
+  const slope=hi>lo?(v1-v0)/(u1-u0):0;
+  for(let c=c0;c<=c1;c++){
+   const s0=Math.max(lo,uOrg+c*g.size),s1=Math.min(hi,uOrg+(c+1)*g.size),va=hi>lo?v0+(s0-u0)*slope:v0,vb=hi>lo?v0+(s1-u0)*slope:v1;
+   const r0=Math.max(0,Math.floor((Math.min(va,vb)-GRID_PAD-vOrg)/g.size)),r1=Math.min(nv-1,Math.floor((Math.max(va,vb)+GRID_PAD-vOrg)/g.size));
+   for(let r=r0;r<=r1;r++)take(xMajor?r*g.nx+c:c*g.nx+r);
+  }
+  // Ascending, as a loop over every object visits them: a short list is sorted, a long one read back from the marks.
+  if(out.length*8<objects.length)return out.sort((x,y)=>x-y);
+  out.length=0;for(let i=0;i<objects.length;i++)if(this.seen[i]===gen)out.push(i);return out;
  }
  /** index: position of object in the current query list, enabling the bounds pre-test. */
  intersect(object:THREE.Object3D,raycaster:THREE.Raycaster,target:THREE.Intersection[],index?:number){
   if(index!==undefined&&this.bounds&&this.boundsObjects===this.queryObjects&&this.queryObjects?.[index]===object&&segmentMisses(this.bounds,index,raycaster))return;
   if(!(object instanceof THREE.InstancedMesh)){if(!object.layers.test(raycaster.layers))return;const cells=(object as THREE.Mesh).isMesh?this.cellsOf(object as THREE.Mesh):null;if(cells&&(object as THREE.Mesh).material!==undefined)this.intersectCells(object as THREE.Mesh,cells,raycaster,target);else object.raycast(raycaster,target);return;}
-  const c=this.query?this.query.get(object):this.prepare(object);if(!c){if(object.layers.test(raycaster.layers))object.raycast(raycaster,target);return;}
+  const c=this.query?this.queried(object):this.prepare(object);if(!c){if(object.layers.test(raycaster.layers))object.raycast(raycaster,target);return;}
   if(!object.layers.test(raycaster.layers)||object.material===undefined)return;
   // Match the stock InstancedMesh whole-object sphere before per-instance work.
   this.sphere.copy(object.boundingSphere!).applyMatrix4(object.matrixWorld);if(!raycaster.ray.intersectsSphere(this.sphere))return;
@@ -180,6 +217,28 @@ export class WorldVisibilityInstances {
    }
   }
  }
+}
+/** #2617: query objects by XZ cell (counting sort). An object whose sphere spans more than GRID_SPAN cells a side, or
+ *  has no known bounds, is in `always`. Cells are GRID_SIZE m, or larger when the scene would need too many. */
+type Grid={size:number;x0:number;z0:number;nx:number;nz:number;start:Int32Array;items:Int32Array;always:Int32Array};
+const GRID_SIZE=8,GRID_SPAN=4,GRID_CELLS=1<<16,GRID_PAD=.01;
+function gridOf(b:Float64Array,n:number):Grid{
+ // The grid covers every gridded object's padded square, so no clamping at its edge can drop one.
+ let size=GRID_SIZE,x0=0,z0=0,x1=0,z1=0;
+ const big=(i:number)=>!(b[i*4+3]>=0)||2*b[i*4+3]>GRID_SPAN*size;
+ for(;;size*=2){
+  x0=Infinity;z0=Infinity;x1=-Infinity;z1=-Infinity;
+  for(let i=0;i<n;i++){if(big(i))continue;const r=b[i*4+3]+2*GRID_PAD;x0=Math.min(x0,b[i*4]-r);x1=Math.max(x1,b[i*4]+r);z0=Math.min(z0,b[i*4+2]-r);z1=Math.max(z1,b[i*4+2]+r);}
+  if(!(x1>=x0&&z1>=z0)||Math.ceil((x1-x0)/size)*Math.ceil((z1-z0)/size)<=GRID_CELLS)break;
+ }
+ if(!(x1>=x0&&z1>=z0))return {size,x0:0,z0:0,nx:1,nz:1,start:new Int32Array(2),items:new Int32Array(0),always:Int32Array.from({length:n},(_,i)=>i)};
+ const nx=Math.max(1,Math.ceil((x1-x0)/size)),nz=Math.max(1,Math.ceil((z1-z0)/size)),count=new Int32Array(nx*nz+1),always:number[]=[];
+ const span=(i:number,k:0|2,org:number,cells:number):[number,number]=>[Math.max(0,Math.floor((b[i*4+k]-b[i*4+3]-GRID_PAD-org)/size)),Math.min(cells-1,Math.floor((b[i*4+k]+b[i*4+3]+GRID_PAD-org)/size))];
+ for(let i=0;i<n;i++){if(big(i)){always.push(i);continue;}const [a0,a1]=span(i,0,x0,nx),[c0,c1]=span(i,2,z0,nz);for(let z=c0;z<=c1;z++)for(let x=a0;x<=a1;x++)count[z*nx+x+1]++;}
+ for(let c=0;c<nx*nz;c++)count[c+1]+=count[c];
+ const start=count.slice(),fill=count.slice(0,nx*nz),items=new Int32Array(start[nx*nz]);
+ for(let i=0;i<n;i++){if(big(i))continue;const [a0,a1]=span(i,0,x0,nx),[c0,c1]=span(i,2,z0,nz);for(let z=c0;z<=c1;z++)for(let x=a0;x<=a1;x++)items[fill[z*nx+x]++]=i;}
+ return {size,x0,z0,nx,nz,start,items,always:Int32Array.from(always)};
 }
 /** Group nearby instances (XZ grid order) and enclose each group's spheres. */
 function chunksOf(spheres:readonly THREE.Sphere[]):Chunk[]{
