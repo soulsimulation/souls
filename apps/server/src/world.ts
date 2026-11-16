@@ -47,8 +47,9 @@ import { emptyIntentHistoryV2, foldIntentHistoryV2, type IntentHistoryV2 } from 
 import { IntentObservations } from './intent-observations.ts';
 import { foldStationFactV1, stationGenesisIdV1, type StationHistoryV1 } from './station-history.ts';
 import { initialStationHistoryV2,foldStationFactV2,type StationHistoryV2 } from './station-history-v2.ts';
-import { bootPhase, bootTick } from './load/boot-progress.ts';
+import { BootProgress } from './load/boot-progress.ts';
 import { S } from './load/shared.ts';
+import { RECOVERY_STEP_ID } from './load/restart-loop.ts';
 import { countGlitch, faultFacts, faultKeys, glitchLine, THROWN_RULE, type GlitchCountsV1, type GlitchRecordV1, type GlitchRung } from './glitch.ts';
 export { replayFromGenesis, replayKernel } from './fold.ts';
 
@@ -86,6 +87,8 @@ export type RecoveryRecipe = { baseline: SnapshotBody; events: LogEvent[]; until
 /** #1369: how often a world under quarantine/1 looks for a broken body that nothing has faulted on yet (one second). */
 const BROKEN_SWEEP_TICKS = 20;
 const REWIND_COOLDOWN_TICKS = 1200;
+/** #2458 A3: a recovery tries no further plan replay after it has held the main thread this long (the hang limit is 10 s). */
+const RECOVERY_REPLAY_BUDGET_MS = 3000;
 /** #1440: holds of one body within a cooldown before quarantine-mark/1 holds it by a standing mark. */
 const MARK_AFTER = 3;
 /** #1250: a stop that gave up, and the crews it let go, are no glitch: nothing broke. */
@@ -208,8 +211,10 @@ export class WorldHost {
    *  of its interval). `snapshotEvery` ticks stays the ceiling. A boot that replayed more than `snapshotAfterReplayTicks`
    *  (0 = off; main.ts sets SNAPSHOT_AFTER_REPLAY_TICKS) snapshots on its first tick, so a second crash does not replay the gap again. */
   snapshotDebtMs = 0; snapshotMinGapMs = 20_000; snapshotAfterReplayTicks = 0;
-  /** Engine-step time of the live ticks since the last snapshot: what a boot after a kill would replay. */
+  /** Main-thread time of the live ticks since the last snapshot (#2458: the whole tick): what a boot after a kill, or a recovery, would replay. */
   replayDebtMs = 0;
+  /** #2458: the running average of a computed tick's whole main-thread time, ms: what each jumped tick adds to the debt. */
+  tickCostMs = 0;
   private lastSnapshotWall = performance.now();
   private snapshotSoon: string | null = null;
   /** Main-thread ms of the last completed snapshot (capture + finish + serialize + persist). */
@@ -277,7 +282,7 @@ export class WorldHost {
   private bootSkippedV1: {tick: number; seq: number; reason: string; error: unknown}[] | null = null;
   private bootV1(): { from: 'genesis' | 'snapshot'; replayed: number } {
     this.bootSkippedV1 = null;
-    const tBoot = performance.now(); bootPhase('boot:restore');
+    const tBoot = performance.now(); this.bootProgress.phase('boot:restore');
     this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null;
     let w = this.db.world(this.worldId);
     if (!w) {
@@ -346,8 +351,8 @@ export class WorldHost {
     const stepReplay=()=>{
       const before=this.engine.runtime.violations.length;
       let out:ReturnType<Engine['step']>;
-      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;bootTick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
-      this.advanceLives();replayTicks++;bootTick(this.engine.world.tick);
+      try{out=this.stepEngine();}catch(error){if(!this.repairRules)throw error;if(!replayThrew)console.warn('[world] a replayed step threw; the repair in the log follows it:',String(error).slice(0,200));replayThrew=true;replayTicks++;this.bootProgress.tick(this.engine.world.tick);if(this.durableClockV1){this.kernel.tick=this.engine.world.tick;sweep(this.kernel);}return;}   // #1150: as the live tick did
+      this.advanceLives();replayTicks++;this.bootProgress.tick(this.engine.world.tick);
       replayedRefusals+=out.refusals?.length??0;
       if(this.durableClockV1){
         if(this.engine.runtime.violations.length>before&&!this.repairRules)throw new Error('clock-frontier.replay-violates');   // #1150: a repair in the log follows it
@@ -379,11 +384,11 @@ export class WorldHost {
       later=later.slice(repaired+1);
     }
     const target = Math.max(this.engine.world.tick, later.length ? later[later.length - 1].tick : 0, clock && !checkedClock ? clock.tick : 0);
-    bootPhase('boot:replay', this.engine.world.tick, target);
+    this.bootProgress.phase('boot:replay', this.engine.world.tick, target);
     for (const e of later) {
       if(clock&&!checkedClock&&e.seq>clock.throughSeq)verifyClock();
       while (this.engine.world.tick < e.tick) stepReplay();
-      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); }
+      try { this.apply(e, true); } catch (error) { if (!this.repairRules) throw error; console.warn(`[world] replayed event ${e.seq} threw, as it did live:`, String(error).slice(0, 200)); if (e.kind === 'birth' && !this.minds.has(e.payload?.soulId)) this.unbornV1.add(e.payload.soulId); }
       this.seq = e.seq;
     }
     verifyClock();
@@ -693,6 +698,7 @@ export class WorldHost {
         const skip = land - 1 > tick ? (this.engine as unknown as { skipToV1?(t: number): { ok: boolean } }).skipToV1?.(land - 1) : undefined;
         if (skip?.ok) {
           const st = this.skipStats; st.ticksJumped += land - 1 - tick; st.jumps++; st.lastHorizon = s.untilTick;
+          this.replayDebtMs += (land - 1 - tick) * this.tickCostMs;   // #2458: a recovery replays jumped ticks one by one
           this.stillStretch = true; this.stillClaim = s.untilTick ?? Infinity; this.jumpFrom = tick;
           this.landing = true; try { this.tickOnce(); } finally { this.landing = false; }
           if (this.stillClaim !== null && this.engine.world.tick >= this.stillClaim) this.stillClaim = null;   // #2384: landed on the claim: it is spent, ask again
@@ -780,6 +786,8 @@ export class WorldHost {
   /** #2378 A2: the shared load numbers (load/shared.ts), where each tick names the step it is in (its stable id) for the
    *  watchdog. Unset: none. */
   stepSlots?: Float64Array;
+  /** #2416: this world's boot progress (startWorld gives its load array's slots; tests get private ones). */
+  bootProgress = new BootProgress();
   /** #2378 A2: a step (a listener's afterTick, by its stable id: stepIdOf) that ended the process on two boots in a row
    *  (load/restart-loop.ts): skipped from `fromTick` until `untilTick`, named once in the log and the glitch counts
    *  (`world.step-quarantined`), so the world comes up and runs on. By id, not by place: `listeners` changes at runtime. */
@@ -887,7 +895,6 @@ export class WorldHost {
     if (out.refusals) this.noteRefusals(out.refusals);
     if (this.quarantineRule) { this.noteWholePoses(); if (this.engine.world.tick % BROKEN_SWEEP_TICKS === 0) this.sweepBrokenBodies(); }
     if (this.repairRules && !this.clockAvailable) return;
-    this.replayDebtMs += performance.now() - tStep;
     if(this.durableClockV1){
       // Derived effects become durable before this elapsed body tick is sent.
       // Listener-generated next inputs retain their ordinary queue semantics.
@@ -922,6 +929,12 @@ export class WorldHost {
     if (crossed(BATCH_TICKS)) this.flush();
     if (crossed(HEARTBEAT_TICKS)) this.heartbeat();
     if (span) span[4] = performance.now() - ts;
+    // #2458 A3: the debt is the whole tick (its inputs, step, listeners, broadcast), not the step alone: a recovery replays
+    // the logged inputs and every tick's lives and programmes too, and at 24 to 100 Souls cost 4 to 6 ms a replayed tick
+    // where the step alone measured 0.6, so the step-only debt let 1800 to 4800 ticks build up between snapshots. A jump
+    // (a still world, as during setup) adds its ticks at the running average whole tick, `tickCostMs`: a recovery steps
+    // through them one by one (on souls-timed at 100 Souls, 1715 of 1836 setup ticks were jumped and counted nothing)
+    const tickMs = performance.now() - t0; this.replayDebtMs += tickMs; this.tickCostMs += (tickMs - this.tickCostMs) * 0.05;
     // #2298 A4: nothing new since the last. #2406: a landing's snapshot is taken on the next turn, not in the landing's own
     if (this.snapshotDue(now) && !(this.landing && this.seq === this.snapshotSeq)) { if (span) span[5] = 1; if (this.landing) this.deferLandingSnapshot(); else this.schedulePeriodicSnapshot(); }
     this.tickMs.push(performance.now() - t0);
@@ -1077,6 +1090,11 @@ export class WorldHost {
   }
 
   // ------------------------------------------------------------ inputs
+  /** Souls whose birth was logged and threw (at boot under repair rules) or was left out by a rewind: a row with no body and
+   *  no mind. Souls.rebirthUnborn() gives each a new birth; until then the Soul cannot act and its owner sees no body. */
+  readonly unbornV1 = new Set<string>();
+  /** Births queued and not yet applied (a direct create counts them against the arrival point's free spots). */
+  queuedBirthsV1(): number { let n = 0; for (const p of this.queue) if (p.kind === 'birth') n++; return n; }
   /** Queue an input; it is logged and applied at the next tick. Resolves with the logged event. */
   enqueue(kind: EventKind, author: string, payload: unknown): Promise<LogEvent> {
     this.assertClockReady();
@@ -1923,8 +1941,12 @@ export class WorldHost {
     // a whole body, so what precedes it is overwritten: start from it (else each level replays its chain again, 2^depth).
     let nested = -1; for (let i=0;i<recipe.events.length;i++) if (recipe.events[i].kind === 'rules' && recipe.events[i].payload?.recovery) nested=i;
     // Keep the outer recipe's original violation ceiling even when its replay prefix is superseded.
-    this.restoreBody(recipe.baseline);
+    let at = performance.now(); this.restoreBody(recipe.baseline); this.notePhase('restore', at); at = performance.now();
+    try { this.replayRecipe(recipe, nested); } finally { this.notePhase('replay', at); }
+  }
+  private replayRecipe(recipe: RecoveryRecipe, nested: number) {
     if (recipe.lastRung) return this.applyLastRung(recipe);
+    this.recoveryReplays?.push(Math.max(0, recipe.untilTick - this.engine.world.tick));
     const historicViolations=this.engine.runtime.violations.length;
     if (nested >= 0) { this.apply(recipe.events[nested],true); this.seq=recipe.events[nested].seq; }
     else {
@@ -1933,10 +1955,10 @@ export class WorldHost {
       for (const actor of recipe.edge?.stopActors ?? []) { const program=this.engine.programOf(actor); if (program) this.engine.stop(program); }
     }
     for (const e of recipe.events.slice(nested+1)) {
-      while (this.engine.world.tick < e.tick) { const out=this.engine.step(); this.advanceLives(); this.afterPrograms(out.programs,true); }
+      while (this.engine.world.tick < e.tick) { const out=this.engine.step(); this.stepFaultV1?.(this.engine.world.tick-1,true); this.advanceLives(); this.afterPrograms(out.programs,true); }
       this.apply(e,true); this.seq=e.seq;
     }
-    while (this.engine.world.tick < recipe.untilTick) { const out=this.engine.step(); this.advanceLives(); this.afterPrograms(out.programs,true); }
+    while (this.engine.world.tick < recipe.untilTick) { const out=this.engine.step(); this.stepFaultV1?.(this.engine.world.tick-1,true); this.advanceLives(); this.afterPrograms(out.programs,true); }
     this.restorePoses(recipe.edge?.poses);
     if (this.engine.runtime.violations.length > historicViolations) {
       // Name both faults (#509): CI logs and a paused world's engineFault keep only this message.
@@ -1948,12 +1970,35 @@ export class WorldHost {
     for (const m of this.minds.values()) { m.nextEvalTick=this.engine.world.tick+1; m.evalTrigger='activity-failed'; m.lastFingerprint=''; if (m.pending && recipe.excluded.includes(m.pending.card)) m.pending=null; }
     this.kernel.tick=this.engine.world.tick; sweep(this.kernel); this.kernelDirty=true;
   }
+  /** #2458 (SIM_FAULT_INJECT, tests and measurement only): run after each engine step with the tick it stepped from, and
+   *  whether a recovery is replaying it; a throw from a live step is a fault inside the tick, recovered as an engine fault is. */
+  stepFaultV1: ((tick: number, replay: boolean) => void) | null = null;
+  /** #2458: the replays the current recovery ran (each one from its baseline to the faulted tick), for its hold line. */
+  private recoveryReplays: number[] | null = null;
+  /** #2458: where the current recovery's main-thread time went, ms: the baseline read, restores, replays, the log write, the snapshot. */
+  private recoveryPhases: Record<'baseline' | 'restore' | 'replay' | 'write' | 'snapshot', number> | null = null;
+  private notePhase(k: 'baseline' | 'restore' | 'replay' | 'write' | 'snapshot', since: number) { if (this.recoveryPhases) this.recoveryPhases[k] += performance.now() - since; }
+  /** #2458: one line per recovery: how long it held the main thread and how far back it replayed. */
   private recoverFault(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
+    const t0 = performance.now(), tick = this.engine.world.tick, replays: number[] = this.recoveryReplays = [], phases = this.recoveryPhases = {baseline: 0, restore: 0, replay: 0, write: 0, snapshot: 0}, debt = this.replayDebtMs, since = tick - this.lastSnapshotTick, age = t0 - this.lastSnapshotWall;
+    // the watchdog sees a recovery as its own step: a kill inside one is recorded so (restart-loop.ts), and the restart
+    // contains that fault in place instead of replaying it again (recoveryQuarantined)
+    const sh = this.stepSlots, prior = sh ? [sh[S.stepTick], sh[S.step]] : null;
+    if (sh) { sh[S.stepTick] = tick; sh[S.step] = RECOVERY_STEP_ID + 1; }
+    try { this.recoverFaultV1(error, cardHint, edgeHint); }
+    finally {
+      if (sh && prior) { sh[S.stepTick] = prior[0]; sh[S.step] = prior[1]; }
+      this.recoveryReplays = null; this.recoveryPhases = null; const ms = performance.now() - t0, ticks = replays.reduce((a, b) => a + b, 0);
+      console.log(`[world] recovery hold ${Math.round(ms)} ms at tick ${tick}: ${replays.length} replays (${replays.join(', ') || 'none'} ticks)${ticks ? `, ${(ms / ticks).toFixed(2)} ms per replayed tick` : ''}; since the last snapshot ${since} ticks, ${Math.round(age)} ms of wall, ${Math.round(debt)} ms of steps (its cost ${Math.round(this.lastSnapshotCostMs)} ms); ${Object.entries(phases).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ')} ms`);
+    }
+  }
+  private recoverFaultV1(error: unknown, cardHint?: string, edgeHint?: {seq: number; entityId?: string}) {
+    const startedAt = performance.now();
     // A pending checkpoint already owns this boundary. Materialize that same
     // capture before recovery replaces the engine; never fall back to an older head.
     let baseline: SnapshotBody | null;
     const head = this.holdHead();
-    try { baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; }
+    try { const at=performance.now(); baseline=this.recoveryCapture ? this.recoveryCapture() : this.recoveryBaseline; this.notePhase('baseline', at); }
     catch (failure) {
       // #1369: a baseline that won't materialize is no failed write: nothing to go back to, so the head stays
       if (this.quarantineRule) { this.cancelPeriodicSnapshot(); this.recoveryCapture = null; this.recoveryBaseline = null; this.nonFiniteBase = null; return this.quarantine(error, failure); }
@@ -1963,7 +2008,7 @@ export class WorldHost {
     // #1377: an invariant that throws reading one entity: only that entity is quarantined (a rewind would stop everyone and read it again)
     if (this.quarantineRule && this.thrownOnly(error)) return this.quarantine(error);
     // #1150: nothing clean to go back to, or this just happened: the head stays and everything on it stops
-    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error))) return this.containInPlace(error);
+    if (this.repairRules && (!baseline || this.stepFailing || this.engine.world.tick - this.lastRewindTick < REWIND_COOLDOWN_TICKS || this.rewoundFor(error) || this.recoveryQuarantined())) return this.containInPlace(error);
     if (!baseline) { if (this.edgeRecovery()) return this.haltOnFault(error, 'no resumable recovery baseline'); throw new Error(`No resumable recovery baseline: ${String(error)}`); }
     const untilTick=this.engine.world.tick, originalSeq=this.seq, all=this.db.events(this.worldId,baseline.seq);
     const pending=[...this.minds.values()].filter(m=>m.pending).map(m=>m.pending!.card);
@@ -1984,10 +2029,12 @@ export class WorldHost {
       const edge=plan.edge?{...plan.edge,...this.rewoundPoses(plan.edge, all)}:undefined;
       const recipe: RecoveryRecipe={baseline:structuredClone(baseline),events,untilTick,faults:{...faults},excluded:[...plan.excluded],reason:String(error).slice(0,800),...(edge?{edge}:{})};
       try { this.restoreRecovery(recipe); }
-      catch (replayError) { if (attempt===plans.length-1) { if (this.repairRules) return this.lastRung(error, baseline, all, untilTick, originalSeq, head); if (this.edgeRecovery()) return this.haltOnFault(replayError, 'recovery replay still faults', error, untilTick); throw replayError; } continue; }
+      // #2458 A3: under the repair rules a failed plan is not followed by another replay once this recovery has held the main
+      // thread for RECOVERY_REPLAY_BUDGET_MS: each replay costs the same again, so the last rung (no replay) ends it
+      catch (replayError) { if (attempt===plans.length-1 || (this.repairRules && performance.now() - startedAt >= RECOVERY_REPLAY_BUDGET_MS)) { if (this.repairRules) return this.lastRung(error, baseline, all, untilTick, originalSeq, head); if (this.edgeRecovery()) return this.haltOnFault(replayError, 'recovery replay still faults', error, untilTick); throw replayError; } continue; }
       this.seq=originalSeq;
       const e: LogEvent={seq:++this.seq,tick:untilTick,kind:'rules',author:'world:recovery',payload:{recovery:recipe},at:Date.now()};
-      if (!this.writeRepair(e)) return;
+      let at=performance.now(); if (!this.writeRepair(e)) return; this.notePhase('write', at);
       this.resetAcc(); this.acc.log.push(e); this.ring=[];
       this.recordGlitch('recovery', error, {tick:untilTick, bodies:[...(edgeHint?.entityId?[edgeHint.entityId]:[]),...(plan.edge?.stopActors??[])], evidence:{seq:e.seq, plan:attempt+1, plans:plans.length, excluded:plan.excluded, ...(plan.edge?{stopActors:plan.edge.stopActors, excludedSeqs:plan.edge.excludedSeqs, souls:plan.edge.souls}:{})}});
       if(this.durableClockV1)this.persistClockFrontier();
@@ -1995,9 +2042,19 @@ export class WorldHost {
       for (const l of this.listeners) l.onApplied?.(e);
       // Rebaseline at the repaired head, so the next recipe never nests this one (each carries a whole body: nested,
       // they double per fault), and snapshot it so a boot starts after it too.
-      if (!this.snapshotRepair()) return;
+      at=performance.now(); const saved=this.snapshotRepair(); this.notePhase('snapshot', at); if (!saved) return;
       this.flush(); this.heartbeat(); return;
     }
+  }
+  /** #2458 A2: a recovery that ended the last process (its watchdog killed it inside one; restart-loop.ts quarantines the
+   *  recovery step after one such death) is not run again in that window: the fault is contained where it happens, named,
+   *  and the world goes on from its head. A restart always makes progress and is never killed the same way twice. */
+  private recoveryQuarantined(): boolean {
+    const q = this.quarantinedStep, tick = this.engine.world.tick;
+    if (q?.id !== RECOVERY_STEP_ID || tick < q.fromTick || tick >= q.untilTick) return false;
+    console.error(`[world] world.recovery-quarantined: a recovery ended the last process at tick ${q.fromTick} (${q.deaths} in a row); until tick ${q.untilTick} a fault is contained where it happens, with no replay`);
+    this.recordGlitch('contained', new Error('world.recovery-quarantined'), { rule: 'world.recovery-quarantined', tick, evidence: { fromTick: q.fromTick, untilTick: q.untilTick, deaths: q.deaths } });
+    return true;
   }
   /** Rung 3s this world has had, for the launcher's ALERT (#1150). */
   get rewinds(): number { return Object.values(this.glitches.byRule).reduce((n, r) => n + (r.rewind ?? 0), 0); }
@@ -2112,7 +2169,7 @@ export class WorldHost {
    *  waits on a tick that isn't coming and a replay can't spin on one. */
   private stepEngine(): ReturnType<Engine['step']> {
     const tick = this.engine.world.tick;
-    try { return this.engine.step(); }
+    try { const out = this.engine.step(); this.stepFaultV1?.(tick, false); return out; }
     catch (error) {
       // always, even if the tick did move: this is also where the step check's memory and the bounds the step skipped are put right
       if (this.repairRules) { const to = Math.max(this.engine.world.tick, tick + 1); try { this.engine.setClockV1!(to); } catch { this.engine.world.tick = to; } }
@@ -2156,14 +2213,15 @@ export class WorldHost {
       catch (failure) { failed = failure; console.error(`[world] last rung: ${events.length} kept events would not re-apply:`, String(failure).slice(0, 300)); continue; }
       this.seq = originalSeq;
       const e: LogEvent = {seq: ++this.seq, tick: untilTick, kind: 'rules', author: 'world:recovery', payload: {recovery: recipe}, at: Date.now()};
-      if (!this.writeRepair(e)) return;
+      let at = performance.now(); if (!this.writeRepair(e)) return; this.notePhase('write', at);
       for (const rule of this.ruleNames(error)) this.rewoundRules.add(rule);
+      for (const b of all) if (b.kind === 'birth' && !this.minds.has(b.payload?.soulId)) this.unbornV1.add(b.payload.soulId);   // a birth the rewind left out
       this.resetAcc(); this.acc.log.push(e); this.ring = [];
       this.recordGlitch('rewind', error, {tick: untilTick, evidence: {seq: e.seq, kept: events.length, dropped: all.length - events.length, contained: recipe.lastRung!.contained, relocated: recipe.lastRung!.relocated, skipped: recipe.lastRung!.skipped}});
       if (this.durableClockV1) this.persistClockFrontier();
       for (const m of this.minds.values()) this.acc.dirty.add(m.soulId);
       for (const l of this.listeners) try { l.onApplied?.(e); } catch (failure) { console.error('[world] a listener failed on a rewind:', String(failure).slice(0, 200)); }
-      if (!this.snapshotRepair()) return;
+      at = performance.now(); const saved = this.snapshotRepair(); this.notePhase('snapshot', at); if (!saved) return;
       this.flush(); this.heartbeat(); return;
     }
     // #1369: the baseline won't restore. That is no failed write (#1368 was a wait the reader rejected), so under quarantine/1 the

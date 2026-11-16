@@ -5,10 +5,11 @@ import { POSTERS_MAX, POSTERS_PER_SOUL, POSTER_TITLE_MAX, POSTER_DETAIL_MAX, POS
 import type { EdgeSoul } from '../edge/contract.ts';
 
 type Refusal = { code: string; reason: string };
-/** The world day now (whole days since the world clock's origin); set by the engine bridge. No clock: day 0. */
-let dayNow: () => number = () => 0;
-export function setWorldDaySource(fn: () => number) { dayNow = fn; }
-export const worldDay = () => { try { const d = dayNow(); return Number.isFinite(d) ? Math.floor(d) : 0; } catch { return 0; } };
+/** The world day now in this world (whole days since its clock's origin). No clock: day 0. #2416: read from the world's
+ *  own host and passed to the board functions; never a module-wide source. */
+export function worldDayOf(host: { living?: { dayTicks: number; origin: number } | null; engine: { world: { tick: number } } }): number {
+  try { const l = host.living; const d = l && l.dayTicks > 0 ? Math.floor(Math.max(0, host.engine.world.tick - l.origin) / l.dayTicks) : 0; return Number.isFinite(d) ? d : 0; } catch { return 0; }
+}
 
 export const isPosterAction = (def: StoredDef, a: { name: string }) => !!def.tags?.includes('posters') && (a.name === 'pin' || a.name === 'unpin');
 export const isWantedAction = (def: StoredDef, a: { name: string }) => !!def.tags?.includes('wanted') && ['pin', 'unpin', 'reply', 'take-on'].includes(a.name);
@@ -28,35 +29,35 @@ const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.l
 const matches = (query: string, hay: string) => { const q = words(query), h = words(hay); return q.length > 0 && q.every(w => h.some(x => x === w || (w.length >= 3 && x.startsWith(w)) || (x.length >= 3 && w.startsWith(x)))); };
 
 // ---- posters ----
-export const posterStale = (p: PosterRec, today = worldDay()) => today - p.day >= POSTER_STALE_DAYS;
-export const posterAge = (p: PosterRec, today = worldDay()) => Math.max(0, today - p.day);
+export const posterStale = (p: PosterRec, today: number) => today - p.day >= POSTER_STALE_DAYS;
+export const posterAge = (p: PosterRec, today: number) => Math.max(0, today - p.day);
 export function posterText(list: PosterRec[]) { return [...list].sort((a, b) => a.s - b.s).map(p => `${p.t}${p.d ? ' — ' + p.d.replace(/\s*\n\s*/g, ' / ') : ''} (${p.n})`).join('\n'); }
 /** The poster a take-down means: the named one, else this Soul's latest, else the oldest out-of-date one. */
-export function posterTarget(state: Record<string, unknown>, soul: EdgeSoul, which?: unknown): PosterRec | null {
+export function posterTarget(state: Record<string, unknown>, soul: EdgeSoul, which: unknown, today: number): PosterRec | null {
   const list = posterList(state), w = line(which);
   if (w) return list.find(p => matches(w, p.t)) ?? list.find(p => matches(w, `${p.t} ${p.d} ${p.n}`)) ?? null;
   const mine = list.filter(p => p.by === soul.soulId); if (mine.length) return mine.reduce((a, b) => (b.day > a.day || (b.day === a.day && list.indexOf(b) > list.indexOf(a)) ? b : a));
-  const stale = list.filter(p => posterStale(p)); return stale.length ? stale.reduce((a, b) => (b.day < a.day ? b : a)) : null;
+  const stale = list.filter(p => posterStale(p, today)); return stale.length ? stale.reduce((a, b) => (b.day < a.day ? b : a)) : null;
 }
 export const posterFreeSlot = (list: PosterRec[]) => { for (let i = 0; i < POSTERS_MAX; i++) if (!list.some(p => p.s === i)) return i; return -1; };
-export function posterProblem(a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params?: Record<string, unknown>): Refusal | null {
+export function posterProblem(a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params: Record<string, unknown> | undefined, today: number): Refusal | null {
   const list = posterList(state);
   if (a.name === 'pin') {
-    if (list.length >= POSTERS_MAX) { const stale = list.filter(p => posterStale(p)); return { code: 'object.state', reason: `The poster wall is full (${POSTERS_MAX} posters).${stale.length ? ` "${stale[0].t}" is out of date, so anyone may take it down first.` : ' A poster comes down when its author takes it down, or anyone may once it is out of date.'}` }; }
+    if (list.length >= POSTERS_MAX) { const stale = list.filter(p => posterStale(p, today)); return { code: 'object.state', reason: `The poster wall is full (${POSTERS_MAX} posters).${stale.length ? ` "${stale[0].t}" is out of date, so anyone may take it down first.` : ' A poster comes down when its author takes it down, or anyone may once it is out of date.'}` }; }
     if (list.filter(p => p.by === soul.soulId).length >= POSTERS_PER_SOUL) return { code: 'object.state', reason: `You already have ${POSTERS_PER_SOUL} posters on this wall; take one down first.` };
     if (params === undefined) return null;
     return textProblem(params.title, 'title', POSTER_TITLE_MAX) ?? (line(params.detail) ? textProblem(params.detail, 'detail', POSTER_DETAIL_MAX, 2) : null);
   }
-  if (params === undefined) return list.some(p => p.by === soul.soulId || posterStale(p)) ? null : { code: 'object.not-yours', reason: `None of these posters is yours and none is out of date; only its author takes a poster down until ${POSTER_STALE_DAYS} world days after it went up.` };
-  const p = posterTarget(state, soul, params.which);
+  if (params === undefined) return list.some(p => p.by === soul.soulId || posterStale(p, today)) ? null : { code: 'object.not-yours', reason: `None of these posters is yours and none is out of date; only its author takes a poster down until ${POSTER_STALE_DAYS} world days after it went up.` };
+  const p = posterTarget(state, soul, params.which, today);
   if (!p) return { code: 'capability.params', reason: line(params.which) ? `No poster on this wall matches "${line(params.which)}".` : `You have no poster here and none is out of date; only its author takes a poster down until it is out of date.` };
-  if (p.by !== soul.soulId && !posterStale(p)) return { code: 'object.not-yours', reason: `Only ${p.n} takes "${p.t}" down until it is out of date (${POSTER_STALE_DAYS} world days after it went up; it has been up ${posterAge(p)}).` };
+  if (p.by !== soul.soulId && !posterStale(p, today)) return { code: 'object.not-yours', reason: `Only ${p.n} takes "${p.t}" down until it is out of date (${POSTER_STALE_DAYS} world days after it went up; it has been up ${posterAge(p, today)}).` };
   return null;
 }
-export function posterPatch(a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params: Record<string, unknown>): Record<string, unknown> {
+export function posterPatch(a: { name: string }, state: Record<string, unknown>, soul: EdgeSoul, params: Record<string, unknown>, today: number): Record<string, unknown> {
   let list = posterList(state);
-  if (a.name === 'pin') { const s = posterFreeSlot(list); if (s >= 0) list.push({ s, t: line(params.title), d: line(params.detail), by: soul.soulId, n: posterName(soul), day: worldDay() }); }
-  else { const p = posterTarget(state, soul, params.which); if (p) list = list.filter(x => x !== p && !(x.s === p.s && x.by === p.by && x.t === p.t)); }
+  if (a.name === 'pin') { const s = posterFreeSlot(list); if (s >= 0) list.push({ s, t: line(params.title), d: line(params.detail), by: soul.soulId, n: posterName(soul), day: today }); }
+  else { const p = posterTarget(state, soul, params.which, today); if (p) list = list.filter(x => x !== p && !(x.s === p.s && x.by === p.by && x.t === p.t)); }
   return { text: posterText(list), textBy: list.length ? JSON.stringify(list) : '' };
 }
 

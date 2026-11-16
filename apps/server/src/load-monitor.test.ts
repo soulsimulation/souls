@@ -207,6 +207,24 @@ test('monitor: tick service counts dilation and slow frames as missed, a paused 
   assert.equal(m.health().level, 'red');
 });
 
+test('monitor: a clock just started owes nothing until its first frame decides; one that then falls behind still reads red', () => {
+  let now = 0; const host = {engine: {world: {tick: 0}}, tickMs: [1], paused: false, pace: 1, baseRate: 1, running: false, clockAvailable: true, sleeping: false};
+  const m = new LoadMonitor({host, now: () => now, shared: newSharedLoad()});
+  m.sample();
+  // a still world started on a busy host: its first frame owes no tick, a sample catches it awake, then it sleeps unticked
+  host.running = true; now += 100; m.sample();
+  assert.equal(m.signals.service, 1, 'just started: nothing owed yet'); assert.equal(m.level, 'green');
+  host.sleeping = true; for (let i = 0; i < 6; i++) { now += 1000; m.sample(); }
+  assert.equal(m.signals.service, 1, 'asleep: the ticks it put into its lag are not missed'); assert.equal(m.level, 'green');
+  // a world that is not still and starts but never ticks: owing once the grace is over
+  const fresh = () => { const w = {...host, running: false, sleeping: false, engine: {world: {tick: 0}}}; const mon = new LoadMonitor({host: w, now: () => now, shared: newSharedLoad()}); mon.sample(); w.running = true; return {w, mon}; };
+  const a = fresh(); for (let i = 0; i < 8; i++) { now += 250; a.mon.sample(); }
+  assert.equal(a.mon.signals.service, 0, 'started 2 s ago and never ticked'); assert.equal(a.mon.level, 'red');
+  // and one that ticks from its first frame but falls behind (8 ticks/s of 20 owed)
+  const b = fresh(); for (let i = 0; i < 20; i++) { now += 250; b.w.engine.world.tick += 2; b.mon.sample(); }
+  assert.ok(Math.abs(b.mon.signals.service - 0.4) < 0.01, String(b.mon.signals.service)); assert.equal(b.mon.level, 'red');
+});
+
 test('monitor: dials hear the level at once and on every change; black for the limit asks for the planned restart', () => {
   let now = 0, restarts = 0; const heard: string[] = [];
   const host = {engine: {world: {tick: 0}}, tickMs: [], paused: false, pace: 1, baseRate: 1, running: true, clockAvailable: true};

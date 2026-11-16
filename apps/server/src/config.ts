@@ -48,6 +48,8 @@ const config = {
   // Default 'edge'. Under node --test (NODE_TEST_CONTEXT) legacy suites keep 'central'; edge tests opt in explicitly.
   mindDriver: ((env.MIND_DRIVER ?? (env.NODE_TEST_CONTEXT ? 'central' : 'edge')) === 'central' ? 'central' : 'edge') as 'edge' | 'central',
   livingWorld: env.ENABLE_LIVING_WORLD === '1',
+  /** #2383: DOOR_FIT_BOOT=1 lets this world adopt door-fit/1 at boot (off until a fit runs in slices under 1 s). */
+  doorFitBoot: env.DOOR_FIT_BOOT === '1',
   worldId: env.WORLD_ID ?? (worldKey === 'toy' ? 'toy-1' : `${worldKey}-1`),
   worldPath: env.WORLD_PATH ?? `/w/${worldKey}`,
   ownerId: env.WORLD_OWNER_ID ?? (env.DEV_AUTH === '1' ? 'dev:admin' : ''),

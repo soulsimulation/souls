@@ -1792,7 +1792,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-1",
           "p": [
             34,
@@ -1849,7 +1849,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-1-kitchen",
           "p": [
             34,
@@ -1906,7 +1906,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-1-bedroom",
           "p": [
             30.1,
@@ -1956,7 +1956,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-1-study",
           "p": [
             37.9,
@@ -2006,7 +2006,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-2",
           "p": [
             52,
@@ -2063,7 +2063,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-2-kitchen",
           "p": [
             52,
@@ -2143,7 +2143,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-2-bedroom",
           "p": [
             48.1,
@@ -2193,7 +2193,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-2-study",
           "p": [
             55.9,
@@ -2249,7 +2249,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-3",
           "p": [
             34,
@@ -2306,7 +2306,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-3-kitchen",
           "p": [
             34,
@@ -2386,7 +2386,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-3-bedroom",
           "p": [
             29.6,
@@ -2436,7 +2436,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-3-study",
           "p": [
             38.4,
@@ -2502,7 +2502,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-4",
           "p": [
             54,
@@ -2559,7 +2559,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-4-kitchen",
           "p": [
             54,
@@ -2639,7 +2639,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-4-bedroom",
           "p": [
             49.6,
@@ -2695,7 +2695,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-house-4-study",
           "p": [
             58.4,
@@ -2761,7 +2761,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-1",
           "p": [
             -116,
@@ -2818,7 +2818,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-1-kitchen",
           "p": [
             -116,
@@ -2875,7 +2875,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-1-bedroom",
           "p": [
             -122.4,
@@ -2925,7 +2925,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-1-study",
           "p": [
             -109.6,
@@ -2975,7 +2975,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-2",
           "p": [
             -136,
@@ -3032,7 +3032,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-2-kitchen",
           "p": [
             -136,
@@ -3118,7 +3118,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-2-bedroom",
           "p": [
             -141.4,
@@ -3168,7 +3168,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-2-study",
           "p": [
             -130.6,
@@ -3218,7 +3218,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-3",
           "p": [
             -116,
@@ -3276,7 +3276,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-3-kitchen",
           "p": [
             -116,
@@ -3357,7 +3357,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-3-bedroom",
           "p": [
             -109.6,
@@ -3408,7 +3408,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-3-study",
           "p": [
             -122.4,
@@ -3459,7 +3459,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-4",
           "p": [
             -138,
@@ -3517,7 +3517,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-4-kitchen",
           "p": [
             -138,
@@ -3604,7 +3604,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-4-bedroom",
           "p": [
             -130.6,
@@ -3655,7 +3655,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-courtyard-quarter-house-4-study",
           "p": [
             -145.4,
@@ -3706,7 +3706,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-abbey-cloister",
           "p": [
             -162,
@@ -3763,7 +3763,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-abbey-cloister-kitchen",
           "p": [
             -162,
@@ -3843,7 +3843,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-abbey-cloister-bedroom",
           "p": [
             -169.4,
@@ -3893,7 +3893,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-abbey-cloister-study",
           "p": [
             -154.6,
@@ -3943,7 +3943,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-library-1",
           "p": [
             74,
@@ -3991,7 +3991,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "eden-office-1",
           "p": [
             92,
@@ -4087,7 +4087,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/barn@1",
+          "def": "core/barn@2",
           "name": "eden-barn-1",
           "p": [
             88,
@@ -4106,7 +4106,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "eden-market-1",
           "p": [
             70,
@@ -4125,7 +4125,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@2",
           "name": "eden-classroom-1",
           "p": [
             42,
@@ -4161,14 +4161,16 @@
                       "wall": "s",
                       "kind": "door",
                       "at": 0.5,
-                      "width": 1.5
+                      "width": 1.5,
+                      "leaf": false
                     },
                     {
                       "room": "classroom",
                       "wall": "n",
                       "kind": "door",
                       "at": 0.5,
-                      "width": 1.5
+                      "width": 1.5,
+                      "leaf": false
                     }
                   ]
                 }
@@ -4179,7 +4181,41 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/door@2",
+          "name": "eden-classroom-1-door-s",
+          "p": [
+            42,
+            0.89
+          ],
+          "r": 0,
+          "params": {
+            "frame": "#dfd6bf",
+            "leaf": "#6a7770",
+            "trim": "#56625c",
+            "sx": 1.27,
+            "sy": 0.94
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-classroom-1-door-n",
+          "p": [
+            42,
+            -17.89
+          ],
+          "r": 3.1416,
+          "params": {
+            "frame": "#dfd6bf",
+            "leaf": "#6a7770",
+            "trim": "#56625c",
+            "sx": 1.27,
+            "sy": 0.94
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/hall@3",
           "name": "int-cafe",
           "p": [
             101.5,
@@ -4226,7 +4262,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-music-room",
           "p": [
             101.1,
@@ -4300,7 +4336,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-games-room",
           "p": [
             86.5,
@@ -4353,7 +4389,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-bakery",
           "p": [
             77.5,
@@ -4427,7 +4463,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-chapel",
           "p": [
             86.5,
@@ -4487,7 +4523,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-clinic",
           "p": [
             64.5,
@@ -4540,7 +4576,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-bathhouse",
           "p": [
             83.5,
@@ -4593,7 +4629,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "int-potting-shed",
           "p": [
             44,
@@ -4647,7 +4683,7 @@
         },
         {
           "op": "place",
-          "def": "core/roundhouse@1",
+          "def": "core/roundhouse@2",
           "name": "eden-observatory",
           "p": [
             36.5,
@@ -4717,7 +4753,7 @@
         },
         {
           "op": "place",
-          "def": "core/greenhouse@1",
+          "def": "core/greenhouse@2",
           "name": "eden-greenhouse",
           "p": [
             69,
@@ -4738,7 +4774,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "eden-a-frame",
           "p": [
             76.5,
@@ -4759,7 +4795,7 @@
         },
         {
           "op": "place",
-          "def": "core/roundhouse@1",
+          "def": "core/roundhouse@2",
           "name": "eden-yurt",
           "p": [
             67.5,
@@ -4821,7 +4857,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "eden-tower-house",
           "p": [
             69,
@@ -4842,7 +4878,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-old-town-domed-hall",
           "p": [
             166,
@@ -4922,7 +4958,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "region-old-town-bell-tower",
           "p": [
             114,
@@ -4943,7 +4979,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-sports-ground-clubhouse",
           "p": [
             22.5,
@@ -5000,7 +5036,7 @@
         },
         {
           "op": "place",
-          "def": "core/barn@1",
+          "def": "core/barn@2",
           "name": "region-farm-hamlet-barn",
           "p": [
             -70,
@@ -5021,7 +5057,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "region-farm-hamlet-farmhouse",
           "p": [
             -54,
@@ -5058,7 +5094,7 @@
         },
         {
           "op": "place",
-          "def": "core/lighthouse@1",
+          "def": "core/lighthouse@2",
           "name": "region-harbour-lighthouse",
           "p": [
             96,
@@ -5086,7 +5122,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-harbour-fish-market",
           "p": [
             20.5,
@@ -5142,7 +5178,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "region-vineyard-villa",
           "p": [
             71,
@@ -5164,7 +5200,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "region-vineyard-villa-tower",
           "p": [
             82.6,
@@ -5185,7 +5221,7 @@
         },
         {
           "op": "place",
-          "def": "core/barn@1",
+          "def": "core/barn@2",
           "name": "region-vineyard-wine-cellar",
           "p": [
             58,
@@ -5207,7 +5243,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-artists-village-warehouse-studio",
           "p": [
             -92,
@@ -5263,7 +5299,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "region-west-lake-inn",
           "p": [
             -140,
@@ -5286,7 +5322,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "region-campsite-lodge",
           "p": [
             -122,
@@ -5309,7 +5345,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-railway-station-station-building",
           "p": [
             142,
@@ -5395,7 +5431,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/barn@1",
+          "def": "core/barn@2",
           "name": "region-makers-yard-workshop-1",
           "p": [
             122,
@@ -5417,7 +5453,7 @@
         },
         {
           "op": "place",
-          "def": "core/barn@1",
+          "def": "core/barn@2",
           "name": "region-makers-yard-workshop-2",
           "p": [
             138,
@@ -5439,7 +5475,7 @@
         },
         {
           "op": "place",
-          "def": "core/barn@1",
+          "def": "core/barn@2",
           "name": "region-makers-yard-workshop-3",
           "p": [
             154,
@@ -5461,7 +5497,7 @@
         },
         {
           "op": "place",
-          "def": "core/church@1",
+          "def": "core/church@2",
           "name": "region-abbey-church",
           "p": [
             -160.5,
@@ -5483,7 +5519,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "region-botanic-garden-pagoda",
           "p": [
             -88,
@@ -5505,7 +5541,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "region-botanic-garden-tea-house",
           "p": [
             -56,
@@ -5527,7 +5563,7 @@
         },
         {
           "op": "place",
-          "def": "core/greenhouse@1",
+          "def": "core/greenhouse@2",
           "name": "region-botanic-garden-palm-house",
           "p": [
             -94,
@@ -5548,7 +5584,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-observatory-dome",
           "p": [
             92,
@@ -5576,7 +5612,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "region-west-river-watermill",
           "p": [
             -222,
@@ -5599,7 +5635,7 @@
         },
         {
           "op": "place",
-          "def": "core/chapel@1",
+          "def": "core/chapel@2",
           "name": "region-cliff-village-chapel",
           "p": [
             279,
@@ -5648,7 +5684,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "region-east-crossroads-petrol-station",
           "p": [
             274,
@@ -5669,7 +5705,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-east-crossroads-pub",
           "p": [
             292,
@@ -5749,7 +5785,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-golf-course-clubhouse",
           "p": [
             186,
@@ -5806,7 +5842,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-festival-meadow-big-top",
           "p": [
             277,
@@ -5868,7 +5904,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-alpine-valley-station",
           "p": [
             -4,
@@ -5924,7 +5960,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-alpine-mountain-station",
           "p": [
             6,
@@ -5980,7 +6016,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "region-alpine-mountain-restaurant",
           "p": [
             6,
@@ -6003,7 +6039,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-campus-library-annex",
           "p": [
             -12,
@@ -6101,7 +6137,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-campus-east-hall",
           "p": [
             13,
@@ -6180,7 +6216,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "region-campus-west-hall",
           "p": [
             -37,
@@ -6259,7 +6295,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "region-campus-clock-tower",
           "p": [
             -1,
@@ -6279,7 +6315,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "campus-residence-1",
           "p": [
             -36,
@@ -6305,7 +6341,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "campus-residence-2",
           "p": [
             12,
@@ -6325,7 +6361,7 @@
         },
         {
           "op": "place",
-          "def": "core/roundhouse@1",
+          "def": "core/roundhouse@2",
           "name": "eden-dome",
           "p": [
             99.2,
@@ -6378,7 +6414,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "eden-pergola-court",
           "p": [
             99.5,
@@ -6395,7 +6431,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "eden-hex-pavilion",
           "p": [
             101.5,
@@ -6412,7 +6448,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "eden-bandstand",
           "p": [
             38.5,
@@ -6429,7 +6465,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "eden-tea-house",
           "p": [
             92.5,
@@ -6446,7 +6482,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "region-hillside-village-lookout-temple",
           "p": [
             226,
@@ -6465,7 +6501,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "region-park-gazebo",
           "p": [
             -28,
@@ -6488,7 +6524,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-1",
           "p": [
             121,
@@ -6510,7 +6546,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-2",
           "p": [
             121,
@@ -6531,7 +6567,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-3",
           "p": [
             121,
@@ -6553,7 +6589,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-4",
           "p": [
             121,
@@ -6574,7 +6610,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-5",
           "p": [
             121,
@@ -6596,7 +6632,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-6",
           "p": [
             121,
@@ -6617,7 +6653,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-7",
           "p": [
             121,
@@ -6639,7 +6675,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-8",
           "p": [
             121,
@@ -6666,7 +6702,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-9",
           "p": [
             121,
@@ -6688,7 +6724,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-10",
           "p": [
             121,
@@ -6710,7 +6746,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-11",
           "p": [
             121,
@@ -6731,7 +6767,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-west-home-12",
           "p": [
             121,
@@ -6753,7 +6789,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-1",
           "p": [
             152,
@@ -6775,7 +6811,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-2",
           "p": [
             152,
@@ -6796,7 +6832,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-3",
           "p": [
             152,
@@ -6818,7 +6854,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-4",
           "p": [
             152,
@@ -6845,7 +6881,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-5",
           "p": [
             152,
@@ -6867,7 +6903,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-6",
           "p": [
             152,
@@ -6888,7 +6924,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-7",
           "p": [
             152,
@@ -6910,7 +6946,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-8",
           "p": [
             152,
@@ -6931,7 +6967,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-9",
           "p": [
             152,
@@ -6953,7 +6989,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-10",
           "p": [
             152,
@@ -6975,7 +7011,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-11",
           "p": [
             152,
@@ -6996,7 +7032,7 @@
         },
         {
           "op": "place",
-          "def": "core/townhouse@1",
+          "def": "core/townhouse@2",
           "name": "canal-east-home-12",
           "p": [
             152,
@@ -7024,7 +7060,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-1",
           "p": [
             113.1,
@@ -7045,7 +7081,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-2",
           "p": [
             119.4,
@@ -7065,7 +7101,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-3",
           "p": [
             125.7,
@@ -7086,7 +7122,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-4",
           "p": [
             132,
@@ -7106,7 +7142,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-5",
           "p": [
             138.3,
@@ -7127,7 +7163,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-6",
           "p": [
             144.6,
@@ -7147,7 +7183,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-7",
           "p": [
             150.9,
@@ -7168,7 +7204,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-8",
           "p": [
             157.2,
@@ -7194,7 +7230,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "market-street-shop-9",
           "p": [
             163.5,
@@ -7215,7 +7251,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-north-arcade-1",
           "p": [
             124.5,
@@ -7235,7 +7271,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-north-arcade-2",
           "p": [
             134.1,
@@ -7254,7 +7290,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-north-arcade-3",
           "p": [
             143.7,
@@ -7274,7 +7310,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-north-arcade-4",
           "p": [
             153.3,
@@ -7293,7 +7329,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-south-arcade-1",
           "p": [
             124.5,
@@ -7314,7 +7350,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-south-arcade-2",
           "p": [
             134.1,
@@ -7334,7 +7370,7 @@
         },
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-south-arcade-3",
           "p": [
             143.7,
@@ -7361,7 +7397,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/shop@1",
+          "def": "core/shop@2",
           "name": "old-town-south-arcade-4",
           "p": [
             153.3,
@@ -7381,7 +7417,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "seafront-hotel-1",
           "p": [
             120,
@@ -7517,7 +7553,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "seafront-hotel-2",
           "p": [
             134.5,
@@ -7653,7 +7689,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "seafront-hotel-3",
           "p": [
             149,
@@ -7789,7 +7825,7 @@
         },
         {
           "op": "place",
-          "def": "core/hall@1",
+          "def": "core/hall@3",
           "name": "seafront-hotel-4",
           "p": [
             163.5,
@@ -7925,7 +7961,7 @@
         },
         {
           "op": "place",
-          "def": "core/greenhouse@1",
+          "def": "core/greenhouse@2",
           "name": "makers-greenhouse-1",
           "p": [
             148,
@@ -7944,7 +7980,7 @@
         },
         {
           "op": "place",
-          "def": "core/greenhouse@1",
+          "def": "core/greenhouse@2",
           "name": "makers-greenhouse-2",
           "p": [
             157,
@@ -7963,7 +7999,7 @@
         },
         {
           "op": "place",
-          "def": "core/greenhouse@1",
+          "def": "core/greenhouse@2",
           "name": "makers-greenhouse-3",
           "p": [
             166,
@@ -7988,7 +8024,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "castle-keep",
           "p": [
             -165,
@@ -8010,7 +8046,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "castle-tower-1",
           "p": [
             -178.57,
@@ -8032,7 +8068,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "castle-tower-2",
           "p": [
             -161.018,
@@ -8054,7 +8090,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "castle-tower-3",
           "p": [
             -168.982,
@@ -8076,7 +8112,7 @@
         },
         {
           "op": "place",
-          "def": "core/tower@1",
+          "def": "core/tower@2",
           "name": "castle-tower-4",
           "p": [
             -151.43,
@@ -8098,7 +8134,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-1",
           "p": [
             -98,
@@ -8119,7 +8155,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-2",
           "p": [
             -93.8,
@@ -8140,7 +8176,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-3",
           "p": [
             -89.6,
@@ -8167,7 +8203,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-4",
           "p": [
             -85.4,
@@ -8188,7 +8224,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-5",
           "p": [
             -81.2,
@@ -8209,7 +8245,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-6",
           "p": [
             -77,
@@ -8230,7 +8266,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-7",
           "p": [
             -72.8,
@@ -8251,7 +8287,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-8",
           "p": [
             -68.6,
@@ -8272,7 +8308,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-9",
           "p": [
             -64.4,
@@ -8293,7 +8329,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-10",
           "p": [
             -60.2,
@@ -8314,7 +8350,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-11",
           "p": [
             -56,
@@ -8341,7 +8377,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-12",
           "p": [
             -51.8,
@@ -8362,7 +8398,7 @@
         },
         {
           "op": "place",
-          "def": "core/shed@1",
+          "def": "core/shed@2",
           "name": "beach-hut-13",
           "p": [
             -47.6,
@@ -8383,7 +8419,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-1",
           "p": [
             180,
@@ -8398,7 +8434,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-2",
           "p": [
             193,
@@ -8413,7 +8449,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-3",
           "p": [
             219,
@@ -8428,7 +8464,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-4",
           "p": [
             232,
@@ -8443,7 +8479,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-5",
           "p": [
             180,
@@ -8458,7 +8494,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-6",
           "p": [
             180,
@@ -8478,7 +8514,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-7",
           "p": [
             193,
@@ -8493,7 +8529,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-8",
           "p": [
             193,
@@ -8507,7 +8543,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-9",
           "p": [
             219,
@@ -8522,7 +8558,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-10",
           "p": [
             219,
@@ -8536,7 +8572,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-11",
           "p": [
             232,
@@ -8551,7 +8587,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-12",
           "p": [
             232,
@@ -8565,7 +8601,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-13",
           "p": [
             180,
@@ -8579,7 +8615,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-14",
           "p": [
             193,
@@ -8599,7 +8635,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-15",
           "p": [
             219,
@@ -8613,7 +8649,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@1",
+          "def": "core/house@2",
           "name": "suburb-house-16",
           "p": [
             232,
@@ -8627,7 +8663,7 @@
         },
         {
           "op": "place",
-          "def": "core/cabin@1",
+          "def": "core/cabin@2",
           "name": "lake-cabin-1",
           "p": [
             -120,
@@ -8641,7 +8677,7 @@
         },
         {
           "op": "place",
-          "def": "core/cabin@1",
+          "def": "core/cabin@2",
           "name": "lake-cabin-2",
           "p": [
             -156,
@@ -8655,7 +8691,7 @@
         },
         {
           "op": "place",
-          "def": "core/cabin@1",
+          "def": "core/cabin@2",
           "name": "lake-cabin-3",
           "p": [
             -168,
@@ -8669,7 +8705,7 @@
         },
         {
           "op": "place",
-          "def": "core/cabin@1",
+          "def": "core/cabin@2",
           "name": "lake-cabin-4",
           "p": [
             -180,
@@ -8683,7 +8719,7 @@
         },
         {
           "op": "place",
-          "def": "core/cabin@1",
+          "def": "core/cabin@2",
           "name": "lake-cabin-5",
           "p": [
             -192,
@@ -8697,7 +8733,7 @@
         },
         {
           "op": "place",
-          "def": "core/cabin@1",
+          "def": "core/cabin@2",
           "name": "lake-cabin-6",
           "p": [
             -198,
@@ -8717,7 +8753,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-1",
           "p": [
             -40,
@@ -8740,7 +8776,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-2",
           "p": [
             -28,
@@ -8763,7 +8799,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-3",
           "p": [
             -46,
@@ -8786,7 +8822,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-4",
           "p": [
             -20,
@@ -8809,7 +8845,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-5",
           "p": [
             -34,
@@ -8832,7 +8868,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-6",
           "p": [
             20,
@@ -8855,7 +8891,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "alpine-chalet-7",
           "p": [
             30,
@@ -8878,7 +8914,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-1",
           "p": [
             -53.419,
@@ -8905,7 +8941,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-2",
           "p": [
             -60.915,
@@ -8926,7 +8962,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-3",
           "p": [
             -74.535,
@@ -8947,7 +8983,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-4",
           "p": [
             -87.904,
@@ -8968,7 +9004,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-5",
           "p": [
             -94.767,
@@ -8989,7 +9025,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-8",
           "p": [
             -66.317,
@@ -9010,7 +9046,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "artists-studio-9",
           "p": [
             -55.552,
@@ -9031,7 +9067,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-2",
           "p": [
             256.662,
@@ -9052,7 +9088,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-3",
           "p": [
             255.083,
@@ -9079,7 +9115,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-4",
           "p": [
             255.782,
@@ -9100,7 +9136,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-5",
           "p": [
             262.869,
@@ -9121,7 +9157,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-6",
           "p": [
             263.948,
@@ -9142,7 +9178,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-7",
           "p": [
             263.188,
@@ -9165,7 +9201,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-8",
           "p": [
             263.118,
@@ -9187,7 +9223,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-9",
           "p": [
             262.275,
@@ -9208,7 +9244,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-11",
           "p": [
             270.69,
@@ -9230,7 +9266,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-12",
           "p": [
             270.589,
@@ -9258,7 +9294,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-13",
           "p": [
             269.069,
@@ -9279,7 +9315,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-14",
           "p": [
             276.833,
@@ -9301,7 +9337,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-15",
           "p": [
             277.211,
@@ -9322,7 +9358,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-17",
           "p": [
             276.373,
@@ -9343,7 +9379,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-18",
           "p": [
             283.459,
@@ -9365,7 +9401,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-19",
           "p": [
             283.304,
@@ -9387,7 +9423,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-20",
           "p": [
             283.669,
@@ -9409,7 +9445,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-21",
           "p": [
             291.267,
@@ -9437,7 +9473,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-23",
           "p": [
             291.74,
@@ -9459,7 +9495,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-24",
           "p": [
             297.918,
@@ -9480,7 +9516,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-25",
           "p": [
             298.582,
@@ -9502,7 +9538,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "cliff-house-27",
           "p": [
             297.03,
@@ -9523,7 +9559,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-1",
           "p": [
             181.517,
@@ -9543,7 +9579,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-2",
           "p": [
             180.313,
@@ -9564,7 +9600,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-3",
           "p": [
             178.111,
@@ -9590,7 +9626,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-4",
           "p": [
             200.693,
@@ -9610,7 +9646,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-5",
           "p": [
             200.51,
@@ -9630,7 +9666,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-7",
           "p": [
             219.41,
@@ -9650,7 +9686,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-8",
           "p": [
             230.455,
@@ -9671,7 +9707,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-9",
           "p": [
             231.049,
@@ -9691,7 +9727,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-10",
           "p": [
             231.411,
@@ -9711,7 +9747,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-11",
           "p": [
             240.212,
@@ -9731,7 +9767,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-12",
           "p": [
             249.907,
@@ -9757,7 +9793,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-13",
           "p": [
             251.872,
@@ -9777,7 +9813,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-14",
           "p": [
             248.232,
@@ -9797,7 +9833,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-15",
           "p": [
             251.929,
@@ -9818,7 +9854,7 @@
         },
         {
           "op": "place",
-          "def": "core/cottage@1",
+          "def": "core/cottage@2",
           "name": "hillside-home-16",
           "p": [
             248.984,
@@ -10276,7 +10312,7 @@
         },
         {
           "op": "place",
-          "def": "core/pavilion@1",
+          "def": "core/pavilion@2",
           "name": "commons-pavilion",
           "p": [
             9,
@@ -88303,7 +88339,7 @@
             ]
           },
           "params": {
-            "level": 35.4,
+            "level": 34.65,
             "edge": 1
           }
         },
@@ -88313,7 +88349,7 @@
           "name": "alpine-terrace-table-1",
           "p": [
             7.5,
-            35.4,
+            34.65,
             -294.3
           ],
           "params": {
@@ -88326,7 +88362,7 @@
           "name": "alpine-terrace-table-2",
           "p": [
             11,
-            35.4,
+            34.65,
             -294.3
           ],
           "params": {
@@ -88339,7 +88375,7 @@
           "name": "alpine-terrace-table-3",
           "p": [
             14.5,
-            35.4,
+            34.65,
             -294.3
           ],
           "params": {
@@ -88352,7 +88388,7 @@
           "name": "alpine-terrace-lights",
           "p": [
             11,
-            35.4,
+            34.65,
             -291.6
           ]
         },
@@ -96531,6 +96567,4172 @@
                 "place-region-northern-mountains"
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "note": "door-fit/1 (#2383): a real door in each fitted outside doorway, at its building's height",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-house-1-kitchen-door-2",
+          "p": [
+            34,
+            0,
+            9.91
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-house-2-door-1",
+          "p": [
+            52,
+            0,
+            20.09
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-house-3-door-1",
+          "p": [
+            34,
+            0,
+            35.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-house-3-kitchen-door-2",
+          "p": [
+            37.633,
+            0,
+            24.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-house-4-door-1",
+          "p": [
+            54,
+            0,
+            35.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-house-4-kitchen-door-2",
+          "p": [
+            57.633,
+            0,
+            24.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-1-door-1",
+          "p": [
+            -116,
+            0,
+            66.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-1-kitchen-door-2",
+          "p": [
+            -116,
+            0,
+            53.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-2-door-1",
+          "p": [
+            -136,
+            0,
+            66.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-2-kitchen-door-2",
+          "p": [
+            -136,
+            0,
+            53.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-3-door-1",
+          "p": [
+            -116.001,
+            0,
+            73.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-3-kitchen-door-2",
+          "p": [
+            -115.999,
+            0,
+            86.39
+          ],
+          "r": 0.001,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-office-1-door-1",
+          "p": [
+            92,
+            0,
+            18.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-4-door-1",
+          "p": [
+            -138.001,
+            0,
+            73.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-barn-1-door-1",
+          "p": [
+            88,
+            0,
+            55.09
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.8,
+            "sy": 1.3
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-cafe-door-1",
+          "p": [
+            98.61,
+            0,
+            24.999
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-music-room-door-1",
+          "p": [
+            98.71,
+            0,
+            59
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-music-room-door-2",
+          "p": [
+            103.49,
+            0,
+            59
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-games-room-door-1",
+          "p": [
+            86.5,
+            0,
+            -17.61
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-games-room-door-2",
+          "p": [
+            86.5,
+            0,
+            -21.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-bakery-door-1",
+          "p": [
+            79.39,
+            0,
+            -15.5
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-bakery-door-2",
+          "p": [
+            75.61,
+            0,
+            -15.5
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-chapel-door-1",
+          "p": [
+            83.91,
+            0,
+            81.999
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-chapel-door-2",
+          "p": [
+            89.09,
+            0,
+            82.001
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-clinic-door-1",
+          "p": [
+            64.5,
+            0,
+            -5.91
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-bathhouse-door-1",
+          "p": [
+            83.5,
+            0,
+            -7.91
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-bathhouse-door-2",
+          "p": [
+            83.5,
+            0,
+            -13.09
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-potting-shed-door-1",
+          "p": [
+            43.999,
+            0,
+            80.41
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "int-potting-shed-door-2",
+          "p": [
+            44.001,
+            0,
+            84.59
+          ],
+          "r": 0.001,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-observatory-door-1",
+          "p": [
+            36.5,
+            0,
+            84.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-observatory-door-2",
+          "p": [
+            36.5,
+            0,
+            79.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-greenhouse-door-1",
+          "p": [
+            69,
+            0,
+            37.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-yurt-door-2",
+          "p": [
+            67.5,
+            0,
+            -21.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-tower-house-door-1",
+          "p": [
+            69,
+            0,
+            22.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-old-town-domed-hall-door-1",
+          "p": [
+            159.61,
+            0,
+            72.999
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-old-town-domed-hall-door-2",
+          "p": [
+            172.39,
+            0,
+            73.001
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-old-town-bell-tower-door-1",
+          "p": [
+            114,
+            0,
+            75.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-sports-ground-clubhouse-door-1",
+          "p": [
+            25.39,
+            0,
+            116.999
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-sports-ground-clubhouse-door-2",
+          "p": [
+            19.61,
+            0,
+            117.001
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-farm-hamlet-barn-door-1",
+          "p": [
+            -70,
+            0,
+            128.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.8,
+            "sy": 1.2
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-farm-hamlet-farmhouse-door-1",
+          "p": [
+            -57.39,
+            0,
+            128.174
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-harbour-lighthouse-door-1",
+          "p": [
+            96,
+            0.1,
+            190.792
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-harbour-fish-market-door-1",
+          "p": [
+            20.5,
+            0,
+            134.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-harbour-fish-market-door-2",
+          "p": [
+            20.5,
+            0,
+            129.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-vineyard-villa-door-1",
+          "p": [
+            72.975,
+            10.299,
+            -147.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-vineyard-villa-tower-door-1",
+          "p": [
+            82.6,
+            9.81,
+            -147.61
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-vineyard-wine-cellar-door-1",
+          "p": [
+            54.61,
+            8.85,
+            -149.001
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.8,
+            "sy": 1.3
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-artists-village-warehouse-studio-door-1",
+          "p": [
+            -92,
+            0,
+            -112.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-artists-village-warehouse-studio-door-2",
+          "p": [
+            -92,
+            0,
+            -123.89
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-west-lake-inn-door-1",
+          "p": [
+            -138.689,
+            0,
+            -47.368
+          ],
+          "r": -0.147,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campsite-lodge-door-1",
+          "p": [
+            -123.977,
+            0,
+            -86.389
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-railway-station-station-building-door-1",
+          "p": [
+            141.999,
+            0,
+            -43.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-makers-yard-workshop-1-door-1",
+          "p": [
+            121.998,
+            0,
+            -78.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.8,
+            "sy": 1.3
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-makers-yard-workshop-2-door-1",
+          "p": [
+            137.998,
+            0,
+            -78.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.8,
+            "sy": 1.3
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-makers-yard-workshop-3-door-1",
+          "p": [
+            153.998,
+            0,
+            -78.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.8,
+            "sy": 1.3
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-botanic-garden-pagoda-door-1",
+          "p": [
+            -87.294,
+            0,
+            -155.717
+          ],
+          "r": 0.3,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-botanic-garden-palm-house-door-1",
+          "p": [
+            -94,
+            0,
+            -140.61
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-observatory-dome-door-1",
+          "p": [
+            96.39,
+            2.572,
+            -188.001
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-courtyard-quarter-house-4-kitchen-door-2",
+          "p": [
+            -137.999,
+            0.022,
+            86.39
+          ],
+          "r": 0.001,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-west-river-watermill-door-1",
+          "p": [
+            -225.39,
+            0,
+            -105.709
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-east-crossroads-pub-door-1",
+          "p": [
+            295.89,
+            0.347,
+            -14.001
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-golf-course-clubhouse-door-1",
+          "p": [
+            189.39,
+            0,
+            -114.001
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-golf-course-clubhouse-door-2",
+          "p": [
+            182.61,
+            0,
+            -113.999
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-festival-meadow-big-top-door-1",
+          "p": [
+            277,
+            0,
+            62.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-festival-meadow-big-top-door-2",
+          "p": [
+            277,
+            0,
+            41.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-library-annex-door-1",
+          "p": [
+            -12,
+            0,
+            -115.61
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-library-annex-door-2",
+          "p": [
+            -12,
+            0,
+            -126.39
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-east-hall-door-1",
+          "p": [
+            8.11,
+            0,
+            -97.001
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-east-hall-door-2",
+          "p": [
+            17.89,
+            0,
+            -96.999
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-west-hall-door-1",
+          "p": [
+            -32.11,
+            0,
+            -97.001
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-west-hall-door-2",
+          "p": [
+            -41.89,
+            0,
+            -96.999
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-campus-clock-tower-door-1",
+          "p": [
+            -1,
+            0,
+            -75.61
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "campus-residence-1-door-1",
+          "p": [
+            -32.61,
+            0,
+            -120.293
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "campus-residence-2-door-1",
+          "p": [
+            15.39,
+            0.018,
+            -120.293
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-1-door-1",
+          "p": [
+            124.99,
+            0,
+            -26.176
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-2-door-1",
+          "p": [
+            124.99,
+            0,
+            -20.476
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-3-door-1",
+          "p": [
+            124.99,
+            0,
+            -14.776
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-4-door-1",
+          "p": [
+            124.99,
+            0,
+            -9.076
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-5-door-1",
+          "p": [
+            124.99,
+            0,
+            -3.376
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-6-door-1",
+          "p": [
+            124.99,
+            0,
+            7.824
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-7-door-1",
+          "p": [
+            124.99,
+            0,
+            13.524
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-8-door-1",
+          "p": [
+            124.99,
+            0,
+            19.224
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-9-door-1",
+          "p": [
+            124.99,
+            0,
+            24.924
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-10-door-1",
+          "p": [
+            124.99,
+            0,
+            34.824
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-11-door-1",
+          "p": [
+            124.99,
+            0,
+            40.524
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-west-home-12-door-1",
+          "p": [
+            124.99,
+            0,
+            46.224
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-1-door-1",
+          "p": [
+            148.01,
+            0,
+            -28.526
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-2-door-1",
+          "p": [
+            148.01,
+            0,
+            -22.826
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-3-door-1",
+          "p": [
+            148.01,
+            0,
+            -17.126
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-4-door-1",
+          "p": [
+            148.01,
+            0,
+            -11.426
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-5-door-1",
+          "p": [
+            148.01,
+            0,
+            -5.726
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-6-door-1",
+          "p": [
+            148.01,
+            0,
+            5.474
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-7-door-1",
+          "p": [
+            148.01,
+            0,
+            11.174
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-8-door-1",
+          "p": [
+            148.01,
+            0,
+            16.874
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-9-door-1",
+          "p": [
+            148.01,
+            0,
+            22.574
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-10-door-1",
+          "p": [
+            148.01,
+            0,
+            32.474
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-11-door-1",
+          "p": [
+            148.01,
+            0,
+            38.174
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "canal-east-home-12-door-1",
+          "p": [
+            148.01,
+            0,
+            43.874
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-1-door-1",
+          "p": [
+            113.098,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-2-door-1",
+          "p": [
+            119.398,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-3-door-1",
+          "p": [
+            125.698,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-4-door-1",
+          "p": [
+            131.998,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-5-door-1",
+          "p": [
+            138.298,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-6-door-1",
+          "p": [
+            144.598,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-7-door-1",
+          "p": [
+            150.898,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-8-door-1",
+          "p": [
+            157.198,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "market-street-shop-9-door-1",
+          "p": [
+            163.498,
+            0,
+            101.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-north-arcade-1-door-1",
+          "p": [
+            124.5,
+            0,
+            59.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-north-arcade-2-door-1",
+          "p": [
+            134.1,
+            -0.967,
+            59.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-north-arcade-3-door-1",
+          "p": [
+            143.7,
+            -0.93,
+            59.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-north-arcade-4-door-1",
+          "p": [
+            153.3,
+            -0.93,
+            59.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-south-arcade-1-door-1",
+          "p": [
+            124.499,
+            0,
+            86.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-south-arcade-2-door-1",
+          "p": [
+            134.099,
+            0,
+            86.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-south-arcade-3-door-1",
+          "p": [
+            143.699,
+            0,
+            86.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "old-town-south-arcade-4-door-1",
+          "p": [
+            153.299,
+            0,
+            86.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "seafront-hotel-1-door-1",
+          "p": [
+            120,
+            0,
+            125.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "seafront-hotel-2-door-1",
+          "p": [
+            134.5,
+            0,
+            125.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "seafront-hotel-3-door-1",
+          "p": [
+            149,
+            0,
+            125.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "seafront-hotel-4-door-1",
+          "p": [
+            163.5,
+            0,
+            125.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "makers-greenhouse-1-door-1",
+          "p": [
+            148,
+            0,
+            -91.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "makers-greenhouse-2-door-1",
+          "p": [
+            157,
+            0,
+            -91.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "makers-greenhouse-3-door-1",
+          "p": [
+            166,
+            0,
+            -91.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "castle-keep-door-1",
+          "p": [
+            -163.375,
+            0,
+            -182.025
+          ],
+          "r": 0.5,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "castle-tower-1-door-1",
+          "p": [
+            -177.424,
+            0,
+            -186.885
+          ],
+          "r": 0.5,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "castle-tower-2-door-1",
+          "p": [
+            -159.872,
+            0,
+            -196.473
+          ],
+          "r": 0.5,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "castle-tower-3-door-1",
+          "p": [
+            -167.836,
+            0,
+            -169.333
+          ],
+          "r": 0.5,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "castle-tower-4-door-1",
+          "p": [
+            -150.284,
+            0,
+            -178.921
+          ],
+          "r": 0.5,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-1-door-1",
+          "p": [
+            -98.001,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-2-door-1",
+          "p": [
+            -93.801,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-3-door-1",
+          "p": [
+            -89.601,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-4-door-1",
+          "p": [
+            -85.401,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-5-door-1",
+          "p": [
+            -81.201,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-6-door-1",
+          "p": [
+            -77.001,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-7-door-1",
+          "p": [
+            -72.801,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-8-door-1",
+          "p": [
+            -68.601,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-9-door-1",
+          "p": [
+            -64.401,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-10-door-1",
+          "p": [
+            -60.201,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-11-door-1",
+          "p": [
+            -56.001,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-12-door-1",
+          "p": [
+            -51.801,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "beach-hut-13-door-1",
+          "p": [
+            -47.601,
+            0,
+            133.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-1-door-1",
+          "p": [
+            179.292,
+            0,
+            42.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-2-door-1",
+          "p": [
+            192.292,
+            0,
+            42.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-3-door-1",
+          "p": [
+            218.292,
+            0,
+            42.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-4-door-1",
+          "p": [
+            231.292,
+            0,
+            42.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-5-door-1",
+          "p": [
+            179.292,
+            0,
+            82.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-6-door-1",
+          "p": [
+            180.706,
+            0,
+            65.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-7-door-1",
+          "p": [
+            192.292,
+            0,
+            82.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-8-door-1",
+          "p": [
+            193.706,
+            0,
+            65.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-9-door-1",
+          "p": [
+            218.292,
+            0,
+            82.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-10-door-1",
+          "p": [
+            219.706,
+            0,
+            65.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-11-door-1",
+          "p": [
+            231.292,
+            0,
+            82.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-12-door-1",
+          "p": [
+            232.706,
+            0,
+            65.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-13-door-1",
+          "p": [
+            180.706,
+            0,
+            103.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-14-door-1",
+          "p": [
+            193.706,
+            0,
+            103.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-15-door-1",
+          "p": [
+            219.706,
+            0,
+            103.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "suburb-house-16-door-1",
+          "p": [
+            232.706,
+            0,
+            103.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-1-door-1",
+          "p": [
+            -56.73,
+            0,
+            -93.301
+          ],
+          "r": -1.771,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-2-door-1",
+          "p": [
+            -63.272,
+            0,
+            -83.959
+          ],
+          "r": -2.72,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-3-door-1",
+          "p": [
+            -75.629,
+            0,
+            -80.176
+          ],
+          "r": 3.116,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-4-door-1",
+          "p": [
+            -87.691,
+            0,
+            -85.608
+          ],
+          "r": 2.72,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-5-door-1",
+          "p": [
+            -91.837,
+            0,
+            -96.51
+          ],
+          "r": 1.72,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-8-door-1",
+          "p": [
+            -66.374,
+            0,
+            -114.192
+          ],
+          "r": -0.375,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "artists-studio-9-door-1",
+          "p": [
+            -57.75,
+            0,
+            -105.501
+          ],
+          "r": -1.073,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-13-door-1",
+          "p": [
+            270.244,
+            1.4,
+            129.652
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-18-door-1",
+          "p": [
+            281.446,
+            2.94,
+            94.741
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-4-door-1",
+          "p": [
+            255.782,
+            0.519,
+            129.622
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-3-door-1",
+          "p": [
+            256.258,
+            0.772,
+            121.913
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-23-door-1",
+          "p": [
+            291.74,
+            2.152,
+            121.287
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-24-door-1",
+          "p": [
+            299.093,
+            2.348,
+            102.17
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-25-door-1",
+          "p": [
+            299.757,
+            2.593,
+            115.47
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-27-door-1",
+          "p": [
+            298.205,
+            2.785,
+            128.531
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-1-door-1",
+          "p": [
+            184.471,
+            0.009,
+            -69.445
+          ],
+          "r": 0.778,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-15-door-1",
+          "p": [
+            278.386,
+            1.946,
+            116.144
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-17-door-1",
+          "p": [
+            277.548,
+            1.533,
+            128.598
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-19-door-1",
+          "p": [
+            285.74,
+            1.755,
+            120.651
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-20-door-1",
+          "p": [
+            285.961,
+            1.764,
+            126.58
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-21-door-1",
+          "p": [
+            292.442,
+            2.907,
+            109.711
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-5-door-1",
+          "p": [
+            262.869,
+            1.834,
+            101.87
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-6-door-1",
+          "p": [
+            263.948,
+            1.467,
+            108.881
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-7-door-1",
+          "p": [
+            265.328,
+            1.476,
+            114.088
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-8-door-1",
+          "p": [
+            265.384,
+            1.42,
+            120.278
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-9-door-1",
+          "p": [
+            263.45,
+            1.351,
+            128.923
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-11-door-1",
+          "p": [
+            268.549,
+            1.745,
+            114.07
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-12-door-1",
+          "p": [
+            272.771,
+            1.704,
+            120.26
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-cliff-village-chapel-door-1",
+          "p": [
+            279,
+            2.992,
+            108.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.35,
+            "sy": 1.2
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-2-door-1",
+          "p": [
+            257.837,
+            1.221,
+            108.861
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-4-door-1",
+          "p": [
+            197.47,
+            5.895,
+            -1.461
+          ],
+          "r": -2.466,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-5-door-1",
+          "p": [
+            197.07,
+            2.256,
+            18.439
+          ],
+          "r": -1.968,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-7-door-1",
+          "p": [
+            216.594,
+            6.717,
+            10.611
+          ],
+          "r": -1.736,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-2-door-1",
+          "p": [
+            177.557,
+            1.616,
+            -1.797
+          ],
+          "r": -2.678,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-3-door-1",
+          "p": [
+            176.023,
+            0.048,
+            15.33
+          ],
+          "r": -2.852,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-13-door-1",
+          "p": [
+            253.551,
+            7.902,
+            -40.897
+          ],
+          "r": 2.215,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-14-door-1",
+          "p": [
+            247.079,
+            11.496,
+            -23.479
+          ],
+          "r": 3.105,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-15-door-1",
+          "p": [
+            251.922,
+            8.256,
+            1.93
+          ],
+          "r": -0.343,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-16-door-1",
+          "p": [
+            247.583,
+            5.001,
+            13.794
+          ],
+          "r": -0.905,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-east-crossroads-petrol-station-door-1",
+          "p": [
+            274,
+            2.05,
+            -8.61
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-9-door-1",
+          "p": [
+            228.89,
+            4.736,
+            11.509
+          ],
+          "r": -1.107,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-10-door-1",
+          "p": [
+            228.994,
+            3.557,
+            23.796
+          ],
+          "r": -1.191,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-alpine-valley-station-door-1",
+          "p": [
+            -4,
+            0,
+            -193.11
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-alpine-valley-station-door-2",
+          "p": [
+            -4,
+            0,
+            -198.89
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-8-door-1",
+          "p": [
+            232.121,
+            10.237,
+            -35.937
+          ],
+          "r": 0.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-11-door-1",
+          "p": [
+            237.465,
+            5.267,
+            -61.005
+          ],
+          "r": -2.574,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "hillside-home-12-door-1",
+          "p": [
+            252.818,
+            7.319,
+            -48.234
+          ],
+          "r": 0.869,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-library-1-door-1",
+          "p": [
+            74,
+            0,
+            -2.91
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-dome-door-1",
+          "p": [
+            99.2,
+            0,
+            40.89
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "eden-dome-door-2",
+          "p": [
+            99.2,
+            0,
+            32.11
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-abbey-cloister-door-1",
+          "p": [
+            -162,
+            0.655,
+            125.39
+          ],
+          "r": 0,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-abbey-church-door-1",
+          "p": [
+            -147.61,
+            2.203,
+            99.997
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.53,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-abbey-cloister-kitchen-door-2",
+          "p": [
+            -162,
+            0.724,
+            109.61
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "cliff-house-14-door-1",
+          "p": [
+            278.973,
+            2.569,
+            92.895
+          ],
+          "r": 1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-2-door-1",
+          "p": [
+            -31.389,
+            2.109,
+            -244.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-4-door-1",
+          "p": [
+            -23.389,
+            0.634,
+            -230.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-station-door-2",
+          "p": [
+            2.11,
+            36.967,
+            -312
+          ],
+          "r": -1.571,
+          "anchor": "center",
+          "params": {
+            "sx": 1.27,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "region-alpine-mountain-restaurant-door-1",
+          "p": [
+            4.256,
+            34.65,
+            -305.889
+          ],
+          "r": -3.141,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-1-door-1",
+          "p": [
+            -43.389,
+            0.83,
+            -234.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-3-door-1",
+          "p": [
+            -49.389,
+            3.147,
+            -250.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-5-door-1",
+          "p": [
+            -37.389,
+            5.028,
+            -260.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-6-door-1",
+          "p": [
+            16.611,
+            1.232,
+            -236.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
+          }
+        },
+        {
+          "op": "place",
+          "def": "core/door@2",
+          "name": "alpine-chalet-7-door-1",
+          "p": [
+            26.611,
+            2.851,
+            -248.823
+          ],
+          "r": -1.57,
+          "anchor": "center",
+          "params": {
+            "sx": 1.01,
+            "sy": 0.9
+          },
+          "state": {
+            "open": true
           }
         }
       ]

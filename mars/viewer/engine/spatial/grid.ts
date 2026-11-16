@@ -226,6 +226,12 @@ export function levelLattice(scene: SpatialScene, lv: Level, cell: number, lat =
  * static generation), so per-grid memos (path.ts, a failed search's side) survive a rebuild of the same content.
  */
 export const gridContentKeys = new WeakMap<LevelGrid, string>();
+/**
+ * The terrain height under a ground world's composed level-0 grid (tiled.ts compose), whose own `y` is a nominal 0: what a
+ * failed search's obstacle naming (path.ts) compares an obstacle's height with, as the ground raster does (#2383: a closed
+ * door on a slope, its foot at the terrain 0.8 m up, was never named, so a walk through it was refused).
+ */
+export const groundHeights = new WeakMap<LevelGrid, (x: number, z: number) => number>();
 
 /**
  * `buildGrids(scene, cell)` (no prefix, no columns), each level rasterised and transformed only over the cells its own

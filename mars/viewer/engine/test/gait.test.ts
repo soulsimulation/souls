@@ -4,7 +4,7 @@ import {Runtime,DT} from '../runtime/runtime.ts';
 import {DEFAULT_INVARIANTS,speedWithinCap,maxStepPerTick} from '../runtime/invariants.ts';
 import {Spatial} from '../spatial/service.ts';
 import {emptyWorld,human,addAll} from '../world/factory.ts';
-import {walkTo,walkSchemaNow,GAIT_SPEED_CAPS,CLIMB_SPEED,type Gait} from '../locomotion/walk.ts';
+import {walkTo,GAIT_SPEED_CAPS,CLIMB_SPEED,type Gait} from '../locomotion/walk.ts';
 import {provingGround} from '../scenes/proving-ground.ts';
 import type {SpatialScene} from '../spatial/types.ts';
 import type {ActionDef} from '../actions/types.ts';
@@ -28,7 +28,7 @@ test('a run to an upper level retains the ordinary slow stair controller',()=>{
   assert.equal(r.status,'completed',r.diagnostic?.message);assert.equal(climb,true);assert.equal(h.human!.level,1);assert.deepEqual(rt.violations,[]);
 });
 test('schema retains walk cap unless the faster gait is explicit',()=>{
-  const p={actor:'h',x:1,z:0};assert.equal(walkSchemaNow().safeParse({...p,speed:2.5}).success,false);assert.equal(walkSchemaNow().safeParse({...p,gait:'jog',speed:2.6}).success,false);assert.equal(walkSchemaNow().safeParse({...p,gait:'run',speed:4.01}).success,false);assert.equal(walkSchemaNow().safeParse({...p,gait:'run',speed:4}).success,true);assert.equal(walkSchemaNow().safeParse({...p,gait:'sprint'}).success,false);
+  const p={actor:'h',x:1,z:0};assert.equal(walkTo.schema.safeParse({...p,speed:2.5}).success,false);assert.equal(walkTo.schema.safeParse({...p,gait:'jog',speed:2.6}).success,false);assert.equal(walkTo.schema.safeParse({...p,gait:'run',speed:4.01}).success,false);assert.equal(walkTo.schema.safeParse({...p,gait:'run',speed:4}).success,true);assert.equal(walkTo.schema.safeParse({...p,gait:'sprint'}).success,false);
 });
 test('unsupported body refuses before any physical effect; running cancellation stops safely',()=>{
   const {rt}=fixture(),h=rt.world.entities.h;h.body={family:'floater'};const before=rt.stateHash();const no=rt.submit('walk_to',{actor:'h',x:20,z:0,gait:'run'});assert.equal(no.status,'failed');assert.equal(no.diagnostic?.code,'gait.unsupported-body');assert.deepEqual(h.pose.p,[-20,0,0]);assert.equal(h.human!.task,undefined);assert.equal(rt.stateHash(),before);

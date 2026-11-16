@@ -1,6 +1,7 @@
 // #2366: the watchdog's hard limits (A2 hang, A3 heap) and the fault guard (A1), as pure functions.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import {EventEmitter} from 'node:events';
 import {mkdtempSync, readFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -97,4 +98,17 @@ test('the fault guard names each fault, logs the first stack of a minute, and re
   installFaultGuard(g, proc as unknown as NodeJS.Process);
   proc.emit('uncaughtException', new Error('u')); proc.emit('unhandledRejection', new Error('r'));
   assert.equal(counts['world.fault.uncaught'], 1); assert.equal(counts['world.fault.rejection'], 1);
+});
+
+test('#2444: in a shard an uncaught error is noted by the world whose code it came from, never by its neighbours', () => {
+  const store = new AsyncLocalStorage<string>(), proc = new EventEmitter(), quiet = {log: () => {}};
+  const a = faultGuard(quiet), b = faultGuard(quiet);
+  installFaultGuard(a, proc as unknown as NodeJS.Process, () => store.getStore() === 'a');
+  const offB = installFaultGuard(b, proc as unknown as NodeJS.Process, () => store.getStore() === 'b');
+  store.run('b', () => { proc.emit('uncaughtException', new Error('in b')); proc.emit('unhandledRejection', new Error('in b')); });
+  store.run('a', () => proc.emit('uncaughtException', new Error('in a')));
+  proc.emit('uncaughtException', new Error('in no world'));
+  assert.deepEqual([{...a.counts}, {...b.counts}], [{'world.fault.uncaught': 1}, {'world.fault.uncaught': 1, 'world.fault.rejection': 1}]);
+  offB(); store.run('b', () => proc.emit('uncaughtException', new Error('b stopped')));
+  assert.equal(b.counts['world.fault.uncaught'], 1, 'a stopped world notes nothing more');
 });
