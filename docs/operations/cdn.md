@@ -202,6 +202,18 @@ header is missing or not an address), so the launcher always sees one entry, nev
 every site on the host, but only to requests from CDN addresses. `GET /__sim/whoami` answers `{address}`, the address
 the launcher keyed that request on (an entry that is not an address answers `null`).
 
+**When the launcher cannot answer** (stopped, restarting, a release), the CDN cannot cover for it: `stale-if-error` is
+ignored for the page's `no-cache`, and the CDN's always-online feature fires only when the origin is unreachable, not on
+a 502. So the site file replaces Caddy's own 502, 503 or 504 with `poster.html`, read from the live release
+(`/srv/sim-worlds/production/tools/world-launcher/deploy/caddy/`, so nothing extra is installed): "Back in a moment"
+and a reload after a random 3 to 8 s, so visitors who waited together come back spread out, and the world once the
+launcher answers. It is sent as `503` with `Retry-After: 5` and `no-store`, so neither the edge nor a crawler keeps it.
+Only a `GET` that accepts HTML outside `/__sim/`, `/v1/` and `/w/<world>/v1/` gets it: agents, API calls, health checks
+and WebSockets keep the real status, and a status the launcher itself sends is never replaced. It shows no world
+picture: the picture's URL carries its hash and the launcher applies moderation vetoes when it serves one (the files
+stay on disk), so neither Caddy nor a static page can choose it safely while the launcher is down. It does not cover
+the machine itself being down. Test: `node --test tools/world-launcher/deploy/caddy/poster.test.mjs` (needs `caddy`).
+
 `node tools/world-launcher/deploy/caddy/check-soul-game.mjs [--origin https://soul.game] [--world eden]`, with
 `SOUL_CHECK_TOKEN` set to a scratch Soul's token in the environment, checks from outside: `address` (whoami equals
 the `ip=` line of `/cdn-cgi/trace` on the same name), `forged` (the same with a forged `X-Forwarded-For`), `viewer`
