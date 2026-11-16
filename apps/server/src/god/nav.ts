@@ -669,6 +669,44 @@ export class GodNav {
     }
     return {pick, here, myLevel, seated, exit};
   }
+  /** #2486: selectedWalks' pick entries whose thing's ref is in `refs`, in its order, without ranking every thing. The
+   *  ranking is by (distance, ref) and refs are unique, so the things no farther than the farthest wanted one (a grid
+   *  read, `within`) are exactly the ranking's prefix that decides whether, and where, each wanted thing is picked: its
+   *  rank against SHOW and the open places before it. The rooms of buildings within ROOMS_WITHIN come after, as there.
+   *  Null (rank as before) when the grid saw a thing with no finite outline, whose distance could not be ordered. */
+  private selectedRefs(soul: EdgeSoul, refs: ReadonlySet<string>) {
+    const me = this.E.world.entities[soul.entityId]; if (!me?.human) return null;
+    const here: Vec2 = [me.pose.p[0], me.pose.p[2]], myLevel = me.human.level ?? 0;
+    const seated = me.human.activity === 'sit' || me.human.baseActivity === 'sit';
+    const all = this.things();
+    const exit = myLevel === 0 ? null : all.find((t) => t.kind === 'room' && t.level === myLevel && t.poly && inPoly(here[0], here[1], t.poly) && t.entry && t.entry.level === 0)?.entry ?? null;
+    this.within(here, 0); if (this.grid!.bad) return null;
+    const ranked = (r: number, keep: (t: Thing) => boolean) => this.within(here, r).filter((t) => keep(t) && (t.kind !== 'room' || !!t.semanticPart))
+      .map((t) => ({ t, d: this.distance(t, here) })).filter((x) => x.d <= r).sort((a, b) => a.d - b.d || (a.t.ref < b.t.ref ? -1 : 1));
+    const wanted = [...refs].map((r) => this.thing(r)).filter((t): t is Thing => !!t && (t.kind !== 'room' || !!t.semanticPart)).map((t) => this.distance(t, here));
+    if (wanted.some((d) => Number.isNaN(d))) return null;
+    const pick: { t: Thing; d: number }[] = [];
+    if (wanted.length) {
+      let places = 0;
+      ranked(Math.max(...wanted), () => true).forEach((x, i) => {
+        const take = i < SHOW || (x.t.semanticPart && x.d <= ROOMS_WITHIN) || ((x.t.kind === 'building' || x.t.big) && x.d <= BUILDINGS_WITHIN)
+          || (places < PLACES_MAX && x.d <= PLACES_WITHIN && !!x.t.area && polyArea(x.t.area) >= PLACE_M2 && !!this.h.placeOf?.(x.t.ref) && ++places > 0);
+        if (take && refs.has(x.t.ref)) pick.push(x);
+      });
+    }
+    for (const { t, d } of ranked(ROOMS_WITHIN, (t) => t.kind === 'building')) {
+      const rooms = (t.rooms ?? []).map((r) => this.thing(r)).filter((r): r is Thing => !!r);
+      if (!rooms.some((r) => refs.has(r.ref))) continue;
+      const inside = d <= UPPER_ROOMS_WITHIN || myLevel !== 0 || rooms.some((r) => r.level === 0 && !!r.poly && inPoly(here[0], here[1], r.poly));
+      for (const rt of rooms) if (refs.has(rt.ref) && (rt.level === 0 || (rt.rise ?? 0) < LOW_RISE_M || inside)) pick.push({ t: rt, d: this.distance(rt, here) });
+    }
+    return { pick, here, myLevel, seated, exit };
+  }
+  /** Test hook (#2486 oracle): the pick entries of `refs`, bounded (selectedRefs) and from the whole ranking. */
+  pickOracleV1(soul: EdgeSoul, refs: ReadonlySet<string>) {
+    const pick = (s: { pick: { t: Thing; d: number }[] } | null) => s?.pick.filter((x) => refs.has(x.t.ref)).map((x) => [x.t.ref, x.d]) ?? null;
+    return { bounded: pick(this.selectedRefs(soul, refs)), full: pick(this.selectedWalks(soul)) };
+  }
 
   /** Continuity (warm after listen): the walk goals this Soul's listing would ask for (room reaches, standing points and
    *  the fine route tiles under them), one thing per step, so a sliced caller builds them between other requests instead
@@ -679,7 +717,13 @@ export class GodNav {
   }
 
   capabilities(soul: EdgeSoul, caps: EdgeCapability[], plans: Plans, focus?: MenuFocus | null) {
-    const selected=this.selectedWalks(soul);if(!selected)return;
+    // #2486: a focused build wants only the things wantsThing passes. None (an object, a spot, `sit-ground:here`): nothing
+    // to rank. Only walk/sit/hang-out/stroll ids (bindOne of one walk): their own entries of the ranking, found without
+    // ranking every thing (selectedRefs). Same offers in the same order either way (nav-focus-oracle.test.ts).
+    const refs = focus ? focusRefs(focus) : null;
+    if (refs && !refs.size && !focus!.verbs.size && !focus!.targets.size) return;
+    const selected = refs && refs.size && !focus!.verbs.size && !focus!.targets.size ? this.selectedRefs(soul, refs) ?? this.selectedWalks(soul) : this.selectedWalks(soul);
+    if (!selected) return;
     // srv-act-words (D): a focused words walk keeps only the walks its words can choose (focus.walkKeep, the ledger's test)
     const at={...selected,keep:focus?.walkKeep?.keep};
     for(const {t,d} of selected.pick)if(this.wantsThing(focus,t))this.offerWalk(soul,t,d,at,caps,plans);
@@ -1004,16 +1048,17 @@ export class GodNav {
     const all = this.things();
     if (this.grid?.of !== all) {
       const cells = new Map<number, number[]>(), always: number[] = [];
+      let bad = false;
       all.forEach((t, i) => {
         const pts = t.area ?? t.path ?? t.poly ?? [t.at], pad = !t.area && t.path ? Math.max(0, (t.width ?? 3) / 2) : 0;
         let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
         for (const [x, z] of pts) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < z0) z0 = z; if (z > z1) z1 = z; }
-        if (!(x0 <= x1 && z0 <= z1) || !Number.isFinite(x0 + x1 + z0 + z1 + pad)) return;  // no outline: never within r
+        if (!(x0 <= x1 && z0 <= z1) || !Number.isFinite(x0 + x1 + z0 + z1 + pad)) { bad = true; return; }  // no outline: never within r
         const i0 = Math.floor((x0 - pad) / NEAR_CELL), i1 = Math.floor((x1 + pad) / NEAR_CELL), j0 = Math.floor((z0 - pad) / NEAR_CELL), j1 = Math.floor((z1 + pad) / NEAR_CELL);
         if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4096) { always.push(i); return; }
         for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) { const k = cellKey(ci, cj), l = cells.get(k); if (l) l.push(i); else cells.set(k, [i]); }
       });
-      this.grid = { of: all, cells, always };
+      this.grid = { of: all, cells, always, bad };
     }
     const g = this.grid, m = r + 1, seen = new Set<number>(g.always);   // (+1 m: float slack; the caller's distance test decides)
     const i0 = Math.floor((at[0] - m) / NEAR_CELL), i1 = Math.floor((at[0] + m) / NEAR_CELL), j0 = Math.floor((at[1] - m) / NEAR_CELL), j1 = Math.floor((at[1] + m) / NEAR_CELL);
@@ -1021,7 +1066,8 @@ export class GodNav {
     for (let ci = i0; ci <= i1; ci++) for (let cj = j0; cj <= j1; cj++) for (const i of g.cells.get(cellKey(ci, cj)) ?? []) seen.add(i);
     return [...seen].sort((a, b) => a - b).map((i) => all[i]);
   }
-  private grid: { of: Thing[]; cells: Map<number, number[]>; always: number[] } | null = null;
+  /** `bad`: some thing has no finite outline (never within r; selectedRefs then ranks every thing). */
+  private grid: { of: Thing[]; cells: Map<number, number[]>; always: number[]; bad: boolean } | null = null;
   /** "by the X" answers depend only on the named things (index version): remembered until the world changes (each
    *  label scanned every thing: ~0.25 s of every capabilities sweep in the Eden 2026 cafe). */
   private nearMemo = new Map<string, unknown>();
@@ -1035,6 +1081,12 @@ export class GodNav {
 
 const NEAR_CELL = 16;
 const cellKey = (i: number, j: number) => (i + 0x8000) * 0x10000 + (j + 0x8000);
+/** #2486: the things a focus names by a walk, sit, hang-out or stroll id (nav wantsThing's ids). */
+function focusRefs(f: MenuFocus): Set<string> {
+  const out = new Set<string>();
+  for (const id of f.ids) for (const v of ['walk:', 'sit:', 'hang-out:', 'stroll:']) if (id.startsWith(v)) out.add(id.slice(v.length));
+  return out;
+}
 function polyDist(poly: Vec2[], p: Vec2) { return inPoly(p[0], p[1], poly) ? 0 : nearestOn(poly, p, true).d; }
 
 function roomSamples(poly: Vec2[], at: Vec2, step = 0.6): Vec2[] {
