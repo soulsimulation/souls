@@ -155,6 +155,12 @@ const LEVELS = ['green', 'amber', 'red', 'black'], HOT = new Set(['red', 'black'
 /** A viewer's arrival reads (#2308 follow-up): a snapshot part is content-addressed and immutable (kept for the world
  *  process's life, at most PART_TTL_MS); /v1/config is the world's public settings, kept as briefly as a C3 read. */
 const PART_PATH = /^\/v1\/world\/part\/[0-9a-f]{32}$/, PART_TTL_MS = 3600_000;
+/** #2515 (E3): the world page is built at most once per PAGE_TTL_MS for every arrival (a 2 s old world clock or snapshot
+ *  key on it costs one snapshot miss, which the snapshot route answers with the current world). */
+const PAGE_TTL_MS = 2000;
+/** #2515 (E3): what the CDN may keep of a public answer that is the same for every caller without a token (as the world's
+ *  /v1/config, apps/server/src/http.ts): 5 s, then served stale for 30 s while it asks again. docs/operations/cdn.md */
+const EDGE_BRIEF = { 'cloudflare-cdn-cache-control': 'max-age=5, stale-while-revalidate=30' };
 /** Only a public answer is shared between callers: none that sets a cookie or says it is private or not to be kept. */
 const shareable = (r) => !r.headers['set-cookie'] && !/\b(private|no-store)\b/i.test(String(r.headers['cache-control'] ?? ''));
 function hostHealth(dataDir) {
@@ -281,6 +287,7 @@ export async function openLauncher(cfg = {}) {
   // lane L1, LOAD-CONTRACT §2b: exact ceilings on the Soul API per address, Soul, account and world (registry `limits`)
   const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log });
   const c3 = new MicroCache();
+  const pageFlights = new Map();   // #2515: the world page being asked of the world now, by its key: arrivals meanwhile wait for it
   const partCache = new MicroCache({ maxEntries: 256, maxTotalBytes: 64 * 2 ** 20 });   // snapshot parts: long-lived, so bounded in bytes too
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
   const feed = platformFeed({ dataDir, log });   // #1876: the platform feed, feed.mjs
@@ -975,7 +982,7 @@ export async function openLauncher(cfg = {}) {
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
-  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData } = {}) {
+  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep } = {}) {
     if (clientGone(req, res)) return;
     const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
@@ -995,6 +1002,7 @@ export async function openLauncher(cfg = {}) {
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
       if (onData) r.on('data', onData);
+      if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
       r.pipe(res);
     });
     // A world that was just handed over (or restarted) refused the connection before answering: a GET/HEAD is asked again
@@ -1149,9 +1157,42 @@ export async function openLauncher(cfg = {}) {
       void cachedRead(req, res, p, slug, url, part ? PART_TTL_MS : HOT.has(levelOf(slug)) ? Math.max(lim.c3CacheMs, 2000) : lim.c3CacheMs, { cache: part ? partCache : c3, key, storable: shareable });
       return;
     }
+    // #2515 (E3): the world page. It is the same for every caller (no cookie, nonce or per-caller value) and every query, so
+    // it is kept by its path, the world process and the host headers its URLs are made from, never by the query (a random
+    // one would pass the cache) or the cookie. Only an answer the world marks as its page (X-Sim-Page), from a GET that
+    // reached it, is kept; arrivals while it is asked wait for it (a wave costs one build). The world's other routes are
+    // proxied as before. Its robots tag is the world's own rule, set for each request. Only a GET that asks for HTML (a
+    // browser's arrival) is a page: any other GET, such as a long-poll, never waits behind another caller's flight.
+    let keep;
+    if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
+      const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
+      let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
+      if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
+      if (kept) {
+        const { 'server-timing': _t, 'x-robots-tag': _r, ...headers } = kept.headers;
+        if (headers['x-sim-page'] !== 'index' || req.url.includes('?')) headers['x-robots-tag'] = NOINDEX;   // as apps/server/src/http.ts (INDEXABLE)
+        res.writeHead(200, robotsOf(slug, { ...headers, 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(kept.body);
+        return;
+      }
+      // the first arrival asks the world; the flight ends with the kept page, or with nothing (not the page, an error, gone)
+      let done = () => {};
+      if (!retried && !pageFlights.has(pageKey)) {
+        const flight = new Promise((y) => { done = (v) => { if (pageFlights.get(pageKey) === flight) pageFlights.delete(pageKey); y(v); }; });
+        pageFlights.set(pageKey, flight); res.once('close', () => done(null));
+      }
+      keep = (u) => {
+        if (u.statusCode !== 200 || !/^(index|world)$/.test(u.headers['x-sim-page'] ?? '') || u.headers['content-encoding'] || !shareable({ headers: u.headers })) { done(null); return; }
+        const chunks = []; u.on('data', (c) => chunks.push(c)); u.on('error', () => done(null));
+        u.on('end', () => {
+          const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers, body = Buffer.concat(chunks), r = { status: 200, headers: { ...headers, 'content-length': String(body.length) }, body };
+          if (body.length <= c3.maxBytes) c3.keep(pageKey, r);
+          done(r);
+        });
+      };
+    }
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
-    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)
     const rp = retried ? null : readTarget(slug, w, rest, req.method, url.search);
     if (rp) { proxyRead(req, res, slug, rp, p, { ...opts, worldDeferred: !!gated?.worldDeferred }); return; }
@@ -1343,7 +1384,8 @@ export async function openLauncher(cfg = {}) {
         if (may !== 200) { json(res, may, { ok: false, code: may === 401 ? 'sign-in' : may === 403 ? 'not-owner' : 'busy' }); return; }
         const d = await dash.json(); json(res, 200, d, { 'server-timing': `dash;dur=${(performance.now() - t0).toFixed(1)}` }); return;
       }
-      if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson()); return; }
+      // #2515 (E3): the public world list is the same for everyone; without a token the CDN may keep it briefly
+      if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson(), req.headers.authorization ? {} : EDGE_BRIEF); return; }
       if (path === '/__sim/my-souls.json' && req.method === 'GET') {
         const souls = await mySouls(req.headers.authorization);
         if (!souls) { json(res, 401, { ok: false, code: 'signin-required', message: 'sign in to see your Souls' }, { vary: 'authorization' }); return; }
