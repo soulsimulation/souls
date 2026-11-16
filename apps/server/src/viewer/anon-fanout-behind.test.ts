@@ -90,3 +90,26 @@ test('A1, A3, A4: stalled sockets hold at most 1 MB plus one picture for 120 s; 
   // a socket behind for more than 60 s is closed with "try later" (a stalled reader cannot read the close frame)
   assert.equal(serverSide().filter((ws) => ws.readyState !== 1).length, STALLED, 'the stalled sockets were closed after 60 s behind');
 });
+
+test('A5: the ping sweep still ends a dead socket (no answer, its ping handed on, no TCP progress); one that answers stays', async (t) => {
+  const feed: PublicFeed = {
+    welcome: () => ({ build: 'test', proto: PROTO, worldId: 'w', rulesVersion: 1, schema: 1, dt: 0.05, clockRate: 1, serverTick: 0, epoch: 'e', paused: false }) as never,
+    join: () => ({ seq: 0, snapshot: { t: 'snapshot', reason: 'join', seq: 0, tick: 0, entities: [] } as never, log: JSON.stringify({ t: 'log', events: [] }), rest: [] }),
+    available: () => true, load: () => 'green',
+  };
+  const fanout = new AnonFanout(feed);
+  const server = createServer(); server.on('upgrade', (req, socket, head) => fanout.handleUpgrade(req, socket, head));
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as { port: number }).port, socks: WebSocket[] = [];
+  t.after(() => { for (const w of socks) w.terminate(); fanout.stopTimers(); server.close(); });
+  const viewer = async () => { const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?hello=${encodeURIComponent(JSON.stringify({ t: 'hello', proto: PROTO }))}`); socks.push(ws); await once(ws, 'open'); return ws; };
+  const live = await viewer(), dead = await viewer();
+  await until(() => fanout.size === 2 && fanout.hasReady(), 'joined');
+  await new Promise((r) => setTimeout(r, 50));
+  (dead as unknown as { _socket: { pause(): void } })._socket.pause();   // it never reads its ping, so never answers
+  const sweep = async () => { (fanout as unknown as { sweep(): void }).sweep(); await turn(); await new Promise((r) => setTimeout(r, 100)); };
+  await sweep();                                                         // pings both
+  await sweep();                                                         // judges: the live one answered, the dead one did not
+  assert.equal(fanout.size, 1, 'the dead socket was ended by the sweep');
+  assert.equal(live.readyState, 1, 'the one that answers stays');
+});

@@ -21,7 +21,8 @@
 // Scaling V4 (#2522): a socket that cannot keep up is skipped and re-pictured, never queued without limit. Past MAX_BUFFERED
 // unsent (beyond its join set or picture still being written) it is marked behind and sent nothing more; once its queue is
 // under DRAINED it gets the picture and the batches after it, exactly as a resync. Behind for BEHIND_MS, it is closed with
-// "try later" (1013; the product client waits at least 5 s).
+// "try later" (1013; the product client waits at least 5 s). The ping sweep spares a socket that is behind, or whose ping
+// is still queued behind data that is moving; one with no TCP progress is ended as before.
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
@@ -82,10 +83,18 @@ type Peer = { ws: WebSocket; ip: string; ready: boolean; alive: boolean; joinedA
   joinPending: number;
   /** #2522: when it was marked behind (sent nothing until its queue drains). */
   behind?: number;
+  /** #2522 A5: where its last ping sits in its byte stream, and the bytes its socket had handed on at the last sweep. */
+  pingAt: number; progress: number;
   /** It negotiated permessage-deflate with the full window, so the shared compressed frame fits it. */
   deflate: boolean };
 
 type Out = { s: string; f?: Frame | null };
+type Sock = { bytesWritten: number; writableLength: number };
+const sockOf = (ws: WebSocket) => (ws as unknown as { _socket?: Sock })._socket;
+/** Bytes written to this socket so far, queued ones included (a ping sent now sits at this position). */
+const queuedTotal = (ws: WebSocket) => sockOf(ws)?.bytesWritten ?? 0;
+/** Bytes the socket has handed on to the network (its writes that completed). */
+const handedOn = (ws: WebSocket) => { const s = sockOf(ws); return s ? s.bytesWritten - s.writableLength : 0; };
 /** The socket negotiated permessage-deflate and did not ask for a smaller server window than the default (15 bits). */
 function fullWindowDeflate(ws: WebSocket): boolean {
   const pmd = (ws as unknown as { _extensions?: Record<string, { params?: { server_max_window_bits?: number } }> })._extensions?.['permessage-deflate'];
@@ -162,7 +171,7 @@ export class AnonFanout {
     const ip = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // as the hub (#2543): an IPv6 network by its /64
     if (this.peers.size >= MAX_CONNECTIONS || (this.perIp.get(ip) ?? 0) >= MAX_PER_IP) { ws.close(1013, 'too many connections'); return; }
     const now = Date.now();
-    const p: Peer = { ws, ip, ready: false, alive: true, joinedAt: now, msgs: 0, windowStart: now, lastHello: 0, lastSnapshot: 0, generation: 0, resyncs: 0, columns: false, awaitingTakes: false, joinSend: false, joinPending: 0,
+    const p: Peer = { ws, ip, ready: false, alive: true, joinedAt: now, msgs: 0, windowStart: now, lastHello: 0, lastSnapshot: 0, generation: 0, resyncs: 0, columns: false, awaitingTakes: false, joinSend: false, joinPending: 0, pingAt: 0, progress: 0,
       deflate: fullWindowDeflate(ws) };
     this.peers.add(p); this.perIp.set(ip, (this.perIp.get(ip) ?? 0) + 1);
     this.wake();
@@ -347,12 +356,21 @@ export class AnonFanout {
   }
   private release = () => { for (const sock of this.held) sock.uncork(); this.held.clear(); };
 
-  /** Lag-aware ping sweep (as the hub's): a sweep that ran more than 5 s late, or a black world, judges nobody. */
+  /** Lag-aware ping sweep (as the hub's): a sweep that ran more than 5 s late, or a black world, judges nobody. #2522 A5: a
+   *  socket that did not answer is spared while it is behind (the 60 s behind bound ends it) or while its ping is still
+   *  queued behind data that is moving; one with no TCP progress is ended as before. */
   private sweepAt = Date.now();
   stallMs = 0;
   private sweep() {
     const now = Date.now(); this.stallMs = Math.max(0, now - this.sweepAt - SWEEP_MS); this.sweepAt = now;
     const judge = this.stallMs <= 5_000 && this.feed.load() !== 'black';
-    setImmediate(() => { for (const p of this.peers) { if (!p.alive && judge) { p.ws.terminate(); this.drop(p); continue; } p.alive = false; try { p.ws.ping(); } catch { /* closed */ } } });
+    setImmediate(() => { for (const p of this.peers) {
+      if (!p.alive && judge) {
+        const out = handedOn(p.ws), moving = out > p.progress; p.progress = out;
+        if (p.behind !== undefined || (out < p.pingAt && moving)) continue;
+        p.ws.terminate(); this.drop(p); continue;
+      }
+      p.alive = false; try { p.ws.ping(); } catch { /* closed */ } p.pingAt = queuedTotal(p.ws); p.progress = handedOn(p.ws);
+    } });
   }
 }
