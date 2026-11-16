@@ -7,6 +7,8 @@
 // past its own timeout, not the time it was held open, so a due return that left late shows as late.
 // #1944: `edge:act` also keeps its time after admission in three parts (handler, wait, commit: actTiming below), and the
 // monitor publishes its last 10-second tick window here (publishTickWindow), so both reach live.json from the watchdog.
+// #2508: and inside the handler three more (bind, check, route: the route searches it made), with since-start sums of every
+// part and of the time admission charged each act (recordCharge), so a harness can take means per act over its own window.
 import {AsyncLocalStorage} from 'node:async_hooks';
 
 export const API_ROUTES = [
@@ -56,7 +58,15 @@ const OVER0 = PART0 + PARTS.length * WINDOWS * SERIES;
 const TICK_FIELDS = ['at', 'windowMs', 'ticks', 'p50', 'p99', 'late', 'longestGapMs', 'green', 'amber', 'red', 'black',
   'holdService', 'holdLoop', 'holdHeap', 'holdDwell', 'enterService', 'enterLoop', 'enterHeap', 'enterQueue', 'enterRed'] as const;
 const TICK0 = OVER0 + WINDOWS;
-export const API_SLOTS = TICK0 + TICK_FIELDS.length;
+// #2508: bind, check and route in the same windows (recorded when the act carries them), then since-start sums: acts, each
+// part's ms, and the acts admission charged and their ms
+const EXTRA = ['bind', 'check', 'route'] as const;
+const EXTRA0 = TICK0 + TICK_FIELDS.length;
+const extraAt = (k: number, win: number) => EXTRA0 + (k * WINDOWS + win) * SERIES;
+const SUM_FIELDS = ['n', 'handler', 'wait', 'commit', 'bind', 'check', 'route', 'chargedN', 'chargedMs'] as const;
+const SUM0 = EXTRA0 + EXTRA.length * WINDOWS * SERIES;
+const sumAt = (k: typeof SUM_FIELDS[number]) => SUM0 + SUM_FIELDS.indexOf(k);
+export const API_SLOTS = SUM0 + SUM_FIELDS.length;
 export const newSharedApi = () => new Float64Array(new SharedArrayBuffer(API_SLOTS * Float64Array.BYTES_PER_ELEMENT));
 /** The process's own histograms, read by the watchdog thread (watchdog.ts passes the buffer). */
 export const sharedApi = newSharedApi();
@@ -70,7 +80,7 @@ function add(a: Float64Array, base: number, ms: number) { a[base + bucketOf(ms)]
 
 /** #1944: an act's time after admission: `handler` up to the point the ledger's settle starts waiting, `wait` from there
  *  until the tick takes the decision, `commit` from there to the answer (applying it inside drainInputs, perform included). */
-export type ActParts = {handler: number; wait: number; commit: number};
+export type ActParts = {handler: number; wait: number; commit: number; bind?: number; check?: number; route?: number};
 /** An act's wait counts as long past three ticks (at 50 ms). */
 export const WAIT_OVER_MS = 150;
 
@@ -92,14 +102,17 @@ export function recordApi(route: ApiRoute, queueMs: number, handlerMs: number, n
     const p = parts && route === 'edge:act' && PARTS.every(k => Number.isFinite(parts[k])) ? parts : null;
     for (const w of [cur, ALL]) {
       add(a, at(r, 0, w), Math.max(0, queueMs)); add(a, at(r, 1, w), Math.max(0, handlerMs));
-      if (p) { PARTS.forEach((k, i) => add(a, partAt(i, w), Math.max(0, p[k]))); if (p.wait > WAIT_OVER_MS) a[OVER0 + w]++; }
+      if (p) { PARTS.forEach((k, i) => add(a, partAt(i, w), Math.max(0, p[k]))); if (p.wait > WAIT_OVER_MS) a[OVER0 + w]++; EXTRA.forEach((k, i) => { const v = p[k]; if (v !== undefined && Number.isFinite(v)) add(a, extraAt(i, w), Math.max(0, v)); }); }
     }
+    if (p) { a[sumAt('n')]++; for (const k of [...PARTS, ...EXTRA]) { const v = p[k]; if (v !== undefined && Number.isFinite(v)) a[sumAt(k)] += Math.max(0, v); } }
   } catch { /* never fails a request */ }
 }
 
 export type Quantiles = {p50: number; p99: number; p999: number; max: number};
 /** edge:act only (#1944): its parts over the same windows, and how many acts waited past three ticks (window, since start). */
-export type ActPartStats = {handler: Quantiles; wait: Quantiles; commit: Quantiles; waitOver3Ticks: number; waitOver3TicksAll: number};
+export type ActPartStats = {handler: Quantiles; wait: Quantiles; commit: Quantiles; waitOver3Ticks: number; waitOver3TicksAll: number;
+  /** #2508: inside the handler (bind, check, route), when acts carried them; and since-start sums (ms; `n` acts). */
+  bind?: Quantiles; check?: Quantiles; route?: Quantiles; sums?: Record<typeof SUM_FIELDS[number], number>};
 export type ApiRouteStats = {n: number; queue: Quantiles; handler: Quantiles; nAll: number; handlerAll: Quantiles; parts?: ActPartStats};
 /** #1944 A3: the monitor's last completed tick window: the tick's own ms, ticks that started over 25 ms after they were
  *  due, the longest start-to-start gap, and the share of the window at each load level. `at` = its end (epoch ms). */
@@ -136,6 +149,8 @@ export function apiOf(a: Float64Array = sharedApi, now = Date.now()): ApiBlock {
   if (act && quantiles(a, [partAt(0, ALL)]).n) {
     const [handler, wait, commit] = PARTS.map((_, k) => quantiles(a, wins.map(w => partAt(k, w))).q);
     act.parts = {handler, wait, commit, waitOver3Ticks: wins.reduce((n, w) => n + a[OVER0 + w], 0), waitOver3TicksAll: a[OVER0 + ALL]};
+    EXTRA.forEach((k, i) => { const q = quantiles(a, wins.map(w => extraAt(i, w))); if (q.n) act.parts![k] = q.q; });
+    act.parts.sums = Object.fromEntries(SUM_FIELDS.map(k => [k, r1(a[sumAt(k)])])) as Record<typeof SUM_FIELDS[number], number>;
   }
   const from = a[2] || a[1], ticks = tickWindowOf(a);
   return {windowS: from ? Math.round((now - from) / 1000) : 0, sinceS: a[3] ? Math.round((now - a[3]) / 1000) : 0, bucketX: 1.25, routes, ...(ticks ? {ticks} : {})};
@@ -158,16 +173,22 @@ function tickWindowOf(a: Float64Array): TickWindow | undefined {
     amberEntries: {service: f('enterService'), loop: f('enterLoop'), heap: f('enterHeap'), queue: f('enterQueue'), red: f('enterRed')}};
 }
 
+/** #2508: the time admission charged an act (admission.ts charge): counted and summed since start, for live.json's
+ *  `parts.sums`. Never throws. */
+export function recordCharge(ms: number, a: Float64Array = sharedApi) {
+  try { if (Number.isFinite(ms) && ms >= 0) { a[sumAt('chargedN')]++; a[sumAt('chargedMs')] += ms; } } catch { /* never fails a request */ }
+}
+
 /** #1944 A1: marks an act request leaves as it runs (admission.ts starts one per POST /v1/edge/act; the ledger fills it).
  *  Outside an act request getStore() is undefined, so a mark elsewhere costs one lookup. performance.now() ms; 0 = unset. */
-export type ActTiming = {bindMs: number; checkAt: number; routeMisses: number; waitAt: number; takenAt: number};
+export type ActTiming = {bindMs: number; checkAt: number; routeMisses: number; waitAt: number; takenAt: number; /** #2508 */ routeMs: number};
 export const actTiming = new AsyncLocalStorage<ActTiming>();
-export const newActTiming = (): ActTiming => ({bindMs: 0, checkAt: 0, routeMisses: 0, waitAt: 0, takenAt: 0});
+export const newActTiming = (): ActTiming => ({bindMs: 0, checkAt: 0, routeMisses: 0, waitAt: 0, takenAt: 0, routeMs: 0});
 /** The parts of an act answered at `end`, its turn having started at `start`: they sum to end − start. `check` runs from
  *  the feasibility check to the wait (or the answer); `bind` is the time spent binding the offer. */
-export function actPartsOf(t: ActTiming, start: number, end: number): ActParts & {bind: number; check: number; routeMisses: number} {
+export function actPartsOf(t: ActTiming, start: number, end: number): ActParts & {bind: number; check: number; route: number; routeMisses: number} {
   const waitAt = t.waitAt ? Math.min(end, Math.max(start, t.waitAt)) : end, takenAt = t.takenAt ? Math.min(end, Math.max(waitAt, t.takenAt)) : end;
-  return {handler: waitAt - start, wait: takenAt - waitAt, commit: end - takenAt, bind: t.bindMs, check: t.checkAt ? Math.max(0, waitAt - t.checkAt) : 0, routeMisses: t.routeMisses};
+  return {handler: waitAt - start, wait: takenAt - waitAt, commit: end - takenAt, bind: t.bindMs, check: t.checkAt ? Math.max(0, waitAt - t.checkAt) : 0, route: t.routeMs, routeMisses: t.routeMisses};
 }
 
 /** The handler time to record for an answer: a long-poll's lateness past its own timeout, otherwise the time itself. */
