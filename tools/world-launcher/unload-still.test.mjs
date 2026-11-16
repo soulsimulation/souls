@@ -204,6 +204,40 @@ test('launcher-settings.json: absent is the default, 1 turns unloading on, an ex
   assert.deepEqual(await said(), ['unload-still 0 (the default)'], 'removed: the default again');
 });
 
+// #2475: a world unloaded to make room while not still was recorded "due at once" and then skipped by the alarm, so its
+// reminder waited for a visitor (the #2301 re-run: 84 reminders undelivered) and its live poll got a stale picture
+test('#2475: a world unloaded for room while not still is served "unloaded" with its clock moved on, and its alarm loads it once there is room: its reminder arrives within 60 s', { timeout: 60_000 }, async (t) => {
+  const L = await open({ dataDir: join(dir, 'for-room'), keepAlive: false, idleMs: 0, roomWaitMs: 1500, stillAlarmMs: 100 });
+  try {
+    await create('Rem'); await create('Other'); await until(() => status(L, 'rem') === 'running' && status(L, 'other') === 'running', 'both run');
+    still('rem', { still: false }); still('other', { still: false });
+    const live = () => fetch(`${base}/w/rem/v1/edge/live`, { headers: SOUL });
+    const kept = await (await live()).json();
+    L.pool.o.pss = () => 300; L.pool.o.worldsMemMb = 400; await L.pool.stop('other');   // one world fits (a fixed 300 MB Pss)
+    const out = join(dir, 'delivered-for-room.txt'), dueAt = Date.now() + 10_000;
+    writeFileSync(dueFile('rem'), JSON.stringify({ dueAt, out }));   // read when the world next loads
+    assert.equal((await act('other')).status, 200, 'other loads: rem, quiet and not still, is unloaded to make room');
+    assert.notEqual(status(L, 'rem'), 'running');
+    assert.equal(L.still.horizons.get('rem')?.still, false, 'recorded not still');
+    await wait(500);
+    assert.notEqual(status(L, 'rem'), 'running', 'no room: its alarm never unloads another world for it');
+    assert.equal(status(L, 'other'), 'running');
+    // A2: its live poll is answered as an unloaded world's
+    const c = await live(), pic = await c.json();
+    assert.equal(c.status, 200); assert.equal(c.headers.get('x-sim-cache'), 'unloaded');
+    assert.ok(pic.clock.at > kept.clock.at && pic.clock.worldDateTime > kept.clock.worldDateTime, 'the clock moved on by wall time');
+    assert.notEqual(status(L, 'rem'), 'running', 'the poll did not load it');
+    // memory frees (other turns still and unloads): rem's alarm loads it, in the background rank
+    still('other'); assert.deepEqual(await L.still.sweep(), ['other']);
+    await until(() => status(L, 'rem') === 'running', 'loaded by its alarm once there is room');
+    let at = null;
+    for (let i = 0; i < 400 && at === null; i++) { try { at = Number(readFileSync(out, 'utf8').trim().split('\n')[0]); } catch { await wait(50); } }
+    assert.ok(at !== null, 'the reminder was delivered');
+    assert.ok(at >= dueAt && at - dueAt <= 60_000, `delivered ${at - dueAt} ms after its due time`);
+    t.diagnostic(`delivered ${at - dueAt} ms after its due time`);
+  } finally { await L.close(); }
+});
+
 test('--unload-still 0 (the default): nothing is read, recorded or unloaded', { timeout: 30_000 }, async () => {
   const L = await open({ dataDir: join(dir, 'off'), unloadStill: undefined });
   try {

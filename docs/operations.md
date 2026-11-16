@@ -18,7 +18,9 @@ in the repository.
 Each stage is one systemd unit, `sim-worlds@<stage>`, running as the unprivileged `simworlds` user. The unit runs the
 keeper (`tools/world-launcher/keeper.mjs`), which holds the stage's port and runs the world launcher from the release
 the stage link `/srv/sim-worlds/<stage>` points at. The launcher runs one Souls server process per world on a private
-loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand and letting idle ones sleep.
+loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand. Idle worlds do not sleep:
+sleep is off by default (`SLEEP_MS = 0` in `tools/world-launcher/launcher.mjs`, #2235), because world time must never
+stop.
 
 | Stage | Public paths | Settings | Data |
 |---|---|---|---|

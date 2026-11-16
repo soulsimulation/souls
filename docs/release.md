@@ -537,6 +537,9 @@ that world moves and reconnects by itself; "Reconnecting…" appears only after 
 The page tries again 50 to 150 ms after the 1001 close, and the launcher holds that upgrade until the new world
 answers, so the pause is the world's boot: 3.6 to 5.1 s on 0.123, 4.17 and 4.18 (#1583). The release probe's bar is
 6500 ms. Each drop carries both parts (`retryMs`, `heldMs`), and the probe's report keeps the probe machine's load.
+The new process answers while it is still running the ticks owed for the pause: its god layer's first perception pass
+runs in slices then, as on a running world. Run whole, it held `/healthz` and every welcome for about 0.9 s on Eden 2026
+(#2501). `tools/world-launcher/handover-reconnect.test.mjs` hands Eden 2026 over between two pools and holds the bar.
 A page running the previous bundle reloads at once only if the protocol changed; otherwise it keeps running and never
 reloads by itself (#2368); its next page load takes the new bundle (`useSouls.ts`).
 
