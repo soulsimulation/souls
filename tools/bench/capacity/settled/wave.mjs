@@ -107,7 +107,7 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
     out.longestHold = lt[0] ? { ms: lt[0].ms, atS: lt[0].atS, group: lt[0].group, cause: lt[0].cause } : null;
     out.longTasks = lt.slice(0, 8).map((x) => ({ ms: x.ms, group: x.group, cause: x.cause }));
     out.actsDuring = counts;
-    for (const k of ['baseline', 'wave']) out[k] = { wallMs: out[k].wallMs, busyMs: out[k].busyMs, groups: Object.fromEntries(Object.entries(out[k].groups ?? {}).slice(0, 12)), holds: out[k].holds, ...(out[k].error ? { error: out[k].error } : {}) };
+    for (const k of ['baseline', 'wave']) out[k] = { wallMs: out[k].wallMs, busyMs: out[k].busyMs, groups: Object.fromEntries(Object.entries(out[k].groups ?? {}).slice(0, 12)), holds: out[k].holds, causes: out[k].step0?.causes, ...(out[k].error ? { error: out[k].error } : {}) };
     await loops;
     log(`wave (${shape}): ${created} created (${errors.length} errors), clock ${out.creates.clockMsPerCreate} ms per create, longest hold ${out.longestHold?.ms ?? '-'} ms (${out.longestHold?.cause ?? '-'}), worst level ${out.levels.worst}, bodies on ${out.bodies.spots ?? 0} spots`);
   } catch (e) { out.error = String(e.message ?? e).split(root).join('.'); if (w.child.exitCode != null) out.worldExited = { code: w.child.exitCode, tail: w.tail() }; log(`wave: ${out.error}${out.worldExited ? ` (world exited ${out.worldExited.code}: ${out.worldExited.tail})` : ''}`); }
