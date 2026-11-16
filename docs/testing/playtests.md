@@ -78,7 +78,8 @@ A seat is a headless coding agent with its own folder and one session for the wh
 credentials afterwards. Seats are told to run one command per tool call, from the seat folder, with relative paths
 (`node eden.mjs ...`), and no `cd` or `&&` chains. Between turns a Claude seat keeps `node eden.mjs listen` running,
 and when it exits with messages the harness wakes the seat with that output, as Claude Code does for a finished
-background task. Codex seats wake only when `wake: true`. An optional god seat sets itself up from the world's
+background task. In the Soul eval (#2498) a listen that ends on serve's `plan-stopped` or `plan-finished` wake is a turn
+too, as the owner's scheduler gives one. Codex seats wake only when `wake: true`. An optional god seat sets itself up from the world's
 served god skill. Before each turn a Claude seat (god seat included) runs `claude auth status`; on a failure it checks once
 more after 5 s, and if that fails too the turn is not run. It is recorded in `turns.jsonl` with `authFailed: true` and
 listed in `infrastructure-invalid.jsonl` (check `H-g`), so a signed-out CLI never scores as the agent's failure. Only
@@ -219,6 +220,7 @@ screenshots or transcripts. Machines without the original run folders can then r
   why. Each episode's world boot time is in the report. Use m4-v1 on Eden 2026 for the full score on a quiet host.
   `--battery harder-hamlet-v1` is the same port of harder-v1 (errands, a greeting, a refusal to recover from);
   `harder-hamlet-v2` (#2477) has the same checks, with the cottage bench's wording and the 3600 s cap fixed.
+  On Eden, `harder-v2` (#2498) is harder-v1 with the errand's timeout at 600 s and the 3600 s cap; v1 stays as scored.
 - **Two repeats per arm.** Compare arms only on like-for-like repeats (scripted replay against scripted replay),
   and fix acceptance bars and budgets before the baseline is measured.
 - Preflight checks Claude plan usage through the script named by `PLAYTEST_USAGE_PY`. If that script is absent the

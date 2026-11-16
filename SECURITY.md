@@ -12,7 +12,7 @@ to credit you in the advisory unless you prefer otherwise.
 
 ## Scope
 
-In scope: this repository's code and the service it runs at `sim.eden.art`, in particular
+In scope: this repository's code and the service it runs at `soul.game`, in particular
 
 - world isolation: reading or changing a world, Soul or god session you don't own;
 - Soul pairing, Soul tokens and god (world creator) credentials;

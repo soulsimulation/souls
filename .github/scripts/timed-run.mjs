@@ -219,7 +219,8 @@ export const PUBLISH = {
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
   load: ['load/results.json', 'load/REPORT.md', 'load.log'],
   settled: ['settled/results.json', 'settled/REPORT.md', 'settled.log'],
-  hundred: ['hundred/results.json', 'hundred/REPORT.md', 'hundred/hundred.log', 'hundred.log'],
+  // #2475 A3: the launcher's own log (what loaded or unloaded each world, and why), scrubbed like every text file
+  hundred: ['hundred/results.json', 'hundred/REPORT.md', 'hundred/hundred.log', 'hundred/launcher.log', 'hundred.log'],
   colocate: ['colocate/results.json', 'colocate/REPORT.md', 'colocate.log'],
   viewers: ['viewers/results.json', 'viewers/REPORT.md', 'viewers.log'],
   // the files the workstation session writes per cell: the kit's record, its log, the score, the class and the probe log

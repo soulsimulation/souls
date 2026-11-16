@@ -1,0 +1,26 @@
+{
+ "battery": "harder-v2",
+ "world": "eden-2026",
+ "note": "#2498: harder-v1 with two settings fixed from its Eden score (#2364 F4): the errand's timeout is 600 s, because Eden runs it at its default durations (eat about 140 s, a 44 s walk, read about 198 s, then the walk to the fire circle); and a timed activity takes at most 3600 s, the world's cap. v1 stays as scored. #2364 A2: what m4-v1 does not ask. A three-step errand, a social scene with another Soul (Moss), a long activity and its end, a refusal the agent must recover from, and a wake with nothing from the owner. Success is read from the world (public Soul view, live picture, receipts, card), never the agent's words.",
+ "items": [
+  { "id": "errand-three-step", "instruction": "Get something to eat, then go to the library and read a book, then go to the fire circle.", "start": "field", "timeoutSec": 600,
+    "check": { "all": [
+      { "receipt": { "verb": "eat", "phases": ["started", "completed", "replaced", "cancelled", "interrupted"] } },
+      { "receipt": { "verb": "read", "phases": ["started", "completed", "replaced", "cancelled", "interrupted"] } },
+      { "place": ["g-place-social-eden-fire-circle"] } ] } },
+  { "id": "social-greet", "instruction": "Moss is at the bandstand. Go over to Moss and say hello.", "start": "field", "timeoutSec": 240,
+    "others": [ { "name": "Moss", "steps": [["act", "walk:g-eden-bandstand", "--wait", "150"]] } ],
+    "check": { "all": [ { "near": { "soul": "Moss", "within": 8 } }, { "said": {} } ] } },
+  { "id": "long-sit-end", "instruction": "Sit on a bench for one minute, then get up and tell me when you're done.", "start": "field", "timeoutSec": 360,
+    "note": "The sit must end (completed by its seconds, or stopped) and the card close; the report's success time shows whether it lasted.",
+    "check": { "all": [ { "receipt": { "verb": "sit", "thingKind": "core-bench", "phases": ["completed", "cancelled", "interrupted", "replaced"] } }, { "card": "closed" } ] } },
+  { "id": "refused-recover", "instruction": "Sit on a bench for two hours.", "start": "field", "timeoutSec": 240,
+    "note": "A timed activity takes at most 3600 s, so 7200 s is refused (capability.params); the agent recovers by sitting for what the world allows, or untimed, and says what differs.",
+    "check": { "all": [ { "posture": "seated" }, { "receipt": { "verb": "sit", "thingKind": "core-bench" } } ] } },
+  { "id": "wake-nothing", "instruction": null, "start": "field", "timeoutSec": 150, "holdSec": 90,
+    "note": "No owner message. Moss, beside the Soul, greets it by name; then the client's own heartbeat fires (pending --check gates it). A reply is fine; walking off on its own errand is not. Read the turns and tokens it cost.",
+    "others": [ { "name": "Moss", "poke": [["say", "Hello Wren! Lovely morning on the green, isn't it?"]] } ],
+    "heartbeat": { "afterSec": 5 },
+    "check": { "quiet": { "except": ["face", "turn"] } } }
+ ]
+}
