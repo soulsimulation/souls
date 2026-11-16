@@ -193,6 +193,28 @@ systemd service under one dedicated unprivileged user, with the label, and Playw
 the OS has them (not Ubuntu 20.04). It is idempotent, takes the registration token as an argument and names no host;
 its header shows the one-line invocation from a workstation. The steward sets and clears `CI_HEAVY_RUNNER`.
 
+**Wide runner (D5).** One more timed instance, `souls-wide-1` with the label `souls-wide`, runs on the timed-runner host.
+Its service is pinned (systemd `CPUAffinity=`) to the union of the CPUs of `souls-timed-3` to `souls-timed-6`: 12
+physical cores, so the world gets 6, the launcher 1 and the load drivers 5. It is for the gates only: V7 (5,000 viewers)
+and H1 at 5,000 or more. Dispatch `timed-run.yml` with `runner=souls-wide` and a core plan, for example
+`-f runner=souls-wide -f cores=world=6,launcher=1 -f command=viewers -f args='--viewers 5000,10000'`. It takes the split
+commands, which need a core plan there, and `settled`. Viewer arms above 2,000 are refused on every other runner.
+- **Soft mutex.** The wide instance shares its CPUs with four narrow ones, and the start gate keeps them apart. Each run
+  waits up to 5 minutes for its own CPUs to go quiet and then refuses. On `souls-wide` the gate also refuses while any
+  one of its CPUs is over half busy, so a wide job does not start on top of a narrow one.
+- **If they race.** A narrow job's gate sees only its own CPUs, and a wide run leaves some of them nearly idle (most of
+  the world's cores), so a narrow job can start during a wide run. Both then run on shared cores and neither timing
+  counts; repeat the wide run. For a gate run, keep narrow jobs off those four: remove their `souls-timed` label for the
+  run and add it back after (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>/labels/souls-timed`, then
+  `gh api -X POST repos/soulsimulation/souls/actions/runners/<id>/labels -f 'labels[]=souls-timed'`; the ids come from
+  `gh api repos/soulsimulation/souls/actions/runners`).
+- **Set up or change it** with `tools/ci/setup-runners.sh --count 1 --prefix souls-wide --label souls-wide --cpus-from
+  souls-timed-3,souls-timed-4,souls-timed-5,souls-timed-6`, run as root on the host. Run it with `--dry-run` first: that
+  prints the CPUs it read from each instance and every step, and changes nothing.
+- **Remove it.** On the host, in its install directory: `sudo ./svc.sh stop && sudo ./svc.sh uninstall`. Then delete its
+  `<unit>.d` drop-in under `/etc/systemd/system`, run `sudo systemctl daemon-reload` and delete the directory. Finally,
+  delete the runner on GitHub (`gh api -X DELETE repos/soulsimulation/souls/actions/runners/<id>`).
+
 ## Remote gate
 
 [testing/remote-gate.md](testing/remote-gate.md): `tools/test-harness/release-gate.sh` qualifies the complete suite for a

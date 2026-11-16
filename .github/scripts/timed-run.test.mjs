@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, LOAD_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
+import { parseInputs, checkArgs, commandLine, parseCpuList, parseProcStat, loadFacts, stage, snapshot, newEntries, sortStrays, globTest, splitCores, descendants, isWorld, isLauncher, parseCorePlan, groupBusy, SPLIT, WIDE, LOAD_GATE, WIDE_MAX_GATE, COUNTED, target, countedSteps } from './timed-run.mjs';
 
 const ENV = { INPUT_REF: 'main', INPUT_COMMAND: 'walk', INPUT_REPEATS: '1', INPUT_ARGS: '' };
 
@@ -199,6 +199,44 @@ test('core plan (#2507): cores is accepted for the split commands, validated, re
   for (const c of ['node\0apps/server/src/main.ts', 'node\0tools/world-launcher/launcher.test.mjs', 'node\0tools/bench/capacity/viewers/viewers.mjs']) assert.ok(!isLauncher(c), c);
   const a = parseProcStat('cpu0 10 0 0 90 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0\ncpu2 50 0 0 50 0 0 0 0\n'), b = parseProcStat('cpu0 60 0 0 140 0 0 0 0\ncpu1 10 0 0 190 0 0 0 0\ncpu2 150 0 0 50 0 0 0 0\n');
   assert.deepEqual(groupBusy(a, b, { world: '0,1', load: '2' }), { world: 0.3, load: 1 });
+});
+
+const CNT_WIDE = { INPUT_REF: 'agent/1367-x', INPUT_COMMAND: 'counted', INPUT_REPEATS: '1', INPUT_ARGS: '--scenario stair-foot', INPUT_BASE: 'main', INPUT_CELL: 'cand-1', INPUT_CORES: '' };
+test('wide runner (D5): souls-wide takes the split commands with a core plan and settled; 5,000 and 10,000 viewers run there only', () => {
+  const W = { ...ENV, INPUT_RUNNER: 'souls-wide', INPUT_CORES: 'world=6,launcher=1' };
+  assert.deepEqual(parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_ARGS: '--viewers 5000,10000' }), { ref: 'main', command: 'viewers', repeats: 1, args: ['--viewers', '5000,10000'], cores: { world: 6, launcher: 1 }, runner: 'souls-wide' });
+  assert.equal(parseInputs({ ...W, INPUT_COMMAND: 'eval-load', INPUT_ARGS: '--souls 500 --raw-from 20' }).runner, 'souls-wide');
+  assert.equal(parseInputs({ ...W, INPUT_COMMAND: 'settled', INPUT_CORES: '' }).runner, 'souls-wide', 'settled is not split: no plan');
+  assert.deepEqual(WIDE, [...SPLIT, 'settled']);
+  for (const command of ['walk', 'eval-scripted', 'load', 'hundred', 'colocate', 'clip'])
+    assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: command, INPUT_CORES: '' }), /input runner="souls-wide": souls-wide runs eval-load, .*viewers, settled only/, command);
+  assert.throws(() => parseInputs({ ...W, ...CNT_WIDE }), /input runner="souls-wide"/, 'counted');
+  assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_CORES: '' }), /input cores="": souls-wide needs a core plan/);
+  for (const v of ['5000', '200,10000']) {
+    assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: `--viewers ${v}` }), /input runner="souls-timed": viewer arms above 2000 run on souls-wide only/, v);
+    assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: `--viewers ${v}`, INPUT_CORES: 'world=1,launcher=1' }), /souls-wide only/, `${v} with a plan`);
+  }
+  assert.deepEqual(parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: '--viewers 0,2000' }).args, ['--viewers', '0,2000'], 'up to 2,000 stays on souls-timed');
+  for (const a of ['--viewers 3000', '--viewers 10001', '--viewers 05000']) assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_ARGS: a }), /input args/, a);
+  // the union of four timed instances' CPUs: 12 physical cores (SMT pairs c, c+24), and a 16-core one
+  const smt = (c) => [c % 24, (c % 24) + 24], twelve = [...parseCpuList('6-17'), ...parseCpuList('30-41')];
+  assert.deepEqual(splitCores(twelve, smt, { world: 6, launcher: 1 }), { physicalCores: 12, plan: 'world=6,launcher=1', layout: '6+1+5',
+    world: '6,30,7,31,8,32,9,33,10,34,11,35', launcher: '12,36', load: '13,37,14,38,15,39,16,40,17,41' });
+  assert.equal(splitCores(parseCpuList('0-15'), (c) => [c], { world: 6, launcher: 1 }).layout, '6+1+9');
+  assert.throws(() => splitCores(twelve, smt), /12 physical core\(s\).*needs 3 or 4/, 'no plan: refused, as parseInputs says first');
+  assert.throws(() => splitCores(twelve, smt, { world: 8, launcher: 4 }), /needs 13 physical cores/);
+});
+
+test('wide runner (D5): the start gate also refuses while any one of its CPUs is busy (a narrow job on shared cores)', () => {
+  const s = (rows) => parseProcStat(rows.map(([b, i], c) => `cpu${c} ${b} 0 0 ${i} 0 0 0 0 0 0`).join('\n'));
+  const a = s(Array.from({ length: 24 }, () => [0, 0]));
+  // a narrow job busy on 4 of the wide runner's 24 CPUs: the mean (0.15) passes, the busiest CPU (0.9) does not
+  const b = s(Array.from({ length: 24 }, (_, c) => (c < 4 ? [90, 10] : [0, 100])));
+  const own = Array.from({ length: 24 }, (_, c) => c);
+  assert.deepEqual([loadFacts(a, b, own).ownBusy, loadFacts(a, b, own).overGate], [0.15, false], 'the narrow gate alone lets it start');
+  const wide = loadFacts(a, b, own, LOAD_GATE, WIDE_MAX_GATE);
+  assert.deepEqual([wide.ownBusy, wide.ownBusyMax, wide.maxGate, wide.overGate], [0.15, 0.9, 0.5, true]);
+  assert.equal(loadFacts(a, s(Array.from({ length: 24 }, () => [20, 80])), own, LOAD_GATE, WIDE_MAX_GATE).overGate, false, 'quiet: every CPU at 0.2');
 });
 
 test('world pinning: only world servers under the run\'s own process tree', () => {
