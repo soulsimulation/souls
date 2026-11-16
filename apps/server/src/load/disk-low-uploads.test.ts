@@ -28,8 +28,22 @@ async function refused(r: Response) {
   assert.equal(e.code, 'host.disk-low'); assert.equal(e.retry_after, DISK_LOW_RETRY_S); assert.match(e.message, /disk is nearly full.*Try again in 5 minutes/);
 }
 
-test('disk low: a body upload is refused, a Soul still acts and the world still ticks', async t => {
+test('disk low: a Soul still acts and the world still ticks', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'disk-low-')), f = fixture(join(dir, 'sim.db'), factory, {durableClockV1: true}); f.brain.quiesce();
+  t.after(() => { ok(); f.host.stop(); if (f.db.db.isOpen) f.db.close(); rmSync(dir, {recursive: true, force: true}); });
+  await invite(f, 'a');
+  const row = await accept(f.host, f.souls.create('dev:a', {name: 'Disk a', description: 'disk-low test'}));
+  const token = f.souls.pairExchange(f.souls.pairCode(row, 'http://127.0.0.1:4958').code, 'scripted').token;
+  const app = new Hono(); mountEdgeRoutes(app, {host: f.host, db: f.db, souls: f.souls, ledger: new EdgeLedger(f.host, f.db, undefined, {ambient: false}), soul: edgeSoulResolver(f.host, f.souls, c => c.req.header('authorization')?.replace(/^Bearer /, ''))});
+  low();
+  const said = await accept(f.host, Promise.resolve(app.request('/v1/edge/say', {method: 'POST', headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'}, body: JSON.stringify({text: 'the disk is low and I still speak'})})));
+  assert.equal(said.status, 200, await said.clone().text());
+  const tick = f.host.engine.world.tick; for (let i = 0; i < 10; i++) f.host.tickOnce();
+  assert.equal(f.host.engine.world.tick, tick + 10, 'the clock runs');
+});
+
+test('disk low: a body upload is refused and nothing is stored; with room again it is stored', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'disk-low-body-')), f = fixture(join(dir, 'sim.db'), factory, {durableClockV1: true}); f.brain.quiesce();
   t.after(() => { ok(); f.host.stop(); if (f.db.db.isOpen) f.db.close(); rmSync(dir, {recursive: true, force: true}); });
   await invite(f, 'a');
   const row = await accept(f.host, f.souls.create('dev:a', {name: 'Disk a', description: 'disk-low test'}));
@@ -39,10 +53,6 @@ test('disk low: a body upload is refused, a Soul still acts and the world still 
   low();
   await refused(await upload());
   assert.equal((f.db.db.prepare('SELECT COUNT(*) n FROM edge_body_assets_v1').get() as {n: number}).n, 0, 'nothing stored');
-  const said = await accept(f.host, Promise.resolve(app.request('/v1/edge/say', {method: 'POST', headers: {authorization: `Bearer ${token}`, 'content-type': 'application/json'}, body: JSON.stringify({text: 'the disk is low and I still speak'})})));
-  assert.equal(said.status, 200, await said.clone().text());
-  const tick = f.host.engine.world.tick; for (let i = 0; i < 10; i++) f.host.tickOnce();
-  assert.equal(f.host.engine.world.tick, tick + 10, 'the clock runs');
   ok();
   assert.equal((await upload()).status, 200, 'with room again the same upload is stored');
 });
