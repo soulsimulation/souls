@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync, readFileSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planExpired, planFix, planHeld, planPhase, reconcileMessages, sseFrames, takeAddressed, takePending } from './soul/eden.mjs';
+import { REFLEX_EVERY_MS, attentionHeld, holdMs, foldAddressed, foldEvents, noteAttention, reflexFor, foldMessages, isServeOf, newPlan, parsePlanSteps, planAnswer, planCarry, planExpired, planFix, planHeld, planPhase, reconcileMessages, sseFrames, takeAddressed, takePending } from './soul/eden.mjs';
 
 const cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -726,6 +726,47 @@ test('plan A2: the replacement runs in the refused step\'s place and the plan go
   ended(w, 'r_1');
   assert.ok(await until(() => w.acts === 2));
   assert.equal(w.bodies.at(-1).capability, 'walk:pond');
+});
+
+// #2498 F1 (the Eden harder-v1 errand, r2): a corrected plan with the same first step was refused slot.none-free, its table
+// held by the Soul's own eat from the plan it replaced; the read and the walk never ran
+test('plan #2498: a plan that replaces one whose running act is its own step 1 keeps that act, and goes on from it', async (t) => {
+  const w = await world(t);
+  await w.cli('serve');
+  w.owner('msg_1', 'Eat, read, then the fire circle');
+  await w.cli('plan', JSON.stringify(['eat:table', 'read:book', 'walk:fire-circle']), '--for', 'msg_1');
+  assert.ok(await planNow(w, (p) => p.plan?.steps[0].receipt === 'r_1'), 'the eat is under way');
+  w.refuse['eat:table'] = 'slot.none-free';   // as Eden answers the same eat sent again
+  const r = await w.cli('plan', JSON.stringify(['eat:table', 'read:book', 'walk:place-fire-circle']), '--for', 'msg_1');
+  assert.equal(r.json.accepted, true, r.err);
+  assert.equal(r.json.plan.steps[0].state, 'running');
+  assert.equal(r.json.plan.steps[0].receipt, 'r_1', 'step 1 is the eat already under way');
+  await sleep(300);
+  assert.equal(w.bodies.filter((b) => b.capability === 'eat:table').length, 1, 'the eat is not sent again');
+  ended(w, 'r_1');
+  assert.ok(await until(() => w.acts === 2), 'step 2 runs when the kept eat ends');
+  assert.equal(w.bodies.at(-1).capability, 'read:book');
+  ended(w, 'r_2');
+  assert.ok(await until(() => w.acts === 3));
+  assert.equal(w.bodies.at(-1).capability, 'walk:place-fire-circle');
+  ended(w, 'r_3');
+  assert.ok(await until(() => w.results.length === 1), 'the newer plan closes the message');
+  assert.equal(w.results[0].outcome, 'done');
+  await sleep(300);
+  assert.equal(w.results.length, 1, 'the replaced plan sends no result for the same message');
+});
+
+test('planCarry #2498: only the same act, with the same params, still running, is kept', () => {
+  const running = (id, params) => { const p = newPlan([{ id, ...(params ? { params } : {}) }, { id: 'walk:pond' }], 'msg_1'); p.steps[0].state = 'running'; p.steps[0].receipt = 'r_1'; return p; };
+  const next = (id, params) => newPlan([{ id, ...(params ? { params } : {}) }, { id: 'walk:mill' }], 'msg_1');
+  assert.equal(planCarry(running('eat:table'), next('eat:table')).steps[0].receipt, 'r_1');
+  assert.equal(planCarry(running('eat:table'), next('eat:table')).steps[1].state, 'pending', 'only step 1');
+  assert.equal(planCarry(running('eat:table'), next('eat:bar')).steps[0].receipt, null, 'another act is sent: the world replaces the running one');
+  assert.equal(planCarry(running('sit:bench', { seconds: 30 }), next('sit:bench', { seconds: 60 })).steps[0].receipt, null, 'other params');
+  assert.equal(planCarry(running('sit:bench', { seconds: 30 }), next('sit:bench', { seconds: 30 })).steps[0].receipt, 'r_1');
+  const over = running('eat:table'); over.steps[0].state = 'done';
+  assert.equal(planCarry(over, next('eat:table')).steps[0].receipt, null, 'an act that ended is asked again');
+  assert.equal(planCarry(null, next('eat:table')).steps[0].receipt, null);
 });
 
 test('plan: a step that ends on the stream before its answer is back still moves on', async (t) => {

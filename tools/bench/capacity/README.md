@@ -129,6 +129,37 @@ node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n6 --sho
 node tools/bench/capacity/bench.mjs --load client --via-launcher --arms n1,n24,n50,n100 --raw-from 4 [--profile stress] --out <dir>
 ```
 
+## Load shapes (`profiles/shapes.json`, #2556)
+
+One shared, seeded description of uneven load, so every scaling measurement runs an even arm and an uneven one and
+two runs of the same shape replay the same load. The numbers are in [`profiles/shapes.json`](profiles/shapes.json),
+each with its source or marked as an estimate; they are judgement, not data, and change there with evidence, never
+in a bench. [`profiles/shapes.mjs`](profiles/shapes.mjs) turns a shape, a count of joined Souls, a window and a seed
+into a schedule:
+
+```js
+import { schedule, describe } from './profiles/shapes.mjs';
+const s = schedule('event', 100, 600, seed);   // 'uniform' takes { actSec } as a fifth argument (--act-sec)
+// s.agents[i] = { arrive, leave, stays: [[from, to)], acts: [{ at, kind, place, pick, crowd? }] }, seconds from the start
+console.log(describe(s.summary, 'event'));      // what was offered: acts a second, busiest tenth, largest burst, arrivals
+```
+
+| shape | present | rate per agent | in time | arriving and leaving | crowds | place | mix |
+|---|---|---|---|---|---|---|---|
+| `uniform` | all | equal (`--act-sec`) | today's paced loop | all from the start | none | spread | the paced loop's |
+| `everyday` | 25 % | log-normal, median 1 per 30 s, capped at 1 per 2 s | runs of 1–4 acts 2–4 s apart, then a pause | from the start | none | spread | the paced loop's |
+| `event` | 80 % | the same | the same | half ramp in over 2 min; every 5 min a tenth leave and others return | 30 % of those present act within 2 s, every 45–120 s | 60 % of walks near one named place | social: speech, gestures, sitting, short walks |
+
+The schedule is open loop: an act is due at its time whether or not the last one was answered, so a bench reports
+achieved against intended (`summary.perS` is the intended count for each second). `kind` is a kind of
+`meetup/client-soul.mjs` `catalogIds` (`walk`, `sit`, `sit-ground`, `read`, `eat`, `play-music`, `gesture`) or `say`
+(speech, sent to `SAY_PATH` with `sayBody`); `place` is `spread` (a walk target around the map), `gathered` (a walk
+target within `place.radiusM` of the bench's one named place) or null; `pick` chooses among the bench's ids for that
+kind. Agents' rates are stratified over the log-normal, so every seed carries the whole tail. At 100 joined Souls over
+10 minutes (seeds 1–40) `event` offers about 5.4 acts a second, the busiest tenth of present agents make 43 % of them
+and the largest one-second burst is 4.6 times the mean; `everyday` offers about 1.7. The `viewers` section gives
+arrival rate, waves and a heavy-tailed stay (median 60 s) for the viewer benches.
+
 ## Meetup workload (CW1, #735: 50 Souls across 10 worlds)
 
 `meetup/` is the near-term product as a workload: ten substantial worlds from `worlds/templates/` behind the
@@ -276,6 +307,26 @@ node tools/bench/capacity/slopes/slopes.mjs --root <built checkout> --axis inven
 - **What qualifies:** only a run on the qualifying executor that is declared quiet, full length (not `--short`) and has at least 2 repeats; every other run is labelled INDICATIVE. A failed arm or repeat is listed under "Failed runs" in REPORT.md, enters no mean (each section's `n` counts the runs its means rest on), and makes the bench exit 1.
 
 `--slice` wraps each world on its own, so a CPU quota there is per world, unlike the meetup bench. A qualifying slopes run needs no slice: it measures cost per call, not headroom.
+
+## Viewers on one world (#2308, #2511)
+
+`viewers/viewers.mjs` measures what anonymous viewers cost one Eden 2026 world (fake minds, behind the checkout's own launcher) while Souls act, from zero viewers up. Each viewer does what the web page's entry does, with no browser: it fetches the world page, the snapshot, the config and the parts the snapshot names, then holds the world's socket open. A closed socket is reopened with the product client's own backoff (`reconnectDelayMs` in `viewers/stats.mjs` mirrors `packages/client`; its test fails if the client changes). Every viewer and every Soul has its own documentation or benchmarking address.
+
+| option | meaning |
+|---|---|
+| `--viewers 0,50,200` | the arms, in rising order; `0` is the zero-viewer arm |
+| `--souls <n>` (to 100) and `--act-sec <s>` | Souls joined with the world's CLI; each acts every `s` seconds from the start of its last act (without it, 6–10 s after the last answer) |
+| `--arrive-per-sec <n>` (default 20) | the rate at which viewers arrive while fewer than the arm's count are present |
+| `--dwell-sec <median>` | each viewer leaves after a heavy-tailed stay (log-normal, sigma 1, seeded per repeat); arrivals continue all window to hold the count |
+| `--arrive-burst <n>@<s>` | `n` more viewers arrive within 5 s, `s` seconds into each window with viewers (a link was just posted); they leave by their own stay, or at the window's end |
+
+Per window it reports the existing columns (tick, act queue and handler time, load levels, world, launcher and driver processor use, bytes per viewer, world calls by viewers, refusals) and: viewers held, joins and leaves per second, reconnects, **first motion** (seconds from a newcomer's first socket to its first take that carries a chunk, p50 and p95; only up to 50 newcomers waiting at once read their messages' heads, and nothing else is parsed), the main thread's heap beside the process's resident memory, and acts achieved against intended. The world's log and any `stall-*.json` are kept in each repeat's folder and in the timed run's artifact.
+
+```bash
+# the timed runner (all timing): command viewers, repeats 2
+#   args: --viewers 0,50,200 --souls 24 --act-sec 10 --arrive-per-sec 20                      (even)
+#   args: --viewers 0,200 --souls 24 --act-sec 10 --dwell-sec 60 --arrive-burst 100@30        (uneven)
+```
 
 ## Recorded baseline (2026-10-31, before the server-reliability fixes)
 
