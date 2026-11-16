@@ -11,6 +11,7 @@ import { defaultCommand } from './children.mjs';
 import { openLauncher } from './launcher.mjs';
 import { archiveWorld, restoreWorld, addGodToken } from './worldops.mjs';
 import { notTestWorld } from './op-souls.mjs';
+import { SNAPSHOT_EPOCH_FILE } from '../../apps/server/src/edge-snapshot.ts';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const mappings = [['eden-2026', 'eden'], ['my-mars-college-2026-3', 'mars-college-2026'], ['mars-2027', 'mars-college-2027']];
@@ -75,6 +76,17 @@ test('archive and restore a migrated world keep its original directory and alias
   assert.equal(existsSync(join(data, 'worlds', 'eden-2026')), false);
   assert.equal(restoreWorld({ registry, dataDir: data }, out.id, 'synthetic-operator')[0], 200);
   assert.equal(readFileSync(join(registry.worldDir('eden'), 'sim.db'), 'utf8'), 'opaque'); assert.equal(registry.resolveSlug('eden-2026'), 'eden');
+});
+
+test('E6: restore-world drops the snapshot epoch, so the restored world boots with a new snapshot key', async () => {
+  const data = dir(); writeFileSync(join(data, 'worlds.json'), JSON.stringify(fixture())); const registry = new Registry(data);
+  const world = registry.worldDir('eden-2026'); mkdirSync(world, { recursive: true });
+  writeFileSync(join(world, 'sim.db'), 'opaque'); writeFileSync(join(world, SNAPSHOT_EPOCH_FILE), '1234567890\n');
+  const pool = { state: () => null, stop: async () => {}, kids: new Map() };
+  const out = await archiveWorld({ registry, pool, dataDir: data }, 'eden-2026', 'synthetic-operator');
+  assert.equal(restoreWorld({ registry, dataDir: data }, out.id, 'synthetic-operator')[0], 200);
+  assert.equal(readFileSync(join(world, 'sim.db'), 'utf8'), 'opaque', 'the data comes back as it was');
+  assert.equal(existsSync(join(world, SNAPSHOT_EPOCH_FILE)), false, 'the epoch does not');
 });
 
 test('root launcher redirects pages but proxies legacy POST bytes, SSE and websocket upgrades to one child', { timeout: 30000 }, async t => {

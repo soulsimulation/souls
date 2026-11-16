@@ -2,11 +2,11 @@
 // that answer the still contract of #2241 (GET /__sim/still) from a file each test writes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { advanceClock, openLauncher } from './launcher.mjs';
+import { advanceClock, launcherSettings, openLauncher } from './launcher.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const BASE = await testPort(8);
@@ -180,6 +180,28 @@ test('#2367 A2: a load with no room waits, then answers world.waking with a retr
     assert.equal(status(L, 'bbb'), 'running'); assert.equal(L.still.stateOf('aaa'), 'unloaded');
     assert.equal(L.still.horizons.get('aaa')?.still, true, 'unloaded as still: its alarm loads it');
   } finally { await L.close(); }
+});
+
+// The 0.130 switch: deploy/install.sh unload-still writes <data>/launcher-settings.json; every launcher reads it once at
+// its start. A reload is a new launcher process (keeper.mjs forks launcher.mjs from the stage link with the same args), so
+// opening a launcher again on the same data dir is what a reload does.
+test('launcher-settings.json: absent is the default, 1 turns unloading on, an explicit --unload-still wins, a bad value is the default, a reload reads a new value', { timeout: 30_000 }, async () => {
+  const dataDir = join(dir, 'settings'), file = join(dataDir, 'launcher-settings.json'); mkdirSync(dataDir, { recursive: true });
+  const said = async (o) => { const lines = []; const L = await open({ dataDir, unloadStill: undefined, log: (s) => lines.push(String(s)), ...o }); await L.close(); return lines.filter((l) => /^(unload-still |launcher-settings)/.test(l)); };
+  assert.deepEqual(launcherSettings(dataDir), {}, 'absent');
+  assert.deepEqual(await said(), ['unload-still 0 (the default)']);
+  writeFileSync(file, '{"unloadStill":1}\n');
+  assert.deepEqual(launcherSettings(dataDir), { unloadStill: true });
+  assert.deepEqual(await said(), ['launcher-settings.json: unloadStill 1', 'unload-still 1 (launcher-settings.json)'], 'a new launcher (a reload) reads it');
+  assert.deepEqual(await said({ unloadStill: false }), ['unload-still 0 (the --unload-still arg)'], '--unload-still 0 wins over the file');
+  writeFileSync(file, '{"unloadStill":"yes"}');
+  assert.deepEqual(await said(), ['launcher-settings.json: unloadStill must be 0 or 1 (got "yes"); the args\' defaults apply', 'unload-still 0 (the default)']);
+  writeFileSync(file, '{not json');
+  assert.match((await said())[0], /launcher-settings\.json unreadable/);
+  writeFileSync(file, '{"unloadStill":0}');
+  assert.deepEqual(await said(), ['launcher-settings.json: unloadStill 0', 'unload-still 0 (launcher-settings.json)']);
+  rmSync(file);
+  assert.deepEqual(await said(), ['unload-still 0 (the default)'], 'removed: the default again');
 });
 
 // #2475: a world unloaded to make room while not still was recorded "due at once" and then skipped by the alarm, so its

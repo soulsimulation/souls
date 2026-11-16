@@ -567,6 +567,10 @@ export class WorldHost {
     return best ?? this.engine.regionAt(e.pose.p);
   }
 
+  /** #2501 follow-up: ticks a boot catch-up still owed when it stopped (a host slower than the wall never quite closes the
+   *  gap) are run by the clock's first frames instead of dropped: world time never stops. Past a frame's cap they meet
+   *  the clock's own overload rule (dilation, logged), as any frame that falls behind does. */
+  oweToClock(ticks: number) { if (ticks > 0 && !this.paused) this.carry += Math.floor(ticks); }
   start() {
     if (this.timer) return;
     this.last = performance.now();
