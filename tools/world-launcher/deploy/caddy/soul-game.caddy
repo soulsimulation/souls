@@ -11,8 +11,31 @@
 # the CF-Connecting-IP of a peer in cdn-trust.snippet's ranges and the TCP peer for anyone else. It is never empty (an
 # empty X-Forwarded-For from loopback would look like the operator's own direct request to the launcher).
 # GET /__sim/whoami answers the address the launcher keyed a request on; check-soul-game.mjs compares it from outside.
+#
+# When the launcher cannot answer (stopped, restarting, a release), Caddy's own 502/503/504 for a page a browser asked
+# for is replaced by poster.html beside this file, read from the live release: "back in a moment" and a reload after a
+# random 3 to 8 s, so waiting visitors come back spread out. It is sent as 503 with Retry-After and no-store, so neither
+# the CDN nor a crawler keeps it. Only a GET that accepts HTML outside /__sim/, /v1/ and /w/<world>/v1/ gets it: agents,
+# API calls, health checks and WebSockets keep the real status. A status the launcher itself sends is never replaced.
 https://soul.game {
 	reverse_proxy localhost:@@PRODUCTION_PORT@@ {
 		header_up X-Forwarded-For {client_ip}
+	}
+	handle_errors {
+		@poster {
+			expression `{http.error.status_code} in [502, 503, 504]`
+			method GET
+			header Accept *text/html*
+			not path /__sim/* /v1/* /w/*/v1/*
+		}
+		handle @poster {
+			root * /srv/sim-worlds/production/tools/world-launcher/deploy/caddy
+			rewrite * /poster.html
+			header Cache-Control no-store
+			header Retry-After 5
+			file_server {
+				status 503
+			}
+		}
 	}
 }
