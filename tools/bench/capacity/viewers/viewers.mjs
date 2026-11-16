@@ -226,15 +226,17 @@ function arrivals(run) {
     }
   })();
 }
+// healthz is read with a 10 s wait: under hundreds of viewers a busy world answers it in seconds, and a 900 ms wait
+// read that as down (runs 43867114786: no tick before or after, 79 s "down" while viewers were already back)
 /** #2512 --restart-at: SIGTERM to the world process (the launcher restarts it), the drivers marked just before; its
  *  healthz read every second until `until`. Returns the table's inputs once `until` has passed. */
 async function restartWorld(run, until) {
-  const pid = run.launcher.worldPid(), h0 = await getJ(`${BASE}/w/${SLUG}/healthz`, 900), at = Date.now(), health = [{ at: at - 1, ok: h0.j?.ok === true, tick: h0.j?.tick ?? null, clients: h0.j?.clients ?? null }];   // the tick just before
+  const pid = run.launcher.worldPid(), h0 = await getJ(`${BASE}/w/${SLUG}/healthz`, 10_000), at = Date.now(), health = [{ at: at - 1, ok: h0.j?.ok === true, tick: h0.j?.tick ?? null, clients: h0.j?.clients ?? null }];   // the tick just before
   for (const d of run.drivers) send(run, d, { op: 'mark', at });
   if (pid) try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
   log(`r${run.k}: world restarted (SIGTERM) with ${run.base.size + run.burst.size} viewers`);
   while (Date.now() < until && !run.stopped) {
-    const t = Date.now(), h = await getJ(`${BASE}/w/${SLUG}/healthz`, 900);
+    const t = Date.now(), h = await getJ(`${BASE}/w/${SLUG}/healthz`, 10_000);
     health.push({ at: t, ok: h.j?.ok === true, tick: h.j?.tick ?? null, clients: h.j?.clients ?? null });
     await sleep(1000 - (Date.now() - t));
   }
