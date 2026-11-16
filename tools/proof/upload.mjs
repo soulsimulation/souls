@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 // Hosts proof media (clips, images, logs, proof.json) for a PR, so the PR links it and the repo never stores it.
 //
-//   node tools/proof/upload.mjs --pr <n> [--repo owner/name] [--release <tag>] [--proof <proof.json>] [--dry-run]
-//        [--json] [--no-preview] [--preview-start <s>] [--preview-seconds <s>] <file>...
+//   node tools/proof/upload.mjs --pr <n> [--proof <proof.json>] [--dry-run] [--json] [--no-preview] [--preview-start <s>]
+//        [--preview-seconds <s>] <file>...
 //
 // Targets:
-//   default   the PR's own GitHub prerelease `proofs-<n>` (tag `proofs-<n>` on the default branch, created on first
-//             use), through `gh api`. One release per PR keeps every release under GitHub's 1000-asset limit, which the
-//             old shared `proofs` release reached. `--release <tag>` (or SIM_PROOF_RELEASE) names another release.
-//             Release asset names cannot hold "/", so the logical name `pr-<n>/<file>` is stored as `pr-<n>.<file>`.
+//   default   the proof CDN: the asset bucket behind assets.eden.art, at `proofs/pr-<n>/<file>`, public at
+//             https://assets.eden.art/proofs/pr-<n>/<file> (PROOF_CDN). Uploads sign with the R2 credentials of
+//             tools/cdn/publish.mjs: EDEN_ASSETS_CREDENTIALS, else the main checkout's
+//             .local/project/team/secrets/eden-assets-r2.env, and CF_ACCOUNT_ID from the environment or the main
+//             checkout's deploy.env. Without them the upload is blocked (exit 3): attach the clips to the PR by hand.
+//             Proof never goes in GitHub Releases, which are for versions of the software.
 //   SIM_PROOF_UPLOAD_URL (+ SIM_PROOF_UPLOAD_TOKEN)
 //             any endpoint that takes `PUT <url>/pr-<n>/<file>` with `Authorization: Bearer <token>` and answers
 //             with JSON `{ "url": ... }` or a Location header; otherwise the public link is
-//             `${SIM_PROOF_PUBLIC_URL || SIM_PROOF_UPLOAD_URL}/pr-<n>/<file>`. For a future CDN endpoint.
+//             `${SIM_PROOF_PUBLIC_URL || SIM_PROOF_UPLOAD_URL}/pr-<n>/<file>`.
 //
 // An existing name is never overwritten: a re-take gets `-2`, `-3`, ... so earlier (failed) takes stay linkable.
 // With --proof, a clip's uncut, realSpeed, seconds, viewport and caption come from its `<clip>.json` sidecar where proof.json
@@ -23,35 +25,25 @@
 // matched by file name (new media get an entry to complete). Then proof.json itself is uploaded last and its link
 // printed: that is the link for the PR.
 //
-// Inline previews: GitHub serves release assets as downloads, so an mp4 link never plays in the PR. For each video,
+// Inline previews: GitHub plays only its own attachments inline, so a CDN mp4 link never plays in the PR. For each video,
 // ffmpeg makes `<clip>.preview.gif` beside it (--preview-seconds, default 6, from --preview-start, default the clip's
 // `arrived` mark in its `<clip>.json` sidecar, else 0, or 0 for a take recorded from load on purpose (#888);
 // real speed, at most 5 MB, smaller frames until it fits), uploads it next to the clip and records it as proof.json
 // `media[].preview`. The printed `[![...](preview.gif)](clip.mp4)` line embeds it in the PR, linked to the full clip.
 // Without ffmpeg the clip is uploaded alone, with a warning. --no-preview skips it.
 //
-// When the upload is blocked (no gh, not signed in, no permission, no network: common in cloud sessions) it exits 3
+// When the upload is blocked (no R2 credentials, no permission, no network: always in cloud sessions) it exits 3
 // and says so. Then tell the user where the files are and ask them to attach them; never commit media to get
 // around it, and never push it to another branch.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, extname, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { clipPrivacyHits, hitSummary } from './clip-privacy.mjs';
+import { PROOF_CDN } from './acceptance.mjs';
 import { assertPublishable, readPublication } from './publication.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-/** The release a PR's proof goes to: `override` when given, else the PR's own `proofs-<n>` (the shared `proofs`
- *  release every PR used before is full: GitHub caps a release at 1000 assets). */
-export const releaseTag = (pr, override) => override || `proofs-${pr}`;
-
-/** GitHub's per-release asset cap, and what to do when a release has reached it. */
-export const RELEASE_ASSET_CAP = 1000;
-export const fullRelease = (tag, pr) => `release "${tag}" is at GitHub's ${RELEASE_ASSET_CAP}-asset limit, so nothing was uploaded. `
-  + `Use the PR's own release: drop --release and SIM_PROOF_RELEASE (the default is proofs-${pr}). On a branch whose upload.mjs `
-  + `still defaults to the shared "proofs" release, run main's copy: git show origin/main:tools/proof/upload.mjs > .local/upload-main.mjs, `
-  + `then node .local/upload-main.mjs --pr ${pr} <files>.`;
-const TAG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_BYTES = 2 * 1024 ** 3, WARN_BYTES = 100 * 1024 ** 2;
 export const TYPES = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
@@ -66,11 +58,9 @@ export class Blocked extends Error {}
 export class IncompleteMedia extends Error { code = 'proof.media-incomplete'; }
 /** A clip that showed something private, or a sidecar, refused before anything is uploaded. */
 export class PrivateClip extends Error { code = 'proof.clip-private'; }
-const BLOCKED = /HTTP 40[134]|Resource not accessible|not logged|gh auth login|authentication|Could not resolve host|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|network|proxy|tunnel|ENOENT/i;
 
 export const safeName = s => s.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+/, '');
 export const logicalName = (pr, file) => `pr-${pr}/${safeName(basename(file))}`;
-export const releaseAssetName = (pr, file) => logicalName(pr, file).replace('/', '.');
 
 /** `name`, or `name-2.ext`, `name-3.ext`, ... the first one not in `taken`. */
 export function uniqueName(name, taken) {
@@ -85,7 +75,7 @@ export function checkLocal(files, git = (...a) => execFileSync('git', a, { cwd: 
   for (const f of files) {
     if (!existsSync(f)) { problems.push(`${f}: no such file`); continue; }
     const size = statSync(f).size;
-    if (size > MAX_BYTES) problems.push(`${f}: ${(size / 1024 ** 3).toFixed(1)} GiB is over the 2 GiB asset limit`);
+    if (size > MAX_BYTES) problems.push(`${f}: ${(size / 1024 ** 3).toFixed(1)} GiB is over the 2 GiB proof limit`);
     else if (size > WARN_BYTES) warnings.push(`${f}: ${(size / 1024 ** 2).toFixed(0)} MB; consider a shorter clip`);
     const rel = relative(root, resolve(f));
     if (rel.startsWith('..')) continue;
@@ -99,61 +89,54 @@ export function checkLocal(files, git = (...a) => execFileSync('git', a, { cwd: 
 }
 
 // ── targets ─────────────────────────────────────────────────────────────────────────────────────────────────────
+export { PROOF_CDN };
+/** Repo-relative home of the R2 credential file in the main checkout (never committed: .local is ignored). */
+export const CREDENTIALS_FILE = '.local/project/team/secrets/eden-assets-r2.env';
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+
+/** The main checkout, where a worktree's ignored .local and deploy.env live. */
+function mainCheckout() {
+  try {
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return dirname(isAbsolute(common) ? common : resolve(ROOT, common));
+  } catch { return ROOT; }
+}
+
 /**
- * GitHub release target through `gh api`: release `tag`, or the PR's own `proofs-<n>` when no tag is given. One target
- * serves one release, so without a tag it uploads for one PR only (a second PR number throws; the CLI takes one --pr).
- * `run(args, opts)` returns stdout; injected in tests.
+ * Proof CDN target: PUT to `<bucket>/proofs/<pr-n>/<file>` on the R2 endpoint, public at `${publicUrl}/pr-<n>/<file>`.
+ * `If-None-Match: *` never overwrites: a name already there (412) moves on to `-2`, `-3`, ... `sign({url, method,
+ * credentials, body, headers})` returns the signed headers (publish.mjs sigv4Headers); injected in tests.
  */
-export function githubTarget({ repo, run, dryRun = false, tag = null }) {
-  if (tag && !TAG_RE.test(tag)) throw Error(`--release ${tag}: not a valid tag name`);
-  const gh = (args, input) => {
-    try { return run(['api', ...args], input); } catch (e) {
-      const msg = `${e.stderr ?? ''} ${e.message ?? ''}`.trim();
-      throw BLOCKED.test(msg) ? new Blocked(`gh api ${args[0] === '-X' ? args.slice(0, 3).join(' ') : args[0]}: ${msg.split('\n')[0]}`) : e;
-    }
-  };
-  let release = null, taken = null, current = tag;
-  const ensure = (pr) => {
-    const want = releaseTag(pr, tag);
-    if (release && current === want) return release;
-    if (release) throw Error(`one upload run targets one release: ${current}, not also ${want}`);
-    current = want;
-    try { release = JSON.parse(gh([`repos/${repo}/releases/tags/${want}`])); }
-    catch (e) {
-      if (!(e instanceof Blocked) || !/404|Not Found/i.test(e.message)) throw e;
-      if (dryRun) { release = { id: 0, assets: [] }; taken = new Set(); return release; }
-      // A new tag is created on the default branch; the release is a prerelease that never becomes "latest".
-      const body = tag
-        ? 'Proof media for pull requests (clips, images, proof.json), uploaded by tools/proof/upload.mjs. Assets are named pr-<n>.<file>. Not a release of the software.'
-        : `Proof media for PR #${pr} (clips, images, proof.json), uploaded by tools/proof/upload.mjs. Not a release of the software.`;
-      release = JSON.parse(gh(['-X', 'POST', `repos/${repo}/releases`, '-f', `tag_name=${want}`, '-f', `name=${tag ? want : `Proof for PR #${pr}`}`,
-        '-F', 'prerelease=true', '-f', 'make_latest=false', '-f', `body=${body}`]));
-    }
-    return release;
-  };
+export function cdnTarget({ credentials = null, endpoint = null, bucket = 'eden-assets', sign = null, fetchImpl = fetch, read = readFileSync, dryRun = false, publicUrl = PROOF_CDN }) {
+  const taken = new Set(), pub = publicUrl.replace(/\/+$/, '');
   return {
-    get name() { return `GitHub release "${current ?? 'proofs-<pr>'}" on ${repo}`; },
-    upload(pr, file) {
-      const rel = ensure(pr);
-      if (!taken) taken = new Set(JSON.parse(gh([`repos/${repo}/releases/${rel.id}/assets?per_page=100`, '--paginate', '--slurp'])).flat().map(a => a.name));
-      // A full release (the old shared `proofs` one) refuses every new asset: say so before uploading anything.
-      if (taken.size >= RELEASE_ASSET_CAP) throw Error(fullRelease(current, pr));
-      const name = uniqueName(releaseAssetName(pr, file), taken);
+    name: `the proof CDN (${new URL(pub).host})`,
+    async upload(pr, file) {
+      const name = uniqueName(logicalName(pr, file), taken);
       taken.add(name);
-      if (dryRun) return { name, url: `https://github.com/${repo}/releases/download/${current}/${name}`, dryRun: true };
-      let out;
-      try {
-        out = JSON.parse(gh(['-X', 'POST', `https://uploads.github.com/repos/${repo}/releases/${rel.id}/assets?name=${encodeURIComponent(name)}`,
-          '-H', `Content-Type: ${contentType(file)}`, '--input', file]));
-      } catch (e) {
-        const msg = `${e.stderr ?? ''} ${e.message ?? ''}`;
-        // `taken` already holds this name: a release listed one short of the cap filled up meanwhile (another upload).
-        if (/HTTP 422/.test(msg) && taken.size >= RELEASE_ASSET_CAP) throw Error(fullRelease(current, pr));
-        throw e;
-      }
-      return { name, url: out.browser_download_url };
+      if (dryRun) return { name, url: `${pub}/${name}`, dryRun: true };
+      const url = new URL(`/${bucket}/proofs/${name}`, endpoint), body = read(file);
+      const headers = sign({ url, method: 'PUT', credentials, body, headers: { 'content-type': contentType(file), 'cache-control': IMMUTABLE, 'if-none-match': '*' } });
+      let res;
+      try { res = await fetchImpl(url, { method: 'PUT', body, headers, redirect: 'error' }); } catch (e) { throw new Blocked(`PUT ${url.host}: ${e.message}`); }
+      if (res.status === 412) return this.upload(pr, file);
+      if ([401, 403].includes(res.status)) throw new Blocked(`PUT ${url.host}: HTTP ${res.status}: these R2 credentials cannot write proofs/`);
+      if (!res.ok) throw Error(`PUT ${name}: HTTP ${res.status}`);
+      return { name, url: `${pub}/${name}` };
     },
   };
+}
+
+/** The proof CDN with this machine's R2 credentials, or Blocked naming what is missing. */
+export async function liveCdnTarget({ env = process.env, main = mainCheckout() } = {}) {
+  const file = env.EDEN_ASSETS_CREDENTIALS || join(main, CREDENTIALS_FILE);
+  if (!existsSync(file)) throw new Blocked(`no R2 credentials for the proof CDN (set EDEN_ASSETS_CREDENTIALS, or keep them at ${CREDENTIALS_FILE} in the main checkout)`);
+  // publish.mjs reads CF_ACCOUNT_ID when it loads: point it at the main checkout's deploy.env from a worktree.
+  if (!env.SIM_DEPLOY_ENV && existsSync(join(main, 'deploy.env'))) process.env.SIM_DEPLOY_ENV = join(main, 'deploy.env');
+  const { BUCKET, ENDPOINT, loadCredentials, requireAccount, sigv4Headers } = await import('../cdn/publish.mjs');
+  let credentials;
+  try { requireAccount(); credentials = await loadCredentials(file); } catch (e) { throw new Blocked(`proof CDN: ${e.message}`); }
+  return cdnTarget({ credentials, endpoint: ENDPOINT, bucket: BUCKET, sign: sigv4Headers });
 }
 
 /** Generic HTTP PUT target (SIM_PROOF_UPLOAD_URL). */
@@ -180,10 +163,9 @@ export function httpTarget({ url, token, publicUrl, fetchImpl = fetch, read = re
   };
 }
 
-export function pickTarget({ env = process.env, repo, run, fetchImpl, dryRun, release = null }) {
+export async function pickTarget({ env = process.env, fetchImpl, dryRun = false, live = liveCdnTarget } = {}) {
   if (env.SIM_PROOF_UPLOAD_URL) return httpTarget({ url: env.SIM_PROOF_UPLOAD_URL, token: env.SIM_PROOF_UPLOAD_TOKEN, publicUrl: env.SIM_PROOF_PUBLIC_URL, fetchImpl, dryRun });
-  if (!repo) throw new Blocked('no repository: pass --repo owner/name (or set GITHUB_REPOSITORY)');
-  return githubTarget({ repo, run, dryRun, tag: release || env.SIM_PROOF_RELEASE || null });
+  return dryRun ? cdnTarget({ dryRun: true }) : live({ env });
 }
 
 // ── previews ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -328,32 +310,22 @@ export function blockedMessage({ reason, files, pr, proofPath }) {
   ].join('\n');
 }
 
-function repoFromGit() {
-  try {
-    const u = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    return /[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(u)?.[1] ?? null;
-  } catch { return null; }
-}
-
 async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
   const valued = new Set(['--pr', '--repo', '--release', '--proof', '--preview-start', '--preview-seconds']);
+  for (const gone of ['--repo', '--release']) if (argv.includes(gone)) console.error(`warn: ${gone} is ignored: proof goes to the proof CDN, not GitHub releases`);
   const files = argv.filter((a, i) => !a.startsWith('--') && !valued.has(argv[i - 1]));
   const pr = opt('--pr'), proofPath = opt('--proof') ?? null, dryRun = argv.includes('--dry-run');
   if (!pr || !/^\d+$/.test(pr) || (!files.length && !proofPath)) {
-    console.error('usage: upload.mjs --pr <n> [--repo owner/name] [--release tag] [--proof proof.json] [--dry-run] [--json] [--no-preview] [--preview-start s] [--preview-seconds s] <file>...');
+    console.error('usage: upload.mjs --pr <n> [--proof proof.json] [--dry-run] [--json] [--no-preview] [--preview-start s] [--preview-seconds s] <file>...');
     return 2;
   }
   const local = checkLocal([...files, ...(proofPath ? [proofPath] : [])]);
   for (const w of local.warnings) console.error(`warn: ${w}`);
   if (local.problems.length) { for (const p of local.problems) console.error(`error: ${p}`); return 1; }
-  const repo = opt('--repo') ?? process.env.GITHUB_REPOSITORY ?? repoFromGit();
-  const run = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1 << 26 });
   try {
-    const release = opt('--release') ?? null;
-    const target = pickTarget({ repo, run, dryRun, release });
-    const where = process.env.SIM_PROOF_UPLOAD_URL ? target.name : `GitHub release "${releaseTag(pr, release || process.env.SIM_PROOF_RELEASE)}" on ${repo}`;
-    console.error(`${dryRun ? 'dry run: would upload' : 'uploading'} ${files.length + (proofPath ? 1 : 0)} file(s) to ${where}`);
+    const target = await pickTarget({ dryRun });
+    console.error(`${dryRun ? 'dry run: would upload' : 'uploading'} ${files.length + (proofPath ? 1 : 0)} file(s) to ${target.name}`);
     const previews = !dryRun && !argv.includes('--no-preview');
     const start = opt('--preview-start') != null ? Number(opt('--preview-start')) : null, seconds = Number(opt('--preview-seconds') ?? 6);
     const out = await uploadAll({ pr: Number(pr), files, proofPath, target, write: dryRun ? () => {} : writeFileSync, previewStart: start,
