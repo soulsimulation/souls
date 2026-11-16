@@ -142,7 +142,7 @@ export class WorldVisibilityInstances {
   const stock=objects.every(o=>STOCK_RAYCASTS.has(o.raycast));
   // #2617: each instanced member is validated when a ray first reaches it in this query (most never are), not up front;
   // nothing changes the scene inside a synchronous query, so the answer is the same.
-  const previousMembers=this.members;this.members=stock&&!previous?new Set(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh)):undefined;
+  const previousMembers=this.members;this.members=!previous?new Set(objects.filter((o):o is THREE.InstancedMesh=>o instanceof THREE.InstancedMesh)):undefined;
   this.query=this.members?new Map():undefined;
   this.queryObjects=objects;const previousBounds=this.bounds,previousBoundsObjects=this.boundsObjects,previousGrid=this.grid;this.bounds=boundsOf(objects);this.boundsObjects=objects;this.grid=undefined;this.stats.boundsPasses++;this.queryDepth++;VIS_STATS.setupMs+=performance.now()-setup0;
   try{return run();}finally{this.queryDepth--;if(this.generation===generation){this.query=previous;this.members=previousMembers;this.queryObjects=previousObjects;this.bounds=previousBounds;this.boundsObjects=previousBoundsObjects;this.grid=previousGrid;}}
