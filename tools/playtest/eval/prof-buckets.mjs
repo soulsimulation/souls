@@ -10,6 +10,8 @@
 //   nav.sync, nav.audit                      the planner's page sync and scans (syncPaged, navScan, navChanged), and the
 //                                            connectivity audit (navWarmV1, fineTileSteps, labelComponents)
 //   gc, snapshot, req <route>, req (middleware/unknown), other <frame>
+// #2533: nav.sync's samples also by who asked (`navSyncBy`): the action step or pass a tick ran the sync in, or the server
+// frame outside a tick, and the first frame outside the spatial service.
 // Long holds: runs of busy samples (no idle between) of at least `holdMs`, each named by the group that took most of it.
 import { readFileSync } from 'node:fs';
 
@@ -71,6 +73,20 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     else g = 'other ' + (outer ?? frames[0].functionName);
     memo.set(leafId, g); return g;
   };
+  // #2533: a nav.sync sample by who asked: the first frame outside the spatial service (the caller), and either the action
+  // step or the pass a tick ran it in (the frame runtime.ts called), or, outside a tick, the innermost server frame
+  const syncMemo = new Map();
+  const at = (f) => `${f.functionName || '(anon)'} ${relOf(f.url).split('/').pop()}:${f.lineNumber + 1}`;
+  const syncWhere = (leafId) => {
+    if (syncMemo.has(leafId)) return syncMemo.get(leafId);
+    const frames = []; for (let x = leafId; x != null; x = parent.get(x)) frames.push(byId.get(x).callFrame);
+    const rels = frames.map((f) => relOf(f.url));
+    const caller = frames.find((f, j) => /^(apps|packages|mars)\//.test(rels[j]) && !rels[j].endsWith('/spatial/service.ts'));
+    const rt = rels.findIndex((r) => r.endsWith('/engine/runtime/runtime.ts')), srv = rels.findIndex((r) => r.startsWith('apps/server/src/'));
+    const where = rt >= 0 ? `tick: ${frames[rt].functionName || '(anon)'} > ${rt > 0 ? at(frames[rt - 1]) : '-'}` : srv >= 0 ? `outside a tick: ${at(frames[srv])}` : 'outside a tick: -';
+    const k = `${where} | ${caller ? at(caller) : '-'}`; syncMemo.set(leafId, k); return k;
+  };
+  const syncBy = new Map();
   const tot = new Map(), holds = [];
   let cur = null, busy = 0, total = 0;
   const close = () => { if (cur && cur.ms >= holdMs) holds.push(cur); cur = null; };
@@ -79,6 +95,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
     const node = byId.get(p.samples[i]); if (BREAK.has(node.callFrame.functionName)) { close(); continue; }
     busy += dt; const g = classify(node.id);
     tot.set(g, (tot.get(g) ?? 0) + dt);
+    if (g === 'nav.sync') { const k = syncWhere(node.id); syncBy.set(k, (syncBy.get(k) ?? 0) + dt); }
     if (!cur) cur = { ms: 0, by: new Map() }; cur.ms += dt; cur.by.set(g, (cur.by.get(g) ?? 0) + dt);
   }
   close();
@@ -88,6 +105,7 @@ export function bucketProfile(p, repo, { holdMs = 100 } = {}) {
   return {
     totalMs: r1(total), busyMs: r1(busy),
     groups: Object.fromEntries([...tot.entries()].sort((a, b) => b[1] - a[1]).map(([g, ms]) => [g, r1(ms)])),
+    navSyncBy: [...syncBy].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, ms]) => { const [where, caller] = k.split(' | '); return { where, caller, ms: r1(ms) }; }),
     holds: { overMs: holdMs, n: holds.length, ms: r1(holds.reduce((s, h) => s + h.ms, 0)), bySource: Object.fromEntries([...bySource].sort((a, b) => b[1].ms - a[1].ms).map(([g, e]) => [g, { n: e.n, ms: r1(e.ms), maxMs: r1(e.maxMs) }])) },
   };
 }

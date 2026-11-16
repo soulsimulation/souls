@@ -18,6 +18,8 @@
 //   node tools/world-launcher/op.mjs restore-world --port 4620 [--base /worlds] --id <id from list-archive>
 //   node tools/world-launcher/op.mjs list-archive --port 4620 [--base /worlds]
 //   node tools/world-launcher/op.mjs audit --port 4620 [--base /worlds] [--slug <slug>]
+//   node tools/world-launcher/op.mjs set-site --port 4620 [--base /worlds] [--uploads on|off] [--creation on|off]
+//        (#2540: pause uploads or new worlds site-wide, at once; kept in worlds.json, an audit row; healthz shows both)
 //   node tools/world-launcher/op.mjs client-errors --port 4620 [--base /worlds] [--world <slug>] [--limit N]
 //        (what visitors' pages reported: top errors by count, world, browser, first/last seen, build; client-errors.mjs)
 //   node tools/world-launcher/op.mjs glitches --port 4620 [--base /worlds] [--world <slug>] [--limit N]
@@ -64,6 +66,7 @@ const usage = () => {
     + '       op.mjs restore-world --port <launcher port> [--base /worlds] --id <archive id>\n'
     + '       op.mjs list-archive --port <launcher port> [--base /worlds]\n'
     + '       op.mjs audit --port <launcher port> [--base /worlds] [--slug <slug>]\n'
+    + '       op.mjs set-site --port <launcher port> [--base /worlds] [--uploads on|off] [--creation on|off]\n'
     + '       op.mjs glitches --port <launcher port> [--base /worlds] [--world <slug>] [--limit N]\n'
     + '       op.mjs usage --port <launcher port> [--base /worlds] [--days N]\n'
     + '       op.mjs set-test --port <launcher port> [--base /worlds] --slug <slug> --test true|false\n'
@@ -128,6 +131,10 @@ if (cmd === 'create-world') {
 } else if (cmd === 'audit') {
   if (!flag('port')) usage();
   body = flag('slug') ? { slug: flag('slug') } : {};
+} else if (cmd === 'set-site') {
+  const on = (k) => (flag(k) === undefined ? undefined : flag(k) === 'on' ? true : flag(k) === 'off' ? false : usage());
+  if (!flag('port') || (flag('uploads') === undefined && flag('creation') === undefined)) usage();
+  body = { uploads: on('uploads'), creation: on('creation') };
 } else if (cmd === 'remove-fork') {
   if (!flag('port') || !flag('slug')) usage();
   body = { slug: flag('slug') };
