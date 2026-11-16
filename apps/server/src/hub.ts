@@ -97,10 +97,11 @@ export class Hub {
   private lastTakeTick = -1;
   /** #2519 (SIM_JOIN_CACHE, on unless '0'): a token-less join's heavy part, the snapshot (stringified once per negotiated
    *  form) and the log list, built at most once every JOIN_CACHE_MS and shared; each joiner then gets the ring's batches
-   *  after it, so its replica ends where a fresh snapshot's would. `ring`/`engine`: the ones it was built from (a recovery
+   *  after it (each stringified once for all of them: a booting world's first batch holds megabytes of log), so its
+   *  replica ends where a fresh snapshot's would. `ring`/`engine`: the ones it was built from (a recovery
    *  replaces both and also clears it). */
   private readonly joinCacheOn: boolean;
-  private joinCache: {at:number;seq:number;ring:unknown;engine:unknown;snapshot:Extract<ServerMsg,{t:'snapshot'}>;log:string;wire:Map<string,{s:string;table:number|null}>}|null = null;
+  private joinCache: {at:number;seq:number;ring:unknown;engine:unknown;snapshot:Extract<ServerMsg,{t:'snapshot'}>;log:string;wire:Map<string,{s:string;table:number|null}>;batches:Map<number,string>}|null = null;
   /** #1221: the oldest batch a client may resume from: nothing before the last recovery still holds. */
   private resumeFrom = 0;
   /** take-entities-ref/1: one table registry for every peer that announced it (see packages/protocol take-entities-wire). */
@@ -256,7 +257,11 @@ export class Hub {
         const wire = this.joinWire(cached, c);
         if (this.sendWire(c, wire.s) && wire.table !== null && c.takeEntities) c.takeEntities.last = wire.table;
         this.sendWire(c, cached.log);
-        for (const b of ring) if (b.seq > cached.seq) this.send(c, { t: 'batch', ...b, log: b.log.map(publicEvent) });
+        for (const b of ring) if (b.seq > cached.seq) {
+          let s = cached.batches.get(b.seq);
+          if (s === undefined) cached.batches.set(b.seq, s = JSON.stringify({ t: 'batch', ...b, log: b.log.map(publicEvent) } satisfies ServerMsg));
+          this.sendWire(c, s);
+        }
       }
       else this.send(c, { t: 'snapshot', reason: typeof m.since === 'number' ? 'too far behind; full snapshot' : 'join', ...this.host.snapshotView() });
       if (!cached) this.send(c, { t: 'log', events: this.db.tailEvents(this.host.worldId, 150, true).map(e=>joinLogEvent(publicEvent(e))) });
@@ -293,7 +298,7 @@ export class Hub {
     if (j && now - j.at < JOIN_CACHE_MS && j.ring === ring && j.engine === h.engine && j.seq >= this.resumeFrom - 1 && (ring.length ? j.seq >= ring[0].seq - 1 : j.seq === h.currentBatchSeq)) return j;
     const snapshot = { t: 'snapshot' as const, reason: 'join', ...h.snapshotView() };
     const log = JSON.stringify({ t: 'log', events: this.db.tailEvents(h.worldId, 150, true).map(e => joinLogEvent(publicEvent(e))) } satisfies ServerMsg);
-    return this.joinCache = { at: now, seq: snapshot.seq, ring, engine: h.engine, snapshot, log, wire: new Map() };
+    return this.joinCache = { at: now, seq: snapshot.seq, ring, engine: h.engine, snapshot, log, wire: new Map(), batches: new Map() };
   }
   /** The cached snapshot in this peer's negotiated form (take-entities-join/1, columns/1), stringified once per form. */
   private joinWire(j: NonNullable<Hub['joinCache']>, c: Client) {
