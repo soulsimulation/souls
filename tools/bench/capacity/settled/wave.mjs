@@ -34,7 +34,9 @@ async function profiled(profDir, name, root, wait) {
   await wait();
   writeFileSync(join(profDir, 'prof.stop'), ''); const wallMs = Date.now() - t0;
   const pf = join(profDir, 'world.cpuprofile');
-  for (let k = 0; k < 240 && !existsSync(pf); k++) await sleep(500); await sleep(1000);
+  // a busy clock thread can take minutes to stop and write a long profile; without one the window keeps its wall time
+  for (let k = 0; k < 1200 && !existsSync(pf); k++) await sleep(500); await sleep(2000);
+  if (!existsSync(pf)) return { wallMs, busyMs: null, groups: {}, holds: null, error: 'the profile was not written within 10 min' };
   const file = join(profDir, `${name}.cpuprofile`); renameSync(pf, file);
   try { return { wallMs, ...bucketProfile(readProfile(file), root) }; } finally { rmSync(file, { force: true }); }
 }
@@ -87,6 +89,7 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
       await sleep(20_000);
     });
     out.waveS = r1((Date.now() - wave0) / 1000);
+    if (w.child.exitCode != null) out.worldExited = { code: w.child.exitCode, tail: w.tail() };   // the world ended on its own during the wave
     await sleep(tailMs);
     const live = await (await fetch(`${w.origin}/v1/edge/live`)).json().catch(() => null), mine = new Set(joins.map((j) => j.soulId));
     out.bodies = spread((live?.souls ?? []).filter((x) => mine.has(x.id)));
@@ -96,18 +99,18 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
     const lv = (k) => (inWave.length ? Math.round(1000 * inWave.reduce((s, x) => s + (x.levels?.[k] ?? 0), 0) / inWave.length) / 1000 : null);
     out.levels = { windows: inWave.length, amber: lv('amber'), red: lv('red'), black: lv('black'), worst: ['black', 'red', 'amber', 'green'].find((k) => inWave.some((x) => (x.levels?.[k] ?? 0) > 0)) ?? null,
       amberS: inWave.reduce((m, x) => { for (const [k, v] of Object.entries(x.amberS ?? {})) m[k] = r1((m[k] ?? 0) + v); return m; }, {}), tickP99Max: Math.max(0, ...inWave.map((x) => x.tickMs?.p99 ?? 0)), longestGapMs: Math.max(0, ...inWave.map((x) => x.gapMs ?? 0)) };
-    const created = joins.length, scaled = out.baseline.busyMs * (out.wave.wallMs / out.baseline.wallMs);
+    const created = joins.length, scaled = out.baseline.busyMs * (out.wave.wallMs / out.baseline.wallMs), profiledOk = out.wave.busyMs != null && out.baseline.busyMs != null;
     out.creates = { created, errors: errors.length, firstErrors: errors.slice(0, 3), joinMs: { p50: q(joins.map((j) => j.joinMs), 0.5), p95: q(joins.map((j) => j.joinMs), 0.95), max: q(joins.map((j) => j.joinMs), 1) },
       withPictureMs: { p50: q(joins.map((j) => j.withPictureMs), 0.5), p95: q(joins.map((j) => j.withPictureMs), 0.95) },
-      clockMsPerCreate: created ? r1((out.wave.busyMs - scaled) / created) : null };
+      clockMsPerCreate: created && profiledOk ? r1((out.wave.busyMs - scaled) / created) : null };
     const lt = [...(out.wave.step0?.longTasks ?? [])].sort((a, b) => b.ms - a.ms);
     out.longestHold = lt[0] ? { ms: lt[0].ms, atS: lt[0].atS, group: lt[0].group, cause: lt[0].cause } : null;
     out.longTasks = lt.slice(0, 8).map((x) => ({ ms: x.ms, group: x.group, cause: x.cause }));
     out.actsDuring = counts;
-    for (const k of ['baseline', 'wave']) out[k] = { wallMs: out[k].wallMs, busyMs: out[k].busyMs, groups: Object.fromEntries(Object.entries(out[k].groups).slice(0, 12)), holds: out[k].holds };
+    for (const k of ['baseline', 'wave']) out[k] = { wallMs: out[k].wallMs, busyMs: out[k].busyMs, groups: Object.fromEntries(Object.entries(out[k].groups ?? {}).slice(0, 12)), holds: out[k].holds, ...(out[k].error ? { error: out[k].error } : {}) };
     await loops;
     log(`wave (${shape}): ${created} created (${errors.length} errors), clock ${out.creates.clockMsPerCreate} ms per create, longest hold ${out.longestHold?.ms ?? '-'} ms (${out.longestHold?.cause ?? '-'}), worst level ${out.levels.worst}, bodies on ${out.bodies.spots ?? 0} spots`);
-  } catch (e) { out.error = String(e.message ?? e).split(root).join('.'); log(`wave: ${out.error}`); }
+  } catch (e) { out.error = String(e.message ?? e).split(root).join('.'); if (w.child.exitCode != null) out.worldExited = { code: w.child.exitCode, tail: w.tail() }; log(`wave: ${out.error}${out.worldExited ? ` (world exited ${out.worldExited.code}: ${out.worldExited.tail})` : ''}`); }
   finally { watching = false; await stopWorld(w); }
   return out;
 }
