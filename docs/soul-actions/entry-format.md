@@ -65,7 +65,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
-| 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
+| 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
@@ -265,8 +265,9 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`). A range need also takes a `timed` field.
-  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` and needs it within reach: the water comes from
-  a thing in the world, never from a refill the kettle does by itself.
+  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
+  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
+  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
