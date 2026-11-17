@@ -29,6 +29,13 @@ test('A1: the kettle, the seat and the lecture each have a yes per form and a ca
   }
 });
 
+test('a within_reach of another thing is unknown, not no, when its pose is not in the input', () => {
+  const c = cases.find(([, k]) => k.name === 'fill_tap_in_reach')![1];
+  const nodes = { ...c.state.nodes, t1: { kind: 'test:reach_tap' } };
+  const v = decide({ kinds, ...c, state: { ...c.state, nodes } });
+  assert.deepEqual([v.verdict, (v as { node?: string }).node, (v as { field?: string }).field], ['unknown', 't1', 'at_mm']);
+});
+
 test('A4: unknown only for a field outside the audience; the same state seen by all is definite', () => {
   for (const [, c] of cases.filter(([, c]) => c.expect.verdict === 'unknown')) {
     const all = decide({ kinds, ...c, asker: { sees: 'all' } });

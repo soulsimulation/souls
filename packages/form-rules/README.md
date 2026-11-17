@@ -36,7 +36,7 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 
 `NEEDS` is one closed list, shared with R2: `state` (a field `is` or is `not` a value, or lies within `at_least` and
 `at_most`, whole numbers), `slot_free`, `within_reach` (of a point, by the reach of the move the form's step makes
-there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
+there, compared as squares in big integers; `"of": {"arg": "tap"}` names the point of another thing given as a form argument, placed by that node's `at_mm` in the input, with no rotation, an unknown pose being `unknown` and the fix a `walk_to` its `stand` point, SA-F2), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
 overflows). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
