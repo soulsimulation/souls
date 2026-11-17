@@ -7,7 +7,7 @@
 //! encoding profile ([`crate::encode`]); this module writes no encoding of its own.
 
 use crate::encode::{Name, Value, encode, parse_diagnostic, to_hex};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[cfg(target_arch = "wasm32")]
@@ -66,7 +66,8 @@ impl fmt::Display for Exhausted {
 
 impl std::error::Error for Exhausted {}
 
-/// Gives out ids in one scope, counting up from 0. A world and each fork of it have their own (rule 1).
+/// Gives out ids in one scope, counting up from 0. Every writer that mints has its own: a world's first zone uses the
+/// world's scope, and each fork and each further zone writer gets a fresh one (rule 1).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Minter {
     scope: Scope,
@@ -74,7 +75,7 @@ pub struct Minter {
 }
 
 impl Minter {
-    /// A minter for a new world or a new fork, with that world's or fork's fresh scope.
+    /// A minter for a new world, fork or zone writer, with its fresh scope.
     pub fn new(scope: Scope) -> Minter {
         Minter { scope, next: 0 }
     }
@@ -87,6 +88,26 @@ impl Minter {
     }
 }
 
+/// Every id a world has ever held (rule 6): for each scope it minted from or inherited at a fork, the counters below
+/// a bound; and each id that arrived from a scope it never minted from. A fork starts with a copy of its parent's.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Held {
+    below: BTreeMap<Scope, u64>,
+    arrived: BTreeSet<Id>,
+}
+
+impl Held {
+    pub fn knows(&self, id: Id) -> bool {
+        self.below.get(&id.scope).is_some_and(|b| id.counter < *b) || self.arrived.contains(&id)
+    }
+
+    /// Records an id the world minted.
+    pub fn minted(&mut self, id: Id) {
+        let bound = self.below.entry(id.scope).or_insert(0);
+        *bound = (*bound).max(id.counter + 1);
+    }
+}
+
 /// A thing that arrived in a world: the id it has there and, if that id is new, the id it came with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Arrived {
@@ -94,20 +115,19 @@ pub struct Arrived {
     pub origin: Option<Id>,
 }
 
-/// The id a thing arriving with `id` gets (rule 6). If the destination already knows `id` (a node it holds, or one a
-/// removal it may undo would bring back), the thing gets a fresh id from the destination's `minter` and keeps `id`
-/// as its origin; otherwise it keeps `id`.
-pub fn arrive(
-    id: Id,
-    known: impl Fn(&Id) -> bool,
-    minter: &mut Minter,
-) -> Result<Arrived, Exhausted> {
-    if known(&id) {
+/// The id a thing arriving with `id` gets (rule 6). If the destination has ever held `id`, the thing gets a fresh id
+/// from the destination's `minter` and keeps `id` as its origin; otherwise it keeps `id`. Either way `held` records
+/// it, so arrivals are applied one after another by the destination's writer.
+pub fn arrive(id: Id, held: &mut Held, minter: &mut Minter) -> Result<Arrived, Exhausted> {
+    if held.knows(id) {
+        let fresh = minter.mint()?;
+        held.minted(fresh);
         Ok(Arrived {
-            id: minter.mint()?,
+            id: fresh,
             origin: Some(id),
         })
     } else {
+        held.arrived.insert(id);
         Ok(Arrived { id, origin: None })
     }
 }
@@ -145,6 +165,8 @@ pub enum Purpose {
     StatePublic,
     /// A node's state for one private audience; never shown outside it (rule 11).
     StatePrivate,
+    /// The sections that sit beside a kind (looks, words, card, how-tos; rule 15).
+    KindBeside,
     /// A golden fixture's bytes, and nothing else.
     Fixture,
 }
@@ -156,6 +178,7 @@ impl Purpose {
             Purpose::Geometry => "souls/geometry/1",
             Purpose::StatePublic => "souls/state-public/1",
             Purpose::StatePrivate => "souls/state-private/1",
+            Purpose::KindBeside => "souls/kind-beside/1",
             Purpose::Fixture => "souls/fixture/1",
         }
     }
@@ -339,18 +362,25 @@ impl KindSource {
     }
 }
 
-/// `namespace:name`: one `:`, both sides non-empty, no `@`.
+/// `namespace:name`, lower case as SA-F1 has it: a namespace of `a-z 0-9 -` and a name of `a-z 0-9 _`, each starting
+/// with a letter (rule 12).
 fn is_kind_name(text: &str) -> bool {
-    matches!(text.split_once(':'), Some((ns, n)) if !ns.is_empty() && !n.is_empty() && !n.contains(':'))
-        && !text.contains('@')
+    let part = |p: &str, extra: u8| {
+        p.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+            && p.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == extra)
+    };
+    matches!(text.split_once(':'), Some((ns, n)) if part(ns, b'-') && part(n, b'_'))
 }
 
-/// A kind's full name, `namespace:name@hash`, and the bytes its hash covers.
+/// A kind's full name, `namespace:name@hash`, the bytes its hash covers, and the `souls/kind-beside/1` hash of the
+/// sections beside it, if it has any.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KindName {
     pub name: String,
     pub hash: Hash,
     pub meaning: Vec<u8>,
+    pub beside: Option<Hash>,
 }
 
 impl fmt::Display for KindName {
@@ -455,12 +485,20 @@ fn name_one(
     }
     let meaning = encode(&Value::Map(meaning));
     let hash = Hash::of(Purpose::Kind, &meaning);
+    let beside: BTreeMap<u64, Value> = kind
+        .sections
+        .range(BESIDE_FROM..)
+        .map(|(k, v)| (*k, v.clone()))
+        .collect();
+    let beside =
+        (!beside.is_empty()).then(|| Hash::of(Purpose::KindBeside, &encode(&Value::Map(beside))));
     named.insert(
         kind.name.clone(),
         KindName {
             name: kind.name.clone(),
             hash,
             meaning,
+            beside,
         },
     );
     Ok(())
@@ -497,19 +535,23 @@ pub fn fork_then_travel_back() -> Vec<FixtureNode> {
         origin: None,
         body,
     };
-    let mut mint_a = Minter::new(FIXTURE_SCOPE_A);
+    let mint = |minter: &mut Minter, held: &mut Held| {
+        let id = minter.mint().expect("fresh scope");
+        held.minted(id);
+        id
+    };
+    let (mut mint_a, mut held_a) = (Minter::new(FIXTURE_SCOPE_A), Held::default());
     let mut a: Vec<FixtureNode> = (0..4)
-        .map(|i| node(mint_a.mint().expect("fresh scope"), i == 3))
+        .map(|i| node(mint(&mut mint_a, &mut held_a), i == 3))
         .collect();
     // The fork keeps every id it carries; it carries no bodies (a Soul is in one world).
     let mut b: Vec<FixtureNode> = a.iter().copied().filter(|n| !n.body).collect();
-    let mut mint_b = Minter::new(FIXTURE_SCOPE_B);
-    b.push(node(mint_b.mint().expect("fresh scope"), false));
-    a.push(node(mint_a.mint().expect("fresh scope"), false));
+    let (mut mint_b, mut held_b) = (Minter::new(FIXTURE_SCOPE_B), held_a.clone());
+    b.push(node(mint(&mut mint_b, &mut held_b), false));
+    a.push(node(mint(&mut mint_a, &mut held_a), false));
     // Travel from B to A: node 2 (A has its own copy) and B's new node.
     for travelling in [b[2], b[3]] {
-        let known = |id: &Id| a.iter().any(|n| n.id == *id);
-        let arrived = arrive(travelling.id, known, &mut mint_a).expect("fresh scope");
+        let arrived = arrive(travelling.id, &mut held_a, &mut mint_a).expect("fresh scope");
         a.push(FixtureNode {
             id: arrived.id,
             origin: arrived.origin,
