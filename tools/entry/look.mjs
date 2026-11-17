@@ -71,7 +71,8 @@ export function shapeInMetres(node, key = '') {
 export function defOf(entry) {
   const name = `core-${entry.kind.split(':')[1]}`, shape = entry.looks?.shape;
   if (!shape?.shapes) return null;
-  const state = Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k,
+  // text (a reference to words kept elsewhere), a list and a schedule are nothing the drawing reads: the def leaves them out
+  const state = Object.fromEntries(Object.entries(entry.state ?? {}).filter(([, f]) => !['text', 'list', 'schedule'].includes(f.type)).map(([k, f]) => [k,
     f.type === 'bool' ? {type: 'bool', default: f.default}
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
         : {type: 'number', default: drawn(f, f.type === 'timed' ? f.default.value : f.default)}]));
