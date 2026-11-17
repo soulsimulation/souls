@@ -2,7 +2,7 @@
 //! micrometres: its floor surfaces, the boxes of every thing that stands on it, its doorways, and on the open ground
 //! its waters and the footprints of the buildings on it. Nothing here is stored: a [`Scene`] is read, cut and dropped.
 //!
-//! The field numbers and kind names are N1's import (`v2/tools/import-eden/src/lib.rs`), which N2's test world shares;
+//! The field numbers and kind names are N1's import (#2649, `v2/tools/import-eden/src/lib.rs`), which N2's test world (#2650) shares;
 //! `tests/ground.rs` checks that they are equal to the importer's.
 
 use replica::encode::Value;
@@ -59,7 +59,7 @@ pub struct Doorway {
     pub y: i64,
 }
 
-/// A water on the open ground: its own outline (a ring, or a line and a width) and its level, kept for N11.
+/// A water on the open ground: its own outline (a ring, or a line and a width) and its level, kept for N11 (#2735).
 #[derive(Clone, Debug)]
 pub struct Water {
     pub place: Id,
