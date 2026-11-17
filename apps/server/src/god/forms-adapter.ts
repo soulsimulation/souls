@@ -424,7 +424,10 @@ function valueFor(def: StoredDef, field: string, v: unknown): unknown {
 /** The reason a receipt fails with, from a "no" or "unknown" of the rules. */
 function refusalText(name: string, r: any): string {
   const d = r.detail ?? {};
-  if (r.reason === 'field_differs') return `${name}: ${d.field} is ${JSON.stringify(d.found)}, and this needs it ${'is' in (d.wanted ?? {}) ? JSON.stringify(d.wanted.is) : `not ${JSON.stringify(d.wanted?.not)}`}`;
+  if (r.reason === 'field_differs') {
+    const w = d.wanted ?? {}, range = [w.at_least !== undefined ? `at least ${w.at_least}` : '', w.at_most !== undefined ? `at most ${w.at_most}` : ''].filter(Boolean).join(' and ');
+    return `${name}: ${d.field} is ${JSON.stringify(d.found)}, and this needs it ${'is' in w ? JSON.stringify(w.is) : 'not' in w ? `not ${JSON.stringify(w.not)}` : range}`;
+  }
   if (r.reason === 'out_of_reach') return `${name}: the ${d.point} was out of reach when the motion ended`;
   if (r.verdict === 'unknown') return `${name}: what this needs could not be read`;
   return `${name}: ${String(r.reason ?? 'refused').replace(/_/g, ' ')}${d.what ? ` (${d.what})` : ''}`;
