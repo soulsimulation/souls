@@ -473,7 +473,7 @@ fn main() {
             // The new ground reaches it and today does not.
             if l.medium == "swim" || l.medium == "wade" {
                 let w = if in_water(l.p) {
-                    "inside a water's outline, where the new ground has ground cover over the water"
+                    "inside a water's outline, yet the new ground has ground within 1.5 m of it (the outline's bank, or ground cover N3 lays back over the water) where today's terrain is under water"
                 } else {
                     "outside every water outline the template gives, so the new ground has no water there"
                 };
