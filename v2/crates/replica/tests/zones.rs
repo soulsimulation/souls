@@ -4,11 +4,11 @@
 use replica::encode::Value;
 use replica::ids::{FIXTURE_SCOPE_A, Held, Id, Minter, Scope};
 use replica::world_model::{
-    Audience, FIXTURE_KINDS, Link, Node, check, parse_kinds, parse_world, show,
+    Audience, Draft, FIXTURE_KINDS, Link, Node, check, parse_kinds, parse_world, plain, show,
 };
 use replica::zones::{
-    FIXTURE_SCOPE_ZONE_B, FIXTURE_ZONE_A, FIXTURE_ZONE_B, Fields, Frame, Own, Place, Prev, Record,
-    System, Systems, Transfer, Write, Zone, minter_past, run_in_order, tick,
+    Arrivals, FIXTURE_SCOPE_ZONE_B, FIXTURE_ZONE_A, FIXTURE_ZONE_B, Fault, Fields, Frame, Own,
+    Place, Prev, Record, System, Systems, Transfer, Write, Zone, minter_past, run_in_order, tick,
 };
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -34,7 +34,7 @@ fn zone(text: &str, root: u64, lineage: Scope, scope: Scope) -> Zone {
         .map(|n| n.id)
         .chain(draft.links.iter().map(|l| l.id));
     let (minter, held) = minter_past(scope, ids).unwrap();
-    Zone::start(node(root), lineage, minter, held, draft.nodes, draft.links).unwrap()
+    Zone::start(node(root), lineage, minter, held, draft).unwrap()
 }
 
 /// Zone A, the world's first: it mints from the world's scope.
@@ -68,9 +68,12 @@ fn to_hall(a: &Zone) -> Place {
 /// The lineage, and the one zone's scope, of another world W.
 const SCOPE_W: Scope = Scope([0xee; 16]);
 
-/// A world with one zone: a place and a chain of `levels` rooms below it, each minted from `scope`. Returns the
-/// zone and its node ids, the place first; the node at index k has k ancestors.
+/// A world with one zone: a place and a chain of `levels` rooms and boats below it (a room admits a boat, a boat a
+/// room), each minted from `scope`. Returns the zone and its node ids, the place first; the node at index k has k
+/// ancestors.
 fn world(scope: Scope, levels: u64) -> (Zone, Vec<Id>) {
+    let kinds = parse_kinds(FIXTURE_KINDS).unwrap();
+    let full = |name: &str| kinds.keys().find(|k| plain(k) == name).unwrap().clone();
     let mut m = Minter::new(scope);
     let mut held = Held::default();
     let mut nodes: Vec<Node> = Vec::new();
@@ -79,7 +82,11 @@ fn world(scope: Scope, levels: u64) -> (Zone, Vec<Id>) {
         held.minted(id);
         nodes.push(Node {
             id,
-            kind: if k == 0 { "souls:place" } else { "souls:room" }.into(),
+            kind: full(match k {
+                0 => "souls:place",
+                _ if k % 2 == 1 => "souls:room",
+                _ => "souls:boat",
+            }),
             parent: nodes.last().map(|n| n.id),
             slot: None,
             audience: Audience::Everyone,
@@ -87,10 +94,20 @@ fn world(scope: Scope, levels: u64) -> (Zone, Vec<Id>) {
         });
     }
     let ids: Vec<Id> = nodes.iter().map(|n| n.id).collect();
-    (
-        Zone::start(ids[0], scope, m, held, nodes, vec![]).unwrap(),
-        ids,
-    )
+    let draft = Draft {
+        kinds,
+        nodes,
+        ..Draft::default()
+    };
+    check(&draft).unwrap();
+    (Zone::start(ids[0], scope, m, held, draft).unwrap(), ids)
+}
+
+/// How many arrived, where none may be refused.
+fn arrived(r: Result<Arrivals, Fault>) -> u64 {
+    let r = r.unwrap();
+    assert!(r.refused.is_empty(), "refused: {:?}", r.refused);
+    r.arrived
 }
 
 fn state(z: &Zone) -> (Vec<Node>, Vec<Link>) {
@@ -203,6 +220,19 @@ impl System for Peek {
     }
 }
 
+/// The hall counts ticks and caches what it wrote: harmless unless another system reads the cache.
+struct Count(Rc<Cell<Option<u64>>>);
+impl System for Count {
+    fn name(&self) -> &str {
+        "count"
+    }
+    fn step(&self, prev: Prev<'_>, own: Own) -> Vec<Write> {
+        let n = uint(prev.fields(own.node()), 1) + 1;
+        self.0.set(Some(n));
+        vec![own.set(1, Value::Uint(n))]
+    }
+}
+
 /// Planted: the hall writes the cup's level, a node not its own.
 struct Meddle;
 impl System for Meddle {
@@ -289,6 +319,30 @@ fn a2_each_planted_bad_system_fails_by_name() {
         "read-same-tick: system peek at aa:3 wrote differently in another order"
     );
 
+    // The writer first in id order: the hall (aa:2) counts and caches, the body (aa:3) reads the cache. Whichever
+    // order runs first leaves this tick's value in the cache for the second, so the check catches it on the ticks
+    // where the reverse order runs first.
+    let cache = Rc::new(Cell::new(None));
+    let writer_first: Systems = BTreeMap::from([
+        (node(2), Box::new(Count(cache.clone())) as Box<dyn System>),
+        (node(3), Box::new(Peek(cache)) as Box<dyn System>),
+    ]);
+    let mut prev = frame();
+    let mut caught = None;
+    for _ in 0..4 {
+        match tick(&prev, &writer_first) {
+            Ok(next) => prev = next,
+            Err(r) => {
+                caught = Some((prev.tick, r));
+                break;
+            }
+        }
+    }
+    let (at, r) = caught.expect("caught within four ticks");
+    println!("A2 a same-tick read whose writer comes first, at tick {at}: {r}");
+    assert_eq!(r.name(), "read-same-tick");
+    assert!(at < 2);
+
     let meddle = systems(Box::new(Watch), Box::new(Meddle), Rc::new(Cell::new(None)));
     let r = tick(&frame(), &meddle).unwrap_err();
     println!("A2 a write outside its own node: {r}");
@@ -313,7 +367,7 @@ fn a3_there_and_back_unchanged() {
         there.nodes.len(),
         there.links.len()
     );
-    assert_eq!(b.arrive_all(std::slice::from_ref(&there)).unwrap(), 1);
+    assert_eq!(arrived(b.arrive_all(std::slice::from_ref(&there))), 1);
     a.settle(there.id).unwrap();
     assert_eq!(copies(&[&a]), (0, 0));
     assert_eq!(copies(&[&b]), (2, 0));
@@ -328,7 +382,7 @@ fn a3_there_and_back_unchanged() {
         show(back.id)
     );
     assert_eq!(back.id.scope(), FIXTURE_SCOPE_ZONE_B);
-    a.arrive_all(std::slice::from_ref(&back)).unwrap();
+    arrived(a.arrive_all(std::slice::from_ref(&back)));
     b.settle(back.id).unwrap();
     let after = state(&a);
     println!(
@@ -354,14 +408,14 @@ fn a3_there_and_back_unchanged() {
             },
         )
         .unwrap();
-    w.arrive_all(std::slice::from_ref(&out)).unwrap();
+    arrived(w.arrive_all(std::slice::from_ref(&out)));
     a.settle(out.id).unwrap();
     assert!(
         w.node(node(3)).is_some(),
         "W never held aa:3, so it keeps it"
     );
     let home = w.leave(node(3), to_hall(&a)).unwrap();
-    a.arrive_all(std::slice::from_ref(&home)).unwrap();
+    arrived(a.arrive_all(std::slice::from_ref(&home)));
     w.settle(home.id).unwrap();
     let renamed: Vec<String> = a
         .nodes()
@@ -418,9 +472,9 @@ fn a_leave_keeps_or_ends_links_to_nodes_that_stay() {
     assert_eq!(ids(&t.links), "aa:6,aa:7,aa:8");
     assert!(t.ended.is_empty());
     assert_eq!(kept, vec!["aa:9"]);
-    b.arrive_all(std::slice::from_ref(&t)).unwrap();
+    arrived(b.arrive_all(std::slice::from_ref(&t)));
     let back = b.leave(node(3), to_hall(&a)).unwrap();
-    a.arrive_all(std::slice::from_ref(&back)).unwrap();
+    arrived(a.arrive_all(std::slice::from_ref(&back)));
     assert_eq!(state(&a), before, "both links are whole again at home");
     // To another world: both are ended, and the leave lists them.
     let mut a = zone(&text, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A);
@@ -443,54 +497,130 @@ fn a_leave_keeps_or_ends_links_to_nodes_that_stay() {
     assert_eq!(a.links().count(), 0);
 }
 
+/// A refused arrive is named, never logged at the destination, holds up no other arrival, and goes back to where
+/// it stood under the same transfer id, so nothing stays in flight for ever.
 #[test]
-fn an_arrive_too_deep_is_refused_by_name() {
-    // A world whose chain of rooms reaches 31 ancestors. The body with its cup is two levels.
+fn a_refused_arrive_is_named_goes_back_and_holds_up_nothing() {
+    // World W's chain reaches 31 ancestors. The body with its cup is two levels.
     let (mut deep, ids) = world(SCOPE_W, 31);
-    let deep_id = deep.id();
-    let send = |parent: Id| {
-        let mut a = zone_a();
-        let t = a
-            .leave(
-                node(3),
-                Place {
-                    lineage: SCOPE_W,
-                    zone: deep_id,
-                    parent,
-                    slot: None,
-                },
-            )
-            .unwrap();
-        (a, t)
+    let w = deep.id();
+    let to = |parent: Id| Place {
+        lineage: SCOPE_W,
+        zone: w,
+        parent,
+        slot: None,
     };
-    let (a, t) = send(ids[31]);
-    let r = deep.arrive_all(std::slice::from_ref(&t)).unwrap_err();
-    println!("under a node with 31 ancestors: {r}");
-    assert_eq!(r.name(), "arrive-too-deep");
-    assert_eq!(
-        a.in_flight().count(),
-        1,
-        "refused, the transfer stays in flight"
+    let mut a = zone_a();
+    let body = a.leave(node(3), to(ids[31])).unwrap();
+    let crate_ = a.leave(node(5), to(ids[1])).unwrap();
+    let r = deep.arrive_all(&[body.clone(), crate_.clone()]).unwrap();
+    let (refused, why) = r.refused[0].clone();
+    println!(
+        "refused arrive: {} arrived, transfer {} refused: {why}",
+        r.arrived,
+        show(refused)
     );
-    assert!(deep.node(node(3)).is_none());
-    let (_, t) = send(ids[30]);
-    deep.arrive_all(std::slice::from_ref(&t)).unwrap();
-    println!("under a node with 30 ancestors: arrives, the cup with 32");
+    assert_eq!((r.arrived, refused), (1, body.id));
+    assert_eq!(why.name(), "arrive-too-deep");
+    assert_eq!(
+        why.to_string(),
+        "arrive-too-deep: transfer aa:8's deepest node would have 33 ancestors, over 32"
+    );
+    assert!(deep.node(node(3)).is_none() && deep.node(node(5)).is_some());
+    a.settle(crate_.id).unwrap();
+    a.take_back(body.id, &why).unwrap();
+    let back = a.node(node(3)).unwrap();
+    println!(
+        "refused arrive: zone A takes the body back under {}, logs return {} ({}), in flight {}",
+        show(back.parent.unwrap()),
+        show(body.id),
+        match a.log().last() {
+            Some(Record::Return { reason, .. }) => reason.as_str(),
+            _ => "no return",
+        },
+        a.in_flight().count()
+    );
+    assert_eq!(back.parent, Some(node(2)));
+    assert_eq!(a.node(node(4)).unwrap().parent, Some(node(3)));
+    assert_eq!(a.in_flight().count(), 0);
+    assert!(
+        matches!(a.log().last(), Some(Record::Return { reason, .. }) if reason == "arrive-too-deep")
+    );
+    // Under a node with 30 ancestors it fits: the cup has 32.
+    let mut a = zone_a();
+    let t = a.leave(node(3), to(ids[30])).unwrap();
+    assert_eq!(arrived(deep.arrive_all(std::slice::from_ref(&t))), 1);
+    // An arrival from another world reaches only the world's first zone.
+    let mut b = zone_b();
+    let stray = deep.leave(ids[31], to_garden(&b)).unwrap();
+    let r = b.arrive_all(std::slice::from_ref(&stray)).unwrap();
+    println!("an arrival from W in zone B: {}", r.refused[0].1);
+    assert_eq!(r.refused[0].1.name(), "arrive-not-first-zone");
+}
+
+/// Trunk review of #2969: a change that crosses nodes inside one zone is the same leave and arrive, a tick apart in
+/// the zone's one log. A pick-up: the crate leaves the hall floor for the body's left hand.
+#[test]
+fn a_change_inside_one_zone_is_a_leave_then_an_arrive() {
+    let mut a = zone_a();
+    let here = |parent: Id, slot: Option<u64>| Place {
+        lineage: FIXTURE_SCOPE_A,
+        zone: node(1),
+        parent,
+        slot,
+    };
+    // Tick n: the leave. The crate is in flight, in nobody's hands.
+    let t = a.leave(node(5), here(node(3), Some(1))).unwrap();
+    assert!(a.node(node(5)).is_none());
+    assert_eq!(a.in_flight().count(), 1);
+    // Tick n+1: the arrive, in the same log, under the same id; it also ends the flight.
+    assert_eq!(arrived(a.arrive_all(std::slice::from_ref(&t))), 1);
+    let crate_ = a.node(node(5)).unwrap();
+    let records: Vec<String> = a
+        .log()
+        .iter()
+        .map(|r| match r {
+            Record::Start { .. } => "start".to_owned(),
+            Record::Leave(t) => format!("leave {}", show(t.id)),
+            Record::Arrive(t) => format!("arrive {}", show(t.id)),
+            Record::Settle(id) => format!("settle {}", show(*id)),
+            Record::Return { transfer, .. } => format!("return {}", show(*transfer)),
+        })
+        .collect();
+    println!(
+        "inside one zone: the crate is in {} slot {:?}; zone A's log: {}",
+        show(crate_.parent.unwrap()),
+        crate_.slot,
+        records.join(", ")
+    );
+    assert_eq!((crate_.parent, crate_.slot), (Some(node(3)), Some(1)));
+    assert_eq!(records, vec!["start", "leave aa:8", "arrive aa:8"]);
+    assert_eq!(a.in_flight().count(), 0);
+    // A crossing the kinds do not admit (the crate into the cup) is refused by T2's name and goes back.
+    let bad = a.leave(node(5), here(node(4), None)).unwrap();
+    let r = a.arrive_all(std::slice::from_ref(&bad)).unwrap();
+    let why = r.refused[0].1.clone();
+    println!("inside one zone, the crate into the cup: {why}");
+    assert_eq!(why.name(), "child-not-admitted");
+    a.take_back(bad.id, &why).unwrap();
+    let crate_ = a.node(node(5)).unwrap();
+    assert_eq!((crate_.parent, crate_.slot), (Some(node(3)), Some(1)));
+    assert_eq!(a.in_flight().count(), 0);
 }
 
 #[test]
 fn a3_an_arrive_applied_twice_leaves_one_copy() {
     let (mut a, mut b) = (zone_a(), zone_b());
     let t = a.leave(node(3), to_garden(&b)).unwrap();
-    let first = b.arrive_all(std::slice::from_ref(&t)).unwrap();
+    let first = arrived(b.arrive_all(std::slice::from_ref(&t)));
     // Delivered again, twice in one batch: nothing more arrives and nothing more is logged.
-    let again = b.arrive_all(&[t.clone(), t.clone()]).unwrap();
+    let again = arrived(b.arrive_all(&[t.clone(), t.clone()]));
     // A stop before zone A settles: after a restart A sends it once more.
     let (log_a, log_b) = (a.log().to_vec(), b.log().to_vec());
     drop((a, b));
     let (mut a, mut b) = (Zone::replay(&log_a).unwrap(), Zone::replay(&log_b).unwrap());
     let resent: Vec<Transfer> = a.in_flight().cloned().collect();
-    let third = b.arrive_all(&resent).unwrap();
+    let third = arrived(b.arrive_all(&resent));
     a.settle(t.id).unwrap();
     // And a log holding the arrive twice replays to one copy too.
     let mut doubled = b.log().to_vec();
@@ -530,7 +660,17 @@ fn a3_a_stop_between_leave_and_arrive_neither_loses_nor_doubles() {
     );
     let resent: Vec<Transfer> = a.in_flight().cloned().collect();
     assert_eq!(resent, vec![t.clone()]);
-    b.arrive_all(&resent).unwrap();
+    // A checkpoint keeps the flight: replayed from it alone, zone A still has the transfer to send.
+    let from_checkpoint = Zone::replay(&[a.checkpoint()]).unwrap();
+    assert_eq!(
+        from_checkpoint.in_flight().cloned().collect::<Vec<_>>(),
+        resent
+    );
+    println!(
+        "A3 stop: zone A replayed from a checkpoint alone has {} in flight",
+        resent.len()
+    );
+    arrived(b.arrive_all(&resent));
     a.settle(t.id).unwrap();
     let done = copies(&[&a, &b]);
     println!("A3 stop: sent again and settled, copies (placed, in flight) {done:?}");
@@ -545,10 +685,17 @@ fn a4_a_body_leaves_only_with_what_its_soul_owns() {
         "    {1: 5, 2: \"souls:crate\", 3: 2}\n",
         "    {1: 5, 2: \"souls:crate\", 3: 2},\n    {1: 8, 2: \"souls:key\", 3: 3, 4: 1}\n",
     );
-    let (mut a, b) = (zone(&text, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A), zone_b());
+    let (w, w_ids) = world(SCOPE_W, 1);
+    let to_w = Place {
+        lineage: SCOPE_W,
+        zone: w.id(),
+        parent: w_ids[1],
+        slot: None,
+    };
+    let mut a = zone(&text, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A);
     let before = a.log().len();
-    let r = a.leave(node(3), to_garden(&b)).unwrap_err();
-    println!("A4 {r}");
+    let r = a.leave(node(3), to_w).unwrap_err();
+    println!("A4 to another world: {r}");
     assert_eq!(r.name(), "leave-holds-unowned");
     assert_eq!(
         r.to_string(),
@@ -556,16 +703,23 @@ fn a4_a_body_leaves_only_with_what_its_soul_owns() {
     );
     assert_eq!(a.log().len(), before, "a refused leave writes nothing");
     assert!(a.node(node(3)).is_some());
-    // Owned, the key goes with it.
+    // Inside the world a zone boundary is invisible: the same body walks into zone B with the key.
+    let t = a.leave(node(3), to_garden(&zone_b())).unwrap();
+    println!(
+        "A4 into the next zone of the same world: the leave carries {} nodes, the key among them",
+        t.nodes.len()
+    );
+    assert!(t.nodes.iter().any(|n| n.id == node(8)));
+    // Owned, the key goes to the other world too.
     let owned = edit(
         &text,
         "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: \"everyone\"}",
         "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: \"everyone\"}, {1: 9, 2: \"owns\", 3: [100, 8], 4: 1, 5: \"everyone\"}",
     );
     let mut a = zone(&owned, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A);
-    let t = a.leave(node(3), to_garden(&b)).unwrap();
+    let t = a.leave(node(3), to_w).unwrap();
     println!(
-        "A4 the key owned too: the leave carries {} nodes",
+        "A4 the key owned too: the leave to another world carries {} nodes",
         t.nodes.len()
     );
     assert_eq!(t.nodes.len(), 3);
@@ -589,7 +743,13 @@ fn two_arrivals_of_one_id_in_one_tick_get_two_ids() {
         .cloned()
         .collect();
     let (_, held_c) = minter_past(FIXTURE_SCOPE_A, fork.iter().map(|n| n.id)).unwrap();
-    let mut c = Zone::start(node(1), SCOPE_C, Minter::new(SCOPE_C), held_c, fork, vec![]).unwrap();
+    let kinds = parse_kinds(FIXTURE_KINDS).unwrap();
+    let fork = Draft {
+        kinds,
+        nodes: fork,
+        ..Draft::default()
+    };
+    let mut c = Zone::start(node(1), SCOPE_C, Minter::new(SCOPE_C), held_c, fork).unwrap();
     let to = |w: &Zone| Place {
         lineage: SCOPE_W,
         zone: w.id(),
@@ -605,7 +765,7 @@ fn two_arrivals_of_one_id_in_one_tick_get_two_ids() {
         [from_c.clone(), from_a.clone()],
     ] {
         let (mut w, _) = world_w();
-        assert_eq!(w.arrive_all(&delivered).unwrap(), 2);
+        assert_eq!(arrived(w.arrive_all(&delivered)), 2);
         let crates: Vec<(Id, Option<Id>)> = w
             .nodes()
             .filter(|n| n.kind.starts_with("souls:crate@"))

@@ -4,13 +4,14 @@
 //! previous tick, and nothing else) and writes only its own node through [`Own`]: the wrong access has no method.
 //! Writes are data ([`Write`]), as they are when they come from a creator's module or a log, so the runner also
 //! refuses one outside the system's node by name, and runs every tick in two orders to catch a same-tick read that
-//! went around the types. A change that crosses zones is a [`Transfer`]: a leave in one log and an arrive in the
-//! other, sharing the transfer's id; until the leaving zone settles it, it is in flight. Types, the check and
-//! fixtures only: no runtime and no parallel ticking (N17 builds those).
+//! went around the types. A change that crosses nodes is a [`Transfer`]: a leave and an arrive sharing the
+//! transfer's id, a tick apart in one zone's log, or in two logs between zones; until the leaving zone settles it or
+//! takes it back, it is in flight. Types, the check and fixtures only: no runtime and no parallel ticking (N17
+//! builds those, and lets a system emit a leave).
 
 use crate::encode::{self, Value, encode};
 use crate::ids::{Exhausted, Hash, Held, Id, Minter, Purpose, Scope, arrive};
-use crate::world_model::{DEPTH_LIMIT, End, Link, Node, show};
+use crate::world_model::{self, DEPTH_LIMIT, Draft, End, Kind, Link, Node, check, show};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -118,6 +119,13 @@ pub enum Fault {
     ArriveParentMissing { transfer: Id, parent: Id },
     /// `arrive-too-deep`: the subtree's deepest node would have more than [`DEPTH_LIMIT`] ancestors there.
     ArriveTooDeep { transfer: Id, depth: u32 },
+    /// `arrive-not-first-zone`: an arrival from another world reached a zone other than the world's first.
+    ArriveNotFirstZone(Id),
+    /// T2's commit check refused the subtree where it would land; named by T2's refusal (`child-not-admitted`, ...).
+    ArriveRefused {
+        transfer: Id,
+        refusal: world_model::Refusal,
+    },
     /// `log-without-start`: a log whose first record, and only its first, is not its start.
     LogWithoutStart,
     /// `log-out-of-step`: replaying a leave minted another transfer id than the record holds.
@@ -135,6 +143,8 @@ impl Fault {
             Fault::HoldsUnowned { .. } => "leave-holds-unowned",
             Fault::ArriveParentMissing { .. } => "arrive-parent-missing",
             Fault::ArriveTooDeep { .. } => "arrive-too-deep",
+            Fault::ArriveNotFirstZone(_) => "arrive-not-first-zone",
+            Fault::ArriveRefused { refusal, .. } => refusal.name(),
             Fault::LogWithoutStart => "log-without-start",
             Fault::LogOutOfStep(_) => "log-out-of-step",
             Fault::Exhausted(_) => "id-counter-exhausted",
@@ -144,8 +154,12 @@ impl Fault {
 
 impl fmt::Display for Fault {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Fault::Exhausted(e) = self {
-            return write!(f, "{e}");
+        match self {
+            Fault::Exhausted(e) => return write!(f, "{e}"),
+            Fault::ArriveRefused { transfer, refusal } => {
+                return write!(f, "{refusal} (transfer {})", show(*transfer));
+            }
+            _ => {}
         }
         write!(f, "{}: ", self.name())?;
         match self {
@@ -180,6 +194,12 @@ impl fmt::Display for Fault {
                 "transfer {}'s deepest node would have {depth} ancestors, over {DEPTH_LIMIT}",
                 show(*transfer)
             ),
+            Fault::ArriveNotFirstZone(t) => write!(
+                f,
+                "transfer {} comes from another world; the world's first zone applies it",
+                show(*t)
+            ),
+            Fault::ArriveRefused { .. } => Ok(()),
             Fault::LogOutOfStep(t) => {
                 write!(f, "the leave of transfer {} replays out of step", show(*t))
             }
@@ -234,14 +254,20 @@ fn run(
     Ok((next, wrote))
 }
 
-/// One tick (rules 2 and 3): every system reads `prev` and writes its own node. The tick is run in id order and in
-/// reverse; a system whose writes differ between the two is refused as `read-same-tick`, and any write outside a
-/// system's node as `write-outside-own`. Returns the next frame.
+/// One tick (rules 2 and 3): every system reads `prev` and writes its own node, and the tick is run in two orders,
+/// id order and its reverse. Which runs first alternates with the tick, so hidden state a system keeps from one run
+/// cannot hide a same-tick read in both directions. A system whose writes differ between the two is refused as
+/// `read-same-tick`, and any write outside a system's node as `write-outside-own`. The check samples; it is not a
+/// wall (K14 and T9's crate boundary forbid the shared state it looks for). Returns the next frame.
 pub fn tick(prev: &Frame, systems: &Systems) -> Result<Frame, Fault> {
     let forward: Vec<Id> = systems.keys().copied().collect();
     let reverse: Vec<Id> = forward.iter().rev().copied().collect();
-    let (next, first) = run(prev, systems, &forward)?;
-    let (again, second) = run(prev, systems, &reverse)?;
+    let (one, two) = match prev.tick % 2 {
+        0 => (&forward, &reverse),
+        _ => (&reverse, &forward),
+    };
+    let (next, first) = run(prev, systems, one)?;
+    let (again, second) = run(prev, systems, two)?;
     for (node, writes) in &first {
         if second.get(node) != Some(writes) {
             return Err(Fault::ReadSameTick {
@@ -260,7 +286,8 @@ pub fn tick(prev: &Frame, systems: &Systems) -> Result<Frame, Fault> {
 pub const BODY_OF: &str = "body-of";
 pub const OWNS: &str = "owns";
 
-/// Where a transfer is sent: a world (by its lineage), a zone, and the node (and slot) its root arrives under.
+/// Where a transfer is sent: a world (by its lineage), a zone (this one, for a change inside a zone), and the node
+/// (and slot) its root arrives under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Place {
     pub lineage: Scope,
@@ -269,7 +296,7 @@ pub struct Place {
     pub slot: Option<u64>,
 }
 
-/// A subtree on its way between zones (rule 5): the leave and the arrive both carry it, under one id.
+/// A subtree on its way between nodes (rule 5): the leave and the arrive both carry it, under one id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transfer {
     /// Minted by the leaving zone's writer, from its own scope.
@@ -277,9 +304,9 @@ pub struct Transfer {
     /// The lineage of the world it leaves. An arrival from another lineage goes through T3's rule 6.
     pub lineage: Scope,
     pub to: Place,
-    /// The subtree, its root first and every parent before its children.
+    /// The subtree as it stood, its root first and every parent before its children.
     pub nodes: Vec<Node>,
-    /// The links whose every end is in the subtree or a Soul.
+    /// The links whose every end is in the subtree or a Soul, and within one world those the subtree owns.
     pub links: Vec<Link>,
     /// The links between the subtree and a node that stays, when it leaves for another world: the leave ends them.
     /// Within one world such a link stays with its owning end and is in neither list.
@@ -288,24 +315,40 @@ pub struct Transfer {
     pub origins: BTreeMap<Id, Id>,
 }
 
+/// What a zone checks a commit against (T2 rule 11): the kinds, the Souls it knows and its audiences.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Rules {
+    pub kinds: BTreeMap<String, Kind>,
+    pub souls: BTreeSet<Id>,
+    pub audiences: BTreeMap<Id, BTreeSet<Id>>,
+}
+
 /// A zone's log, one record per change. Replaying it rebuilds the zone exactly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Record {
-    /// The zone's first record: its writer's minter and held ids, and its nodes and links.
+    /// The zone's first record, and a checkpoint's (K5): everything a zone holds, transfers in flight, the
+    /// transfer ids that arrived and the origins of renamed ids included.
     Start {
         id: Id,
         lineage: Scope,
         minter: Minter,
         held: Held,
+        rules: Rules,
         nodes: Vec<Node>,
         links: Vec<Link>,
+        in_flight: BTreeMap<Id, Transfer>,
+        arrived: BTreeSet<Id>,
+        origins: BTreeMap<Id, Id>,
     },
-    /// A subtree left; it is in flight until settled.
+    /// A subtree left; it is in flight until it arrives in this zone, is settled, or is taken back.
     Leave(Transfer),
-    /// A subtree arrived. A second arrive of one transfer id changes nothing.
+    /// A subtree arrived. A second arrive of one transfer id changes nothing. Inside one zone it also ends the
+    /// flight, since the leave and the arrive are in the same log.
     Arrive(Transfer),
     /// The destination's arrive is durable; the transfer is no longer in flight.
     Settle(Id),
+    /// The destination refused the arrive, for the named reason; the subtree is back where it stood.
+    Return { transfer: Id, reason: String },
 }
 
 /// One zone: a subtree with one writer and one log (rule 1).
@@ -315,6 +358,7 @@ pub struct Zone {
     lineage: Scope,
     minter: Minter,
     held: Held,
+    rules: Rules,
     nodes: BTreeMap<Id, Node>,
     links: BTreeMap<Id, Link>,
     in_flight: BTreeMap<Id, Transfer>,
@@ -323,23 +367,38 @@ pub struct Zone {
     log: Vec<Record>,
 }
 
+/// What one tick's arrivals came to: how many arrived, and each refused transfer with its reason.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Arrivals {
+    pub arrived: u64,
+    pub refused: Vec<(Id, Fault)>,
+}
+
 impl Zone {
-    /// A zone from its first record's contents. Its id is its root node's.
+    /// A new zone holding `draft`'s nodes and links, checked on arrival against its kinds, Souls and audiences.
+    /// Its id is its root node's.
     pub fn start(
         id: Id,
         lineage: Scope,
         minter: Minter,
         held: Held,
-        nodes: Vec<Node>,
-        links: Vec<Link>,
+        draft: Draft,
     ) -> Result<Zone, Fault> {
         Zone::replay(&[Record::Start {
             id,
             lineage,
             minter,
             held,
-            nodes,
-            links,
+            rules: Rules {
+                kinds: draft.kinds,
+                souls: draft.souls,
+                audiences: draft.audiences,
+            },
+            nodes: draft.nodes,
+            links: draft.links,
+            in_flight: BTreeMap::new(),
+            arrived: BTreeSet::new(),
+            origins: BTreeMap::new(),
         }])
     }
 
@@ -351,7 +410,6 @@ impl Zone {
                 id,
                 lineage,
                 minter,
-                held,
                 ..
             },
             rest,
@@ -363,7 +421,8 @@ impl Zone {
             id: *id,
             lineage: *lineage,
             minter: minter.clone(),
-            held: held.clone(),
+            held: Held::default(),
+            rules: Rules::default(),
             nodes: BTreeMap::new(),
             links: BTreeMap::new(),
             in_flight: BTreeMap::new(),
@@ -376,6 +435,22 @@ impl Zone {
             zone.write(r.clone())?;
         }
         Ok(zone)
+    }
+
+    /// The zone as one start record: a checkpoint, from which a replay continues.
+    pub fn checkpoint(&self) -> Record {
+        Record::Start {
+            id: self.id,
+            lineage: self.lineage,
+            minter: self.minter.clone(),
+            held: self.held.clone(),
+            rules: self.rules.clone(),
+            nodes: self.nodes.values().cloned().collect(),
+            links: self.links.values().cloned().collect(),
+            in_flight: self.in_flight.clone(),
+            arrived: self.arrived.clone(),
+            origins: self.origins.clone(),
+        }
     }
 
     pub fn id(&self) -> Id {
@@ -403,9 +478,18 @@ impl Zone {
         self.origins.get(&id).copied()
     }
 
-    /// Transfers that left and are not yet settled. After a restart, each is sent again (rule 6).
+    /// Transfers that left and have not arrived here, been settled or been taken back. After a restart, each is
+    /// sent again (rule 6).
     pub fn in_flight(&self) -> impl Iterator<Item = &Transfer> {
         self.in_flight.values()
+    }
+
+    /// Whether this zone's writer mints from the world's own scope: the world's first zone (T3 rule 1).
+    fn first(&self) -> bool {
+        self.minter
+            .clone()
+            .mint()
+            .is_ok_and(|id| id.scope() == self.lineage)
     }
 
     /// Appends `record` to the log and applies it. Every change goes through here, so replay is the same code.
@@ -417,12 +501,31 @@ impl Zone {
 
     fn apply(&mut self, record: &Record) -> Result<(), Fault> {
         match record {
-            Record::Start { nodes, links, .. } => {
+            Record::Start {
+                id,
+                lineage,
+                minter,
+                held,
+                rules,
+                nodes,
+                links,
+                in_flight,
+                arrived,
+                origins,
+            } => {
                 if !self.log.is_empty() {
                     return Err(Fault::LogWithoutStart);
                 }
+                self.id = *id;
+                self.lineage = *lineage;
+                self.minter = minter.clone();
+                self.held = held.clone();
+                self.rules = rules.clone();
                 self.nodes = nodes.iter().map(|n| (n.id, n.clone())).collect();
                 self.links = links.iter().map(|l| (l.id, l.clone())).collect();
+                self.in_flight = in_flight.clone();
+                self.arrived = arrived.clone();
+                self.origins = origins.clone();
             }
             Record::Leave(t) => {
                 if self.minter.mint()? != t.id {
@@ -438,13 +541,32 @@ impl Zone {
                 self.in_flight.insert(t.id, t.clone());
             }
             Record::Arrive(t) => {
-                if !self.arrived.insert(t.id) {
+                if self.arrived.contains(&t.id) {
                     return Ok(());
                 }
                 self.land(t)?;
+                self.arrived.insert(t.id);
+                self.in_flight.remove(&t.id);
             }
             Record::Settle(id) => {
                 self.in_flight.remove(id);
+            }
+            Record::Return { transfer, .. } => {
+                let Some(t) = self.in_flight.remove(transfer) else {
+                    return Ok(());
+                };
+                for (i, n) in t.nodes.iter().enumerate() {
+                    let mut n = n.clone();
+                    // Back where it stood; if that node is gone, at the zone's root.
+                    if i == 0 && !n.parent.is_some_and(|p| self.nodes.contains_key(&p)) {
+                        n.parent = Some(self.id);
+                        n.slot = None;
+                    }
+                    self.nodes.insert(n.id, n);
+                }
+                for l in t.links.iter().chain(&t.ended) {
+                    self.links.insert(l.id, l.clone());
+                }
             }
         }
         Ok(())
@@ -468,19 +590,19 @@ impl Zone {
         out
     }
 
-    /// How many ancestors `node` has in this zone, walked with a loop and bounded by the zone's size, so a cycle
-    /// cannot hang it. A zone's root counts as depth 0 here; K2 adds the depth of the root's own parent.
-    fn depth(&self, node: Id) -> u32 {
-        let mut depth = 0u32;
+    /// The ancestors of `node` in this zone, nearest first, walked with a loop and bounded by the zone's size, so a
+    /// cycle cannot hang it. Depth here is zone-local: K2 adds the depth of the zone root's own parent.
+    fn ancestors(&self, node: Id) -> Vec<Id> {
+        let mut out = Vec::new();
         let mut at = self.nodes.get(&node).and_then(|n| n.parent);
         while let Some(p) = at.and_then(|p| self.nodes.get(&p)) {
-            depth = depth.saturating_add(1);
-            if u64::from(depth) > self.nodes.len() as u64 {
+            if out.len() > self.nodes.len() {
                 break;
             }
+            out.push(p.id);
             at = p.parent;
         }
-        depth
+        out
     }
 
     /// The Soul a body belongs to, from its `body-of` link.
@@ -492,15 +614,17 @@ impl Zone {
         })
     }
 
-    /// The subtree under `root` leaves for `to` (rule 5). The leave is written to this zone's log and the transfer
-    /// is in flight until [`Zone::settle`]. A body leaves only with things its Soul owns (rule 7).
+    /// The subtree under `root` leaves for `to` (rule 5), which may be another node of this zone. The leave is
+    /// written to this zone's log and the transfer is in flight until it arrives here, is settled, or is taken back.
+    /// A body leaving for another world takes only things its Soul owns (rule 8).
     pub fn leave(&mut self, root: Id, to: Place) -> Result<Transfer, Fault> {
         if root == self.id || !self.nodes.contains_key(&root) {
             return Err(Fault::LeaveNotHere(root));
         }
         let ids = self.subtree(root);
         let inside: BTreeSet<Id> = ids.iter().copied().collect();
-        if let Some(soul) = self.soul_of(root) {
+        let within = to.lineage == self.lineage;
+        if let Some(soul) = self.soul_of(root).filter(|_| !within) {
             let owned = |thing: Id| {
                 self.links
                     .values()
@@ -513,7 +637,6 @@ impl Zone {
         // A link between the subtree and a node that stays (rule 5): within one world it stays with its owning end,
         // and the far end's index is derived; to another world it is ended and listed. A link whose other end is
         // not a node of this zone (a Soul, or a node of another zone) goes with the subtree.
-        let within = to.lineage == self.lineage;
         let (mut links, mut ended) = (Vec::new(), Vec::new());
         for l in self.links.values() {
             let here = |e: &Id| inside.contains(e);
@@ -558,45 +681,123 @@ impl Zone {
         }
     }
 
+    /// The destination refused `transfer` with `why`: the subtree is put back where it stood, under the same
+    /// transfer id, so nothing stays in flight without an end (rule 6).
+    pub fn take_back(&mut self, transfer: Id, why: &Fault) -> Result<(), Fault> {
+        match self.in_flight.contains_key(&transfer) {
+            true => self.write(Record::Return {
+                transfer,
+                reason: why.name().to_owned(),
+            }),
+            false => Ok(()),
+        }
+    }
+
     /// Applies the transfers arriving in one tick, one after another, in transfer id order whatever order they
-    /// were delivered in (rule 6). A transfer already applied is skipped and not logged again. Returns how many
-    /// arrived.
-    pub fn arrive_all(&mut self, transfers: &[Transfer]) -> Result<u64, Fault> {
+    /// were delivered in (rule 7). A transfer already applied is skipped and not logged again. A refused one is
+    /// logged nowhere here and answered with its reason, and the rest go on.
+    pub fn arrive_all(&mut self, transfers: &[Transfer]) -> Result<Arrivals, Fault> {
         let mut by_id: BTreeMap<Id, &Transfer> = BTreeMap::new();
         for t in transfers {
             by_id.insert(t.id, t);
         }
-        let mut count = 0;
+        let mut out = Arrivals::default();
         for t in by_id.into_values() {
             if self.arrived.contains(&t.id) {
                 continue;
             }
-            if !self.nodes.contains_key(&t.to.parent) {
-                return Err(Fault::ArriveParentMissing {
-                    transfer: t.id,
-                    parent: t.to.parent,
-                });
+            match self.admit(t) {
+                Ok(()) => {
+                    self.write(Record::Arrive(t.clone()))?;
+                    out.arrived += 1;
+                }
+                Err(why) => out.refused.push((t.id, why)),
             }
-            let depth = self
-                .depth(t.to.parent)
-                .saturating_add(1)
-                .saturating_add(height(t));
-            if depth > DEPTH_LIMIT {
-                return Err(Fault::ArriveTooDeep {
-                    transfer: t.id,
-                    depth,
-                });
-            }
-            self.write(Record::Arrive(t.clone()))?;
-            count += 1;
         }
-        Ok(count)
+        Ok(out)
     }
 
-    /// Puts an arriving subtree in place. Within one lineage every id is kept (the world already holds it); from
-    /// another, each id goes through T3's `arrive` against this writer's held ids, one at a time, so an id that
-    /// arrived earlier in the same tick is known to the next (rule 6).
-    fn land(&mut self, t: &Transfer) -> Result<(), Fault> {
+    /// Whether `t` may arrive here: its place is here; from another world, this is the world's first zone; its
+    /// deepest node stays within the depth limit; and T2's commit check passes on the subtree where it would land,
+    /// with the ancestors it would sit under (admitted children, slots, audiences, links).
+    fn admit(&self, t: &Transfer) -> Result<(), Fault> {
+        if !self.nodes.contains_key(&t.to.parent) {
+            return Err(Fault::ArriveParentMissing {
+                transfer: t.id,
+                parent: t.to.parent,
+            });
+        }
+        if t.lineage != self.lineage && !self.first() {
+            return Err(Fault::ArriveNotFirstZone(t.id));
+        }
+        let above = self.ancestors(t.to.parent).len() as u64;
+        let depth = u32::try_from(above + 1 + u64::from(height(t))).unwrap_or(u32::MAX);
+        if depth > DEPTH_LIMIT {
+            return Err(Fault::ArriveTooDeep {
+                transfer: t.id,
+                depth,
+            });
+        }
+        let mut trial = self.clone();
+        let root = trial.land(t)?;
+        trial
+            .commit_check(root)
+            .map_err(|refusal| Fault::ArriveRefused {
+                transfer: t.id,
+                refusal,
+            })
+    }
+
+    /// T2's check (rule 11) over the subtree under `root` and the ancestors it sits under. A link end that is not
+    /// one of those nodes counts as a Soul, so the check reads only what the arrive touches.
+    fn commit_check(&self, root: Id) -> Result<(), world_model::Refusal> {
+        let inside = self.subtree(root);
+        let mut ids: Vec<Id> = self.ancestors(root);
+        ids.extend(&inside);
+        let set: BTreeSet<Id> = ids.iter().copied().collect();
+        let nodes: Vec<Node> = ids
+            .iter()
+            .filter_map(|id| self.nodes.get(id))
+            .map(|n| {
+                let mut n = n.clone();
+                if !n.parent.is_some_and(|p| set.contains(&p)) {
+                    n.parent = None;
+                    n.slot = None;
+                }
+                n
+            })
+            .collect();
+        let links: Vec<Link> = self
+            .links
+            .values()
+            .filter(|l| l.ends.iter().any(|e| inside.contains(e)))
+            .filter(|l| match l.owner {
+                End::First => set.contains(&l.ends[0]),
+                End::Second => set.contains(&l.ends[1]),
+            })
+            .cloned()
+            .collect();
+        let mut souls = self.rules.souls.clone();
+        souls.extend(
+            links
+                .iter()
+                .flat_map(|l| l.ends)
+                .filter(|e| !set.contains(e)),
+        );
+        check(&Draft {
+            kinds: self.rules.kinds.clone(),
+            souls,
+            audiences: self.rules.audiences.clone(),
+            nodes,
+            links,
+        })
+        .map(|_| ())
+    }
+
+    /// Puts an arriving subtree in place and returns its root's id here. Within one lineage every id is kept (the
+    /// world already holds it); from another, each id goes through T3's `arrive` against this writer's held ids,
+    /// one at a time, so an id that arrived earlier in the same tick is known to the next (rule 7).
+    fn land(&mut self, t: &Transfer) -> Result<Id, Fault> {
         let mut rename: BTreeMap<Id, Id> = BTreeMap::new();
         let mut origins = t.origins.clone();
         if t.lineage != self.lineage {
@@ -615,12 +816,14 @@ impl Zone {
             }
         }
         let new = |id: Id| rename.get(&id).copied().unwrap_or(id);
+        let mut root = t.to.parent;
         for (i, n) in t.nodes.iter().enumerate() {
             let mut n = n.clone();
             n.id = new(n.id);
             if i == 0 {
                 n.parent = Some(t.to.parent);
                 n.slot = t.to.slot;
+                root = n.id;
             } else {
                 n.parent = n.parent.map(new);
             }
@@ -633,7 +836,7 @@ impl Zone {
             self.links.insert(l.id, l);
         }
         self.origins.extend(origins);
-        Ok(())
+        Ok(root)
     }
 }
 
@@ -653,7 +856,7 @@ fn height(t: &Transfer) -> u32 {
 }
 
 /// A minter for `scope` that has already given out every counter in `ids` of that scope: the state of a writer
-/// whose earlier mints are those ids. Mints one by one, so it is for fixtures only.
+/// whose earlier mints are those ids. Mints one by one, so it is for fixtures only (K5 wants `Minter::at`, #2652).
 pub fn minter_past(
     scope: Scope,
     ids: impl IntoIterator<Item = Id>,
