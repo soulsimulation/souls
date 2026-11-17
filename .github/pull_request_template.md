@@ -21,7 +21,8 @@ How to fill it: .claude/skills/journal/SKILL.md. T0 needs only the Problem. Clip
 
 Tier: T?
 <!-- `node tools/proof/tier.mjs` prints the computed tier; a tier:Tn label can raise it. One line per clip or image:
-     the journey, world template, viewport, duration, commit, and the moment the change is visible. -->
+     the journey, world template, viewport, duration, commit, and the moment the change is visible.
+     An entry (content/kinds): the `pnpm entry prove <family>` verdict and its sheets (.claude/skills/entry/SKILL.md). -->
 - proof.json:
 - clips: <!-- explicit Full-resolution uncut video links + dimensions/duration; reduced GIF previews are pointers only -->
 - images:
