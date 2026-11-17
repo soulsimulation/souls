@@ -210,7 +210,7 @@ test('wide runner (D5): souls-wide takes the split commands with a core plan and
   assert.equal(parseInputs({ ...W, INPUT_COMMAND: 'settled', INPUT_CORES: '' }).runner, 'souls-wide', 'settled is not split: no plan');
   assert.deepEqual(WIDE, [...SPLIT, 'settled']);
   for (const command of ['walk', 'eval-scripted', 'load', 'hundred', 'colocate', 'clip'])
-    assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: command, INPUT_CORES: '' }), /input runner="souls-wide": souls-wide runs eval-load, .*viewers, settled only/, command);
+    assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: command, INPUT_CORES: '' }), /input runner="souls-wide": souls-wide runs eval-load, .*viewers, page, settled only/, command);
   assert.throws(() => parseInputs({ ...W, ...CNT_WIDE }), /input runner="souls-wide"/, 'counted');
   assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_CORES: '' }), /input cores="": souls-wide needs a core plan/);
   for (const v of ['5000', '200,10000']) {
