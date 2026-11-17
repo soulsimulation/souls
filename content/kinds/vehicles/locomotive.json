@@ -76,7 +76,7 @@
   "looks": {
     "model": "look:locomotive",
     "table": [
-      {"part":"fill","field":"fire","do":"show","at":{"false":0,"true":1}},
+      {"part":"fill","field":"fire","do":"steam","at":{"false":0,"true":800}},
       {"part":"light","field":"fire","do":"glow","at":{"false":0,"true":800}},
       {"sound":"engine","field":"fire","at":{"false":0,"true":500},"reach_mm":40000}
     ],
@@ -93,16 +93,13 @@
         {"kind":"cyl","at":[720,420,2600],"r":420,"h":140,"segments":10,"tint":"iron","roll":90000},
         {"kind":"cyl","at":[0,1530,1200],"r":850,"h":4600,"segments":12,"tint":"paint","pitch":90000},
         {"kind":"sphere","at":[0,1530,3500],"r":850,"segments":10,"tint":"iron","scale":[1000,1000,200]},
-        {"kind":"cyl","at":[0,2780,2700],"r":220,"h":900,"segments":8,"r2":300,"tint":"iron"},
+        {"kind":"cyl","at":[0,2780,2700],"r":220,"h":900,"segments":8,"r2":300,"tint":"iron","role":"fill"},
         {"kind":"sphere","at":[0,2430,800],"r":300,"segments":6,"tint":"brass"},
         {"kind":"extrude","at":[0,610,-2400],"polygon":[[-1020,-1070],[1020,-1070],[1020,1070],[-1020,1070]],"h":2240,"tint":"paint"},
         {"kind":"extrude","at":[0,2900,-2400],"polygon":[[-1120,-1170],[1120,-1170],[1120,1170],[-1120,1170]],"h":60,"tint":"roof"},
         {"kind":"box","at":[0,2180,-1290],"size":[1400,600,30],"round":0,"tint":"glass"},
         {"kind":"extrude","at":[0,130,3850],"polygon":[[-900,0],[900,0],[0,550]],"h":250,"tint":"iron","pitch":-90000},
-        {"kind":"sphere","at":[0,1530,3720],"r":160,"segments":5,"tint":"lamp","glow":800,"role":"light"},
-        {"kind":"sphere","at":[0,3480,2700],"r":400,"segments":6,"tint":"smoke","role":"fill","pivot":[0,3180,2700]},
-        {"kind":"sphere","at":[100,4180,2300],"r":550,"segments":6,"tint":"smoke","role":"fill","pivot":[0,3180,2700]},
-        {"kind":"sphere","at":[200,4980,1700],"r":700,"segments":6,"tint":"smoke","role":"fill","pivot":[0,3180,2700]}
+        {"kind":"sphere","at":[0,1530,3720],"r":160,"segments":5,"tint":"lamp","glow":800,"role":"light"}
       ],
       "palette": {"frame":"#2a2725","iron":"#3a3c3e","paint":"#2f5a4a","brass":"#b8913f","roof":"#2a2725","glass":"#3b4b55","lamp":"#fff2c4","smoke":"#d8d6d2","stripe":"#d9a63a"},
       "tags": ["vehicle","rail","train"]
