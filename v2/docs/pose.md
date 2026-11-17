@@ -41,7 +41,9 @@ so that flying, throwing and moving decks need no new stored shape. Code: `v2/cr
    (`p0 + v·dt`), thrown (`p0 + v·dt + g·dt²/2`, one division of `2·10^6·v·dt + g·dt²` by `2·10^12`) or on a rail
    (a distance along a path; the path is N14's, so its position is refused as `rail-needs-path` here). A track's
    orientation is constant; one that turns needs an integer sine table (N14). A time before its start is
-   `before-track-start`.
+   `before-track-start`. T5's `Line` ([time.md](time.md) rule 4) does not fit a track: a position falls (a
+   negative velocity), a throw is quadratic, and a pose rounds to the nearest so that a hand-off is off by half a
+   unit, not up to one in a fixed direction. Time itself (`dt`) is T5's microseconds, unrounded.
 9. **A pose reaches the root frame one frame at a time,** walked up with a loop, then carried down: each frame turns
    its child's arm, adds its own position and velocity, and adds ω × arm. Each carry rounds each turned vector once.
 10. **A hand-off** (`HandOff`) names the node, the world time, the old and the new owner, the pose in the new frame,
