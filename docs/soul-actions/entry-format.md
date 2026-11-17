@@ -48,7 +48,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
@@ -227,11 +227,19 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
-  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
+  (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
+  the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
   `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
   `timed` field.
+  A `state` need with a `link` reads the **place the thing stands in**: `{"need": "state", "link": "place", "field":
+  "rain", "at_least": 101}`, where the link type is declared `{"from": "place", "most": 1}`. The field is the place
+  kind's, read by its number and only by its audience; the place is never read from the tree, since a parent means
+  lifetime and frame only (Engine v2 T2, `v2/docs/world-model.md`), and never from a global weather call. Who links a
+  thing to its place is outside the kind (Engine v2 E4, E6); a rain collector collects only while it rains there.
+  Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
+  conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
   water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
   `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
@@ -241,6 +249,10 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
+- **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
+  (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
+  microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
+  timer's form still checks its own needs when it fires.
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
   into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
   slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")

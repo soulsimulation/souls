@@ -155,6 +155,7 @@ function wayOut(entry, add) {
   const linked = new Set(Object.keys(links).filter(l => !linkers[l]));
   const armed = new Set(), on = new Set();
   const ok = n => {
+    if (n.need === 'state' && n.link) return true; // the place's field is set by its place, from outside
     if (n.need === 'state') {
       if (open.has(n.field) || !reach[n.field]) return true;
       const v = 'is' in n ? n.is : n.not;
