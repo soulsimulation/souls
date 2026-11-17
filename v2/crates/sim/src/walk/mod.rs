@@ -148,6 +148,10 @@ pub struct Walker {
     pub waiting: Option<(Id, i64)>,
     /// It stays where it is by its own order (E3's order; a scripted marker here): never moved, never waiting.
     pub staying: bool,
+    /// The ladder's shoulder turn (N10, `crate::unstick`): no neighbour pushes it.
+    pub shoulder: bool,
+    /// The ladder holds it, so this skill never moves it: its order ended by this name, or `walk-out` (N10).
+    pub held: Option<&'static str>,
 }
 
 /// What a neighbour is, as of the previous tick.
@@ -323,6 +327,8 @@ impl Crowd {
             arrived: None,
             waiting: None,
             staying: false,
+            shoulder: false,
+            held: None,
         };
         let k = self.walkers.partition_point(|o| o.body.id < w.body.id);
         self.walkers.insert(k, w);
@@ -331,7 +337,9 @@ impl Crowd {
 
     /// Whether every walker has arrived.
     pub fn done(&self) -> bool {
-        self.walkers.iter().all(|w| w.arrived.is_some())
+        self.walkers
+            .iter()
+            .all(|w| w.arrived.is_some() || w.held.is_some())
     }
 
     /// One tick for every walker, in id order, against its neighbours as they stood at the end of the last tick.
@@ -353,7 +361,7 @@ impl Crowd {
             .collect();
         world.turns(&marks, at)?;
         for w in self.walkers.iter_mut() {
-            if w.arrived.is_some() || w.staying {
+            if w.arrived.is_some() || w.staying || w.held.is_some() {
                 continue;
             }
             if w.crossing {
@@ -406,7 +414,9 @@ impl Crowd {
             let node = node_of(&w.body);
             // Those waiting at a narrow place make way: they push only others waiting.
             let mut near = grid.near(w.body.id, node, [p.x, p.z], RANGE);
-            if pass != Pass::Wait {
+            if w.shoulder {
+                near.clear();
+            } else if pass != Pass::Wait {
                 near.retain(|(n, _)| n.waiting.is_none());
             }
             let v = wanted(w.body.id, [p.x, p.z], aim, w.speed, dt, &near);
