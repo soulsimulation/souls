@@ -1,0 +1,10 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:dart",
+  "owner": "thing",
+  "state": {},
+  "geometry": { "bounds_mm": [150, 20, 20] },
+  "forms": {},
+  "text": { "card": "A test dart: held in a hand to throw at a dartboard." },
+  "card": { "text": "card" }
+}
