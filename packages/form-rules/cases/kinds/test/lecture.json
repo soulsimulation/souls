@@ -3,9 +3,9 @@
   "kind": "test:lecture",
   "owner": "thing",
   "links": {
-    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" },
-    "speaker": { "n": 2, "from": "soul", "most": 1, "audience": "public" },
-    "listener": { "n": 3, "from": "soul", "most": 120, "audience": "public" }
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} },
+    "speaker": { "n": 2, "from": "soul", "most": 1, "audience": {"rule": "everyone"} },
+    "listener": { "n": 3, "from": "soul", "most": 120, "audience": {"rule": "everyone"} }
   },
   "forms": {
     "speak": {

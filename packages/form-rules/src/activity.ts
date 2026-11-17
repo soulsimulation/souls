@@ -38,8 +38,8 @@
 // member cannot part while present (refused `still_present`). The end date is its `ends` field: its own world form
 // removes it at that time, members or not; `lapse` then releases every member first. Nothing waits for a time.
 
-import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State } from './effects.ts';
-import { crossing, whoMay, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
+import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State, type Unknown } from './effects.ts';
+import { crossing, seesAudience, whoMay, type Audience, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
@@ -181,7 +181,8 @@ function sittingBegins(entry: Activity, standing: Standing, nodes: State['nodes'
   return setStage(entry, standing, id, standing.sitting, 'sitting_began', done);
 }
 
-export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as effects gives it. */
+export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict | Unknown;
 
 /** Enter the role a form enters: who may (SA-F7a), then the place, then the form's needs and effects (SA-F2b). */
 export function enter(input: Input & { receipt: string }): Entered {
@@ -210,7 +211,8 @@ export function leaving(entry: Activity, form: string): { role: string } | { bad
 
 export type LeaveBad = { verdict: 'no'; reason: 'bad_input' | 'still_present'; detail: Record<string, unknown> };
 /** `ended` is 1 when this leave ended the activity, which is then removed; else 0. */
-export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as `enter` does. */
+export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad | Unknown;
 
 /**
  * Leave the role a form leaves: who may (SA-F7a), the form's own needs and effects (SA-F2b), then the role's rule for
@@ -326,7 +328,7 @@ export function nowLine(input: { kinds: Record<string, Entry>; state: { nodes: I
   if (!parts || typeof parts !== 'object') return bad('no_now');
   const extra = Object.keys(parts).filter((k) => !NOW_PARTS.includes(k));
   if (extra.length) return bad('malformed_now', { parts: extra });
-  const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
+  const sees = (audience: Audience) => seesAudience(asker.sees, audience);
   const now: NowLine = {};
   const unseen: string[] = [];
   if (parts.floor !== undefined) {
