@@ -47,17 +47,14 @@ test('no site parses a forwarded address by itself', async () => {
   const { join } = await import('node:path');
   const root = new URL('../../../', import.meta.url).pathname;
   const sites = ['tools/world-launcher/flood.mjs', 'tools/world-launcher/launcher.mjs', 'apps/server/src/hub.ts', 'apps/server/src/http.ts',
-    'apps/server/src/flood.ts', 'apps/server/src/welcome.ts'];
-  // Left on purpose, named so it stays visible: the calendar reads' own split sits under the edge path, whose proof tier is
-  // T3; it moves to addressKey in a change to that route (H7 deferred it rather than raise this one's tier).
-  const deferred = new Set(['apps/server/src/edge/comms/index.ts']);
+    'apps/server/src/flood.ts', 'apps/server/src/welcome.ts', 'apps/server/src/edge/comms/index.ts'];
   for (const f of sites) assert.match(readFileSync(join(root, f), 'utf8'), /import \{ ?addressKey(, forwardedAddress)? ?\} from '[./]+(apps\/server\/src\/)?address-key\.ts'/, `${f} imports addressKey`);
   const files = (dir: string): string[] => readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => e.isDirectory()
     ? (e.name === 'node_modules' ? [] : files(join(dir, e.name)))
     : /\.(ts|mjs)$/.test(e.name) && !/\.test\.(ts|mjs)$/.test(e.name) && e.name !== 'address-key.ts' ? [join(dir, e.name)] : []);
   const parsing = /(x-forwarded-for|xff)\b[^\n]*\.(split|trim)\(/i;
   const offenders = [...files('apps/server/src'), ...files('tools/world-launcher')]
-    .flatMap((f) => readFileSync(join(root, f), 'utf8').split('\n').map((l, i) => [f, i + 1, l] as const).filter(([, , l]) => parsing.test(l) && !deferred.has(f)))
+    .flatMap((f) => readFileSync(join(root, f), 'utf8').split('\n').map((l, i) => [f, i + 1, l] as const).filter(([, , l]) => parsing.test(l)))
     .map(([f, n]) => `${f}:${n}`);
   assert.deepEqual(offenders, [], 'parse the address with addressKey instead');
 });
