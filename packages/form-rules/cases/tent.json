@@ -1,0 +1,227 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:tent (SA-X24): open the flap, then lie or sleep inside and get up; close it again. Pitched where it stands.",
+  "cases": [
+    {
+      "name": "tent_lie_free",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "inside" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true }, "slots": { "inside": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "tent_lie_when_full",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "inside" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true }, "slots": { "inside": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "fix": null }
+    },
+    {
+      "name": "tent_sleep_free",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "inside" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true }, "slots": { "inside": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "tent_sleep_when_full",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "inside" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true }, "slots": { "inside": ["o0"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "fix": null }
+    },
+    {
+      "name": "tent_get_up_lying_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:tent",
+            "fields": { "open": true },
+            "slots": { "inside": ["b1"] },
+            "links": { "sleeper": ["b1"] }
+          },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "tent_get_up_when_nobody_lies_there",
+      "act": { "this": "t1", "form": "get_up" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true }, "slots": { "inside": [] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_linked", "need": 0, "detail": { "link": "sleeper", "count": 0 } }
+    },
+    {
+      "name": "tent_lie_with_the_flap_shut",
+      "act": { "this": "t1", "form": "lie", "args": { "place": "inside" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "open_flap" } }
+    },
+    {
+      "name": "tent_sleep_with_the_flap_shut",
+      "act": { "this": "t1", "form": "sleep", "args": { "place": "inside" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "open_flap" } }
+    },
+    {
+      "name": "tent_open_flap_shut",
+      "act": { "this": "t1", "form": "open_flap" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "tent_open_flap_already_open",
+      "act": { "this": "t1", "form": "open_flap" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "close_flap" } }
+    },
+    {
+      "name": "tent_open_flap_from_too_far",
+      "act": { "this": "t1", "form": "open_flap" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 3000] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 1, "detail": { "point": "flap", "move": "press" } }
+    },
+    {
+      "name": "tent_close_flap_open",
+      "act": { "this": "t1", "form": "close_flap" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "tent_close_flap_already_shut",
+      "act": { "this": "t1", "form": "close_flap" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent" },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "open_flap" } }
+    },
+    {
+      "name": "tent_close_flap_from_too_far",
+      "act": { "this": "t1", "form": "close_flap" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": { "kind": "eden:tent", "fields": { "open": true } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 3000] },
+          "b2": { "hands": { "left": null, "right": null } },
+          "b3": { "hands": { "left": null, "right": null } }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 1, "detail": { "point": "flap", "move": "press" } }
+    }
+  ]
+}
