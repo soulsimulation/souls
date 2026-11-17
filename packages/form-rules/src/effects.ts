@@ -7,7 +7,8 @@
 //
 // - An amount moved between two things is two `set` changes on one field, each carrying its signed `by`
 //   beside the value after; the `by`s of one event sum to zero, and `apply` refuses them if they do not.
-// - Holding is a parent: take and put are `reparent` into or out of a hand or a slot.
+// - Holding is a parent: take and put are `reparent` into or out of a hand, a slot or the actor's place (`here`).
+//   What is moved is the actor, this thing, or a thing argument of the form.
 // - A made thing appears where its form names: a slot, the actor's hand, or `here`, loose in the actor's
 //   place (the spot is Engine v2's set-down, E4, and is not chosen here). Its id comes from the receipt.
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
@@ -111,7 +112,13 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
     }
     return slotPlace(into);
   };
-  const subject = (what: unknown) => (what === 'actor' ? actor : what === 'this' ? self : null);
+  // The node an effect moves or removes: the actor, this thing, or a thing argument of the form (a body's pick_up).
+  const subject = (what: unknown) => {
+    if (what === 'actor') return actor;
+    if (what === 'this') return self;
+    const id = has(what, 'arg') ? args[(what as { arg: string }).arg] : undefined;
+    return typeof id === 'string' && has(work, id) ? id : null;
+  };
 
   const effectList = entry.forms![act.form].effects ?? [];
   for (let i = 0; i < effectList.length; i++) {

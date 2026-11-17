@@ -11,9 +11,11 @@ const doc = JSON.parse(readFileSync(new URL('./cases/placements.json', import.me
 const listFile = JSON.parse(readFileSync(root + 'packages/form-rules/placements.json', 'utf8'));
 const load = name => { const {entry, errors} = F.parseEntry(readFileSync(root + doc.kinds[name], 'utf8')); assert.deepEqual(errors, []); assert.deepEqual(F.validateEntry(entry), [], name); return entry; };
 const kinds = Object.fromEntries(Object.keys(doc.kinds).map(k => [k, load(k)]));
+// A case names one copy of each kind, so a name is also its node.
 const run = c => F.place(kinds[c.thing], c.place, {
   anchor: c.place.anchor && kinds[c.place.anchor],
   facingAnchor: c.place.facing?.toward && kinds[c.place.facing.toward],
+  node: c.thing, anchorNode: c.place.anchor,
 });
 
 test('the words are the list file\'s, in its order, and the format holds no list of its own', () => {
@@ -85,7 +87,8 @@ test('A4: a form\'s placement takes only words on the list, and a case that uses
   const dirs = readdirSync(root + 'content/kinds');
   for (const d of dirs) for (const f of readdirSync(root + 'content/kinds/' + d)) {
     const e = F.parseEntry(readFileSync(root + `content/kinds/${d}/${f}`, 'utf8')).entry;
-    for (const form of Object.values(e.forms ?? {})) for (const s of form.steps ?? []) if (s.place) assert.ok(F.PLACE_WORDS.includes(s.place.at), `${d}/${f}`);
+    // A word is written on the list, or given when the form is done as an argument of type placement (the body's put).
+    for (const form of Object.values(e.forms ?? {})) for (const s of form.steps ?? []) if (s.place) assert.ok(typeof s.place.at === 'string' ? F.PLACE_WORDS.includes(s.place.at) : form.takes?.[s.place.at?.arg]?.type === 'placement', `${d}/${f}`);
   }
   assert.deepEqual(doc.front.accepted, [...F.FRONTS]);
   const bad = structuredClone(kinds.table); bad.geometry.front = doc.front.refused[0].set;
@@ -95,4 +98,13 @@ test('A4: a form\'s placement takes only words on the list, and a case that uses
 test('a front is part of a kind\'s meaning: the hash changes with it', () => {
   const a = structuredClone(kinds.table), b = structuredClone(a); b.geometry.front = 'none';
   assert.notEqual(F.hashKinds([a]).get('eden:table').ref, F.hashKinds([b]).get('eden:table').ref);
+});
+
+test('a thing is by itself by its node, not its entry: two chairs of one kind may be put next to each other', () => {
+  const chair = kinds.chair;
+  const two = F.place(chair, {at: 'next_to'}, {anchor: chair, node: 'chair1', anchorNode: 'chair2'});
+  assert.deepEqual([two.ok, two.at, two.anchor], [true, 'next_to', 'eden:chair']);
+  assert.equal(F.place(chair, {at: 'on'}, {anchor: chair, node: 'chair2', anchorNode: 'chair1'}).ok, true, 'one chair on another of its kind');
+  const self = F.place(chair, {at: 'next_to'}, {anchor: structuredClone(chair), node: 'chair1', anchorNode: 'chair1'});
+  assert.deepEqual([self.ok, self.code], [false, 'self'], 'one node is itself, whatever entry object it is handed with');
 });
