@@ -1,0 +1,245 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Eden's plants (SA-X29, #2919). Going to a shade, a glade or a garden path, and hiding behind a hedge, change nothing in the world: the walk is the body's. Two Souls sit on a fallen log, one on each seat.",
+  "cases": [
+    {
+      "name": "go_to_the_shades_the_glade_and_the_path",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1",
+              "p1",
+              "r1",
+              "o1",
+              "w1",
+              "g1",
+              "h1"
+            ]
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:tree"
+          },
+          "p1": {
+            "kind": "eden:pine"
+          },
+          "r1": {
+            "kind": "eden:birch"
+          },
+          "o1": {
+            "kind": "eden:orchard"
+          },
+          "w1": {
+            "kind": "eden:woodland"
+          },
+          "g1": {
+            "kind": "eden:flower_garden"
+          },
+          "h1": {
+            "kind": "eden:hedge"
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "go_to_shade"
+          },
+          "receipt": "rp1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "go_to_shade"
+          },
+          "receipt": "rp2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "go_to_shade"
+          },
+          "receipt": "rp3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "o1",
+            "form": "go_to_shade"
+          },
+          "receipt": "rp4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "w1",
+            "form": "go_to_glade"
+          },
+          "receipt": "rp5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "g1",
+            "form": "wander"
+          },
+          "receipt": "rp6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "h1",
+            "form": "hide_behind"
+          },
+          "receipt": "rp7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [],
+            "events": [],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "two_sit_on_a_log",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:log"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "l1",
+            "form": "sit",
+            "args": {
+              "seat": "left"
+            }
+          },
+          "receipt": "rl1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "l1",
+                  "slot": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sat_down",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "sit",
+            "args": {
+              "seat": "right"
+            }
+          },
+          "actor": "b2",
+          "receipt": "rl2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "l1",
+                  "slot": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sat_down",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    }
+  ]
+}

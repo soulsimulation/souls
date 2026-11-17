@@ -1,0 +1,60 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:orchard",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      10000,
+      5000,
+      10000
+    ]
+  },
+  "forms": {
+    "go_to_shade": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "shade"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "areas": {
+    "shade": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 4000,
+      "allows": {
+        "sit": "on",
+        "lie": "on"
+      }
+    }
+  },
+  "looks": {
+    "model": "look:orchard",
+    "shape": {"round":20,"shapes":[{"kind":"cyl","at":[-2500,840,-2500],"r":192,"h":1680,"segments":7,"r2":120,"tint":"bark"},{"kind":"cyl","at":[-2230,1800,-2440],"r":72,"h":908,"segments":5,"r2":42,"tint":"bark","pitch":37529,"yaw":77464},{"kind":"cyl","at":[-2710,1950,-2590],"r":66,"h":904,"segments":5,"r2":36,"tint":"bark","pitch":30367,"yaw":-113216},{"kind":"sphere","at":[-2500,2760,-2500],"r":1320,"segments":8,"tint":"leaf","scale":[1000,850,1000]},{"kind":"sphere","at":[-1720,2460,-2260],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-3220,2580,-2800],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-2380,3360,-2860],"r":780,"segments":7,"tint":"leaf3"},{"kind":"cyl","at":[2500,840,-2500],"r":192,"h":1680,"segments":7,"r2":120,"tint":"bark"},{"kind":"cyl","at":[2770,1800,-2440],"r":72,"h":908,"segments":5,"r2":42,"tint":"bark","pitch":37529,"yaw":77464},{"kind":"cyl","at":[2290,1950,-2590],"r":66,"h":904,"segments":5,"r2":36,"tint":"bark","pitch":30367,"yaw":-113216},{"kind":"sphere","at":[2500,2760,-2500],"r":1320,"segments":8,"tint":"leaf","scale":[1000,850,1000]},{"kind":"sphere","at":[3280,2460,-2260],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[1780,2580,-2800],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[2620,3360,-2860],"r":780,"segments":7,"tint":"leaf3"},{"kind":"cyl","at":[-2500,840,2500],"r":192,"h":1680,"segments":7,"r2":120,"tint":"bark"},{"kind":"cyl","at":[-2230,1800,2560],"r":72,"h":908,"segments":5,"r2":42,"tint":"bark","pitch":37529,"yaw":77464},{"kind":"cyl","at":[-2710,1950,2410],"r":66,"h":904,"segments":5,"r2":36,"tint":"bark","pitch":30367,"yaw":-113216},{"kind":"sphere","at":[-2500,2760,2500],"r":1320,"segments":8,"tint":"leaf","scale":[1000,850,1000]},{"kind":"sphere","at":[-1720,2460,2740],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-3220,2580,2200],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-2380,3360,2140],"r":780,"segments":7,"tint":"leaf3"},{"kind":"cyl","at":[2500,840,2500],"r":192,"h":1680,"segments":7,"r2":120,"tint":"bark"},{"kind":"cyl","at":[2770,1800,2560],"r":72,"h":908,"segments":5,"r2":42,"tint":"bark","pitch":37529,"yaw":77464},{"kind":"cyl","at":[2290,1950,2410],"r":66,"h":904,"segments":5,"r2":36,"tint":"bark","pitch":30367,"yaw":-113216},{"kind":"sphere","at":[2500,2760,2500],"r":1320,"segments":8,"tint":"leaf","scale":[1000,850,1000]},{"kind":"sphere","at":[3280,2460,2740],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[1780,2580,2200],"r":900,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[2620,3360,2140],"r":780,"segments":7,"tint":"leaf3"},{"kind":"sphere","at":[-1600,2600,-1900],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[-3200,2900,-3000],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[3400,2600,-1900],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[1800,2900,-3000],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[-1600,2600,3100],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[-3200,2900,2000],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[3400,2600,3100],"r":90,"segments":6,"tint":"apple"},{"kind":"sphere","at":[1800,2900,2000],"r":90,"segments":6,"tint":"apple"}],"palette":{"bark":"#5a3d22","leaf":"#4f7f3a","leaf2":"#5f9142","leaf3":"#6aa152","apple":"#c0392b"},"tags":["plant","orchard","fruit","area"]}
+  },
+  "text": {
+    "card": "Apple trees in rows: shade to rest in between them.",
+    "place": "place",
+    "fruit_trees": "fruit trees",
+    "apple_trees": "apple trees",
+    "shade": "shade"
+  },
+  "card": {
+    "text": "card",
+    "category": "place",
+    "synonyms": [
+      "fruit_trees",
+      "apple_trees",
+      "shade"
+    ]
+  }
+}

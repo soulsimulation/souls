@@ -1,0 +1,164 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:log (SA-X29, #2919), a fallen log with two seats. The seat argument is given resolved; choosing it from its selector is not a rule. A taken seat names the other free one as its fix; a full log names none.",
+  "cases": [
+    {
+      "name": "sit_free_seat",
+      "act": {
+        "this": "l1",
+        "form": "sit",
+        "args": {
+          "seat": "left"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:log",
+            "slots": {
+              "left": [],
+              "right": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "sit_taken_seat_fixed_by_the_other",
+      "act": {
+        "this": "l1",
+        "form": "sit",
+        "args": {
+          "seat": "left"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:log",
+            "slots": {
+              "left": [
+                "b2"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": {
+          "node": "l1",
+          "slot": "left"
+        },
+        "fix": {
+          "form": "sit",
+          "args": {
+            "seat": "right"
+          }
+        }
+      }
+    },
+    {
+      "name": "sit_log_full_has_no_fix",
+      "act": {
+        "this": "l1",
+        "form": "sit",
+        "args": {
+          "seat": "right"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": {
+            "kind": "eden:log",
+            "slots": {
+              "left": [
+                "b2"
+              ],
+              "right": [
+                "b3"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b3": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": {
+          "node": "l1",
+          "slot": "right"
+        },
+        "fix": null
+      }
+    }
+  ]
+}
