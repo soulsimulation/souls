@@ -1,0 +1,341 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:abacus",
+  "owner": "thing",
+  "state": {
+    "tens": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 9,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ones": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 9,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 150, 0]
+    },
+    "beads": {
+      "role": "contact",
+      "at_mm": [0, 150, 20]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 600]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [260, 290, 60]
+  },
+  "forms": {
+    "add_one": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "ones",
+          "at_most": 8,
+          "says": "ones_full"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "beads"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ones",
+          "by": 1,
+          "event": "counted"
+        }
+      ]
+    },
+    "subtract_one": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "ones",
+          "at_least": 1,
+          "says": "ones_empty"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "beads"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "ones",
+          "by": -1,
+          "event": "counted"
+        }
+      ]
+    },
+    "add_ten": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "tens",
+          "at_most": 8,
+          "says": "out_of_range"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "beads"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tens",
+          "by": 1,
+          "event": "counted"
+        }
+      ]
+    },
+    "subtract_ten": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "tens",
+          "at_least": 1,
+          "says": "out_of_range"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "beads"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tens",
+          "by": -1,
+          "event": "counted"
+        }
+      ]
+    },
+    "clear": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "any",
+          "fields": ["tens", "ones"],
+          "not": 0,
+          "says": "already_clear"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "beads"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tens",
+          "to": 0,
+          "event": "cleared"
+        },
+        {
+          "change": "set",
+          "field": "ones",
+          "to": 0,
+          "event": "cleared"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:abacus",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,10,0],"size":[260,20,60],"tint":"frame"},
+        {"kind":"box","at":[0,280,0],"size":[260,20,60],"tint":"frame"},
+        {"kind":"box","at":[-120,145,0],"size":[20,250,60],"tint":"frame"},
+        {"kind":"box","at":[120,145,0],"size":[20,250,60],"tint":"frame"},
+        {"kind":"box","at":[0,190,0],"size":[220,10,50],"tint":"frame"},
+        {"kind":"box","at":[-50,145,0],"size":[8,250,8],"tint":"rod"},
+        {"kind":"box","at":[50,145,0],"size":[8,250,8],"tint":"rod"},
+        {"kind":"box","at":[-50,50,0],"size":[44,26,44],"tint":"bead","when":"@tens<1"},
+        {"kind":"box","at":[-50,116,0],"size":[44,26,44],"tint":"bead","when":"@tens>=1&@tens<5"},
+        {"kind":"box","at":[-50,50,0],"size":[44,26,44],"tint":"bead","when":"@tens>=5&@tens<6"},
+        {"kind":"box","at":[-50,116,0],"size":[44,26,44],"tint":"bead","when":"@tens>=6"},
+        {"kind":"box","at":[-50,80,0],"size":[44,26,44],"tint":"bead","when":"@tens<2"},
+        {"kind":"box","at":[-50,142,0],"size":[44,26,44],"tint":"bead","when":"@tens>=2&@tens<5"},
+        {"kind":"box","at":[-50,80,0],"size":[44,26,44],"tint":"bead","when":"@tens>=5&@tens<7"},
+        {"kind":"box","at":[-50,142,0],"size":[44,26,44],"tint":"bead","when":"@tens>=7"},
+        {"kind":"box","at":[-50,110,0],"size":[44,26,44],"tint":"bead","when":"@tens<3"},
+        {"kind":"box","at":[-50,168,0],"size":[44,26,44],"tint":"bead","when":"@tens>=3&@tens<5"},
+        {"kind":"box","at":[-50,110,0],"size":[44,26,44],"tint":"bead","when":"@tens>=5&@tens<8"},
+        {"kind":"box","at":[-50,168,0],"size":[44,26,44],"tint":"bead","when":"@tens>=8"},
+        {"kind":"box","at":[-50,140,0],"size":[44,26,44],"tint":"bead","when":"@tens<4"},
+        {"kind":"box","at":[-50,194,0],"size":[44,26,44],"tint":"bead","when":"@tens>=4&@tens<5"},
+        {"kind":"box","at":[-50,140,0],"size":[44,26,44],"tint":"bead","when":"@tens>=5&@tens<9"},
+        {"kind":"box","at":[-50,194,0],"size":[44,26,44],"tint":"bead","when":"@tens>=9"},
+        {"kind":"box","at":[-50,250,0],"size":[44,26,44],"tint":"five","when":"@tens<5"},
+        {"kind":"box","at":[-50,218,0],"size":[44,26,44],"tint":"five","when":"@tens>=5"},
+        {"kind":"box","at":[50,50,0],"size":[44,26,44],"tint":"bead","when":"@ones<1"},
+        {"kind":"box","at":[50,116,0],"size":[44,26,44],"tint":"bead","when":"@ones>=1&@ones<5"},
+        {"kind":"box","at":[50,50,0],"size":[44,26,44],"tint":"bead","when":"@ones>=5&@ones<6"},
+        {"kind":"box","at":[50,116,0],"size":[44,26,44],"tint":"bead","when":"@ones>=6"},
+        {"kind":"box","at":[50,80,0],"size":[44,26,44],"tint":"bead","when":"@ones<2"},
+        {"kind":"box","at":[50,142,0],"size":[44,26,44],"tint":"bead","when":"@ones>=2&@ones<5"},
+        {"kind":"box","at":[50,80,0],"size":[44,26,44],"tint":"bead","when":"@ones>=5&@ones<7"},
+        {"kind":"box","at":[50,142,0],"size":[44,26,44],"tint":"bead","when":"@ones>=7"},
+        {"kind":"box","at":[50,110,0],"size":[44,26,44],"tint":"bead","when":"@ones<3"},
+        {"kind":"box","at":[50,168,0],"size":[44,26,44],"tint":"bead","when":"@ones>=3&@ones<5"},
+        {"kind":"box","at":[50,110,0],"size":[44,26,44],"tint":"bead","when":"@ones>=5&@ones<8"},
+        {"kind":"box","at":[50,168,0],"size":[44,26,44],"tint":"bead","when":"@ones>=8"},
+        {"kind":"box","at":[50,140,0],"size":[44,26,44],"tint":"bead","when":"@ones<4"},
+        {"kind":"box","at":[50,194,0],"size":[44,26,44],"tint":"bead","when":"@ones>=4&@ones<5"},
+        {"kind":"box","at":[50,140,0],"size":[44,26,44],"tint":"bead","when":"@ones>=5&@ones<9"},
+        {"kind":"box","at":[50,194,0],"size":[44,26,44],"tint":"bead","when":"@ones>=9"},
+        {"kind":"box","at":[50,250,0],"size":[44,26,44],"tint":"five","when":"@ones<5"},
+        {"kind":"box","at":[50,218,0],"size":[44,26,44],"tint":"five","when":"@ones>=5"}
+      ],
+      "palette": {
+        "frame": "#6b4a2f",
+        "rod": "#c8b48a",
+        "bead": "#b23a2e",
+        "five": "#2f5d8c"
+      },
+      "tags": ["game", "abacus", "counting", "object"]
+    }
+  },
+  "text": {
+    "card": "An abacus of two rods, tens and ones, counted from 0 to 99 a bead at a time.",
+    "counting": "counting",
+    "abacus": "abacus",
+    "put_down_first": "Put down what you are holding before counting.",
+    "out_of_range": "That change would exceed the abacus range 0–99.",
+    "ones_full": "The ones rod already shows nine: add ten and count the ones down.",
+    "ones_empty": "The ones rod already shows none: take ten away and count the ones up.",
+    "already_clear": "The abacus already shows nothing.",
+    "howto_count": "With empty hands, add or take away one or ten; a rod counts to nine, its upper bead is five."
+  },
+  "card": {
+    "text": "card",
+    "category": "counting",
+    "synonyms": ["abacus"]
+  },
+  "howtos": {
+    "count": {
+      "text": "howto_count",
+      "steps": [
+        {
+          "form": "add_ten"
+        },
+        {
+          "form": "add_one"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,434 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hanoi_board",
+  "owner": "thing",
+  "state": {
+    "small": {
+      "n": 1,
+      "type": "enum",
+      "values": ["a", "b", "c"],
+      "default": "a",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "medium": {
+      "n": 2,
+      "type": "enum",
+      "values": ["a", "b", "c"],
+      "default": "a",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "large": {
+      "n": 3,
+      "type": "enum",
+      "values": ["a", "b", "c"],
+      "default": "a",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "moves": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [440, 25, 0]
+    },
+    "pegs": {
+      "role": "contact",
+      "at_mm": [0, 150, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 650]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [900, 260, 300]
+  },
+  "forms": {
+    "move_small": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "to": {
+          "type": "value",
+          "of": ["a", "b", "c"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "small",
+          "not": {
+            "arg": "to"
+          },
+          "says": "same_peg"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "pegs"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "small",
+          "to": {
+            "arg": "to"
+          },
+          "event": "ring_moved"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "ring_moved"
+        }
+      ]
+    },
+    "move_medium": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "from": {
+          "type": "value",
+          "of": ["a", "b", "c"]
+        },
+        "to": {
+          "type": "value",
+          "of": ["a", "b", "c"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "medium",
+          "is": {
+            "arg": "from"
+          },
+          "says": "not_on_peg"
+        },
+        {
+          "need": "state",
+          "field": "medium",
+          "not": {
+            "arg": "to"
+          },
+          "says": "same_peg"
+        },
+        {
+          "need": "state",
+          "field": "small",
+          "not": {
+            "arg": "from"
+          },
+          "says": "ring_on_top"
+        },
+        {
+          "need": "state",
+          "field": "small",
+          "not": {
+            "arg": "to"
+          },
+          "says": "larger_on_smaller"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "pegs"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "medium",
+          "to": {
+            "arg": "to"
+          },
+          "event": "ring_moved"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "ring_moved"
+        }
+      ]
+    },
+    "move_large": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "from": {
+          "type": "value",
+          "of": ["a", "b", "c"]
+        },
+        "to": {
+          "type": "value",
+          "of": ["a", "b", "c"]
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "large",
+          "is": {
+            "arg": "from"
+          },
+          "says": "not_on_peg"
+        },
+        {
+          "need": "state",
+          "field": "large",
+          "not": {
+            "arg": "to"
+          },
+          "says": "same_peg"
+        },
+        {
+          "need": "state",
+          "field": "small",
+          "not": {
+            "arg": "from"
+          },
+          "says": "ring_on_top"
+        },
+        {
+          "need": "state",
+          "field": "medium",
+          "not": {
+            "arg": "from"
+          },
+          "says": "ring_on_top"
+        },
+        {
+          "need": "state",
+          "field": "small",
+          "not": {
+            "arg": "to"
+          },
+          "says": "larger_on_smaller"
+        },
+        {
+          "need": "state",
+          "field": "medium",
+          "not": {
+            "arg": "to"
+          },
+          "says": "larger_on_smaller"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "pegs"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "large",
+          "to": {
+            "arg": "to"
+          },
+          "event": "ring_moved"
+        },
+        {
+          "change": "set",
+          "field": "moves",
+          "by": 1,
+          "event": "ring_moved"
+        }
+      ]
+    },
+    "reset": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "any",
+          "fields": ["small", "medium", "large"],
+          "not": "a",
+          "says": "already_reset"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "pegs"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "small",
+          "to": "a",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "medium",
+          "to": "a",
+          "event": "reset"
+        },
+        {
+          "change": "set",
+          "field": "large",
+          "to": "a",
+          "event": "reset"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:hanoi_board",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,25,0],"size":[900,50,300],"tint":"wood"},
+        {"kind":"cyl","at":[-300,150,0],"r":12,"h":200,"segments":10,"tint":"peg"},
+        {"kind":"cyl","at":[0,150,0],"r":12,"h":200,"segments":10,"tint":"peg"},
+        {"kind":"cyl","at":[300,150,0],"r":12,"h":200,"segments":10,"tint":"peg"},
+        {"kind":"cyl","at":[-300,70,0],"r":120,"h":36,"segments":20,"tint":"large","when":"@large=a"},
+        {"kind":"cyl","at":[-300,70,0],"r":90,"h":36,"segments":20,"tint":"medium","when":"@medium=a&@large!=a"},
+        {"kind":"cyl","at":[-300,110,0],"r":90,"h":36,"segments":20,"tint":"medium","when":"@medium=a&@large=a"},
+        {"kind":"cyl","at":[-300,70,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=a&@medium!=a&@large!=a"},
+        {"kind":"cyl","at":[-300,110,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=a&@medium=a&@large!=a"},
+        {"kind":"cyl","at":[-300,110,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=a&@medium!=a&@large=a"},
+        {"kind":"cyl","at":[-300,150,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=a&@medium=a&@large=a"},
+        {"kind":"cyl","at":[0,70,0],"r":120,"h":36,"segments":20,"tint":"large","when":"@large=b"},
+        {"kind":"cyl","at":[0,70,0],"r":90,"h":36,"segments":20,"tint":"medium","when":"@medium=b&@large!=b"},
+        {"kind":"cyl","at":[0,110,0],"r":90,"h":36,"segments":20,"tint":"medium","when":"@medium=b&@large=b"},
+        {"kind":"cyl","at":[0,70,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=b&@medium!=b&@large!=b"},
+        {"kind":"cyl","at":[0,110,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=b&@medium=b&@large!=b"},
+        {"kind":"cyl","at":[0,110,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=b&@medium!=b&@large=b"},
+        {"kind":"cyl","at":[0,150,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=b&@medium=b&@large=b"},
+        {"kind":"cyl","at":[300,70,0],"r":120,"h":36,"segments":20,"tint":"large","when":"@large=c"},
+        {"kind":"cyl","at":[300,70,0],"r":90,"h":36,"segments":20,"tint":"medium","when":"@medium=c&@large!=c"},
+        {"kind":"cyl","at":[300,110,0],"r":90,"h":36,"segments":20,"tint":"medium","when":"@medium=c&@large=c"},
+        {"kind":"cyl","at":[300,70,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=c&@medium!=c&@large!=c"},
+        {"kind":"cyl","at":[300,110,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=c&@medium=c&@large!=c"},
+        {"kind":"cyl","at":[300,110,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=c&@medium!=c&@large=c"},
+        {"kind":"cyl","at":[300,150,0],"r":60,"h":36,"segments":20,"tint":"small","when":"@small=c&@medium=c&@large=c"}
+      ],
+      "palette": {
+        "wood": "#7a5634",
+        "peg": "#d8c49a",
+        "large": "#2f5d8c",
+        "medium": "#3f8f5a",
+        "small": "#c8483a"
+      },
+      "tags": ["game", "puzzle", "hanoi", "object"]
+    }
+  },
+  "text": {
+    "card": "A Tower of Hanoi: move three rings from peg a to c, never a larger on a smaller.",
+    "puzzle": "puzzle",
+    "tower": "tower",
+    "rings": "rings",
+    "put_down_first": "Put down what you hold before moving the rings.",
+    "not_on_peg": "That ring is not on the source peg; choose the peg it is on.",
+    "same_peg": "Choose a different destination peg.",
+    "ring_on_top": "A smaller ring lies on top of it; move that ring first.",
+    "larger_on_smaller": "A larger ring cannot go on a smaller ring; choose another peg.",
+    "already_reset": "The same rings are already reset on peg a.",
+    "howto_solve": "With empty hands, move one top ring at a time to another peg, never onto a smaller ring, until all three stand on c."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": ["tower", "rings"]
+  },
+  "howtos": {
+    "solve": {
+      "text": "howto_solve",
+      "steps": [
+        {
+          "form": "move_small"
+        },
+        {
+          "form": "move_medium"
+        },
+        {
+          "form": "move_small"
+        },
+        {
+          "form": "move_large"
+        }
+      ]
+    }
+  }
+}

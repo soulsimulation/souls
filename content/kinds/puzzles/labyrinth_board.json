@@ -1,0 +1,305 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:labyrinth_board",
+  "owner": "thing",
+  "state": {
+    "position": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 24,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ahead": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 24,
+      "min": 0,
+      "max": 24,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [250, 15, 0]
+    },
+    "spiral": {
+      "role": "contact",
+      "at_mm": [0, 40, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 650]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [500, 90, 500]
+  },
+  "forms": {
+    "trace_in": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "steps": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "too_far_in"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "spiral"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "ahead",
+          "from": "this",
+          "into": "this",
+          "into_field": "position",
+          "amount": {
+            "arg": "steps"
+          },
+          "event": "traced_in"
+        }
+      ]
+    },
+    "trace_out": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "steps": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "too_far_out"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "spiral"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "position",
+          "from": "this",
+          "into": "this",
+          "into_field": "ahead",
+          "amount": {
+            "arg": "steps"
+          },
+          "event": "traced_out"
+        }
+      ]
+    },
+    "reset": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "state",
+          "field": "position",
+          "at_least": 1,
+          "says": "already_reset"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "spiral"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "position",
+          "from": "this",
+          "into": "this",
+          "into_field": "ahead",
+          "amount": 24,
+          "event": "reset"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:labyrinth_board",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[0,15,0],"size":[500,30,500],"tint":"wood"},
+        {"kind":"box","at":[-180,34,-180],"size":[80,8,80],"tint":"traced"},
+        {"kind":"sphere","at":[-180,60,-180],"r":22,"segments":12,"tint":"cursor","when":"@position=0"},
+        {"kind":"box","at":[-90,34,-180],"size":[80,8,80],"tint":"groove","when":"@position<1"},
+        {"kind":"box","at":[-90,34,-180],"size":[80,8,80],"tint":"traced","when":"@position>=1"},
+        {"kind":"sphere","at":[-90,60,-180],"r":22,"segments":12,"tint":"cursor","when":"@position=1"},
+        {"kind":"box","at":[0,34,-180],"size":[80,8,80],"tint":"groove","when":"@position<2"},
+        {"kind":"box","at":[0,34,-180],"size":[80,8,80],"tint":"traced","when":"@position>=2"},
+        {"kind":"sphere","at":[0,60,-180],"r":22,"segments":12,"tint":"cursor","when":"@position=2"},
+        {"kind":"box","at":[90,34,-180],"size":[80,8,80],"tint":"groove","when":"@position<3"},
+        {"kind":"box","at":[90,34,-180],"size":[80,8,80],"tint":"traced","when":"@position>=3"},
+        {"kind":"sphere","at":[90,60,-180],"r":22,"segments":12,"tint":"cursor","when":"@position=3"},
+        {"kind":"box","at":[180,34,-180],"size":[80,8,80],"tint":"groove","when":"@position<4"},
+        {"kind":"box","at":[180,34,-180],"size":[80,8,80],"tint":"traced","when":"@position>=4"},
+        {"kind":"sphere","at":[180,60,-180],"r":22,"segments":12,"tint":"cursor","when":"@position=4"},
+        {"kind":"box","at":[180,34,-90],"size":[80,8,80],"tint":"groove","when":"@position<5"},
+        {"kind":"box","at":[180,34,-90],"size":[80,8,80],"tint":"traced","when":"@position>=5"},
+        {"kind":"sphere","at":[180,60,-90],"r":22,"segments":12,"tint":"cursor","when":"@position=5"},
+        {"kind":"box","at":[180,34,0],"size":[80,8,80],"tint":"groove","when":"@position<6"},
+        {"kind":"box","at":[180,34,0],"size":[80,8,80],"tint":"traced","when":"@position>=6"},
+        {"kind":"sphere","at":[180,60,0],"r":22,"segments":12,"tint":"cursor","when":"@position=6"},
+        {"kind":"box","at":[180,34,90],"size":[80,8,80],"tint":"groove","when":"@position<7"},
+        {"kind":"box","at":[180,34,90],"size":[80,8,80],"tint":"traced","when":"@position>=7"},
+        {"kind":"sphere","at":[180,60,90],"r":22,"segments":12,"tint":"cursor","when":"@position=7"},
+        {"kind":"box","at":[180,34,180],"size":[80,8,80],"tint":"groove","when":"@position<8"},
+        {"kind":"box","at":[180,34,180],"size":[80,8,80],"tint":"traced","when":"@position>=8"},
+        {"kind":"sphere","at":[180,60,180],"r":22,"segments":12,"tint":"cursor","when":"@position=8"},
+        {"kind":"box","at":[90,34,180],"size":[80,8,80],"tint":"groove","when":"@position<9"},
+        {"kind":"box","at":[90,34,180],"size":[80,8,80],"tint":"traced","when":"@position>=9"},
+        {"kind":"sphere","at":[90,60,180],"r":22,"segments":12,"tint":"cursor","when":"@position=9"},
+        {"kind":"box","at":[0,34,180],"size":[80,8,80],"tint":"groove","when":"@position<10"},
+        {"kind":"box","at":[0,34,180],"size":[80,8,80],"tint":"traced","when":"@position>=10"},
+        {"kind":"sphere","at":[0,60,180],"r":22,"segments":12,"tint":"cursor","when":"@position=10"},
+        {"kind":"box","at":[-90,34,180],"size":[80,8,80],"tint":"groove","when":"@position<11"},
+        {"kind":"box","at":[-90,34,180],"size":[80,8,80],"tint":"traced","when":"@position>=11"},
+        {"kind":"sphere","at":[-90,60,180],"r":22,"segments":12,"tint":"cursor","when":"@position=11"},
+        {"kind":"box","at":[-180,34,180],"size":[80,8,80],"tint":"groove","when":"@position<12"},
+        {"kind":"box","at":[-180,34,180],"size":[80,8,80],"tint":"traced","when":"@position>=12"},
+        {"kind":"sphere","at":[-180,60,180],"r":22,"segments":12,"tint":"cursor","when":"@position=12"},
+        {"kind":"box","at":[-180,34,90],"size":[80,8,80],"tint":"groove","when":"@position<13"},
+        {"kind":"box","at":[-180,34,90],"size":[80,8,80],"tint":"traced","when":"@position>=13"},
+        {"kind":"sphere","at":[-180,60,90],"r":22,"segments":12,"tint":"cursor","when":"@position=13"},
+        {"kind":"box","at":[-180,34,0],"size":[80,8,80],"tint":"groove","when":"@position<14"},
+        {"kind":"box","at":[-180,34,0],"size":[80,8,80],"tint":"traced","when":"@position>=14"},
+        {"kind":"sphere","at":[-180,60,0],"r":22,"segments":12,"tint":"cursor","when":"@position=14"},
+        {"kind":"box","at":[-180,34,-90],"size":[80,8,80],"tint":"groove","when":"@position<15"},
+        {"kind":"box","at":[-180,34,-90],"size":[80,8,80],"tint":"traced","when":"@position>=15"},
+        {"kind":"sphere","at":[-180,60,-90],"r":22,"segments":12,"tint":"cursor","when":"@position=15"},
+        {"kind":"box","at":[-90,34,-90],"size":[80,8,80],"tint":"groove","when":"@position<16"},
+        {"kind":"box","at":[-90,34,-90],"size":[80,8,80],"tint":"traced","when":"@position>=16"},
+        {"kind":"sphere","at":[-90,60,-90],"r":22,"segments":12,"tint":"cursor","when":"@position=16"},
+        {"kind":"box","at":[0,34,-90],"size":[80,8,80],"tint":"groove","when":"@position<17"},
+        {"kind":"box","at":[0,34,-90],"size":[80,8,80],"tint":"traced","when":"@position>=17"},
+        {"kind":"sphere","at":[0,60,-90],"r":22,"segments":12,"tint":"cursor","when":"@position=17"},
+        {"kind":"box","at":[90,34,-90],"size":[80,8,80],"tint":"groove","when":"@position<18"},
+        {"kind":"box","at":[90,34,-90],"size":[80,8,80],"tint":"traced","when":"@position>=18"},
+        {"kind":"sphere","at":[90,60,-90],"r":22,"segments":12,"tint":"cursor","when":"@position=18"},
+        {"kind":"box","at":[90,34,0],"size":[80,8,80],"tint":"groove","when":"@position<19"},
+        {"kind":"box","at":[90,34,0],"size":[80,8,80],"tint":"traced","when":"@position>=19"},
+        {"kind":"sphere","at":[90,60,0],"r":22,"segments":12,"tint":"cursor","when":"@position=19"},
+        {"kind":"box","at":[90,34,90],"size":[80,8,80],"tint":"groove","when":"@position<20"},
+        {"kind":"box","at":[90,34,90],"size":[80,8,80],"tint":"traced","when":"@position>=20"},
+        {"kind":"sphere","at":[90,60,90],"r":22,"segments":12,"tint":"cursor","when":"@position=20"},
+        {"kind":"box","at":[0,34,90],"size":[80,8,80],"tint":"groove","when":"@position<21"},
+        {"kind":"box","at":[0,34,90],"size":[80,8,80],"tint":"traced","when":"@position>=21"},
+        {"kind":"sphere","at":[0,60,90],"r":22,"segments":12,"tint":"cursor","when":"@position=21"},
+        {"kind":"box","at":[-90,34,90],"size":[80,8,80],"tint":"groove","when":"@position<22"},
+        {"kind":"box","at":[-90,34,90],"size":[80,8,80],"tint":"traced","when":"@position>=22"},
+        {"kind":"sphere","at":[-90,60,90],"r":22,"segments":12,"tint":"cursor","when":"@position=22"},
+        {"kind":"box","at":[-90,34,0],"size":[80,8,80],"tint":"groove","when":"@position<23"},
+        {"kind":"box","at":[-90,34,0],"size":[80,8,80],"tint":"traced","when":"@position>=23"},
+        {"kind":"sphere","at":[-90,60,0],"r":22,"segments":12,"tint":"cursor","when":"@position=23"},
+        {"kind":"box","at":[0,34,0],"size":[80,8,80],"tint":"groove","when":"@position<24"},
+        {"kind":"box","at":[0,34,0],"size":[80,8,80],"tint":"traced","when":"@position>=24"},
+        {"kind":"sphere","at":[0,60,0],"r":22,"segments":12,"tint":"cursor","when":"@position=24"}
+      ],
+      "palette": {
+        "wood": "#7c5b3a",
+        "groove": "#3d2c1d",
+        "traced": "#d9c08a",
+        "cursor": "#c8483a"
+      },
+      "tags": ["game", "puzzle", "labyrinth", "object"]
+    }
+  },
+  "text": {
+    "card": "A finger labyrinth of 25 cells: trace a spiral in to the centre and back out.",
+    "labyrinth": "labyrinth",
+    "maze": "maze",
+    "put_down_first": "Put down held objects before tracing or resetting this board.",
+    "too_far_in": "Fewer cells remain to the centre than that; choose fewer steps or reverse direction.",
+    "too_far_out": "Fewer cells remain to the entrance than that; choose fewer steps or reverse direction.",
+    "already_reset": "This same cursor and trace are already reset at the entrance.",
+    "howto_trace": "With empty hands, trace in a number of cells toward the centre, then trace out again to the entrance."
+  },
+  "card": {
+    "text": "card",
+    "category": "labyrinth",
+    "synonyms": ["maze"]
+  },
+  "howtos": {
+    "trace": {
+      "text": "howto_trace",
+      "steps": [
+        {
+          "form": "trace_in"
+        },
+        {
+          "form": "trace_out"
+        }
+      ]
+    }
+  }
+}

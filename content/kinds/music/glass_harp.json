@@ -1,0 +1,579 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:glass_harp",
+  "owner": "thing",
+  "state": {
+    "reservoir": {
+      "n": 1,
+      "type": "int",
+      "unit": "g",
+      "default": 300,
+      "min": 0,
+      "max": 600,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "glass_1": {
+      "n": 2,
+      "type": "int",
+      "unit": "g",
+      "default": 0,
+      "min": 0,
+      "max": 300,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "glass_2": {
+      "n": 3,
+      "type": "int",
+      "unit": "g",
+      "default": 100,
+      "min": 0,
+      "max": 300,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "glass_3": {
+      "n": 4,
+      "type": "int",
+      "unit": "g",
+      "default": 200,
+      "min": 0,
+      "max": 300,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "strikes": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [-240, 15, 0]
+    },
+    "glasses": {
+      "role": "contact",
+      "at_mm": [0, 190, 30]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 650]
+    },
+    "rim_1": {
+      "role": "contact",
+      "at_mm": [-120, 190, 30]
+    },
+    "rim_2": {
+      "role": "contact",
+      "at_mm": [0, 190, 30]
+    },
+    "rim_3": {
+      "role": "contact",
+      "at_mm": [120, 190, 30]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [560, 200, 200]
+  },
+  "forms": {
+    "fill_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "grams": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "not_enough_water"
+        },
+        {
+          "need": "room",
+          "says": "glass_full"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "glasses"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "reservoir",
+          "from": "this",
+          "into": "this",
+          "into_field": "glass_1",
+          "amount": {
+            "arg": "grams"
+          },
+          "event": "tuned"
+        }
+      ]
+    },
+    "fill_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "grams": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "not_enough_water"
+        },
+        {
+          "need": "room",
+          "says": "glass_full"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "glasses"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "reservoir",
+          "from": "this",
+          "into": "this",
+          "into_field": "glass_2",
+          "amount": {
+            "arg": "grams"
+          },
+          "event": "tuned"
+        }
+      ]
+    },
+    "fill_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "grams": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "not_enough_water"
+        },
+        {
+          "need": "room",
+          "says": "glass_full"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "glasses"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "reservoir",
+          "from": "this",
+          "into": "this",
+          "into_field": "glass_3",
+          "amount": {
+            "arg": "grams"
+          },
+          "event": "tuned"
+        }
+      ]
+    },
+    "lower_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "grams": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "glass_low"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "glasses"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "glass_1",
+          "from": "this",
+          "into": "this",
+          "into_field": "reservoir",
+          "amount": {
+            "arg": "grams"
+          },
+          "event": "tuned"
+        }
+      ]
+    },
+    "lower_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "grams": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "glass_low"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "glasses"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "glass_2",
+          "from": "this",
+          "into": "this",
+          "into_field": "reservoir",
+          "amount": {
+            "arg": "grams"
+          },
+          "event": "tuned"
+        }
+      ]
+    },
+    "lower_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "grams": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        },
+        {
+          "need": "enough",
+          "says": "glass_low"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "glasses"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "glass_3",
+          "from": "this",
+          "into": "this",
+          "into_field": "reservoir",
+          "amount": {
+            "arg": "grams"
+          },
+          "event": "tuned"
+        }
+      ]
+    },
+    "strike_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "rim_1"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strikes",
+          "by": 1,
+          "event": "struck_1"
+        }
+      ]
+    },
+    "strike_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "rim_2"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strikes",
+          "by": 1,
+          "event": "struck_2"
+        }
+      ]
+    },
+    "strike_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "rim_3"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strikes",
+          "by": 1,
+          "event": "struck_3"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:glass_harp",
+    "table": [
+      {
+        "sound": "chime",
+        "event": "struck_1",
+        "level": 800,
+        "mode": "once",
+        "reach_mm": 8000
+      },
+      {
+        "sound": "chime",
+        "event": "struck_2",
+        "level": 800,
+        "mode": "once",
+        "reach_mm": 8000
+      },
+      {
+        "sound": "chime",
+        "event": "struck_3",
+        "level": 800,
+        "mode": "once",
+        "reach_mm": 8000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {"kind":"box","at":[40,15,0],"size":[560,30,200],"tint":"wood"},
+        {"kind":"cyl","at":[-120,33,30],"r":38,"h":6,"segments":16,"tint":"glass"},
+        {"kind":"cyl","at":[-120,65,30],"r":6,"h":60,"segments":8,"tint":"glass"},
+        {"kind":"cyl","at":[-120,98,30],"r":44,"h":6,"segments":16,"tint":"glass"},
+        {"kind":"torus","at":[-120,190,30],"r":48,"r2":3,"pitch":90000,"segments":16,"tint":"glass"},
+        {"kind":"cyl","at":[-120,115,30],"r":42,"h":30,"segments":14,"tint":"water","when":"@glass_1>=100&@glass_1<200"},
+        {"kind":"cyl","at":[-120,130,30],"r":42,"h":60,"segments":14,"tint":"water","when":"@glass_1>=200&@glass_1<300"},
+        {"kind":"cyl","at":[-120,145,30],"r":42,"h":90,"segments":14,"tint":"water","when":"@glass_1>=300&@glass_1<400"},
+        {"kind":"cyl","at":[0,33,30],"r":38,"h":6,"segments":16,"tint":"glass"},
+        {"kind":"cyl","at":[0,65,30],"r":6,"h":60,"segments":8,"tint":"glass"},
+        {"kind":"cyl","at":[0,98,30],"r":44,"h":6,"segments":16,"tint":"glass"},
+        {"kind":"torus","at":[0,190,30],"r":48,"r2":3,"pitch":90000,"segments":16,"tint":"glass"},
+        {"kind":"cyl","at":[0,115,30],"r":42,"h":30,"segments":14,"tint":"water","when":"@glass_2>=100&@glass_2<200"},
+        {"kind":"cyl","at":[0,130,30],"r":42,"h":60,"segments":14,"tint":"water","when":"@glass_2>=200&@glass_2<300"},
+        {"kind":"cyl","at":[0,145,30],"r":42,"h":90,"segments":14,"tint":"water","when":"@glass_2>=300&@glass_2<400"},
+        {"kind":"cyl","at":[120,33,30],"r":38,"h":6,"segments":16,"tint":"glass"},
+        {"kind":"cyl","at":[120,65,30],"r":6,"h":60,"segments":8,"tint":"glass"},
+        {"kind":"cyl","at":[120,98,30],"r":44,"h":6,"segments":16,"tint":"glass"},
+        {"kind":"torus","at":[120,190,30],"r":48,"r2":3,"pitch":90000,"segments":16,"tint":"glass"},
+        {"kind":"cyl","at":[120,115,30],"r":42,"h":30,"segments":14,"tint":"water","when":"@glass_3>=100&@glass_3<200"},
+        {"kind":"cyl","at":[120,130,30],"r":42,"h":60,"segments":14,"tint":"water","when":"@glass_3>=200&@glass_3<300"},
+        {"kind":"cyl","at":[120,145,30],"r":42,"h":90,"segments":14,"tint":"water","when":"@glass_3>=300&@glass_3<400"},
+        {"kind":"cyl","at":[240,33,0],"r":55,"h":6,"segments":16,"tint":"jug"},
+        {"kind":"torus","at":[240,150,0],"r":55,"r2":4,"pitch":90000,"segments":16,"tint":"jug"},
+        {"kind":"cyl","at":[240,48,0],"r":48,"h":18,"segments":14,"tint":"water","when":"@reservoir>=100"},
+        {"kind":"cyl","at":[240,66,0],"r":48,"h":18,"segments":14,"tint":"water","when":"@reservoir>=200"},
+        {"kind":"cyl","at":[240,84,0],"r":48,"h":18,"segments":14,"tint":"water","when":"@reservoir>=300"},
+        {"kind":"cyl","at":[240,102,0],"r":48,"h":18,"segments":14,"tint":"water","when":"@reservoir>=400"},
+        {"kind":"cyl","at":[240,120,0],"r":48,"h":18,"segments":14,"tint":"water","when":"@reservoir>=500"},
+        {"kind":"cyl","at":[240,138,0],"r":48,"h":18,"segments":14,"tint":"water","when":"@reservoir>=600"}
+      ],
+      "palette": {
+        "wood": "#6e4b2e",
+        "jug": "#9aa6ad",
+        "glass": "#dfe9ee",
+        "water": "#5aa0c8"
+      },
+      "tags": ["music", "glass-harp", "object"]
+    }
+  },
+  "text": {
+    "card": "Three glasses and 600 g of water: pour to tune each glass, then strike it.",
+    "music": "music",
+    "glasses": "glasses",
+    "put_down_first": "Put down held objects before tuning or striking the glasses.",
+    "not_enough_water": "Not enough water remains in this reservoir; lower another glass to recover water first.",
+    "glass_full": "That glass cannot hold that much; it holds 300 g.",
+    "glass_low": "That glass holds less water than that.",
+    "howto_play": "With empty hands, pour water from the reservoir into a glass to tune it, lower it to free water, and strike a glass to sound it."
+  },
+  "card": {
+    "text": "card",
+    "category": "music",
+    "synonyms": ["glasses"]
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "fill_1"
+        },
+        {
+          "form": "strike_1"
+        }
+      ]
+    }
+  }
+}
