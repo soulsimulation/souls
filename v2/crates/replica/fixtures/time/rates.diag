@@ -1,7 +1,8 @@
 # The tick-rate fixture (Engine v2 T5, #2643, v2/docs/time.md). Field 1: the world's start, three time effects, each
 # {1: which, 2: anchor, 3: at, 4: rate} (1 mapping: world us, real us, [num, den]; 2 tick rate: us, tick, per second;
-# 3 tempo: us, beat, period [num, den] us). Field 2: the tick-rate changes of the second run, 20 to 30 at tick 20
-# (1 s), 30 to 60 at tick 50 (2 s). Field 3: timers, [set at us, duration us]. Field 4: beats, by number.
+# 3 tempo: us, beat, period [num, den] us). Field 2: the tick-rate changes of the second run, each [written at us,
+# effect]: 20 to 30 at tick 20 (1 s), written at 0.99 s, during tick 19; 30 to 60 at tick 50 (2 s), written at 1.98 s,
+# during tick 49. Field 3: timers, [set at us, duration us]. Field 4: beats, by number.
 {
   1: [
     {1: 1, 2: 0, 3: 1763337600000000, 4: [1, 1]},
@@ -9,8 +10,8 @@
     {1: 3, 2: 0, 3: 0, 4: [60000000, 130]}
   ],
   2: [
-    {1: 2, 2: 1000000, 3: 20, 4: 30},
-    {1: 2, 2: 2000000, 3: 50, 4: 60}
+    [990000, {1: 2, 2: 1000000, 3: 20, 4: 30}],
+    [1980000, {1: 2, 2: 2000000, 3: 50, 4: 60}]
   ],
   3: [
     [0, 1],

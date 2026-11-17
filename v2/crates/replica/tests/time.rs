@@ -4,7 +4,7 @@
 
 use replica::encode::{Value, parse_diagnostic};
 use replica::time::{
-    Mapping, Micros, TickRate, TimeEffect, Timeline, beat_a_million_two_ways, time_goldens,
+    Mapping, Micros, Tempo, TickRate, TimeEffect, Timeline, beat_a_million_two_ways, time_goldens,
 };
 
 fn fixture(name: &str) -> String {
@@ -113,14 +113,21 @@ fn a1_tick_rate_changes_move_no_microsecond() {
     let fx = read("rates.diag");
     let one = start(&fx);
     let mut three = start(&fx);
-    for e in effects(field(&fx, 2)) {
-        three.apply(e).unwrap();
+    for change in field(&fx, 2) {
+        let Value::Array(pair) = change else {
+            panic!("a change is [written at, effect]")
+        };
+        let effect = TimeEffect::from_value(&pair[1]).unwrap();
+        three.apply(effect, uint(&pair[0])).unwrap();
     }
     // A change that does not start on a tick of the rate before is refused, and changes nothing.
     let off = TickRate::new(2_500_001, 80, 60).unwrap();
     let before = three.clone();
     assert_eq!(
-        three.apply(TimeEffect::TickRate(off)).unwrap_err().name(),
+        three
+            .apply(TimeEffect::TickRate(off), 2_490_000)
+            .unwrap_err()
+            .name(),
         "tick-rate-not-on-a-tick"
     );
     assert_eq!(three, before);
@@ -183,6 +190,34 @@ fn a2_beat_a_million_same_in_two_runs_and_both_builds() {
     println!(
         "A2: beat 1,000,000 at 130 a minute = {beat} us in two runs; native goldens equal the committed file"
     );
+}
+
+#[test]
+fn an_effects_anchor_is_the_first_tick_or_beat_after_it_is_written() {
+    let fx = read("rates.diag");
+    let to_30 = TimeEffect::TickRate(TickRate::new(1_000_000, 20, 30).unwrap());
+    // Tick 20 starts at 1,000,000 us at 20 a second. Written at 1,000,001, the first tick at or after is 21.
+    let mut line = start(&fx);
+    let got = line.apply(to_30, 1_000_001).unwrap_err().name();
+    assert_eq!(got, "anchor-in-past");
+    println!(
+        "rule 2: a tick rate anchored at tick 20, written at 1000001 us (tick 20 has begun) -> {got}"
+    );
+    // Written at 900,000, the first tick at or after is 18: tick 20 would be a change held for a later time.
+    let got = line.apply(to_30, 900_000).unwrap_err().name();
+    assert_eq!(got, "anchor-in-future");
+    println!("rule 2: the same, written at 900000 us (first tick at or after is 18) -> {got}");
+    assert_eq!(line, start(&fx), "a refused effect changes nothing");
+    let to_140 = TimeEffect::Tempo(Tempo::per_minute(461_539, 1, 140).unwrap());
+    let got = line.apply(to_140, 461_540).unwrap_err().name();
+    assert_eq!(got, "anchor-in-past");
+    println!("rule 2: a tempo anchored at beat 1 (461539 us), written at 461540 us -> {got}");
+    line.apply(to_140, 461_539).unwrap();
+    line.apply(to_30, 1_000_000).unwrap();
+    println!("rule 2: each written at its own anchor -> applied");
+    let got = line.world_at(1_763_337_599_999_999).unwrap_err().name();
+    assert_eq!(got, "before-world-start");
+    println!("world_at one microsecond before the first mapping's real anchor -> {got}");
 }
 
 #[test]
