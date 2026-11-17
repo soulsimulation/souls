@@ -166,6 +166,15 @@ or proxy examples to this host. Internal `sim-*` service and data names remain u
   set against its `MemoryMax`, OOM kills and the last backup. It writes `<data>/host-health.json` and appends an
   ALERT/RECOVERED line to `<data>/host-health.log`; the launcher folds the result into healthz. An external monitor
   can alert on `hostOk`.
+- **Low disk (#2378, #2538).** An overload guard against filling the disk, not a limit on visitors or agents. Each world
+  reads its free space every minute; under `SIM_DISK_MIN_FREE_MB` (default 1,024 MB) it logs `[load] disk.low`, prunes
+  by the retention rules, holds its hourly copy and refuses uploads (god assets and thumbnails, art media, bodies) with
+  `507 host.disk-low` and `Retry-After: 300`; the god's command-line tool prints the refusal and when to retry. Acts,
+  ticks, snapshots, the journal and viewing never read it. With `--disk-min-free-mb N` the launcher also refuses new
+  worlds under N MB free on its data disk (read at most every 30 s) with `503 host.disk-low` and `Retry-After: 600`,
+  and healthz raises the host code `disk` at once. It is off when absent (development machines, hosted CI);
+  `install.sh` writes `--disk-min-free-mb 4096` into a new production file, and on a host whose file already exists the
+  operator adds it to `SIM_WORLDS_ARGS` once (it takes effect at the next restart).
 
 ## Soul API ceilings
 
