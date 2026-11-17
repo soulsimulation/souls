@@ -3,7 +3,7 @@
   "kind": "test:kettle",
   "owner": "thing",
   "state": {
-    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 1700, "audience": "public" }
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 1700, "audience": {"rule": "everyone"} }
   },
   "points": {
     "handle": { "role": "grip", "at_mm": [0, 220, 0] },
@@ -36,6 +36,7 @@
       "effects": [{ "change": "transfer", "field": "water_g", "from": "this", "into": { "arg": "into" }, "amount": 250, "event": "poured" }]
     }
   },
+  "looks": { "model": "look:test_kettle", "shape": {"round":6,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,12],[84,12],[90,30],[92,70],[88,160],[78,210],[62,226],[0,229]],"segments":20,"tint":"shell"},{"kind":"cyl","at":[0,229,0],"r":58,"h":6,"segments":16,"tint":"steel"},{"kind":"sweep","at":[0,0,0],"path":[[82,110,0],[140,130,0],[205,158,0],[262,192,0]],"r":16,"segments":7,"tint":"shell"}],"palette":{"shell":"#e6dfcf","steel":"#b9bfc3"},"tags":["test","kettle"]} },
   "text": { "card": "A test kettle that holds an amount of water, for the effects' cases: fill it at a tap, pour a cupful." },
   "card": { "text": "card" }
 }
