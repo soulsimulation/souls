@@ -1,14 +1,15 @@
 # @souls/form-rules
 
 What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://github.com/soulsimulation/souls/issues/2843)),
-and what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)).
+what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)),
+and the value of a field that changes with time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)).
 `decide(input)` answers whether a form of a kind written in the [entry format](../../docs/soul-actions/entry-format.md)
 can be done now. Nothing in today's server or client calls it yet; Engine v2's shared rules (R2,
 [#2685](https://github.com/soulsimulation/souls/issues/2685)) write it again and run the same cases.
 
 ```sh
-node --test packages/form-rules/src/*.test.ts        # every case in cases/ and cases/effects/, plus the library's own checks
-node packages/form-rules/bin/browser-check.mjs       # the same verdicts in Node and in a browser build (1,000 generated cases)
+node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/ and cases/timed/, plus the library's own checks
+node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed values and crossings in Node and in a browser build
 ```
 
 ## The answer
@@ -34,7 +35,7 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts in Node
 there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
-overflows). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+overflows). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
 the test kinds in `cases/kinds/test/`.
 
 ## A case
@@ -65,6 +66,7 @@ the state and the asker, and the expected verdict; adding one changes no code.
   position in the frame of the act's thing (turning poses into that frame is geometry the engine supplies).
 - An argument naming a slot is the slot's name on the act's thing, or `{"node", "slot"}` for another node's.
   Arguments arrive resolved: choosing them from a selector is not a rule.
+- `now_us` in the state is world time in whole microseconds; it is needed only when a need reads a `timed` field.
 - `asker.sees` is the audience rules the asker satisfies for these nodes, or `"all"` for the world itself.
 - `expect` lists the keys to compare with the verdict; each key is compared whole, object key order aside.
 
@@ -110,6 +112,32 @@ and the acts done in it, in order, each with its `receipt`, an optional `actor` 
 what `effects` should return (`expect`, compared like a rule case's). `after` names nodes and what each should be
 once every act is applied (`null`: removed), compared whole. Every act that is done is also applied a second time
 with its receipt, which must change nothing.
+
+## A timed value
+
+A field of type `timed` changes by itself with time (a kettle heats, a candle burns down) and is stored as three whole
+numbers, `{value, per_s, set_us}`: its value when it was set, its rate per second in the field's unit, and the world
+time it was set, in microseconds. Nothing is written between events; Engine v2's F5
+([#2770](https://github.com/soulsimulation/souls/issues/2770)) settles and rewrites the three on any change and runs
+the same cases.
+
+- `valueAt(def, stored, now_us)`: the value plus `per_s x (now_us - set_us) / 1,000,000`, truncated toward zero (whole
+  units accrued, so rising and falling behave alike), held within the field's `min` and `max`. The rounding of a
+  falling value is F5's ([#2770](https://github.com/soulsimulation/souls/issues/2770)) to settle: a floor instead of
+  truncating the change would read one unit lower for a falling value mid-step (a candle 1 mm shorter after 1 us).
+- `crossing(def, stored, {at_least | at_most: level}, from_us)`: the first whole microsecond at or after `from_us` at
+  which that value meets the level, so the crossing is rounded up and a need on the field turns from no to yes at
+  exactly that time; `null` when it never does (the rate is zero or points away, or a bound stops it short).
+- World time is a signed 64-bit count that never stops. Every number (the three, `now_us`, `from_us`, a level, `min`,
+  `max`) may be a safe integer or a big integer, as T0's encoding reads a whole number beyond 2^53; everything is
+  worked in big integers, and a result is a number when it is a safe integer, else a big integer. Only a number or
+  result outside the signed 64-bit range is refused, as `{bad: "beyond_i64"}`; a time before `set_us` is refused as
+  `{bad: "time_before_set"}`. A Rust build needs 128-bit intermediates (rate x elapsed time exceeds 64 bits).
+  Case files are read with whole numbers beyond 2^53 as big integers (`parse` in `src/load.ts`).
+
+A file in `cases/timed/` is `{"format": "souls-timed-cases/1", "about": ..., "cases": [...]}`. A case names a kind
+and a field, a stored value, `values` as `[now_us, value]` and `crossings` as a level, `from_us` and the expected
+time (or `null`). The `timed` type is not in the entry format yet; its cases use `cases/kinds/test/timed_kettle.json`.
 
 ## Looks
 
