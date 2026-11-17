@@ -20,7 +20,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [{ "change": "set", "node": "k1", "field": "water", "n": 1, "to": "cold" }],
-            "events": [{ "event": "filled", "node": "k1", "changes": [0] }]
+            "events": [{ "event": "eden:filled", "node": "k1", "changes": [0] }]
           }
         },
         {
