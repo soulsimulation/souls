@@ -78,7 +78,7 @@ importers:
         specifier: ^0.187.0
         version: 0.187.0
       ws:
-        specifier: ^8.22.0
+        specifier: 8.22.0
         version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       zod:
         specifier: ^4.6.7
@@ -310,6 +310,12 @@ importers:
       '@types/node':
         specifier: ^22.19.19
         version: 22.20.4
+
+  packages/form-rules:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.19
+        version: 22.19.19
 
   packages/generators:
     dependencies:
