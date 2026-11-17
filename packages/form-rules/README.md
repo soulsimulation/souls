@@ -84,8 +84,17 @@ layers of Engine v2's contract T6:
   and for an amount the signed `by`), `link` / `unlink` (`node`, `link`, `n`, `end`), `reparent` (`node`, `to`),
   `create` (`node`, `kind`, `to`) and `remove` (`node`, with everything it holds). A place `to` is a slot
   `{node, slot}`, a hand `{node, hand}`, or loose in a node `{node}`.
-- `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes.
+- `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes. The name
+  is `namespace:name`: the declaring kind's namespace before the plain name its entry writes (`poured` in an
+  `eden:` kind is `eden:poured`).
 - `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event.
+
+Every value in a result is one that Engine v2's encoding profile holds (T0, `v2/docs/encoding.md`): whole numbers and
+names, never a float, a boolean or `null`. A flag is 0 or 1 (an entry may still write `true` or `false`, and the
+rules compare them as 1 and 0); text is a key by reference, `{"text": <key>}`, never words; a value that is missing
+is left out, and a `set` without `to` clears the field to its default. `outsideProfile(value)` names where a value
+leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
+`effects` refuses to write such a value and `apply` refuses to accept one.
 
 The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
@@ -106,7 +115,20 @@ hold, or `null` while it is closed to the actor; a case may name such reads in `
 
 `apply(state, result)` applies a result to plain state, all of it or none: a refusal changes nothing; a receipt
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
-change that cannot apply, refuses the batch with its index.
+change that cannot apply or a value outside the profile, refuses the batch with its index.
+
+## Chance (SA-F13)
+
+An effect `{"change": "draw", "outcomes": [{"name", "weight", "event", "set": [{"field", "to"}]}]}` has one of its rows
+happen, by weight. A weight is a whole number or `{"field": <an int field of the thing>}` (a practice count), and nothing
+else (Engine v2 E14 runs the draw by the same rule). The draw is the world's: `effects` takes `draw`, one whole number
+below the table's total per draw effect, in order, as data, so a case is fixed and nothing here is random. The row
+drawn is the first whose running total passes it. The result's event is the row's `event` and carries `outcome`, the
+row's name, so the record says which was drawn. With no `draw` the answer is `{verdict: "unknown", reason: "draw",
+effect, total, could_be: [{outcome, weight, event}]}`, the whole table with its weights now, and no changes. A draw
+outside `0..total-1`, an empty table, or a weight that is not whole is refused as `bad_input`. A reaction rule never
+draws (SA-F15). Only `set` changes are in a row for now; the entry format does not have `draw` yet, so cases use the
+test kinds `test:dartboard` and `test:die`.
 
 ## An effect case
 
@@ -265,3 +287,14 @@ that the asker still holds the thing in a hand (`not_held`), then `enter`s. An e
 <type>}`, the one thing at the end of that link of this node, never a body. Cases are in `cases/activity/pairs/` (the
 same step format, with `offer`, `accept`, `leave`, `world` running `lapse` and `now`); the test checks that no change
 names a body that is neither the actor nor a member.
+
+## Looks
+
+`looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's
+looks table, a state and the time since it changed into where each part of its model is: rotate and slide in whole
+millidegrees and millimetres, scale and glow in permille, show, tint, and pick by choice. The table is written in
+[the entry format](../../docs/soul-actions/entry-format.md#the-looks-table); `checkTable` names what is wrong with one.
+Its cases are `cases/looks/` (kinds in `cases/looks/kinds/`); `node --test packages/form-rules/src/looks.test.ts` runs
+them and `node packages/form-rules/bin/looks-browser-check.mjs` checks Node against a browser build. Today's page
+calls it for a def whose `make.args.looks_table` carries a table (`apps/web/src/gen-mesh/vocab-look.ts`); the wiring is
+thrown away when Engine v2 draws things (V17, V8), the table and the function carry over.
