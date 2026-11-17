@@ -51,8 +51,8 @@ Owner words, private rules, journals and recovery details are carried in private
 ## Maintenance and backups
 
 In-process, a minute after boot and then hourly (`backupNow` in `apps/server/src/world-main.ts`): prune call bodies and
-talk lines, write `backup-YYYYMMDDHH.db`, and keep the 6 newest plus the 00:00 UTC file of each recent day (about a
-week). The hourly job does not compact the database (a `VACUUM` stalled a serving world's tick thread); a bloated file
+talk lines, write `backup-YYYYMMDDHH.db`, and keep the 2 newest (the history is the restic snapshots, nightly and
+hourly). The hourly job does not compact the database (a `VACUUM` stalled a serving world's tick thread); a bloated file
 is compacted once at boot, before the world serves (`vacuumIfBloated` in `apps/server/src/db.ts`). Off-host copies: a launcher host backs up world data with restic. See [disaster recovery](../operations/disaster-recovery.md).
 
 With `ARCHIVE_TAKES=1` (requires `TAKES_PERSIST=1`) take segments are uploaded to R2 (`R2_*` settings, prefix
