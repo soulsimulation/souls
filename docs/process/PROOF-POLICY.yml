@@ -101,7 +101,7 @@ paths:
   - { prefix: "e2e/", tier: T1 }
   # Engine v2 (#2635): everything under v2/, its docs included, is T1 until the cut-over: focused tests and posted
   # tables, no clip, no playtest. Its CI is the `v2` job alone and its release-gate scope is `none` (K15, #2637).
-  # Written now, switched on by X8 (#2635) at the cut-over, above this line and in this order:
+  # Written now, switched on by X8 (#2839) at the cut-over, above this line and in this order:
   #   - { prefix: "v2/crates/sim/", tier: T3 }
   #   - { prefix: "v2/crates/replica/", tier: T3 }
   #   - { prefix: "v2/crates/skills/", tier: T3 }

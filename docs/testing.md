@@ -187,7 +187,7 @@ toolchain `v2/rust-toolchain.toml` pins, with a cargo cache keyed on that file a
 install. It is picked by its own paths (`v2/`) and by every full-scope run. A change only under `v2/` runs that job
 alone, has release-gate scope `none` (no walk, bundle, conformance or remote gate) and is T1, its docs included. The
 strict tiers for the core (`v2/crates/sim`, `replica`, `skills` T3; `v2/web` T2) are written in
-`docs/process/PROOF-POLICY.yml` and switched on at the cut-over (X8 of #2635). The publication check and the secret
+`docs/process/PROOF-POLICY.yml` and switched on at the cut-over by X8 (#2839). The publication check and the secret
 scanner always apply. Later tasks add their steps to `v2/tools/ci.sh`, not new jobs.
 
 **Self-hosted runners.** The `qualify` legs that `ci-scope.mjs` marks `heavy: true` (the server shards and the legs

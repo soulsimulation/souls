@@ -1,4 +1,4 @@
-//! A placeholder crate so CI's `v2` job has something to build and test (K15, #2637). K1 replaces it.
+//! A placeholder crate so CI's `v2` job has something to build and test (K15, #2637). K1 (#2638) replaces it.
 
 /// Adds two numbers; `None` when the sum does not fit.
 pub fn checked_sum(a: u64, b: u64) -> Option<u64> {
