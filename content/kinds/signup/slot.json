@@ -27,7 +27,7 @@
       "who": { "link": "signed" },
       "starts": "act",
       "needs": [
-        { "need": "linked", "link": "signed" },
+        { "need": "linked", "link": "signed", "end": "actor", "says": "not_your_name" },
         { "need": "within_reach", "point": "line" }
       ],
       "steps": [{ "step": "move", "move": "slide", "at": "line" }],
@@ -38,6 +38,9 @@
     "model": "look:signup_slot",
     "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1,0],"size":[330,2,40],"tint":"sheet"},{"kind":"box","at":[0,3,-14],"size":[320,2,2],"tint":"rule"}],"palette":{"sheet":"#fbfaf4","rule":"#9fb3c8"},"tags":["sheet","object"]}
   },
-  "text": { "card": "One place on a sheet; who signed it is a link." },
+  "text": {
+    "card": "One place on a sheet; who signed it is a link.",
+    "not_your_name": "Your name is not on this sheet; only a signer crosses their own name off."
+  },
   "card": { "text": "card" }
 }

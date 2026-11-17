@@ -65,6 +65,12 @@
       "move": "lock",
       "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [150, 1000, 450] },
       "at_us": [[1999999, [0, 900, 300]], [2200000, [75, 950, 375]], [2400000, [150, 1000, 450]], [2600000, [75, 950, 375]], [2800000, [0, 900, 300]]]
+    },
+    {
+      "why": "a turn: a hand grips a sand timer's frame and stays on it while the thing turns over in place (the second point is the grip itself), then returns",
+      "move": "turn",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [0, 1000, 450], "to_mm": [0, 1000, 450] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [0, 950, 375]], [2300000, [0, 1000, 450]], [2600000, [0, 1000, 450]], [2899999, [0, 1000, 450]], [3050000, [0, 950, 375]], [3200000, [0, 900, 300]]]
     }
   ],
   "consume": [

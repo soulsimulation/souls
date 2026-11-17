@@ -6,7 +6,7 @@
     "words": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
   },
   "links": {
-    "signer": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } }
+    "signer": { "n": 1, "from": "soul", "most": 1, "most_per": 1, "per": "parent", "audience": { "rule": "everyone" } }
   },
   "points": {
     "line": { "role": "contact", "at_mm": [0, 4, 0] }
@@ -19,7 +19,8 @@
       "takes": { "words": { "type": "text" } },
       "needs": [
         { "need": "unlinked", "link": "signer" },
-        { "need": "within_reach", "point": "line" }
+        { "need": "within_reach", "point": "line" },
+        { "need": "most_per", "link": "signer", "says": "already_signed" }
       ],
       "steps": [{ "step": "move", "move": "slide", "at": "line" }],
       "effects": [
@@ -34,6 +35,7 @@
   },
   "text": {
     "card": "One line of a guestbook: a visitor's name and a few words; it stays.",
+    "already_signed": "You have already signed the guestbook.",
     "line": "line"
   },
   "card": { "text": "card", "category": "line" }

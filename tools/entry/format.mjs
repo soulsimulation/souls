@@ -77,7 +77,9 @@ export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 
 /** The closed lists. Each grows only with the task that first needs a new member. */
 /** `sum`: the sum of two or more int fields of this kind, such as a well whose portions are kept in two fields. `any`: at
  *  least one of two or more fields of this kind is `not` a value, such as sand that is not yet smooth everywhere. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'sum', 'any']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'not_in_hand', 'hand', 'linked', 'unlinked', 'most_per', 'room', 'enough', 'sum', 'any']);
+/** The scopes a link's `most_per` may be counted in: `parent`, the things of this kind under one parent (one board). */
+export const PER = Object.freeze(['parent']);
 /** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
 /** `transfer` moves an amount between two int fields of one name (SA-F2b, #2844), or between two fields of one thing
@@ -154,10 +156,13 @@ export function validateEntry(entry) {
   for (const [name, l] of Object.entries(links)) {
     const p = `links.${name}`;
     if (!isObj(l)) { err(p, 'a link type is an object'); continue; }
-    only(l, ['n', 'from', 'most', 'most_per', 'audience'], p, err);
+    only(l, ['n', 'from', 'most', 'most_per', 'per', 'audience'], p, err);
     if (!(LINK_ENDS.includes(l.from) || (typeof l.from === 'string' && KIND.test(l.from)))) err(`${p}.from`, `must be one of ${LINK_ENDS.join(', ')}, or a kind "namespace:name"`);
     if (l.most !== undefined && !(isInt(l.most) && l.most > 0)) err(`${p}.most`, 'how many may be linked at the from end to one of these, a whole number above zero');
     if (l.most_per !== undefined && !(isInt(l.most_per) && l.most_per > 0)) err(`${p}.most_per`, 'how many of these one from end may be linked to, a whole number above zero');
+    // `per`: most_per counted among the things of this kind under one parent (one per Soul per guestbook), not world-wide.
+    if (l.per !== undefined && !PER.includes(l.per)) err(`${p}.per`, `one of ${PER.join(', ')}: where most_per is counted`);
+    else if (l.per !== undefined && l.most_per === undefined) err(`${p}.per`, 'scopes most_per; declare most_per too');
     audience(l, p, links, err);
     if (name === SOUL_LINK && !(entry.owner === 'family' && l.from === 'soul' && l.most === 1)) err(p, 'the soul link is a body\'s link to its Soul: declared by a body\'s family (owner "family"), from "soul", most 1');
   }
@@ -768,7 +773,19 @@ function form(f, path, ctx, err) {
       else value(n.field, exact ? n.is : n.not, `${p}.${exact ? 'is' : 'not'}`);
     } else if (n.need === 'slot_free') { only(n, ['need', 'slot'], p, err); slot(n.slot, `${p}.slot`); }
     else if (n.need === 'within_reach') { only(n, ['need', 'point'], p, err); place(n.point, `${p}.point`); }
-    else if (n.need === 'held_by_actor') only(n, ['need'], p, err);
+    else if (n.need === 'held_by_actor' || n.need === 'not_in_hand') only(n, ['need'], p, err);
+    else if (n.need === 'linked' || n.need === 'unlinked') {
+      // `end: "actor"`: the actor is (not) at the other end of this link on this thing (only its author takes it down).
+      only(n, ['need', 'link', 'end'], p, err);
+      linkName(n.link, `${p}.link`);
+      if ('end' in n && n.end !== 'actor') err(`${p}.end`, 'actor: whether the actor is one of the link\'s ends; leave it out for whether the link has any end');
+    } else if (n.need === 'most_per') {
+      // The actor is linked by this link to fewer than its most_per things of this kind under this thing's parent.
+      only(n, ['need', 'link'], p, err);
+      linkName(n.link, `${p}.link`);
+      const l = ctx.links[n.link];
+      if (isObj(l) && !(isInt(l.most_per) && l.per === 'parent')) err(`${p}.link`, 'a link with most_per counted per parent ("per": "parent"); a world-wide most_per is not read from one thing');
+    }
     else if (n.need === 'hand') {
       only(n, ['need', 'free', 'empty', 'holds'], p, err);
       const which = ['free', 'empty', 'holds'].filter(k => k in n);
@@ -832,11 +849,32 @@ function form(f, path, ctx, err) {
     } else if (e.change === 'link' || e.change === 'unlink') {
       only(e, ['change', 'link', 'from', 'event'], p, err);
       linkName(e.link, `${p}.link`);
-      if (e.from !== 'actor') err(`${p}.from`, 'actor');
+      // An unlink may free every end of the link on this thing (`all`: anyone takes down an out-of-date poster); it
+      // writes only this thing's own links (Engine v2 T6: a link's node is its owning end). A link is always the actor's.
+      if (!(e.from === 'actor' || (e.change === 'unlink' && e.from === 'all'))) err(`${p}.from`, e.change === 'unlink' ? 'actor, or all (every end of this link on this thing)' : 'actor');
     } else if (e.change === 'create') {
-      only(e, ['change', 'kind', 'into', 'event'], p, err);
+      only(e, ['change', 'kind', 'into', 'set', 'event'], p, err);
       if (typeof e.kind !== 'string' || !KIND.test(e.kind)) err(`${p}.kind`, 'a kind, "namespace:name"');
       if (e.into !== 'here' && e.into !== 'actor_hand') slot(e.into, `${p}.into`);
+      // `set`: fields of the made thing chosen at the bench (a candle's shape and colour), each a value written out or a
+      // value argument. They are the made kind's fields, checked against it by the check gate (refs) and by the rules.
+      if ('set' in e) {
+        if (!(Array.isArray(e.set) && e.set.length)) err(`${p}.set`, 'a list of {"field", "to"}: fields of the made thing');
+        else {
+          const seen = new Set();
+          e.set.forEach((x, j) => {
+            const sp = `${p}.set.${j}`;
+            if (!isObj(x)) { err(sp, 'an object: {"field", "to"}'); return; }
+            only(x, ['field', 'to'], sp, err);
+            if (!(typeof x.field === 'string' && IDENT.test(x.field))) err(`${sp}.field`, 'names a state field of the made kind, lower_snake_case');
+            else if (seen.has(x.field)) err(`${sp}.field`, `"${x.field}" is already set`);
+            else seen.add(x.field);
+            if (!('to' in x)) err(`${sp}.to`, 'required');
+            else if (isArg(x.to)) arg(x.to, `${sp}.to`, ['value']);
+            else if (!(typeof x.to === 'boolean' || isInt(x.to) || (typeof x.to === 'string' && IDENT.test(x.to)))) err(`${sp}.to`, 'a flag, a whole number, an enum value or a value argument');
+          });
+        }
+      }
     } else if (e.change === 'remove') { only(e, ['change', 'what', 'event'], p, err); if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`); }
     else if (e.change === 'transfer') {
       only(e, ['change', 'field', 'from', 'into', 'into_field', 'amount', 'event'], p, err);

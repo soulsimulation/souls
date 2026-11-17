@@ -48,7 +48,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
@@ -134,7 +134,9 @@ or a stall is always open). The cases are `packages/form-rules/cases/stock/stock
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
-end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
+end may be linked to (a Soul signs up to three slots). With `"per": "parent"`, `most_per` is counted among the things of
+this kind under one parent, not across the world: one signature per Soul per guestbook, one vote per poll. The
+`most_per` need reads it (below); a world-wide `most_per` is not read from one thing. A record that points at a Soul or a thing is never a list item:
 it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
 the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
@@ -237,7 +239,12 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
   (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
-  the hash follows), `linked`, `unlinked`, `room`
+  the hash follows), `linked`, `unlinked` (whether the link has any end; with `"end": "actor"`, whether the actor is
+  one of its ends, so "only its author takes a note down" refuses with the original's words), `most_per` (the actor is
+  linked by this link to fewer than its `most_per` things of this kind under this thing's parent, the link declared
+  `"per": "parent"`; a thing under no parent counts alone; a refusal is `already_linked` with `on`, the things that hold
+  the actor, so moving a vote is taking it back there first), `not_in_hand` (this thing is in nobody's hand, else
+  `in_hand`; the actor's own hold names `put` as the fix: a lantern is set down before its wick is worked), `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
   `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less), `sum` (below). A range
@@ -275,8 +282,11 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
   timer's form still checks its own needs when it fires.
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
-  into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
-  slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
+  into a slot or the actor's hand: holding is a change of parent), `link`, `unlink` (`from`: `actor`, or `all`, every end
+  of the link on this thing: anyone takes down an out-of-date poster; it writes only this thing's own links, Engine v2
+  T6's rule that an entry writes its own node), `create` (a kind, `here`, in a slot or in the hand; `set`, a list of
+  `{field, to}`, gives the made thing fields chosen at the bench, each a value or a value argument: a candle's shape and
+  colour; T6's create carries its fields, and the check gate checks them against the made kind), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
   defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
   per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
   boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
@@ -350,7 +360,9 @@ the hand, and the hand is placed so the point stays on `contact_mm` (the target'
 Five more hand moves share the shape of press and slide (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
 `swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
 `knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
-`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw.
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `turn` grips a thing and
+holds there while it turns over in place (a sand timer): its middle phase keeps the hand on the grip (the record's
+second point is the grip). A rope pull is a `tug`.
 
 ```sh
 node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference

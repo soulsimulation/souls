@@ -1,0 +1,66 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:candle_mold_bench",
+  "owner": "thing",
+  "state": {
+    "wax": { "n": 1, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } },
+    "wicks": { "n": 2, "type": "int", "unit": "count", "default": 6, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 700], "yaw_mdeg": 180000 },
+    "mold": { "role": "contact", "at_mm": [120, 900, 120] }
+  },
+  "slots": {
+    "out": { "admits": "thing", "kinds": ["eden:molded_candle"], "most": 1, "at_mm": [-250, 860, 100], "fits_mm": [120, 300, 120] }
+  },
+  "geometry": { "bounds_mm": [1000, 1000, 600] },
+  "forms": {
+    "mold": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "shape": { "type": "value", "of": ["pillar", "taper"] },
+        "colour": { "type": "value", "of": ["red", "blue", "ivory"] }
+      },
+      "needs": [
+        { "need": "state", "field": "wax", "at_least": 1, "says": "no_wax" },
+        { "need": "state", "field": "wicks", "at_least": 1, "says": "no_wicks" },
+        { "need": "slot_free", "slot": "out", "says": "take_candle_first" },
+        { "need": "hand", "empty": true, "says": "empty_hands" },
+        { "need": "within_reach", "point": "mold" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "mold" },
+        { "step": "wait", "us": 8000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "wax", "by": -1, "event": "wax_used" },
+        { "change": "set", "field": "wicks", "by": -1, "event": "wick_used" },
+        { "change": "create", "kind": "eden:molded_candle", "into": "out", "set": [{ "field": "shape", "to": { "arg": "shape" } }, { "field": "colour", "to": { "arg": "colour" } }], "event": "candle_molded" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:candle_mold_bench",
+    "table": [
+      { "part": "fill", "field": "wax", "do": "scale", "axis": "y", "range": [0, 6], "to": [0, 1000] }
+    ],
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,840,0],"size":[1000,40,600],"tint":"wood"},{"kind":"box","at":[-460,410,-260],"size":[50,820,50],"tint":"wood"},{"kind":"box","at":[460,410,-260],"size":[50,820,50],"tint":"wood"},{"kind":"box","at":[-460,410,260],"size":[50,820,50],"tint":"wood"},{"kind":"box","at":[460,410,260],"size":[50,820,50],"tint":"wood"},{"kind":"box","at":[120,890,120],"size":[220,60,160],"tint":"mold"},{"kind":"cyl","at":[60,925,120],"r":30,"h":10,"segments":10,"tint":"hole"},{"kind":"cyl","at":[180,925,120],"r":14,"h":10,"segments":8,"tint":"hole"},{"kind":"box","at":[330,920,-150],"size":[200,120,140],"tint":"wax","role":"fill","pivot":[330,860,-150]},{"kind":"box","at":[-60,868,-180],"size":[160,16,40],"tint":"wick"}],"palette":{"wood":"#8a6a48","mold":"#6f7378","hole":"#2c2c2c","wax":"#efe4c8","wick":"#3b3530"},"tags":["workbench","craft","candle","object"]}
+  },
+  "text": {
+    "card": "A candle bench with six wax portions and six wicks: mold a pillar or a taper.",
+    "no_wax": "The bench has no wax portion left.",
+    "no_wicks": "The bench has no wick left.",
+    "take_candle_first": "Take the finished candle from the bench before molding another.",
+    "empty_hands": "Empty your hands before molding a candle.",
+    "craft": "craft",
+    "candle_bench": "candle bench",
+    "mold": "mold",
+    "howto_mold": "With empty hands, choose a pillar or a taper and a colour, mold it, then take the candle."
+  },
+  "card": { "text": "card", "category": "craft", "synonyms": ["candle_bench", "mold"] },
+  "howtos": {
+    "mold": { "text": "howto_mold", "steps": [{ "form": "mold" }] }
+  }
+}

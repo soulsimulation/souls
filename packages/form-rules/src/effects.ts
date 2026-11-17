@@ -31,7 +31,7 @@ export type Change =
   | { change: 'set'; node: string; field: string; n: number; to?: unknown; by?: number }
   | { change: 'link' | 'unlink'; node: string; link: string; n: number; end: string }
   | { change: 'reparent'; node: string; to: Place }
-  | { change: 'create'; node: string; kind: string; to: Place }
+  | { change: 'create'; node: string; kind: string; to: Place; fields?: Record<string, unknown> }
   | { change: 'remove'; node: string };
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
@@ -158,14 +158,28 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
       const ends = work[self].links?.[e.link!] ?? [];
       if (e.change === 'link' && ends.includes(actor)) return refuse(i, 'already_linked', { link: e.link });
       if (e.change === 'link' && ends.length >= def.most) return refuse(i, 'link_full', { link: e.link, most: def.most });
-      if (e.change === 'unlink' && !ends.includes(actor)) return refuse(i, 'not_linked', { link: e.link });
-      out.push({ change: e.change, node: self, link: e.link!, n: def.n, end: actor });
+      // `from: "all"` frees every end of the link on this thing, each its own unlink, all of them this thing's own links
+      // (Engine v2 T6: a link's node is its owning end). An empty link frees nothing.
+      if (e.change === 'unlink' && e.from === 'all') for (const end of [...ends].sort() as string[]) out.push({ change: 'unlink', node: self, link: e.link!, n: def.n, end });
+      else {
+        if (e.change === 'unlink' && !ends.includes(actor)) return refuse(i, 'not_linked', { link: e.link });
+        out.push({ change: e.change, node: self, link: e.link!, n: def.n, end: actor });
+      }
     } else if (e.change === 'reparent' || e.change === 'create') {
       const to = place(e.into);
       if (typeof to === 'string') return refuse(i, to === 'no_free_hand' || to === 'slot_taken' ? to : 'bad_input', { what: to });
       if (e.change === 'create') {
         if (typeof e.kind !== 'string' || !has(kinds, e.kind)) return refuse(i, 'bad_input', { what: 'no_such_kind', kind: e.kind ?? null });
-        out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to });
+        // Fields of the made thing chosen at the bench (a candle's shape and colour): T6's create carries its fields.
+        const fields: Record<string, unknown> = {};
+        for (const x of Array.isArray(e.set) ? e.set : []) {
+          const def = has(kinds[e.kind].state, x?.field) ? kinds[e.kind].state![x.field] : undefined;
+          const v = arg(x?.to, args);
+          const ok = def && (def.type === 'bool' ? typeof v === 'boolean' : def.type === 'enum' ? (def as { values?: unknown[] }).values?.includes(v) : def.type === 'int' && Number.isSafeInteger(v));
+          if (!ok) return refuse(i, 'bad_input', { what: def ? 'not_a_value' : 'no_such_field', kind: e.kind, field: x?.field ?? null });
+          fields[x.field] = stored(def, v);
+        }
+        out.push({ change: 'create', node: `${receipt}.${made++}`, kind: e.kind, to, ...(Object.keys(fields).length ? { fields } : {}) });
       } else {
         const node = subject(e.what);
         if (!node) return refuse(i, 'bad_input', { what: 'malformed_subject' });
@@ -319,7 +333,7 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
     case 'create':
       if (node) return 'node_exists';
       if (typeof c.kind !== 'string') return 'malformed_change';
-      nodes[c.node] = { kind: c.kind };
+      nodes[c.node] = { kind: c.kind, ...(c.fields ? { fields: { ...c.fields } } : {}) };
       return attach(nodes, c.to, c.node);
     case 'remove': {
       if (!node) return 'no_such_node';
