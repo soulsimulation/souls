@@ -126,6 +126,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
 | `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
 | `no-labels` | a mood word in the card | no |
 | `refs` | a kind that is not loaded, or kinds in a circle | no |
 
