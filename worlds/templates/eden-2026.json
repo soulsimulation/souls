@@ -5985,7 +5985,7 @@
         },
         {
           "op": "place",
-          "def": "core/church@3",
+          "def": "core/church@4",
           "name": "region-abbey-church",
           "p": [
             -160.5,
@@ -13074,7 +13074,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-1",
           "p": [
             180,
@@ -13174,7 +13174,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-2",
           "p": [
             193,
@@ -13274,7 +13274,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-3",
           "p": [
             219,
@@ -13374,7 +13374,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-4",
           "p": [
             232,
@@ -13474,7 +13474,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-5",
           "p": [
             180,
@@ -13574,7 +13574,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-6",
           "p": [
             180,
@@ -13679,7 +13679,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-7",
           "p": [
             193,
@@ -13779,7 +13779,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-8",
           "p": [
             193,
@@ -13878,7 +13878,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-9",
           "p": [
             219,
@@ -13978,7 +13978,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-10",
           "p": [
             219,
@@ -14077,7 +14077,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-11",
           "p": [
             232,
@@ -14177,7 +14177,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-12",
           "p": [
             232,
@@ -14276,7 +14276,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-13",
           "p": [
             180,
@@ -14375,7 +14375,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-14",
           "p": [
             193,
@@ -14480,7 +14480,7 @@
       "ops": [
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-15",
           "p": [
             219,
@@ -14579,7 +14579,7 @@
         },
         {
           "op": "place",
-          "def": "core/house@3",
+          "def": "core/house@4",
           "name": "suburb-house-16",
           "p": [
             232,
