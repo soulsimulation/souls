@@ -50,7 +50,9 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm` |
 | 7 | `geometry` | `bounds_mm` |
 | 8 | `forms` | What can be done with it (below) |
-| 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
+| 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 12 | (reserved) | `reactions` (SA-F15) |
 | 20 | `looks` | How it looks; its table is SA-D1a's |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
@@ -64,9 +66,9 @@ Not defined yet, and refused with the name of the task that adds each: `reaction
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
 end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
-it is a child node, declared in `children` with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
-the sheet (`content/kinds/signup/`). Holding is a change of parent, not a link.
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
 whole on every change, Engine v2 F11, [#2774](https://github.com/soulsimulation/souls/issues/2774)), `of` (one to eight
