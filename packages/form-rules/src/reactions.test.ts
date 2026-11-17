@@ -45,7 +45,7 @@ test('A1: a switch sets three linked lamps; dusk lights a street lamp; a kettle 
   const lamps = react({ kinds, ...by('switch_on_lights_its_three_lamps') });
   assert.ok(lamps.verdict === 'yes' && new Set(lamps.changes.map((x) => x.node)).size === 3);
   const dusk = react({ kinds, ...by('dusk_lights_the_street_lamp') });
-  assert.ok(dusk.verdict === 'yes' && same(dusk.changes, [{ change: 'set', node: 's1', field: 'lit', n: 1, to: true }]));
+  assert.ok(dusk.verdict === 'yes' && same(dusk.changes, [{ change: 'set', node: 's1', field: 'lit', n: 1, to: 1 }]));
   for (const name of ['stove_lit_under_the_kettle_gives_it_a_rate', 'kettle_put_on_a_lit_stove_gives_it_a_rate']) {
     const kettle = react({ kinds, ...by(name) });
     assert.ok(kettle.verdict === 'yes' && (kettle.changes[0] as { to: { per_s: number } }).to.per_s === 800, name);
@@ -58,9 +58,9 @@ test('A1: the shop closes at six with a timer of fourteen hours, and that timer 
   assert.ok(closed.verdict === 'yes' && 'timers' in closed, JSON.stringify(closed));
   assert.deepEqual(closed.timers, [{ node: 'sh', form: 'opening', after_us: 14 * 3600 * 1000000, event: 1 }]);
   const after = apply(state, closed);
-  assert.ok(after.ok && same(after.state.nodes.sh.fields, { open: false }));
+  assert.ok(after.ok && same(after.state.nodes.sh.fields, { open: 0 }));
   const opened = react({ kinds, state: after.state, cause: { due: closed.timers[0].form, node: 'sh' }, receipt: 'due' });
-  assert.ok(opened.verdict === 'yes' && same(opened.changes, [{ change: 'set', node: 'sh', field: 'open', n: 1, to: true }]));
+  assert.ok(opened.verdict === 'yes' && same(opened.changes, [{ change: 'set', node: 'sh', field: 'open', n: 1, to: 1 }]));
 });
 
 // A2 and A3: each check case's kinds, loaded in its order, give exactly the expected errors.
