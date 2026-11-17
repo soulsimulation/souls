@@ -20,7 +20,10 @@ export function eased(num, den) {
   return Math.floor((p * p * (3 * PERMILLE - 2 * p)) / (PERMILLE * PERMILLE));
 }
 
-const between = (a, b, k) => a.map((v, i) => v + Math.trunc(((b[i] - v) * k) / PERMILLE));
+/** A signed whole-number quotient rounded to the nearest unit, halves away from zero (Engine v2's rule for a position;
+ *  truncating would be biased and make a slide and its reverse differ). Whole-number arithmetic only. */
+const roundDiv = (n, d) => (n < 0 ? -Math.floor((-n * 2 + d) / (2 * d)) : Math.floor((n * 2 + d) / (2 * d)));
+const between = (a, b, k) => a.map((v, i) => v + roundDiv((b[i] - v) * k, PERMILLE));
 
 /** Each phase's time in microseconds after the start: contact is the instant, `end_us` the end of recovery. */
 export function timesOf(move) {

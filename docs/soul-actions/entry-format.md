@@ -158,7 +158,8 @@ node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/ent
 
 `tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
 (`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
-arithmetic only (easing in permille), so Node and a browser build give the same position. It does not check reach or
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
 move the thing's frame into the world's: the caller passes world positions.
 
 ## The hash, provisional
