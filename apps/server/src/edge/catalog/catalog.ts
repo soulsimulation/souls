@@ -24,7 +24,9 @@ export type CatalogPlaceIn = {id: string; name: string; kind: string; parent: st
 export type CatalogSpotIn = {id: string; place?: string; activity: string; also?: readonly string[]; at: V2; label?: string; title?: string; together?: {need: number}; requires?: string};
 /** #1751: an act a kind of thing takes by hand, sent as `object:<thing>:<verb>`; `when` is the state it needs. */
 export type CatalogKindAct = {verb: string; label: string; params?: Record<string, unknown>; when?: {field: string; is?: unknown; not?: unknown}[]};
-export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; seat?: boolean; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null};
+export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; seat?: boolean; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null;
+  /** SA-C3: a thing loaded from an entry (tools/entry/load.mjs): the kind its def's `entry` param names, and the entry */
+  entry?: {kind: string; body: unknown} | null};
 /** activity-spots/1 `interiors[]`: a building made enterable through its doors (each door a segment `[x0, z0, x1, z1]` across its wall). */
 export type CatalogInteriorIn = {place: string; doors: readonly (readonly number[])[]; shell?: [number, number, number, number]; wall?: number};
 export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]; interiors?: readonly CatalogInteriorIn[]};
@@ -42,6 +44,8 @@ export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope
   /** #1751: per kind of thing, the acts it takes by hand (`object:<thing id>:<verb>`) and its state's defaults. Only kinds
    *  that take acts or have a published state (a bucket that only receives: acts []). */
   kinds: Record<string, {acts: CatalogKindAct[]; state: Record<string, unknown>}>;
+  /** SA-C3: the entries of the things loaded from one, by the kind each names (an entry thing's `kind`); absent when none */
+  entries?: Record<string, unknown>;
   counts: {places: number; things: number; acts: number; kinds: number; handKinds: number; handThings: number}};
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -97,13 +101,16 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
     ...(p.carrier ? {} : p.doors?.length ? {doors: p.doors.map(d => ({...d}))} : interiors.has(p.id) ? {doors: placeDoors(p, interiors.get(p.id)!)} : {})})).sort(byId);
   const known = new Set(input.places.map(p => p.id));   // #1262: no place is secret, whatever its data says
   const shown = input.things.filter(t => !t.place || known.has(t.place));
-  const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOf(t.kind), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);
+  // SA-C3: a thing loaded from an entry is of the entry's kind, and the entry is published once by it
+  const kindOfThing = (t: CatalogThingIn) => t.entry?.kind ?? kindOf(t.kind), entries = new Map<string, unknown>();
+  for (const t of shown) if (t.entry && !entries.has(t.entry.kind)) entries.set(t.entry.kind, t.entry.body);
+  const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOfThing(t), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);
   // one entry per kind (`state`: what a thing of it is in until the live picture says otherwise). A revision whose acts or
   // defaults differ from the kind's first (in id order) gets its own entry, `<kind>@<revision>`, named by its things' `hands`.
   const handKinds = new Map<string, {sig: string; acts: CatalogKindAct[]; state: Record<string, unknown>}>(), handsOf = new Map<string, string>(); let handThings = 0;
   for (const t of [...shown].sort(byId)) {
     if (!t.hand) continue; handThings++;
-    const base = kindOf(t.kind), sig = stableStringify(t.hand);
+    const base = kindOfThing(t), sig = stableStringify(t.hand);
     let k = base;
     if (handKinds.has(k) && handKinds.get(k)!.sig !== sig) { k = `${base}@${/@(\d+)/.exec(t.kind)?.[1] ?? '0'}`; if (handKinds.has(k) && handKinds.get(k)!.sig !== sig) k = `${k}:${hashOf(t.hand).slice(0, 8)}`; }
     if (!handKinds.has(k)) handKinds.set(k, {sig, acts: [...t.hand.acts], state: {...t.hand.state}});
@@ -111,7 +118,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   }
   for (const t of things) {const h = handsOf.get(t.id); if (h) t.hands = h;}
   // a thing of a revision that takes no acts, where another revision of its kind does
-  const bare = new Set(shown.filter(t => !t.hand && handKinds.has(kindOf(t.kind))).map(t => t.id));
+  const bare = new Set(shown.filter(t => !t.hand && handKinds.has(kindOfThing(t))).map(t => t.id));
   for (const t of things) if (bare.has(t.id)) t.byHand = false;
   const kinds: Catalog['kinds'] = Object.fromEntries([...handKinds].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([k, m]) => [k, {acts: m.acts, state: m.state}]));
   const acts: CatalogAct[] = [];
@@ -122,7 +129,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
       label: verb === s.activity && s.title ? `${s.title} (${where})` : `${verb.replace(/-/g, ' ')} (${where})`, ...(s.together ? {with: s.together.need} : {}), ...(s.requires ? {needs: s.requires} : {})});
   }
   acts.sort(byId);
-  const payload: Catalog = {contract: CATALOG_CONTRACT, worldId: input.worldId, scope: 'public', placeVerbs: PLACE_VERBS, anywhere: ANYWHERE.map(([verb, label]) => ({id: `${verb}:here`, verb, label})), places, things, acts, kinds,
+  const payload: Catalog = {contract: CATALOG_CONTRACT, worldId: input.worldId, scope: 'public', placeVerbs: PLACE_VERBS, anywhere: ANYWHERE.map(([verb, label]) => ({id: `${verb}:here`, verb, label})), places, things, acts, kinds, ...(entries.size ? {entries: Object.fromEntries([...entries].sort((a, b) => a[0] < b[0] ? -1 : 1))} : {}),
     counts: {places: places.length, things: things.length, acts: acts.length, kinds: new Set(things.map(t => t.kind)).size, handKinds: handKinds.size, handThings}};
   const serialized = stableStringify(payload), version = hashOf(payload);
   return {payload, serialized, etag: `"${version}"`, version};

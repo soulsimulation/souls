@@ -39,7 +39,7 @@ import { fadingIds } from '../art/art.ts';
 import { createWatering, type Watering } from './watering.ts';
 import { createMending, type Mending } from './mending.ts';
 import { createTea, type Tea } from './tea.ts';
-import { createFormsAdapter } from './forms-adapter.ts';
+import { catalogEntry, createFormsAdapter } from './forms-adapter.ts';
 import { createHarvest, type HarvestFaculty } from './harvest.ts';
 import { createContactActuatorService, isContactActuator } from './contact-actuator.ts';
 import { createDoorPassage } from './door-passage.ts';
@@ -346,6 +346,8 @@ export class EngineBridge {
       this.edge.thingName=(id)=>this.model.entities.has(id)?this.model.pathOf(id):null;
       // #1751: the catalog's acts per thing and the live picture's thing states, from the def's own action list
       this.edge.thingActs=(id)=>{const e=this.model.entities.get(id),def=e&&this.model.resolvedDef(e.def);if(!def)return null;const acts=catalogActs(def),state=stateDefaults(def);return acts.length||Object.keys(state).length?{acts,state}:null;};
+      // SA-C3 (forms-adapter.ts): a thing loaded from an entry publishes its entry in the catalog
+      this.edge.thingEntry=(id)=>{const e=this.model.entities.get(id);return e?catalogEntry(this.model.resolvedDef(e.def)):null;};
       let states:{v:number;m:Map<string,Record<string,unknown>>}|null=null;
       this.edge.thingStates=()=>{if(states?.v===this.model.editSeq)return states.m;const m=new Map<string,Record<string,unknown>>();
         for(const e of this.model.entities.values()){if(!e.state)continue;const def=this.model.resolvedDef(e.def),d=def&&stateDiff(e,def);if(d)m.set(e.id,d);}

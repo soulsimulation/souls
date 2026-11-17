@@ -26,7 +26,8 @@ import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 type Vec2 = [number, number];
 type Vec3 = [number, number, number];
 type Step = { verb: string; params: Record<string, unknown> };
-type Refusal = { code: string; reason: string };
+/** A refusal; an entry's form adds `decided`, the rules library's own verdict (reason, detail, fix, read), for the client. */
+type Refusal = { code: string; reason: string; decided?: unknown };
 type Action = StoredDef['actions'][number];
 
 const ROOT = resolve(import.meta.dirname, '../../../..');
@@ -59,6 +60,10 @@ function moves(): Record<string, { reach_mm: number }> {
   return movesCache;
 }
 
+/** The catalog's copy of an entry thing (SA-C3): its kind, from the def's `entry` param, and the entry itself; else null. */
+export function catalogEntry(def: StoredDef | undefined): { kind: string; body: Entry } | null {
+  const entry = entryOf(def); return entry ? { kind: entry.kind, body: entry } : null;
+}
 /** The entry a def was loaded from (load.mjs: tag `entry`, param `entry` = `<kind>@<hash>`), or null. */
 export function entryOf(def: StoredDef | undefined): Entry | null {
   if (!def?.tags?.includes('entry')) return null;
@@ -125,7 +130,7 @@ export function createFormsAdapter(h: FormsHost) {
     const body = h.engine.world.entities[soul.entityId]; if (!body?.pose?.p) return null;
     // the needs as they stand now, with the hand where the form's move puts it (its walk meets within_reach)
     const mv = (form.steps ?? []).find((s) => s.step === 'move'), now = ask(t, id, action, soul.entityId, (mv && t.entry.points?.[mv.at as string]?.at_mm) ?? [0, 0, 0], 'plan');
-    if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.` };
+    if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.`, decided: now };
     const wp = M().worldPose(t.e), level = h.levelAt(wp.x, wp.z, wp.y), points = t.entry.points ?? {};
     const stands = Object.entries(points).filter(([, p]) => (p as { role?: string }).role === 'stand').map(([, p]) => toWorld(wp, p.at_mm));
     const steps: Step[] = [{ verb: 'stand', params: {} }];
@@ -168,7 +173,7 @@ export function createFormsAdapter(h: FormsHost) {
       else { const dx = body.pose.p[0] - wp.x, dz = body.pose.p[2] - wp.z, c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); effector = [Math.round((dx * c - dz * s) * 1000), 0, Math.round((dx * s + dz * c) * 1000)]; }
     }
     const r = ask(t, id, action, bodyId, effector, `${capability}@${h.engine.world.tick}`);
-    if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.` };
+    if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.`, decided: r };
     const patch: Record<string, unknown> = {};
     for (const c of r.changes as Change[]) if (c.change === 'set' && c.node === id) patch[c.field] = valueFor(t.def, c.field, (c as { to?: unknown }).to);
     if (Object.keys(patch).length && !h.commit([opSchema.parse({ op: 'set', id, state: patch })], `${bodyId} ${action} ${id}`).accepted)
