@@ -1,0 +1,11 @@
+# A world's directory record (Engine v2 T11, #2665, v2/docs/durability.md rules 9 and 10), the object world/<zone>
+# in the object store. Each field changes only by a write conditional on the version read. A sleeping world.
+{
+  1: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],                                     # the zone (its root): one per world today
+  2: "souls:machine-a",                                                            # where it runs: a machine, by name
+  3: 4,                                                                            # its epoch, which only grows
+  4: 1200,                                                                         # the sequence epoch 4 took over at
+  5: 1834,                                                                         # the off-machine mark: last sequence stored there
+  6: 1795000000000000,                                                             # when it must wake: real time, us since 1970
+  7: h'12208c854707e5559d7b4a982e5c32ff0071e295bba0179f3bddd098d2c9ac239b57'       # its pinned build (a stand-in hash)
+}
