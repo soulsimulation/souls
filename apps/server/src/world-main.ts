@@ -164,7 +164,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     onTicker: (lines) => hub?.broadcast({ t: 'ticker', lines }),
     onNarrative: (view) => hub?.broadcast({ t: 'narrative', view }),
     onTalk: (lines) => hub?.broadcast({ t: 'talk', lines }),
-    clients: () => hub?.clients.size ?? 0,
+    clients: () => host.viewerCount(),
   },edenCapabilities?{intentV2Choices:true}:undefined);
   const souls = new Souls(host, db, brain, config);
   if(edenCapabilities||accountLifecycle&&host.engine.rulesVersion.includes('+crew-removal/1'))souls.enableLifecycle();
@@ -177,7 +177,6 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, config.worldPath);
   server.on('upgrade', req => { req.url = stripWorldPath(req.url); host.wake(); });   // #2384: a viewer wakes a sleeping still world
   hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
-  host.watched = () => hub.clients.size > 0;   // #2298 A4b
   host.listeners.push({ afterTick: () => { load.shared[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
   const faultInject = config.env.SIM_FAULT_INJECT === '1' ? installFaultInject(host, config.dataDir) : null;
   if (lastExit?.quarantine) host.quarantinedStep = lastExit.quarantine;   // #2378 A2: a step that ended two boots in a row
