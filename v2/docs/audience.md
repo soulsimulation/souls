@@ -7,65 +7,73 @@ The store that keeps the words (K16), signing in (W1), removal end to end (W7) a
 
 ## Who may see a record
 
-1. **An audience is everyone, or an id naming a set of principals.** Principals are Souls and creators, each named by
-   an id the directory mints (never an account id). A role is not a stored principal: it is a link (`roles.now`,
-   whose turn it is) that the `linked` rule resolves to the Souls in it. **A record is seen by its audience's members
-   as the log stood when it was written** (the state just before the entry), never as it stands when read, so a
-   principal who joins later does not see what came before. Membership changes are effects: the link and unlink of
-   T6 at the thing the audience belongs to.
-2. **One resolver for SA-F8's four rules** (#2947), run when a record is committed: `everyone` is everyone;
-   `creator` is the world's creator's own principal id; `owner` and `{linked, link: L}` are the thing's audience node
-   for `souls:owns` or for `L`. An audience node is a child of the thing, of kind `souls:audience`, with the thing's
-   own audience and fields `{1: 1 owner or 2 linked, 2: link type}`; it lives and dies with the thing. The commit
-   creates it before the first record that needs it (`audience-not-declared` until then). Its members are the
-   principals at the far end of that type's links at the thing. A rule names a link at the thing itself, never one
-   on a parent (SA-F8's open point, settled here): a seat's player is a link on the seat. Any other audience id is one
-   principal's own, with that one member for ever: a whisper's, or a creator's private state.
-3. **A node has one audience (T6), so a field of another lives on a facet.** When a kind's field rule resolves to an
-   audience other than its node's (a seat's `hand`), the field lives on a child of kind `souls:facet` with that
-   audience, created with the node, and is written by that child's own entries ([effects.md](effects.md) rule 6). A
-   `closed` container's fields (SA-F8) are a facet with the container's audience.
+1. **An audience is everyone, or an id naming a set of principals, and that set is written once.** Principals are
+   Souls and creators, each named by an id the directory mints, never an account id. Any audience id that is not an
+   audience node (rule 2) is one principal's own, with that one member for ever: a whisper's, a creator's private
+   state. An audience node's members are its own `souls:member` links, written in the entry that creates it and never
+   changed. So **a record is seen by its audience's members as they were when it was written**: a principal who joins
+   later is a member of a new audience, not the old one, and is never sent what came before. A viewer is sent the
+   public views and the views of each audience it is a member of (T7 rule 5).
+2. **One resolver for SA-F8's four rules** (#2947), run when a record is committed. `everyone` is everyone; `creator`
+   is the world's creator's own principal id. `owner` and `{linked, link: L}` name the principals at the far end of
+   `souls:owns` or `L` links at the thing itself (never on a parent: SA-F8's open point, settled here), each body
+   counted as its Soul by `souls:body-of`. They resolve to the thing's audience node for that rule whose members are
+   exactly those principals: a child of the thing, of kind `souls:audience`, with the thing's own audience and fields
+   `{1: 1 owner or 2 linked, 2: link type}`. When none matches (none yet, or someone joined or left), the commit writes
+   a new one first (`audience-not-declared` names the members it needs). A role (`roles.now`, section 17) is a link
+   type, resolved like any other. A creator cannot be a link end (T2 rule 7), so `owner` and `linked` name Souls.
+3. **A node has one audience for life (T6), so a field of another lives on a facet.** When a kind's field rule
+   resolves to an audience other than its node's (a seat's `hand`), the field lives on a child of kind `souls:facet`
+   with that audience, written by its own entries ([effects.md](effects.md) rule 6). The commit creates it, in an
+   entry of that audience, before the field's first value. When the audience changes (rule 2), the facet ends and a
+   new one takes the field for the new audience. What opening a `closed` container (SA-F8 section 9) does to its
+   fields and children is E22's; on this page it is a facet with the `closed` rule's audience.
 4. **How far a voice reaches is not who may read it** (E13). Speech is an event, `souls:said {1: reference, 2: reach
    in mm}`. Ordinary speech has the public audience and a short reach; a whisper has an audience of one, the
-   listener.
+   listener. The speaker's own client keeps what it said.
 5. **Account ids stay out of the log.** An actor is a Soul, a creator's principal id or the world (T6 rule 6).
-   Re-checking links when an audience's members change (T2 rule 11) is the commit's (K3); it never rewrites a record.
+   Re-checking links at a node when its audience changes (T2 rule 11) is the commit's (K3); it never rewrites a record.
 
 ## Words, kept apart
 
 6. **All free text and every upload, however short, whoever wrote it, is kept apart under a reference.** The log
-   holds `{21: id}` and nothing else in that record; field 21 alone is reserved for this in every record. A `text`
-   field (SA-F6b, #2951) holds one. Words the kind's author wrote are part of the kind (its `text` section), not
-   the log's.
-7. **A reference is minted (T3), never a hash of the words.** A hash of a short text is guessed from a list, and it
-   survives removal as a fingerprint.
-8. **A view never holds words; delivery may.** A view (T7, [views.md](views.md)) carries references. Delivered to an
-   audience entitled to the record, a reference gets its words beside it, `{21: id, 23: words}`, when the store has
-   them and the redaction list does not name it. The archive never holds words.
+   holds `{21: id}` and nothing else in that record; field 21 alone is reserved for this in every record, with 22 and
+   23 for what a view and delivery add. A `text` field (SA-F6b, #2951) holds one. Words the kind's author wrote are
+   part of the kind (its `text` section), not the log's.
+7. **A reference is minted (T3), never a hash of the words, and belongs to one audience:** that of the entry that
+   first carries it. The store keeps that audience with the words. A record of another audience may not carry it
+   (`reference-audience`, refused at commit), and delivery gives its words to no other audience even if one does.
+8. **A view never holds words; delivery may.** A view (T7, [views.md](views.md)) carries references. Delivered, a
+   reference gets its words beside it, `{21: id, 23: words}`, when the view's audience is the reference's, the store
+   has them and the redaction list does not name them. Words not at hand leave the reference bare. The list must be
+   the one the view names (`redactions-differ`), so an older list never undoes a removal.
 
 ## Removing words, and forks
 
-9. **Removal deletes the words from the store and adds the reference to the redaction list.** No byte of the log and
-   no hash changes. Every view built with the list marks the reference `{21: id, 22: 1}`, and delivery puts no words
-   beside it. Copies outside the store (a reader's, a cache's) outlive the delete until purged; purging is W7's and
-   V2's.
-10. **A fork is a view of a checkpoint through one principal.** It keeps the ids and the nodes and links that
-    principal sees; nothing under a node it drops; no body (a Soul is in one world, T3; K6 sets down what a body
-    held); and removed words stay removed, since it shares the text store and the redaction list. One creator's fork
-    never holds another's private state.
+9. **Removal deletes the words from the store and adds the reference to the redaction list.** The log is not an
+   input to removal: no byte and no hash of it changes. Every view built with the list marks the reference
+   `{21: id, 22: 1}`. Copies outside the store (a reader's, a cache's) outlive the delete until purged; purging is
+   W7's and V2's. The list is a lineage family's (a world and its forks); views name it by hash.
+10. **A fork is a view of a checkpoint through one principal's audiences:** everyone's, its own and those it is a
+    member of at the checkpoint. It keeps the ids and the nodes and links it sees; nothing under a node it drops; no
+    body (a Soul is in one world, T3; K6 sets down what a body held); and removed words stay removed, since it shares
+    the text store and the redaction list. One creator's fork never holds another's private state.
 
 **Step 0.** T6's 13 fixtures hold 36 text items, every one a name: no free text sits in a record.
 
 ## What would quietly break this
 
-- **Membership looked up when read.** A principal added later would see every old whisper and hand.
+- **Membership looked up when read, or an audience whose members change.** A principal added later would be sent
+  every old hand and whisper.
 - **Audiences as a fixed list in stored bytes** (public, owner, creator). A hand of cards, a team or a whisper needs a
   rewrite of history.
 - **An account id in an actor or an audience.** Removing a person would mean rewriting the log.
-- **A reference that is a hash of its words.** Short words are guessed, and the hash outlives their removal.
+- **A reference that is a hash of its words, or one shared across audiences.** Short words are guessed; a public
+  record naming a whisper's reference would publish the whisper.
 - **Words inline anywhere in a record,** a name or a reason included. They can never be removed.
 - **A view that holds words,** or a removal that rewrites a view. A redaction would then have to find every copy.
 - **A private field on a public node.** T6 would write it in the node's public entry, for everyone.
-- **A rule that follows a link on a parent.** Who sees a field would change when something else moves.
+- **A rule that follows a link on a parent,** or a body end not counted as its Soul. Who sees a field would change
+  when something else moves, or nobody would.
 - **A fork through a world's whole state.** One creator's fork would hand over another's private notes.
 - **A public cache of a private view, or a delete that forgets caches.** Removed words would still be served.

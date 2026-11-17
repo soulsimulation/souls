@@ -5,18 +5,18 @@
 use std::collections::BTreeSet;
 
 use replica::audience::{
-    Rule, TextStore, deliver, fork, members, references, remove, resolve, sees,
+    Rule, TextStore, audiences_of, deliver, fork, members, references, remove, resolve, sees,
 };
 use replica::effects::{FIXTURE_HEADER, FIXTURES, Header, Part, State, fixture_bytes, texts};
 use replica::encode::{Name, Value, decode, encode};
 use replica::ids::{Hash, Id, Purpose, Scope as IdScope};
-use replica::views::{Key, ORDER, Redactions, build};
-use replica::world_model::Audience;
+use replica::views::{Key, Level, ORDER, Redactions, build, entry_part};
+use replica::world_model::{Audience, show};
 
 const HEADER: &str = include_str!("../fixtures/audience/header.diag");
 const LOG: &str = include_str!("../fixtures/audience/log.diag");
 
-/// What the board says, aloud and in a whisper: the stand-in for K16's store. Never in a fixture.
+/// What the board says, what is said aloud and what is whispered: the stand-in for K16's store. Never in a fixture.
 const BOARD: &str = "meet me at the well at noon";
 const ALOUD: &str = "hello everyone";
 const WHISPER: &str = "the key is under the mat";
@@ -35,17 +35,13 @@ struct Log {
 
 fn log() -> Log {
     let header = Header::read(&fixture_bytes(HEADER).expect("bytes")).expect("a header");
-    let root = header.kinds[0].clone();
-    let start = State::start(header.zone, root);
+    let start = State::start(header.zone, header.kinds[0].clone());
     let part = Part::read(&fixture_bytes(LOG).expect("bytes")).expect("a part");
     let mut states = vec![start.clone()];
     for e in &part.effects {
         let mut s = states.last().expect("a state").clone();
-        s.apply(
-            &header,
-            &replica::views::entry_part(&header, e).expect("a part"),
-        )
-        .expect("applies");
+        s.apply(&header, &entry_part(&header, e).expect("a part"))
+            .expect("applies");
         states.push(s);
     }
     Log {
@@ -56,11 +52,12 @@ fn log() -> Log {
     }
 }
 
+/// Each reference's words, kept for the audience of the entry that first carried it.
 fn store() -> TextStore {
     let mut s = TextStore::default();
-    s.keep(id(0xcc, 1), BOARD);
-    s.keep(id(0xcc, 2), ALOUD);
-    s.keep(id(0xcc, 3), WHISPER);
+    s.keep(id(0xcc, 1), Audience::Everyone, BOARD);
+    s.keep(id(0xcc, 2), Audience::Everyone, ALOUD);
+    s.keep(id(0xcc, 3), Audience::Of(id(0xdd, 101)), WHISPER);
     s
 }
 
@@ -68,13 +65,13 @@ fn holds(hay: &[u8], needle: &str) -> bool {
     hay.windows(needle.len()).any(|w| w == needle.as_bytes())
 }
 
-/// Every audience in the log, and everyone.
 fn audiences() -> Vec<Audience> {
     vec![
         Audience::Everyone,
         Audience::Of(id(0x77, 1)),
         Audience::Of(id(0x88, 1)),
         Audience::Of(id(0xee, 8)),
+        Audience::Of(id(0xee, 13)),
         Audience::Of(id(0xdd, 101)),
     ]
 }
@@ -127,26 +124,13 @@ fn a1_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged() {
     let l = log();
     let mut words = store();
     let before = Redactions::default();
-    let log_hash = |l: &Log| {
-        (
-            Hash::of(Purpose::Fixture, l.part.stored()),
-            l.header.hash(),
-            l.states.last().expect("a state").hash().expect("a hash"),
-        )
-    };
-    let was = log_hash(&l);
     let keys = keys();
-    let views = build(
-        &l.start,
-        &l.header,
-        std::slice::from_ref(&l.part),
-        &keys,
-        &before,
-    )
-    .expect("views");
+    let parts = std::slice::from_ref(&l.part);
+    let views = build(&l.start, &l.header, parts, &keys, &before).expect("views");
+    let delivered = |v, list: &Redactions, w: &TextStore| deliver(v, w, list).expect("delivered");
     let shown = views
         .iter()
-        .filter(|v| holds(&deliver(v, &words, &before).expect("delivered"), BOARD))
+        .filter(|v| holds(&delivered(v, &before, &words), BOARD))
         .count();
     println!(
         "before removal: {shown} of {} views deliver the board's words",
@@ -156,50 +140,60 @@ fn a1_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged() {
     assert!(
         views
             .iter()
-            .all(|v| !holds(&v.bytes().expect("bytes"), BOARD)),
-        "a view holds words"
+            .all(|v| !holds(&v.bytes().expect("bytes"), BOARD))
     );
+    // The whisper's words go only to its own audience, though a public record (seq 13, which the commit refuses as
+    // `reference-audience`) names its reference.
+    let mut heard = 0;
+    for v in &views {
+        if holds(&delivered(v, &before, &words), WHISPER) {
+            assert_eq!(v.key.audience, Audience::Of(id(0xdd, 101)), "{:?}", v.key);
+            heard += 1;
+        }
+    }
+    println!("the whisper's words reach {heard} views, every one dd:101's");
+    assert!(heard > 0);
 
+    // The log is not an input to removal, so it cannot change; its bytes and hashes are compared anyway.
+    let hashes = |l: &Log| {
+        (
+            Hash::of(Purpose::Fixture, l.part.stored()),
+            l.header.hash(),
+            l.states.last().expect("a state").hash().expect("a hash"),
+        )
+    };
+    let was = hashes(&l);
     let after = remove(id(0xcc, 1), &mut words, &before);
     let l2 = log();
-    let now = log_hash(&l2);
+    let now = hashes(&l2);
     println!(
-        "the log before and after: part {} / {}, header {} / {}, state {} / {}",
+        "the log before and after removal: part {} / {}, header {} / {}, state {} / {}",
         was.0, now.0, was.1, now.1, was.2, now.2
     );
     assert_eq!(was, now);
-    assert_eq!(l.part.stored(), l2.part.stored());
-    let views = build(
-        &l2.start,
-        &l2.header,
-        std::slice::from_ref(&l2.part),
-        &keys,
-        &after,
-    )
-    .expect("views");
+    let views = build(&l2.start, &l2.header, parts, &keys, &after).expect("views");
     let mut marked = 0;
     for v in &views {
-        let d = deliver(v, &words, &after).expect("delivered");
-        assert!(
-            !holds(&d, BOARD),
-            "{:?} still delivers the removed words",
-            v.key
-        );
-        let out = v.to_value();
-        if references(&out).contains(&id(0xcc, 1)) {
+        assert!(!holds(&delivered(v, &after, &words), BOARD), "{:?}", v.key);
+        if references(&v.to_value()).contains(&id(0xcc, 1)) {
             marked += 1;
         }
     }
     println!(
-        "after removal: 0 of {} views deliver it; {marked} name its reference, marked removed; the other words stay",
+        "after removal: 0 of {} views deliver it; {marked} name its reference, marked removed",
         views.len()
     );
+    assert!(marked > 0);
     assert!(
         views
             .iter()
-            .any(|v| holds(&deliver(v, &words, &after).unwrap(), ALOUD))
+            .any(|v| holds(&delivered(v, &after, &words), ALOUD))
     );
-    assert!(words.words(id(0xcc, 1)).is_none());
+    // A list older than the view's never undoes a removal.
+    assert_eq!(
+        deliver(&views[0], &words, &before).map_err(|r| r.name),
+        Err("redactions-differ")
+    );
 }
 
 #[test]
@@ -210,24 +204,18 @@ fn a2_a_fork_through_creator_x_holds_nothing_of_creator_y_nor_the_removed_senten
     let checkpoint = l.states.last().expect("a state");
     let x = fork(checkpoint, id(0x77, 1), &removed);
     let y = fork(checkpoint, id(0x88, 1), &removed);
-    let ids = |s: &State| {
-        s.nodes
-            .keys()
-            .map(|i| replica::world_model::show(*i))
-            .collect::<Vec<_>>()
-    };
+    let ids = |s: &State| s.nodes.keys().map(|i| show(*i)).collect::<Vec<_>>();
     println!("fork through X: nodes {:?}", ids(&x));
     println!("fork through Y: nodes {:?}", ids(&y));
     assert!(x.nodes.contains_key(&id(0xee, 6)) && !x.nodes.contains_key(&id(0xee, 7)));
     assert!(y.nodes.contains_key(&id(0xee, 7)) && !y.nodes.contains_key(&id(0xee, 6)));
-    // No body (a Soul is in one world) and no hand of a game X does not play.
+    // No body (a Soul is in one world) and no hand of a game the creator does not play.
     for f in [&x, &y] {
         assert!(!f.nodes.contains_key(&id(0xee, 2)));
-        assert!(!f.nodes.contains_key(&id(0xee, 10)));
+        assert!(!f.nodes.contains_key(&id(0xee, 16)));
         assert!(f.links.values().all(|l| l.ty.as_str() != "souls:body-of"));
     }
-    let bytes = encode(&x.to_value()).expect("bytes");
-    assert!(!holds(&bytes, BOARD));
+    assert!(!holds(&encode(&x.to_value()).expect("bytes"), BOARD));
     let board = &x.nodes[&id(0xee, 5)].fields[&2];
     println!("the board in X's fork: {board:?}");
     let Value::Map(m) = board else {
@@ -242,6 +230,7 @@ fn a3_no_fixture_holds_an_account_id_or_free_text_inline() {
         fixture_bytes(HEADER).expect("bytes"),
         fixture_bytes(LOG).expect("bytes"),
     ];
+    // The fixtures' scopes: the world's, Souls', two creators' principals, and references. An account's is none.
     let known: BTreeSet<u8> = [0xee, 0xdd, 0x77, 0x88, 0xcc].into();
     let (mut items, mut ids) = (0, 0);
     for b in &bytes {
@@ -253,20 +242,17 @@ fn a3_no_fixture_holds_an_account_id_or_free_text_inline() {
             );
             items += 1;
         }
-        // Every byte string is an id's scope (16 bytes) of a known kind of principal or thing, or a hash (34).
         let mut stack = vec![&v];
         while let Some(v) = stack.pop() {
             match v {
                 Value::Bytes(x) if x.len() == 16 => {
                     assert!(
                         x.iter().all(|c| *c == x[0]) && known.contains(&x[0]),
-                        "an unknown scope {x:?}"
+                        "{x:?}"
                     );
                     ids += 1;
                 }
-                Value::Bytes(x) => {
-                    assert_eq!(x.len(), 34, "a byte string that is not an id or a hash")
-                }
+                Value::Bytes(x) => assert_eq!(x.len(), 34, "a byte string not an id or a hash"),
                 Value::Array(a) => stack.extend(a),
                 Value::Map(m) => stack.extend(m.values()),
                 _ => {}
@@ -284,48 +270,70 @@ fn a3_no_fixture_holds_an_account_id_or_free_text_inline() {
 #[test]
 fn a4_a_principal_added_later_does_not_see_what_was_written_before() {
     let l = log();
-    let hand = Audience::Of(id(0xee, 8));
-    let (dealt_first, dealt_later) = (5_usize, 10_usize);
-    let before_first = &l.states[dealt_first];
-    let before_later = &l.states[dealt_later];
     let (a, b) = (id(0xdd, 100), id(0xdd, 101));
-    let show = |m: Option<BTreeSet<Id>>| {
+    let end = l.states.last().expect("a state");
+    let (old, new) = (Audience::Of(id(0xee, 8)), Audience::Of(id(0xee, 13)));
+    let names = |m: Option<BTreeSet<Id>>| {
         m.unwrap_or_default()
             .into_iter()
-            .map(replica::world_model::show)
+            .map(show)
             .collect::<Vec<_>>()
     };
     println!(
-        "the hand's audience when seq 5 was written: {:?}; when seq 10 was: {:?}",
-        show(members(hand, before_first)),
-        show(members(hand, before_later))
+        "the first hand's audience ee:8: {:?}; after dd:101 joins, the new hand's ee:13: {:?}",
+        names(members(old, end)),
+        names(members(new, end))
     );
-    assert!(sees(a, hand, before_first) && sees(a, hand, before_later));
+    // Members are written once, with the audience: joining never adds 101 to ee:8.
+    assert!(sees(a, old, end) && !sees(b, old, end));
+    assert!(sees(a, new, end) && sees(b, new, end));
+    // What 101 is sent: the views of its audiences, none of which holds the first deal (seq 5).
+    let keys: Vec<Key> = audiences_of(b, end)
+        .into_iter()
+        .map(|audience| Key {
+            node: id(0xee, 4),
+            level: Level::Full,
+            audience,
+        })
+        .collect();
+    let parts = std::slice::from_ref(&l.part);
+    let views = build(&l.start, &l.header, parts, &keys, &Redactions::default()).expect("views");
+    let seqs: Vec<u64> = views
+        .iter()
+        .flat_map(|v| v.records.iter())
+        .filter_map(|(_, r)| match r {
+            Value::Map(m) => match m.get(&1) {
+                Some(Value::Uint(n)) => Some(*n),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    println!("dd:101 is sent the table's entries {seqs:?}");
     assert!(
-        !sees(b, hand, before_first),
-        "101 joined at seq 9 and must not see seq 5"
+        !seqs.contains(&5),
+        "101 joined at seq 9 and must not see the first deal"
     );
-    assert!(sees(b, hand, before_later));
-    // Read now, membership would wrongly show 101 the first deal.
-    assert!(sees(b, hand, l.states.last().expect("a state")));
-    // The whisper's audience is one: 101 hears it, 100 does not read it back.
+    assert!(seqs.contains(&11) && seqs.contains(&12));
+    // The whisper's audience is one: 101 reads it back, 100 does not.
     let whisper = Audience::Of(b);
     assert!(sees(b, whisper, &l.states[8]) && !sees(a, whisper, &l.states[8]));
-    // The one resolver.
-    let at = l.states.last().expect("a state");
+    // The one resolver: the players are ee:8 before 101 joins and ee:13 after; the owner has no audience yet.
     let table = id(0xee, 4);
+    let creator = id(0x77, 1);
     let player = Rule::Linked(Name::new("souls:player").expect("a name"));
-    assert_eq!(resolve(&player, table, at, id(0x77, 1)), Ok(hand));
+    assert_eq!(resolve(&player, table, &l.states[9], creator), Ok(old));
+    assert_eq!(resolve(&player, table, end, creator), Ok(new));
     assert_eq!(
-        resolve(&Rule::Creator, table, at, id(0x77, 1)),
-        Ok(Audience::Of(id(0x77, 1)))
+        resolve(&Rule::Creator, table, end, creator),
+        Ok(Audience::Of(creator))
     );
     assert_eq!(
-        resolve(&Rule::Everyone, table, at, id(0x77, 1)),
+        resolve(&Rule::Everyone, table, end, creator),
         Ok(Audience::Everyone)
     );
     assert_eq!(
-        resolve(&Rule::Owner, table, at, id(0x77, 1)).map_err(|r| r.name),
+        resolve(&Rule::Owner, table, end, creator).map_err(|r| r.name),
         Err("audience-not-declared")
     );
 }

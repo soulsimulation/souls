@@ -28,7 +28,8 @@
     {1: 4, 2: 1000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 1]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # Soul 100 sits down to play
      7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], 3: "souls:audience@122093b5149dc0f465aa77332c6e84486ff7ad6ef18a4626fcd3ca35018511d9711c",   # the table's players, as an audience
           4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 0}}, 5: {1: 1}, 6: {1: 2, 2: "souls:player"}},
-         {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9], 3: "souls:player", 4: [[h'dddddddddddddddddddddddddddddddd', 100], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 5: 1, 6: {1: 1}}]},
+         {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9], 3: "souls:player", 4: [[h'dddddddddddddddddddddddddddddddd', 100], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 5: 1, 6: {1: 1}},
+         {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 12], 3: "souls:member", 4: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], [h'dddddddddddddddddddddddddddddddd', 100]], 5: 0, 6: {1: 1}}]},   # its members, fixed when written
     {1: 5, 2: 1100000, 3: {1: 2, 2: 4}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # the players' hand: a facet of the table
      7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10], 3: "souls:facet@12205c58627871a614fe90a68b2db2c33cdf6aba610ccf97271b1004123bc7bbce04",
           4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 0}}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: {1: 7}}]},
@@ -41,9 +42,20 @@
     {1: 8, 2: 4000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 4]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 2, 2: [h'dddddddddddddddddddddddddddddddd', 101]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2],   # and whispers to Soul 101: an audience of one
      7: [],
      8: [{1: "souls:said", 2: {1: {21: [h'cccccccccccccccccccccccccccccccc', 3]}, 2: 500}}]},
-    {1: 9, 2: 5000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 5]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 101]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # Soul 101 joins the table
-     7: [{1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 11], 3: "souls:player", 4: [[h'dddddddddddddddddddddddddddddddd', 101], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 5: 1, 6: {1: 1}}]},
-    {1: 10, 2: 6000000, 3: {1: 2, 2: 9}, 4: {1: 3}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10],   # a card is dealt from the hand
-     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10], 3: 1, 4: 6}]}
+    {1: 9, 2: 5000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 5]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 101]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # Soul 101 joins the table: a new audience of the players
+     7: [{1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 11], 3: "souls:player", 4: [[h'dddddddddddddddddddddddddddddddd', 101], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 5: 1, 6: {1: 1}},
+         {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13], 3: "souls:audience@122093b5149dc0f465aa77332c6e84486ff7ad6ef18a4626fcd3ca35018511d9711c",
+          4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 0}}, 5: {1: 1}, 6: {1: 2, 2: "souls:player"}},
+         {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 14], 3: "souls:member", 4: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13], [h'dddddddddddddddddddddddddddddddd', 100]], 5: 0, 6: {1: 1}},
+         {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 15], 3: "souls:member", 4: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13], [h'dddddddddddddddddddddddddddddddd', 101]], 5: 0, 6: {1: 1}}]},
+    {1: 10, 2: 5100000, 3: {1: 2, 2: 9}, 4: {1: 3}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10],   # the old hand's facet ends
+     7: [{1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10]}]},
+    {1: 11, 2: 5100000, 3: {1: 2, 2: 9}, 4: {1: 3}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # and the hand goes on for the new players
+     7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 16], 3: "souls:facet@12205c58627871a614fe90a68b2db2c33cdf6aba610ccf97271b1004123bc7bbce04",
+          4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 0}}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13]}, 6: {1: 7}}]},
+    {1: 12, 2: 6000000, 3: {1: 2, 2: 11}, 4: {1: 3}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 13]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 16],   # a card is dealt from the hand
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 16], 3: 1, 4: 6}]},
+    {1: 13, 2: 7000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 6]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 101]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5],   # a public record carrying the whisper's reference: the commit refuses it
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5], 3: 3, 4: {21: [h'cccccccccccccccccccccccccccccccc', 3]}}]}                     # (reference-audience); applied here, delivery must still not leak it
   ]
 }

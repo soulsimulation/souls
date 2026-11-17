@@ -501,7 +501,7 @@ impl View {
                 for r in outline(entry, before, after).into_iter().filter(mine) {
                     let mut m = vec![(1, seq.clone())];
                     m.extend(r);
-                    self.out.records.push((env.at, map(m)));
+                    self.out.records.push((env.at, redactions.scrub(map(m))));
                 }
             }
             Level::Counts => {
