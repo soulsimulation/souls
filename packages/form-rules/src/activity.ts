@@ -15,7 +15,7 @@
 // is the place; if none has room, the answer is no, `no_free_place`, naming the role and how many places it looked at.
 // Positions (`at_mm` on a node) are its origin in the frame of the place it is in, supplied by the engine.
 
-import { effects, type Done, type Refused } from './effects.ts';
+import { effects, type Done, type Refused, type Unknown } from './effects.ts';
 import { whoMay, type Entry, type Input, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
@@ -106,7 +106,8 @@ export function place(input: Input): PlaceVerdict {
   return { verdict: 'no', reason: 'no_free_place', role: enters.role, detail: { places: candidates.length }, read };
 }
 
-export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as effects gives it. */
+export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict | Unknown;
 
 /** Enter the role a form enters: who may (SA-F7a), then the place, then the form's needs and effects (SA-F2b). */
 export function enter(input: Input & { receipt: string }): Entered {
