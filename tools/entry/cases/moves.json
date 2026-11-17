@@ -1,257 +1,40 @@
 {
- "refused": [
-  {
-   "why": "a duration in ticks (key)",
-   "edit": {
-    "phases": {
-     "start_up_us": 250000,
-     "start_up_ticks": 5,
-     "recovery_us": 300000
+  "refused": [
+    { "why": "a duration in ticks (key)", "edit": { "phases": { "start_up_us": 250000, "start_up_ticks": 5, "recovery_us": 300000 } }, "path": "phases.start_up_ticks", "word": "ticks" },
+    { "why": "a duration in ticks (named phase)", "edit": { "phases": { "start_up_ticks": 5, "recovery_us": 300000 } }, "path": "phases.start_up_ticks", "word": "ticks" },
+    { "why": "a float duration", "raw": "{\"format\":\"souls-move/1\",\"move\":\"press\",\"claims\":[\"manipulator\"],\"blocks\":[\"manipulator\"],\"cancels_on\":[],\"effector\":\"hand\",\"reach_mm\":600,\"phases\":{\"start_up_us\":250000.0,\"recovery_us\":300000}}", "word": "floating" },
+    { "why": "a claim by anatomy", "edit": { "claims": ["right_arm"] }, "path": "claims.0", "word": "anatomy" },
+    { "why": "a reach of a full arm and more", "edit": { "reach_mm": 900 }, "path": "reach_mm", "word": "arm" },
+    { "why": "no recovery", "edit": { "phases": { "start_up_us": 250000 } }, "path": "phases.recovery_us", "word": "required" }
+  ],
+  "pour": [
+    { "why": "a kettle's spout over a cup's rim (the spout's offset from the grip is read from the kettle entry)", "from_kind": "content/kinds/kitchen/kettle.json", "grip": "grip", "spout": "spout", "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [450, 780, 150] } },
+    { "why": "a watering can's rose over a planter's rim (no can entry yet: the offset is the case's)", "effector_mm": [380, -60, 0], "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [900, 520, -120] } }
+  ],
+  "pose": [
+    {
+      "why": "a press on a button: rest, middle of start-up, contact, after recovery",
+      "move": "press",
+      "record": { "start_us": 1000000, "from_mm": [0, 900, 300], "contact_mm": [-118, 236, 0] },
+      "at_us": [[900000, [0, 900, 300]], [1125000, [-59, 568, 150]], [1250000, [-118, 236, 0]], [1550000, [0, 900, 300]], [9000000, [0, 900, 300]]]
+    },
+    {
+      "why": "a slide from one point to another: contact, middle of the slide, its end",
+      "move": "slide",
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [100, 500, 0], "to_mm": [300, 500, 0] },
+      "at_us": [[250000, [100, 500, 0]], [450000, [200, 500, 0]], [650000, [300, 500, 0]]]
     }
-   },
-   "path": "phases.start_up_ticks",
-   "word": "ticks"
-  },
-  {
-   "why": "a duration in ticks (named phase)",
-   "edit": {
-    "phases": {
-     "start_up_ticks": 5,
-     "recovery_us": 300000
+  ],
+  "consume": [
+    {
+      "why": "a cup's rim at the mouth, one sip (the rim is 90 mm above the grip, toward the face)",
+      "effector_mm": [0, 90, 60],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 1 }
+    },
+    {
+      "why": "a bread roll's bitten edge at the mouth, three bites (no roll entry: the offset is the case's)",
+      "effector_mm": [0, 40, 70],
+      "record": { "start_us": 500000, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 3 }
     }
-   },
-   "path": "phases.start_up_ticks",
-   "word": "ticks"
-  },
-  {
-   "why": "a float duration",
-   "raw": "{\"format\":\"souls-move/1\",\"move\":\"press\",\"claims\":[\"manipulator\"],\"blocks\":[\"manipulator\"],\"cancels_on\":[],\"effector\":\"hand\",\"reach_mm\":600,\"phases\":{\"start_up_us\":250000.0,\"recovery_us\":300000}}",
-   "word": "floating"
-  },
-  {
-   "why": "a claim by anatomy",
-   "edit": {
-    "claims": [
-     "right_arm"
-    ]
-   },
-   "path": "claims.0",
-   "word": "anatomy"
-  },
-  {
-   "why": "a reach of a full arm and more",
-   "edit": {
-    "reach_mm": 900
-   },
-   "path": "reach_mm",
-   "word": "arm"
-  },
-  {
-   "why": "no recovery",
-   "edit": {
-    "phases": {
-     "start_up_us": 250000
-    }
-   },
-   "path": "phases.recovery_us",
-   "word": "required"
-  }
- ],
- "pour": [
-  {
-   "why": "a kettle's spout over a cup's rim (the spout's offset from the grip is read from the kettle entry)",
-   "from_kind": "content/kinds/kitchen/kettle.json",
-   "grip": "grip",
-   "spout": "spout",
-   "record": {
-    "start_us": 2000000,
-    "from_mm": [
-     0,
-     900,
-     300
-    ],
-    "contact_mm": [
-     450,
-     780,
-     150
-    ]
-   }
-  },
-  {
-   "why": "a watering can's rose over a planter's rim (no can entry yet: the offset is the case's)",
-   "effector_mm": [
-    380,
-    -60,
-    0
-   ],
-   "record": {
-    "start_us": 0,
-    "from_mm": [
-     0,
-     900,
-     300
-    ],
-    "contact_mm": [
-     900,
-     520,
-     -120
-    ]
-   }
-  }
- ],
- "pose": [
-  {
-   "why": "a press on a button: rest, middle of start-up, contact, after recovery",
-   "move": "press",
-   "record": {
-    "start_us": 1000000,
-    "from_mm": [
-     0,
-     900,
-     300
-    ],
-    "contact_mm": [
-     -118,
-     236,
-     0
-    ]
-   },
-   "at_us": [
-    [
-     900000,
-     [
-      0,
-      900,
-      300
-     ]
-    ],
-    [
-     1125000,
-     [
-      -59,
-      568,
-      150
-     ]
-    ],
-    [
-     1250000,
-     [
-      -118,
-      236,
-      0
-     ]
-    ],
-    [
-     1550000,
-     [
-      0,
-      900,
-      300
-     ]
-    ],
-    [
-     9000000,
-     [
-      0,
-      900,
-      300
-     ]
-    ]
-   ]
-  },
-  {
-   "why": "a slide from one point to another: contact, middle of the slide, its end",
-   "move": "slide",
-   "record": {
-    "start_us": 0,
-    "from_mm": [
-     0,
-     900,
-     300
-    ],
-    "contact_mm": [
-     100,
-     500,
-     0
-    ],
-    "to_mm": [
-     300,
-     500,
-     0
-    ]
-   },
-   "at_us": [
-    [
-     250000,
-     [
-      100,
-      500,
-      0
-     ]
-    ],
-    [
-     450000,
-     [
-      200,
-      500,
-      0
-     ]
-    ],
-    [
-     650000,
-     [
-      300,
-      500,
-      0
-     ]
-    ]
-   ]
-  }
- ],
- "consume": [
-  {
-   "why": "a cup's rim at the mouth, one sip (the rim is 90 mm above the grip, toward the face)",
-   "effector_mm": [
-    0,
-    90,
-    60
-   ],
-   "record": {
-    "start_us": 0,
-    "from_mm": [
-     0,
-     900,
-     300
-    ],
-    "contact_mm": [
-     0,
-     1500,
-     200
-    ],
-    "count": 1
-   }
-  },
-  {
-   "why": "a bread roll's bitten edge at the mouth, three bites (no roll entry: the offset is the case's)",
-   "effector_mm": [
-    0,
-    40,
-    70
-   ],
-   "record": {
-    "start_us": 500000,
-    "from_mm": [
-     0,
-     900,
-     300
-    ],
-    "contact_mm": [
-     0,
-     1500,
-     200
-    ],
-    "count": 3
-   }
-  }
- ]
+  ]
 }
