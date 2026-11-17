@@ -68,7 +68,11 @@ export type Effect = {
   amount?: unknown;
   form?: string;
   after_us?: number;
+  /** A `draw`: the table the world draws one outcome from (SA-F13). */
+  outcomes?: DrawRow[];
 };
+/** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
+export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
 export type Entry = {
   kind: string;
   state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;

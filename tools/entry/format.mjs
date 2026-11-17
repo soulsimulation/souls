@@ -296,7 +296,7 @@ function field(f, path, links, err, taken = false) {
     if (!isInt(d)) err(`${path}.default`, 'a whole number');
   }
   if (f.type === 'duration' && !(isInt(d) && d >= 0)) err(`${path}.default`, 'whole microseconds');
-  if (f.type === 'text' && d !== null) err(`${path}.default`, 'null; text is set by reference when written');
+  if (f.type === 'text' && d !== null) err(`${path}.default`, 'null; inline words in state are refused, a text field holds a reference once written');
   if (f.type !== 'enum' && f.values !== undefined) err(`${path}.values`, 'only an enum has values');
   if (f.type !== 'int' && f.unit !== undefined) err(`${path}.unit`, 'only an int has a unit');
 }
@@ -327,9 +327,16 @@ function form(f, path, ctx, err) {
   const fieldName = (v, p) => { if (!(typeof v === 'string' && v in ctx.state)) err(p, 'names a state field of this kind'); };
   const linkName = (v, p) => { if (!(typeof v === 'string' && v in ctx.links)) err(p, 'names a link type of this kind'); };
   const value = (fname, v, p) => {
-    if (isArg(v)) { arg(v, p); return; }
     const fd = ctx.state[fname];
+    if (isArg(v)) {
+      arg(v, p);
+      const at = takes[v.arg]?.type;
+      // Words are kept by reference (contract T8, #2662): only a text argument reaches a text field, and nothing else does.
+      if (fd && at && (fd.type === 'text') !== (at === 'text')) err(p, fd.type === 'text' ? `argument "${v.arg}" is ${at}; a text field is set from a text argument (a reference)` : `argument "${v.arg}" is text; field "${fname}" is ${fd.type}, and a text argument goes only to a text field`);
+      return;
+    }
     if (!fd) return;
+    if (fd.type === 'text' && v !== null) { err(p, 'inline words in state; a text field holds a reference, so set it from a text argument (or null to clear it)'); return; }
     const ok = fd.type === 'bool' ? typeof v === 'boolean' : fd.type === 'enum' ? fd.values?.includes(v) : fd.type === 'int' || fd.type === 'duration' ? isInt(v) : v === null;
     if (!ok) err(p, `not a value of field "${fname}" (${fd.type})`);
   };
