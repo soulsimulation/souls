@@ -15,8 +15,8 @@ const refused = (entry, path, word) => {
 
 const base = () => {
   const k = load('content/kinds/kitchen/kettle.json');
-  k.state.charge = {n: 3, type: 'int', unit: 'mC', default: 0, audience: {rule: 'everyone'}};
-  k.state.rest = {n: 4, type: 'duration', default: 0, audience: {rule: 'everyone'}};
+  k.state.charge = {n: 4, type: 'int', unit: 'mC', default: 0, audience: {rule: 'everyone'}};
+  k.state.rest = {n: 5, type: 'duration', default: 0, audience: {rule: 'everyone'}};
   return k;
 };
 const withNeed = n => { const k = base(); k.forms.pour.needs.push(n); return k; };

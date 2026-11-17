@@ -52,7 +52,7 @@ function effectCase(kinds, c) {
   const out = [];
   let state = structuredClone(c.state);
   for (const [k, step] of c.do.entries()) {
-    const result = effects({kinds, act: step.act, state: {...state, actor: step.actor ?? state.actor}, receipt: step.receipt});
+    const result = effects({kinds, act: step.act, state: {...state, actor: step.actor ?? state.actor, now_us: step.now_us ?? state.now_us}, receipt: step.receipt});
     const off = step.expect ? mismatches(step.expect, result) : [];
     if (off.length) { out.push(`step ${k}: ${off.join(', ')} differ: got ${JSON.stringify(Object.fromEntries(off.map(x => [x, result[x]])))}`); break; }
     const once = apply(state, result);

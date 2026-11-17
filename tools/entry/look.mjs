@@ -31,10 +31,11 @@ const MAX_COLS = 6;
 
 /** The values one state field takes in a sheet, its default first. A field with nothing to vary is its default alone. */
 export function valuesOf(f) {
-  const d = f.default, more = [];
+  // a timed value is drawn at a value it holds, from its default to its bounds (the sheet stops the clock)
+  const d = f.type === 'timed' ? f.default.value : f.default, more = [];
   if (f.type === 'bool') more.push(!d);
   else if (f.type === 'enum') more.push(...f.values.filter(v => v !== d));
-  else if (f.type === 'int' && Number.isInteger(f.min) && Number.isInteger(f.max)) more.push(f.min, f.min + Math.floor((f.max - f.min) / 2), f.max);
+  else if ((f.type === 'int' || f.type === 'timed') && Number.isInteger(f.min) && Number.isInteger(f.max)) more.push(f.min, f.min + Math.floor((f.max - f.min) / 2), f.max);
   return [d, ...more.filter((v, i) => v !== d && more.indexOf(v) === i)];
 }
 
@@ -44,7 +45,7 @@ const drawn = (f, v) => (f.type === 'int' && f.unit === 'permille' ? v / 1000 : 
 /** The frames of an entry: its default state, then each field varied alone. The label names the field and its value. */
 export function framesOf(entry) {
   const fields = Object.entries(entry.state ?? {}).sort((a, b) => a[1].n - b[1].n);
-  const base = Object.fromEntries(fields.map(([k, f]) => [k, f.default]));
+  const base = Object.fromEntries(fields.map(([k, f]) => [k, f.type === 'timed' ? f.default.value : f.default]));
   const frames = [{label: fields.length ? `${fields.map(([k]) => `${k}=${base[k]}`).join(' ')} (default)` : 'no state', values: base}];
   for (const [k, f] of fields) for (const v of valuesOf(f).slice(1)) frames.push({label: `${k}=${v}`, values: {...base, [k]: v}});
   return frames.map(fr => ({label: fr.label, values: fr.values, state: Object.fromEntries(fields.map(([k, f]) => [k, drawn(f, fr.values[k])]))}));
@@ -73,7 +74,7 @@ export function defOf(entry) {
   const state = Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k,
     f.type === 'bool' ? {type: 'bool', default: f.default}
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
-        : {type: 'number', default: drawn(f, f.default)}]));
+        : {type: 'number', default: drawn(f, f.type === 'timed' ? f.default.value : f.default)}]));
   const b = entry.geometry?.bounds_mm;
   // SA-D1a: the looks table rides in the def's make.args, where the page's one drawing function reads it
   const args = shapeInMetres({round: shape.round, shapes: shape.shapes});

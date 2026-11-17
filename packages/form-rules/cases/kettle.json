@@ -80,13 +80,14 @@
       "act": { "this": "k1", "form": "boiled" },
       "state": {
         "actor": "b1",
+        "now_us": 150000000,
         "nodes": {
-          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": true } },
+          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": true, "heat": { "value": 25000, "per_s": 500, "set_us": 0 } } },
           "b1": { "hands": {} }
         }
       },
       "asker": { "sees": "all" },
-      "expect": { "verdict": "yes", "read": [["k1/field/2", true]] }
+      "expect": { "verdict": "yes", "read": [["k1/field/2", true], ["k1/field/3", 100000]] }
     },
     {
       "name": "boiled_not_heating_fixed_by_switch_on",
