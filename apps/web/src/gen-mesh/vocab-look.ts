@@ -13,6 +13,7 @@ import type { MeshCtx } from './registry.ts';
 import { DRAWER_TRAVEL } from '@souls/world-compiler';
 import { foldCanopy } from '../opening-motion.ts';
 import { variantOf } from './material-variants.ts';
+import { declaredState, looks as tableLooks, type LookRow, type Placement } from '../../../../packages/form-rules/src/looks.ts';
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const declared = (ctx: MeshCtx, k: string) => Object.hasOwn(ctx.def.params ?? {}, k);
@@ -23,13 +24,33 @@ export function lookOf(ctx: MeshCtx): Look | null {
   const p = ctx.params, st = (ctx.entity.state ?? {}) as Record<string, unknown>, defState = ctx.def.state ?? {};
   const g = (k: string, d: number) => (declared(ctx, k) ? num(p[k], d) : d);
   const state: Record<string, unknown> = {};
-  for (const k of STATE_LOOKS) if (Object.hasOwn(defState, k) || st[k] !== undefined) state[k] = st[k] ?? (defState as Record<string, { default?: unknown }>)[k]?.default;
+  for (const k of [...STATE_LOOKS, ...tableOf(ctx).map((r) => r.field)]) if (Object.hasOwn(defState, k) || st[k] !== undefined) state[k] = st[k] ?? (defState as Record<string, { default?: unknown }>)[k]?.default;
   const look: Look = { sx: g('sx', 1), sy: g('sy', 1), sz: g('sz', 1), taper: g('taper', 0), bend: g('bend', 0), skew: g('skew', 0),
     tint: declared(ctx, 'tint') && typeof p.tint === 'string' && /^#[0-9a-f]{6}$/i.test(p.tint) ? p.tint : null, vary: g('vary', 0),
     condition: declared(ctx, 'condition') && typeof p.condition === 'string' ? p.condition : 'new', state };
-  const active = look.sx !== 1 || look.sy !== 1 || look.sz !== 1 || look.taper || look.bend || look.skew || look.tint || look.vary > 0 || look.condition !== 'new' || stateMatters(look.state, ctx);
+  const active = look.sx !== 1 || look.sy !== 1 || look.sz !== 1 || look.taper || look.bend || look.skew || look.tint || look.vary > 0 || look.condition !== 'new' || stateMatters(look.state, ctx) || tableOf(ctx).length > 0;
   return active ? look : null;
 }
+/** SA-D1a: a kind's looks table rides in the def's make.args (`looks_table`); a def without one is drawn exactly as before. */
+const tableOf = (ctx: MeshCtx): LookRow[] => (Array.isArray(ctx.args?.looks_table) ? (ctx.args.looks_table as LookRow[]) : []);
+/** The table's parts placed by the plain function, in whole units. The entry's whole numbers reach the function in their stated unit; the page holds a permille field as a fraction (`looks_units` names it), so only that is scaled back. Parts are found by role; the rest pose is kept so the same state gives the same picture every time. */
+function tableRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
+  const table = tableOf(ctx); if (!table.length) return;
+  const state = declaredState(look.state, (ctx.args?.looks_units ?? {}) as Record<string, string>);
+  const placed = tableLooks({ table, state }), tint = new THREE.Color();
+  root.traverse((o) => {
+    const p: Placement | undefined = placed[o.userData.role as string]; if (!p) return;
+    const rest = (o.userData.looksRest ??= { rot: [o.rotation.x, o.rotation.y, o.rotation.z], pos: o.position.toArray(), scale: o.scale.toArray(), visible: o.visible }) as { rot: number[]; pos: number[]; scale: number[]; visible: boolean };
+    const d = Math.PI / 180000;
+    o.rotation.set(rest.rot[0] + (p.rotate_mdeg?.[0] ?? 0) * d, rest.rot[1] + (p.rotate_mdeg?.[1] ?? 0) * d, rest.rot[2] + (p.rotate_mdeg?.[2] ?? 0) * d);
+    o.position.set(rest.pos[0] + (p.slide_mm?.[0] ?? 0) / 1000, rest.pos[1] + (p.slide_mm?.[1] ?? 0) / 1000, rest.pos[2] + (p.slide_mm?.[2] ?? 0) / 1000);
+    o.scale.set(rest.scale[0] * (p.scale_permille?.[0] ?? 1000) / 1000, rest.scale[1] * (p.scale_permille?.[1] ?? 1000) / 1000, rest.scale[2] * (p.scale_permille?.[2] ?? 1000) / 1000);
+    o.visible = p.show === undefined ? rest.visible : p.show;
+    if (p.glow_permille !== undefined || p.tint) o.traverse((c) => { const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (!m) return;
+      (c as THREE.Mesh).material = lookMaterial(m, `table:${p.glow_permille ?? ''}:${p.tint ?? ''}`, (x) => { if (p.glow_permille !== undefined && x.emissive) x.emissiveIntensity *= p.glow_permille / 1000; if (p.tint) x.color.copy(tint.set(p.tint)); }); });
+  });
+}
+
 /** State only changes the picture when it differs from what the plain build shows (doors closed, flames on, glow on, full). */
 function stateMatters(s: Record<string, unknown>, ctx: MeshCtx) {
   return s.open === true || s.locked === true || s.lit === false || (s.on === false && !ctx.def.components.light) || (typeof s.level === 'number' && s.level < 1) || (typeof s.moisture === 'number' && s.moisture < 1) || typeof s.station === 'string';
@@ -157,7 +178,7 @@ export function applyLook(obj: THREE.Object3D | null, ctx: MeshCtx): THREE.Objec
   const look = lookOf(ctx); if (!look) return obj;
   const box = ctx.baked.box as [number, number, number];
   const h = box[1] / (look.sy || 1);   // the picture is built at the unstretched size
-  const apply = (root: THREE.Object3D) => { warpSubtree(root, look, h); paintSubtree(root, look, ctx); stateRoles(root, look, ctx); };
+  const apply = (root: THREE.Object3D) => { warpSubtree(root, look, h); paintSubtree(root, look, ctx); stateRoles(root, look, ctx); tableRoles(root, look, ctx); };
   apply(obj);
   // imported meshes arrive after build (mesh.mesh.ts adds the GLB later): give them the same look when they land
   // the event object is reused (its child is null again by the microtask): keep the child itself (entry 34 found it)
