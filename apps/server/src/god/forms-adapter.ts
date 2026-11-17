@@ -60,6 +60,9 @@ const HELD_MOVES = new Set(['pour', 'consume']);
 /** A pour (tea.ts's numbers): the pouring hand this far right of the body's axis; the outlet this far over the target's
  *  top (m). */
 const POUR_HAND_RIGHT = 0.17, OUTLET_DROP = 0.07;
+/** The stream runs from this far (rad) before the full tilt and fully at it, so it does not start at a can's shallow
+ *  angle and overshoot (tea.ts passes its kettle's window for the same reason). */
+const FLOW_LEAD = 7 * Math.PI / 180;
 /** Effects that become changes today's store holds (a reparent is made by today's take and put, SA-F4b). */
 const KEPT = new Set(['set', 'transfer', 'reparent']);
 /** The body's kind (lane A's entry, SA-G3): its forms that move a thing argument are offered on that thing. */
@@ -348,7 +351,7 @@ export function createFormsAdapter(h: FormsHost) {
         const gf = cf - Math.sqrt(L * L - lat * lat), turn = Math.atan2(lat, cf - gf);
         const hold: Vec3 = [at[0] + f[0] * gf + r[0] * POUR_HAND_RIGHT, tp[1] + top + OUTLET_DROP - tip[1], at[1] + f[1] * gf + r[1] * POUR_HAND_RIGHT];
         const moved = had - left, unit = amount ? t.entry.state![amount.field].unit : undefined;
-        steps.push({ verb: 'mars:watering_can_v1', params: { item: id, target: into, stage: 'pour', face: r3(Math.atan2(f[1], f[0])), hold: hold.map(r3), spoutYaw: r3(turn), seconds: Math.min(20, Math.max(0.5, Number(ph.pour_us ?? 2500000) / 1e6)), levelAfter: r3(max > 0 ? Math.min(1, Math.max(0, left / max)) : 0), ...(unit === 'g' && moved > 0 ? { litres: r3(moved / 1000) } : {}) } });
+        steps.push({ verb: 'mars:watering_can_v1', params: { item: id, target: into, stage: 'pour', face: r3(Math.atan2(f[1], f[0])), hold: hold.map(r3), spoutYaw: r3(turn), tilt: r3(TILT), tiltMore: r3(TILT_MORE), flowFrom: r3(TILT - FLOW_LEAD), flowFull: r3(TILT), seconds: Math.min(20, Math.max(0.5, Number(ph.pour_us ?? 2500000) / 1e6)), levelAfter: r3(max > 0 ? Math.min(1, Math.max(0, left / max)) : 0), ...(unit === 'g' && moved > 0 ? { litres: r3(moved / 1000) } : {}) } });
         continue;
       }
       if (s.step === 'wait') { steps.push({ verb: 'mars:pose_v1', params: { activity: 'listen', seconds: Math.min(3600, Math.max(0.5, Number((s as { us?: number }).us ?? 0) / 1e6)) } }); continue; }
