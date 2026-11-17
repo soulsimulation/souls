@@ -13,13 +13,17 @@
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
 //   changes would not all apply is refused with the effect that failed.
 // - A timer is not a change to state: it is returned beside the changes, with its event.
+// - Every value is one Engine v2's encoding profile holds (T0, v2/docs/encoding.md): whole numbers and names,
+//   never a float, a boolean or null. A flag is 0 or 1, text is a key by reference `{text: <key>}` (never
+//   words), and a value that is missing is left out: a `set` without `to` clears the field to its default.
+// - An event's name is `namespace:name`, the declaring kind's namespace before the name its entry writes.
 // No float decides anything; nothing here imports more than the rules.
 
 import { decide, measure, type Entry, type Input, type Node, type Verdict } from './rules.ts';
 
 export type Place = { node: string; slot: string } | { node: string; hand: string } | { node: string };
 export type Change =
-  | { change: 'set'; node: string; field: string; n: number; to: unknown; by?: number }
+  | { change: 'set'; node: string; field: string; n: number; to?: unknown; by?: number }
   | { change: 'link' | 'unlink'; node: string; link: string; n: number; end: string }
   | { change: 'reparent'; node: string; to: Place }
   | { change: 'create'; node: string; kind: string; to: Place }
@@ -37,6 +41,40 @@ const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'obje
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const arg = (v: unknown, args: Record<string, unknown>) => (v && typeof v === 'object' && has(v, 'arg') ? args[(v as { arg: string }).arg] : v);
 
+/** A field's value as it is stored: a flag 0 or 1, text a key by reference, and nothing (undefined) for a missing value. */
+function stored(def: { type?: string }, v: unknown): unknown {
+  if (v === null || v === undefined) return undefined;
+  if (def.type === 'bool' && typeof v === 'boolean') return Number(v);
+  if (def.type === 'text' && typeof v === 'string') return { text: v };
+  return v;
+}
+
+const NAME = /^[A-Za-z0-9_\-.:/@]*$/;
+const MAX_DEPTH = 32;
+/**
+ * Where a value leaves Engine v2's encoding profile (T0, v2/docs/encoding.md), with the profile's name for the
+ * refusal, or null when it is inside: `null`, `simple` (a boolean or undefined), `float`, `text-not-name` (a
+ * string or a key outside the name characters), `too-deep`; and two a JavaScript number adds, `unsafe-integer`
+ * (a whole number beyond 2^53, which only a BigInt holds) and `int-out-of-range`. Records here are keyed by
+ * names; an adapter numbers them.
+ */
+export function outsideProfile(v: unknown, at = '', depth = 0): { at: string; refused: string } | null {
+  const no = (refused: string) => ({ at, refused });
+  if (v === null) return no('null');
+  if (v === undefined || typeof v === 'boolean') return no('simple');
+  if (typeof v === 'number') return !Number.isInteger(v) ? no('float') : Number.isSafeInteger(v) ? null : no('unsafe-integer');
+  if (typeof v === 'bigint') return v >= -(2n ** 64n) && v < 2n ** 64n ? null : no('int-out-of-range');
+  if (typeof v === 'string') return NAME.test(v) ? null : no('text-not-name');
+  if (typeof v !== 'object') return no('not-a-value');
+  if (depth >= MAX_DEPTH) return no('too-deep');
+  for (const [k, item] of Object.entries(v)) {
+    if (!Array.isArray(v) && !NAME.test(k)) return { at: `${at}/${k}`, refused: 'text-not-name' };
+    const out = outsideProfile(item, `${at}/${k}`, depth + 1);
+    if (out) return out;
+  }
+  return null;
+}
+
 /** What `input.act` does, or why it is not done. The rules are asked as the world (every field seen). */
 export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done | Refused | Verdict {
   const refuse = (effect: number, reason: string, detail: Record<string, unknown> = {}): Refused => ({ verdict: 'no', reason, effect, detail });
@@ -46,6 +84,7 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
   const { kinds, act, state, receipt } = input;
   const self = act.this, actor = state.actor, args = act.args ?? {};
   const entry = kinds[state.nodes[self].kind!];
+  const namespace = entry.kind.slice(0, entry.kind.indexOf(':') + 1);
   const work: Record<string, Node> = structuredClone(state.nodes);
   const done: Done = { verdict: 'yes', receipt, actor, changes: [], events: [], timers: [] };
   let made = 0;
@@ -82,7 +121,8 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
     if (e.change === 'set') {
       const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
       if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: arg(e.to, args) ?? null });
+      const to = stored(def, arg(e.to, args));
+      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);
       if ('bad' in m) return refuse(i, 'bad_input', { what: m.bad, ...m.detail });
@@ -117,7 +157,9 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
       done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length });
     } else return refuse(i, 'bad_input', { what: 'unknown_change', change: e.change ?? null });
 
-    const event: Event = { event: e.event, node: self, changes: [] };
+    const event: Event = { event: e.event.includes(':') ? e.event : namespace + e.event, node: self, changes: [] };
+    const outside = outsideProfile({ out, event, timers: done.timers });
+    if (outside) return refuse(i, 'bad_input', { what: 'outside_profile', ...outside });
     for (const c of out) {
       const failed = applyChange(work, c);
       if (failed) return refuse(i, 'bad_input', { what: failed });
@@ -133,11 +175,21 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
  * Apply a result of `effects` to plain state: every change or none, and once per receipt. A refusal changes
  * nothing; a receipt already applied changes nothing (`again: true`). Needs no kinds.
  */
-export function apply(state: State, result: Done | Refused | Verdict): { ok: true; state: State; again: boolean } | { ok: false; reason: string; change: number } {
+export function apply(
+  state: State,
+  result: Done | Refused | Verdict,
+): { ok: true; state: State; again: boolean } | { ok: false; reason: string; change?: number; event?: number; at?: string } {
   if (result.verdict !== 'yes' || !('changes' in result)) return { ok: true, state, again: false };
   const applied = state.applied ?? [];
   if (applied.includes(result.receipt)) return { ok: true, state, again: true };
   const changes = Array.isArray(result.changes) ? result.changes : [];
+  // Only values inside Engine v2's encoding profile are accepted, named by the profile's refusal.
+  for (const [list, key] of [[changes, 'change'], [result.events ?? [], 'event']] as const) {
+    for (let k = 0; k < list.length; k++) {
+      const outside = outsideProfile(list[k]);
+      if (outside) return { ok: false, reason: outside.refused, [key]: k, at: outside.at };
+    }
+  }
   for (const event of result.events ?? []) {
     let sum = 0n;
     for (const k of event.changes) {
@@ -223,6 +275,8 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
       if (!node) return 'no_such_node';
       if (c.by !== undefined && !(Number.isSafeInteger(c.to) && (c.to as number) >= 0)) return 'not_whole_number';
       node.fields = { ...node.fields, [c.field]: c.to };
+      // A set without a value clears the field: it reads as its default again.
+      if (!has(c, 'to')) delete node.fields[c.field];
       return null;
     case 'link':
     case 'unlink': {
