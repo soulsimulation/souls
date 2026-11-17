@@ -298,3 +298,34 @@ Its cases are `cases/looks/` (kinds in `cases/looks/kinds/`); `node --test packa
 them and `node packages/form-rules/bin/looks-browser-check.mjs` checks Node against a browser build. Today's page
 calls it for a def whose `make.args.looks_table` carries a table (`apps/web/src/gen-mesh/vocab-look.ts`); the wiring is
 thrown away when Engine v2 draws things (V17, V8), the table and the function carry over.
+
+A row may follow a timed field (below; SA-D1b, [#2886](https://github.com/soulsimulation/souls/issues/2886)): the
+state holds its three stored numbers and `looks({..., now_us, fields})` reads it with `valueAt` at the viewer's world
+time, so a level rises on screen with nothing sent after the record (a viewer behind the set time draws it as set).
+The page sets its world clock with `setLooksClock` (`vocab-look.ts`) and places such parts again each frame.
+
+## A timed value
+
+A field of type `timed` changes by itself with time (a kettle heats, a candle burns down) and is stored as three whole
+numbers, `{value, per_s, set_us}`: its value when it was set, its rate per second in the field's unit, and the world
+time it was set, in microseconds. Nothing is written between events; Engine v2's F5
+([#2770](https://github.com/soulsimulation/souls/issues/2770)) settles and rewrites the three on any change and runs
+the same cases.
+
+- `valueAt(def, stored, now_us)`: the value plus `per_s x (now_us - set_us) / 1,000,000`, truncated toward zero (whole
+  units accrued, so rising and falling behave alike), held within the field's `min` and `max`. The rounding of a
+  falling value is F5's ([#2770](https://github.com/soulsimulation/souls/issues/2770)) to settle: a floor instead of
+  truncating the change would read one unit lower for a falling value mid-step (a candle 1 mm shorter after 1 us).
+- `crossing(def, stored, {at_least | at_most: level}, from_us)`: the first whole microsecond at or after `from_us` at
+  which that value meets the level, so the crossing is rounded up and a need on the field turns from no to yes at
+  exactly that time; `null` when it never does (the rate is zero or points away, or a bound stops it short).
+- World time is a signed 64-bit count that never stops. Every number (the three, `now_us`, `from_us`, a level, `min`,
+  `max`) may be a safe integer or a big integer, as T0's encoding reads a whole number beyond 2^53; everything is
+  worked in big integers, and a result is a number when it is a safe integer, else a big integer. Only a number or
+  result outside the signed 64-bit range is refused, as `{bad: "beyond_i64"}`; a time before `set_us` is refused as
+  `{bad: "time_before_set"}`. A Rust build needs 128-bit intermediates (rate x elapsed time exceeds 64 bits).
+  Case files are read with whole numbers beyond 2^53 as big integers (`parse` in `src/load.ts`).
+
+A file in `cases/timed/` is `{"format": "souls-timed-cases/1", "about": ..., "cases": [...]}`. A case names a kind
+and a field, a stored value, `values` as `[now_us, value]` and `crossings` as a level, `from_us` and the expected
+time (or `null`). The `timed` type is not in the entry format yet; its cases use `cases/kinds/test/timed_kettle.json`.
