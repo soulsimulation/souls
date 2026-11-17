@@ -23,7 +23,7 @@
               { "change": "set", "node": "t1", "field": "water_g", "n": 1, "to": 999998500, "by": -1500 },
               { "change": "set", "node": "k1", "field": "water_g", "n": 1, "to": 1700, "by": 1500 }
             ],
-            "events": [{ "event": "filled", "node": "k1", "changes": [0, 1] }],
+            "events": [{ "event": "test:filled", "node": "k1", "changes": [0, 1] }],
             "timers": []
           }
         }
@@ -54,7 +54,7 @@
               { "change": "set", "node": "k1", "field": "water_g", "n": 1, "to": 1450, "by": -250 },
               { "change": "set", "node": "c1", "field": "water_g", "n": 1, "to": 250, "by": 250 }
             ],
-            "events": [{ "event": "poured", "node": "k1", "changes": [0, 1] }],
+            "events": [{ "event": "test:poured", "node": "k1", "changes": [0, 1] }],
             "timers": []
           }
         }
@@ -112,7 +112,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [{ "change": "reparent", "node": "c1", "to": { "node": "b1", "hand": "left" } }],
-            "events": [{ "event": "taken", "node": "c1", "changes": [0] }],
+            "events": [{ "event": "test:taken", "node": "c1", "changes": [0] }],
             "timers": []
           }
         }
@@ -140,7 +140,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [{ "change": "link", "node": "h1", "link": "signed", "n": 1, "end": "b1" }],
-            "events": [{ "event": "signed_up", "node": "h1", "changes": [0] }],
+            "events": [{ "event": "test:signed_up", "node": "h1", "changes": [0] }],
             "timers": []
           }
         }
