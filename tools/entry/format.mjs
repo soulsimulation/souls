@@ -15,7 +15,10 @@ export const FORMAT = 'souls-entry/1';
 
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640). */
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 10, vehicle: 13, ride: 14, stock: 15, areas: 16,
+// Section 10 is reserved for Engine v2 T3's hashed table of referenced kinds (T3, #2640, rule 14); it is not implemented
+// here. Section 11 is `children`, the kinds a thing admits as children: a check at commit by plain kind name, never a
+// hashed reference, so `kindRefs` does not follow it. Section 12 is `reactions` (SA-F15), numbered when that task lands.
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
@@ -209,14 +212,12 @@ function section(entry, key, err) {
   return v;
 }
 
-// A card is the line a search ranks a kind on: its purpose (at most CARD_PURPOSE_MAX characters), one category word and
+// A card is the line a search ranks a kind on: its purpose (its length is the check's rule), one category word and
 // synonyms. All are words, so all are named by reference to the text table.
-const CARD_PURPOSE_MAX = 80;
 function card(c, text, err) {
   if (!isObj(c)) { err('card', 'an object'); return; }
   only(c, ['text', 'category', 'synonyms'], 'card', err);
   if (!(typeof c.text === 'string' && c.text in text)) err('card.text', 'names an entry of the text table');
-  else if ([...text[c.text]].length > CARD_PURPOSE_MAX) err('card.text', `the purpose line is at most ${CARD_PURPOSE_MAX} characters`);
   if (c.category !== undefined) {
     if (!(typeof c.category === 'string' && c.category in text)) err('card.category', 'names an entry of the text table (one word)');
     else if (/\s/.test(text[c.category].trim())) err('card.category', 'one word: its text entry has more than one');
@@ -743,7 +744,6 @@ export function kindRefs(entry) {
     else if (isObj(v)) for (const [k, x] of Object.entries(v)) { if ((k === 'kind' || k === 'holds') && typeof x === 'string' && KIND.test(x)) refs.add(x); else walk(x); }
   };
   walk(entry.forms);
-  for (const c of Object.values(entry.children ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
   for (const c of Object.values(entry.stock ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
   return [...refs].sort();
 }

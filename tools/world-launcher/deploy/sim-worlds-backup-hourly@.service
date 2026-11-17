@@ -1,0 +1,25 @@
+# Hourly off-site backup of a launcher stage (#2542): deploy/backup-restic.mjs backup-hourly. Copies only the databases
+# written since their last copy (online backup + quick_check), takes one restic snapshot tagged <stage>,hourly and copies
+# it to SIM_BACKUP_OFFSITE. No forget, prune or check here: the nightly run (sim-worlds-backup@.service) keeps the newest
+# 24 hourly snapshots and checks the repository. Same settings file and the same lock as the nightly run (they share the
+# staging mirror). Installed by install.sh, never enabled by it:
+#   enable:  systemctl enable --now sim-worlds-backup-hourly@production.timer
+#   run now: systemctl start sim-worlds-backup-hourly@production.service
+#   restore: backup-restic.mjs list production, then restore production <hourly snapshot id> <empty dir> (docs/operations/runbook.md#backups)
+[Unit]
+Description=Hourly backup of sim-worlds@%i changed databases (restic, off-site)
+
+[Service]
+Type=oneshot
+User=simworlds
+Group=simworlds
+Nice=10
+IOSchedulingClass=idle
+EnvironmentFile=-/etc/sim-worlds/backup.env
+ExecStart=/usr/bin/flock -w 3600 /srv/sim-worlds-backups/.lock-%i /usr/bin/node --no-warnings /srv/sim-worlds/%i/tools/world-launcher/deploy/backup-restic.mjs backup-hourly %i
+TimeoutStartSec=50min
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/sim-worlds-data/%i /srv/sim-worlds-backups
+PrivateTmp=true
