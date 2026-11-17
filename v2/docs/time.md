@@ -30,8 +30,9 @@ natively, and the `time-goldens` step of `v2/tools/ci.sh` for the WASM build. Th
    (tick n, beat k, a world time from a real one) rounds down. The time a count is reached (a tick's start, a beat's
    time) is the first whole microsecond at or after it: it rounds up. Never add a rounded period: at 130 a minute a
    beat is 461,538.46 µs, and a million added periods land 461,539 µs early (Step 0 below). These lines only rise,
-   and the rule lives in one type, `Line` with `Fraction`, which a later task with a quantity rising with world time
-   (T4's tracks) uses instead of a copy. A value that can fall (a timed value: a candle shortening) is F5's (#2770),
+   and the rule lives in one type, `Line` with `Fraction`, available to any later use that rises with world time and
+   rounds down. A use that falls, curves or rounds otherwise states its own rule (T4's tracks round a pose to the
+   nearest unit, `pose.md` rule 8). A value that can fall (a timed value: a candle shortening) is F5's (#2770),
    which follows SA-F5a (#2845): its value rounds toward zero, not down (a candle losing 1 a second reads no change
    0.5 s after it is set, where a floor would read −1), and its crossing rounds up.
 5. **Every fraction is positive and its parts fit 32 bits** (`fraction-not-positive`, `fraction-too-wide`), so a
@@ -69,7 +70,7 @@ natively, and the `time-goldens` step of `v2/tools/ci.sh` for the WASM build. Th
 
 - **A duration or a deadline stored in ticks.** Its meaning changes with the rate; round only when scheduling.
 - **Adding a rounded period** for ticks or beats. The error grows with every step; compute from the anchor.
-- **A second copy of the rounding** (for a track, say) instead of `Line`. Two copies drift apart.
+- **A second copy of this rounding** for a rising, round-down count instead of `Line`. Two copies drift apart.
 - **A float anywhere in the arithmetic.** Native and WASM agree on integers, not on every float path.
 - **Nanoseconds in 64 bits.** They last 104 days.
 - **A JavaScript number past 2^53 µs.** It rounds silently after 285 world years, which a fast world reaches in real
