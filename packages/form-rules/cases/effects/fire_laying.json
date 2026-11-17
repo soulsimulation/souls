@@ -1,0 +1,283 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Campfire laying (from #1648): a Soul with empty hands lays the site's one set; supplies go 1 to 0 and one campfire is made on the out place in the same batch, its id from the receipt. The Soul lights the new campfire and puts it out. A second lay is refused: no set left, and nothing is made. A campfire already laid is lit, refused a second lighting, and put out.",
+ "cases": [
+  {
+   "name": "lay_light_put_out_then_none_left",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "k1"
+      ]
+     },
+     "k1": {
+      "kind": "eden:fire_laying_site"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "k1",
+      "form": "lay"
+     },
+     "receipt": "rf1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "k1",
+        "field": "supplies",
+        "n": 1,
+        "to": 0
+       },
+       {
+        "change": "create",
+        "node": "rf1.0",
+        "kind": "eden:campfire",
+        "to": {
+         "node": "k1",
+         "slot": "out"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:supplies_used",
+        "node": "k1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:campfire_laid",
+        "node": "k1",
+        "changes": [
+         1
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "rf1.0",
+      "form": "light"
+     },
+     "receipt": "rf2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "rf1.0",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "rf1.0",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "rf1.0",
+      "form": "put_out"
+     },
+     "receipt": "rf3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "rf1.0",
+        "field": "lit",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:put_out",
+        "node": "rf1.0",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "k1",
+      "form": "lay"
+     },
+     "receipt": "rf4",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "says": "no_supplies"
+     }
+    }
+   ],
+   "after": {
+    "k1": {
+     "kind": "eden:fire_laying_site",
+     "fields": {
+      "supplies": 0
+     },
+     "slots": {
+      "out": [
+       "rf1.0"
+      ]
+     }
+    },
+    "rf1.0": {
+     "kind": "eden:campfire",
+     "fields": {
+      "lit": 0
+     }
+    }
+   }
+  },
+  {
+   "name": "light_a_laid_campfire_twice",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "k1"
+      ]
+     },
+     "k1": {
+      "kind": "eden:fire_laying_site",
+      "fields": {
+       "supplies": 0
+      },
+      "slots": {
+       "out": [
+        "c1"
+       ]
+      }
+     },
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "c1",
+      "form": "light"
+     },
+     "receipt": "rf1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lit",
+        "n": 1,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:lit",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "light"
+     },
+     "receipt": "rf2",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "put_out"
+      },
+      "says": "already_lit"
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "put_out"
+     },
+     "receipt": "rf3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "lit",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:put_out",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "c1": {
+     "kind": "eden:campfire",
+     "fields": {
+      "lit": 0
+     }
+    }
+   }
+  }
+ ]
+}

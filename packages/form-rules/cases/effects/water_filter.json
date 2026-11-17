@@ -1,0 +1,395 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "The camp water filter (from #1828), to its end: filter a portion into the carafe (cloudy 3 to 2, cartridge 2 to 1); filtering into the full carafe is refused; drain and filter again (the cartridge is spent); with the cartridge spent filtering is refused and names replace_cartridge; the spare goes in; the last portion is filtered; with no cloudy water left filtering is refused; the Soul takes the same carafe.",
+ "cases": [
+  {
+   "name": "filter_drain_spend_replace_run_dry",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "f1",
+       "c1"
+      ]
+     },
+     "f1": {
+      "kind": "eden:water_filter"
+     },
+     "c1": {
+      "kind": "eden:filter_carafe"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "f1",
+      "form": "filter",
+      "args": {
+       "carafe": "c1"
+      }
+     },
+     "receipt": "rw1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "water",
+        "n": 1,
+        "to": 2,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "water",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "cartridge",
+        "n": 2,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:filtered",
+        "node": "f1",
+        "changes": [
+         0,
+         1
+        ]
+       },
+       {
+        "event": "eden:cartridge_used",
+        "node": "f1",
+        "changes": [
+         2
+        ]
+       }
+      ],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "filter",
+      "args": {
+       "carafe": "c1"
+      }
+     },
+     "receipt": "rw2",
+     "expect": {
+      "verdict": "no",
+      "reason": "no_room",
+      "need": 3,
+      "says": "carafe_full"
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "drain"
+     },
+     "receipt": "rw3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "water",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:drained",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "filter",
+      "args": {
+       "carafe": "c1"
+      }
+     },
+     "receipt": "rw4",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "water",
+        "n": 1,
+        "to": 1,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "water",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "cartridge",
+        "n": 2,
+        "to": 0
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "drain"
+     },
+     "receipt": "rw5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "water",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:drained",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "filter",
+      "args": {
+       "carafe": "c1"
+      }
+     },
+     "receipt": "rw6",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0,
+      "fix": {
+       "form": "replace_cartridge"
+      },
+      "says": "cartridge_spent"
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "replace_cartridge"
+     },
+     "receipt": "rw7",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "spares",
+        "n": 3,
+        "to": 0
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "cartridge",
+        "n": 2,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:spare_used",
+        "node": "f1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:cartridge_replaced",
+        "node": "f1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "filter",
+      "args": {
+       "carafe": "c1"
+      }
+     },
+     "receipt": "rw8",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "water",
+        "n": 1,
+        "to": 0,
+        "by": -1
+       },
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "water",
+        "n": 1,
+        "to": 1,
+        "by": 1
+       },
+       {
+        "change": "set",
+        "node": "f1",
+        "field": "cartridge",
+        "n": 2,
+        "to": 1
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "drain"
+     },
+     "receipt": "rw9",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "c1",
+        "field": "water",
+        "n": 1,
+        "to": 0
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:drained",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "f1",
+      "form": "filter",
+      "args": {
+       "carafe": "c1"
+      }
+     },
+     "receipt": "rw10",
+     "expect": {
+      "verdict": "no",
+      "reason": "not_enough",
+      "need": 2,
+      "says": "no_cloudy_water"
+     }
+    },
+    {
+     "act": {
+      "this": "c1",
+      "form": "take"
+     },
+     "receipt": "rw11",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "reparent",
+        "node": "c1",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        }
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:taken",
+        "node": "c1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "f1": {
+     "kind": "eden:water_filter",
+     "fields": {
+      "water": 0,
+      "cartridge": 1,
+      "spares": 0
+     }
+    },
+    "c1": {
+     "kind": "eden:filter_carafe",
+     "fields": {
+      "water": 0
+     }
+    },
+    "b1": {
+     "hands": {
+      "left": "c1",
+      "right": null
+     }
+    }
+   }
+  }
+ ]
+}

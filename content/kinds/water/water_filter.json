@@ -1,0 +1,82 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:water_filter",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "cartridge": { "n": 2, "type": "int", "unit": "count", "default": 2, "min": 0, "max": 2, "audience": { "rule": "everyone" } },
+    "spares": { "n": 3, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "pump": { "role": "contact", "at_mm": [0, 1150, 120] },
+    "spout": { "role": "outlet", "at_mm": [250, 950, 150], "yaw_mdeg": 0 },
+    "stand": { "role": "stand", "at_mm": [0, 0, 800], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [700, 1300, 500] },
+  "forms": {
+    "filter": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "carafe": { "type": "thing", "select": { "of": "things", "kind": "eden:filter_carafe", "in": "here", "anchor": "this", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "state", "field": "cartridge", "at_least": 1, "says": "cartridge_spent" },
+        { "need": "hand", "empty": true, "says": "hands_and_table" },
+        { "need": "enough", "says": "no_cloudy_water" },
+        { "need": "room", "says": "carafe_full" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "pump" },
+        { "step": "wait", "us": 6000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "water", "from": "this", "into": { "arg": "carafe" }, "amount": 1, "event": "filtered" },
+        { "change": "set", "field": "cartridge", "by": -1, "event": "cartridge_used" }
+      ]
+    },
+    "replace_cartridge": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "cartridge", "at_most": 0, "says": "not_yet_spent" },
+        { "need": "state", "field": "spares", "at_least": 1, "says": "no_spare" },
+        { "need": "hand", "empty": true, "says": "hands_and_table" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 6000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "spares", "by": -1, "event": "spare_used" },
+        { "change": "set", "field": "cartridge", "to": 2, "event": "cartridge_replaced" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:water_filter",
+    "table": [
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 3], "to": [0, 1000] },
+      { "part": "light", "field": "cartridge", "do": "tint", "at": { "0": "#6b5a3a", "1": "#c9c2a8", "2": "#f2efe4" } }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[0,350,0],"size":[700,700,500],"tint":"stand"},{"kind":"cyl","at":[-120,880,0],"r":170,"h":360,"segments":12,"tint":"tank","material":"glass"},{"kind":"cyl","at":[-120,870,0],"r":160,"h":330,"segments":12,"tint":"cloudy","role":"fill","pivot":[-120,705,0]},{"kind":"cyl","at":[180,880,0],"r":70,"h":300,"segments":10,"tint":"cartridge","role":"light"},{"kind":"box","at":[0,1150,120],"size":[40,220,40],"tint":"metal","role":"knob"},{"kind":"box","at":[250,950,120],"size":[160,30,30],"tint":"metal"}],"palette":{"stand":"#6b5a46","tank":"#c7e3e7","cloudy":"#a99f7c","cartridge":"#f2efe4","metal":"#4b4f4c"},"tags":["camping","water","filter","object"]}
+  },
+  "text": {
+    "card": "A camp hand-pump filter with three cloudy portions: filter one into a carafe.",
+    "cartridge_spent": "The installed cartridge is spent; replace it using a supplied spare.",
+    "hands_and_table": "Empty your hands and put the selected carafe on a fixed work surface beside the filter.",
+    "no_cloudy_water": "No supplied cloudy water remains; draining does not replenish it.",
+    "carafe_full": "Empty this full carafe before filtering another portion.",
+    "not_yet_spent": "Use the installed cartridge until spent before replacing it.",
+    "no_spare": "No spare cartridge remains; replacement cannot restore free capacity.",
+    "water": "water",
+    "purifier": "purifier",
+    "pump": "pump",
+    "howto_filter": "Set a filter carafe near it, pump one portion through with empty hands; replace the cartridge when it is spent."
+  },
+  "card": { "text": "card", "category": "water", "synonyms": ["purifier", "pump"] },
+  "howtos": {
+    "filter": { "text": "howto_filter", "steps": [{ "form": "filter" }, { "form": "replace_cartridge" }] }
+  }
+}

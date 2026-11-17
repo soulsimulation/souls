@@ -1,0 +1,82 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sand_timer",
+  "owner": "thing",
+  "state": {
+    "sand": { "n": 1, "type": "enum", "values": ["top", "bottom"], "default": "top", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "frame": { "role": "grip", "at_mm": [0, 120, 0] }
+  },
+  "geometry": { "bounds_mm": [120, 240, 120] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "time_5s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "sand", "is": "top", "says": "flip_first" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [{ "step": "wait", "us": 5000000 }],
+      "effects": [{ "change": "set", "field": "sand", "to": "bottom", "event": "interval_timed" }]
+    },
+    "time_10s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "sand", "is": "top", "says": "flip_first" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [{ "step": "wait", "us": 10000000 }],
+      "effects": [{ "change": "set", "field": "sand", "to": "bottom", "event": "interval_timed" }]
+    },
+    "time_15s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "sand", "is": "top", "says": "flip_first" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [{ "step": "wait", "us": 15000000 }],
+      "effects": [{ "change": "set", "field": "sand", "to": "bottom", "event": "interval_timed" }]
+    },
+    "flip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "sand", "is": "bottom" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "frame" }],
+      "effects": [{ "change": "set", "field": "sand", "to": "top", "event": "flipped" }]
+    }
+  },
+  "looks": {
+    "model": "look:sand_timer",
+    "table": [
+      { "part": "fill", "field": "sand", "do": "scale", "axis": "y", "at": { "top": 1000, "bottom": 1 } },
+      { "part": "flip", "field": "sand", "do": "scale", "axis": "y", "at": { "top": 1, "bottom": 1000 } }
+    ],
+    "shape": {"round":2,"shapes":[{"kind":"cyl","at":[0,8,0],"r":60,"h":16,"segments":8,"tint":"wood"},{"kind":"cyl","at":[0,232,0],"r":60,"h":16,"segments":8,"tint":"wood"},{"kind":"cyl","at":[-48,120,0],"r":6,"h":210,"segments":5,"tint":"wood"},{"kind":"cyl","at":[48,120,0],"r":6,"h":210,"segments":5,"tint":"wood"},{"kind":"cone","at":[0,172,0],"r":38,"h":104,"segments":10,"tint":"glass","material":"glass","pitch":180000},{"kind":"cone","at":[0,68,0],"r":38,"h":104,"segments":10,"tint":"glass","material":"glass"},{"kind":"cone","at":[0,190,0],"r":30,"h":60,"segments":10,"tint":"sand","pitch":180000,"role":"fill","pivot":[0,220,0]},{"kind":"cone","at":[0,46,0],"r":30,"h":60,"segments":10,"tint":"sand","role":"flip","pivot":[0,16,0]}],"palette":{"wood":"#6b4a2e","glass":"#d8ecef","sand":"#d9b779"},"tags":["item","timer","hourglass","object"]}
+  },
+  "text": {
+    "card": "A portable sand timer: time five, ten or fifteen seconds, then flip it.",
+    "flip_first": "The sand is at the lower end; flip the same timer before starting another interval.",
+    "put_down_first": "Put down held objects before timing or flipping the sand timer.",
+    "time": "time",
+    "hourglass": "hourglass",
+    "egg_timer": "egg timer",
+    "howto_time": "Set it down, time an interval with empty hands while the sand runs, then flip it to time again."
+  },
+  "card": { "text": "card", "category": "time", "synonyms": ["hourglass", "egg_timer"] },
+  "howtos": {
+    "time": { "text": "howto_time", "steps": [{ "form": "time_10s" }, { "form": "flip" }] }
+  }
+}

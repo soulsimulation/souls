@@ -1,0 +1,63 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:campfire",
+  "owner": "thing",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "logs": { "role": "contact", "at_mm": [0, 250, 0] },
+    "stand": { "role": "stand", "at_mm": [0, 0, 1100], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [1100, 600, 1100] },
+  "forms": {
+    "light": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": false, "says": "already_lit" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "logs" }
+      ],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    },
+    "put_out": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": true, "says": "already_out" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "logs" }
+      ],
+      "effects": [{ "change": "set", "field": "lit", "to": false, "event": "put_out" }]
+    }
+  },
+  "looks": {
+    "model": "look:campfire",
+    "table": [
+      { "part": "flame", "field": "lit", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "flame", "field": "lit", "do": "flame", "at": { "true": 1000, "false": 0 } },
+      { "part": "light", "field": "lit", "do": "glow", "at": { "true": 800, "false": 0 } }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"torus","at":[0,60,0],"r":440,"r2":70,"segments":10,"tint":"stone","pitch":90000},{"kind":"cyl","at":[-120,120,0],"r":55,"h":700,"segments":6,"tint":"wood","pitch":90000,"yaw":20000},{"kind":"cyl","at":[120,120,0],"r":55,"h":700,"segments":6,"tint":"wood","pitch":90000,"yaw":-20000},{"kind":"cyl","at":[0,200,0],"r":50,"h":650,"segments":6,"tint":"wood","pitch":90000,"yaw":90000},{"kind":"cyl","at":[0,40,0],"r":250,"h":20,"segments":10,"tint":"ember","role":"light"},{"kind":"cone","at":[0,380,0],"r":180,"h":360,"segments":7,"tint":"flame","role":"flame","pivot":[0,220,0]}],"palette":{"stone":"#817b70","wood":"#806045","ember":"#6b2b18","flame":"#ffae42"},"tags":["camping","fire","campfire","object"]}
+  },
+  "text": {
+    "card": "A laid campfire of logs in a stone ring: light it, or put it out.",
+    "already_lit": "The campfire is already burning.",
+    "already_out": "The campfire is already out.",
+    "camp": "camp",
+    "bonfire": "bonfire",
+    "fire": "fire",
+    "howto_light": "With a hand free, light the logs; put it out the same way."
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["bonfire", "fire"] },
+  "howtos": {
+    "light": { "text": "howto_light", "steps": [{ "form": "light" }] }
+  }
+}
