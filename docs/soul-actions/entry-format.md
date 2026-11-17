@@ -229,7 +229,9 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
-  `transfer`). A range need also takes a `timed` field.
+  `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
+  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
+  `timed` field.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
   water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
   `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`

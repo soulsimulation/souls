@@ -1,0 +1,28 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:kindling_bundle",
+  "owner": "thing",
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 55, 0] }
+  },
+  "geometry": { "bounds_mm": [210, 110, 300] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    }
+  },
+  "looks": {
+    "model": "look:kindling_bundle",
+    "shape": {"round":3,"shapes":[{"kind":"box","at":[-60,25,0],"size":[45,40,300],"tint":"wood"},{"kind":"box","at":[-60,70,0],"size":[45,40,300],"tint":"wood"},{"kind":"box","at":[0,25,0],"size":[45,40,280],"tint":"wood"},{"kind":"box","at":[0,70,0],"size":[45,40,280],"tint":"wood"},{"kind":"box","at":[60,25,0],"size":[45,40,260],"tint":"wood"},{"kind":"box","at":[60,70,0],"size":[45,40,260],"tint":"wood"},{"kind":"box","at":[0,55,0],"size":[210,110,25],"tint":"twine"}],"palette":{"wood":"#d1ac73","twine":"#79674e"},"tags":["camping","item","kindling","object"]}
+  },
+  "text": {
+    "card": "A bundle of split kindling, tied with twine: take it.",
+    "camp": "camp",
+    "wood": "wood"
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["wood"] }
+}
