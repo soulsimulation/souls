@@ -60,7 +60,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
-(SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
+(SA-F10), `stock` (SA-F12), `areas` (SA-D6), `hatch` (SA-F9).
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
@@ -77,6 +77,22 @@ named fields, each `bool`, `enum`, `int` or `duration`; never text and never an 
 record), an optional `key` (a field of the record; the rules add, remove or set one item by it) and an empty default.
 `stateAtMax(entry)` counts a kind's state with every list full and every child kind at its bound; the check gate uses
 it rather than the empty default.
+
+**Schedules are data** (SA-F16, [#2854](https://github.com/soulsimulation/souls/issues/2854); feeds Engine v2 E7, R15).
+Every "when" the world knows is a state field of type `schedule`, never part of a form: `{"n", "type": "schedule",
+"most": 1 to 100, "default": [entries], "audience"}`. An entry is `{"repeat": "once", "from_us", "to_us"}` (two world
+times, whole microseconds) or `{"repeat": "weekly", "days": ["mon", ...], "from_us", "to_us"}` (one to seven different
+days of `mon` to `sun`, between two local times of day in whole microseconds, `to_us` after `from_us` and at most a day;
+an evening past midnight is two entries). Local time is the clock of the place the thing stands in. A shop states its
+hours as weekly entries; a weekly class states its sittings the same way; a one-off opening is a `once`. The default
+is the hours a copy starts with; its owner sets the list whole. A form never writes a schedule. A ride's timetable is not
+stored: it follows from its track (Engine v2 E7, N12). The world never waits for a time, reminds a mind or starts a
+form at one: the client reads the schedule and acts when it chooses. A form that carries a start time (`at`, `start`,
+`until`, `when`, `schedule`, ...), a step or need that waits for a time or a condition (`wait_until`, `time`, ...) is
+refused, naming the field. Its only waits are a stated pause (`wait`, `us`) and a timer the world itself sets
+(`timer`, `after_us`). A calendar entry is a kind (`content/kinds/calendar/entry.json`): `start` and `end` (durations
+as world times), `words` (by reference), links `place`, `poster` and `interested`; `post` is a form, interest a link. No
+new section number: a schedule is a field type in `state` (3). `stateAtMax` counts three values an entry.
 
 **Audience** is a rule on every state field and link type, written out (there is no implied default), from one closed
 list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"rule": "owner"}` (the thing's owner),
