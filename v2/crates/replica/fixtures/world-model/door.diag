@@ -2,7 +2,7 @@
 # T1); a typed link joins it to the kitchen. Written: 1 the Souls this world knows, 2 audiences (number: members),
 # 3 nodes {1 id, 2 kind, 3 parent, 4 slot, 5 audience, 6 fields}, 4 links {1 id, 2 type, 3 [end, end],
 # 4 owning end (0 or 1), 5 audience}. Ids are counters: a counter listed in section 1 is a Soul (the directory's
-# scope), any other is this world's. Audience 0 is everyone, and a node written without one has it.
+# scope), any other is the scope of this world's one zone writer. Audience 0 is everyone, and a node written without one has it.
 {
   1: [],
   2: {},

@@ -492,7 +492,8 @@ pub fn parse_kinds(text_: &str) -> Result<BTreeMap<String, Kind>, Refusal> {
 }
 
 /// Reads a world fixture (layout in `fixtures/world-model/door.diag`) against `kinds`. A counter listed as a Soul is in
-/// [`FIXTURE_SCOPE_SOULS`]; every other counter is in the world's scope, [`FIXTURE_SCOPE_A`].
+/// [`FIXTURE_SCOPE_SOULS`]; every other counter is in the scope of the world's one zone writer, [`FIXTURE_SCOPE_A`] (each writer mints in
+/// its own scope, `v2/docs/ids.md` rule 1).
 pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft, Refusal> {
     let Value::Map(w) = read(text_)? else {
         return source("a world is a map");
