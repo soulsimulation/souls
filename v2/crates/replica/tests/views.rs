@@ -149,10 +149,10 @@ fn a1_one_pass_equals_effect_by_effect_at_every_level_for_two_audiences() {
     };
     assert_eq!(room(Level::Full, private()), 2);
     // The room's public view holds the base entry that furnished it, though that entry's node is the root.
-    assert_eq!(room(Level::Full, Audience::Everyone), 10);
+    assert_eq!(room(Level::Full, Audience::Everyone), 13);
     // Its outline: the room itself, the body, the cup, the key and the crate created, the cup removed, the key left
-    // and arrived.
-    assert_eq!(room(Level::Outline, Audience::Everyone), 8);
+    // and arrived, the cushion created, left and arrived.
+    assert_eq!(room(Level::Outline, Audience::Everyone), 11);
     let crate_outline = &one_pass[keys
         .iter()
         .position(|k| {
@@ -165,8 +165,39 @@ fn a1_one_pass_equals_effect_by_effect_at_every_level_for_two_audiences() {
         panic!("a map")
     };
     assert_eq!(m.get(&2), Some(&Value::Uint(4)));
-    assert_eq!(m.get(&3), Some(&id(0xee, 6).to_value()));
+    assert_eq!(m.get(&3), Some(&id(0xee, 12).to_value()));
     assert_eq!(m.get(&5), Some(&id(0xee, 7).to_value()));
+    // The crate's outline names only what is on it: the crate, the key and the cushion.
+    assert_eq!(crate_outline.records.len(), 3);
+    // The crate's full view held neither leave, so each arrival comes after its subtree as it was in flight: the
+    // cushion's, whose creation the view never held, and the key's.
+    let full = &one_pass[keys
+        .iter()
+        .position(|k| {
+            k.node == id(0xee, 7) && k.level == Level::Full && k.audience == Audience::Everyone
+        })
+        .expect("a key")];
+    let carried: Vec<_> = full
+        .records
+        .iter()
+        .filter_map(|(_, r)| match r {
+            Value::Map(m) if m.get(&2) == Some(&Value::Uint(6)) => Some(m.clone()),
+            _ => None,
+        })
+        .collect();
+    println!(
+        "the crate's full view carries {} subtree(s) in flight",
+        carried.len()
+    );
+    assert_eq!(carried.len(), 2, "the key and the cushion, as in flight");
+    let Some(Value::Array(nodes)) = carried[1].get(&3) else {
+        panic!("nodes")
+    };
+    assert_eq!(nodes.len(), 1);
+    let Value::Array(pair) = &nodes[0] else {
+        panic!("a pair")
+    };
+    assert_eq!(pair[0], id(0xee, 12).to_value());
 }
 
 /// Each level's busiest second over every view a viewer in `audiences` is sent for `scope`, and how many views that
@@ -375,7 +406,7 @@ fn a4_each_output_names_its_log_position_redaction_list_and_version() {
             out.version
         );
         assert_eq!(m.get(&4), Some(&header.hash().to_value()));
-        assert_eq!(m.get(&5), Some(&Value::Uint(12)));
+        assert_eq!(m.get(&5), Some(&Value::Uint(15)));
         assert_eq!(m.get(&6), Some(&list.hash().to_value()));
         assert_eq!(m.get(&7), Some(&Level::Full.version().to_value()));
     }

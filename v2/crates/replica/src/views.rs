@@ -359,6 +359,7 @@ pub struct View {
     out: Output,
     kept: BTreeMap<Id, Micros>,
     second: Option<Second>,
+    left: BTreeSet<Id>,
 }
 
 /// The world second a counts view is in: its number, the entries seen in it, the nodes alive after the last of them
@@ -416,6 +417,7 @@ impl View {
             },
             kept: BTreeMap::new(),
             second: None,
+            left: BTreeSet::new(),
         }
     }
 
@@ -439,19 +441,38 @@ impl View {
         }
         let seq = Value::Uint(env.sequence);
         match self.key.level {
-            Level::Full => self
-                .out
-                .records
-                .push((env.at, redactions.scrub(entry.to_value()))),
-            Level::Sampled => {
-                if self.keep_sample(entry) {
+            Level::Full | Level::Sampled => {
+                if self.key.level == Level::Full || self.keep_sample(entry) {
+                    match &entry.body {
+                        Body::Transfer(TransferRec::Leave { transfer, .. }) => {
+                            self.left.insert(*transfer);
+                        }
+                        Body::Transfer(TransferRec::Arrive { transfer, .. })
+                            if !self.left.remove(transfer) =>
+                        {
+                            if let Some(f) = before.in_flight.get(transfer) {
+                                self.out
+                                    .records
+                                    .push((env.at, redactions.scrub(carried(&seq, f))));
+                            }
+                        }
+                        _ => {}
+                    }
                     self.out
                         .records
                         .push((env.at, redactions.scrub(entry.to_value())));
                 }
             }
             Level::Outline => {
-                for r in outline(entry, before, after) {
+                let mine = |r: &Vec<(u64, Value)>| {
+                    let gone = matches!(r.first(), Some((2, Value::Uint(2 | 3))));
+                    let node = r.iter().find(|(k, _)| *k == 3).map(|(_, v)| v);
+                    let at = if gone { before } else { after };
+                    at.nodes
+                        .keys()
+                        .any(|i| node == Some(&i.to_value()) && under(at, *i, self.key.node))
+                };
+                for r in outline(entry, before, after).into_iter().filter(mine) {
                     let mut m = vec![(1, seq.clone())];
                     m.extend(r);
                     self.out.records.push((env.at, map(m)));
@@ -527,6 +548,59 @@ impl View {
         out.records.extend(self.second.map(Second::record));
         out
     }
+}
+
+/// The record a `full` or `sampled` view writes before an arrival whose leave it did not hold (rule 4): `{1: sequence,
+/// 2: 6 carried, 3: [[id, node], ...], 4: [[id, link], ...]}`, the subtree as it was in flight, in T6's state layout.
+fn carried(seq: &Value, f: &crate::effects::Flight) -> Value {
+    let pairs = |m: Vec<(Id, Value)>| {
+        Value::Array(
+            m.into_iter()
+                .map(|(i, v)| Value::Array(vec![i.to_value(), v]))
+                .collect(),
+        )
+    };
+    let nodes = f
+        .nodes
+        .iter()
+        .map(|(i, n)| {
+            let mut m = vec![
+                (1, Value::Text(n.kind.clone())),
+                (4, audience(n.audience)),
+                (5, Value::Map(n.fields.clone())),
+            ];
+            m.extend(n.parent.map(|p| (2, p.to_value())));
+            m.extend(n.slot.map(|x| (3, Value::Uint(x))));
+            m.extend(n.place.clone().map(|x| (6, x)));
+            m.extend(n.motion.clone().map(|x| (7, x)));
+            (*i, map(m))
+        })
+        .collect();
+    let links = f
+        .links
+        .iter()
+        .map(|(i, l)| {
+            let m = vec![
+                (1, Value::Text(l.ty.clone())),
+                (
+                    2,
+                    Value::Array(vec![l.ends[0].to_value(), l.ends[1].to_value()]),
+                ),
+                (
+                    3,
+                    Value::Uint(u64::from(l.owner == crate::world_model::End::Second)),
+                ),
+                (4, audience(l.audience)),
+            ];
+            (*i, map(m))
+        })
+        .collect();
+    map(vec![
+        (1, seq.clone()),
+        (2, Value::Uint(6)),
+        (3, pairs(nodes)),
+        (4, pairs(links)),
+    ])
 }
 
 /// The nodes an entry creates or brings in (rule 4): its creates, the root of a subtree that arrives from this zone,

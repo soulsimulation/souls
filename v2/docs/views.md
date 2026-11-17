@@ -15,7 +15,7 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
    `audience.md` once it exists; until then an opaque, growing set of references) and the view's own version. Its
    output is `{1: node, 2: level, 3: audience, 4: header hash, 5: last sequence, 6: redaction list hash, 7: version,
    8: [record, ...]}`, with 5 left out before the first entry. Field 4 is the header of the bundle that holds the last
-   sequence. The version is `souls/view/1` over the level's number, name and revision, and for `sampled` its sample
+   sequence (the reference here builds within one bundle; K4's logs of several bundles move it on). The version is `souls/view/1` over the level's number, name and revision, and for `sampled` its sample
    spacing; the list's hash is `souls/redactions/1` over its references in id order. A view reads no clock, no
    setting, no kind's definition and no memory but what it built from earlier entries. The tree it needs (what is
    under a node) is derived from the log.
@@ -24,14 +24,17 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
    motion is always kept); 3 `outline`, which is also the world-wide index level (E1 adds a place's name, by
    reference, and its outline): `{1: sequence, 2: 1 created, 3: node, 4: kind, 5: parent}`, `{.., 2: 2 removed,
    3: node}`, `{.., 2: 3 left, 3: node}`, `{.., 2: 4 arrived, 3: node, 5: parent}` and `{.., 2: 5 back, 3: node}`,
-   where an arrive from another zone also writes each node it carries as created; 4 `counts` (at most one record of at
+   where an arrive from another zone also writes each node it carries as created, and only nodes in the key's subtree
+   are written (before the entry for a removal or a leave, after it otherwise); 4 `counts` (at most one record of at
    most 31 bytes per world second: the second, the nodes alive in the view, the entries seen). A level added later
    takes the next unused number and its place in the order; none is renumbered, and order is never read from the
    numbers.
 4. **A view is computed once per key: (node, level, audience),** by the tier that reads the log, never by the clock
    thread. It holds each entry whose audience is the key's and that touches the key's subtree: its node was the key's
    node or under it just before the entry, or a node it creates or brings in (a create, an arrive's subtree) is under
-   it just after. One walk of the log feeds every key; any number of subscriptions with one key share one view. Every
+   it just after. When `full` or `sampled` keeps an arrival whose leave it did not hold, it first writes the subtree
+   as it was in flight, `{1: sequence, 2: 6 carried, 3: [[id, node], ...], 4: [[id, link], ...]}` in T6's state
+   layout, so a view can draw what came in from elsewhere. One walk of the log feeds every key; any number of subscriptions with one key share one view. Every
    entry moves the view's position, seen or not. For one redaction list and version a stream only appends: a record
    once sent is never rewritten, except that a counts view's open second is its last record until a later second
    closes it.
@@ -72,4 +75,6 @@ delivery, after the view. How busy a view is (rule 7) is read by the grant, not 
 - **A private view in a shared cache.** Anyone with the URL reads another audience's records.
 - **Dropping a subscription, or slowing the world, under load.** Detail gives way; nothing else does.
 - **Thinning away the sample that stops a body.** The viewer would move it on for ever.
+- **A crossing without its old place.** A node cannot show that something left it unless the leave or reparent
+  names where it was (T6 rule 3).
 - **Words copied into a view's records.** A redaction would then have to rewrite every built view.
