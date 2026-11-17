@@ -60,12 +60,11 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 14 | `ride` | A set trip between stops that nobody steers (below) |
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
-| 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
+| 17 | `roles` | An activity's roles: how much each is needed and where its members may be, and its "now" line, `now` (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
-| 24 | `now` | An activity's "now" line: `floor` (a role), `stage` (an enum field), `ends` (a timed field counting down) (below) |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
 (SA-F10), `hatch` (SA-F9).
@@ -290,11 +289,11 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
   activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
   Nothing removes a member for being quiet.
-- **The "now" line** (section 24, beside the meaning: it changes no verdict) names the parts of the activity's state that say what is happening
+- **The "now" line** (`roles.now`: a member of the activity's own section, 17, so no role is named `now`) names the parts of the activity's state that say what is happening
   now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
 
   ```json
-  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  "roles": { ..., "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" } }
   ```
 
   `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)

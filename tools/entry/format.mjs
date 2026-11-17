@@ -17,7 +17,7 @@ export const FORMAT = 'souls-entry/1';
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640).
  *  Section 10 is Engine v2 T3's table of referenced kinds, written by the encoder, never in a file; 12 is `reactions`. */
 export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16, roles: 17,
-  looks: 20, text: 21, card: 22, howtos: 23, now: 24});
+  looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
 export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', hatch: 'SA-F9'});
@@ -596,6 +596,7 @@ function bounds(f, path, err) {
 function roles(entry, err) {
   const table = section(entry, 'roles', err), links = isObj(entry.links) ? entry.links : {}, slots = isObj(entry.slots) ? entry.slots : {};
   for (const [name, r] of Object.entries(table)) {
+    if (name === 'now') continue; // the activity's now line, a member of this section (below), never a role
     const p = `roles.${name}`;
     if (!(isObj(links[name]) && (links[name].from === 'body' || links[name].from === 'soul'))) err(p, 'a role is a link type of this kind whose from end is a body or a Soul');
     if (!isObj(r)) { err(p, 'a role is an object: {"need", "places"}'); continue; }
@@ -616,16 +617,18 @@ function roles(entry, err) {
   }
 }
 
-/** An activity's "now" line (SA-G1b, #2873), beside the meaning: the role whose members have the floor, the enum field that
- *  is its stage, and the timed field counting down to its end. Each part is optional; no other key. */
+/** An activity's "now" line (SA-G1b, #2873), `roles.now`: a member of the activity's own section (17), so `now` is never a
+ *  role's name. The role whose members have the floor, the enum field that is its stage, and the timed field counting down
+ *  to its end. Each part is optional; no other key. */
 function nowLine(entry, err) {
-  if (entry.now === undefined) return;
-  if (!isObj(entry.now)) { err('now', 'an object: {"floor", "stage", "ends"}'); return; }
-  const n = entry.now, state = isObj(entry.state) ? entry.state : {};
-  only(n, ['floor', 'stage', 'ends'], 'now', err);
-  if (n.floor !== undefined && !(isObj(entry.roles) && n.floor in entry.roles)) err('now.floor', 'names a role of this kind');
-  if (n.stage !== undefined && state[n.stage]?.type !== 'enum') err('now.stage', 'names an enum field of this kind');
-  if (n.ends !== undefined && state[n.ends]?.type !== 'timed') err('now.ends', 'names a timed field of this kind, counting down');
+  const n = isObj(entry.roles) ? entry.roles.now : undefined;
+  if (n === undefined) return;
+  if (!isObj(n)) { err('roles.now', 'an object: {"floor", "stage", "ends"}'); return; }
+  const state = isObj(entry.state) ? entry.state : {};
+  only(n, ['floor', 'stage', 'ends'], 'roles.now', err);
+  if (n.floor !== undefined && !(n.floor !== 'now' && n.floor in entry.roles)) err('roles.now.floor', 'names a role of this kind');
+  if (n.stage !== undefined && state[n.stage]?.type !== 'enum') err('roles.now.stage', 'names an enum field of this kind');
+  if (n.ends !== undefined && state[n.ends]?.type !== 'timed') err('roles.now.ends', 'names a timed field of this kind, counting down');
 }
 
 function field(f, path, links, err, taken = false) {

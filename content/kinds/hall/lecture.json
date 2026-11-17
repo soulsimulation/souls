@@ -19,7 +19,8 @@
   "geometry": { "bounds_mm": [1600, 1300, 1200] },
   "roles": {
     "speaker": { "need": "required", "places": { "in": "this", "slots": ["lectern"] } },
-    "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } }
+    "listener": { "need": "optional", "places": { "in": "here", "posture": "sit", "within_mm": 12000 } },
+    "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
   },
   "forms": {
     "take_the_lectern": {
@@ -80,7 +81,6 @@
       "effects": [{ "change": "remove", "what": "this", "event": "lapsed" }]
     }
   },
-  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" },
   "looks": {
     "shape": {
       "round": 6,
