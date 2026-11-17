@@ -91,3 +91,20 @@ test('SA-D5c A1/A2: consume validates; the rim or bitten edge is at the mouth fo
     assert.deepEqual(P.handAt(m, r, s + end_us), r.from_mm, 'the hand ends at rest');
   }
 });
+
+test('SA-D4b A1: swing, stroke, tug, knock and lock validate, differ, and each has a case with the hand on its contact point at contact', () => {
+  const names = ['swing', 'stroke', 'tug', 'knock', 'lock'];
+  const refs = new Set(loaded.filter(r => names.includes(r.move?.move)).map(r => r.ref));
+  assert.equal(refs.size, names.length, 'five distinct valid references');
+  for (const n of names) {
+    const own = cases.pose.filter(c => c.move === n);
+    assert.equal(own.length, 1, `${n}: one position case`);
+    const [c] = own;
+    const {contact_us} = P.timesOf(moves[n]);
+    const at = c.at_us.find(([t]) => t === c.record.start_us + contact_us);
+    assert.ok(at, `${n}: the case names the contact instant`);
+    assert.deepEqual(at[1], c.record.contact_mm, `${n}: the hand is on its contact point at contact`);
+    assert.deepEqual(P.handAt(moves[n], c.record, c.record.start_us + contact_us), c.record.contact_mm);
+    assert.equal(!!moves[n].phases.slide_us, !!c.record.to_mm, `${n}: a second point exactly when the move has a middle phase`);
+  }
+});

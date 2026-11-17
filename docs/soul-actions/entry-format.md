@@ -377,7 +377,10 @@ includes its start and excludes its end. A key or unit in ticks is refused. `pre
 point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
 `held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
 contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
-the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free.
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
+`swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
+`knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw.
 
 ```sh
 node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
