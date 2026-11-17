@@ -63,7 +63,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
 | 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
 | 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
-| 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
+| 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below). `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
@@ -232,8 +232,9 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
-`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
-`look.mjs` converts to metres only when it draws.
+`tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees and a part's `scale` and
+`glow` in permille. The format has no floating-point number and `look.mjs` converts to metres and fractions only when it
+draws; a text, list or schedule field changes no part, so it is not drawn.
 
 **The code hatch** (SA-F9, [#2850](https://github.com/soulsimulation/souls/issues/2850); Engine v2 F8
 [#2823](https://github.com/soulsimulation/souls/issues/2823), T9 [#2663](https://github.com/soulsimulation/souls/issues/2663)).
@@ -312,7 +313,13 @@ classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_o
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
-point and then to a second one.
+point and then to a second one. Five more hand moves share that shape (SA-D4b, [#2857](https://github.com/soulsimulation/souls/issues/2857)):
+`swing` (a hinged leaf pushed through its arc), `stroke` (a hand drawn along a line), `tug` (a handle drawn down) and
+`knock` and `lock` (one contact, like `press`, with their own timing). The middle phase of the first three is named
+`slide_us` and is the same straight path; an arc or a rotation is the viewer's to draw. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
+contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free. `strike` and `pump` (SA-D5b, [#2859](https://github.com/soulsimulation/souls/issues/2859)) are the same shape with the effector at the tool's head (a hammer's face, a pump's nozzle): a window `strike_us` per blow or `pump_us` per stroke, `count` of them in the record, claiming the hand only.
 
 ```sh
 node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
@@ -324,6 +331,28 @@ node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/ent
 arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
 rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
 move the thing's frame into the world's: the caller passes world positions.
+
+## The looks table
+
+`looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
+the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`), `slide` (millimetres along an `axis`),
+`scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
+of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
+of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
+burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
+`range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
+`over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
+only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
+function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
+cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+```json
+"table": [
+  { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] },
+  { "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 } }
+]
+```
 
 ## The hash, provisional
 
