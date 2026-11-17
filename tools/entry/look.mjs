@@ -51,9 +51,11 @@ export function framesOf(entry) {
 }
 
 const metres = v => v.map(x => x / 1000);
-const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
+const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth', 'polygon']);
 const ANGLE_KEYS = new Set(['roll', 'arc', 'yaw', 'pitch']);
 const COUNT_KEYS = new Set(['segments']);
+/** A stretch of a part (today's `scale`), written in permille. */
+const PERMILLE_KEYS = new Set(['scale']);
 
 /** A shape written in whole millimetres and millidegrees, as the metres and radians the viewer draws with. */
 export function shapeInMetres(node, key = '') {
@@ -63,7 +65,8 @@ export function shapeInMetres(node, key = '') {
   if (LENGTH_KEYS.has(key)) return node / 1000;
   if (ANGLE_KEYS.has(key)) return node * Math.PI / 180000;
   if (COUNT_KEYS.has(key)) return node;
-  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, counts)`);
+  if (PERMILLE_KEYS.has(key)) return node / 1000;
+  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, permille, counts)`);
 }
 
 /** The def the gallery studio draws: the entry's shape, with its state fields as the def's state. */
