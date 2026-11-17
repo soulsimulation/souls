@@ -71,8 +71,8 @@ export type Effect = {
 };
 export type Entry = {
   kind: string;
-  state?: Record<string, { n: number; default: unknown; audience: string; type?: string; unit?: string; min?: number; max?: number }>;
-  links?: Record<string, { n: number; most: number; audience: string }>;
+  state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;
+  links?: Record<string, { n: number; most: number; audience: Audience }>;
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
@@ -87,6 +87,8 @@ export type Node = {
   /** Things resting loose in this node (on its ground or a surface), not in a slot or a hand. */
   loose?: string[];
 };
+/** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
+export type Audience = string | { rule: 'everyone' | 'owner' | 'creator' } | { rule: 'linked'; link: string };
 export type Input = {
   kinds: Record<string, Entry>;
   act: { this: string; form: string; args?: Record<string, unknown> };
@@ -132,7 +134,16 @@ export function decide(input: Input): Verdict {
   if (!form) return bad(-1, 'no_such_form', { form: act.form });
   const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
-  const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
+  // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
+  // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
+  const sees = (audience: Audience) => {
+    if (asker.sees === 'all') return true;
+    const list = Array.isArray(asker.sees) ? asker.sees : [];
+    if (typeof audience === 'string') return list.includes(audience);
+    if (audience.rule === 'everyone') return true;
+    if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+    return list.includes(audience.rule);
+  };
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
   const formFix = (meets: (e: Effect) => boolean): Fix | null => {
