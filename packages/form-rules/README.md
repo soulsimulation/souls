@@ -94,6 +94,19 @@ done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
 change that cannot apply, refuses the batch with its index.
 
+## Chance (SA-F13)
+
+An effect `{"change": "draw", "outcomes": [{"name", "weight", "event", "set": [{"field", "to"}]}]}` has one of its rows
+happen, by weight. A weight is a whole number or `{"field": <an int field of the thing>}` (a practice count), and nothing
+else (Engine v2 E14 runs the draw by the same rule). The draw is the world's: `effects` takes `draw`, one whole number
+below the table's total per draw effect, in order, as data, so a case is fixed and nothing here is random. The row
+drawn is the first whose running total passes it. The result's event is the row's `event` and carries `outcome`, the
+row's name, so the record says which was drawn. With no `draw` the answer is `{verdict: "unknown", reason: "draw",
+effect, total, could_be: [{outcome, weight, event}]}`, the whole table with its weights now, and no changes. A draw
+outside `0..total-1`, an empty table, or a weight that is not whole is refused as `bad_input`. A reaction rule never
+draws (SA-F15). Only `set` changes are in a row for now; the entry format does not have `draw` yet, so cases use the
+test kinds `test:dartboard` and `test:die`.
+
 ## An effect case
 
 A file in `cases/effects/` is `{"format": "souls-effect-cases/1", "about": ..., "cases": [...]}`. A case is a state

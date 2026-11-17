@@ -15,7 +15,7 @@
 // - A timer is not a change to state: it is returned beside the changes, with its event.
 // No float decides anything; nothing here imports more than the rules.
 
-import { decide, measure, type Entry, type Input, type Node, type Verdict } from './rules.ts';
+import { decide, measure, type Entry, type DrawRow, type Input, type Node, type Verdict } from './rules.ts';
 
 export type Place = { node: string; slot: string } | { node: string; hand: string } | { node: string };
 export type Change =
@@ -26,9 +26,15 @@ export type Change =
   | { change: 'remove'; node: string };
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
-export type Event = { event: string; node: string; changes: number[] };
+/** `outcome` is set on the event of a draw: the name of the row the world drew. */
+export type Event = { event: string; node: string; changes: number[]; outcome?: string };
 export type Timer = { node: string; form: string; after_us: number; event: number };
 export type Done = { verdict: 'yes'; receipt: string; actor: string; changes: Change[]; events: Event[]; timers: Timer[] };
+/**
+ * A draw was asked and the world has not answered: the client's answer for the outcome. `could_be` is the whole table
+ * in order, each row with its weight now; `total` is their sum, and the world draws a whole number below it (SA-F13).
+ */
+export type Unknown = { verdict: 'unknown'; reason: 'draw'; effect: number; total: number; could_be: { outcome: string; weight: number; event: string }[] };
 /** Refused while working out the effects: `effect` is the index of the effect that could not be done. */
 export type Refused = { verdict: 'no'; reason: string; effect: number; detail: Record<string, unknown> };
 export type State = Input['state'] & { applied?: string[] };
@@ -38,7 +44,7 @@ const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() :
 const arg = (v: unknown, args: Record<string, unknown>) => (v && typeof v === 'object' && has(v, 'arg') ? args[(v as { arg: string }).arg] : v);
 
 /** What `input.act` does, or why it is not done. The rules are asked as the world (every field seen). */
-export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done | Refused | Verdict {
+export function effects(input: Omit<Input, 'asker'> & { receipt: string; draw?: number[] }): Done | Refused | Verdict | Unknown {
   const refuse = (effect: number, reason: string, detail: Record<string, unknown> = {}): Refused => ({ verdict: 'no', reason, effect, detail });
   if (!input || typeof input.receipt !== 'string' || !input.receipt) return refuse(-1, 'bad_input', { what: 'no_receipt' });
   const verdict = decide({ ...input, asker: { sees: 'all' } });
@@ -48,7 +54,7 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
   const entry = kinds[state.nodes[self].kind!];
   const work: Record<string, Node> = structuredClone(state.nodes);
   const done: Done = { verdict: 'yes', receipt, actor, changes: [], events: [], timers: [] };
-  let made = 0;
+  let made = 0, drawn = 0;
 
   const freeHand = (): Place | null => {
     const hands = work[actor].hands ?? {};
@@ -78,6 +84,23 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
   for (let i = 0; i < effectList.length; i++) {
     const e = effectList[i];
     const out: Change[] = [];
+    let event: Event;
+    if (e && e.change === 'draw') {
+      // The world draws: a whole number below the table's total, passed in as data (one per draw, in order). No draw, no outcome.
+      const table = tableOf(e, work[self], entry);
+      if (typeof table === 'string') return refuse(i, 'bad_input', { what: table });
+      if (!input.draw || input.draw.length <= drawn) return { verdict: 'unknown', reason: 'draw', effect: i, total: table.total, could_be: table.rows.map((r) => ({ outcome: r.name, weight: r.weight, event: r.event })) };
+      const r = input.draw[drawn++];
+      if (!Number.isSafeInteger(r) || r < 0 || r >= table.total) return refuse(i, 'bad_input', { what: 'draw_out_of_range', draw: r, total: table.total });
+      let acc = 0;
+      const row = table.rows.find((x) => (acc += x.weight) > r)!;
+      for (const s of row.set) {
+        const def = has(entry.state, s?.field ?? '') ? entry.state![s.field] : undefined;
+        if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: s?.field ?? null });
+        out.push({ change: 'set', node: self, field: s.field, n: def.n, to: s.to ?? null });
+      }
+      event = { event: row.event, node: self, changes: [], outcome: row.name };
+    } else {
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
       const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
@@ -117,7 +140,8 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
       done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length });
     } else return refuse(i, 'bad_input', { what: 'unknown_change', change: e.change ?? null });
 
-    const event: Event = { event: e.event, node: self, changes: [] };
+    event = { event: e.event, node: self, changes: [] };
+    }
     for (const c of out) {
       const failed = applyChange(work, c);
       if (failed) return refuse(i, 'bad_input', { what: failed });
@@ -133,7 +157,7 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
  * Apply a result of `effects` to plain state: every change or none, and once per receipt. A refusal changes
  * nothing; a receipt already applied changes nothing (`again: true`). Needs no kinds.
  */
-export function apply(state: State, result: Done | Refused | Verdict): { ok: true; state: State; again: boolean } | { ok: false; reason: string; change: number } {
+export function apply(state: State, result: Done | Refused | Verdict | Unknown): { ok: true; state: State; again: boolean } | { ok: false; reason: string; change: number } {
   if (result.verdict !== 'yes' || !('changes' in result)) return { ok: true, state, again: false };
   const applied = state.applied ?? [];
   if (applied.includes(result.receipt)) return { ok: true, state, again: true };
@@ -255,4 +279,27 @@ function applyChange(nodes: Record<string, Node>, c: Change): string | null {
     default:
       return 'unknown_change';
   }
+}
+
+/** A draw's table with its weights worked out now, or why it is malformed. A weight is a whole number or one whole-number field of the thing, and nothing else. */
+function tableOf(e: { outcomes?: DrawRow[] }, self: Node, entry: Entry): { rows: (DrawRow & { weight: number })[]; total: number } | string {
+  const rows = e.outcomes;
+  if (!Array.isArray(rows) || rows.length === 0) return 'empty_table';
+  const out: (DrawRow & { weight: number })[] = [];
+  let total = 0;
+  for (const o of rows) {
+    if (!o || typeof o.name !== 'string' || typeof o.event !== 'string' || !Array.isArray(o.set)) return 'malformed_outcome';
+    let w: unknown = o.weight;
+    if (w !== null && typeof w === 'object') {
+      const keys = Object.keys(w);
+      const field = (w as { field?: unknown }).field;
+      const def = typeof field === 'string' && has(entry.state, field) ? entry.state![field] : undefined;
+      if (keys.length !== 1 || !def || def.type !== 'int') return 'malformed_weight';
+      w = has(self.fields, field as string) ? self.fields![field as string] : def.default;
+    }
+    if (!Number.isSafeInteger(w) || (w as number) < 0) return 'malformed_weight';
+    total += w as number;
+    out.push({ ...o, weight: w as number });
+  }
+  return Number.isSafeInteger(total) && total > 0 ? { rows: out, total } : 'no_weight';
 }

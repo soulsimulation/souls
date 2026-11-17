@@ -13,7 +13,7 @@ for (const [file, c] of cases) {
   test(`${file.slice(CASES.length + 1)}: ${c.name}`, () => {
     let state: State = structuredClone(c.state);
     c.do.forEach((step, k) => {
-      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt });
+      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt, draw: step.draw });
       if (step.expect) assert.deepEqual(mismatches(step.expect, result), [], `step ${k}: ${JSON.stringify(result)}`);
       const once = apply(state, result);
       if (!once.ok) return assert.fail(`step ${k}: ${JSON.stringify(once)}`);
@@ -76,4 +76,34 @@ test('amounts that do not sum to zero are refused, and a batch applies whole or 
   assert.deepEqual(apply(state, result([out, { change: 'set', node: 'c1', field: 'water_g', n: 1, to: 6, by: 6 }])), { ok: false, reason: 'amounts_do_not_balance', change: 0 });
   assert.deepEqual(apply(state, result([out, { change: 'set', node: 'gone', field: 'water_g', n: 1, to: 5, by: 5 }])), { ok: false, reason: 'no_such_node', change: 1 });
   assert.deepEqual(state.nodes.k1.fields, { water_g: 10 }, 'the first change of a refused batch is not applied');
+});
+
+const board: State = { actor: 'b1', nodes: { room: { loose: ['b1', 'd1', 'a1'] }, d1: { kind: 'test:dartboard' }, a1: { kind: 'test:dart' }, b1: { hands: { left: null, right: 'a1' } } } };
+const throwAt = { this: 'd1', form: 'throw', args: {} };
+
+test('SA-F13 A1: every row of a dartboard is reached by some draw, and a draw below the total always lands on a row', () => {
+  const seen = new Set<string>();
+  for (let r = 0; r < 10; r++) {
+    const done = effects({ kinds, act: throwAt, state: board, receipt: `d${r}`, draw: [r] });
+    assert.equal(done.verdict, 'yes');
+    if ('events' in done) seen.add(done.events[0].outcome!);
+  }
+  assert.deepEqual([...seen].sort(), ['bull', 'miss', 'single']);
+});
+
+test('SA-F13 A2: with no draw the answer is unknown and lists every outcome, and it changes nothing', () => {
+  const answer = effects({ kinds, act: throwAt, state: board, receipt: 'u1' });
+  assert.equal(answer.verdict, 'unknown');
+  assert.deepEqual('could_be' in answer && answer.could_be.map((o) => o.outcome), ['miss', 'single', 'bull']);
+  assert.ok(!('changes' in answer));
+  const kept = apply(board, answer);
+  assert.ok(kept.ok && kept.state === board);
+});
+
+test('SA-F13: a weight is a whole number or one whole-number field, and nothing else', () => {
+  const entry = (weight: unknown) => ({ ...kinds['test:die'], state: { face: { n: 1, type: 'int', default: 1, audience: 'public' }, label: { n: 2, type: 'text', default: null, audience: 'public' } }, forms: { roll: { ...kinds['test:die'].forms!.roll, effects: [{ change: 'draw', outcomes: [{ name: 'a', weight, event: 'test:a', set: [] }] }] } } });
+  const state: State = { actor: 'b1', nodes: { room: { loose: ['b1'] }, x1: { kind: 'test:die' }, b1: { hands: { right: 'x1' } } } };
+  const roll = (weight: unknown) => effects({ kinds: { ...kinds, 'test:die': entry(weight) as never }, act: { this: 'x1', form: 'roll', args: {} }, state, receipt: 'w', draw: [0] });
+  for (const bad of [-1, 0, 1.5, '3', { field: 'label' }, { field: 'nope' }, { field: 'face', plus: 1 }, null]) assert.equal(roll(bad).verdict, 'no', JSON.stringify(bad));
+  assert.equal(roll({ field: 'face' }).verdict, 'yes');
 });
