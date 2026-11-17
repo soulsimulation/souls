@@ -39,8 +39,9 @@ const act = (base, slug) => { const t0 = Date.now(); return fetch(`${base}/w/${s
 test('A6/A1/A7: 50 alarms due in the same second load at most 4 at a time and are all served; an act meanwhile goes first', { timeout: 120_000 }, async () => {
   const due = Date.now() - 1;
   const { L, base, names } = await launcher(N, { bootMs: 300, unloadStill: true, horizon: () => ({ still: true, untilWallMs: null, moveWallMs: due, at: due }) });
+  let watch;   // cleared in finally: a failed wait must not leave a 5 ms interval holding this file's process open forever
   try {
-    let peak = 0; const watch = setInterval(() => { peak = Math.max(peak, [...L.pool.kids.values()].filter((k) => k.status === 'starting').length, L.pool.loadStats().loading); }, 5);
+    let peak = 0; watch = setInterval(() => { peak = Math.max(peak, [...L.pool.kids.values()].filter((k) => k.status === 'starting').length, L.pool.loadStats().loading); }, 5);
     assert.deepEqual(L.still.alarms().length, N, 'every alarm is due at once');
     await wait(100);
     const h = await (await fetch(`${base}/__sim/healthz`)).json();
@@ -58,7 +59,7 @@ test('A6/A1/A7: 50 alarms due in the same second load at most 4 at a time and ar
     assert.equal(s.waiting, 0); assert.equal(s.lastWaitsMs.n, N);
     assert.ok(s.lastWaitsMs.median > 0 && s.lastWaitsMs.p95 >= s.lastWaitsMs.median && s.lastWaitsMs.max >= s.lastWaitsMs.p95, JSON.stringify(s.lastWaitsMs));
     console.log(`# A6: ${N} alarms, peak ${peak} loads at once; act served in ${r.ms} ms, ahead of ${before}; waits ${JSON.stringify(s.lastWaitsMs)}`);
-  } finally { await L.close(); }
+  } finally { clearInterval(watch); await L.close(); }
 });
 
 test('A6/A4/A3: a crawler fetching 50 world pages loads none; a visitor gets the page without a load, its data request loads it', { timeout: 60_000 }, async () => {
