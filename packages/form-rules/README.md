@@ -92,7 +92,7 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us` with the new rate, `{value, per_s, set_us}` written whole); `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us`, or `to` when the effect gives one, with the new rate, `{value, per_s, set_us}` written whole); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
 to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);

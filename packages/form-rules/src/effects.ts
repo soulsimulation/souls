@@ -126,7 +126,9 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
         const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
         const now = valueAt(def, held, state.now_us);
         if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
+        // a set may also give the value from now on (a planter watered full), else the value settles where it is
+        if (e.to !== undefined && !Number.isSafeInteger(e.to)) return refuse(i, 'bad_input', { what: 'malformed_value', field: e.field! });
+        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: e.to === undefined ? now : e.to as number, per_s: e.rate!, set_us: state.now_us! } });
       } else {
       const to = stored(def, arg(e.to, args));
       out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
