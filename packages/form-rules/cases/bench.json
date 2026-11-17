@@ -1,0 +1,57 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:bench, the seat. The seat argument is given resolved; choosing it from its selector is not a rule.",
+  "cases": [
+    {
+      "name": "sit_free_seat",
+      "act": { "this": "s1", "form": "sit", "args": { "seat": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "s1": { "kind": "eden:bench", "slots": { "left": [], "right": ["b2"] } }, "b1": { "hands": {} }, "b2": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["s1/slot/left", 0]] }
+    },
+    {
+      "name": "sit_taken_seat_fixed_by_the_other",
+      "act": { "this": "s1", "form": "sit", "args": { "seat": "left" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "s1": { "kind": "eden:bench", "slots": { "left": ["b2"] } }, "b1": { "hands": {} }, "b2": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 0,
+        "detail": { "node": "s1", "slot": "left" },
+        "fix": { "form": "sit", "args": { "seat": "right" } },
+        "read": [["s1/slot/left", 1], ["s1/slot/right", 0]]
+      }
+    },
+    {
+      "name": "sit_bench_full_has_no_fix",
+      "act": { "this": "s1", "form": "sit", "args": { "seat": "right" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "s1": { "kind": "eden:bench", "slots": { "left": ["b2"], "right": ["b3"] } }, "b1": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "detail": { "node": "s1", "slot": "right" }, "fix": null }
+    },
+    {
+      "name": "sit_without_a_seat_argument",
+      "act": { "this": "s1", "form": "sit" },
+      "state": { "actor": "b1", "nodes": { "s1": { "kind": "eden:bench" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "argument_missing", "arg": "seat" }, "fix": null }
+    },
+    {
+      "name": "sit_no_such_seat",
+      "act": { "this": "s1", "form": "sit", "args": { "seat": "middle" } },
+      "state": { "actor": "b1", "nodes": { "s1": { "kind": "eden:bench" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "no_such_slot", "node": "s1", "slot": "middle" }, "fix": null }
+    }
+  ]
+}
