@@ -648,12 +648,17 @@ test('ship.sh --unload-still: a stop after the write says what the file holds an
   assert.equal(r.status, 1); assert.match(r.stdout, /install\.sh unload-still failed; nothing was activated/);
   assert.ok(!existsSync(file(s))); assert.doesNotMatch(s.calls(), /^activate\t/m);
   assert.doesNotMatch(r.stdout, /now says|COULD NOT/, 'nothing was written, so nothing is claimed or restored');
-  // the old file cannot be read (here: no read permission): fail closed, never "no file", so a restore never deletes a 1
-  s = setup(); writeFileSync(file(s), '{"unloadStill":1}\n'); chmodSync(file(s), 0o000);
+});
+
+// No read permission does not stop root, so as root (the remote gate's containers) the file cannot be made unreadable this
+// way: skipped there (quarantine.json lists it), run by every non-root runner (CI, local).
+test('ship.sh --unload-still: an old settings file that cannot be read fails closed, never "no file", so a restore never deletes a 1', { skip: process.getuid?.() === 0 && 'as root, chmod 000 does not make a file unreadable' }, () => {
+  const s = setup(), file = join(s.t, 'host/data/launcher-settings.json');
+  writeFileSync(file, '{"unloadStill":1}\n'); chmodSync(file, 0o000);
   try {
-    r = s.run([...s.base, '--unload-still', '0']);
+    const r = s.run([...s.base, '--unload-still', '0']);
     assert.equal(r.status, 1); assert.match(r.stdout, /could not read launcher-settings\.json on the host; nothing changed/);
     assert.doesNotMatch(s.calls(), /install\.sh unload-still|^activate\t/m);
-  } finally { chmodSync(file(s), 0o644); }
-  assert.equal(readFileSync(file(s), 'utf8'), '{"unloadStill":1}\n');
+  } finally { try { chmodSync(file, 0o644); } catch (e) { if (e.code !== 'ENOENT') throw e; } }
+  assert.equal(readFileSync(file, 'utf8'), '{"unloadStill":1}\n');
 });

@@ -75,7 +75,9 @@ export async function startV7ClerkFixture({origin, out, web, marsWeb}) {
   return {
     async prepareContext(ctx) {
       await ctx.exposeFunction('__stubClerkMint', sub => keys.sign(sub));
-      await ctx.addInitScript(() => localStorage.setItem('stubClerk.user', 'user_v7gaia'));
+      // signed in as real Clerk leaves it: the session in the stub, and Clerk's `__client_uat` cookie on the page's origin,
+      // which a world page reads to decide whether to load Clerk at all (#2564)
+      await ctx.addInitScript(() => { localStorage.setItem('stubClerk.user', 'user_v7gaia'); try { document.cookie = '__client_uat=' + Math.floor(Date.now() / 1000) + '; path=/'; } catch { /* no cookies here */ } });
       await ctx.addInitScript(STUB);
       await ctx.route(/clerk\.example\.test/, route => route.abort());
     },

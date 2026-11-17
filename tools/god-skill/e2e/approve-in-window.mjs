@@ -85,7 +85,9 @@ const STUB = `(() => {
 async function context(browser, sub, { viewport, dpr, mobile, colorScheme } = {}) {
   const ctx = await browser.newContext({ viewport: viewport ?? { width: 1352, height: 780 }, deviceScaleFactor: dpr ?? 1, isMobile: !!mobile, hasTouch: !!mobile, colorScheme: colorScheme ?? 'light' });
   await ctx.exposeFunction('__stubClerkMint', (s) => keys.sign(s));
-  await ctx.addInitScript((sub) => { try { localStorage.setItem('stubClerk.user', sub); } catch { /* storage off */ } }, sub);
+  // signed in as real Clerk leaves it: the stub's session and Clerk's `__client_uat` cookie, which a world page reads to
+  // decide whether to load Clerk at all (#2564)
+  await ctx.addInitScript((sub) => { try { localStorage.setItem('stubClerk.user', sub); document.cookie = '__client_uat=' + Math.floor(Date.now() / 1000) + '; path=/'; } catch { /* storage off */ } }, sub);
   await ctx.addInitScript(STUB);
   await ctx.route(/clerk\.example\.test/, (r) => r.abort());
   return ctx;

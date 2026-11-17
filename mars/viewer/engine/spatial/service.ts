@@ -689,6 +689,12 @@ export class Spatial {
   /** The nav-trust token of the last scan (-1: made while trust was closed) and the table it scanned. */
   private trustToken = -1;
   private trustEntities: WorldState['entities'] | null = null;
+  /** N1b (#2593): move this Spatial's last scan from interval `from` into the open interval `to`, for an owner that has
+   *  proved nothing that can change a static entity ran since (nav-trust.ts). Only this Spatial, only that scan of `world`. */
+  adoptTrust(from: number, to: number, world: WorldState): boolean {
+    if (from < 0 || to < 0 || this.trustToken !== from || this.trustEntities !== world.entities) return false;
+    this.trustToken = to; return true;
+  }
   /** The bodies the last scan met, in its order (a trusted sync lists them again for the windows). */
   private bodyIds: string[] = [];
   private bodyN = 0;

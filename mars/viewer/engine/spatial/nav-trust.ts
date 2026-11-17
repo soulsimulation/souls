@@ -10,6 +10,10 @@
 // walking the entities again, and still lists the bodies (the windows follow them). The result is exactly the scan's:
 // nothing that could change a static entity ran in between. Global (not per runtime): a nested runtime's close only
 // invalidates more, never less.
+// N1b (#2593): a close still voids every certificate, and a token is never open again. An owner that proves nothing that
+// can write ran since its own Spatial's last scan (the engine: its write barrier tableWritesV1 and the runtime's
+// writesV1, unchanged since its step's pass) moves that one Spatial's certificate into a new interval
+// (Spatial.adoptTrust), so the next tick's first walk step and the reads between ticks take that scan's answer.
 let gen = 0, open = false;
 /** Only nav-pure code runs until the next close (the token of the current interval stays valid). */
 export function navTrustOpen(): void { open = true; }
