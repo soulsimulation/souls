@@ -1,0 +1,40 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:sheet",
+  "owner": "thing",
+  "state": {
+    "open": { "n": 1, "type": "bool", "default": true, "audience": "public" }
+  },
+  "links": {
+    "signed": { "n": 1, "from": "soul", "most": 2, "audience": "public" }
+  },
+  "points": {
+    "pad": { "role": "contact", "at_mm": [0, 1100, 0] }
+  },
+  "geometry": { "bounds_mm": [400, 1500, 40] },
+  "forms": {
+    "sign_up": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "open", "is": true }],
+      "steps": [{ "step": "move", "move": "write", "at": "pad" }],
+      "effects": [{ "change": "link", "link": "signed", "from": "actor", "event": "signed_up" }]
+    },
+    "tear_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "move", "move": "tear", "at": "pad" }],
+      "effects": [{ "change": "create", "kind": "test:slip", "into": "actor_hand", "event": "tore_off" }]
+    },
+    "post": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "move", "move": "tear", "at": "pad" }],
+      "effects": [{ "change": "create", "kind": "test:slip", "into": "here", "event": "posted" }]
+    }
+  },
+  "text": { "card": "A test sign-up sheet with room for two names, and slips to tear off." },
+  "card": { "text": "card" }
+}

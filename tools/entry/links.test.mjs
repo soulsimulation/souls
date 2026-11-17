@@ -21,10 +21,15 @@ test('A1: a sign-up sheet\'s slots are child nodes, and who signed is a link on 
   assert.deepEqual(F.validateEntry(slot), []);
   // The slots are children of the sheet, a bounded number of a named kind; the sheet's hash covers the slot kind.
   assert.deepEqual(sheet.children.slot, {kind: 'eden:signup_slot', most: 20});
-  const hashes = F.hashKinds([sheet, slot]);
-  assert.ok(F.kindRefs(sheet).includes('eden:signup_slot'));
+  // Admits are a commit-time check by kind name: the sheet's hash does not follow the slot kind, but does cover its own list.
+  assert.ok(!F.kindRefs(sheet).includes('eden:signup_slot'));
+  assert.equal(F.SECTIONS.children, 11);
   const other = structuredClone(slot); other.state.starts_in.default = 1;
-  assert.notEqual(hashes.get('eden:signup_sheet').hash, F.hashKinds([sheet, other]).get('eden:signup_sheet').hash);
+  const before = F.hashKinds([sheet, slot]).get('eden:signup_sheet').hash;
+  assert.equal(F.hashKinds([sheet, other]).get('eden:signup_sheet').hash, before);
+  assert.equal(F.hashKinds([sheet]).get('eden:signup_sheet').hash, before);
+  const more = structuredClone(sheet); more.children.slot.most = 21;
+  assert.notEqual(F.hashKinds([more]).get('eden:signup_sheet').hash, before);
   // Who signed is a link declared with its two ends: a Soul at one, the slot at the other; found from either.
   assert.equal(slot.links.signed.from, 'soul');
   assert.equal(slot.links.signed.most, 1);      // a slot has one signer
