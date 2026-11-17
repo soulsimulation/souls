@@ -15,11 +15,11 @@ export const FORMAT = 'souls-entry/1';
 
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640). */
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 10, vehicle: 13, ride: 14,
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 10, vehicle: 13, ride: 14, stock: 15,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
-export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', stock: 'SA-F12', areas: 'SA-D6', hatch: 'SA-F9'});
+export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', areas: 'SA-D6', hatch: 'SA-F9'});
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
@@ -125,6 +125,7 @@ export function validateEntry(entry) {
   for (const [name, f] of Object.entries(state)) field(f, `state.${name}`, links, err, closedNames.includes(name));
   if (entry.closed !== undefined) closed(entry.closed, state, links, err);
   children(section(entry, 'children', err), err);
+  stock(entry, err);
   if (entry.vehicle !== undefined) vehicle(entry, err);
   if (entry.ride !== undefined) ride(entry, err);
   if (entry.vehicle !== undefined && entry.ride !== undefined) err('ride', 'a kind is a vehicle (steered) or a ride (a set trip), not both');
@@ -278,6 +279,75 @@ function children(table, err) {
     if (!(typeof c.kind === 'string' && KIND.test(c.kind))) err(`${p}.kind`, 'a kind, "namespace:name"');
     if (!(isInt(c.most) && c.most > 0)) err(`${p}.most`, 'how many children at most, a whole number above zero');
   }
+}
+
+/** Stock: the things a container is known to hold, yielded when taken (SA-F12, #2851). A stock is a count in an int
+ *  state field that is capped at both ends, so it runs out; taking makes one thing in the actor's hand and lowers the
+ *  count in the same batch; it may refill, one more every so long, up to its cap. Free to take for now: buying, lending
+ *  and debts are not here. What a stocked thing carries by reference (a book's title and first page) comes from a
+ *  library the world's creator supplies; the entry only names the text fields. */
+export const STOCK_KEYS = ['kind', 'count', 'take', 'carries', 'refill'];
+function stock(entry, err) {
+  const table = section(entry, 'stock', err), state = section(entry, 'state', err), forms = section(entry, 'forms', err);
+  for (const [name, s] of Object.entries(table)) {
+    const p = `stock.${name}`;
+    if (!IDENT.test(name)) err(p, 'a stock name is lower_snake_case');
+    if (!isObj(s)) { err(p, 'a stock is an object: {"kind", "count", "take", "carries", "refill"}'); continue; }
+    only(s, STOCK_KEYS, p, err);
+    if (entry.owner !== 'thing') err(p, 'a thing holds stock');
+    if (!(typeof s.kind === 'string' && KIND.test(s.kind))) err(`${p}.kind`, 'the kind it yields, "namespace:name"');
+    const f = state[s.count];
+    if (!(typeof s.count === 'string' && isObj(f))) err(`${p}.count`, 'names a state field of this kind: how many are left');
+    else if (!(f.type === 'int' && f.unit === 'count' && f.min === 0 && isInt(f.max) && f.max > 0 && isInt(f.default) && f.default >= 0 && f.default <= f.max)) err(`${p}.count`, `"${s.count}" is an int field in unit count with a min of 0 and a max above 0, its default within them: stock is a count and it runs out`);
+    if (s.carries !== undefined && !(Array.isArray(s.carries) && s.carries.length > 0 && s.carries.length <= 4 && s.carries.every(c => typeof c === 'string' && IDENT.test(c)))) err(`${p}.carries`, 'one to four text fields of the yielded kind that come by reference from the world\'s library (a book\'s title and first page)');
+    if (s.refill !== undefined) {
+      if (!isObj(s.refill)) err(`${p}.refill`, 'an object: {"every_us": whole microseconds}');
+      else { only(s.refill, ['every_us'], `${p}.refill`, err); if (!(isInt(s.refill.every_us) && s.refill.every_us > 0)) err(`${p}.refill.every_us`, 'one more every this long, whole microseconds above zero'); }
+    }
+    const t = forms[s.take], tp = `${p}.take`;
+    if (!(typeof s.take === 'string' && isObj(t))) { err(tp, 'names the form of this kind that takes one'); continue; }
+    const needs = Array.isArray(t.needs) ? t.needs : [], effects = Array.isArray(t.effects) ? t.effects : [];
+    if (t.starts !== 'act' || !(t.who === 'anyone' || t.who === 'holder')) err(tp, 'the take form is a Soul\'s act (starts "act") that anyone, or the holder, may do');
+    if (!needs.some(n => n?.need === 'state' && n.field === s.count && isInt(n.at_least) && n.at_least >= 1)) err(tp, `the take form needs {"need": "state", "field": "${s.count}", "at_least": 1}: an empty stock refuses`);
+    if (!needs.some(n => n?.need === 'hand' && n.free === true)) err(tp, 'the take form needs a free hand: {"need": "hand", "free": true}');
+    const makes = effects.filter(e => e?.change === 'create');
+    if (!(makes.length === 1 && makes[0].kind === s.kind && makes[0].into === 'actor_hand')) err(tp, `the take form makes one ${s.kind} into the actor's hand (a create into "actor_hand")`);
+    if (effects.some(e => e?.change === 'set' && e.field === s.count)) err(tp, `the take form does not set "${s.count}": the engine lowers it by one in the same batch as the make`);
+  }
+}
+
+/** What a container lists as its stock: [{stock, kind, count, carries}] once the count may be read, else `null`. A kind
+ *  whose count is a closed field shows it only once it is opened (Engine v2 E22); a shelf or a stall is always open.
+ *  `fields` is the thing's state by field name. */
+export function stockOf(entry, {fields = {}, opened = false} = {}) {
+  const hidden = new Set(isObj(entry?.closed) && Array.isArray(entry.closed.fields) ? entry.closed.fields : []);
+  const out = [];
+  for (const [name, s] of Object.entries(entry?.stock ?? {})) {
+    if (hidden.has(s.count) && !opened) return null;
+    out.push({stock: name, kind: s.kind, count: s.count in fields ? fields[s.count] : entry.state[s.count].default, carries: s.carries ?? []});
+  }
+  return out;
+}
+
+/** Taking one from stock `name`: refused as `closed` (not opened) or `empty` (the count is 0), with a reason in words; else
+ *  the generic changes of one batch (contract T6): one thing made into the hand and the count lowered by one, so nothing
+ *  is made from nothing. `made` is the new node's id, `receipt` the act's. */
+export function takeStock(entry, {name, fields = {}, opened = false, receipt, hand = 'hand'}) {
+  const s = entry?.stock?.[name];
+  if (!s) return {ok: false, code: 'no_such_stock', reason: `${entry?.kind} holds no stock called "${name}"`};
+  if (stockOf(entry, {fields, opened}) === null) return {ok: false, code: 'closed', reason: `${entry.kind} is closed; open it to take from it`};
+  const left = s.count in fields ? fields[s.count] : entry.state[s.count].default;
+  if (left < 1) return {ok: false, code: 'empty', reason: `${entry.kind} is empty: no ${s.kind} is left`};
+  const made = `${receipt}.0`;
+  return {ok: true, made, carries: s.carries ?? [], changes: [
+    {change: 'create', node: made, kind: s.kind, to: {hand}},
+    {change: 'set', field: s.count, n: entry.state[s.count].n, to: left - 1, by: -1}], event: s.take};
+}
+
+/** The count a refill reaches `us` microseconds after the count was `count`: one more every `every_us`, never above its cap. */
+export function refilled(entry, name, count, us) {
+  const s = entry.stock[name], cap = entry.state[s.count].max;
+  return s.refill ? Math.min(cap, count + Math.floor(us / s.refill.every_us)) : count;
 }
 
 function speed(v, path, err) {
@@ -623,6 +693,7 @@ export function kindRefs(entry) {
   };
   walk(entry.forms);
   for (const c of Object.values(entry.children ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
+  for (const c of Object.values(entry.stock ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
   return [...refs].sort();
 }
 

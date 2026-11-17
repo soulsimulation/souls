@@ -56,13 +56,14 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
 | 13 | `vehicle` | A thing a Soul sits in or on and steers (below) |
 | 14 | `ride` | A set trip between stops that nobody steers (below) |
+| 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
-(SA-F10), `stock` (SA-F12), `areas` (SA-D6), `hatch` (SA-F9).
+(SA-F10), `areas` (SA-D6), `hatch` (SA-F9).
 
 **Vehicles and rides** (SA-F14, [#2884](https://github.com/soulsimulation/souls/issues/2884)). A kind says what a vehicle
 is, never how the engine moves it. `vehicle`: `drive` (a slot admitting one body, posture `sit`: the drive seat; every
@@ -75,6 +76,19 @@ spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/v
 `ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
 of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
 `speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
+
+**Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
+wardrobe, a fridge or a stall is known to hold, made real when someone reaches for it. A stock is
+`{kind, count, take, carries, refill}`: the kind it yields; `count`, an `int` state field in unit `count` with `min` 0
+and a `max` (so it runs out; its default is how many a copy starts with); `take`, the form that takes one; optional
+`carries`, one to four text fields of the yielded kind that come by reference from a library the world's creator
+supplies (a book's title and first page); optional `refill`, `{every_us}`, one more every so long up to the `max`
+(a timed value, SA-F5a). The take form is checked: it is a Soul's act that needs the count `at_least` 1 (an empty
+stock refuses) and a free hand, and its one `create` makes the kind into `actor_hand`; it never sets the count. The engine
+lowers the count by one in the same batch as the make (`takeStock` shows the batch: a `create` and a `set` with `by` -1), so
+nothing is made from nothing. Stock is free to take; buying, lending and debts are not here. A kind whose contents are
+closed lists `count` in `closed.fields` and shows its stock only once opened (`stockOf` answers `null` until then; a shelf
+or a stall is always open). The cases are `packages/form-rules/cases/stock/stock.json`. Section 15 is meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
