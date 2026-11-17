@@ -889,7 +889,6 @@ export function kindRefs(entry) {
     else if (isObj(v)) for (const [k, x] of Object.entries(v)) { if ((k === 'kind' || k === 'holds') && typeof x === 'string' && KIND.test(x)) refs.add(x); else walk(x); }
   };
   walk(entry.forms);
-  for (const c of Object.values(entry.children ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
   for (const c of Object.values(entry.stock ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
   return [...refs].sort();
 }
