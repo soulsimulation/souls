@@ -9,15 +9,16 @@ import { crossing, decide, valueAt } from './rules.ts';
 const kinds = loadKinds();
 const cases = loadTimedCases();
 
+const show = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? `${x}n` : x));
 // A1: each case's value at each stated time, and each crossing, from the stored three numbers alone.
 for (const [file, c] of cases) {
   test(`${file.slice(CASES.length + 1)}: ${c.name}`, () => {
     const def = kinds[c.kind].state![c.field];
     assert.equal(def.type, 'timed');
-    for (const [at, want] of c.values) assert.ok(same(valueAt(def, c.stored, at), want), `value at ${at}: ${JSON.stringify(valueAt(def, c.stored, at))}`);
+    for (const [at, want] of c.values) assert.ok(same(valueAt(def, c.stored, at), want), `value at ${at}: ${show(valueAt(def, c.stored, at))}`);
     for (const { expect, from_us, ...level } of c.crossings) {
       const got = crossing(def, c.stored, level, from_us);
-      assert.ok(same(got, expect), `${JSON.stringify(level)} from ${from_us}: ${JSON.stringify(got)}`);
+      assert.ok(same(got, expect), `${show(level)} from ${from_us}: ${show(got)}`);
     }
   });
 }

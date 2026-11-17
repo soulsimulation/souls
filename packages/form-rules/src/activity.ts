@@ -39,7 +39,7 @@
 // removes it at that time, members or not; `lapse` then releases every member first. Nothing waits for a time.
 
 import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State } from './effects.ts';
-import { crossing, whoMay, type Entry, type Input, type Read, type Verdict, type WhoVerdict } from './rules.ts';
+import { crossing, whoMay, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
@@ -303,7 +303,8 @@ export function lapse(input: Omit<Input, 'asker'> & { receipt: string }): Lapsed
   return check.ok ? result : { verdict: 'no', reason: 'bad_input', detail: { what: check.reason, change: check.change } };
 }
 
-export type NowLine = { floor?: string[]; stage?: unknown; ends_us?: number };
+/** `ends_us` is SA-F5a's `Int`: a number when safe, a BigInt beyond 2^53. */
+export type NowLine = { floor?: string[]; stage?: unknown; ends_us?: Int };
 export type NowVerdict =
   | { verdict: 'yes'; now: NowLine; unseen: string[]; read: Read[] }
   | { verdict: 'no'; reason: 'bad_input'; detail: Record<string, unknown>; read: Read[] };
