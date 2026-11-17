@@ -612,7 +612,12 @@ fn meets(
                 } else {
                     door.n0 - g.d
                 };
-                let (pa, pb) = (door.point(a0, n), door.point(a1, n));
+                // The segment is the part of the narrowest width that reaches this piece: where a box beyond the
+                // wall leaves the piece only one side of the doorway, the middle of the whole width lies off it.
+                let lo = cs.iter().map(|c| c.0).min().unwrap_or(a0).max(a0);
+                let hi = cs.iter().map(|c| c.0).max().unwrap_or(a1).min(a1);
+                let (s0, s1) = if lo <= hi { (lo, hi) } else { (a0, a1) };
+                let (pa, pb) = (door.point(s0, n), door.point(s1, n));
                 let ym = mm(y) as i32;
                 sides[usize::from(side > 0)] = true;
                 found.push(Meet {

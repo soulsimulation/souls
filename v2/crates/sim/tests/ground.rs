@@ -388,6 +388,62 @@ fn a2_a3_every_eden_node_cuts_in_under_5_ms() {
     println!("  cut: {gp} pieces, {gt} triangles, {gm} meets");
 }
 
+/// A box just beyond a doorway's wall that leaves its far side only part of the doorway's width: that side's meet
+/// lies on its piece (the part of the width that reaches the piece), not in the box's clearance (Eden's four
+/// cottage doors whose ends were left off their pieces).
+#[test]
+fn a_meet_lies_on_its_piece_when_a_box_beyond_the_wall_takes_part_of_the_width() {
+    let im = testworld();
+    let mut scene = Scene::of(&im.tree, im.nodes["building/floor-1"]).unwrap();
+    let link = doorway_of(&im, &scene, "door-building-to-b");
+    let d = scene
+        .doorways
+        .iter()
+        .find(|d| d.link == link)
+        .unwrap()
+        .clone();
+    let half = d.width / 2;
+    // Door coordinates (µm along the wall, µm through it) to the floor's frame.
+    let at = |s: i64, n: i64| {
+        [
+            d.at[0] + (s * d.along[0] + n * d.across[0]) / 1_000_000,
+            d.at[1] + (s * d.along[1] + n * d.across[1]) / 1_000_000,
+        ]
+    };
+    // From past the doorway's left jamb to a little short of its middle, half a metre to a metre beyond the wall.
+    let (s0, s1, n0, n1) = (-half - 400_000, -100_000, 500_000, 1_100_000);
+    scene.solids.push(sim::ground::Solid {
+        ring: [at(s0, n0), at(s1, n0), at(s1, n1), at(s0, n1)],
+        y0: d.y,
+        y1: d.y + 2_000_000,
+    });
+    let p = cut_floor(&scene, HUMAN_RADIUS, Turn::NONE).unwrap();
+    let far: Vec<_> = p
+        .meets
+        .iter()
+        .filter(|m| m.link == link && m.side == 1)
+        .collect();
+    assert!(!far.is_empty(), "the far side still meets a piece");
+    for m in far {
+        let mid = [
+            (i64::from(m.a[0]) + i64::from(m.b[0])) / 2,
+            (i64::from(m.a[2]) + i64::from(m.b[2])) / 2,
+        ];
+        // 30 mm further from the wall: inside the piece the meet is given to.
+        let p30 = [
+            mid[0] + 30 * d.across[0] / 1_000_000,
+            mid[1] + 30 * d.across[1] / 1_000_000,
+        ];
+        let pc = &p.pieces[m.piece as usize];
+        assert!(
+            pc.triangles
+                .iter()
+                .any(|t| inside_triangle(&pc.vertices, t, p30)),
+            "the meet's middle {mid:?} lies off its piece"
+        );
+    }
+}
+
 /// The field numbers and kind names the ground reads are N1's.
 #[test]
 fn fields_are_the_importers() {
