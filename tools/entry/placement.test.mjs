@@ -87,7 +87,8 @@ test('A4: a form\'s placement takes only words on the list, and a case that uses
   const dirs = readdirSync(root + 'content/kinds');
   for (const d of dirs) for (const f of readdirSync(root + 'content/kinds/' + d)) {
     const e = F.parseEntry(readFileSync(root + `content/kinds/${d}/${f}`, 'utf8')).entry;
-    for (const form of Object.values(e.forms ?? {})) for (const s of form.steps ?? []) if (s.place) assert.ok(F.PLACE_WORDS.includes(s.place.at), `${d}/${f}`);
+    // A word is written on the list, or given when the form is done as an argument of type placement (the body's put).
+    for (const form of Object.values(e.forms ?? {})) for (const s of form.steps ?? []) if (s.place) assert.ok(typeof s.place.at === 'string' ? F.PLACE_WORDS.includes(s.place.at) : form.takes?.[s.place.at?.arg]?.type === 'placement', `${d}/${f}`);
   }
   assert.deepEqual(doc.front.accepted, [...F.FRONTS]);
   const bad = structuredClone(kinds.table); bad.geometry.front = doc.front.refused[0].set;
