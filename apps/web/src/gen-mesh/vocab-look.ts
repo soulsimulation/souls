@@ -41,11 +41,15 @@ function tableRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   root.traverse((o) => {
     const p: Placement | undefined = placed[o.userData.role as string]; if (!p) return;
     const rest = (o.userData.looksRest ??= { rot: [o.rotation.x, o.rotation.y, o.rotation.z], pos: o.position.toArray(), scale: o.scale.toArray(), visible: o.visible }) as { rot: number[]; pos: number[]; scale: number[]; visible: boolean };
+    // SA-D2: steam and growth are read by the page's plume and plant code from the part and the picture's root; flame is shown or put out here
+    if (p.steam_permille !== undefined) { o.userData.lookSteam = p.steam_permille; root.userData.lookSteamPart = o; }
+    if (p.growth_permille !== undefined) root.userData.lookGrowth = p.growth_permille;
     const d = Math.PI / 180000;
     o.rotation.set(rest.rot[0] + (p.rotate_mdeg?.[0] ?? 0) * d, rest.rot[1] + (p.rotate_mdeg?.[1] ?? 0) * d, rest.rot[2] + (p.rotate_mdeg?.[2] ?? 0) * d);
     o.position.set(rest.pos[0] + (p.slide_mm?.[0] ?? 0) / 1000, rest.pos[1] + (p.slide_mm?.[1] ?? 0) / 1000, rest.pos[2] + (p.slide_mm?.[2] ?? 0) / 1000);
     o.scale.set(rest.scale[0] * (p.scale_permille?.[0] ?? 1000) / 1000, rest.scale[1] * (p.scale_permille?.[1] ?? 1000) / 1000, rest.scale[2] * (p.scale_permille?.[2] ?? 1000) / 1000);
     o.visible = p.show === undefined ? rest.visible : p.show;
+    if (p.flame_permille !== undefined) { const f = p.flame_permille / 1000; o.visible = f > 0; o.scale.set(rest.scale[0] * f, rest.scale[1] * f, rest.scale[2] * f); }
     if (p.glow_permille !== undefined || p.tint) o.traverse((c) => { const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (!m) return;
       (c as THREE.Mesh).material = lookMaterial(m, `table:${p.glow_permille ?? ''}:${p.tint ?? ''}`, (x) => { if (p.glow_permille !== undefined && x.emissive) x.emissiveIntensity *= p.glow_permille / 1000; if (p.tint) x.color.copy(tint.set(p.tint)); }); });
   });
