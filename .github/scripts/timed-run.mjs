@@ -71,7 +71,7 @@ export const ARG_ALLOW = {
   'slopes-profile': {},
   load: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--boots': int(1, 5), '--souls': (v) => ['0', '10'].includes(v), '--profile': FLAG, '--short': FLAG },
   settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': list(/^(300|[12]\d\d|[1-9]?\d)$/, 6), '--settle-min': int(1, 20), '--short': FLAG,
-    '--raw': FLAG, '--look': FLAG, '--present-only': FLAG, '--heap-at': list(/^(300|[12]\d\d|[1-9]?\d)$/, 4), '--wave': FLAG, '--acting': int(1, 100), '--wave-n': int(1, 300), '--wave-per-sec': int(1, 20), '--shape': (v) => ['uniform', 'event'].includes(v), '--seed': int(1, 99) },   // #2553
+    '--raw': FLAG, '--look': FLAG, '--present-only': FLAG, '--heap-at': list(/^(300|[12]\d\d|[1-9]?\d)$/, 4), '--wave': FLAG, '--acting': int(1, 100), '--wave-n': int(1, 300), '--wave-per-sec': int(1, 20), '--shape': (v) => ['uniform', 'event'].includes(v), '--seed': int(1, 99), '--no-profile': FLAG },   // #2553; --no-profile #2615
   hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
   colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
   // #2511: 0 is the zero-viewer arm; arrivals, a burst (<n>@<s>), stays and the Souls' pacing

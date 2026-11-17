@@ -28,6 +28,14 @@ async function eventDriver() {
   return { loop: m.rawShapedLoop, ids: m.shapeIds, schedule: s.schedule, describe: s.describe };
 }
 
+/** #2615 S6: the clock kept between the first and last of `samples` ({at, tick, rate} read from live.json): world ticks run
+ *  over ticks owed at 20 a second times the clock rate, to 3 places; null with fewer than two samples. */
+export function clockKept(samples) {
+  if (samples.length < 2) return null;
+  const a = samples[0], b = samples.at(-1), owed = ((b.at - a.at) / 1000) * 20 * (a.rate || 1);
+  return owed > 0 ? Math.round(1000 * Math.min(1, (b.tick - a.tick) / owed)) / 1000 : null;
+}
+
 /** One profiled window: start, wait `ms` (or until `until()` resolves), stop; the profile's buckets. */
 async function profiled(profDir, name, root, wait) {
   writeFileSync(join(profDir, 'prof.start'), ''); const t0 = Date.now();
@@ -54,16 +62,20 @@ export function spread(rows) {
     places: Object.entries(rows.reduce((m, x) => { const k = x.place ?? '(none)'; m[k] = (m[k] ?? 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5) };
 }
 
-export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', heapMb, dir, root, log, acting = 50, n = 200, perSec = 2, shape = 'uniform', seed = 1 }) {
+export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', heapMb, dir, root, log, acting = 50, n = 200, perSec = 2, shape = 'uniform', seed = 1, profile = true }) {
   mkdirSync(dir, { recursive: true });
   const profDir = join(dir, 'prof'); mkdirSync(profDir, { recursive: true });
   const ev = shape === 'event' ? await eventDriver() : null;
   // #2615: the profiler stops and serializes its profile on the world's main thread (prof-hook.mjs), which took longer than the
   // 10 s hang kill on a loaded runner and ended the world at the baseline's end (3 of 3 Step 0 runs); the stall log still logs every hold
-  const w = await bootWorld(dir, { slug: 'st-wave', template, heapMb, env: { SIM_PROF_DIR: profDir, SIM_HANG_KILL_MS: '120000' }, nodeOptions: `--import=${PROF_HOOK}` });
-  const out = { shape, acting, n, perSec, bootS: w.bootS };
-  const liveFile = join(w.data, 'live.json'), windows = new Map(); let watching = true;
-  const watch = (async () => { while (watching) { const t = readLive(liveFile)?.api?.ticks; if (t?.at) windows.set(t.at, { at: t.at, levels: t.levels, amberS: t.amberS, tickMs: t.tickMs, gapMs: t.longestGapMs }); await sleep(4000); } })();
+  // #2615 S6: `profile: false` (--no-profile) boots the world without the profiler and with its own hang kill, for scored runs;
+  // each window then keeps only its wall time
+  const w = await bootWorld(dir, profile ? { slug: 'st-wave', template, heapMb, env: { SIM_PROF_DIR: profDir, SIM_HANG_KILL_MS: '120000' }, nodeOptions: `--import=${PROF_HOOK}` } : { slug: 'st-wave', template, heapMb });
+  const window = profile ? profiled : async (_d, _n, _r, wait) => { const t0 = Date.now(); await wait(); return { wallMs: Date.now() - t0, busyMs: null, groups: {}, holds: null }; };
+  const out = { shape, acting, n, perSec, profiled: profile, bootS: w.bootS };
+  const liveFile = join(w.data, 'live.json'), windows = new Map(), clock = []; let watching = true;
+  const watch = (async () => { while (watching) { const l = readLive(liveFile), t = l?.api?.ticks;
+    if (l?.tick?.world != null) clock.push({ at: Date.now(), tick: l.tick.world, rate: l.tick.clockRate, service5s: l.tick.service5s }); if (t?.at) windows.set(t.at, { at: t.at, ticks: t.ticks, windowS: t.windowS, levels: t.levels, amberS: t.amberS, tickMs: t.tickMs, gapMs: t.longestGapMs }); await sleep(4000); } })();
   try {
     // the acting Souls: joined 8 at a time, each with its catalog and live picture
     const souls = [];
@@ -79,18 +91,21 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
     const loops = Promise.all(souls.map((s, k) => (ev ? ev.loop({ base: w.origin, soul: s, ids: s.ids, agent: sch.agents[k], t0, until, counts, acts: s.acts, http: s.http })
       : rawPacedLoop({ base: w.origin, soul: s, ids: s.ids, until, r: rng(1000 * seed + k), counts, acts: s.acts, http: s.http, actSec: 10 }))));
     await sleep(warmMs);
-    out.baseline = await profiled(profDir, 'base', root, () => sleep(baseMs));
+    const base0 = Date.now();
+    out.baseline = await window(profDir, 'base', root, () => sleep(baseMs));
     const wave0 = Date.now(), joins = [], errors = [];
-    out.wave = await profiled(profDir, 'wave', root, async () => {
+    out.wave = await window(profDir, 'wave', root, async () => {
       await Promise.all(Array.from({ length: n }, async (_, k) => {
-        await sleep(wave0 + (k * 1000) / perSec - Date.now());
+        const due = wave0 + (k * 1000) / perSec; await sleep(due - Date.now());
         const a = Date.now();
-        try { const s = await rawJoin(w.origin, acting + k), j = Date.now() - a; await startPicture(w.origin, s); joins.push({ k, soulId: s.soulId, joinMs: j, withPictureMs: Date.now() - a }); }
+        // #2615 S6: each create is also timed from when it was due (fromDueMs), so a late start counts against it
+        try { const s = await rawJoin(w.origin, acting + k), j = Date.now() - a; await startPicture(w.origin, s); joins.push({ k, soulId: s.soulId, joinMs: j, withPictureMs: Date.now() - a, fromDueMs: Date.now() - due, doneS: (Date.now() - wave0) / 1000 }); }
         catch (e) { errors.push(String(e.message ?? e).slice(0, 160)); }
       }));
       await sleep(20_000);
     });
     out.waveS = r1((Date.now() - wave0) / 1000);
+    out.baselineKept = clockKept(clock.filter((x) => x.at >= base0 && x.at <= wave0));
     if (w.child.exitCode != null) out.worldExited = { code: w.child.exitCode, tail: w.tail() };   // the world ended on its own during the wave
     await sleep(tailMs);
     const live = await fetch(`${w.origin}/v1/edge/live`).then((r) => r.json()).catch(() => null), mine = new Set(joins.map((j) => j.soulId));
@@ -100,11 +115,17 @@ export async function runWave({ bootWorld, stopWorld, template = 'eden-2026', he
     const inWave = [...windows.values()].filter((x) => x.at > wave0 && x.at <= wave0 + waveMs + 10_000).sort((a, b) => a.at - b.at);
     const lv = (k) => (inWave.length ? Math.round(1000 * inWave.reduce((s, x) => s + (x.levels?.[k] ?? 0), 0) / inWave.length) / 1000 : null);
     out.levels = { windows: inWave.length, amber: lv('amber'), red: lv('red'), black: lv('black'), worst: ['black', 'red', 'amber', 'green'].find((k) => inWave.some((x) => (x.levels?.[k] ?? 0) > 0)) ?? null,
-      amberS: inWave.reduce((m, x) => { for (const [k, v] of Object.entries(x.amberS ?? {})) m[k] = r1((m[k] ?? 0) + v); return m; }, {}), tickP99Max: Math.max(0, ...inWave.map((x) => x.tickMs?.p99 ?? 0)), longestGapMs: Math.max(0, ...inWave.map((x) => x.gapMs ?? 0)) };
+      amberS: inWave.reduce((m, x) => { for (const [k, v] of Object.entries(x.amberS ?? {})) m[k] = r1((m[k] ?? 0) + v); return m; }, {}), tickP99Max: Math.max(0, ...inWave.map((x) => x.tickMs?.p99 ?? 0)), longestGapMs: Math.max(0, ...inWave.map((x) => x.gapMs ?? 0)),
+      // #2615 S6: the clock kept from the wave's first create to 20 s after the last (live.json read every 4 s), and the lowest
+      // 5 s tick service the load monitor showed in that time
+      ...(() => { const s = clock.filter((x) => x.at >= wave0 && x.at <= wave0 + waveMs); return { kept: clockKept(s), service5sMin: s.length ? Math.min(...s.map((x) => x.service5s ?? 1)) : null }; })() };
     const created = joins.length, scaled = out.baseline.busyMs * (out.wave.wallMs / out.baseline.wallMs), profiledOk = out.wave.busyMs != null && out.baseline.busyMs != null;
     out.creates = { created, errors: errors.length, firstErrors: errors.slice(0, 3), joinMs: { p50: q(joins.map((j) => j.joinMs), 0.5), p95: q(joins.map((j) => j.joinMs), 0.95), max: q(joins.map((j) => j.joinMs), 1) },
       withPictureMs: { p50: q(joins.map((j) => j.withPictureMs), 0.5), p95: q(joins.map((j) => j.withPictureMs), 0.95) },
-      clockMsPerCreate: created && profiledOk ? r1((out.wave.busyMs - scaled) / created) : null };
+      clockMsPerCreate: created && profiledOk ? r1((out.wave.busyMs - scaled) / created) : null,
+      // #2615 S6: creates achieved against intended: completed per second of the wave until the last completed, and each from its due time
+      fromDueMs: { p50: q(joins.map((j) => j.fromDueMs), 0.5), p95: q(joins.map((j) => j.fromDueMs), 0.95), max: q(joins.map((j) => j.fromDueMs), 1) },
+      achievedPerSec: created ? Math.round(100 * created / Math.max(...joins.map((j) => j.doneS))) / 100 : 0, intendedPerSec: perSec };
     const lt = [...(out.wave.step0?.longTasks ?? [])].sort((a, b) => b.ms - a.ms);
     out.longestHold = lt[0] ? { ms: lt[0].ms, atS: lt[0].atS, group: lt[0].group, cause: lt[0].cause } : null;
     out.longTasks = lt.slice(0, 8).map((x) => ({ ms: x.ms, group: x.group, cause: x.cause }));

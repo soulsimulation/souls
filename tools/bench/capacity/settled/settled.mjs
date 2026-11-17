@@ -22,7 +22,8 @@
 // forced collection), read by heap.mjs into what holds the heap (the menu caches, the replica and take state, the per-Soul
 // stores, the rest, and the largest holders); the snapshot file is deleted once read. The report adds memory per Soul
 // between each pair of Soul counts. `--wave` runs wave.mjs instead (A2: `--acting 50 --wave-n 200 --wave-per-sec 2
-// --shape uniform|event --seed <k>`) and writes <out>/{wave.json, WAVE.md}.
+// --shape uniform|event --seed <k> [--no-profile]`) and writes <out>/{wave.json, WAVE.md}. #2615: --no-profile scores a wave
+// without the profiler (the world keeps its own hang kill): the clock kept, creates achieved and each from its due time.
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer, request as httpRequest } from 'node:http';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -257,7 +258,7 @@ if (flag('wave')) {
   // #2553 A2: the join wave (wave.mjs), one repeat per invocation; nothing else runs
   const { runWave } = await import('./wave.mjs');
   if (WORLD_LIST.length !== 1) throw new Error('--wave: one --world (eden for the measurement; small only as a smoke)');
-  const o = { acting: Number(opt('acting', 50)), n: Number(opt('wave-n', 200)), perSec: Number(opt('wave-per-sec', 2)), shape: opt('shape', 'uniform'), seed: Number(opt('seed', 1)) };
+  const o = { acting: Number(opt('acting', 50)), n: Number(opt('wave-n', 200)), perSec: Number(opt('wave-per-sec', 2)), shape: opt('shape', 'uniform'), seed: Number(opt('seed', 1)), profile: !flag('no-profile') };
   log(`settled --wave: ${o.n} creates at ${o.perSec}/s on ${WORLDS[WORLD_LIST[0]]} with ${o.acting} acting (${o.shape}), commit ${commit?.slice(0, 9)}`);
   const wave = await runWave({ bootWorld, stopWorld, template: WORLDS[WORLD_LIST[0]], heapMb: worldHeapMb({ template: WORLDS[WORLD_LIST[0]] }, 0), dir: join(OUT, `wave-${o.shape}`), root: ROOT, log, ...o });
   receipt.loadAfter = loadavg().map((x) => +x.toFixed(2)); receipt.issue = 2553;
@@ -268,6 +269,7 @@ if (flag('wave')) {
     '| created (errors) | join ms p50 / p95 / max | with picture ms p50 / p95 | clock ms per create | longest hold ms (source) | worst level | amber / red / black share | amber s by signal | tick p99 max ms | longest tick gap ms | heap at end MB | bodies: placed, spots, within 1 m, nearest m p50, radius m p50 / max |', '|---|---|---|---|---|---|---|---|---|---|---|---|',
     `| ${f(c.created)} (${f(c.errors)}) | ${f(c.joinMs?.p50)} / ${f(c.joinMs?.p95)} / ${f(c.joinMs?.max)} | ${f(c.withPictureMs?.p50)} / ${f(c.withPictureMs?.p95)} | ${f(c.clockMsPerCreate)} | ${f(wave.longestHold?.ms)} (${f(wave.longestHold?.cause)}) | ${f(wave.levels?.worst)} | ${f(wave.levels?.amber)} / ${f(wave.levels?.red)} / ${f(wave.levels?.black)} | ${f(wave.levels?.amberS)} | ${f(wave.levels?.tickP99Max)} | ${f(wave.levels?.longestGapMs)} | ${f(wave.heapEnd?.usedMb)} / ${f(wave.heapEnd?.limitMb)} | ${f(wave.bodies?.placed)}, ${f(wave.bodies?.spots)}, ${f(wave.bodies?.within1m)}, ${f(wave.bodies?.nearestM?.p50)}, ${f(wave.bodies?.radiusM?.p50)} / ${f(wave.bodies?.radiusM?.max)} |`,
     '', `clock busy ms: baseline ${f(wave.baseline?.busyMs)} of ${f(wave.baseline?.wallMs)} wall, wave ${f(wave.wave?.busyMs)} of ${f(wave.wave?.wallMs)} wall`,
+    `#2615 S6: profiled ${f(wave.profiled)} · world exited ${f(wave.worldExited?.code)} · clock kept in the wave ${f(wave.levels?.kept)} (baseline ${f(wave.baselineKept)}) · lowest 5 s service ${f(wave.levels?.service5sMin)} · creates achieved ${f(c.achievedPerSec)}/s of ${f(c.intendedPerSec)}/s · from due ms p50/p95/max ${f(c.fromDueMs?.p50)} / ${f(c.fromDueMs?.p95)} / ${f(c.fromDueMs?.max)}`,
     `wave groups (ms): ${f(wave.wave?.groups)}`, `baseline groups (ms): ${f(wave.baseline?.groups)}`, `long tasks in the wave: ${f(wave.longTasks)}`, `bodies by place: ${f(wave.bodies?.places)}`].join('\n') + '\n');
   log('done: WAVE.md'); process.exit(wave.error ? 1 : 0);
 }
