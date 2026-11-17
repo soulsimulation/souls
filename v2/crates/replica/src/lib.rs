@@ -4,6 +4,7 @@
 
 pub mod encode;
 pub mod ids;
+pub mod time;
 pub mod world_model;
 pub mod zones;
 
