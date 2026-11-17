@@ -3,7 +3,7 @@
   "kind": "test:workbench",
   "owner": "thing",
   "links": {
-    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" }
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} }
   },
   "forms": {
     "use": {
