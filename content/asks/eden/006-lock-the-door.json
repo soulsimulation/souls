@@ -1,1 +1,1 @@
-{"format":"souls-ask/1","n":6,"group":"object","words":"lock the door","obvious":1,"things":{"door":"eden:door"},"chain":[{"this":"door","form":"close"},{"this":"door","form":"lock"}]}
+{"format":"souls-ask/1","n":6,"group":"object","words":"lock the door","obvious":1,"things":{"door":"eden:door"},"chain":[{"this":"door","form":"lock"}]}
