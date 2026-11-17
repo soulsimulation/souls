@@ -51,11 +51,11 @@ The store that keeps the words (K16), signing in (W1), removal end to end (W7) a
 7. **A reference is minted (T3), never a hash of the words, and belongs to one audience line:** the audience of the
    entry that first carries it, and, when that is an audience node, every node that supersedes it for the same thing
    and rule (so a seat's text survives a player joining). The store keeps that audience with the words. A record may
-   carry only a reference its own entry mints or one already of its own audience; a reference enters a superseding
-   audience only through the commit's move of a facet (the field's current value, rule 2). Anything else is refused
-   at commit (`reference-audience`), public words quoted in a private record included, and delivery gives words to no
-   view outside the line even if such a record exists. The fixture log holds one such refused record on purpose (seq
-   13), to show delivery does not leak it.
+   carry only a reference its own entry mints or one already of its own audience (or moved into it by the commit); a
+   reference enters a superseding audience only through the commit's move of a facet (the field's current value, rule
+   2). Anything else is refused at commit (`reference-audience`), public words quoted in a private record included,
+   and delivery gives words to no view outside the line even if such a record exists. The fixture log holds one such
+   refused record on purpose (seq 13), to show delivery does not leak it.
 8. **A view never holds words; delivery may.** A view (T7, [views.md](views.md)) carries references. Delivered, a
    reference gets its words beside it, `{21: id, 23: words}`, when the view's audience is on the reference's line,
    the store has them and the redaction list does not name them. Words not at hand leave the reference bare. The list
