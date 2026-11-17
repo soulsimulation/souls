@@ -93,6 +93,8 @@ export type Entry = {
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
   motion?: { how?: string };
+  /** A closed kind: the fields it names take the container's audience and declare none of their own (SA-F8, #2849). */
+  closed?: { audience: Audience; fields?: string[] };
 };
 export type Node = {
   kind?: string;
@@ -127,6 +129,10 @@ const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() :
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
 /** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
 const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigint';
+/** Who may see a state field: the container's audience when the kind is closed and names it, else the field's own. */
+const audienceOf = (entry: Entry | undefined, field: string, def = entry?.state?.[field]): Audience =>
+  entry?.closed?.fields?.includes(field) ? entry.closed.audience : (def?.audience as Audience);
+
 /** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
 const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
@@ -166,10 +172,12 @@ export function decide(input: Input): Verdict {
 
   // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
   // that meets the need. A holder's form refused for want of holding names its own fix (take).
-  const formFix = (meets: (e: Effect) => boolean): Fix | null => {
+  // `ready`, when given, passes over a form its own needs would refuse now (a dimmer step on a lamp that is dark).
+  const formFix = (meets: (e: Effect) => boolean, ready?: (f: Form) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
       if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
+      if (ready && !ready(f)) continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
     return null;
@@ -187,7 +195,7 @@ export function decide(input: Input): Verdict {
       const field = n.field ?? '';
       const def = has(entry.state, field) ? entry.state![field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
-      if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+      if (!sees(audienceOf(entry, field))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
       let value = has(self.fields, field) ? self.fields![field] : def.default;
       if (def.type === 'timed') {
         const now = valueAt(def, value, state.now_us);
@@ -197,11 +205,12 @@ export function decide(input: Input): Verdict {
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
-      const meets = (v: unknown) =>
-        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
-        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
-        (!has(n, 'at_least') || (int(v) && v >= (n.at_least as number))) &&
-        (!has(n, 'at_most') || (int(v) && v <= (n.at_most as number)));
+      const holds = (m: Need, v: unknown) =>
+        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'at_least') || (int(v) && v >= (m.at_least as number))) &&
+        (!has(m, 'at_most') || (int(v) && v <= (m.at_most as number)));
+      const meets = (v: unknown) => holds(n, v);
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
@@ -210,7 +219,9 @@ export function decide(input: Input): Verdict {
       const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
       const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
         (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
-        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))));
+        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+        // the fix's own needs on this field must hold now, or it would be refused in turn
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
@@ -343,7 +354,7 @@ export function decide(input: Input): Verdict {
       const m = measure(kinds, nodes, act.this, args, e);
       if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
       for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
-        if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+        if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
       }
       read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
       read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
