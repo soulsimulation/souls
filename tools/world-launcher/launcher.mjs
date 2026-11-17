@@ -113,6 +113,7 @@ import { usageRollup } from './usage.mjs';
 import { ownerOverview } from './owner-overview.mjs';
 import { connect, isIP } from 'node:net';
 import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -127,8 +128,10 @@ import { EXISTING_WORLDS, decorateCommand, memAvailableMb, productionSettings } 
 import { makeHandoff } from './handoff.mjs';
 import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, short, soulCeilings } from './flood.mjs';
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
+import { readAlertProblems } from './telemetry/alerts.mjs';   // #2541
 import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
 import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
+import { addressKey, forwardedAddress } from '../../apps/server/src/address-key.ts';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
@@ -333,6 +336,13 @@ export async function openLauncher(cfg = {}) {
   const diskMinFreeMb = cfg.diskMinFreeMb ?? 0, diskFree = cfg.diskFreeMb ?? (() => { const s = statfsSync(dataDir); return Math.floor(Number(s.bavail) * Number(s.bsize) / 1048576); });
   let diskSeen = { at: -Infinity, mb: Infinity };
   const diskLow = () => { if (!(diskMinFreeMb > 0)) return false; if (Date.now() - diskSeen.at >= 30_000) { let mb = Infinity; try { mb = diskFree(); } catch { /* unreadable: not low */ } diskSeen = { at: Date.now(), mb }; } return diskSeen.mb < diskMinFreeMb; };
+  // #2541: what a spike needs exported (metrics.mjs): worlds created here since start, and this process's own loop delay
+  let worldsCreated = 0; const loopDelay = monitorEventLoopDelay({ resolution: 20 }); loopDelay.enable();
+  const launcherGauges = () => {
+    const p99 = loopDelay.count ? loopDelay.percentile(99) / 1e6 : null; loopDelay.reset();   // ns → ms, since the previous scrape
+    let disk = null; try { const s = statfsSync(dataDir); disk = { free: s.bavail * s.bsize, size: s.blocks * s.bsize }; } catch { /* left out: "no data", not 0 */ }
+    return { loopDelayP99Ms: p99, worldsCreated, diskFreeBytes: disk?.free, diskSizeBytes: disk?.size };
+  };
   /** Open WebSocket (upgraded) connections per world: a world someone is watching never goes to sleep. */
   const live = new Map();
   /** HTTP requests in flight per world (a god's long-poll listen): such a world is not idle either. */
@@ -591,7 +601,7 @@ export async function openLauncher(cfg = {}) {
     if (!/^[A-Za-z0-9_:.-]{3,96}$/.test(owner)) return [400, { ok: false, code: 'invalid', message: 'owner (account id) or ownerOf (slug of a world it owns) is required' }];
     if (!accountExists(owner)) return [404, { ok: false, code: 'no-account', message: `no account ${owner} in this launcher's account registry` }];
     const run = creating.then(() => createWorld(body, undefined, { owner })); creating = run.catch(() => {});
-    return run;
+    return run.then((out) => { if (out[0] === 201) worldsCreated++; return out; });
   }
 
   // ---------- operator: forks of the old worlds (lane FORKS). Only FORK_SLUGS, only from this machine, only onto a
@@ -1389,7 +1399,7 @@ export async function openLauncher(cfg = {}) {
         if (req.method === 'POST') {
           const chunks = []; let n = 0;
           for await (const c of req) { n += c.length; if (n > 8192) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
-          const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+          const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543
           const [st, out] = errors.ingest(who, req.headers['user-agent'], Buffer.concat(chunks));
           if (out) json(res, st, out); else res.writeHead(st, { 'cache-control': 'no-store' }).end(); return;
         }
@@ -1430,11 +1440,11 @@ export async function openLauncher(cfg = {}) {
         for await (const c of req) { n += c.length; if (n > 16_384) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { json(res, 400, { ok: false, code: 'bad-json' }); return; }
         // per-client creation limit (production): the first x-forwarded-for hop is the visitor Caddy saw
-        const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+        const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
         const recent = (made.get(who) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
         if (recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
         const run = creating.then(() => createWorld(body, req.headers.authorization)); creating = run.catch(() => {});
-        const out = await run; if (out[0] === 201) made.set(who, [...recent, Date.now()]);
+        const out = await run; if (out[0] === 201) { made.set(who, [...recent, Date.now()]); worldsCreated++; }
         json(res, out[0], out[1], out[1].retry_after ? { 'retry-after': String(out[1].retry_after) } : {}); return;
       }
       if (path === '/__sim/op/create-world' && req.method === 'POST') {
@@ -1569,7 +1579,7 @@ export async function openLauncher(cfg = {}) {
         json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
       }
       // lane L7: Prometheus text for the worlds and the launcher (LOAD-CONTRACT §5), loopback only
-      if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
+      if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb(), ...launcherGauges() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), viewers: live.get(w.slug) ?? 0, refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
       // #1150: every world's recoveries and halts from its own store, asleep or not; ?world= adds that world's records. Loopback only.
       if (path === '/__sim/glitches' && req.method === 'GET') {
         if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
@@ -1582,15 +1592,17 @@ export async function openLauncher(cfg = {}) {
       // and the ceilings take it), else the TCP peer. Public, since it is the caller's own address; never a header
       // verbatim: anything that is not an address answers null. deploy/caddy/check-soul-game.mjs compares it from outside.
       if (path === '/__sim/whoami' && (req.method === 'GET' || req.method === 'HEAD')) {
-        const xff = behindProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '', a = xff || (req.socket.remoteAddress ?? '');
+        const a = (behindProxy ? forwardedAddress(req.headers['x-forwarded-for']) : null) || (req.socket.remoteAddress ?? '');   // #2543
         json(res, 200, { address: isIP(a) ? a : null }); return;
       }
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
         const running = registry.worlds.filter((w) => pool.status(w.slug).status === 'running').length;
         const host = hostHealth(dataDir); // deploy/host-health.mjs (timer): `hostOk` (+ short `hostCodes` when not ok) public, the numbers loopback-only
         // lane L1: the guard's findings now, not at the timer's next run: wedged, held, crashloop, bootSlow, halted (codes public, texts loopback)
-        const worldProblems = pool.problems(), wcodes = [...new Set([...worldProblems.map((x) => x.code), ...(diskLow() ? ['disk'] : [])])];   // #2538: the launcher's own floor raises `disk` now, not at the timer's next run
-        const hostOk = (host ? host.ok : true) && !wcodes.length, hostCodes = [...new Set([...(host && !host.ok ? host.codes ?? [] : []), ...wcodes])];
+        const worldProblems = pool.problems(), wcodes = [...new Set([...worldProblems.map((x) => x.code), ...readAlertProblems(dataDir).map((x) => x.code), ...(diskLow() ? ['disk'] : [])])];   // #2541: firing telemetry alerts too; #2538: the launcher's own disk floor raises `disk` now
+        // the alerts file read now supersedes the timer's copy of it, so a resolved alert clears at once
+        const hc = host && !host.ok ? (host.codes ?? []).filter((c) => !c.startsWith('alert:')) : [];
+        const hostOk = (host ? host.ok || (host.codes?.length > 0 && !hc.length) : true) && !wcodes.length, hostCodes = [...new Set([...hc, ...wcodes])];
         json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, site: registry.site() /* #2540 */,...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), loads: pool.loadStats(), ...(host ? { host } : {}) } : {}) }); return;
       }
       const to = redirects?.target(req, path, url);
@@ -1683,7 +1695,7 @@ export async function openLauncher(cfg = {}) {
     const w = slug && !closing.has(slug) && registry.get(slug);
     if (!w) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
     // lane L1: WebSockets count toward the address's concurrent ceiling
-    const slot = ceilings.socket(slug, behindProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : null);
+    const slot = ceilings.socket(slug, behindProxy ? addressKey(req.headers['x-forwarded-for']) : null);   // #2543
     if (!slot) { socket.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\nConnection: close\r\n\r\n'); return; }
     socket.once('close', slot.release);
     const eyes = eyesAgent(req.headers['user-agent']);
@@ -1883,7 +1895,7 @@ export async function openLauncher(cfg = {}) {
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)
-      clearInterval(problemsTimer); for (const s of sockets) s.destroy(); await pool.closeAll(); await done;
+      clearInterval(problemsTimer); loopDelay.disable(); for (const s of sockets) s.destroy(); await pool.closeAll(); await done;
     },
   };
 }

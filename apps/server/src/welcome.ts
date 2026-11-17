@@ -15,6 +15,7 @@ import type {StreamEvent} from './edge/comms/stream.ts';
 import type {GodMode} from './god/god.ts';
 import {ApiError, type Souls} from './souls.ts';
 import type {WorldHost} from './world.ts';
+import {addressKey} from './address-key.ts';
 
 export const FEEDBACK_MAX_BYTES = 1024 * 1024;
 export const AWAY_SCAN = 300, AWAY_RESIDENTS = 24;
@@ -39,8 +40,8 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 export function feedbackIp(c: Context) {
   let remote: string | undefined;
   try { remote = getConnInfo(c).remote.address; } catch { /* in-process Hono fixtures have no socket */ }
-  if (remote && !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) return remote;
-  return c.req.header('x-forwarded-for')?.split(',').at(-1)?.trim() || remote || 'local';
+  if (remote && !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) return addressKey(remote)!;   // #2543: IPv6 by its /64
+  return addressKey(c.req.header('x-forwarded-for'), {hop: 'last'}) ?? (remote || 'local');
 }
 const parsed = <T>(schema: z.ZodType<T>, input: unknown): T => {
   const result = schema.safeParse(input);

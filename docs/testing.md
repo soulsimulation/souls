@@ -328,3 +328,9 @@ The kit and the recorder come from the workflow's branch, the app from `ref`. Th
 `SIM_PROOF_GPU=hardware`: it fails (exit 5) rather than fall back to SwiftShader, and the log and the sidecar's `gl`
 name the renderer. The log also prints the clip's frame timing (frames, mean fps, largest gap) beside the take's wall
 clock. The job holds no write token, so the clip comes back as the run's artifact and `upload.mjs` attaches it.
+
+The page with many Souls ([#2554](https://github.com/soulsimulation/souls/issues/2554)) is measured the same way:
+`-f command=page -f args='--souls 12,50,200,500 --shape event' -f repeats=2 -f cores=world=1` runs
+`tools/test-harness/page-souls.mjs`, which grows one fake-mind Eden 2026 to each size with raw Souls on a load shape
+and records frame time, draws, GPU time, heap and long tasks for desktop and phone, Broadcast and a high Free view. Its
+`REPORT.md` holds the table; the frame times are relative to the runner's GPU, not a visitor's.

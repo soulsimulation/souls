@@ -567,6 +567,10 @@ export class WorldHost {
     return best ?? this.engine.regionAt(e.pose.p);
   }
 
+  /** #2501 follow-up: ticks a boot catch-up still owed when it stopped (a host slower than the wall never quite closes the
+   *  gap) are run by the clock's first frames instead of dropped: world time never stops. Past a frame's cap they meet
+   *  the clock's own overload rule (dilation, logged), as any frame that falls behind does. */
+  oweToClock(ticks: number) { if (ticks > 0 && !this.paused) this.carry += Math.floor(ticks); }
   start() {
     if (this.timer) return;
     this.last = performance.now();
@@ -1678,6 +1682,9 @@ export class WorldHost {
    *  single-file passage it does not hold while the body standing there yields to it, so that body can walk out through it.
    *  Main adopts it at boot, last. */
   enableCedePassageV1(author='operator:cede-passage'){if((this.extra.runtimePolicy as {cedePassageV1?:boolean}|undefined)?.cedePassageV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,cedePassageV1:true},why:'cede-passage/1 (#2426): a walker at the end of its walk leg leaves a single-file passage to the body standing there while that body yields to it, so it can make way; retain historical replay before this event'});}
+  /** #2596 cycle-recover/1, one logged rules event (prospective): a two-body wait cycle asks for recovery after 3 s, not 10 s,
+   *  and when routing round the other does not break it one of the pair steps aside. Main adopts it at boot, after cede-passage/1. */
+  enableCycleRecoverV1(author='operator:cycle-recover'){if((this.extra.runtimePolicy as {cycleRecoverV1?:boolean}|undefined)?.cycleRecoverV1)return Promise.resolve();return this.enqueue('rules',author,{runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,cycleRecoverV1:true},why:'cycle-recover/1 (#2596): a two-body wait cycle asks for recovery after 3 s, and one of the pair steps aside and walks on once the other has passed; retain historical replay before this event'});}
   enableClassroomTvV1(author='operator:classroom-tv'){
     if((this.extra.runtimePolicy as {classroomTvV1?:boolean}|undefined)?.classroomTvV1)return Promise.resolve();
     const payload:Record<string,unknown>={runtimePolicy:{sleepBlockTicks:1200,...this.extra.runtimePolicy as object,classroomTvV1:true},why:'classroom-tv/1 (#2302): the lecture screen is a TV a Soul in the room switches on or off and changes the picture of (garden, sea, stars, test card, or the lesson); a running class still puts its lesson on it; retain historical replay before this event'};

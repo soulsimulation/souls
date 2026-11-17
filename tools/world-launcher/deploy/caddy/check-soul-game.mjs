@@ -2,8 +2,8 @@
 // Checks soul.game behind the CDN from outside (#2513; the site file is soul-game.caddy beside this script, the trusted
 // ranges cdn-trust.snippet):
 //   SOUL_CHECK_TOKEN=<a scratch Soul's token> node tools/world-launcher/deploy/caddy/check-soul-game.mjs \
-//     [--origin https://soul.game] [--world eden] [--trace <origin>/cdn-cgi/trace]
-// Six points, each PASS or a PROBLEM naming it:
+//     [--origin https://soul.game] [--world eden] [--trace <origin>/cdn-cgi/trace] [--stable <path>] [--points a,b]
+// Seven points (the CLI runs all; checkSoulGame's default is the first six), each PASS or a PROBLEM naming it:
 //   address  /__sim/whoami (the address the launcher keyed this request on) equals the ip= line of the CDN's trace page
 //   forged   the same with a forged X-Forwarded-For: the same answer, never the forged value
 //   viewer   a viewer WebSocket (/w/<world>/ws?hello=...) receives its welcome
@@ -12,6 +12,9 @@
 //   events   the first event of /w/<world>/v1/edge/events arrives within --event-ms (the token is read from the
 //            environment only, so it stays out of shell history and process lists)
 //   ranges   the static ranges in cdn-trust.snippet equal the CDN's published lists
+//   cache    the cache rule (docs/operations/cdn.md): the world page's script bundle, its first snapshot part, a
+//            release-stable file (--stable) and the snapshot under the page's own key, each requested twice, the
+//            second a CDN hit; the snapshot under a stale key is no-store and never a hit
 // Read-only: GETs, one WebSocket join, and one POST without a token that the launcher refuses before any world reads it.
 // Exit 0 on PASS.
 import { readFileSync } from 'node:fs';
@@ -22,6 +25,7 @@ export const PUBLISHED = ['https://www.cloudflare.com/ips-v4', 'https://www.clou
 export const FORGED = '203.0.113.77';   // a documentation address (RFC 5737): no visitor has it
 const SNIPPET = fileURLToPath(new URL('./cdn-trust.snippet', import.meta.url));
 const UA = 'souls-check-soul-game';
+const STABLE = '/mars-assets/draco/draco_decoder.wasm';   // every world page loads it (LiveWorld's Draco decoder)
 
 /** The ranges on the snippet's `trusted_proxies static <ranges...>` line (Caddy takes them as arguments of one line). */
 export function staticRanges(text) {
@@ -33,7 +37,7 @@ export function staticRanges(text) {
 const challenged = (r) => r.headers.get('cf-mitigated') ? `challenged (cf-mitigated: ${r.headers.get('cf-mitigated')})` : null;
 const isJson = (r) => /application\/json/.test(r.headers.get('content-type') ?? '');
 
-export async function checkSoulGame({ origin = 'https://soul.game', world = 'eden', trace, token, snippet = SNIPPET, published = PUBLISHED, points = POINTS, eventMs = 5000, waitMs = 10_000, fetchImpl = fetch, WebSocketImpl = globalThis.WebSocket } = {}) {
+export async function checkSoulGame({ origin = 'https://soul.game', world = 'eden', trace, token, snippet = SNIPPET, published = PUBLISHED, points = POINTS, stable = STABLE, eventMs = 5000, waitMs = 10_000, fetchImpl = fetch, WebSocketImpl = globalThis.WebSocket } = {}) {
   const problems = [], seen = [];
   const bad = (point, message) => problems.push(`${point}: ${message}`);
   const get = (url, init = {}) => fetchImpl(url, { redirect: 'manual', signal: AbortSignal.timeout(waitMs), ...init, headers: { 'user-agent': UA, ...(init.headers ?? {}) } });
@@ -94,6 +98,24 @@ export async function checkSoulGame({ origin = 'https://soul.game', world = 'ede
     seen.push(`ranges: ${mine.size} in the snippet, ${theirs.size} published`);
     if (missing.length) bad('ranges', `published but not trusted: ${missing.join(' ')}`);
     if (extra.length) bad('ranges', `trusted but no longer published: ${extra.join(' ')}`);
+  }, cache: async () => {
+    // what a first visit fetches, each twice: the second must be an edge hit (one edge site: the hit rate elsewhere is
+    // not shown here). Then the snapshot with a key that is not current: never kept.
+    const page = await get(`${origin}/w/${world}/`, { headers: { accept: 'text/html' } }), html = await page.text();
+    if (page.status !== 200) return bad('cache', `the world page answered ${page.status}`);
+    const key = /__simSnapshotKey=("[0-9.]+")/.exec(html)?.[1], part = /__simSnapshotParts=\["([0-9a-f]{32})"/.exec(html)?.[1];
+    const snapshot = `/w/${world}/v1/world/snapshot?defs=ref&cols=1&v=`;
+    const targets = { bundle: /<script[^>]+src="((?:\/w\/[^/"]+)?\/assets\/[^"?#]+\.js)"/.exec(html)?.[1], part: part && `/w/${world}/v1/world/part/${part}`, stable, snapshot: key && snapshot + encodeURIComponent(JSON.parse(key)) };
+    const twice = async (path) => { const st = []; for (let i = 0; i < 2; i++) { const r = await get(origin + path); await r.arrayBuffer(); st.push({ status: r.status, cf: r.headers.get('cf-cache-status') ?? 'none', cc: r.headers.get('cache-control') ?? '' }); } return st; };
+    for (const [what, path] of Object.entries(targets)) {
+      if (!path) { bad('cache', `the world page names no ${what}`); continue; }
+      const [a, b] = await twice(path);
+      seen.push(`cache: ${what} ${path}: ${a.status} ${a.cf}, then ${b.status} ${b.cf}`);
+      if (b.status !== 200 || b.cf.toUpperCase() !== 'HIT') bad('cache', `${what} ${path}: the second request was ${b.status} ${b.cf}, want 200 HIT`);
+    }
+    const [a, b] = await twice(snapshot + '0');
+    seen.push(`cache: stale snapshot key: ${b.status} ${b.cf} ${b.cc}`);
+    if (![a, b].every((x) => /no-store/i.test(x.cc)) || b.cf.toUpperCase() === 'HIT') bad('cache', `the snapshot with a stale key answered ${b.cf} (${b.cc || 'no cache-control'}), want no-store and never a hit`);
   } };
   for (const p of points) { try { await run[p](); } catch (e) { bad(p, e.message); } }
   return { pass: problems.length === 0, problems, seen };
@@ -101,7 +123,7 @@ export async function checkSoulGame({ origin = 'https://soul.game', world = 'ede
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : d; };
-  const r = await checkSoulGame({ origin: opt('--origin', 'https://soul.game').replace(/\/$/, ''), world: opt('--world', 'eden'), trace: opt('--trace'), token: process.env.SOUL_CHECK_TOKEN, eventMs: Number(opt('--event-ms', 5000)) });
+  const r = await checkSoulGame({ origin: opt('--origin', 'https://soul.game').replace(/\/$/, ''), world: opt('--world', 'eden'), trace: opt('--trace'), token: process.env.SOUL_CHECK_TOKEN, eventMs: Number(opt('--event-ms', 5000)), stable: opt('--stable', STABLE), points: opt('--points')?.split(',') ?? [...POINTS, 'cache'] });
   for (const s of r.seen) console.log(`  ${s}`);
   for (const p of r.problems) console.log(`  PROBLEM ${p}`);
   console.log(r.pass ? 'PASS' : 'FAIL');

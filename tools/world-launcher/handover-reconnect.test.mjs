@@ -54,6 +54,8 @@ test('#2501: a handover of Eden 2026 reconnects its viewer within the release ba
     assert.equal(Number(restored[2]), saved, 'it restores the very tick the stopped process saved');
     const owed = Number(/\[clock\] (\d+) ticks owed to the wall/.exec(lines)?.[1]), caught = /\[clock\] caught up (\d+) ticks/.exec(lines);
     assert.ok(owed > 0 && Number(caught?.[1]) >= owed, `the ticks owed for the pause run (${owed} owed, ${caught?.[1]} run)`);
-    assert.doesNotMatch(lines, /ticks still owed when the catch-up stopped/);
+    // none dropped: a host slower than the wall (a loaded runner) may end the catch-up still owing a tick or two, which the
+    // running clock then runs first (WorldHost.oweToClock); a dropped tick says "not run"
+    assert.doesNotMatch(lines, /ticks still owed when the catch-up stopped[^\n]*not run/);
   } catch (e) { t.diagnostic(`--- eden.log\n${log().slice(-6000)}`); throw e; }
 });

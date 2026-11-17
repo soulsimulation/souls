@@ -1,0 +1,27 @@
+# #2541: the telemetry collector for sim-worlds@<stage>: scrapes the launcher's loopback /__sim/metrics every 15 s into
+# /srv/sim-worlds-data/<stage>/telemetry, evaluates the alert rules after each scrape, and writes the firing rules that
+# page to alert-problems.json, which /__sim/healthz folds into hostOk/hostCodes (alert:<rule>) for the outside check.
+# install.sh installs it and never enables it. Enabling is the maintainer's step (docs/operations/telemetry.md):
+#   systemctl enable --now sim-worlds-telemetry@production
+[Unit]
+Description=Telemetry collector and alerts for the sim-worlds@%i launcher
+After=sim-worlds@%i.service
+
+[Service]
+Type=simple
+User=simworlds
+Group=simworlds
+Nice=10
+EnvironmentFile=/etc/sim-worlds/%i.conf
+ExecStart=/usr/bin/node --no-warnings /srv/sim-worlds/%i/tools/world-launcher/telemetry.mjs collect --launcher-args --dir /srv/sim-worlds-data/%i/telemetry --alerts --problems /srv/sim-worlds-data/%i/alert-problems.json
+Restart=always
+RestartSec=10
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/sim-worlds-data/%i
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

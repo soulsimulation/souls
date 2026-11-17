@@ -16,6 +16,7 @@ import type { Souls } from './souls.ts';
 import { isLooseCarryAsset } from '@souls/engine-mars';
 import type {CandidateStationV1} from './station.ts';
 import type {CandidateStationV2} from './station-v2.ts';
+import { addressKey } from './address-key.ts';
 
 const clientMsg = z.discriminatedUnion('t', [
   z.object({ t: z.literal('hello'), proto: z.number(), token: z.string().max(4000).optional(), since: z.number().optional(), epoch: z.string().max(40).optional(),
@@ -43,6 +44,8 @@ const publicStats = (st: ServerStats): ServerStats => ({ ...st, brain: { mode: s
 const MAX_BUFFERED = 1_000_000;
 /** Longest the world clock waits for a join set (lane P5); under the frame loop's 1 s elapsed cap, so no world time is lost. */
 const JOIN_HOLD_MS = 750, JOIN_HOLD_REST_MS = 2_000;
+/** #2519: the oldest a cached anonymous join picture may be. */
+const JOIN_CACHE_MS = 2_000;
 /** A world's stop waits this long for its sockets to finish the close handshake, then cuts the rest (Hub.closeClients). */
 export const CLOSE_GRACE_MS = 500;
 
@@ -93,6 +96,13 @@ export class Hub {
   epoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   build = 'dev';
   private lastTakeTick = -1;
+  /** #2519 (SIM_JOIN_CACHE, on unless '0'): a token-less join's heavy part, the snapshot (stringified once per negotiated
+   *  form) and the log list, built at most once every JOIN_CACHE_MS and shared; each joiner then gets the ring's batches
+   *  after it (each stringified once for all of them: a booting world's first batch holds megabytes of log), so its
+   *  replica ends where a fresh snapshot's would. `ring`/`engine`: the ones it was built from (a recovery
+   *  replaces both and also clears it). */
+  private readonly joinCacheOn: boolean;
+  private joinCache: {at:number;seq:number;ring:unknown;engine:unknown;snapshot:Extract<ServerMsg,{t:'snapshot'}>;log:string;wire:Map<string,{s:string;table:number|null}>;batches:Map<number,string>}|null = null;
   /** #1221: the oldest batch a client may resume from: nothing before the last recovery still holds. */
   private resumeFrom = 0;
   /** take-entities-ref/1: one table registry for every peer that announced it (see packages/protocol take-entities-wire). */
@@ -108,7 +118,7 @@ export class Hub {
   private stationV2?:CandidateStationV2;
 
   constructor(server: Server, host: WorldHost, auth: Auth, db: Db,lifecycleSouls?:Souls,station?:CandidateStationV1,stationV2?:CandidateStationV2) {
-    this.host = host; this.auth = auth; this.db = db; this.persistTakes = worldConfig(host).env.TAKES_PERSIST === '1';
+    this.host = host; this.auth = auth; this.db = db; this.persistTakes = worldConfig(host).env.TAKES_PERSIST === '1'; this.joinCacheOn = worldConfig(host).env.SIM_JOIN_CACHE !== '0';
     if(station){if(station.host!==host)throw new Error('station must belong to selected Hub host');this.station=station;}
     if(stationV2){if(stationV2.host!==host)throw new Error('V2 station must belong to selected Hub host');this.stationV2=stationV2;}
     // Internal opt-in only; production bootstrap does not supply this adapter.
@@ -131,10 +141,11 @@ export class Hub {
       onApplied: e => { if (e.kind === 'rules' && e.payload?.recovery) {
           // #1221: the world took a step back; everyone gets the picture again where they are. A new epoch or a closed socket
           // would make every page tear its whole view down and lose who it was following. Nothing from before this resumes.
-          this.lastTakeTick=host.engine.world.tick; this.resumeFrom=host.currentBatchSeq+1;
+          this.lastTakeTick=host.engine.world.tick; this.resumeFrom=host.currentBatchSeq+1; this.joinCache=null;
           for (const c of this.clients) if (c.ready) this.send(c, {t: 'snapshot', reason: 'world restored', ...host.snapshotView()});
         }
         if(e.kind==='station-rules-era-v1'){
+          this.joinCache=null;
           for(const c of this.clients){if(!c.ready)continue;
             if(c.stationContract==='station-live/1')this.welcomeClient(c);
             this.send(c,{t:'snapshot',reason:'recorded physical checkpoint',...host.snapshotView()});
@@ -176,7 +187,7 @@ export class Hub {
   stopTimers() { for (const t of this.timers) clearInterval(t); this.timers = []; }
 
   private onConnect(ws: WebSocket, req: IncomingMessage) {
-    const ip = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+    const ip = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
     let sameIp = 0; for (const x of this.clients) if (x.ip === ip) sameIp++;
     if (this.clients.size >= MAX_CLIENTS || sameIp >= MAX_PER_IP) { ws.close(1013, 'too many connections'); return; }
     const c: Client = { ws, me: null, ready: false, alive: true, joinedAt: Date.now(), resyncs: 0, sent: 0, ip, msgs: 0, windowStart: Date.now(), lastHello: 0, lastSnapshot: 0,stationContract:null,authUserId:null,helloGeneration:0 };
@@ -240,9 +251,21 @@ export class Hub {
       c.joinSend=true;c.awaitingTakes=true;
       try{
       const canResume = typeof m.since === 'number' && m.epoch === this.epoch && m.since >= this.resumeFrom && ring.length > 0 && m.since >= ring[0].seq - 1 && m.since <= this.host.currentBatchSeq;
+      // #2519: a token-less page join takes the shared picture and its log, then every ring batch after it
+      const cached = !canResume && m.token === undefined && m.since === undefined ? this.joinPicture() : null;
       if (canResume) for (const b of ring) { if (b.seq > m.since!) this.send(c, { t: 'batch', ...b, log: b.log.map(publicEvent) }); }
+      else if (cached) {
+        const wire = this.joinWire(cached, c);
+        if (this.sendWire(c, wire.s) && wire.table !== null && c.takeEntities) c.takeEntities.last = wire.table;
+        this.sendWire(c, cached.log);
+        for (const b of ring) if (b.seq > cached.seq) {
+          let s = cached.batches.get(b.seq);
+          if (s === undefined) cached.batches.set(b.seq, s = JSON.stringify({ t: 'batch', ...b, log: b.log.map(publicEvent) } satisfies ServerMsg));
+          this.sendWire(c, s);
+        }
+      }
       else this.send(c, { t: 'snapshot', reason: typeof m.since === 'number' ? 'too far behind; full snapshot' : 'join', ...this.host.snapshotView() });
-      this.send(c, { t: 'log', events: this.db.tailEvents(this.host.worldId, 150, true).map(e=>joinLogEvent(publicEvent(e))) });
+      if (!cached) this.send(c, { t: 'log', events: this.db.tailEvents(this.host.worldId, 150, true).map(e=>joinLogEvent(publicEvent(e))) });
       this.send(c, { t: 'kernel', view: this.host.kernelView() });
       this.send(c, { t: 'plays', plays: this.host.recentPlays.slice(-60) });
       this.send(c, { t: 'talk', lines: this.db.recentTalk(40) });
@@ -267,6 +290,39 @@ export class Hub {
       ...(this.lifecycleSouls?{privateMe:{contract:'me-live/1' as const,connectionId:c.meScope!.connectionId,userId:c.meScope!.userId,revision:1 as const}}:{}),
       ...(this.station||this.stationV2?{stationContract:c.stationContract}:{}),...(c.takeTransport?{takeTransport:c.takeTransport}:{}),...(c.takeEntities?{takeEntities:TAKE_ENTITIES_WIRE_V1}:{}),...(c.takeEntities?.join?{takeEntitiesJoin:TAKE_ENTITIES_JOIN_V1}:{}),...(c.takeChunks?{takeChunks:TAKE_CHUNKS_WIRE_V1}:{})});
     if(sent)c.publishedMe=JSON.stringify(c.me);return sent;
+  }
+  /** #2519: the shared join picture, rebuilt when missing, JOIN_CACHE_MS old, from another ring or engine (a recovery), or
+   *  older than the ring's first batch (the batches after it could not all be replayed). */
+  private joinPicture(){
+    if (!this.joinCacheOn) return null;
+    const h = this.host, ring = h.ring, now = Date.now(), j = this.joinCache;
+    if (j && now - j.at < JOIN_CACHE_MS && j.ring === ring && j.engine === h.engine && j.seq >= this.resumeFrom - 1 && (ring.length ? j.seq >= ring[0].seq - 1 : j.seq === h.currentBatchSeq)) return j;
+    const snapshot = { t: 'snapshot' as const, reason: 'join', ...h.snapshotView() };
+    const log = JSON.stringify({ t: 'log', events: this.db.tailEvents(h.worldId, 150, true).map(e => joinLogEvent(publicEvent(e))) } satisfies ServerMsg);
+    return this.joinCache = { at: now, seq: snapshot.seq, ring, engine: h.engine, snapshot, log, wire: new Map(), batches: new Map() };
+  }
+  /** The cached snapshot in this peer's negotiated form (take-entities-join/1, columns/1), stringified once per form. */
+  private joinWire(j: NonNullable<Hub['joinCache']>, c: Client) {
+    const join = !!c.takeEntities?.join, columns = !!c.snapshotColumns, key = `${join}|${columns}`;
+    let w = j.wire.get(key);
+    if (!w) j.wire.set(key, w = this.snapshotWire(j.snapshot, join, columns));
+    return w;
+  }
+  /** A snapshot as one peer gets it: with its registered entity table id (take-entities-join/1) and/or the table in the
+   *  column form (columns/1). `table`: the id that becomes the peer's last table, or null. */
+  private snapshotWire(m: Extract<ServerMsg, {t:'snapshot'}>, join: boolean, columns: boolean): {s:string;table:number|null} {
+    const joined = join ? this.takeEntities.register(m.entities) : null;
+    if (!joined && !columns) return { s: JSON.stringify(m), table: null };
+    const { entities, ...rest } = m;
+    return { s: JSON.stringify(joined ? { ...rest, entitiesTable: joined.id } : rest).slice(0, -1) + ',"entities":' + (columns ? this.columnsOf(entities, joined?.json) : joined!.json) + '}', table: joined?.id ?? null };
+  }
+  /** A message already stringified for this peer (a join's cached part): the transport half of `send`. */
+  private sendWire(c: Client, s: string) {
+    if (!this.host.clockAvailable) { c.ready = false; c.ws.close(1013, 'world unavailable'); return false; }
+    if (c.ws.readyState !== 1) return false;
+    c.sent += s.length;
+    if (c.joinSend) { c.joinPending = (c.joinPending ?? 0) + 1; c.ws.send(s, () => { c.joinPending = (c.joinPending ?? 1) - 1; }); } else c.ws.send(s);
+    return true;
   }
   private sendStation(c:Client){
     if(c.stationContract==='station-live/2'&&this.stationV2)this.send(c,{t:'station-v2',view:this.stationV2.view()});
@@ -297,10 +353,10 @@ export class Hub {
       const inner=(v:unknown)=>mode==='wire'?stringifyTakeBoundaryWireV1(v):JSON.stringify(v);
       // take-entities-join/1: the snapshot names its entity table, which becomes this peer's last table (its next take's
       // table then travels as a reference or a patch against it)
-      const joined=current.t==='snapshot'&&c.takeEntities?.join?this.takeEntities.register(current.entities):null;
-      if(joined)nextTable=joined.id;
+      const snap=current.t==='snapshot'&&(c.takeEntities?.join||c.snapshotColumns)?this.snapshotWire(current,!!c.takeEntities?.join,!!c.snapshotColumns):null;
+      if(snap&&snap.table!==null)nextTable=snap.table;
       s=cached[key]??(()=>{
-        if(joined||current.t==='snapshot'&&c.snapshotColumns){const {entities,...rest}=current as Extract<ServerMsg,{t:'snapshot'}>;return JSON.stringify(joined?{...rest,entitiesTable:joined.id}:rest).slice(0,-1)+',"entities":'+(c.snapshotColumns?this.columnsOf(entities,joined?.json):joined!.json)+'}';}
+        if(snap)return snap.s;
         const packed=entities?JSON.stringify({t:'take-entities',contract:TAKE_ENTITIES_WIRE_V1,ids:entities.envelope.ids}).slice(0,-1)+',"payload":'+inner(entities.envelope.payload)+'}':inner(stream);
         return chunks?JSON.stringify({t:'take-chunks',contract:TAKE_CHUNKS_WIRE_V1,ids:chunks.ids,same:chunks.same}).slice(0,-1)+',"payload":'+packed+'}':packed;
       })();
@@ -312,8 +368,7 @@ export class Hub {
       c.ready=false;c.ws.send(JSON.stringify({t:'error',code:'takes.transport-invalid',message:'The take transport cannot be encoded exactly.'}));c.ws.close(1011,'invalid take transport');return false;
     }
     s=this.kernelWire(c,current,s);
-    c.sent += s.length;
-    if(c.joinSend){c.joinPending=(c.joinPending??0)+1;c.ws.send(s,()=>{c.joinPending=(c.joinPending??1)-1;});}else c.ws.send(s);
+    this.sendWire(c,s);
     if(nextTable!==undefined&&c.takeEntities)c.takeEntities.last=nextTable;
     if(nextTake!==undefined&&c.takeChunks)c.takeChunks.last=nextTake;
     if(current.t==='takes'&&current.chunks.length)c.awaitingTakes=false;

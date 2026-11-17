@@ -15,7 +15,7 @@ test('a main thread stuck in a busy loop: the watchdog names the looping functio
   const dir = mkdtempSync(join(realpathSync(tmpdir()), 'souls-stall-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
   const script = join(dir, 'stuck.mjs');
   writeFileSync(script, `
-    import {startWatchdog} from ${JSON.stringify(join(here, 'load/watchdog.ts'))};
+    import {stallConfig, startWatchdog} from ${JSON.stringify(join(here, 'load/watchdog.ts'))};
     import {bootPhase} from ${JSON.stringify(join(here, 'load/boot-progress.ts'))};
     import {sharedLoad, S} from ${JSON.stringify(join(here, 'load/shared.ts'))};
     bootPhase('serving', 7);
@@ -25,7 +25,9 @@ test('a main thread stuck in a busy loop: the watchdog names the looping functio
       const token = 'sim_s_secret_token_in_scope', body = {text: 'a request body in scope'};
       const end = Date.now() + ms; let x = 0; while (Date.now() < end) x += token.length + body.text.length; return x;
     }
-    startWatchdog({dataDir: ${JSON.stringify(dir)}, everyMs: 200, stall: {dataDir: ${JSON.stringify(dir)}, root: ${JSON.stringify(dir)}, stallMs: 600, gapMs: 60_000}});
+    // opted in, as a world with SIM_STALL_STACK=1 (#2607)
+    const c = stallConfig(${JSON.stringify(dir)}, {SIM_STALL_STACK: '1', SIM_STALL_STACK_MS: '600'});
+    startWatchdog({dataDir: ${JSON.stringify(dir)}, everyMs: 200, stall: {...c, root: ${JSON.stringify(dir)}, gapMs: 60_000}});
     // in-process only: the watchdog's session never opens the --inspect listener or any port
     setTimeout(async () => { const {url} = await import('node:inspector'); console.log('INSPECTOR URL ' + String(url())); }, 600);
     setTimeout(() => {
@@ -55,9 +57,35 @@ test('a main thread stuck in a busy loop: the watchdog names the looping functio
   assert.equal(live.stall.at, r.at); assert.equal(live.stall.top, `stuckInTheLoop stuck.mjs:${r.frames[0].line}`);
 });
 
-test('stall stacks: on unless SIM_STALL_STACK=0, after SIM_STALL_STACK_MS; report files are release-relative or bare names', () => {
-  assert.equal(stallConfig('/d', {SIM_STALL_STACK: '0'}), undefined);
-  assert.equal(stallConfig('/d', {})!.stallMs, 2000); assert.equal(stallConfig('/d', {SIM_STALL_STACK_MS: '5000'})!.stallMs, 5000);
+test('#2607: with no SIM_STALL_STACK a stuck main thread opens no inspector session: no debugger, no capture', {timeout: 60_000}, async t => {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), 'souls-stall-off-')); t.after(() => rmSync(dir, {recursive: true, force: true}));
+  const script = join(dir, 'stuck.mjs');
+  writeFileSync(script, `
+    import {stallConfig, startWatchdog} from ${JSON.stringify(join(here, 'load/watchdog.ts'))};
+    import {bootPhase} from ${JSON.stringify(join(here, 'load/boot-progress.ts'))};
+    import {sharedLoad, S} from ${JSON.stringify(join(here, 'load/shared.ts'))};
+    bootPhase('serving', 7);
+    setInterval(() => { sharedLoad[S.lastTurnAt] = Date.now(); }, 50);
+    const c = stallConfig(${JSON.stringify(dir)}, {SIM_STALL_STACK_MS: '600'});
+    console.log('CONFIG ' + String(c));
+    startWatchdog({dataDir: ${JSON.stringify(dir)}, everyMs: 200, stall: c});
+    function stuckInTheLoop(ms) { const end = Date.now() + ms; let x = 0; while (Date.now() < end) x++; return x; }
+    setTimeout(() => { stuckInTheLoop(3_000); setTimeout(() => process.exit(0), 300); }, 800);`);
+  const child = spawn(process.execPath, [script], {stdio: ['ignore', 'pipe', 'pipe']});
+  t.after(() => child.kill('SIGKILL'));
+  let out = ''; child.stdout!.on('data', (b: Buffer) => { out += b; }); child.stderr!.on('data', (b: Buffer) => { out += b; });
+  await new Promise<void>((r) => child.on('exit', () => r()));
+  assert.match(out, /CONFIG undefined/);
+  // startStallStack (the only place the watchdog opens a Session and sends Debugger.enable) never ran: it announces itself either way
+  assert.doesNotMatch(out, /stall stacks (on|off)/, out);
+  assert.deepEqual(readdirSync(dir).filter((f) => /^stall-/.test(f)), [], 'no capture');
+  assert.equal(JSON.parse(readFileSync(join(dir, 'live.json'), 'utf8')).stall, undefined);
+});
+
+test('stall stacks: only with SIM_STALL_STACK=1, after SIM_STALL_STACK_MS; report files are release-relative or bare names', () => {
+  assert.equal(stallConfig('/d', {}), undefined); assert.equal(stallConfig('/d', {SIM_STALL_STACK: '0'}), undefined);
+  assert.equal(stallConfig('/d', {SIM_STALL_STACK_MS: '5000'}), undefined);
+  assert.equal(stallConfig('/d', {SIM_STALL_STACK: '1'})!.stallMs, 2000); assert.equal(stallConfig('/d', {SIM_STALL_STACK: '1', SIM_STALL_STACK_MS: '5000'})!.stallMs, 5000);
   assert.equal(reportFile('file:///srv/rel/apps/server/src/x.ts', '/srv/rel'), 'apps/server/src/x.ts');
   assert.equal(reportFile('file:///srv/rel/apps/server/src/x.ts', '/srv/rel/'), 'apps/server/src/x.ts');
   assert.equal(reportFile('node:internal/timers', '/srv/rel'), 'node:internal/timers');
