@@ -1,0 +1,2614 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Eden's storage (SA-X26, #2916): wardrobe, dresser, bookshelf, bookcase, chest, lockers, crate, sack, bin, toolbox, shop shelving, and what three of them yield (book, garment, apple). Every form with every need met, and each need unmet. A wardrobe's or dresser's garments and a chest's or lockers' contents are closed (the owner's audience), so their cases ask as the owner, and one asks as a passer-by, who cannot know. Refusals are the originals' where today's defs had them (open a locked chest or locker: unlock it first; lock it while open: close it first).",
+  "cases": [
+    {
+      "name": "wardrobe_open_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wardrobe_open_already_open",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "wardrobe_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wardrobe_close_already_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "wardrobe_take_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wardrobe_take_doors_shut",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "wardrobe_take_none_left",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe",
+            "fields": {
+              "open": true,
+              "garments": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "wardrobe_take_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "wardrobe_take_count_hidden_from_a_passer_by",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:wardrobe",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "unknown",
+        "need": 1,
+        "node": "x1",
+        "field": "garments"
+      }
+    },
+    {
+      "name": "dresser_open_top_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {
+          "drawer": "top"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "dresser_open_while_a_drawer_is_out",
+      "act": {
+        "this": "x1",
+        "form": "open",
+        "args": {
+          "drawer": "top"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser",
+            "fields": {
+              "open": "middle"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "dresser_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser",
+            "fields": {
+              "open": "bottom"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "dresser_close_all_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "dresser_take_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser",
+            "fields": {
+              "open": "top"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "dresser_take_all_shut",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "dresser_take_none_left",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser",
+            "fields": {
+              "open": "top",
+              "garments": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "dresser_take_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:dresser",
+            "fields": {
+              "open": "top"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "bookshelf_take_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookshelf_take_none_left",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf",
+            "fields": {
+              "books": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "bookshelf_take_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "bookshelf_straighten_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "straighten"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf",
+            "fields": {
+              "neat": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookshelf_dust_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "dust"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookshelf"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookcase_take_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookcase_take_none_left",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase",
+            "fields": {
+              "books": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "bookcase_take_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "bookcase_straighten_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "straighten"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase",
+            "fields": {
+              "neat": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bookcase_dust_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "dust"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bookcase"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "chest_open_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "chest_open_already_open",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "chest_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "chest_close_already_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "chest_open_locked",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "chest_lock_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "chest_lock_already_locked",
+      "act": {
+        "this": "x1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "chest_lock_while_open",
+      "act": {
+        "this": "x1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "chest_unlock_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "chest_unlock_not_locked",
+      "act": {
+        "this": "x1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:chest"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "lock"
+        }
+      }
+    },
+    {
+      "name": "lockers_open_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lockers_open_already_open",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "lockers_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lockers_close_already_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "lockers_open_locked",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "lockers_lock_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lockers_lock_already_locked",
+      "act": {
+        "this": "x1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "unlock"
+        }
+      }
+    },
+    {
+      "name": "lockers_lock_while_open",
+      "act": {
+        "this": "x1",
+        "form": "lock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "lockers_unlock_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers",
+            "fields": {
+              "locked": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lockers_unlock_not_locked",
+      "act": {
+        "this": "x1",
+        "form": "unlock"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:lockers"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public",
+          "owner"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "lock"
+        }
+      }
+    },
+    {
+      "name": "bin_open_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bin"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bin_open_already_open",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bin",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "bin_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bin",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "bin_close_already_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:bin"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "toolbox_open_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:toolbox"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toolbox_open_already_open",
+      "act": {
+        "this": "x1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:toolbox",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "close"
+        }
+      }
+    },
+    {
+      "name": "toolbox_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:toolbox",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toolbox_close_already_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:toolbox"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "crate_take_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:crate"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "crate_take_none_left",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:crate",
+            "fields": {
+              "apples": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "crate_take_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:crate"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "sack_untie_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "untie"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:sack"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "sack_untie_already_untied",
+      "act": {
+        "this": "x1",
+        "form": "untie"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:sack",
+            "fields": {
+              "tied": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "tie"
+        }
+      }
+    },
+    {
+      "name": "sack_untie_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "untie"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:sack"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "sack_tie_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "tie"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:sack",
+            "fields": {
+              "tied": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "sack_tie_already_tied",
+      "act": {
+        "this": "x1",
+        "form": "tie"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:sack"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "untie"
+        }
+      }
+    },
+    {
+      "name": "sack_tie_hands_full",
+      "act": {
+        "this": "x1",
+        "form": "tie"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:sack",
+            "fields": {
+              "tied": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": "p2"
+            }
+          },
+          "p1": {
+            "kind": "eden:apple"
+          },
+          "p2": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "shop_shelving_browse_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "browse"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:shop_shelving"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "book_read_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "read"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "book_read_not_held",
+      "act": {
+        "this": "x1",
+        "form": "read"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "fix": {
+          "step": "take",
+          "thing": "x1"
+        }
+      }
+    },
+    {
+      "name": "book_close_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "book_close_not_held",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "fix": {
+          "step": "take",
+          "thing": "x1"
+        }
+      }
+    },
+    {
+      "name": "book_close_already_shut",
+      "act": {
+        "this": "x1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:book"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "fix": {
+          "form": "read"
+        }
+      }
+    },
+    {
+      "name": "apple_bite_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:apple"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "apple_bite_not_held",
+      "act": {
+        "this": "x1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:apple"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "fix": {
+          "step": "take",
+          "thing": "x1"
+        }
+      }
+    },
+    {
+      "name": "apple_bite_nothing_left_to_bite",
+      "act": {
+        "this": "x1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:apple",
+            "fields": {
+              "bites": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "apple_finish_every_need_met",
+      "act": {
+        "this": "x1",
+        "form": "finish"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:apple",
+            "fields": {
+              "bites": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "apple_finish_not_held",
+      "act": {
+        "this": "x1",
+        "form": "finish"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:apple",
+            "fields": {
+              "bites": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "fix": {
+          "step": "take",
+          "thing": "x1"
+        }
+      }
+    },
+    {
+      "name": "apple_finish_not_yet_eaten",
+      "act": {
+        "this": "x1",
+        "form": "finish"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "x1": {
+            "kind": "eden:apple",
+            "fields": {
+              "bites": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    }
+  ]
+}

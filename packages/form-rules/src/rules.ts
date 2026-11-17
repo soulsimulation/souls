@@ -81,6 +81,8 @@ export type Entry = {
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
+  /** A closed kind's fields take the container's audience (SA-F8, #2849); they declare none of their own. */
+  closed?: { audience: Audience; fields: string[] };
 };
 export type Node = {
   kind?: string;
@@ -119,6 +121,11 @@ const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigi
 const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
+/** Who may see a state field: its own audience, or, when the kind is closed and names it, the container's (SA-F8, #2849). */
+function audienceOf(entry: Entry | undefined, field: string, def = entry?.state?.[field]): Audience {
+  return entry?.closed?.fields?.includes(field) ? entry.closed.audience : (def?.audience as Audience);
+}
+
 export function decide(input: Input): Verdict {
   const read: Read[] = [];
   const bad = (need: number, what: string, extra: Record<string, unknown> = {}): Verdict => ({
@@ -175,7 +182,7 @@ export function decide(input: Input): Verdict {
       const field = n.field ?? '';
       const def = has(entry.state, field) ? entry.state![field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
-      if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+      if (!sees(audienceOf(entry, field))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
       let value = has(self.fields, field) ? self.fields![field] : def.default;
       if (def.type === 'timed') {
         const now = valueAt(def, value, state.now_us);
@@ -298,7 +305,7 @@ export function decide(input: Input): Verdict {
       const m = measure(kinds, nodes, act.this, args, e);
       if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
       for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
-        if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+        if (!sees(audienceOf(kinds[nodes[node]?.kind ?? ''], m.field, def))) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
       }
       read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
       read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);

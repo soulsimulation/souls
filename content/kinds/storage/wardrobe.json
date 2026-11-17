@@ -1,0 +1,246 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:wardrobe",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "garments": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 20,
+      "default": 6
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        768
+      ],
+      "yaw_mdeg": 180000
+    },
+    "doors": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        1000,
+        330
+      ]
+    }
+  },
+  "slots": {
+    "rail": {
+      "admits": "thing",
+      "most": 20,
+      "at_mm": [
+        0,
+        1700,
+        0
+      ],
+      "fits_mm": [
+        1000,
+        1200,
+        500
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1150,
+      1975,
+      637
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "doors"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "doors"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    },
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "garments",
+          "at_least": 1
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "stand"
+        }
+      ],
+      "effects": [
+        {
+          "change": "create",
+          "kind": "eden:garment",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "closed": {
+    "audience": {
+      "rule": "owner"
+    },
+    "fields": [
+      "garments"
+    ]
+  },
+  "stock": {
+    "garments": {
+      "kind": "eden:garment",
+      "count": "garments",
+      "take": "take"
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:wardrobe",
+    "table": [
+      {
+        "part": "wing.l",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": -100000,
+          "false": 0
+        },
+        "over_us": 600000
+      },
+      {
+        "part": "wing.r",
+        "field": "open",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": 100000,
+          "false": 0
+        },
+        "over_us": 600000
+      }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"box","at":[0,980,0],"size":[1070,1830,550],"round":0,"tint":"wood"},{"kind":"box","at":[0,1950,0],"size":[1150,50,610],"round":0,"tint":"trim"},{"kind":"cyl","at":[-440,30,-190],"r":30,"h":60,"segments":6,"r2":24,"tint":"trim"},{"kind":"cyl","at":[440,30,-190],"r":30,"h":60,"segments":6,"r2":24,"tint":"trim"},{"kind":"cyl","at":[-440,30,190],"r":30,"h":60,"segments":6,"r2":24,"tint":"trim"},{"kind":"cyl","at":[440,30,190],"r":30,"h":60,"segments":6,"r2":24,"tint":"trim"},{"kind":"box","at":[-267,980,287],"size":[530,1700,20],"round":0,"tint":"trim","role":"wing.l","pivot":[-535,980,287]},{"kind":"box","at":[267,980,287],"size":[530,1700,20],"round":0,"tint":"trim","role":"wing.r","pivot":[535,980,287]},{"kind":"sphere","at":[-60,1000,310],"r":22,"segments":4,"tint":"brass","role":"wing.l","pivot":[-535,980,287]},{"kind":"sphere","at":[60,1000,310],"r":22,"segments":4,"tint":"brass","role":"wing.r","pivot":[535,980,287]}],"palette":{"wood":"#5e3d27","trim":"#9a6b43","brass":"#b8913f"},"tags":["furniture","storage","wardrobe","container"]}
+  },
+  "text": {
+    "card": "A tall wardrobe: open its doors, take a garment, hang things on its rail.",
+    "storage": "storage",
+    "closet": "closet",
+    "armoire": "armoire",
+    "howto_dress": "Open the doors, take a garment with a hand free, then close the doors."
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "closet",
+      "armoire"
+    ]
+  },
+  "howtos": {
+    "dress": {
+      "text": "howto_dress",
+      "steps": [
+        {
+          "form": "open"
+        },
+        {
+          "form": "take"
+        },
+        {
+          "form": "close"
+        }
+      ]
+    }
+  }
+}

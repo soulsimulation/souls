@@ -55,6 +55,8 @@ const metres = v => v.map(x => x / 1000);
 const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
 const ANGLE_KEYS = new Set(['roll', 'arc', 'yaw', 'pitch']);
 const COUNT_KEYS = new Set(['segments']);
+/** A scale factor per axis, in permille (1000 is as drawn). */
+const PERMILLE_KEYS = new Set(['scale']);
 
 /** A shape written in whole millimetres and millidegrees, as the metres and radians the viewer draws with. */
 export function shapeInMetres(node, key = '') {
@@ -64,14 +66,16 @@ export function shapeInMetres(node, key = '') {
   if (LENGTH_KEYS.has(key)) return node / 1000;
   if (ANGLE_KEYS.has(key)) return node * Math.PI / 180000;
   if (COUNT_KEYS.has(key)) return node;
-  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, counts)`);
+  if (PERMILLE_KEYS.has(key)) return node / 1000;
+  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, a scale in permille, counts)`);
 }
 
 /** The def the gallery studio draws: the entry's shape, with its state fields as the def's state. */
 export function defOf(entry) {
   const name = `core-${entry.kind.split(':')[1]}`, shape = entry.looks?.shape;
   if (!shape?.shapes) return null;
-  const state = Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k,
+  // a text field is words by reference: it never changes the picture, so the def carries no state for it
+  const state = Object.fromEntries(Object.entries(entry.state ?? {}).filter(([, f]) => f.type !== 'text').map(([k, f]) => [k,
     f.type === 'bool' ? {type: 'bool', default: f.default}
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
         : {type: 'number', default: drawn(f, f.type === 'timed' ? f.default.value : f.default)}]));
