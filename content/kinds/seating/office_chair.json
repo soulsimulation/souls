@@ -98,7 +98,7 @@
           "h": 20,
           "tint": "pad",
           "role": "body",
-          "pivot": [0, 470, 20]
+          "pivot": [0, 470, 0]
         },
         {
           "kind": "rbox",
@@ -108,7 +108,7 @@
           "round": 30,
           "pitch": -6875,
           "role": "body",
-          "pivot": [0, 820, -220]
+          "pivot": [0, 820, 0]
         },
         {
           "kind": "box",
@@ -117,7 +117,7 @@
           "round": 0,
           "tint": "iron",
           "role": "body",
-          "pivot": [0, 550, -200]
+          "pivot": [0, 550, 0]
         }
       ],
       "palette": { "pad": "#2f3a4a", "iron": "#3b3d40", "chrome": "#c9ccd0" },
