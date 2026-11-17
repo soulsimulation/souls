@@ -85,6 +85,20 @@ area's `forbids`: leaning is `lean`, the others are `go_to`, `look_at`, `point`,
 (`content/kinds/street/railing.json` forbids leaning; `allowsBase(entry, form)` answers `forbidden` with the name and the area).
 Cases are data: `tools/entry/cases/motion.json` and `packages/form-rules/cases/base.json` (a lamp post with no forms).
 
+**Where to put it** (SA-F11, [#2883](https://github.com/soulsimulation/souls/issues/2883); one list with Engine v2 E2
+[#2709](https://github.com/soulsimulation/souls/issues/2709) and E4 [#2772](https://github.com/soulsimulation/souls/issues/2772)).
+A `put` step may carry `place` instead of a `slot`: `{"at": word, "anchor": {"arg": ...}, "facing": ...}`. The words are one closed
+list in `packages/form-rules/placements.json`, which the format reads and nothing else repeats: `on`, `in`, `here`, `next_to`,
+`in_front_of`, `behind`, `against`, `facing`, `middle` (of this room). The anchor is an argument of type thing, named or described
+by a selector (a `takes` entry with `select`). `facing` is `{"toward": argument}`, `as_it_was` or `to_wall`; the word `facing`
+turns a thing where it stands, so the position is not touched and no `facing` field is written beside it. A kind with no front
+(a round table) says `geometry.front: "none"`; the default is `"z"`, the front the frame names. `place(thing, placement,
+{anchor, facingAnchor})` decides only what plain data can: the thing may be moved (`fixed` is refused), the anchor is named, a
+front exists where the word needs one (`behind` and `in_front_of` need the anchor's, `facing` and `toward` need the thing's). A
+refusal has a `code` (`no_front`, `no_anchor`, `fixed`, `unsaid`, `self`, `unknown_word`, `unknown_facing`) and names the word and
+the kind. The spot is the engine's choice, recorded (E4); whether it is free and legal is the world's answer. Cases:
+`tools/entry/cases/placements.json`.
+
 **Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
 ([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
 kind's surfaces and shape, and E4 ([#2772](https://github.com/soulsimulation/souls/issues/2772)) lets a thing be set
