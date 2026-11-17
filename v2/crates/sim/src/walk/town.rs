@@ -2,20 +2,21 @@
 //! links and door writer for crossings, all read from K2's tree.
 //!
 //! - **Legs.** The route (N5, a body with hands) from where the body stands to the goal; each link it crosses is a
-//!   leg's end, at the link's near end on the body's floor (N4). A doorway between a building and the open ground
-//!   has no near end in N4's building (it is read with one end only), so a route across one is refused as
-//!   `link-not-walked` for now.
+//!   leg's end, at the link's near end on the node the body stands on (N4, read with the open ground: a doorway
+//!   between a building and the open ground has one end on each).
 //! - **The next corner.** The leg's end when a straight walk on the body's surface reaches it (N6's walk, on a copy of
 //!   the body), else the second point of the first line of the route from where it stands to the leg's end.
 //! - **A crossing.** At the near end: a shut door is asked to open and the opening written at the end of that tick
 //!   (N4's writer, the order as the cause and the walker as the Soul), and the body stands. Then it follows the
 //!   link's line at its speed, never a longer step than speed times the tick, and stands on the far floor's surface
-//!   at the line's end.
+//!   at the line's end. The line is followed in the frame of the node the body stands on: a body coming in from the
+//!   open ground follows it placed on the ground by the building's frame, and stands at the far end on the floor; a
+//!   body going out follows it in the building's frame and stands at the far end on the open ground.
 
 use super::{Leg, World, node_of};
 use crate::ground::scene::FLOOR;
 use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
-use crate::links::{Building, Doors, F_OPEN};
+use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
 use replica::effects::{Actor, Cause, Refusal};
@@ -34,10 +35,15 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
     }
 }
 
-/// A crossing under way: the line left to follow (µm), and the floor it ends on.
+/// How far a leg's end may lie off the ground and still be aimed at, mm: a link's end on its piece's edge.
+const AT_EDGE: i64 = 20;
+
+/// A crossing under way: the line left to follow (µm, the near node's frame), the node it ends on, and where on it
+/// the body stands at the end when that node's frame is another (the far end's middle, its frame).
 struct Crossing {
     line: Vec<Vec3>,
     to: Id,
+    arrive: Option<Vec3>,
 }
 
 /// The engine as the walk skill reads it.
@@ -58,13 +64,17 @@ impl Town {
         let map = Map::build(&tree, ground, &|_| 0)?;
         let mut surfaces = BTreeMap::new();
         let open = OpenGround::prepare(&Scene::of(&tree, ground)?, HUMAN_RADIUS)?;
-        let mut pieces = Vec::new();
+        let (mut pieces, mut meets) = (Vec::new(), Vec::new());
         for (i, j) in open.squares() {
-            pieces.extend(open.cut_square(i, j).pieces);
+            let p = open.cut_square(i, j);
+            pieces.extend(p.pieces);
+            meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
         }
+        let gh = tree.handle(ground).ok_or("no such ground")?;
+        let gdoors = ground_doors(&tree, ground)?;
         surfaces.insert(ground, Surface::new(ground, pieces));
         let mut buildings = Vec::new();
-        let mut stack = vec![tree.handle(ground).ok_or("no such ground")?];
+        let mut stack = vec![gh];
         while let Some(h) = stack.pop() {
             let kids = tree.children(h).ok_or("a node that is gone")?;
             if kids.iter().any(|&c| {
@@ -72,7 +82,15 @@ impl Town {
                     .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
             }) {
                 let id = tree.node(h).ok_or("a node that is gone")?.id();
-                if let Ok(b) = Building::read(&tree, id) {
+                let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
+                let open = Open {
+                    ground,
+                    place: crate::ground::scene::xform_to(&tree, h, gh)?,
+                    meets: &meets,
+                    on: &on,
+                    doors: &gdoors,
+                };
+                if let Ok(b) = Building::read_on(&tree, id, Some(open)) {
                     for (&floor, (_, patch)) in &b.floors {
                         surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
                     }
@@ -81,6 +99,20 @@ impl Town {
             }
             stack.extend(kids.iter().rev().copied());
         }
+        // The open ground's own links: gates in walls and fences.
+        let known = buildings
+            .iter()
+            .flat_map(|b| b.links.iter().map(|l| l.id))
+            .collect();
+        let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
+        let open = Open {
+            ground,
+            place: crate::ground::scene::Xform::IDENTITY,
+            meets: &meets,
+            on: &on,
+            doors: &gdoors,
+        };
+        buildings.push(Building::of_ground(&tree, open, &known)?);
         Ok(Town {
             tree,
             ground,
@@ -99,7 +131,11 @@ impl Town {
     }
 
     fn link(&self, id: Id) -> Option<&crate::links::Link> {
-        self.buildings.iter().find_map(|b| b.link(id))
+        self.building(id).and_then(|b| b.link(id))
+    }
+
+    fn building(&self, link: Id) -> Option<&Building> {
+        self.buildings.iter().find(|b| b.link(link).is_some())
     }
 
     /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
@@ -171,14 +207,18 @@ impl World for Town {
         let node = node_of(body);
         let (Some(from), Some(goal)) = (
             self.map.spot(node, body.pose.position),
-            self.map.spot(node, to),
+            // A link's near end lies on its piece's edge, within the grid's rounding.
+            self.map.spot_near(node, to, AT_EDGE),
         ) else {
             return Err(refusal("off-ground", show(node)));
         };
         let r = self.map.route(&self.tree, from, goal, HANDS)?;
+        // The first point of the line that is not where the body stands (the funnel may repeat a point).
         let c = r
             .first_line
-            .get(1)
+            .iter()
+            .skip(1)
+            .find(|&&c| c != [from.at[0], from.at[2]])
             .copied()
             .unwrap_or([goal.at[0], goal.at[2]]);
         Ok([c[0] * 1000, c[1] * 1000])
@@ -218,13 +258,47 @@ impl World for Town {
                 .filter(|&k| l.ends[k].is_some_and(|e| e.floor == here))
                 .min_by_key(|&k| l.ends[k].map_or(i128::MAX, |e| dist2(p, e.middle())))
                 .ok_or_else(|| refusal("link-not-here", show(link)))?;
-            let to = l.ends[1 - near].map_or(here, |e| e.floor);
+            let far = l.ends[1 - near];
+            let to = far.map_or(here, |e| e.floor);
             let mut line = l.line.clone();
             if near == 1 {
                 line.reverse();
             }
+            // The line is in the building's frame; on the open ground it is followed placed there. Between frames it
+            // ends where the body stands on the far side: the far end's middle, on its piece (it may lie on the
+            // piece's edge, within the grid's rounding).
+            let mut arrive = None;
+            if here == self.ground || to == self.ground {
+                let place = self
+                    .building(link)
+                    .map(|b| b.place)
+                    .ok_or_else(|| refusal("link-missing", show(link)))?;
+                let out = |e: String| refusal("out-of-range", e);
+                if let Some(e) = far {
+                    let s = self
+                        .map
+                        .spot_near(to, e.middle(), AT_EDGE)
+                        .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                    let stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+                    let last = if to == self.ground {
+                        back(&place, stand).map_err(out)?
+                    } else {
+                        stand
+                    };
+                    if let Some(p) = line.last_mut() {
+                        *p = last;
+                    }
+                    arrive = Some(stand);
+                }
+                if here == self.ground {
+                    for p in &mut line {
+                        *p = place.point(*p).map_err(out)?;
+                    }
+                }
+            }
             let door = l.door;
-            self.crossings.insert(body.id, Crossing { line, to });
+            self.crossings
+                .insert(body.id, Crossing { line, to, arrive });
             if let Some(door) = door {
                 let shut = self
                     .tree
@@ -271,8 +345,9 @@ impl World for Town {
         if !c.line.is_empty() {
             return Ok(false);
         }
-        let to = c.to;
+        let (to, arrive) = (c.to, c.arrive);
         self.crossings.remove(&body.id);
+        let p = arrive.unwrap_or(p);
         let linear = body.linear;
         let frame = Frame {
             node: to,
