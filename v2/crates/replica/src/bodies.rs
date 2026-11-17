@@ -43,12 +43,14 @@ impl Class {
     }
 }
 
-/// One resource of a family (rule 1): a name and a class. Reach is measured from a manipulator's effector, which may
-/// be a held tool (rule 6).
+/// One resource of a family (rule 1): a name, a class and, for a manipulator, the body's slot that holds what it holds
+/// (a held thing is a child of that slot, T2 rule 2). Reach is measured from its effector, which may be a held tool
+/// (rule 6).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resource {
     pub name: Name,
     pub class: Class,
+    pub slot: Option<u64>,
 }
 
 /// A body's family (rule 1): its name and its resources, in order.
@@ -59,11 +61,16 @@ pub struct Family {
 }
 
 impl Family {
-    /// Reads a family from its fixture value, `{1: name, 2: [{1: name, 2: class}, ...]}`. Two resources of one name
-    /// are refused (`resource-duplicate`).
+    /// Reads a family as `replica` holds it, `{1: name, 2: [{1: name, 2: class, 3: slot}, ...]}` (3 for a
+    /// manipulator only): a decoded view, never an authored or stored form (rule 1). Unknown fields, a slot on a
+    /// resource that is not a manipulator and two resources of one name are refused (`not-a-family`,
+    /// `resource-duplicate`).
     pub fn from_value(v: &Value) -> R<Family> {
         let not = || refuse("not-a-family", "a family is {1: name, 2: [resource, ...]}");
         let Value::Map(m) = v else { return not() };
+        if m.keys().any(|k| *k > 2) {
+            return not();
+        }
         let (Some(Value::Text(name)), Some(Value::Array(rs))) = (m.get(&1), m.get(&2)) else {
             return not();
         };
@@ -73,12 +80,22 @@ impl Family {
             let (Some(Value::Text(n)), Some(Value::Uint(c))) = (r.get(&1), r.get(&2)) else {
                 return not();
             };
+            let class = Class::from_number(*c)?;
+            let slot = match r.get(&3) {
+                None => None,
+                Some(Value::Uint(s)) if class == Class::Manipulator => Some(*s),
+                Some(_) => return not(),
+            };
+            if r.keys().any(|k| *k > 3) {
+                return not();
+            }
             if resources.iter().any(|x| x.name == *n) {
                 return refuse("resource-duplicate", n.as_str());
             }
             resources.push(Resource {
                 name: n.clone(),
-                class: Class::from_number(*c)?,
+                class,
+                slot,
             });
         }
         Ok(Family {
@@ -120,8 +137,8 @@ pub struct Instance {
 /// A body as skills see it (rule 3): its family, and the skill instances running on it, by instance number.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Body {
-    pub family: Family,
-    pub running: BTreeMap<u64, Instance>,
+    family: Family,
+    running: BTreeMap<u64, Instance>,
 }
 
 /// What starting a skill did: the resources it holds, and the instances it cancelled (each ended and released).
@@ -139,6 +156,15 @@ impl Body {
         }
     }
 
+    pub fn family(&self) -> &Family {
+        &self.family
+    }
+
+    /// The instances running, by number. Only [`Body::start`] and [`Body::end`] change them.
+    pub fn running(&self) -> &BTreeMap<u64, Instance> {
+        &self.running
+    }
+
     /// Who holds `resource`, if anyone.
     pub fn holder(&self, resource: &Name) -> Option<u64> {
         self.running
@@ -147,16 +173,37 @@ impl Body {
             .map(|(n, _)| *n)
     }
 
-    /// The resources `shape` would take and the instances it would cancel, or the refusal by name (rule 4):
-    /// `resource-missing` (the family has none of that class or name), `resource-held` (another skill holds it and is
-    /// not cancelled by its class) or `resource-blocked` (a running skill blocks that class). Nothing changes.
-    pub fn plan(&self, shape: &SkillShape) -> R<Started> {
+    /// The resources `shape` would take as instance `n` and the instances it would cancel, or the refusal by name
+    /// (rules 3 and 4). Nothing changes. For each resource it claims: a running instance that holds it, or blocks its
+    /// class, is cancelled when that instance names the class in `cancelled_by`, and otherwise refuses it
+    /// (`resource-held`, `resource-blocked`); cancelling beats blocking. For each class it blocks: a running instance
+    /// holding a resource of that class is cancelled the same way, or refuses it (`resource-blocked`). Also
+    /// `resource-missing` (the family has none) and `instance-duplicate`.
+    pub fn plan(&self, n: u64, shape: &SkillShape) -> R<Started> {
+        if self.running.contains_key(&n) {
+            return refuse("instance-duplicate", format!("instance {n}"));
+        }
         let mut holds: Vec<Name> = Vec::new();
         let mut cancelled: Vec<u64> = Vec::new();
+        // An instance in the way of `class` is cancelled if it names the class, else it refuses.
+        let mut give_way =
+            |m: u64, i: &Instance, class: Class, why: &'static str, what: &str| -> R<()> {
+                if i.shape.cancelled_by.contains(&class) {
+                    if !cancelled.contains(&m) {
+                        cancelled.push(m);
+                    }
+                    Ok(())
+                } else {
+                    refuse(
+                        why,
+                        format!("{what} by {} (instance {m})", i.shape.name.as_str()),
+                    )
+                }
+            };
         for want in &shape.claims {
             let fits = |r: &&Resource| match want {
                 Want::All(c) | Want::One(c) => r.class == *c,
-                Want::Named(n) => r.name == *n,
+                Want::Named(x) => r.name == *x,
             };
             let mut candidates: Vec<&Resource> =
                 self.family.resources.iter().filter(fits).collect();
@@ -176,38 +223,33 @@ impl Body {
                 candidates.truncate(1);
             }
             for r in candidates {
-                if let Some((n, i)) = self
-                    .running
-                    .iter()
-                    .find(|(_, i)| i.shape.blocks.contains(&r.class) && !i.holds.contains(&r.name))
-                {
-                    return refuse(
-                        "resource-blocked",
-                        format!(
-                            "{} is blocked by {} (instance {n})",
-                            r.name.as_str(),
-                            i.shape.name.as_str()
-                        ),
-                    );
-                }
-                if let Some(n) = self.holder(&r.name) {
-                    let i = &self.running[&n];
-                    if !i.shape.cancelled_by.contains(&r.class) {
-                        return refuse(
-                            "resource-held",
-                            format!(
-                                "{} is held by {} (instance {n})",
-                                r.name.as_str(),
-                                i.shape.name.as_str()
-                            ),
-                        );
-                    }
-                    if !cancelled.contains(&n) {
-                        cancelled.push(n);
+                for (m, i) in &self.running {
+                    let what = format!("{} is", r.name.as_str());
+                    if i.holds.contains(&r.name) {
+                        give_way(*m, i, r.class, "resource-held", &(what + " held"))?;
+                    } else if i.shape.blocks.contains(&r.class) {
+                        give_way(*m, i, r.class, "resource-blocked", &(what + " blocked"))?;
                     }
                 }
                 if !holds.contains(&r.name) {
                     holds.push(r.name.clone());
+                }
+            }
+        }
+        for class in &shape.blocks {
+            for (m, i) in &self.running {
+                let held = self
+                    .family
+                    .resources
+                    .iter()
+                    .find(|r| r.class == *class && i.holds.contains(&r.name));
+                if let Some(r) = held {
+                    let what = format!(
+                        "{} is held, and {} blocks it,",
+                        r.name.as_str(),
+                        shape.name.as_str()
+                    );
+                    give_way(*m, i, *class, "resource-blocked", &what)?;
                 }
             }
         }
@@ -217,10 +259,7 @@ impl Body {
     /// Starts `shape` as instance `n` (rule 4): all of its claims or none. The instances it cancels end first and
     /// release everything they hold.
     pub fn start(&mut self, n: u64, shape: &SkillShape) -> R<Started> {
-        if self.running.contains_key(&n) {
-            return refuse("instance-duplicate", format!("instance {n}"));
-        }
-        let s = self.plan(shape)?;
+        let s = self.plan(n, shape)?;
         for c in &s.cancelled {
             self.end(*c);
         }
@@ -241,11 +280,11 @@ impl Body {
     }
 }
 
-/// Starts a joint activity's claims on several bodies (rule 5): all or none. A refusal on any body names it and
-/// changes no body.
+/// Starts a joint activity's claims on several bodies (rule 5): all or none. Every body is planned before any starts,
+/// so a refusal on any body names it and changes no body.
 pub fn start_joint(bodies: &mut [(&mut Body, u64, &SkillShape)]) -> R<Vec<Started>> {
-    for (i, (b, _, shape)) in bodies.iter().enumerate() {
-        if let Err(r) = b.plan(shape) {
+    for (i, (b, n, shape)) in bodies.iter().enumerate() {
+        if let Err(r) = b.plan(*n, shape) {
             return refuse(r.name, format!("body {i}: {}", r.detail));
         }
     }

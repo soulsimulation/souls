@@ -1,96 +1,151 @@
 //! The scan (`v2/docs/bodies.md` rule 8): what safe Rust compiles but a skill must not do. A skill crate that reads a
-//! clock, keeps a global, names the fixtures' state harness, or does not forbid `unsafe` fails it by name. It reads the
-//! code with comments and literals blanked, so words in them never match.
+//! clock or the machine, keeps a global, iterates a hash's order, names the fixtures' state harness, or does not forbid
+//! `unsafe` fails it by name. It reads tokens, with comments and string, char and byte literals blanked, so words in
+//! them never match and spacing does not matter.
 
-/// A fault the scan finds: its name, and the code it matched.
+/// A fault the scan finds: its name, and what it matched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fault {
     pub name: &'static str,
-    pub found: &'static str,
+    pub found: String,
 }
 
-/// What the scan refuses: (name, text in code). Order is the report's.
-const RULES: &[(&str, &str)] = &[
-    ("skill-reads-clock", "std::time"),
-    ("skill-reads-clock", "Instant"),
-    ("skill-reads-clock", "SystemTime"),
-    ("skill-keeps-global", "static "),
-    ("skill-keeps-global", "static mut"),
-    ("skill-keeps-global", "thread_local!"),
-    ("skill-keeps-global", "OnceLock"),
-    ("skill-keeps-global", "OnceCell"),
-    ("skill-keeps-global", "LazyLock"),
-    ("skill-keeps-global", "lazy_static"),
-    ("skill-keeps-global", "extern crate std"),
-    ("skill-names-state", "effects::State"),
-];
-
-/// `src` with comments, strings and character literals blanked, and lifetimes (`'static`) dropped.
+/// `src` with comments, strings (raw ones included), and char and byte literals blanked; lifetimes (`'static`) too.
 pub fn code(src: &str) -> String {
-    let b = src.as_bytes();
+    let c: Vec<char> = src.chars().collect();
+    let blank = |s: &[char]| {
+        s.iter()
+            .map(|x| if *x == '\n' { '\n' } else { ' ' })
+            .collect::<String>()
+    };
     let mut out = String::with_capacity(src.len());
     let mut i = 0;
-    while i < b.len() {
-        let rest = &src[i..];
-        if rest.starts_with("//") {
-            let end = rest.find('\n').map_or(b.len(), |n| i + n);
-            out.push_str(&" ".repeat(end - i));
-            i = end;
-        } else if rest.starts_with("/*") {
-            let end = rest.find("*/").map_or(b.len(), |n| i + n + 2);
-            out.extend(
-                src[i..end]
-                    .chars()
-                    .map(|c| if c == '\n' { '\n' } else { ' ' }),
-            );
-            i = end;
-        } else if b[i] == b'"' {
+    while i < c.len() {
+        let at = |k: usize| c.get(i + k).copied().unwrap_or('\0');
+        let end = if at(0) == '/' && at(1) == '/' {
+            (i..c.len()).find(|j| c[*j] == '\n').unwrap_or(c.len())
+        } else if at(0) == '/' && at(1) == '*' {
+            (i + 2..c.len().saturating_sub(1))
+                .find(|j| c[*j] == '*' && c[*j + 1] == '/')
+                .map_or(c.len(), |j| j + 2)
+        } else if at(0) == 'r'
+            && (at(1) == '"' || at(1) == '#')
+            && (i == 0 || !c[i - 1].is_alphanumeric())
+        {
+            let hashes = (i + 1..c.len()).take_while(|j| c[*j] == '#').count();
+            let open = i + 1 + hashes;
+            if c.get(open) == Some(&'"') {
+                let close: String = std::iter::once('"')
+                    .chain(std::iter::repeat_n('#', hashes))
+                    .collect();
+                let rest: String = c[open + 1..].iter().collect();
+                rest.find(&close).map_or(c.len(), |k| {
+                    open + 1 + rest[..k].chars().count() + close.chars().count()
+                })
+            } else {
+                i + 1
+            }
+        } else if at(0) == '"' {
             let mut j = i + 1;
-            while j < b.len() && b[j] != b'"' {
-                j += if b[j] == b'\\' { 2 } else { 1 };
+            while j < c.len() && c[j] != '"' {
+                j += if c[j] == '\\' { 2 } else { 1 };
             }
-            let end = (j + 1).min(b.len());
-            out.extend(
-                src[i..end]
-                    .chars()
-                    .map(|c| if c == '\n' { '\n' } else { ' ' }),
-            );
-            i = end;
-        } else if b[i] == b'\'' {
-            // A lifetime ('static, 'a) or a char literal ('x', '\n'): blank either.
-            let mut j = i + 1;
-            while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_' || b[j] == b'\\') {
-                j += 1;
+            (j + 1).min(c.len())
+        } else if at(0) == '\'' {
+            if at(1) == '\\' {
+                (i + 2..c.len())
+                    .find(|j| c[*j] == '\'')
+                    .map_or(c.len(), |j| j + 1)
+            } else if at(2) == '\'' {
+                i + 3
+            } else {
+                // A lifetime: the quote and its name.
+                i + 1
+                    + (i + 1..c.len())
+                        .take_while(|j| c[*j].is_alphanumeric() || c[*j] == '_')
+                        .count()
             }
-            if j < b.len() && b[j] == b'\'' {
-                j += 1;
-            }
-            out.push_str(&" ".repeat(j - i));
-            i = j;
         } else {
-            let c = rest.chars().next().unwrap_or(' ');
-            out.push(c);
-            i += c.len_utf8();
-        }
+            out.push(c[i]);
+            i += 1;
+            continue;
+        };
+        out.push_str(&blank(&c[i..end]));
+        i = end;
     }
     out
 }
 
-/// The faults in one crate's sources: each file's code against the rules, and the crate root's `#![forbid(unsafe_code)]`
-/// (`skill-allows-unsafe` when it is missing).
+/// The tokens of code: words, and each other non-space character on its own.
+fn tokens(code: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut word = String::new();
+    for ch in code.chars() {
+        if ch.is_alphanumeric() || ch == '_' {
+            word.push(ch);
+        } else {
+            if !word.is_empty() {
+                out.push(std::mem::take(&mut word));
+            }
+            if !ch.is_whitespace() {
+                out.push(ch.to_string());
+            }
+        }
+    }
+    if !word.is_empty() {
+        out.push(word);
+    }
+    out
+}
+
+/// What one token sequence, starting at `i`, breaks: a rule's name and what it matched.
+fn rule(t: &[String], i: usize) -> Option<(&'static str, String)> {
+    let w = t[i].as_str();
+    let next = |k: usize| t.get(i + k).map_or("", String::as_str);
+    let after_std = i >= 3 && t[i - 1] == ":" && t[i - 2] == ":" && t[i - 3] == "std";
+    // `std::{time, ...}` and the like: a word inside a `use std` braces.
+    let in_std_use = t[..i].iter().rposition(|x| x == "use").is_some_and(|u| {
+        t[u + 1..i].first().is_some_and(|x| x == "std") && !t[u..i].iter().any(|x| x == ";")
+    });
+    let std_path = after_std || in_std_use;
+    match w {
+        "time" if std_path => Some(("skill-reads-clock", "std::time".into())),
+        "Instant" | "SystemTime" | "UNIX_EPOCH" => Some(("skill-reads-clock", w.into())),
+        "env" | "fs" | "net" | "process" | "thread" if std_path => {
+            Some(("skill-reaches-out", format!("std::{w}")))
+        }
+        "static" => Some(("skill-keeps-global", "static".into())),
+        "thread_local" | "lazy_static" if next(1) == "!" => {
+            Some(("skill-keeps-global", format!("{w}!")))
+        }
+        "OnceLock" | "OnceCell" | "LazyLock" | "LazyCell" => Some(("skill-keeps-global", w.into())),
+        "extern" if next(1) == "crate" => Some(("skill-keeps-global", "extern crate".into())),
+        "HashMap" | "HashSet" | "RandomState" => Some(("skill-uses-hash-order", w.into())),
+        "State" if t[..i].iter().rev().take(12).any(|x| x == "effects") => {
+            Some(("skill-names-state", "effects::State".into()))
+        }
+        _ => None,
+    }
+}
+
+/// The faults in one crate's sources: the crate root must `#![forbid(unsafe_code)]` (`skill-allows-unsafe`), and no
+/// file may break a rule. Each (name, match) is reported once.
 pub fn scan(root: &str, files: &[&str]) -> Vec<Fault> {
-    let mut faults = Vec::new();
-    if !code(root).contains("#![forbid(unsafe_code)]") {
+    let mut faults: Vec<Fault> = Vec::new();
+    let root_tokens = tokens(&code(root)).concat();
+    if !root_tokens.contains("#![forbid(unsafe_code)]") {
         faults.push(Fault {
             name: "skill-allows-unsafe",
-            found: "#![forbid(unsafe_code)] is missing",
+            found: "#![forbid(unsafe_code)] is missing".into(),
         });
     }
     for f in std::iter::once(&root).chain(files) {
-        let c = code(f);
-        for (name, text) in RULES {
-            if c.contains(text) && !faults.iter().any(|x: &Fault| x.found == *text) {
-                faults.push(Fault { name, found: text });
+        let t = tokens(&code(f));
+        for i in 0..t.len() {
+            if let Some((name, found)) = rule(&t, i)
+                && !faults.iter().any(|x| x.name == name && x.found == found)
+            {
+                faults.push(Fault { name, found });
             }
         }
     }

@@ -5,10 +5,10 @@
 use std::collections::BTreeMap;
 
 use crate::bodies::SkillShape;
-use crate::effects::{Change, Refusal};
+use crate::effects::{Change, Event, Refusal};
 use crate::encode::{Name, Value};
 use crate::ids::Id;
-use crate::pose::{Mode, Vec3};
+use crate::pose::{ControllerInput, Vec3};
 use crate::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -40,14 +40,14 @@ pub enum Ask {
     Toward { from: Id, to: Vec3 },
 }
 
-/// A controller input (rule 7): a velocity in three dimensions in T4's units a second, and a movement mode.
+/// An answer, in integers (rule 7).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Control {
-    pub velocity: Vec3,
-    pub mode: Mode,
+pub enum Answer {
+    Distance(i64),
+    Point(Vec3),
 }
 
-/// How a skill's step ended (rule 3).
+/// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Progress {
     Going,
@@ -64,20 +64,24 @@ pub trait Host {
     fn body(&self) -> Id;
     /// A node: the body as of this tick, any other as of the previous tick.
     fn read(&self, node: Id) -> Option<Seen>;
-    /// An answer about geometry, in integers.
-    fn ask(&self, q: &Ask) -> Option<Vec3>;
-    /// A timer on the body, due `after` microseconds of world time from now, named for what it is for.
+    /// An answer about geometry, in integers, or none.
+    fn ask(&self, q: &Ask) -> Option<Answer>;
+    /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
     fn set_timer(&mut self, after: Micros, name: Name) -> Id;
+    /// Clears a timer the skill set (fired or cancelled).
+    fn clear_timer(&mut self, timer: Id);
     /// A draw from the world's random numbers (T1's seeded RNG).
     fn draw(&mut self) -> u64;
-    /// A controller input for the body (B1 turns it into motion).
-    fn control(&mut self, input: Control);
-    /// A generic change to the body's own node (T6); the host refuses one to any other node (`write-outside-own`).
-    fn emit(&mut self, change: Change) -> R<()>;
+    /// A controller input for the body: T4's own type (B1 turns it into motion).
+    fn control(&mut self, input: ControllerInput);
+    /// One entry of the body's own node (T6 rule 6): generic changes, applied all or none, and what they meant. A
+    /// change to any node but the body and those the same changes create under it is refused (`write-outside-own`).
+    fn emit(&mut self, changes: Vec<Change>, meaning: Option<Event>) -> R<()>;
 }
 
-/// A skill (rule 2): its shape and its step. It keeps nothing outside itself, and its state in progress is never
-/// stored: on a restart the intent is handed to the skill again, or ended with a named reason (rule 8).
+/// A skill (rule 7): its shape and its step. It keeps nothing outside itself, and its state in progress is never
+/// stored: on a restart the intent is handed to the skill again, or ended with a named reason (rule 9). A skill only
+/// asks; the claims it holds are made by the body (rule 4), so nothing a skill returns needs sealing.
 pub trait Skill {
     fn shape(&self) -> SkillShape;
     fn step(&mut self, host: &mut dyn Host) -> Progress;
@@ -85,10 +89,10 @@ pub trait Skill {
 
 // --- The code hatch, shape only -----------------------------------------------------------------------------------
 
-/// The most steps a hatch may declare (rule 9). F8 meters it by its own count, never the runtime's.
+/// The most steps a hatch may declare (rule 10). F8 meters it by its own count, never the runtime's.
 pub const HATCH_STEPS_MOST: u64 = 1_000_000;
 
-/// What a hatch reads (rule 9): a field of the thing or an argument of the form, whole values only. It reads nothing
+/// What a hatch reads (rule 10): a field of the thing or an argument of the form, whole values only. It reads nothing
 /// it did not declare.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Read {
@@ -96,14 +100,14 @@ pub enum Read {
     Argument(Name),
 }
 
-/// What a hatch answers (rule 9): a verdict (yes, or no with a named reason) or one field's new value.
+/// What a hatch answers (rule 10): a verdict (yes, or no with a named reason) or one field's new value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answers {
     Verdict,
     Field(u64),
 }
 
-/// The code hatch's shape (rule 9; SA-F9, #3000): one pure function, named by the hash of its module, its reads
+/// The code hatch's shape (rule 10; SA-F9, #3000): one pure function, named by the hash of its module, its reads
 /// declared, a step limit and what it answers. `{1: module hash, 2: [read, ...], 3: steps most, 4: answers,
 /// 5: why}`, a read `{1: 1, 2: field}` or `{1: 2, 2: argument}`, answers `{1: 1}` a verdict or `{1: 2, 2: field}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,8 +121,8 @@ pub struct Hatch {
 }
 
 impl Hatch {
-    /// Reads a hatch, refusing by name: `hatch-not-a-record`, `hatch-module-not-hash`, `hatch-reads-nothing`,
-    /// `hatch-steps-over-limit`.
+    /// Reads a hatch, refusing by name: `hatch-not-a-record` (unknown fields included), `hatch-module-not-hash`,
+    /// `hatch-reads-nothing`, `hatch-steps-out-of-range` (none, or more than [`HATCH_STEPS_MOST`]).
     pub fn from_value(v: &Value) -> R<Hatch> {
         let not = || {
             refuse(
@@ -127,6 +131,9 @@ impl Hatch {
             )
         };
         let Value::Map(m) = v else { return not() };
+        if m.keys().any(|k| *k > 5) {
+            return not();
+        }
         let module = match m.get(&1) {
             Some(Value::Bytes(b))
                 if b.len() == 34 && b[0] == crate::ids::SHA2_256 && b[1] == 32 =>
@@ -160,8 +167,8 @@ impl Hatch {
         };
         if *steps_most == 0 || *steps_most > HATCH_STEPS_MOST {
             return refuse(
-                "hatch-steps-over-limit",
-                format!("{steps_most}; at most {HATCH_STEPS_MOST}"),
+                "hatch-steps-out-of-range",
+                format!("{steps_most}; 1 to {HATCH_STEPS_MOST}"),
             );
         }
         let answers = match m.get(&4) {

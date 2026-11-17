@@ -54,14 +54,17 @@ fn a3_a_skill_crate_that_names_sim_or_uses_unsafe_does_not_compile() {
         "pub fn peek() -> usize { core::mem::size_of::<sim::walk::Walker>() }",
     );
     println!("names sim's state: compiles {ok}\n{said}");
-    assert!(!ok && said.contains("sim"), "{said}");
+    assert!(
+        !ok && said.contains("E0433") && said.contains("unresolved module or unlinked crate `sim`"),
+        "{said}"
+    );
 
     let (ok, said) = case(
         "unsafe",
         "pub fn poke(p: *const u8) -> u8 { unsafe { *p } }",
     );
     println!("uses unsafe: compiles {ok}\n{said}");
-    assert!(!ok && said.contains("unsafe"), "{said}");
+    assert!(!ok && said.contains("usage of an `unsafe` block"), "{said}");
 }
 
 #[test]
@@ -73,31 +76,84 @@ fn a4_a_skill_that_reads_a_clock_or_keeps_a_global_fails_the_scan_by_name() {
             .map(|f| f.name)
             .collect::<Vec<_>>()
     };
-    let clock = "pub fn t() -> u128 { std::time::Instant::now().elapsed().as_nanos() }";
-    let global = "static mut COUNT: u64 = 0;\npub fn bump() { }";
-    let tls = "thread_local! { static SEEN: u64 = 0; }";
-    let harness = "pub fn f(s: &replica::effects::State) -> u64 { s.next }";
-    let clean = "// a comment saying std::time and static is fine\npub fn name() -> &'static str { \"static \" }";
     for (what, src, want) in [
-        ("reads a clock", clock, "skill-reads-clock"),
-        ("keeps a static", global, "skill-keeps-global"),
-        ("keeps a thread-local", tls, "skill-keeps-global"),
-        ("names the state harness", harness, "skill-names-state"),
+        (
+            "reads a clock",
+            "pub fn t() -> u128 { std::time::Instant::now().elapsed().as_nanos() }",
+            "skill-reads-clock",
+        ),
+        (
+            "reads a clock through a use",
+            "use std::{time::UNIX_EPOCH};\npub fn t() { let _ = UNIX_EPOCH.elapsed(); }",
+            "skill-reads-clock",
+        ),
+        (
+            "keeps a static",
+            "static mut COUNT: u64 = 0;",
+            "skill-keeps-global",
+        ),
+        (
+            "keeps a static, spaced oddly",
+            "pub static\n\tX: u64 = 0;",
+            "skill-keeps-global",
+        ),
+        (
+            "after a quote char",
+            "fn q() -> char { '\"' }\nstatic mut X: u64 = 0;",
+            "skill-keeps-global",
+        ),
+        (
+            "keeps a thread-local",
+            "thread_local ! { static\tY: u64 = 0; }",
+            "skill-keeps-global",
+        ),
+        (
+            "reads the environment",
+            "pub fn e() -> bool { std::env::var(\"X\").is_ok() }",
+            "skill-reaches-out",
+        ),
+        (
+            "iterates a hash",
+            "use std::collections::HashMap;",
+            "skill-uses-hash-order",
+        ),
+        (
+            "names the state harness",
+            "use replica::effects::{State};",
+            "skill-names-state",
+        ),
     ] {
         let got = names(&[src]);
         println!("{what}: {got:?}");
         assert!(got.contains(&want), "{what}: {got:?}");
     }
+    let clean = "// std::time and static are fine in a comment\npub fn name() -> &'static str { \"static \" }\nfn c() -> char { 'x' }";
     assert!(names(&[clean]).is_empty(), "{:?}", names(&[clean]));
     assert_eq!(
         scan("pub mod a;", &[]).first().map(|f| f.name),
         Some("skill-allows-unsafe")
     );
-    // The built-in skills pass it.
+    // Every source file of the built-in skills, however many there are, passes it.
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let read = |f: &str| std::fs::read_to_string(src.join(f)).expect("a source");
-    let (lib, walk, scanner) = (read("lib.rs"), read("walk.rs"), read("scan.rs"));
-    let faults = scan(&lib, &[&walk, &scanner]);
-    println!("v2/crates/skills/src: {} faults", faults.len());
+    let mut files: Vec<String> = Vec::new();
+    let mut dirs = vec![src.clone()];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).expect("a folder") {
+            let p = e.expect("an entry").path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "rs") && p != src.join("lib.rs") {
+                files.push(std::fs::read_to_string(&p).expect("a source"));
+            }
+        }
+    }
+    let lib = std::fs::read_to_string(src.join("lib.rs")).expect("lib.rs");
+    let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+    let faults = scan(&lib, &refs);
+    println!(
+        "v2/crates/skills/src: {} files, {} faults",
+        files.len() + 1,
+        faults.len()
+    );
     assert!(faults.is_empty(), "{faults:?}");
 }

@@ -4,10 +4,12 @@
 use std::collections::BTreeMap;
 
 use replica::bodies::{Body, Family};
+use replica::effects::Event;
 use replica::effects::{Change, Refusal, fixture_bytes};
 use replica::encode::{Name, Value, decode};
-use replica::host::{Ask, Control, Host, Progress, Seen, Skill};
+use replica::host::{Answer, Ask, Host, Progress, Seen, Skill};
 use replica::ids::{Id, Scope};
+use replica::pose::ControllerInput;
 use replica::pose::Vec3;
 use replica::time::Micros;
 use skills::walk::Walk;
@@ -31,7 +33,7 @@ struct Fake {
     body: Id,
     at: Vec3,
     now: Micros,
-    inputs: Vec<Control>,
+    inputs: Vec<ControllerInput>,
 }
 
 impl Host for Fake {
@@ -50,26 +52,27 @@ impl Host for Fake {
             fields: BTreeMap::new(),
         })
     }
-    fn ask(&self, q: &Ask) -> Option<Vec3> {
+    fn ask(&self, q: &Ask) -> Option<Answer> {
         match q {
-            Ask::Toward { to, .. } => Some(*to),
+            Ask::Toward { to, .. } => Some(Answer::Point(*to)),
             Ask::Distance { .. } => None,
         }
     }
     fn set_timer(&mut self, _after: Micros, _name: Name) -> Id {
         self.body
     }
+    fn clear_timer(&mut self, _timer: Id) {}
     fn draw(&mut self) -> u64 {
         4
     }
-    fn control(&mut self, input: Control) {
+    fn control(&mut self, input: ControllerInput) {
         let dt = 50_000;
         self.at.x += input.velocity.x * dt / 1_000_000;
         self.at.y += input.velocity.y * dt / 1_000_000;
         self.at.z += input.velocity.z * dt / 1_000_000;
         self.inputs.push(input);
     }
-    fn emit(&mut self, _change: Change) -> Result<(), Refusal> {
+    fn emit(&mut self, _changes: Vec<Change>, _meaning: Option<Event>) -> Result<(), Refusal> {
         Ok(())
     }
 }
@@ -111,6 +114,6 @@ fn a1_one_toy_walk_runs_unchanged_on_a_quadruped_and_a_humanoid() {
         assert_eq!(end, Progress::Done);
         assert!((host.at.x - to.x).abs() <= 60_000 && (host.at.z - to.z).abs() <= 60_000);
         assert_eq!(released, started.holds);
-        assert!(body.running.is_empty());
+        assert!(body.running().is_empty());
     }
 }

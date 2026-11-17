@@ -83,7 +83,7 @@ fn a2_two_skills_run_at_once_and_a_third_on_a_held_resource_is_refused_by_name()
     let refused = body.start(4, &walk()).map_err(|r| (r.name, r.detail));
     println!("a second walk: {refused:?}");
     assert_eq!(refused.as_ref().map_err(|r| r.0), Err("resource-held"));
-    assert_eq!(body.running.len(), 3, "a refusal changes nothing");
+    assert_eq!(body.running().len(), 3, "a refusal changes nothing");
     // A second carry takes the other hand; a third finds both held.
     assert!(body.start(5, &carry()).is_ok());
     assert_eq!(
@@ -114,6 +114,25 @@ fn a2_two_skills_run_at_once_and_a_third_on_a_held_resource_is_refused_by_name()
         Err("resource-blocked")
     );
     dog.end(2);
+    // A sit cannot start while a walk holds what it blocks, unless the walk gives way to it; and a new walk
+    // cancels a sit that gives way to walking: cancelling beats blocking.
+    let w = dog.start(5, &walk()).expect("walk");
+    let _ = w;
+    assert_eq!(
+        dog.start(6, &sit).map_err(|r| r.name),
+        Err("resource-blocked")
+    );
+    dog.end(5);
+    let yielding = shape(
+        "souls:sit-lightly",
+        vec![Want::One(Class::Gaze)],
+        vec![Class::Locomotion],
+        vec![Class::Locomotion],
+    );
+    dog.start(6, &yielding).expect("sit lightly");
+    let up = dog.start(7, &walk()).expect("a walk ends the light sit");
+    assert_eq!(up.cancelled, vec![6]);
+    dog.end(7);
     let steer = shape(
         "souls:steer",
         vec![Want::All(Class::Locomotion)],
@@ -123,7 +142,7 @@ fn a2_two_skills_run_at_once_and_a_third_on_a_held_resource_is_refused_by_name()
     dog.start(3, &steer).expect("steer");
     let again = dog.start(4, &walk()).expect("a new walk cancels the steer");
     assert_eq!(again.cancelled, vec![3]);
-    assert!(!dog.running.contains_key(&3));
+    assert!(!dog.running().contains_key(&3));
 }
 
 #[test]
@@ -143,7 +162,14 @@ fn a_joint_activity_claims_on_several_bodies_all_or_none() {
         start_joint(&mut [(&mut c, 1, &lift), (&mut d, 1, &lift)]).map_err(|r| (r.name, r.detail));
     println!("a humanoid and a quadruped lift together: {refused:?}");
     assert_eq!(refused.map_err(|r| r.0), Err("resource-missing"));
-    assert!(c.running.is_empty(), "none: the humanoid took nothing");
+    assert!(c.running().is_empty(), "none: the humanoid took nothing");
+    // A duplicate instance number on the second body is refused before the first starts.
+    let (mut e, mut f) = (Body::new(families().1), Body::new(families().1));
+    f.start(7, &walk()).expect("f is busy as 7");
+    let look = shape("souls:look", vec![Want::One(Class::Gaze)], vec![], vec![]);
+    let dup = start_joint(&mut [(&mut e, 7, &look), (&mut f, 7, &look)]).map_err(|r| r.name);
+    assert_eq!(dup, Err("instance-duplicate"));
+    assert!(e.running().is_empty(), "none: the first body took nothing");
 }
 
 #[test]
@@ -167,8 +193,10 @@ fn the_hatch_shape_reads_from_its_fixture_and_refuses_by_name() {
     };
     for (field, bad, want) in [
         (2, Value::Array(vec![]), "hatch-reads-nothing"),
-        (3, Value::Uint(2_000_000), "hatch-steps-over-limit"),
+        (3, Value::Uint(2_000_000), "hatch-steps-out-of-range"),
         (1, Value::Bytes(vec![1, 2, 3]), "hatch-module-not-hash"),
+        (3, Value::Uint(0), "hatch-steps-out-of-range"),
+        (6, Value::Uint(1), "hatch-not-a-record"),
     ] {
         let mut m = m.clone();
         m.insert(field, bad);

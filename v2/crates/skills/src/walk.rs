@@ -1,11 +1,12 @@
 //! A toy walk (T9's proof, not N7's walk): it claims every locomotion resource the body has, asks the host the way
 //! toward a point, and steers at a steady speed until it is there. It names no limb, so it runs on any family with
-//! locomotion. K13 moves the real walk behind this interface.
+//! locomotion. K13 moves the real walk behind this interface. It steers in its parent's frame, so it assumes a body
+//! that is upright and unturned (T4's controller takes the body's frame; the real walk turns first).
 
 use replica::bodies::{Class, SkillShape, Want};
 use replica::encode::Name;
-use replica::host::{Ask, Control, Host, Progress, Skill};
-use replica::pose::{Mode, Vec3};
+use replica::host::{Answer, Ask, Host, Progress, Skill};
+use replica::pose::{ControllerInput, Mode, Vec3};
 
 /// Its speed, in T4's units (micrometres) a second.
 pub const SPEED: i64 = 1_400_000;
@@ -49,7 +50,7 @@ impl Skill for Walk {
         let Some(me) = host.read(body) else {
             return Progress::Failed(name("souls:body-gone"));
         };
-        let Some(next) = host.ask(&Ask::Toward {
+        let Some(Answer::Point(next)) = host.ask(&Ask::Toward {
             from: body,
             to: self.to,
         }) else {
@@ -63,14 +64,14 @@ impl Skill for Walk {
         let len = isqrt(i128::from(d.x).pow(2) + i128::from(d.y).pow(2) + i128::from(d.z).pow(2));
         let still = Vec3 { x: 0, y: 0, z: 0 };
         if len <= i128::from(NEAR) {
-            host.control(Control {
+            host.control(ControllerInput {
                 velocity: still,
                 mode: Mode::Surface,
             });
             return Progress::Done;
         }
         let v = |c: i64| i64::try_from(i128::from(c) * i128::from(SPEED) / len).unwrap_or(0);
-        host.control(Control {
+        host.control(ControllerInput {
             velocity: Vec3 {
                 x: v(d.x),
                 y: v(d.y),

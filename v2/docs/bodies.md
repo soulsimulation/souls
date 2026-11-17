@@ -10,19 +10,26 @@ hatch (F8) are not here.
 ## Bodies and skills
 
 1. **A body's family declares its resources:** each a name and a class from a closed list, 1 locomotion,
-   2 manipulator, 3 gaze, 4 voice (a class added later takes the next number). A family is `{1: name, 2: [{1: name,
-   2: class}, ...]}`; two resources of one name are refused (`resource-duplicate`). There is no fixed body plan: four
-   legs and no hands, two of each, a beak.
+   2 manipulator, 3 gaze, 4 voice (a class added later takes the next number; another is `class-unknown`), and for a
+   manipulator the body's slot that holds what it holds. There is no fixed body plan: four legs and no hands, two of
+   each, a beak. A family is authored as a kind whose owner is `family` (SA-F1, E21), with its resources in a
+   meaning section of its entry, below 20 and outside the register's 9 to 12 and 17 (B2 picks the number);
+   `replica` holds it decoded as `{1: name, 2: [{1: name, 2: class, 3: slot}, ...]}`, never an authored or stored
+   form. Unknown fields, and two resources of one name, are refused (`not-a-family`, `resource-duplicate`).
 2. **A skill claims classes or names, never anatomy:** every resource of a class (a walk takes all the legs), any
    one of a class (a carry takes one hand), or one by name (a family's own skill). So one walk runs unchanged on a
    dog and a person.
 3. **A skill instance has its claims, what it blocks and what cancels it, and an end that always releases.** It
    blocks classes it does not hold (a sit blocks walking). It names the classes whose claim by a new skill cancels it
    (a new walk ends the old one). However it ends, done, cancelled, refused or failed, it releases all it holds.
-4. **Starting is all or none, and every refusal has a name:** `resource-missing` (the family has none),
-   `resource-held` (another skill holds it and is not cancelled by its class), `resource-blocked`,
-   `instance-duplicate`. Several skills run at once on one body when their claims do not meet.
-5. **A joint activity claims on several bodies, all or none.** A refusal on one body names it and changes no body.
+4. **Starting is all or none, and every refusal has a name.** For each resource a new skill claims, a running
+   instance that holds it or blocks its class gives way if it names that class in what cancels it, and otherwise
+   refuses (`resource-held`, `resource-blocked`): cancelling beats blocking. A new skill that blocks a class another
+   instance holds cancels that instance the same way, or is refused (`resource-blocked`); a sit never starts under a
+   walk that goes on. Also `resource-missing` (the family has none) and `instance-duplicate`. Several skills run at
+   once on one body when their claims do not meet.
+5. **A joint activity claims on several bodies, all or none.** Every body is planned before any starts, so a refusal
+   on one body names it and changes no body.
    The activity is a node with one owner (T1), so it survives a restart.
 6. **Reach is measured from an effector, which may be a held tool.** A held thing is a child of the hand's slot
    ([world-model.md](world-model.md) rule 2), so it moves with the hand and lengthens it (B12).
@@ -31,16 +38,21 @@ hatch (F8) are not here.
 
 7. **A skill touches the world through one trait, `Host`, in `replica`:** world time (T5; never a machine's clock),
    its body, reading nodes (its body as of this tick, every other node as of the previous tick, T1), a closed list of
-   geometry questions answered in integers, timers on its body, draws from the world's random numbers, controller
-   inputs (a velocity in three dimensions and a movement mode, T4), and generic changes to its own node (T6), any
-   other refused as `write-outside-own`. A skill is a `Skill`: its shape and a step that returns going, done or
-   failed with a name. The built-in skills use the same trait.
+   geometry questions answered in integers (a distance, a point), timers on its body set and cleared (T6 rule 15),
+   draws from the world's random numbers, controller inputs (T4's own `ControllerInput`: a velocity in three
+   dimensions in the body's frame and a movement mode), and entries of its own node (T6 rule 6: generic changes, all
+   or none, with the named event that says what they meant), any other node refused as `write-outside-own`. A skill
+   is a `Skill`: its shape and a step that returns going, done or failed with a name. The built-in skills use the
+   same trait. A skill only asks: the claims it holds are made by the body, so nothing it returns needs sealing.
 8. **The wall is a crate boundary, and a scan for what the compiler allows.** Built-in skills live in
    `v2/crates/skills`, which depends on `replica` alone (K14's dependency list holds it there) under
    `#![forbid(unsafe_code)]`. A skill crate that names `sim`'s state does not compile, and neither does one that uses
-   `unsafe`. Safe Rust cannot refuse a `static`, a `thread_local!`, `extern crate std` or a clock, so the scan
-   refuses them by name (`skill-reads-clock`, `skill-keeps-global`), with `skill-names-state` for the fixtures'
-   harness and `skill-allows-unsafe` for a crate root without the `forbid`.
+   `unsafe`, and the crate denies float arithmetic (lane note 4). Safe Rust cannot refuse a `static`, a
+   `thread_local!`, `extern crate std` or a clock, so a scan of every source file, by tokens with comments and
+   literals blanked, refuses them by name: `skill-reads-clock` (`std::time`, `Instant`, `SystemTime`, `UNIX_EPOCH`),
+   `skill-keeps-global`, `skill-reaches-out` (`std::env`, `fs`, `net`, `process`, `thread`), `skill-uses-hash-order`
+   (`HashMap`, `HashSet`, `RandomState`), `skill-names-state` (the fixtures' harness) and `skill-allows-unsafe` (a
+   crate root without the `forbid`). A name reached through a re-export or a macro gets past a scan of text.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -50,9 +62,11 @@ hatch (F8) are not here.
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
     multihash), 2: [read, ...], 3: steps most, 4: answers, 5: why}`. Reads are declared, whole values only: a field
     of the thing `{1: 1, 2: field}` or an argument of the form `{1: 2, 2: name}`; it reads nothing else. It answers a
-    verdict `{1: 1}` or one field's new value `{1: 2, 2: field}`. Its steps are at most 1,000,000, counted by F8's
-    own meter, never a runtime's. `why` is its text key. Refusals: `hatch-not-a-record`, `hatch-module-not-hash`,
-    `hatch-reads-nothing`, `hatch-steps-over-limit`. It sits on a form (`forms.<name>.hatch`), inside the kind's hash.
+    verdict `{1: 1}` or one field's new value `{1: 2, 2: field}`. Its steps are 1 to 1,000,000, counted by F8's own
+    meter, never a runtime's. `why` is its text key. Refusals: `hatch-not-a-record` (unknown fields included),
+    `hatch-module-not-hash`, `hatch-reads-nothing`, `hatch-steps-out-of-range`. One read is the engine's floor; SA-F9's
+    gate asks for two, against hatches that bypass the closed lists. It sits on a form (`forms.<name>.hatch`), inside
+    the kind's hash.
 11. **No scripting language is embedded.** F8 will run a hatch in one WASM interpreter inside `replica`, with no
     imports, so the client and the server give the same answer. That is an interpreter of a pure function, not a
     language a world is written in.
