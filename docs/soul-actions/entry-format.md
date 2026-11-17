@@ -134,9 +134,9 @@ or a stall is always open). The cases are `packages/form-rules/cases/stock/stock
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
 end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
-it is a child node, declared in `children` with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
-the sheet (`content/kinds/signup/`). Holding is a change of parent, not a link.
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
 
 A body's family declares the link type `soul` (`from: "soul"`, `most` 1): a body's link to its Soul (contract T2). A
 link declared `from: "soul"` on a thing (an owner, a speaker) has a Soul at its end while the actor is a body, so who-may
@@ -272,6 +272,28 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
+
 ## The hash, provisional
 
 A kind's reference is `namespace:name@hash`. Until Engine v2's encoding (T0) exists, the hash is SHA-256 over a
@@ -283,3 +305,32 @@ picture or a fixed typo never renames a placed thing. Reordering keys changes ne
 
 **The provisional hash will change once**, when the real encoding lands. Nothing may store it as permanent, which
 is why entries name each other by `namespace:name` and the tool resolves the hash.
+
+## The check gate
+
+```sh
+node tools/entry/check.mjs kitchen        # one family (a folder of content/kinds); no argument checks them all
+pnpm entry check kitchen                  # the same
+node --test tools/entry/check.test.mjs    # one fixture per rule
+```
+
+One JSON line per file, then a summary; exit 1 if any entry has a finding. A finding is `{rule, form, field, path,
+reason, fix}`: the rule broken, where, and the smallest change that passes. The format's own refusals are reported
+under the rule they break; the rest are checked on top (`tools/entry/check.mjs`, `RULES`).
+
+| Rule | Broken by | Format already refuses |
+|---|---|---|
+| `exact` | a float or a count in ticks | yes |
+| `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
+| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
+| `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
+| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
+| `no-labels` | a mood word in the card | no |
+| `refs` | a kind that is not loaded, or kinds in a circle | no |
+
+A state field that no form of the kind sets to some declared value is taken as set from outside, so a need on it is not
+a dead end (the kettle's water is filled by something else).

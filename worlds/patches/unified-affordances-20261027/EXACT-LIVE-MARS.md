@@ -1,7 +1,7 @@
 # Exact live Mars fixture
 
 `worlds/templates/unified-mars-live-proof-20261027.json` is a hidden (`"hidden": true`) operator-only genesis,
-generated from a public snapshot of the live Mars world taken before the pond and meaning patches in this folder. It is
+generated from a public snapshot of the live Mars world taken before the meaning patches in this folder (and before a swimming pond fixture that was later withdrawn: Mars College has no pond, #1984). It is
 not a copy of a private database and not a fresh Mars template.
 
 - Kept: all 176 authored physical entities, their original historical definition hashes, explicit root XYZ poses,
@@ -20,6 +20,6 @@ The fixture keeps the source's historical sofa pose. Ordinary God CLI import doe
 either refuses to redefine historical core definitions or, with world-local aliases, applies a 0.15 m buildsafe sofa
 repair. Server-owned genesis is the supported exact path.
 
-To compare with live Mars, apply the same reviewed pond and meaning batches to the new world and to live Mars through
+To compare with live Mars, apply the same reviewed meaning batches to the new world and to live Mars through
 normal God operations, then re-read both public snapshots and compare non-Soul physical fields and meaning references.
 The frozen fixture alone does not establish post-patch parity, and it must never be updated from a different snapshot.
