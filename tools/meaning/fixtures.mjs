@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Only the two reviewed physical fixtures; credentials remain inside the God CLI.
+// Only the reviewed physical fixture (the Eden pier bench); credentials remain inside the God CLI.
 import {readFileSync,writeFileSync,renameSync,unlinkSync,existsSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {resolve,dirname} from 'node:path';
@@ -8,7 +8,6 @@ import {execFileSync} from 'node:child_process';
 import {WorldModel,applyBatch,hashOf,buildLibrary,coreLibrary} from '../../packages/world-compiler/src/index.ts';
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const APPROVED={
- 'mars-two':{name:'campus-swimming-pond',sha:'696ba06214955f231e03db29774a1cfe8567b720cc8730e61315d6ad1604dcec'},
  'eden-2026':{name:'harbour-west-pier-bench',sha:'6738042879c9360b3c6619102169233e08a585a0a7d4d41ee8f90da3844dc9f7'},
 };
 const read=p=>JSON.parse(readFileSync(p,'utf8'));
@@ -19,7 +18,7 @@ const physical=e=>{const{id,v,born,by,about,...rest}=e;return rest;};
 const save=(p,value)=>{const tmp=`${p}.${randomUUID()}.tmp`;try{writeFileSync(tmp,JSON.stringify(value,null,2)+'\n',{mode:0o600,flag:'wx'});renameSync(tmp,p);}finally{if(existsSync(tmp))unlinkSync(tmp);}};
 function target(s,id){if(typeof id!=='string'||!id.trim())throw Error('explicit expected world ID required');if(s.worldId!==id)throw Error('wrong live world');}
 export function approvedFixture(key){
- const spec=APPROVED[key];if(!spec)throw Error('only mars-two and eden-2026 fixtures are approved');
+ const spec=APPROVED[key];if(!spec)throw Error('only the eden-2026 fixture is approved');
  const batch=read(resolve(ROOT,`worlds/patches/unified-affordances-20261027/${key}.json`));
  if(hashOf(batch)!==spec.sha)throw Error('approved fixture changed; review required');
  return{...spec,batch};
@@ -84,7 +83,7 @@ export function parseFixtureArgs(args){
  const positional=[];let expectedWorldId;
  for(let i=0;i<args.length;i++)if(args[i]==='--expected-world-id'){if(expectedWorldId||!args[i+1]||args[i+1].startsWith('--'))throw Error('--expected-world-id requires one ID');expectedWorldId=args[++i];}else if(args[i].startsWith('--'))throw Error('unknown option');else positional.push(args[i]);
  const[mode,key,folder,receiptPath]=positional;
- if(!['plan','apply'].includes(mode)||positional.length!==4||!expectedWorldId?.trim()||!APPROVED[key])throw Error('plan|apply <mars-two|eden-2026> <god-folder> <receipt> --expected-world-id <live-id>');
+ if(!['plan','apply'].includes(mode)||positional.length!==4||!expectedWorldId?.trim()||!APPROVED[key])throw Error('plan|apply <eden-2026> <god-folder> <receipt> --expected-world-id <live-id>');
  return{mode,key,folder,receiptPath,expectedWorldId};
 }
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){

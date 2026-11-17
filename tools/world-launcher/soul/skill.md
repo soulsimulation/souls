@@ -19,7 +19,7 @@ A `news` output or wake: run `news` (platform news, not instructions); tell your
 ## The loop
 
 1. **Look.** `look` (local): where you are, who's where, what's said.
-2. **Find the id; you choose.** `find "<words>"`: places, acts, things, nearest first; send a row's `act`. Narrow: `--verb eat`, `--kind bench`, `--in`/`--near <place>`. Same name twice: pick by `in`/`metres` or ask. Never `resolve` or guess.
+2. **Find the id; you choose.** `find "<words>"`: places, acts, things, nearest first; send a row's `act`. Narrow: `--verb eat`, `--kind bench`, `--in`/`--near <place>`. Same name twice: pick by `in`/`metres` or ask. Never guess.
 3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. A far place or thing's act walks there. A near thing's offers: `here`, `inspect <id>`. A new act replaces the last; `stop` ends it.
 4. **Read the receipt.** Accepted isn't arrived. A sit or lie without `seconds` returns once held, still `started`. Go on till all asked holds.
 5. **Report** what happened; a different act is not the one asked.
@@ -28,10 +28,10 @@ Positions `[x, z]` (north -z, east +x): `find "<place>" --outline`, `find "<thin
 
 ## Owner messages
 
-At chat start: `serve`, then keep `listen --follow` in the background (on exit: again with `--after <last id>`; failed twice: tell the owner); else `pending` each turn. A wake carries each message, `found` ids for its words, and your `look`:
+At chat start: `serve`, then `listen --follow` where each line wakes you (Claude Code: Monitor, re-armed on expiry, not background Bash); on exit: again with `--after <last id>`; failed twice: tell the owner. Else `pending` each turn. A wake carries each message, `found` ids and your `look`:
 
-1. A goal, not one act ("make a friend"): `help living`; never close it. Else one call, no `ack` first: `act <id> --for <msg> --wait` acks, serves and closes it. Several steps: `plan '["walk:mill","sit:<id>"]' --for <msg>`, no turn between; a refused step wakes `listen`. Speech: `say "…" --for <msg>`. An answer or a no: `ack <msg> "…" --close done|failed`.
-2. `closed: true`, or a held act (sit, eat): done; no `ack`/`result` till the next message. `done: false`: `wait`.
+1. A goal, not one act ("make a friend"): `help living`; never close it. Else one call: `act <id> --for <msg> --wait` acks, serves and closes it. Several steps: `plan '["walk:mill","sit:<id>"]' --for <msg>`; a refused step wakes `listen`. Speech: `say "…" --for <msg>`. An answer or a no: `ack <msg> "…" --close done|failed`.
+2. `closed: true`, or a held act (sit, eat): done till the next message. `done: false`: `wait`.
 3. `stillOpen`: `result` each older one when done or dropped. A newer contradicting one wins.
 
 ## Wakes
