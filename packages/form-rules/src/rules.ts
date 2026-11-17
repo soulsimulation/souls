@@ -12,8 +12,11 @@
 // - Loops run over lists the entry declares (needs, slots, forms); the one list the asker
 //   states (a body's hands) is capped at MAX_HANDS.
 // - The cases in ../cases/ are the specification. Never edit a case to make this pass.
+//
+// What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
+// moves is measured here, so the `room` need and the effect agree on one number.
 
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room']);
 export const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -23,6 +26,8 @@ export const REASONS = Object.freeze([
   'not_held',
   'not_linked',
   'already_linked',
+  'no_room',
+  'link_full',
   'bad_input',
 ]);
 export const MAX_HANDS = 8;
@@ -47,11 +52,26 @@ export type Form = {
   starts?: string;
   needs?: Need[];
   steps?: { step: string; move?: string; at?: Ref }[];
-  effects?: { change: string; field?: string; to?: unknown; link?: string }[];
+  effects?: Effect[];
+};
+/** An effect as an entry writes it. `transfer` moves an amount of one field from one node to another (SA-F2b). */
+export type Effect = {
+  change: string;
+  event?: string;
+  field?: string;
+  to?: unknown;
+  link?: string;
+  what?: string;
+  into?: unknown;
+  kind?: string;
+  from?: unknown;
+  amount?: unknown;
+  form?: string;
+  after_us?: number;
 };
 export type Entry = {
   kind: string;
-  state?: Record<string, { n: number; default: unknown; audience: string }>;
+  state?: Record<string, { n: number; default: unknown; audience: string; type?: string; unit?: string; min?: number; max?: number }>;
   links?: Record<string, { n: number; most: number; audience: string }>;
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
@@ -64,6 +84,8 @@ export type Node = {
   slots?: Record<string, unknown[]>;
   hands?: Record<string, string | null>;
   effector_mm?: number[];
+  /** Things resting loose in this node (on its ground or a surface), not in a slot or a hand. */
+  loose?: string[];
 };
 export type Input = {
   kinds: Record<string, Entry>;
@@ -110,7 +132,7 @@ export function decide(input: Input): Verdict {
   const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
-  const formFix = (meets: (e: { change: string; field?: string; to?: unknown; link?: string }) => boolean): Fix | null => {
+  const formFix = (meets: (e: Effect) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
       if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
@@ -230,6 +252,26 @@ export function decide(input: Input): Verdict {
 
     linked: (n, i) => link(n, i, true),
     unlinked: (n, i) => link(n, i, false),
+
+    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows.
+    room(_n, i) {
+      const transfers = (form.effects ?? []).filter((e) => e && e.change === 'transfer');
+      if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
+      for (const e of transfers) {
+        const m = measure(kinds, nodes, act.this, args, e);
+        if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
+        for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
+          if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+        }
+        read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
+        read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
+        if (m.room !== null && m.moved > m.room) {
+          const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
+          return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
+        }
+      }
+      return { ok: true };
+    },
   };
 
   function link(n: Need, i: number, wantLinked: boolean): Outcome {
@@ -266,4 +308,59 @@ function resolve(ref: unknown, args: Record<string, unknown>): string | null {
     return typeof v === 'string' ? v : null;
   }
   return null;
+}
+
+type FieldDef = NonNullable<Entry['state']>[string];
+export type Measure = {
+  field: string;
+  from: string;
+  into: string;
+  fromDef: FieldDef;
+  intoDef: FieldDef;
+  /** What the source has, what the target has, the target's room (null: no capacity) and the amount moved. */
+  there: number;
+  has: number;
+  room: number | null;
+  moved: number;
+};
+
+/**
+ * The amount a `transfer` effect moves: the least of what it asks (a whole number, an argument, or `"room"`, the
+ * target's room up to its field's `max`) and what the source has above its `min`. Both ends are int fields of one name and unit; amounts are whole and
+ * never negative. Shared by the `room` need and by effects.ts, so both work out one number.
+ */
+export function measure(kinds: Record<string, Entry>, nodes: Record<string, Node>, self: string, args: Record<string, unknown>, e: Effect): Measure | { bad: string; detail: Record<string, unknown> } {
+  const end = (ref: unknown) => (ref === 'this' ? self : resolve(ref, args));
+  const from = end(e.from), into = end(e.into), field = typeof e.field === 'string' ? e.field : '';
+  if (!from || !into || from === into) return { bad: 'malformed_transfer', detail: { from, into } };
+  const defs: FieldDef[] = [];
+  const values: number[] = [];
+  for (const id of [from, into]) {
+    const node = has(nodes, id) ? nodes[id] : undefined;
+    const entry = node?.kind && has(kinds, node.kind) ? kinds[node.kind] : undefined;
+    const def = entry && has(entry.state, field) ? entry.state![field] : undefined;
+    if (!node || !def || def.type !== 'int') return { bad: 'no_such_field', detail: { node: id, field } };
+    const value = has(node.fields, field) ? node.fields![field] : def.default;
+    if (!whole(value) || value < 0) return { bad: 'not_whole_number', detail: { node: id, field } };
+    defs.push(def);
+    values.push(value);
+  }
+  const [fromDef, intoDef] = defs;
+  const [there, held] = values;
+  if (fromDef.unit !== intoDef.unit) return { bad: 'units_differ', detail: { field } };
+  // The target's room is up to its field's `max`; the source gives down to its `min` (0 if none).
+  let room: number | null = null;
+  if (has(intoDef, 'max')) {
+    if (!whole(intoDef.max) || intoDef.max < held) return { bad: 'over_capacity', detail: { node: into, field } };
+    room = intoDef.max - held;
+  }
+  const floor = has(fromDef, 'min') ? fromDef.min : 0;
+  if (!whole(floor) || floor < 0) return { bad: 'not_whole_number', detail: { node: from, field } };
+  let want: unknown = e.amount;
+  if (e.amount === 'room') {
+    if (room === null) return { bad: 'no_capacity', detail: { node: into, field } };
+    want = room;
+  } else if (e.amount && typeof e.amount === 'object' && has(e.amount, 'arg')) want = args[(e.amount as { arg: string }).arg];
+  if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
+  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)) };
 }
