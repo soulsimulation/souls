@@ -1,0 +1,275 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:block_print_sheet",
+  "owner": "thing",
+  "state": {
+    "back_left": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "blank",
+        "red_disc",
+        "blue_disc",
+        "red_bar",
+        "blue_bar"
+      ],
+      "default": "blank",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "back_right": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "blank",
+        "red_disc",
+        "blue_disc",
+        "red_bar",
+        "blue_bar"
+      ],
+      "default": "blank",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "front_left": {
+      "n": 3,
+      "type": "enum",
+      "values": [
+        "blank",
+        "red_disc",
+        "blue_disc",
+        "red_bar",
+        "blue_bar"
+      ],
+      "default": "blank",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "front_right": {
+      "n": 4,
+      "type": "enum",
+      "values": [
+        "blank",
+        "red_disc",
+        "blue_disc",
+        "red_bar",
+        "blue_bar"
+      ],
+      "default": "blank",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ink": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1150
+      ],
+      "yaw_mdeg": 180000
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        18,
+        0
+      ]
+    },
+    "back_left": {
+      "role": "contact",
+      "at_mm": [
+        -130,
+        28,
+        -100
+      ]
+    },
+    "back_right": {
+      "role": "contact",
+      "at_mm": [
+        130,
+        28,
+        -100
+      ]
+    },
+    "front_left": {
+      "role": "contact",
+      "at_mm": [
+        -130,
+        28,
+        100
+      ]
+    },
+    "front_right": {
+      "role": "contact",
+      "at_mm": [
+        130,
+        28,
+        100
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      560,
+      50,
+      420
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "print": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "field",
+          "of": [
+            "back_left",
+            "back_right",
+            "front_left",
+            "front_right"
+          ]
+        },
+        "motif": {
+          "type": "value",
+          "of": [
+            "red_disc",
+            "blue_disc",
+            "red_bar",
+            "blue_bar"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "ink",
+          "at_least": 1,
+          "says": "ink_out"
+        },
+        {
+          "need": "state",
+          "field": {
+            "arg": "cell"
+          },
+          "not": {
+            "arg": "motif"
+          },
+          "says": "same_motif"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": {
+            "arg": "cell"
+          }
+        },
+        {
+          "step": "wait",
+          "us": 6000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "cell"
+          },
+          "to": {
+            "arg": "motif"
+          },
+          "event": "printed"
+        },
+        {
+          "change": "set",
+          "field": "ink",
+          "by": -1,
+          "event": "ink_used"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,9,0],"size":[560,18,420],"tint":"paper"},{"kind":"cyl","at":[-130,22,-100],"r":60,"h":12,"segments":8,"when":"@back_left=red_disc","tint":"red"},{"kind":"cyl","at":[-130,22,-100],"r":60,"h":12,"segments":8,"when":"@back_left=blue_disc","tint":"blue"},{"kind":"box","at":[-130,22,-100],"size":[160,12,70],"when":"@back_left=red_bar","tint":"red"},{"kind":"box","at":[-130,22,-100],"size":[160,12,70],"when":"@back_left=blue_bar","tint":"blue"},{"kind":"cyl","at":[130,22,-100],"r":60,"h":12,"segments":8,"when":"@back_right=red_disc","tint":"red"},{"kind":"cyl","at":[130,22,-100],"r":60,"h":12,"segments":8,"when":"@back_right=blue_disc","tint":"blue"},{"kind":"box","at":[130,22,-100],"size":[160,12,70],"when":"@back_right=red_bar","tint":"red"},{"kind":"box","at":[130,22,-100],"size":[160,12,70],"when":"@back_right=blue_bar","tint":"blue"},{"kind":"cyl","at":[-130,22,100],"r":60,"h":12,"segments":8,"when":"@front_left=red_disc","tint":"red"},{"kind":"cyl","at":[-130,22,100],"r":60,"h":12,"segments":8,"when":"@front_left=blue_disc","tint":"blue"},{"kind":"box","at":[-130,22,100],"size":[160,12,70],"when":"@front_left=red_bar","tint":"red"},{"kind":"box","at":[-130,22,100],"size":[160,12,70],"when":"@front_left=blue_bar","tint":"blue"},{"kind":"cyl","at":[130,22,100],"r":60,"h":12,"segments":8,"when":"@front_right=red_disc","tint":"red"},{"kind":"cyl","at":[130,22,100],"r":60,"h":12,"segments":8,"when":"@front_right=blue_disc","tint":"blue"},{"kind":"box","at":[130,22,100],"size":[160,12,70],"when":"@front_right=red_bar","tint":"red"},{"kind":"box","at":[130,22,100],"size":[160,12,70],"when":"@front_right=blue_bar","tint":"blue"},{"kind":"box","at":[250,25,-170],"size":[40,30,40],"when":"@ink>=1","tint":"red"}],"palette":{"paper":"#ede0bd","red":"#ab4037","blue":"#355d8a"},"tags":["art","paper","print","object"]},
+    "model": "look:block_print_sheet"
+  },
+  "text": {
+    "card": "A block-print sheet of four cells: print a red or blue disc or bar in each.",
+    "ink_out": "The supplied ink is exhausted.",
+    "same_motif": "That cell already has the chosen motif and color.",
+    "empty_hands": "Empty your hands before printing.",
+    "art": "art",
+    "print": "print",
+    "stamp": "stamp",
+    "howto_print": "With empty hands, print a motif in a cell for six seconds; each print uses one of four inks."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "print",
+      "stamp"
+    ]
+  },
+  "howtos": {
+    "print": {
+      "text": "howto_print",
+      "steps": [
+        {
+          "form": "print"
+        }
+      ]
+    }
+  }
+}

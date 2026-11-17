@@ -1,0 +1,234 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sealed_letter",
+  "owner": "thing",
+  "state": {
+    "words": {
+      "n": 1,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "stage": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "blank",
+        "written",
+        "sealed",
+        "opened"
+      ],
+      "default": "blank",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "face": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        120,
+        20
+      ]
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        120,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      340,
+      286,
+      60
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "write": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "blank"
+        },
+        {
+          "need": "within_reach",
+          "point": "face",
+          "says": "walk_up"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "set_down_held"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "words",
+          "to": {
+            "arg": "words"
+          },
+          "event": "letter_written"
+        },
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "written",
+          "event": "letter_composed"
+        }
+      ]
+    },
+    "seal": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "written"
+        },
+        {
+          "need": "within_reach",
+          "point": "face",
+          "says": "walk_up"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "set_down_held"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "sealed",
+          "event": "letter_sealed"
+        }
+      ]
+    },
+    "open_seal": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": "sealed"
+        },
+        {
+          "need": "within_reach",
+          "point": "face",
+          "says": "walk_up"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "set_down_held"
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "press",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": "opened",
+          "event": "seal_broken"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,120,0],"size":[340,240,18],"tint":"paper"},{"kind":"box","at":[0,185,14],"size":[280,45,12],"when":"@stage!=opened","tint":"fold"},{"kind":"box","at":[0,253,-12],"size":[280,65,12],"when":"@stage=opened","tint":"fold"},{"kind":"sphere","at":[0,185,32],"r":30,"segments":8,"scale":[1000,1000,300],"when":"@stage=sealed","tint":"wax"},{"kind":"sphere","at":[-45,190,32],"r":18,"segments":6,"scale":[1000,1000,350],"when":"@stage=opened","tint":"wax"},{"kind":"sphere","at":[40,240,4],"r":18,"segments":6,"scale":[1000,1000,350],"when":"@stage=opened","tint":"wax"},{"kind":"box","at":[0,110,11],"size":[240,6,3],"when":"@stage!=blank","tint":"ink"},{"kind":"box","at":[-30,80,11],"size":[180,6,3],"when":"@stage!=blank","tint":"ink"}],"palette":{"paper":"#eee4c7","fold":"#d8cbaa","wax":"#a52d37","ink":"#34302d"},"tags":["item","correspondence","letter","object"]},
+    "model": "look:sealed_letter"
+  },
+  "text": {
+    "card": "An envelope written once and sealed in red wax; a broken seal stays broken.",
+    "walk_up": "Walk up to the correspondence before composing or changing its seal.",
+    "set_down_held": "Set down what you are holding before composing or changing the seal.",
+    "post": "post",
+    "letter": "letter",
+    "envelope": "envelope",
+    "howto_seal": "Set it down, write one message, seal it; opening breaks the wax for good."
+  },
+  "card": {
+    "text": "card",
+    "category": "post",
+    "synonyms": [
+      "letter",
+      "envelope"
+    ]
+  },
+  "howtos": {
+    "seal": {
+      "text": "howto_seal",
+      "steps": [
+        {
+          "form": "write"
+        },
+        {
+          "form": "seal"
+        }
+      ]
+    }
+  }
+}

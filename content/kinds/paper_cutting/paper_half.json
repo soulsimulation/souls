@@ -1,0 +1,65 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:paper_half",
+  "owner": "thing",
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        10,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      300,
+      50,
+      400
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,5,0],"size":[300,10,400],"tint":"paper"}],"palette":{"paper":"#d89b48"},"tags":["art","paper","item","object"]},
+    "model": "look:paper_half"
+  },
+  "text": {
+    "card": "A piece cut from a paper sheet, a half of its width, for collage.",
+    "art": "art",
+    "paper": "paper",
+    "collage": "collage"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "paper",
+      "collage"
+    ]
+  }
+}

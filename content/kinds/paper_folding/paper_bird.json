@@ -1,0 +1,65 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:paper_bird",
+  "owner": "thing",
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        90,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      340,
+      240,
+      300
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"extrude","at":[0,10,0],"polygon":[[-25,-60],[25,-60],[40,40],[0,90],[-40,40]],"h":60,"tint":"fold"},{"kind":"extrude","at":[0,90,0],"polygon":[[-20,0],[-150,-90],[-140,90]],"h":6,"roll":-22918,"tint":"paper"},{"kind":"extrude","at":[0,90,0],"polygon":[[20,0],[150,-90],[140,90]],"h":6,"roll":22918,"tint":"paper"},{"kind":"box","at":[0,140,75],"size":[16,150,16],"pitch":25783,"tint":"paper"},{"kind":"extrude","at":[0,210,105],"polygon":[[-15,0],[15,0],[0,45]],"h":8,"tint":"paper"},{"kind":"extrude","at":[0,70,-60],"polygon":[[-25,0],[0,-65],[25,0]],"h":6,"pitch":-40107,"tint":"paper"}],"palette":{"paper":"#f0dfb7","fold":"#d1b77e"},"tags":["art","paper","item","object"]},
+    "model": "look:paper_bird"
+  },
+  "text": {
+    "card": "A folded paper bird, a sculpture to carry and set down; it does not fly.",
+    "art": "art",
+    "origami": "origami",
+    "bird": "bird"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "origami",
+      "bird"
+    ]
+  }
+}

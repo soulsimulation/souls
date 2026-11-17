@@ -1,0 +1,71 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:field_journal",
+  "owner": "thing",
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        30,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      460,
+      60,
+      320
+    ]
+  },
+  "children": {
+    "entry": {
+      "kind": "eden:journal_entry",
+      "most": 5
+    }
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,9,0],"size":[440,18,300],"tint":"cover"},{"kind":"box","at":[0,25,0],"size":[420,14,280],"tint":"page"},{"kind":"box","at":[0,35,0],"size":[8,6,280],"tint":"cover"}],"palette":{"cover":"#633c2d","page":"#f1e3be"},"tags":["camping","writing","item","object"]},
+    "model": "look:field_journal"
+  },
+  "text": {
+    "card": "A field journal of five signed entries, carried and read anywhere.",
+    "writing": "writing",
+    "journal": "journal",
+    "diary": "diary"
+  },
+  "card": {
+    "text": "card",
+    "category": "writing",
+    "synonyms": [
+      "journal",
+      "diary"
+    ]
+  }
+}

@@ -1,0 +1,471 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:quilling_board",
+  "owner": "thing",
+  "state": {
+    "red_strip": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "blue_strip": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "gold_strip": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "red_coil": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "blue_coil": {
+      "n": 5,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "gold_coil": {
+      "n": 6,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1100
+      ],
+      "yaw_mdeg": 180000
+    },
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        30,
+        0
+      ]
+    },
+    "coil_red": {
+      "role": "contact",
+      "at_mm": [
+        -100,
+        52,
+        -60
+      ]
+    },
+    "coil_blue": {
+      "role": "contact",
+      "at_mm": [
+        100,
+        52,
+        -60
+      ]
+    },
+    "coil_gold": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        52,
+        100
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      560,
+      80,
+      650
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "roll_red": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "turns": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "enough",
+          "says": "short_red"
+        },
+        {
+          "need": "room",
+          "says": "coil_full"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "coil_red"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "red_strip",
+          "from": "this",
+          "into": "this",
+          "into_field": "red_coil",
+          "amount": {
+            "arg": "turns"
+          },
+          "event": "coil_rolled"
+        }
+      ]
+    },
+    "unroll_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "red_coil",
+          "at_least": 1,
+          "says": "unwound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "coil_red"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "red_coil",
+          "from": "this",
+          "into": "this",
+          "into_field": "red_strip",
+          "amount": 3,
+          "event": "coil_unrolled"
+        }
+      ]
+    },
+    "roll_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "turns": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "enough",
+          "says": "short_blue"
+        },
+        {
+          "need": "room",
+          "says": "coil_full"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "coil_blue"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "blue_strip",
+          "from": "this",
+          "into": "this",
+          "into_field": "blue_coil",
+          "amount": {
+            "arg": "turns"
+          },
+          "event": "coil_rolled"
+        }
+      ]
+    },
+    "unroll_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "blue_coil",
+          "at_least": 1,
+          "says": "unwound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "coil_blue"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "blue_coil",
+          "from": "this",
+          "into": "this",
+          "into_field": "blue_strip",
+          "amount": 3,
+          "event": "coil_unrolled"
+        }
+      ]
+    },
+    "roll_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "turns": {
+          "type": "count"
+        }
+      },
+      "needs": [
+        {
+          "need": "enough",
+          "says": "short_gold"
+        },
+        {
+          "need": "room",
+          "says": "coil_full"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "coil_gold"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "gold_strip",
+          "from": "this",
+          "into": "this",
+          "into_field": "gold_coil",
+          "amount": {
+            "arg": "turns"
+          },
+          "event": "coil_rolled"
+        }
+      ]
+    },
+    "unroll_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "gold_coil",
+          "at_least": 1,
+          "says": "unwound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "coil_gold"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "gold_coil",
+          "from": "this",
+          "into": "this",
+          "into_field": "gold_strip",
+          "amount": 3,
+          "event": "coil_unrolled"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,15,0],"size":[560,30,650],"tint":"wood"},{"kind":"box","at":[0,31,20],"size":[440,2,440],"tint":"card"},{"kind":"torus","at":[-100,42,-60],"r":18,"r2":5,"segments":20,"pitch":90000,"when":"@red_coil>=1","tint":"red"},{"kind":"torus","at":[-100,42,-60],"r":30,"r2":5,"segments":20,"pitch":90000,"when":"@red_coil>=2","tint":"red"},{"kind":"torus","at":[-100,42,-60],"r":42,"r2":5,"segments":20,"pitch":90000,"when":"@red_coil>=3","tint":"red"},{"kind":"box","at":[-240,38,190],"size":[20,4,40],"when":"@red_strip>=1","tint":"red"},{"kind":"box","at":[-240,42,140],"size":[20,4,40],"when":"@red_strip>=2","tint":"red"},{"kind":"box","at":[-240,46,90],"size":[20,4,40],"when":"@red_strip>=3","tint":"red"},{"kind":"torus","at":[100,42,-60],"r":18,"r2":5,"segments":20,"pitch":90000,"when":"@blue_coil>=1","tint":"blue"},{"kind":"torus","at":[100,42,-60],"r":30,"r2":5,"segments":20,"pitch":90000,"when":"@blue_coil>=2","tint":"blue"},{"kind":"torus","at":[100,42,-60],"r":42,"r2":5,"segments":20,"pitch":90000,"when":"@blue_coil>=3","tint":"blue"},{"kind":"box","at":[-210,38,190],"size":[20,4,40],"when":"@blue_strip>=1","tint":"blue"},{"kind":"box","at":[-210,42,140],"size":[20,4,40],"when":"@blue_strip>=2","tint":"blue"},{"kind":"box","at":[-210,46,90],"size":[20,4,40],"when":"@blue_strip>=3","tint":"blue"},{"kind":"torus","at":[0,42,100],"r":18,"r2":5,"segments":20,"pitch":90000,"when":"@gold_coil>=1","tint":"gold"},{"kind":"torus","at":[0,42,100],"r":30,"r2":5,"segments":20,"pitch":90000,"when":"@gold_coil>=2","tint":"gold"},{"kind":"torus","at":[0,42,100],"r":42,"r2":5,"segments":20,"pitch":90000,"when":"@gold_coil>=3","tint":"gold"},{"kind":"box","at":[-180,38,190],"size":[20,4,40],"when":"@gold_strip>=1","tint":"gold"},{"kind":"box","at":[-180,42,140],"size":[20,4,40],"when":"@gold_strip>=2","tint":"gold"},{"kind":"box","at":[-180,46,90],"size":[20,4,40],"when":"@gold_strip>=3","tint":"gold"}],"palette":{"wood":"#75604c","card":"#efe4cc","red":"#c65349","blue":"#4f88aa","gold":"#d7b654"},"tags":["art","paper","board","object"]},
+    "model": "look:quilling_board"
+  },
+  "text": {
+    "card": "A quilling board of red, blue and gold strips: roll them into coils, or unroll.",
+    "short_red": "Not enough unwound red strip is left; use fewer turns or unroll the red coil.",
+    "short_blue": "Not enough unwound blue strip is left; use fewer turns or unroll the blue coil.",
+    "short_gold": "Not enough unwound gold strip is left; use fewer turns or unroll the gold coil.",
+    "coil_full": "That coil already holds three turns; unroll it before rolling more.",
+    "unwound": "That coil is already unwound; choose an occupied coil to recover its paper.",
+    "put_down": "Put down held objects before rolling or unrolling this board.",
+    "art": "art",
+    "quilling": "quilling",
+    "scroll": "scroll",
+    "howto_quill": "With empty hands, roll turns of a colour into its coil; unroll a coil to get its strip back."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "quilling",
+      "scroll"
+    ]
+  },
+  "howtos": {
+    "quill": {
+      "text": "howto_quill",
+      "steps": [
+        {
+          "form": "roll_red"
+        },
+        {
+          "form": "unroll_red"
+        }
+      ]
+    }
+  }
+}

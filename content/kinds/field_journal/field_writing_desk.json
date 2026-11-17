@@ -1,0 +1,74 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:field_writing_desk",
+  "owner": "thing",
+  "state": {
+    "ink": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 5,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "writer": {
+      "role": "stand",
+      "at_mm": [
+        120,
+        0,
+        1000
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "journal": {
+      "admits": "thing",
+      "kinds": [
+        "eden:field_journal"
+      ],
+      "most": 1,
+      "at_mm": [
+        120,
+        1000,
+        0
+      ],
+      "stand": "writer",
+      "fits_mm": [
+        500,
+        90,
+        360
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1000,
+      1070,
+      650
+    ]
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[-430,480,-230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[-430,480,230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[430,480,-230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[430,480,230],"size":[60,960,60],"tint":"wood"},{"kind":"box","at":[0,980,0],"size":[1000,40,650],"tint":"wood"},{"kind":"box","at":[-340,1035,-140],"size":[120,70,120],"when":"@ink>=1","tint":"ink"}],"palette":{"wood":"#84603e","ink":"#263646"},"tags":["camping","writing","desk","object"]},
+    "model": "look:field_writing_desk"
+  },
+  "text": {
+    "card": "A camp writing desk with five ink charges: set a field journal on it to write.",
+    "writing": "writing",
+    "desk": "desk",
+    "ink": "ink"
+  },
+  "card": {
+    "text": "card",
+    "category": "writing",
+    "synonyms": [
+      "desk",
+      "ink"
+    ]
+  }
+}

@@ -1,0 +1,200 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:folding_desk",
+  "owner": "thing",
+  "state": {
+    "sheets": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "worker": {
+      "role": "stand",
+      "at_mm": [
+        -50,
+        0,
+        850
+      ],
+      "yaw_mdeg": 180000
+    },
+    "mat": {
+      "role": "contact",
+      "at_mm": [
+        -150,
+        990,
+        140
+      ]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:paper_boat",
+        "eden:paper_bird"
+      ],
+      "most": 1,
+      "at_mm": [
+        350,
+        1010,
+        0
+      ],
+      "fits_mm": [
+        360,
+        260,
+        320
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1200,
+      1050,
+      700
+    ]
+  },
+  "forms": {
+    "fold_boat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "sheets",
+          "at_least": 1,
+          "says": "no_paper"
+        },
+        {
+          "need": "slot_free",
+          "slot": "out",
+          "says": "clear_tray"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "worker"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "mat"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "sheets",
+          "by": -1,
+          "event": "sheet_used"
+        },
+        {
+          "change": "create",
+          "kind": "eden:paper_boat",
+          "into": "out",
+          "event": "boat_folded"
+        }
+      ]
+    },
+    "fold_bird": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "sheets",
+          "at_least": 1,
+          "says": "no_paper"
+        },
+        {
+          "need": "slot_free",
+          "slot": "out",
+          "says": "clear_tray"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "worker"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "mat"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "sheets",
+          "by": -1,
+          "event": "sheet_used"
+        },
+        {
+          "change": "create",
+          "kind": "eden:paper_bird",
+          "into": "out",
+          "event": "bird_folded"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1200,30,700],"tint":"wood"},{"kind":"box","at":[-500,475,-250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[-500,475,250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,-250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,250],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[350,990,0],"size":[400,20,360],"tint":"tray"},{"kind":"box","at":[-150,984,140],"size":[350,8,320],"tint":"mat"},{"kind":"box","at":[-150,1009,140],"size":[280,6,280],"yaw":0,"when":"@sheets>=1","tint":"paper"},{"kind":"box","at":[-150,1017,140],"size":[280,6,280],"yaw":2292,"when":"@sheets>=2","tint":"paper"}],"palette":{"wood":"#8b6746","tray":"#57483e","mat":"#698e83","paper":"#f0dfb7"},"tags":["art","paper","desk","object"]},
+    "model": "look:folding_desk"
+  },
+  "text": {
+    "card": "A folding desk with two paper sheets: fold a boat or a bird onto its tray.",
+    "no_paper": "This folding desk has no supplied paper sheet left.",
+    "clear_tray": "Take the item off the output surface before folding paper.",
+    "put_down": "Put down what you are holding before folding paper.",
+    "art": "art",
+    "origami": "origami",
+    "folding": "folding",
+    "howto_fold": "With empty hands, fold a boat or a bird for ten seconds; take it off the tray before folding again."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "origami",
+      "folding"
+    ]
+  },
+  "howtos": {
+    "fold": {
+      "text": "howto_fold",
+      "steps": [
+        {
+          "form": "fold_boat"
+        }
+      ]
+    }
+  }
+}
