@@ -13,7 +13,10 @@
 //   place (the spot is Engine v2's set-down, E4, and is not chosen here). Its id comes from the receipt.
 // - Effects are worked out in order on a copy, so a later effect sees an earlier one, and a form whose
 //   changes would not all apply is refused with the effect that failed.
-// - A timer is not a change to state: it is returned beside the changes, with its event.
+// - A timer is not a change to state: it is returned beside the changes, with its event. A timer is named by the
+//   form it starts; starting one replaces the node's pending timer of that form, which it names in `replaces`, so the
+//   engine clears it (Engine v2 T6 rule 15: a clear is "fired or cancelled"). A lamp put out early and lit again is
+//   not put out by the earlier timer.
 // - Every value is one Engine v2's encoding profile holds (T0, v2/docs/encoding.md): whole numbers and names,
 //   never a float, a boolean or null. A flag is 0 or 1, text is a key by reference `{text: <key>}` (never
 //   words), and a value that is missing is left out: a `set` without `to` clears the field to its default.
@@ -32,7 +35,8 @@ export type Change =
 /** The generic changes, Engine v2 T6's list less the motion sample. */
 export const CHANGES = Object.freeze(['set', 'link', 'unlink', 'reparent', 'create', 'remove']);
 export type Event = { event: string; node: string; changes: number[] };
-export type Timer = { node: string; form: string; after_us: number; event: number };
+/** `replaces`: the ids of this node's pending timers of the same form, cleared by this one (present only when there are any). */
+export type Timer = { node: string; form: string; after_us: number; event: number; replaces?: string[] };
 export type Done = { verdict: 'yes'; receipt: string; actor: string; changes: Change[]; events: Event[]; timers: Timer[] };
 /** Refused while working out the effects: `effect` is the index of the effect that could not be done. */
 export type Refused = { verdict: 'no'; reason: string; effect: number; detail: Record<string, unknown> };
@@ -175,7 +179,8 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
       out.push({ change: 'remove', node });
     } else if (e.change === 'timer') {
       if (typeof e.form !== 'string' || !Number.isSafeInteger(e.after_us) || e.after_us! <= 0) return refuse(i, 'bad_input', { what: 'malformed_timer' });
-      done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length });
+      const pending = (Array.isArray(work[self].timers) ? work[self].timers! : []).filter((t) => t && t.form === e.form).map((t) => t.id);
+      done.timers.push({ node: self, form: e.form, after_us: e.after_us!, event: done.events.length, ...(pending.length ? { replaces: pending } : {}) });
     } else return refuse(i, 'bad_input', { what: 'unknown_change', change: e.change ?? null });
 
     const event: Event = { event: e.event.includes(':') ? e.event : namespace + e.event, node: self, changes: [] };
