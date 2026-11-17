@@ -166,10 +166,12 @@ export function decide(input: Input): Verdict {
 
   // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
   // that meets the need. A holder's form refused for want of holding names its own fix (take).
-  const formFix = (meets: (e: Effect) => boolean): Fix | null => {
+  // `ready`, when given, passes over a form that its own needs would refuse now (a dimmer step on a lamp that is dark).
+  const formFix = (meets: (e: Effect) => boolean, ready?: (f: Form) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
       if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
+      if (ready && !ready(f)) continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
     return null;
@@ -197,11 +199,12 @@ export function decide(input: Input): Verdict {
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
-      const meets = (v: unknown) =>
-        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
-        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
-        (!has(n, 'at_least') || (int(v) && v >= (n.at_least as number))) &&
-        (!has(n, 'at_most') || (int(v) && v <= (n.at_most as number)));
+      const holds = (m: Need, v: unknown) =>
+        (!has(m, 'is') || flag(def, v) === flag(def, m.is)) &&
+        (!has(m, 'not') || flag(def, v) !== flag(def, m.not)) &&
+        (!has(m, 'at_least') || (int(v) && v >= (m.at_least as number))) &&
+        (!has(m, 'at_most') || (int(v) && v <= (m.at_most as number)));
+      const meets = (v: unknown) => holds(n, v);
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
@@ -210,7 +213,8 @@ export function decide(input: Input): Verdict {
       const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
       const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
         (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
-        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))));
+        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
