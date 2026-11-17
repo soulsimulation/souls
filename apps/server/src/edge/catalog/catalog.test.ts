@@ -125,3 +125,14 @@ test('native Eden: a building with an interior gives its doors, with position, l
   assert.equal(payload.places.filter(p => p.doors).length, interiors.length);
   assert.equal(place('region-campus.library-annex').doors, undefined);
 });
+
+test('a ride is one act on the thing it rides on, and its basket names that thing', () => {
+  const base = input();
+  const {payload} = buildCatalog({...base, things: [...base.things, {id: 'balloon', kind: 'eden-launch-balloon@1', name: 'eden balloon', at: [5, 5], place: 'world'}],
+    rides: [{id: 'ride-balloon', carrier: 'balloon', name: 'eden balloon', vehicle: 'balloon'}, {id: 'ride-gone', carrier: 'nothing-here', name: 'gone'}]});
+  const ride = payload.acts.find(a => a.id === 'object:ride-balloon:join')!;
+  assert.deepEqual({verb: ride.verb, thing: ride.thing, place: ride.place, at: ride.at}, {verb: 'ride', thing: 'balloon', place: 'world', at: [5, 5]});
+  assert.match(ride.label, /^Fly the eden balloon \(hot-air balloon\): board its basket; in the air, steer it/);
+  assert.equal(payload.acts.some(a => a.id === 'object:ride-gone:join'), false, 'a ride on a thing the catalog does not show is not an act');
+  assert.equal(payload.places.find(p => p.id === 'basket')!.of, 'balloon');
+});

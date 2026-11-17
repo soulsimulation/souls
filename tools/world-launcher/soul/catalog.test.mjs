@@ -101,7 +101,7 @@ test("what a body does on the spot is found by its words, and comes before anyth
 });
 
 test("a place a Soul cannot walk to names no walk", () => {
-  assert.equal(find(ix, "balloon basket", { at }).found[0].act, null);
+  assert.equal(find(ix, "balloon basket", { at }).found[0].act, null);   // a basket the catalog ties to no ride
 });
 
 test("a place view groups: twelve chairs are one line, an act alone names its id", () => {
@@ -264,4 +264,20 @@ test('#2381 A1: find "bench" --verb sit finds the seats --kind bench finds, each
   assert.deepEqual(byKind.found.filter((x) => x.act?.startsWith("sit:")).map((x) => x.id), byVerb.found.map((x) => x.id));
   assert.equal(find(ix, "", { verb: "sit", at, limit: 20 }).found.length, 14, "every seat, with no words");
   assert.deepEqual(find(ix, "bench", { verb: "read", at }).found, [], "a seat does not offer read");
+});
+
+test("a balloon, its basket and its ride are one row whose act flies it; get in reads as boarding", () => {
+  const rideCat = structuredClone(cat);
+  rideCat.places.push({ id: "eden-balloon-basket", name: "eden balloon basket", kind: "vehicle", parent: "world", at: [0, 0], fixed: true, of: "eden-balloon" });
+  rideCat.things.push({ id: "eden-balloon", name: "eden balloon", kind: "hot-air-balloon", place: "world", at: [20, 20] });
+  rideCat.acts.push({ id: "object:ride-eden-balloon:join", verb: "ride", place: "world", thing: "eden-balloon", at: [20, 20], label: "Fly the eden balloon (hot-air balloon): board its basket; in the air, steer it to a place or a direction and land it on clear ground" });
+  const rix = indexCatalog(rideCat), here = [18, 18];
+  for (const words of ["balloon", "eden balloon", "hot air balloon", "fly the balloon", "get in the balloon basket", "eden balloon basket"]) {
+    const rows = find(rix, words, { at: here }).found, flying = rows.filter((r) => r.act === "object:ride-eden-balloon:join");
+    assert.equal(flying.length, 1, `${words}: one row flies it`);
+    assert.equal(rows[0].act, "object:ride-eden-balloon:join", `${words}: it leads`);
+    assert.equal(flying[0].metres, 3, `${words}: measured from the balloon`);
+  }
+  assert.match(find(rix, "eden balloon basket", { at: here }).found[0].label, /^Fly the eden balloon/);
+  assert.equal(rix.knows("object:ride-eden-balloon:join"), true);
 });

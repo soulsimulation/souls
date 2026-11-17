@@ -3,7 +3,7 @@
 // the agent loads into its context is what a question asks for and no more; every answer says what it left out.
 
 const STOP = new Set(["the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
-const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"] };
+const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"], fly: ["ride"], board: ["ride"] };
 export const tokensOf = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => (w.length > 4 && w.endsWith("ies") ? w.slice(0, -3) + "y" : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 const hit = (q, words) => words.some((w) => w === q || stem(w) === stem(q) || (q.length >= 4 && w.startsWith(q)));
@@ -23,6 +23,8 @@ export function indexCatalog(cat) {
   for (const p of cat.places) if (p.parent) push(kids, p.parent, p);
   for (const a of cat.acts) push(actsAt, a.place ?? "", a);
   for (const t of cat.things) push(thingsAt, t.place ?? "", t);
+  // the acts done with a thing as a whole (a balloon's ride): a row for the thing, or a place on it, offers them
+  const actsOf = new Map(); for (const a of cat.acts) if (a.thing && !/^e_/.test(a.thing)) push(actsOf, a.thing, a);
   const place = (id) => places.get(id) ?? byRef.get(id) ?? null;
   const pathOf = (id) => { const out = []; for (let p = place(id), n = 0; p && n < 12; p = p.parent ? places.get(p.parent) : null, n++) out.push(p.name); return out.reverse(); };
   /** A place and every place inside it. */
@@ -36,7 +38,7 @@ export function indexCatalog(cat) {
   /** `object:<thing>:<verb>`: a thing of a kind that takes that verb by hand. */
   const handVouches = (id) => { const m = /^object:([^:]+):([^:]+)$/.exec(id); return !!m && !!handOf(things.get(m[1]))?.acts.some((a) => a.verb === m[2]); };
   const verbs = new Set(cat.acts.map((a) => a.verb));
-  return { cat, places, things, acts, kids, actsAt, thingsAt, place, pathOf, within, walkId, knows, verbs, handOf };
+  return { cat, places, things, acts, kids, actsAt, thingsAt, actsOf, place, pathOf, within, walkId, knows, verbs, handOf };
 }
 
 const same = (a, b) => a === b || (a == null && b == null) || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9);
@@ -160,7 +162,8 @@ const soulWords = (x) => wordsOf(x, () => ({ name: tokensOf(x.name), id: tokensO
  *  before a place or thing row of the same score. Its name is another Soul's words, so the row is marked untrusted. `here`
  *  is my live place (#2477): a Soul the world offers no go-near to from here gets the walk to it as its act instead. */
 export function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8, states, outline, souls = [] } = {}) {
-  let text = String(words ?? ""), around = null;
+  // "get in the balloon", "climb aboard the punt": boarding, not a place to search inside
+  let text = String(words ?? "").replace(/\b(?:get|climb|hop|step|jump)\s+(?:in|into|inside|on|onto|aboard)\b/gi, "board"), around = null;
   const rel = !inPlace && !near ? RELATION.exec(text) : null;
   let atPlace = null;
   if (rel && tokensOf(rel[1]).length) { const anchor = bestPlace(ix, rel[3], at); if (anchor) { text = rel[1]; if (/^(in|inside|at)$/i.test(rel[2])) inPlace = anchor.id; else near = anchor.id; if (/^at$/i.test(rel[2])) atPlace = anchor; } }
@@ -183,14 +186,16 @@ export function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8
     out.push({ s: s + 3.5, d: dist(ref, x.at), row: { type: "soul", id: x.id, name: x.name, place: x.place ?? null, at: x.at ?? null, doing: x.doing ?? null, metres: dist(ref, x.at), ...soulReach(ix, x, { here, at }), untrusted: true } });
   }
   if (!kind && !verbs.size) for (const p of ix.cat.places) {
-    if (!q.length || !inScope(p.id, p.at)) continue;
+    // a place on a carrier (a basket) is where its carrier is: its own `at` is in the carrier's frame
+    const pAt = (p.of && ix.things.get(p.of)?.at) || p.at;
+    if (!q.length || !inScope(p.id, pAt)) continue;
     // #2274: the full name first, then the longest name the words hold whole, then the rest
     const name = placeWords(p).name, full = name.join(" ") === q.join(" "), inside = nameIn(q, name);
     const s = full ? 100 + score(q, placeWords(p)) : inside ? 50 + inside : score(q, placeWords(p)); if (!s) continue;
     const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
     // #2452: water's row walks to its bank, and says so: the world refuses a walk into the water itself
-    const edge = waterEdge(ix, p), act = p.fixed ? null : ix.walkId(edge ?? p);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    const edge = waterEdge(ix, p), act = p.fixed ? (ix.actsOf.get(p.of ?? "")?.[0]?.id ?? null) : ix.walkId(edge ?? p);
+    out.push({ s: s + 3, d: dist(ref, pAt), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(pAt), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(p.fixed && act ? { label: ix.acts.get(act)?.label } : {}), ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -227,9 +232,12 @@ export function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...offers].sort((a, b) => named(b) - named(a));
     out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
-      ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
+      ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : ix.actsOf.get(t.id)?.length ? { act: ix.actsOf.get(t.id)[0].id, label: ix.actsOf.get(t.id)[0].label } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
+  // one row per act: the balloon, its basket and its ride are one way to fly, the best-ranked row standing for it
+  const acted = new Set();
+  for (let i = 0; i < out.length; i++) { const act = out[i].row.act; if (!act || act.startsWith("walk")) continue; if (acted.has(act)) out.splice(i--, 1); else acted.add(act); }
   const found = out.slice(0, limit).map((x) => (outline && x.row.type === "place" ? { ...x.row, ...outlineOf(ix, x.row.id) } : x.row));
   // #2312: "at the bandstand" is in it, or else around it: the benches that face a bandstand stand outside its floor
   if (atPlace && !found.length) return find(ix, text, { verb, kind, near: atPlace.id, at, here, limit, states, outline, souls });
