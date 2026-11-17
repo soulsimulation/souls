@@ -17,7 +17,8 @@
 //   (whole numbers, amounts that balance), so both things change or neither. An argument that is a thing chosen by a
 //   select (`kind`, nearest to the actor) is chosen here, again at the end; the actor's hand is the god thing it holds.
 //   A move toward an argument with no point (`hold_under`) is a walk to clear ground by it and a short stand there.
-//   The kinds are read from content/kinds and from the rules' own test kinds (the entry format has no amount yet).
+//   The kinds are read from content/kinds, then the rules' own test kinds (the entry format has no amount yet); a
+//   published kind wins. The argument is chosen again at the end (no reservation): the nearest one then is debited.
 // - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list),
 //   reparent, create and remove are new engine only or later tasks; a link has no field in today's def. Interruption
 //   and restart are today's: the receipt fails and nothing is applied.
@@ -58,7 +59,7 @@ function kinds(kind?: string): Record<string, Entry> {
   if (!kindsCache || (kind && !kindsCache[kind] && !missed.has(kind))) {
     if (kindsCache && kind) missed.add(kind);
     kindsCache = {};
-    for (const f of KINDS_DIRS.flatMap(jsonFiles)) { try { const e = JSON.parse(readFileSync(f, 'utf8')); if (e?.format === 'souls-entry/1') kindsCache[e.kind] = e; } catch { /* a broken file is check.mjs's to report */ } }
+    for (const f of KINDS_DIRS.flatMap(jsonFiles)) { try { const e = JSON.parse(readFileSync(f, 'utf8')); if (e?.format === 'souls-entry/1' && !kindsCache[e.kind]) kindsCache[e.kind] = e; } catch { /* a broken file is check.mjs's to report */ } }
   }
   return kindsCache;
 }
@@ -82,8 +83,13 @@ export function entryOf(def: StoredDef | undefined): Entry | null {
 /** Why this adapter cannot carry a form out on today's engine, or null when it can. */
 export function unmapped(form: Form & { takes?: unknown }): string | null {
   if (form.starts !== 'act' || !WHO.has(form.who as string)) return 'not started by anyone\'s act';
+  // the rules do not read `who`: a holder's form is mapped only when its needs check the holding
+  if (form.who === 'holder' && !(form.needs ?? []).some((n) => n.need === 'held_by_actor')) return 'a holder\'s form that does not need the holding';
   // an argument is chosen here only when it is a thing picked by its select, the nearest first (SA-F4a)
-  for (const [, a] of Object.entries((form.takes ?? {}) as Takes)) if (a?.type !== 'thing' || !a.select || (a.select.order ?? 'nearest') !== 'nearest' || (a.select.rank ?? 1) !== 1) return 'an argument chosen otherwise than the nearest thing: a later task';
+  for (const [, a] of Object.entries((form.takes ?? {}) as Takes)) {
+    const sel = a?.select as Record<string, unknown> | undefined;
+    if (a?.type !== 'thing' || !sel || (sel.of ?? 'things') !== 'things' || (sel.in ?? 'here') !== 'here' || (sel.anchor ?? 'me') !== 'me' || (sel.order ?? 'nearest') !== 'nearest' || (sel.rank ?? 1) !== 1) return 'an argument chosen otherwise than the nearest thing: a later task';
+  }
   for (const s of form.steps ?? []) {
     const toward = argName((s as { toward?: unknown }).toward);
     if (s.step === 'move' && s.at === undefined && toward && (form.takes as Takes | undefined)?.[toward]) continue;   // walk by it, stand
@@ -125,7 +131,7 @@ export function createFormsAdapter(h: FormsHost) {
     return [wp.x + (l[0] * c + l[2] * s) * wp.s, wp.y + l[1] * wp.s, wp.z + (-l[0] * s + l[2] * c) * wp.s];
   };
   /** What the form needs and does now, asked of @souls/form-rules as the world: the thing's fields as today's store holds
-   *  them, a body with free hands (holding is a later task) and its effector in the thing's frame (whole millimetres). */
+   *  them, the god thing the body holds in its right hand, the form's argument things, and its effector in the thing's frame (whole millimetres). */
   function ask(t: NonNullable<ReturnType<typeof thing>>, id: string, action: string, bodyId: string, effector: number[], receipt: string): any {
     const args = argsOf(t, id, action, bodyId), kinds: Record<string, Entry> = {}, nodes: Record<string, any> = {};
     for (const n of new Set([id, ...Object.values(args)])) { const x = n === id ? t : thing(n)!; kinds[x.entry.kind] = x.entry; nodes[n] = { kind: x.entry.kind, fields: fieldsOf(x) }; }
