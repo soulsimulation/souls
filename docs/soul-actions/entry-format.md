@@ -93,7 +93,8 @@ list in `packages/form-rules/placements.json`, which the format reads and nothin
 by a selector (a `takes` entry with `select`). `facing` is `{"toward": argument}`, `as_it_was` or `to_wall`; the word `facing`
 turns a thing where it stands, so the position is not touched and no `facing` field is written beside it. A kind with no front
 (a round table) says `geometry.front: "none"`; the default is `"z"`, the front the frame names. `place(thing, placement,
-{anchor, facingAnchor})` decides only what plain data can: the thing may be moved (`fixed` is refused), the anchor is named, a
+{anchor, facingAnchor, node, anchorNode})` decides only what plain data can: the thing may be moved (`fixed` is refused), the
+anchor is named and is another node (`self` is decided by node id, so two chairs of one kind may stand next to each other), a
 front exists where the word needs one (`behind` and `in_front_of` need the anchor's, `facing` and `toward` need the thing's). A
 refusal has a `code` (`no_front`, `no_anchor`, `fixed`, `unsaid`, `self`, `unknown_word`, `unknown_facing`) and names the word and
 the kind. The spot is the engine's choice, recorded (E4); whether it is free and legal is the world's answer. Cases:
