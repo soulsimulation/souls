@@ -60,7 +60,7 @@ export function defOf(entry) {
         : {type: 'number', default: drawn(f, f.default)}]));
   const b = entry.geometry?.bounds_mm;
   // SA-D1a: the looks table rides in the def's make.args, where the page's one drawing function reads it
-  const make = entry.looks?.table ? {...shape.make, args: {...shape.make.args, looks_table: entry.looks.table}} : shape.make;
+  const make = entry.looks?.table ? {...shape.make, args: {...shape.make.args, looks_table: entry.looks.table, looks_units: Object.fromEntries(Object.entries(entry.state ?? {}).filter(([, f]) => f.unit).map(([k, f]) => [k, f.unit]))}} : shape.make;
   return {schema: 'def/1', name, version: 1, description: entry.text?.[entry.card?.text] ?? entry.kind, tags: shape.tags ?? [], form: 'point',
     make, params: shape.params ?? {}, palette: shape.palette ?? {}, state, size: {box: b ? metres(b) : [1, 1, 1]}};
 }
