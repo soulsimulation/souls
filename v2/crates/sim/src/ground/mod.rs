@@ -442,8 +442,16 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         ];
         for (r, y0, y1) in &flat {
             if spans(*y0, *y1, dw.y) && flank.iter().any(|f| inside_convex(r, *f)) {
-                for p in r {
-                    let (_, n) = door.coords(*p);
+                // A box of the door's own wall runs along it. One that meets the opening end-on (a corridor's side
+                // wall starting at the jamb) runs through it, and would make the whole corridor doorway.
+                let cs: Vec<(i64, i64)> = r.iter().map(|p| door.coords(*p)).collect();
+                let span = |f: fn(&(i64, i64)) -> i64| {
+                    cs.iter().map(f).max().unwrap_or(0) - cs.iter().map(f).min().unwrap_or(0)
+                };
+                if span(|c| c.1) > span(|c| c.0) {
+                    continue;
+                }
+                for (_, n) in cs {
                     door.n0 = door.n0.min(n);
                     door.n1 = door.n1.max(n);
                 }

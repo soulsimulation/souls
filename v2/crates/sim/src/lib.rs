@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ground;
+pub mod links;
 
 #[cfg(test)]
 mod tests {
