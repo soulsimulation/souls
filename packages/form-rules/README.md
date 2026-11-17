@@ -31,7 +31,10 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts in Node
 
 `NEEDS` is one closed list, shared with R2: `state` (a field `is` or is `not` a value, or lies within `at_least` and
 `at_most`, whole numbers), `slot_free`, `within_reach` (of a point, by the reach of the move the form's step makes
-there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
+there, compared as squares in big integers; of a `thing` argument the form walks to, met when the thing is in the
+actor's place, since the walk is taken as done), `hand` (`free: true` or `holds: <kind>`), `held_by_actor` (this
+thing, or a `thing` argument), `moves` (a `thing` argument moves `by` `carry` or `push`, read from its kind's
+`motion.how`: `moves_by`, `motion_unsaid`, `needs_souls`, or `no_free_hand` when carrying takes more hands), and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
 overflows). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
@@ -93,7 +96,8 @@ leaves the profile, with the profile's name for the refusal (`simple`, `null`, `
 The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
-to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);
+to zero; `reparent` moves the actor, the thing or a `thing` argument into a slot, the actor's first free hand or
+`here`, loose in the actor's place (holding is a parent);
 `create` makes a thing in a slot, the actor's first free hand or `here`, loose in the place the actor is in (where
 on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the
 actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be

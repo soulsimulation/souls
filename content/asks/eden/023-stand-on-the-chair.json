@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":23,"group":"object","words":"stand on the chair","obvious":2,"things":{"chair":"eden:chair"},"chain":[{"this":"me","form":"stand_on","args":{"spot":"chair"}}]}
