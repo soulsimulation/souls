@@ -134,8 +134,9 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`.
-  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` and needs it within reach: the water comes from
-  a thing in the world, never from a refill the kettle does by itself.
+  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
+  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
+  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`).

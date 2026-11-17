@@ -22,10 +22,9 @@
       },
       "needs": [
         { "need": "held_by_actor" },
-        { "need": "state", "field": "water", "is": "empty" },
-        { "need": "within_reach", "point": { "arg": "from" } }
+        { "need": "state", "field": "water", "is": "empty" }
       ],
-      "steps": [{ "step": "move", "move": "fill", "at": "spout", "toward": { "arg": "from" } }],
+      "steps": [{ "step": "move", "move": "fill", "toward": { "arg": "from" } }],
       "effects": [{ "change": "set", "field": "water", "to": "cold", "event": "filled" }]
     },
     "switch_on": {
