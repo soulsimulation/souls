@@ -1,0 +1,107 @@
+{
+  "format": "souls-look-cases/1",
+  "about": "State (and time) in, where each part is out. A case names a kind of cases/looks/kinds (whose looks.table is used) or carries its own table. Numbers are whole: rotate in millidegrees, slide in millimetres, scale and glow in permille. Never edit a case to make something pass.",
+  "cases": [
+    { "name": "mug_empty", "kind": "looks:mug", "state": { "fullness": 0 }, "expect": { "fill": { "show": false, "scale_permille": [1000, 1, 1000] } } },
+    { "name": "mug_quarter", "kind": "looks:mug", "state": { "fullness": 250 }, "expect": { "fill": { "show": true, "scale_permille": [1000, 250, 1000] } } },
+    { "name": "mug_half", "kind": "looks:mug", "state": { "fullness": 500 }, "expect": { "fill": { "show": true, "scale_permille": [1000, 500, 1000] } } },
+    { "name": "mug_full", "kind": "looks:mug", "state": { "fullness": 1000 }, "expect": { "fill": { "show": true, "scale_permille": [1000, 1000, 1000] } } },
+    { "name": "mug_over_full_is_clamped", "kind": "looks:mug", "state": { "fullness": 1500 }, "expect": { "fill": { "show": true, "scale_permille": [1000, 1000, 1000] } } },
+    { "name": "mug_below_empty_is_clamped", "kind": "looks:mug", "state": { "fullness": -5 }, "expect": { "fill": { "show": false, "scale_permille": [1000, 1, 1000] } } },
+    { "name": "chest_closed", "kind": "looks:chest", "state": { "open": false }, "expect": { "drawer": { "slide_mm": [0, 0, 0] } } },
+    { "name": "chest_open", "kind": "looks:chest", "state": { "open": true }, "expect": { "drawer": { "slide_mm": [0, 0, 280] } } },
+    { "name": "lamp_unlit", "kind": "looks:tablelamp", "state": { "lit": false }, "expect": { "light": { "glow_permille": 0, "tint": "#5d5a50" } } },
+    { "name": "lamp_lit", "kind": "looks:tablelamp", "state": { "lit": true }, "expect": { "light": { "glow_permille": 1000, "tint": "#fff2b0" } } },
+    { "name": "a_field_the_table_does_not_mention_moves_nothing", "kind": "looks:chest", "state": { "open": true, "colour": "red" }, "expect": { "drawer": { "slide_mm": [0, 0, 280] } } },
+    { "name": "a_missing_field_moves_nothing", "kind": "looks:chest", "state": {}, "expect": {} },
+    {
+      "name": "slide_part_way_through_its_time",
+      "table": [{ "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 }, "over_us": 1000000 }],
+      "state": { "open": true }, "prev": { "open": false }, "t_us": 250000,
+      "expect": { "drawer": { "slide_mm": [0, 0, 70] } }
+    },
+    {
+      "name": "slide_arrived_after_its_time",
+      "table": [{ "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 }, "over_us": 1000000 }],
+      "state": { "open": true }, "prev": { "open": false }, "t_us": 2000000,
+      "expect": { "drawer": { "slide_mm": [0, 0, 280] } }
+    },
+    {
+      "name": "slide_back_part_way",
+      "table": [{ "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 }, "over_us": 1000000 }],
+      "state": { "open": false }, "prev": { "open": true }, "t_us": 500000,
+      "expect": { "drawer": { "slide_mm": [0, 0, 140] } }
+    },
+    {
+      "name": "no_time_given_is_the_state_reached",
+      "table": [{ "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 }, "over_us": 1000000 }],
+      "state": { "open": true }, "prev": { "open": false },
+      "expect": { "drawer": { "slide_mm": [0, 0, 280] } }
+    },
+    {
+      "name": "pick_shows_the_part_for_the_choice_and_hides_the_others",
+      "table": [{ "field": "water", "do": "pick", "at": { "cold": "ice", "hot": "steam" } }],
+      "state": { "water": "hot" },
+      "expect": { "ice": { "show": false }, "steam": { "show": true } }
+    },
+    {
+      "name": "pick_with_no_matching_choice_hides_them_all",
+      "table": [{ "field": "water", "do": "pick", "at": { "cold": "ice", "hot": "steam" } }],
+      "state": { "water": "empty" },
+      "expect": { "ice": { "show": false }, "steam": { "show": false } }
+    },
+    {
+      "name": "rotate_a_lid_open",
+      "table": [{ "part": "lid", "field": "open", "do": "rotate", "axis": "x", "at": { "true": -108000, "false": 0 } }],
+      "state": { "open": true },
+      "expect": { "lid": { "rotate_mdeg": [-108000, 0, 0] } }
+    },
+    {
+      "name": "a_negative_amount_truncates_toward_zero",
+      "table": [{ "part": "knob", "field": "turn", "do": "rotate", "axis": "z", "range": [0, 3], "to": [0, -100] }],
+      "state": { "turn": 1 },
+      "expect": { "knob": { "rotate_mdeg": [0, 0, -33] } }
+    },
+    {
+      "name": "two_scales_on_one_part_multiply_and_two_slides_add",
+      "table": [
+        { "part": "p", "field": "a", "do": "scale", "axis": "x", "at": { "true": 500 } },
+        { "part": "p", "field": "a", "do": "scale", "at": { "true": 2000 } },
+        { "part": "p", "field": "a", "do": "slide", "axis": "y", "at": { "true": 30 } },
+        { "part": "p", "field": "a", "do": "slide", "axis": "y", "at": { "true": 12 } }
+      ],
+      "state": { "a": true },
+      "expect": { "p": { "scale_permille": [1000, 2000, 2000], "slide_mm": [0, 42, 0] } }
+    },
+    {
+      "name": "a_part_is_hidden_when_any_show_row_hides_it",
+      "table": [
+        { "part": "p", "field": "a", "do": "show", "at": { "true": 1 } },
+        { "part": "p", "field": "b", "do": "show", "at": { "off": 0, "on": 1 } }
+      ],
+      "state": { "a": true, "b": "off" },
+      "expect": { "p": { "show": false } }
+    },
+    {
+      "name": "a_tint_by_the_nearer_end_of_a_range",
+      "table": [{ "part": "p", "field": "heat", "do": "tint", "range": [0, 100], "to": ["#8899aa", "#cc4422"] }],
+      "state": { "heat": 60 },
+      "expect": { "p": { "tint": "#cc4422" } }
+    },
+    { "name": "kettle_cold_does_not_steam", "kind": "looks:kettle", "state": { "heat": 0}, "expect": { "lid": { "steam_permille": 0}}},
+    { "name": "kettle_at_the_stated_level_does_not_steam", "kind": "looks:kettle", "state": { "heat": 600}, "expect": { "lid": { "steam_permille": 0}}},
+    { "name": "kettle_just_above_the_level_steams_a_little", "kind": "looks:kettle", "state": { "heat": 610}, "expect": { "lid": { "steam_permille": 25}}},
+    { "name": "kettle_at_eighty_steams_half", "kind": "looks:kettle", "state": { "heat": 800}, "expect": { "lid": { "steam_permille": 500}}},
+    { "name": "kettle_boiling_steams_fully", "kind": "looks:kettle", "state": { "heat": 1000}, "expect": { "lid": { "steam_permille": 1000}}},
+    { "name": "kettle_hotter_than_the_range_is_clamped", "kind": "looks:kettle", "state": { "heat": 1300}, "expect": { "lid": { "steam_permille": 1000}}},
+    { "name": "candle_out", "kind": "looks:candle", "state": { "burn": 0}, "expect": { "flame": { "flame_permille": 0}}},
+    { "name": "candle_half", "kind": "looks:candle", "state": { "burn": 500}, "expect": { "flame": { "flame_permille": 500}}},
+    { "name": "candle_over_burning_is_clamped", "kind": "looks:candle", "state": { "burn": 1500}, "expect": { "flame": { "flame_permille": 1000}}},
+    { "name": "planter_seed", "kind": "looks:planter", "state": { "ripeness": 0}, "expect": { "fill": { "growth_permille": 0}}},
+    { "name": "planter_leafy", "kind": "looks:planter", "state": { "ripeness": 500}, "expect": { "fill": { "growth_permille": 2000}}},
+    { "name": "planter_fruiting", "kind": "looks:planter", "state": { "ripeness": 1000}, "expect": { "fill": { "growth_permille": 4000}}},
+    { "name": "planter_past_the_last_stage_is_clamped", "kind": "looks:planter", "state": { "ripeness": 2250}, "expect": { "fill": { "growth_permille": 4000}}},
+    { "name": "steam_follows_a_field_by_choice_not_by_name", "table": [{ "part": "vent", "field": "state", "do": "steam", "at": { "idle": 0, "venting": 800}}], "state": { "state": "venting"}, "expect": { "vent": { "steam_permille": 800}}},
+    { "name": "steam_eases_in_over_its_time", "table": [{ "part": "vent", "field": "heat", "do": "steam", "range": [0, 100], "to": [0, 1000], "over_us": 2000000}], "state": { "heat": 100}, "prev": { "heat": 0}, "t_us": 500000, "expect": { "vent": { "steam_permille": 250}}}
+  ]
+}
