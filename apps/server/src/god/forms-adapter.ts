@@ -29,6 +29,12 @@
 // - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list), create,
 //   remove, a put into a named slot and other placement words are new engine only or later tasks; a link has no field
 //   in today's def. Interruption and restart are today's: the receipt fails and nothing is applied.
+// - Pour and sip (SA-F4d, #2931): the moves `pour` and `consume` of a held thing are today's two verbs, reached by
+//   parameters for any held thing, not by code for cans and cups. A pour toward an argument is mars:watering_can_v1
+//   (stage pour, the right hand: today's pour is right-handed) from the entry's stand point by the target, the grip
+//   placed so the entry's outlet point is over the target, for the move's pour time, with the level after from the
+//   rules' amount. A consume is mars:cup_v1 (stage drink, one sip), the level before and the sip from the rules'
+//   amount. Today's drink draws a mug's pose for any shape. The amounts are applied at the end, as any `set`.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { opSchema, type Op, type StoredDef, type WorldModel } from '@souls/world-compiler';
@@ -48,6 +54,8 @@ const ROOT = resolve(import.meta.dirname, '../../../..');
 const KINDS_DIRS = [join(ROOT, 'content/kinds'), join(ROOT, 'packages/form-rules/cases/kinds')], MOVES_DIR = join(ROOT, 'content/moves');
 /** Moves today's hand can make at a point (a slide is pressed: see the header). */
 const HAND_MOVES = new Set(['press', 'slide']);
+/** Moves of a held thing that today's verbs make by parameters (SA-F4d). */
+const HELD_MOVES = new Set(['pour', 'consume']);
 /** Effects that become changes today's store holds (a reparent is made by today's take and put, SA-F4b). */
 const KEPT = new Set(['set', 'transfer', 'reparent']);
 /** The body's kind (lane A's entry, SA-G3): its forms that move a thing argument are offered on that thing. */
@@ -67,7 +75,7 @@ const LET_GO: Step = { verb: 'mars:let_go_v1', params: {} };
 function jsonFiles(dir: string): string[] {
   try { return readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? jsonFiles(join(dir, e.name)) : e.name.endsWith('.json') ? [join(dir, e.name)] : []); } catch { return []; }
 }
-let kindsCache: Record<string, Entry> | null = null, movesCache: Record<string, { reach_mm: number }> | null = null;
+let kindsCache: Record<string, Entry> | null = null, movesCache: Record<string, { reach_mm: number; phases?: Record<string, number> }> | null = null;
 const missed = new Set<string>();
 /** The published entries by kind, read once (a kind not found is looked for again once, then not until a restart). */
 function kinds(kind?: string): Record<string, Entry> {
@@ -78,10 +86,10 @@ function kinds(kind?: string): Record<string, Entry> {
   }
   return kindsCache;
 }
-function moves(): Record<string, { reach_mm: number }> {
+function moves(): Record<string, { reach_mm: number; phases?: Record<string, number> }> {
   if (!movesCache) {
     movesCache = {};
-    for (const f of jsonFiles(MOVES_DIR)) { try { const m = JSON.parse(readFileSync(f, 'utf8')); if (m?.format === 'souls-move/1') movesCache[m.move] = { reach_mm: m.reach_mm }; } catch { /* move.mjs reports it */ } }
+    for (const f of jsonFiles(MOVES_DIR)) { try { const m = JSON.parse(readFileSync(f, 'utf8')); if (m?.format === 'souls-move/1') movesCache[m.move] = { reach_mm: m.reach_mm, phases: m.phases }; } catch { /* move.mjs reports it */ } }
   }
   return movesCache;
 }
@@ -111,6 +119,13 @@ export function unmapped(form: Form & { takes?: unknown }, offered?: string): st
   for (const s of form.steps ?? []) {
     const toward = argName((s as { toward?: unknown }).toward);
     if (s.step === 'move' && s.at === undefined && toward && (form.takes as Takes | undefined)?.[toward]) continue;   // walk by it, stand
+    if (s.step === 'move' && HELD_MOVES.has(String(s.move))) {
+      // SA-F4d: made with this thing in hand, so the form must need the holding; a pour goes toward an argument thing
+      if (!(form.needs ?? []).some((n) => n.need === 'held_by_actor' && (n as { thing?: unknown }).thing === undefined)) return `the move ${s.move} of a thing not held: a later task`;
+      if (typeof s.at !== 'string') return 'a move at an argument: a later task';
+      if (s.move === 'pour' && !(toward && (form.takes as Takes | undefined)?.[toward])) return 'a pour toward nothing named: a later task';
+      continue;
+    }
     if (s.step === 'move' && !HAND_MOVES.has(String(s.move))) return `the move ${s.move}: a later task`;
     if (s.step === 'move' && typeof s.at !== 'string') return 'a move at an argument: a later task';
     if (s.step === 'walk_to' && typeof (s as { point?: unknown } & typeof s).point !== 'string') return 'a walk to an argument: a later task';
@@ -262,6 +277,7 @@ export function createFormsAdapter(h: FormsHost) {
       let stand: Vec2 | null = null, best = Infinity;
       for (const q of standsOf(of)) { const d = Math.hypot(q[0] - target[0], q[2] - target[2]); if (d < best && clear(q, level)) { best = d; stand = [q[0], q[2]]; } }
       if (stand) walk(stand, target);
+      return !!stand;
     };
     for (const s of form.steps ?? []) {
       if (s.step === 'take' || s.step === 'put') {
@@ -292,6 +308,35 @@ export function createFormsAdapter(h: FormsHost) {
         const ow = M().worldPose(oe), by = h.engine.standableNearV1?.([ow.x, ow.z], level, soul.entityId, 0.4, 16) ?? null;
         if (!by) return { code: 'form.no-room', reason: `There is no room to stand by ${nameOf(other)}.` };
         walk(by, [ow.x, ow.y, ow.z]); steps.push({ verb: 'mars:pose_v1', params: { activity: 'listen', seconds: 2 } }); continue;
+      }
+      if (s.step === 'move' && HELD_MOVES.has(String(s.move))) {
+        // SA-F4d: today's pour and sip, by parameters: the entry's points, the move's time, the rules' amounts
+        const e = all()[id], ph = moves()[String(s.move)]?.phases ?? {};
+        if (e?.support?.kind !== 'in-hand' || e.support.by !== soul.entityId) return { code: 'form.not_held', reason: `${nameOf(id)}: not held.` };
+        const amount = (now.changes as Change[]).find((c) => c.change === 'set' && c.node === id && typeof t.entry.state?.[c.field]?.max === 'number') as Extract<Change, { change: 'set' }> | undefined;
+        const max = amount ? t.entry.state![amount.field].max! : 0, had = amount ? Number(fieldsOf(t)[amount.field] ?? 0) : 0, left = amount ? Number(amount.to) : 0;
+        if (s.move === 'consume') {
+          const from = max > 0 ? Math.min(1, Math.max(0, had / max)) : 1, sip = max > 0 ? Math.min(1, Math.max(0.01, (had - left) / max)) : 0.2;
+          steps.push(LET_GO, { verb: 'mars:cup_v1', params: { item: id, stage: 'drink', face: r3(body.pose.yaw ?? 0), sips: 1, from: r3(from), sip: Math.round(sip * 10000) / 10000 } });
+          continue;
+        }
+        if (e.support.hand !== 'right') return { code: 'form.wrong_hand', reason: `Today's pour is made with the right hand; ${nameOf(id)} is in your left.` };
+        const into = now.input.act.args?.[toward!], te = typeof into === 'string' ? all()[into] : null;
+        if (!te?.pose?.p) return { code: 'form.argument_missing', reason: `There is nothing near to ${action.replace(/_/g, ' ')} into.` };
+        const tp = te.pose.p as Vec3;
+        if (!standBy(into, tp)) {
+          const by = h.engine.standableNearV1?.([tp[0], tp[2]], level, soul.entityId, 0.4, 16) ?? null;
+          if (!by) return { code: 'form.no-room', reason: `There is no room to stand by ${nameOf(into)}.` };
+          walk(by, tp);
+        }
+        // the grip placed so the outlet point is over the target's top, the thing's outlet toward the target
+        const fx = tp[0] - at[0], fz = tp[2] - at[1], fl = Math.hypot(fx, fz) || 1, f: Vec2 = [fx / fl, fz / fl];
+        const grip = Object.values(points).find((q) => (q as { role?: string }).role === 'grip')?.at_mm ?? [0, 0, 0], out = points[s.at as string].at_mm;
+        const reach = Math.hypot(out[0] - grip[0], out[2] - grip[2]) / 1000, top = (thing(into)?.entry as { geometry?: { bounds_mm?: number[] } } | undefined)?.geometry?.bounds_mm?.[1] ?? 100;
+        const hold: Vec3 = [tp[0] - f[0] * reach, tp[1] + top / 1000 + 0.08 - (out[1] - grip[1]) / 1000, tp[2] - f[1] * reach];
+        const moved = had - left, unit = amount ? t.entry.state![amount.field].unit : undefined;
+        steps.push({ verb: 'mars:watering_can_v1', params: { item: id, target: into, stage: 'pour', face: r3(Math.atan2(f[1], f[0])), hold: hold.map(r3), seconds: Math.min(20, Math.max(0.5, Number(ph.pour_us ?? 2500000) / 1e6)), levelAfter: r3(max > 0 ? Math.min(1, Math.max(0, left / max)) : 0), ...(unit === 'g' && moved > 0 ? { litres: r3(moved / 1000) } : {}) } });
+        continue;
       }
       if (s.step === 'wait') { steps.push({ verb: 'mars:pose_v1', params: { activity: 'listen', seconds: Math.min(3600, Math.max(0.5, Number((s as { us?: number }).us ?? 0) / 1e6)) } }); continue; }
       const p = points[s.at as string]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${s.at}.` };
