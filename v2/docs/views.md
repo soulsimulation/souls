@@ -12,7 +12,7 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
    a viewer receives is kept in its place: a projection bug, or a change in who may see what, is fixed by building
    the view again.
 2. **A view is a function of three inputs and names all three:** the log up to a position, the redaction list (T8,
-   `audience.md` once it exists; until then an opaque, growing set of references) and the view's own version. Its
+   [audience.md](audience.md): the references whose words were removed, a growing set) and the view's own version. Its
    output is `{1: node, 2: level, 3: audience, 4: header hash, 5: last sequence, 6: redaction list hash, 7: version,
    8: [record, ...]}`, with 5 left out before the first entry. Field 4 is the header of the bundle that holds the last
    sequence (the reference here builds within one bundle; K4's logs of several bundles move it on). The version is `souls/view/1` over the level's number, name and revision, and for `sampled` its sample

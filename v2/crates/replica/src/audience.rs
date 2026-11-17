@@ -1,0 +1,328 @@
+//! Audience and removing words (contract T8; Engine v2 T8, #2662): who may see a record, text kept apart by
+//! reference, and removal in a history that is never rewritten. The rules are numbered in `v2/docs/audience.md`.
+//!
+//! This is the reference definition, run on the fixtures through T6's harness ([`State`]). The text store here is a
+//! stand-in for K16's; signing in (W1), removal end to end (W7) and who may act (F6) are not here.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::effects::{Refusal, State};
+use crate::encode::{Name, Value, encode};
+use crate::ids::Id;
+use crate::views::{Output, Redactions};
+use crate::world_model::Audience;
+
+type R<T> = Result<T, Refusal>;
+
+fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
+    Err(Refusal {
+        name,
+        detail: detail.into(),
+    })
+}
+
+// --- References ---------------------------------------------------------------------------------------------------
+
+/// The field that makes a record a text reference (rule 4): `{21: id}` and nothing else. No other record uses 21 alone.
+pub const REFERENCE: u64 = 21;
+/// The field a view adds to a reference whose words were removed: `{21: id, 22: 1}`.
+pub const REMOVED: u64 = 22;
+/// The field delivery adds beside a reference, for an audience entitled to the words: `{21: id, 23: words}`.
+pub const WORDS: u64 = 23;
+
+/// The reference a value is, if it is one: `{21: id}`, as the log holds it, or with a view's 22 or delivery's 23.
+pub fn reference(v: &Value) -> Option<Id> {
+    match v {
+        Value::Map(m) if m.keys().all(|k| [REFERENCE, REMOVED, WORDS].contains(k)) => {
+            crate::effects::read_id(m.get(&REFERENCE)?).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Rewrites every reference in `v`, depth first, with `f`. The walk is a loop, never recursion.
+fn rewrite(v: Value, f: &dyn Fn(Id) -> Value) -> Value {
+    // Each frame is a value being rebuilt: its remaining children and the ones done.
+    enum Frame {
+        Array(std::vec::IntoIter<Value>, Vec<Value>),
+        Map(
+            std::collections::btree_map::IntoIter<u64, Value>,
+            Option<u64>,
+            BTreeMap<u64, Value>,
+        ),
+    }
+    fn open(v: Value, f: &dyn Fn(Id) -> Value, stack: &mut Vec<Frame>) -> Option<Value> {
+        if let Some(r) = reference(&v) {
+            return Some(f(r));
+        }
+        match v {
+            Value::Array(a) => {
+                stack.push(Frame::Array(a.into_iter(), Vec::new()));
+                None
+            }
+            Value::Map(m) => {
+                stack.push(Frame::Map(m.into_iter(), None, BTreeMap::new()));
+                None
+            }
+            other => Some(other),
+        }
+    }
+    let mut stack = Vec::new();
+    let mut done = open(v, f, &mut stack);
+    loop {
+        if let Some(d) = done.take() {
+            match stack.last_mut() {
+                None => return d,
+                Some(Frame::Array(_, out)) => out.push(d),
+                Some(Frame::Map(_, key, out)) => {
+                    if let Some(k) = key.take() {
+                        out.insert(k, d);
+                    }
+                }
+            }
+        }
+        let next = match stack.last_mut() {
+            Some(Frame::Array(it, _)) => it.next(),
+            Some(Frame::Map(it, key, _)) => it.next().map(|(k, v)| {
+                *key = Some(k);
+                v
+            }),
+            None => unreachable!("returned above"),
+        };
+        match next {
+            Some(child) => done = open(child, f, &mut stack),
+            None => {
+                done = Some(match stack.pop() {
+                    Some(Frame::Array(_, out)) => Value::Array(out),
+                    Some(Frame::Map(_, _, out)) => Value::Map(out),
+                    None => unreachable!("a frame was open"),
+                });
+            }
+        }
+    }
+}
+
+/// Every reference in `v`.
+pub fn references(v: &Value) -> BTreeSet<Id> {
+    let found = std::cell::RefCell::new(BTreeSet::new());
+    rewrite(v.clone(), &|r| {
+        found.borrow_mut().insert(r);
+        Value::Uint(0)
+    });
+    found.into_inner()
+}
+
+/// `v` with each reference on the redaction list marked removed, `{21: id, 22: 1}` (rule 7). A view's records pass
+/// through this (T7's `Redactions::scrub`).
+pub fn scrub(v: Value, redactions: &Redactions) -> Value {
+    rewrite(v, &|r| {
+        let mut m = BTreeMap::from([(REFERENCE, r.to_value())]);
+        if redactions.contains(r) {
+            m.insert(REMOVED, Value::Uint(1));
+        }
+        Value::Map(m)
+    })
+}
+
+// --- The text store (a stand-in for K16) and removal --------------------------------------------------------------
+
+/// Words kept apart from the log, by reference (rule 4). K16 builds the real one; this one is the fixtures'.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TextStore(BTreeMap<Id, Vec<u8>>);
+
+impl TextStore {
+    /// Keeps `words` under `reference`, a minted id (never a hash of the words, rule 5).
+    pub fn keep(&mut self, reference: Id, words: &str) {
+        self.0.insert(reference, words.as_bytes().to_vec());
+    }
+
+    pub fn words(&self, reference: Id) -> Option<&[u8]> {
+        self.0.get(&reference).map(Vec::as_slice)
+    }
+}
+
+/// Removes words (rule 7): they are deleted from the store and their reference goes on the redaction list. The log is
+/// not touched.
+pub fn remove(reference: Id, store: &mut TextStore, redactions: &Redactions) -> Redactions {
+    store.0.remove(&reference);
+    Redactions::new(redactions.iter().chain([reference]))
+}
+
+/// A view as delivered to an audience entitled to it (rule 8): its records, with the words beside each reference that
+/// is still in the store and not removed. The view itself never holds words.
+pub fn deliver(view: &Output, store: &TextStore, redactions: &Redactions) -> R<Vec<u8>> {
+    let v = rewrite(view.to_value(), &|r| {
+        let mut m = BTreeMap::from([(REFERENCE, r.to_value())]);
+        match store.words(r) {
+            Some(w) if !redactions.contains(r) => {
+                m.insert(WORDS, Value::Bytes(w.to_vec()));
+            }
+            _ => {
+                m.insert(REMOVED, Value::Uint(1));
+            }
+        }
+        Value::Map(m)
+    });
+    encode(&v).or_else(|e| refuse("encoding", e.to_string()))
+}
+
+// --- Audiences, rules and members ---------------------------------------------------------------------------------
+
+/// The kind of an audience node (rule 2).
+pub const AUDIENCE_KIND: &str = "souls:audience";
+/// The kind of a facet: a child holding the fields of a kind whose audience differs from its node's (rule 3).
+pub const FACET_KIND: &str = "souls:facet";
+
+/// SA-F8's four rules (#2947), the one closed list a kind's field or link type names its audience by.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Rule {
+    Everyone,
+    Owner,
+    Linked(Name),
+    Creator,
+}
+
+fn plain(kind: &Name) -> &str {
+    kind.as_str().split('@').next().unwrap_or("")
+}
+
+/// The link type a group audience's members are found by: `souls:owns` for the owner, the named type for `linked`.
+fn group(state: &State, audience: Id) -> Option<(Id, String)> {
+    let n = state.nodes.get(&audience)?;
+    if plain(&n.kind) != AUDIENCE_KIND {
+        return None;
+    }
+    let ty = match n.fields.get(&1) {
+        Some(Value::Uint(1)) => "souls:owns".to_owned(),
+        Some(Value::Uint(2)) => match n.fields.get(&2) {
+            Some(Value::Text(t)) => t.as_str().to_owned(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some((n.parent?, ty))
+}
+
+/// The one resolver (rule 2): the audience a rule names for a thing, as the log stands. `everyone` is everyone; the
+/// creator is the world's creator's own principal id; the owner and `linked` are the thing's audience node for that
+/// rule, which the commit creates as the thing's child before the first record that needs it
+/// (`audience-not-declared` until then).
+pub fn resolve(rule: &Rule, anchor: Id, state: &State, creator: Id) -> R<Audience> {
+    let want = match rule {
+        Rule::Everyone => return Ok(Audience::Everyone),
+        Rule::Creator => return Ok(Audience::Of(creator)),
+        Rule::Owner => "souls:owns".to_owned(),
+        Rule::Linked(t) => t.as_str().to_owned(),
+    };
+    state
+        .nodes
+        .keys()
+        .find(|id| group(state, **id).is_some_and(|(a, ty)| a == anchor && ty == want))
+        .map(|id| Audience::Of(*id))
+        .map_or_else(
+            || {
+                refuse(
+                    "audience-not-declared",
+                    format!("{rule:?} at {}", crate::world_model::show(anchor)),
+                )
+            },
+            Ok,
+        )
+}
+
+/// The principals in an audience as the log stands (rule 1): `None` for everyone. A group audience's members are the
+/// principals at the far end of its links at the thing it belongs to; any other audience id is a principal's own
+/// (a Soul's, a creator's), with that one member.
+pub fn members(audience: Audience, state: &State) -> Option<BTreeSet<Id>> {
+    let Audience::Of(id) = audience else {
+        return None;
+    };
+    let Some((anchor, ty)) = group(state, id) else {
+        return Some(BTreeSet::from([id]));
+    };
+    Some(
+        state
+            .links
+            .values()
+            .filter(|l| plain(&l.ty) == ty && l.ends.contains(&anchor))
+            .flat_map(|l| l.ends)
+            .filter(|e| *e != anchor && !state.nodes.contains_key(e))
+            .collect(),
+    )
+}
+
+/// Whether `principal` sees a record of `audience` (rule 1): membership as the log stood when it was written
+/// (`written`, the state just before the record), never as it stands when read.
+pub fn sees(principal: Id, audience: Audience, written: &State) -> bool {
+    members(audience, written).is_none_or(|m| m.contains(&principal))
+}
+
+// --- Forks --------------------------------------------------------------------------------------------------------
+
+/// A fork made through one principal's audience (rule 9): the checkpoint as that principal sees it. It keeps the
+/// nodes and links it may see, with their ids; no body (T3), nor anything under one; nothing under a node it does not
+/// keep; removed words marked removed. It shares the text store and the redaction list. Nothing in flight, no timer
+/// of a node it drops.
+pub fn fork(state: &State, through: Id, redactions: &Redactions) -> State {
+    let bodies: BTreeSet<Id> = state
+        .links
+        .values()
+        .filter(|l| plain(&l.ty) == "souls:body-of")
+        .flat_map(|l| l.ends)
+        .filter(|e| state.nodes.contains_key(e))
+        .collect();
+    let mut kept: BTreeSet<Id> = BTreeSet::new();
+    // Parents come before children in a walk down from the root, by depth.
+    let mut order: Vec<(u64, Id)> = state
+        .nodes
+        .keys()
+        .map(|id| {
+            let mut d = 0_u64;
+            let mut at = state.nodes.get(id).and_then(|n| n.parent);
+            while let Some(p) = at {
+                d += 1;
+                at = state.nodes.get(&p).and_then(|n| n.parent);
+            }
+            (d, *id)
+        })
+        .collect();
+    order.sort();
+    for (_, id) in order {
+        let n = &state.nodes[&id];
+        let parent_kept = n.parent.is_none_or(|p| kept.contains(&p));
+        if parent_kept && !bodies.contains(&id) && sees(through, n.audience, state) {
+            kept.insert(id);
+        }
+    }
+    let mut out = State::start(state.root, state.nodes[&state.root].kind.clone());
+    out.nodes = kept
+        .iter()
+        .map(|id| {
+            let mut n = state.nodes[id].clone();
+            n.fields = match scrub(Value::Map(n.fields.clone()), redactions) {
+                Value::Map(m) => m,
+                _ => unreachable!("a map stays a map"),
+            };
+            (*id, n)
+        })
+        .collect();
+    out.links = state
+        .links
+        .iter()
+        .filter(|(_, l)| {
+            sees(through, l.audience, state)
+                && l.ends.iter().all(|e| {
+                    kept.contains(e) || !state.nodes.contains_key(e) && !bodies.contains(e)
+                })
+        })
+        .map(|(i, l)| (*i, l.clone()))
+        .collect();
+    out.timers = state
+        .timers
+        .iter()
+        .filter(|(_, t)| kept.contains(&t.node))
+        .map(|(i, t)| (*i, t.clone()))
+        .collect();
+    out.time = state.time.clone();
+    out
+}

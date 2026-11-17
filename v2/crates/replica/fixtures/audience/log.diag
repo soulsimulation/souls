@@ -1,0 +1,49 @@
+# The audience fixtures' log (Engine v2 T8, #2662, v2/docs/audience.md), under header.diag. Ids are [scope, counter]:
+# the world's ee..ee, Souls' dd..dd, creator X's principal 77..77, creator Y's 88..88, text references cc..cc. Words
+# are never here: each is a reference {21: id}; the words are in the test's stand-in for K16's store.
+# Layout as in fixtures/effects/0-base.diag.
+{
+  1: h'1220a8e3a244e019393bb38f933ff1913d0b4f5459efa0909b6185d1184a41d59f15',
+  2: [
+    {1: 0, 2: 0, 3: {1: 3}, 4: {1: 3}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],    # the world starts
+     10: [{1: 1, 2: 0, 3: 1763337600000000, 4: [1, 1]}, {1: 2, 2: 0, 3: 0, 4: 20}, {1: 3, 2: 0, 3: 0, 4: [60000000, 130]}]},
+    {1: 1, 2: 0, 3: {1: 3}, 4: {1: 2, 2: [h'77777777777777777777777777777777', 1]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],   # creator X furnishes
+     7: [
+       {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: "souls:room@12201891c9af912d72fad5e13fc896373e2a41d9c45fd82f51e1d6c081c2d776796e",
+        4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0], 3: 0}}, 5: {1: 1}, 6: {}},
+       {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], 3: "souls:body@1220ee1ad75a34f067112ef6d2a095fe5bd3e121a75611a1a95ba85198efcb131cb2",
+        4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [2000000, 0, 1000000], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}}, 5: {1: 1}, 6: {}},
+       {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 3], 3: "souls:body-of", 4: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], [h'dddddddddddddddddddddddddddddddd', 100]], 5: 0, 6: {1: 1}},
+       {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: "souls:crate@122090fbc4c3f786f2765b16b6014480381b4618c4ff6a429d4873ef92cf68440426",
+        4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [-1000000, 0, 2000000], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}}, 5: {1: 1}, 6: {}},
+       {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5], 3: "souls:key@1220781d89e0ae5ff74f79e61f020201f2128268af10ffa77355868f6c8497442ae1",
+        4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [3000000, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}}, 5: {1: 1}, 6: {1: 0}}
+     ]},
+    {1: 2, 2: 0, 3: {1: 3}, 4: {1: 2, 2: [h'77777777777777777777777777777777', 1]}, 5: {1: 2, 2: [h'77777777777777777777777777777777', 1]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1],   # X's private note: X's own audience
+     7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6], 3: "souls:key@1220781d89e0ae5ff74f79e61f020201f2128268af10ffa77355868f6c8497442ae1",
+          4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [0, 0, 1000000], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}}, 5: {1: 2, 2: [h'77777777777777777777777777777777', 1]}, 6: {1: 1}}]},
+    {1: 3, 2: 0, 3: {1: 3}, 4: {1: 2, 2: [h'88888888888888888888888888888888', 1]}, 5: {1: 2, 2: [h'88888888888888888888888888888888', 1]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1],   # Y's private note: Y's own audience
+     7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7], 3: "souls:key@1220781d89e0ae5ff74f79e61f020201f2128268af10ffa77355868f6c8497442ae1",
+          4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [0, 0, 2000000], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}}, 5: {1: 2, 2: [h'88888888888888888888888888888888', 1]}, 6: {1: 2}}]},
+    {1: 4, 2: 1000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 1]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # Soul 100 sits down to play
+     7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], 3: "souls:audience@122093b5149dc0f465aa77332c6e84486ff7ad6ef18a4626fcd3ca35018511d9711c",   # the table's players, as an audience
+          4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 0}}, 5: {1: 1}, 6: {1: 2, 2: "souls:player"}},
+         {1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9], 3: "souls:player", 4: [[h'dddddddddddddddddddddddddddddddd', 100], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 5: 1, 6: {1: 1}}]},
+    {1: 5, 2: 1100000, 3: {1: 2, 2: 4}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # the players' hand: a facet of the table
+     7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10], 3: "souls:facet@12205c58627871a614fe90a68b2db2c33cdf6aba610ccf97271b1004123bc7bbce04",
+          4: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 0}}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: {1: 7}}]},
+    {1: 6, 2: 2000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 2]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5],   # Soul 100 writes on the board
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5], 3: 2, 4: {21: [h'cccccccccccccccccccccccccccccccc', 1]}}],
+     8: [{1: "souls:wrote", 3: [0]}]},
+    {1: 7, 2: 3000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 3]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2],   # it says something aloud: public, a short reach
+     7: [],
+     8: [{1: "souls:said", 2: {1: {21: [h'cccccccccccccccccccccccccccccccc', 2]}, 2: 3000}}]},
+    {1: 8, 2: 4000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 4]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 2, 2: [h'dddddddddddddddddddddddddddddddd', 101]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2],   # and whispers to Soul 101: an audience of one
+     7: [],
+     8: [{1: "souls:said", 2: {1: {21: [h'cccccccccccccccccccccccccccccccc', 3]}, 2: 500}}]},
+    {1: 9, 2: 5000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 5]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 101]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],   # Soul 101 joins the table
+     7: [{1: 5, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 11], 3: "souls:player", 4: [[h'dddddddddddddddddddddddddddddddd', 101], [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]], 5: 1, 6: {1: 1}}]},
+    {1: 10, 2: 6000000, 3: {1: 2, 2: 9}, 4: {1: 3}, 5: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8]}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10],   # a card is dealt from the hand
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10], 3: 1, 4: 6}]}
+  ]
+}

@@ -133,8 +133,8 @@ fn name(text: &str) -> Value {
 
 // --- Inputs: the redaction list and the log's position ------------------------------------------------------------
 
-/// The redaction list (rule 2): the references whose words have been removed. Until T8 (#2662) a reference is opaque
-/// here, an id; T8 says what one is and how a view leaves it out. The list only grows.
+/// The redaction list (rule 2): the references whose words have been removed. A reference is T8's (`{21: id}`,
+/// `v2/docs/audience.md`). The list only grows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Redactions(BTreeSet<Id>);
 
@@ -154,10 +154,14 @@ impl Redactions {
         Hash::of(Purpose::Redactions, &bytes)
     }
 
-    /// The record a view writes, with every redacted reference left out. T8 fills this in; until then no record
-    /// holds a reference and it returns the record as it is.
+    /// The references, in id order.
+    pub fn iter(&self) -> impl Iterator<Item = Id> + '_ {
+        self.0.iter().copied()
+    }
+
+    /// The record a view writes, with every reference on the list marked removed (T8, `v2/docs/audience.md`).
     pub fn scrub(&self, record: Value) -> Value {
-        record
+        crate::audience::scrub(record, self)
     }
 }
 
