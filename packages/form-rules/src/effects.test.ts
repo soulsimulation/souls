@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { apply, effects, type Done, type State } from './effects.ts';
+import { apply, effects, outsideProfile, type Done, type State } from './effects.ts';
 import { generate } from './generate.ts';
 import { CASES, loadEffectCases, loadKinds, mismatches, same } from './load.ts';
 
@@ -76,4 +76,58 @@ test('amounts that do not sum to zero are refused, and a batch applies whole or 
   assert.deepEqual(apply(state, result([out, { change: 'set', node: 'c1', field: 'water_g', n: 1, to: 6, by: 6 }])), { ok: false, reason: 'amounts_do_not_balance', change: 0 });
   assert.deepEqual(apply(state, result([out, { change: 'set', node: 'gone', field: 'water_g', n: 1, to: 5, by: 5 }])), { ok: false, reason: 'no_such_node', change: 1 });
   assert.deepEqual(state.nodes.k1.fields, { water_g: 10 }, 'the first change of a refused batch is not applied');
+});
+
+// Every result, done step by step: the hand-written cases' acts and 1,000 generated ones.
+function results(): Done[] {
+  const out: Done[] = [];
+  for (const [, c] of cases) {
+    let state: State = structuredClone(c.state);
+    for (const step of c.do) {
+      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt });
+      const once = apply(state, result);
+      if (result.verdict === 'yes' && 'changes' in result && once.ok) (out.push(result), (state = once.state));
+    }
+  }
+  for (const [k, input] of generate(kinds, 1000, 2844).entries()) {
+    const result = effects({ kinds, act: input.act, state: input.state, receipt: `g${k}` });
+    if (result.verdict === 'yes' && 'changes' in result) out.push(result);
+  }
+  return out;
+}
+
+test('T0 values: every change, event and timer of every result is inside Engine v2\'s encoding profile', () => {
+  const all = results();
+  assert.ok(all.some((r) => r.changes.some((c) => c.change === 'set' && typeof c.to === 'number' && c.n === 2 && c.field === 'heating')), 'a flag is set');
+  for (const r of all) {
+    for (const [what, list] of [['change', r.changes], ['event', r.events], ['timer', r.timers]] as const) {
+      list.forEach((item, k) => assert.equal(outsideProfile(item), null, `${r.receipt} ${what} ${k}: ${JSON.stringify(item)}`));
+    }
+  }
+});
+
+test('T0 values: a value outside the profile is refused by name, and apply refuses it', () => {
+  for (const [value, refused] of [[true, 'simple'], [false, 'simple'], [undefined, 'simple'], [null, 'null'], [0.5, 'float'], [2 ** 53, 'unsafe-integer'], ['two words', 'text-not-name'], ['é', 'text-not-name']] as const) {
+    assert.deepEqual(outsideProfile({ to: value }), { at: '/to', refused }, String(value));
+  }
+  assert.equal(outsideProfile({ to: { text: 't_ethics' }, by: -5, n: 9007199254740991, big: 2n ** 63n }), null);
+  const state: State = { actor: 'b1', nodes: { k1: { kind: 'eden:kettle', fields: { heating: 0 } } } };
+  const result: Done = { verdict: 'yes', receipt: 'x', actor: 'b1', changes: [{ change: 'set', node: 'k1', field: 'heating', n: 2, to: true }], events: [], timers: [] };
+  assert.deepEqual(apply(state, result), { ok: false, reason: 'simple', change: 0, at: '/to' });
+  assert.deepEqual(apply(state, { ...result, changes: [], events: [{ event: 'eden:on', node: 'k1', changes: [], extra: null } as never] }), { ok: false, reason: 'null', event: 0, at: '/extra' });
+});
+
+test('T0 values: a missing text argument is left out, and a set without a value clears the field', () => {
+  const state: State = { actor: 'b1', nodes: { room: { loose: ['b1', 'l1'] }, l1: { kind: 'eden:lecture', fields: { topic: { text: 't_old' } } }, b1: { hands: {} } } };
+  const result = effects({ kinds, act: { this: 'l1', form: 'begin', args: {} }, state, receipt: 'r1' });
+  assert.equal(result.verdict, 'yes');
+  const set = (result as Done).changes[1];
+  assert.deepEqual(set, { change: 'set', node: 'l1', field: 'topic', n: 2 });
+  const after = apply(state, result);
+  assert.ok(after.ok);
+  assert.deepEqual(after.ok && after.state.nodes.l1.fields, { running: 1 });
+});
+
+test('event names are namespace:name, the declaring kind\'s namespace before the name the entry writes', () => {
+  for (const r of results()) for (const e of r.events) assert.match(e.event, /^[a-z0-9_]+:[a-z0-9_]+$/, e.event);
 });
