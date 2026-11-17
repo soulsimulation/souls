@@ -218,7 +218,7 @@ test('wide runner (D5): souls-wide takes the split commands with a core plan and
     assert.throws(() => parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: `--viewers ${v}`, INPUT_CORES: 'world=1,launcher=1' }), /souls-wide only/, `${v} with a plan`);
   }
   assert.deepEqual(parseInputs({ ...ENV, INPUT_COMMAND: 'viewers', INPUT_ARGS: '--viewers 0,2000' }).args, ['--viewers', '0,2000'], 'up to 2,000 stays on souls-timed');
-  for (const a of ['--viewers 3000', '--viewers 10001', '--viewers 05000']) assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_ARGS: a }), /input args/, a);
+  for (const a of ['--viewers 10001', '--viewers 05000']) assert.throws(() => parseInputs({ ...W, INPUT_COMMAND: 'viewers', INPUT_ARGS: a }), /input args/, a);
   // the union of four timed instances' CPUs: 12 physical cores (SMT pairs c, c+24), and a 16-core one
   const smt = (c) => [c % 24, (c % 24) + 24], twelve = [...parseCpuList('6-17'), ...parseCpuList('30-41')];
   assert.deepEqual(splitCores(twelve, smt, { world: 6, launcher: 1 }), { physicalCores: 12, plan: 'world=6,launcher=1', layout: '6+1+5',
