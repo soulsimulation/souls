@@ -27,7 +27,10 @@ format's whole vocabulary; this page explains them. Examples: [the kettle](../..
 3. **A relation is a link, never an id in a field.** A field cannot hold a Soul, body or node, and no value may be a
    Soul's id. Who speaks, who owns, whose turn it is: a typed link (contract T2).
 4. **Human words go by reference.** Every phrase lives in the entry's `text` table and is named by its key; a string
-   with a space anywhere else is refused (contract T8).
+   with a space anywhere else is refused (contract T8). A `text` state field holds a reference to words kept
+   elsewhere, so they can be removed later without rewriting history: its default is `null`, and a form sets it only
+   from a `text` argument (`{"arg": ...}`), never from words written in the entry or from another type. Words the
+   entry's author wrote (a card, a form's label, a refusal's wording) are part of the kind and stay in `text`.
 5. **Closed lists.** Owners, field types, audiences, point roles, needs, steps and changes are closed lists. The
    task that first needs a new member adds it, with its proof.
 6. **No time of day and no waiting for a condition.** A `wait` step is a pause of stated microseconds. Opening hours
@@ -44,13 +47,16 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 0 | `format` | `souls-entry/1` |
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
-| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference), `default`, `audience` |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`), `most`, `audience` |
+| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`), `default`, `audience` (a rule) |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below) |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm` |
-| 7 | `geometry` | `bounds_mm` |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
-| 20 | `looks` | How it looks; its table is SA-D1a's |
+| 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
+| 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 12 | (reserved) | `reactions` (SA-F15) |
+| 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
@@ -58,9 +64,53 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
-**Audience** is a rule resolved to an audience id when a record is written: `public`, `holder`, `owner`, `members`
-(those linked to the node) or `creator`. Point and slot names share one namespace, so a form's argument of type
+**Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
+[#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
+the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
+`from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
+end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+`eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
+
+A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
+whole on every change, Engine v2 F11, [#2774](https://github.com/soulsimulation/souls/issues/2774)), `of` (one to eight
+named fields, each `bool`, `enum`, `int` or `duration`; never text and never an id, so a Soul cannot be inside a
+record), an optional `key` (a field of the record; the rules add, remove or set one item by it) and an empty default.
+`stateAtMax(entry)` counts a kind's state with every list full and every child kind at its bound; the check gate uses
+it rather than the empty default.
+
+**Audience** is a rule on every state field and link type, written out (there is no implied default), from one closed
+list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"rule": "owner"}` (the thing's owner),
+`{"rule": "linked", "link": "<link type>"}` (whoever is linked to this thing by that link of this kind: its members,
+the Soul whose turn it is) and `{"rule": "creator"}` (the world's creator). A rule names a link type, never a Soul.
+A kind may add a `closed` section (9), `{"audience": rule, "fields": ["stock"]}`: the fields it names, and its
+children, take the container's own audience until it is opened (Engine v2 E22,
+[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own.
+Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
+
+**Points, slots and the thing's own frame** (SA-D3, [#2855](https://github.com/soulsimulation/souls/issues/2855);
+feeds Engine v2 K3, E2, E3 and B3). Every place is whole millimetres in the thing's own frame: the origin at the centre
+of its footprint on the ground, x to its right, y up, z to its front. `bounds_mm` is [width, height, depth], so x runs
+from -width/2 to width/2, y from 0 to height, z from -depth/2 to depth/2. A point is a name, a `role` (`grip`, `contact`
+for a button or switch, `outlet` for a spout, `stand` for where a body stands), a position and an optional `yaw_mdeg`.
+A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
+may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
+declares its bounds.
+
+A thing slot may list `kinds` it admits (`"kinds": ["eden:cup"]`); a slot that lists none admits any thing, and a body's
+slot lists none. Today's slot kinds and heights (seat, bed, surface, stand, hang, shelf) are carried as they are. Engine
+v2 E3 (#2777) reads surfaces and shapes to find where a body can rest, so an entry need not declare a seat for every
+place a body might perch.
+
+A row of places names the slots in it with `row` and `place` (1 at the first end, counting up), and the two ends with
+`end`: the lowest place says `"end": "first"` and the highest `"end": "last"`, so that "the stool on the end" and "the
+back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
+
+`looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
+`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
+`look.mjs` converts to metres only when it draws.
 
 ## A form
 
@@ -68,8 +118,8 @@ Not defined yet, and refused with the name of the task that adds each: `reaction
 "switch_on": {
   "who": "anyone",
   "starts": "act",
-  "needs": [{ "need": "state", "field": "water", "not": "empty" }, { "need": "within_reach", "point": "switch" }],
-  "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+  "needs": [{ "need": "state", "field": "water", "not": "empty" }, { "need": "within_reach", "point": "button" }],
+  "steps": [{ "step": "move", "move": "press", "at": "button" }],
   "effects": [{ "change": "timer", "form": "boiled", "after_us": 150000000, "event": "boil_started" }]
 }
 ```
@@ -161,6 +211,28 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
   members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
   are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
+
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
 
 ## The hash, provisional
 
