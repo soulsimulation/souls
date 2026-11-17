@@ -27,7 +27,10 @@ format's whole vocabulary; this page explains them. Examples: [the kettle](../..
 3. **A relation is a link, never an id in a field.** A field cannot hold a Soul, body or node, and no value may be a
    Soul's id. Who speaks, who owns, whose turn it is: a typed link (contract T2).
 4. **Human words go by reference.** Every phrase lives in the entry's `text` table and is named by its key; a string
-   with a space anywhere else is refused (contract T8).
+   with a space anywhere else is refused (contract T8). A `text` state field holds a reference to words kept
+   elsewhere, so they can be removed later without rewriting history: its default is `null`, and a form sets it only
+   from a `text` argument (`{"arg": ...}`), never from words written in the entry or from another type. Words the
+   entry's author wrote (a card, a form's label, a refusal's wording) are part of the kind and stay in `text`.
 5. **Closed lists.** Owners, field types, audiences, point roles, needs, steps and changes are closed lists. The
    task that first needs a new member adds it, with its proof.
 6. **No time of day and no waiting for a condition.** A `wait` step is a pause of stated microseconds. Opening hours
