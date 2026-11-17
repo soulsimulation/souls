@@ -32,7 +32,9 @@ const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() :
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
 const scalar = (v: unknown) => v === null || typeof v === 'boolean' || typeof v === 'string' || whole(v);
 const triggerDef = (on: string) => (LISTS.triggers as Record<string, { takes: string[]; carries_value: boolean; fields?: string[] }>)[on];
-const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// A timed value's numbers may be big integers (SA-F5a): compared by value, a safe one equal to its number.
+const plain = (_k: string, x: unknown) => (typeof x === 'bigint' ? (x >= BigInt(Number.MIN_SAFE_INTEGER) && x <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(x) : { big: String(x) }) : x);
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a, plain) === JSON.stringify(b, plain);
 const isTriggerValue = (v: unknown) => !!v && typeof v === 'object' && sameValue(v, LISTS.trigger_value);
 
 /** What one cause makes the rules do. The state is as it was before the cause. Never throws: bad data is `bad_input`. */
@@ -141,9 +143,10 @@ export function react(input: { kinds: Kinds; state: ReactState; cause: Cause; re
         } else if (e.change === 'rate') {
           const stored = old as { per_s?: unknown };
           if (!whole(e.per_s) || !stored || typeof stored !== 'object') return bad('not_timed', { node: t, field: e.field });
-          if (stored.per_s === e.per_s) continue;
+          if (sameValue(stored.per_s, e.per_s)) continue;
           const settled = valueAt(def, stored, state.now_us);
-          if (typeof settled !== 'number') return bad(settled.bad, { node: t, field: e.field });
+          // SA-F5a's contract: a whole number (a number when safe, else a big integer), or a refusal `{bad}`.
+          if (typeof settled === 'object') return bad(settled.bad, { node: t, field: e.field });
           to = { value: settled, per_s: e.per_s, set_us: state.now_us };
         } else return bad('unknown_effect', { change: e.change ?? null, rule: f.rule });
         if (sameValue(old, to)) continue;

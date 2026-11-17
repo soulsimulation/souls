@@ -33,121 +33,6 @@
  },
  "batches": [
   {
-   "note": "A real campus swimming pond with a graded shore; common physical fixture in both semantic test arms.",
-   "ops": [
-    {
-     "op": "place",
-     "def": "core/pond@1",
-     "name": "campus-swimming-pond",
-     "params": {
-      "level": -0.2,
-      "depth": 2.6,
-      "edge": 6
-     },
-     "shape": {
-      "area": [
-       [
-        -34,
-        -20
-       ],
-       [
-        -34.341,
-        -17.929
-       ],
-       [
-        -35.34,
-        -16
-       ],
-       [
-        -36.929,
-        -14.343
-       ],
-       [
-        -39,
-        -13.072
-       ],
-       [
-        -41.412,
-        -12.273
-       ],
-       [
-        -44,
-        -12
-       ],
-       [
-        -46.588,
-        -12.273
-       ],
-       [
-        -49,
-        -13.072
-       ],
-       [
-        -51.071,
-        -14.343
-       ],
-       [
-        -52.66,
-        -16
-       ],
-       [
-        -53.659,
-        -17.929
-       ],
-       [
-        -54,
-        -20
-       ],
-       [
-        -53.659,
-        -22.071
-       ],
-       [
-        -52.66,
-        -24
-       ],
-       [
-        -51.071,
-        -25.657
-       ],
-       [
-        -49,
-        -26.928
-       ],
-       [
-        -46.588,
-        -27.727
-       ],
-       [
-        -44,
-        -28
-       ],
-       [
-        -41.412,
-        -27.727
-       ],
-       [
-        -39,
-        -26.928
-       ],
-       [
-        -36.929,
-        -25.657
-       ],
-       [
-        -35.34,
-        -24
-       ],
-       [
-        -34.341,
-        -22.071
-       ]
-      ]
-     }
-    }
-   ]
-  },
-  {
    "note": "the campus buildings (Mimos, the Chiba kitchen and dining hall, the showers as Gene corrected them; Chiba, Dojo, Tool camp, Freeside, the west racks)",
    "group": "campus",
    "ops": [
@@ -12562,7 +12447,7 @@
      "id": "water-tank",
      "about": {
       "title": "Campus Water Tank",
-      "what": "A storage tank serving the campus garden area. This is stored water infrastructure, distinct from the open swimming pond.",
+      "what": "A storage tank serving the campus garden area. This is stored water infrastructure.",
       "aliases": [
        "storage tank",
        "water storage"
@@ -12660,24 +12545,6 @@
       "role": "part",
       "in": "mimos",
       "salience": 0
-     }
-    },
-    {
-     "op": "set",
-     "id": "campus-swimming-pond",
-     "about": {
-      "title": "Campus Swimming Pond",
-      "what": "A body of water beside the main campus, provided for swimming. Approach its bank before entering the water; it is distinct from the stored water tank.",
-      "aliases": [
-       "water",
-       "swimming pond",
-       "campus pond",
-       "lake",
-       "body of water"
-      ],
-      "kind": "pond",
-      "role": "landmark",
-      "salience": 3
      }
     },
     {
@@ -13261,7 +13128,7 @@
       "about": {
        "title": "Mars College",
        "what": "A desert campus for shared study, art, making and communal life. Chiba hosts presentations; Mimos offers café, study and tea spaces; the kitchen, workshops and living compounds support everyday activity.",
-       "tour": "Begin with Chiba for an auditorium presentation or gallery visit, Mimos for coffee and a seated conversation, or the campus kitchen for the dining hall. Tool Camp combines workbenches and a reading corner; Freeside and CoLab form the living and workshop compound. The Dojo is for practice and movement. For a swim choose the Campus Swimming Pond, not the storage tank. The old tire track is an outdoor landmark beyond the main buildings."
+       "tour": "Begin with Chiba for an auditorium presentation or gallery visit, Mimos for coffee and a seated conversation, or the campus kitchen for the dining hall. Tool Camp combines workbenches and a reading corner; Freeside and CoLab form the living and workshop compound. The Dojo is for practice and movement. The old tire track is an outdoor landmark beyond the main buildings."
       }
      }
     }
