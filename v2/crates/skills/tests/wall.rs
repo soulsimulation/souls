@@ -118,6 +118,16 @@ fn a4_a_skill_that_reads_a_clock_or_keeps_a_global_fails_the_scan_by_name() {
             "skill-uses-hash-order",
         ),
         (
+            "hides std behind an alias",
+            "use std as s;\npub fn e() -> bool { s::env::var(\"X\").is_ok() }",
+            "skill-reaches-out",
+        ),
+        (
+            "after a byte raw string",
+            "pub fn b() -> &'static [u8] { br\"\\\" }\nstatic mut X: u64 = 0;",
+            "skill-keeps-global",
+        ),
+        (
             "names the state harness",
             "use replica::effects::{State};",
             "skill-names-state",

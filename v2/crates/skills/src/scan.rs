@@ -28,10 +28,7 @@ pub fn code(src: &str) -> String {
             (i + 2..c.len().saturating_sub(1))
                 .find(|j| c[*j] == '*' && c[*j + 1] == '/')
                 .map_or(c.len(), |j| j + 2)
-        } else if at(0) == 'r'
-            && (at(1) == '"' || at(1) == '#')
-            && (i == 0 || !c[i - 1].is_alphanumeric())
-        {
+        } else if at(0) == 'r' && (at(1) == '"' || at(1) == '#') && raw_start(&c, i) {
             let hashes = (i + 1..c.len()).take_while(|j| c[*j] == '#').count();
             let open = i + 1 + hashes;
             if c.get(open) == Some(&'"') {
@@ -76,6 +73,16 @@ pub fn code(src: &str) -> String {
     out
 }
 
+/// Whether the `r` at `i` starts a raw string: alone, or after a byte or C string's `b` or `c`.
+fn raw_start(c: &[char], i: usize) -> bool {
+    let word = |k: usize| c[k].is_alphanumeric() || c[k] == '_';
+    match i {
+        0 => true,
+        1 => !word(0) || c[0] == 'b' || c[0] == 'c',
+        _ => !word(i - 1) || ((c[i - 1] == 'b' || c[i - 1] == 'c') && !word(i - 2)),
+    }
+}
+
 /// The tokens of code: words, and each other non-space character on its own.
 fn tokens(code: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -114,6 +121,7 @@ fn rule(t: &[String], i: usize) -> Option<(&'static str, String)> {
         "env" | "fs" | "net" | "process" | "thread" if std_path => {
             Some(("skill-reaches-out", format!("std::{w}")))
         }
+        "std" if next(1) == "as" => Some(("skill-reaches-out", "use std as".into())),
         "static" => Some(("skill-keeps-global", "static".into())),
         "thread_local" | "lazy_static" if next(1) == "!" => {
             Some(("skill-keeps-global", format!("{w}!")))

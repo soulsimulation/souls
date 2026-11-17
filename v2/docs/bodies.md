@@ -26,7 +26,8 @@ hatch (F8) are not here.
    instance that holds it or blocks its class gives way if it names that class in what cancels it, and otherwise
    refuses (`resource-held`, `resource-blocked`): cancelling beats blocking. A new skill that blocks a class another
    instance holds cancels that instance the same way, or is refused (`resource-blocked`); a sit never starts under a
-   walk that goes on. Also `resource-missing` (the family has none) and `instance-duplicate`. Several skills run at
+   walk that goes on. Each resource is judged on its own: an instance cancelled for one claim still refuses another
+   claim on a class it does not give way to. Also `resource-missing` (the family has none) and `instance-duplicate`. Several skills run at
    once on one body when their claims do not meet.
 5. **A joint activity claims on several bodies, all or none.** Every body is planned before any starts, so a refusal
    on one body names it and changes no body.
@@ -52,7 +53,8 @@ hatch (F8) are not here.
    literals blanked, refuses them by name: `skill-reads-clock` (`std::time`, `Instant`, `SystemTime`, `UNIX_EPOCH`),
    `skill-keeps-global`, `skill-reaches-out` (`std::env`, `fs`, `net`, `process`, `thread`), `skill-uses-hash-order`
    (`HashMap`, `HashSet`, `RandomState`), `skill-names-state` (the fixtures' harness) and `skill-allows-unsafe` (a
-   crate root without the `forbid`). A name reached through a re-export or a macro gets past a scan of text.
+   crate root without the `forbid`); `use std as` counts as reaching out. A name reached through a re-export or a
+   macro gets past a scan of text.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
@@ -83,6 +85,7 @@ hatch (F8) are not here.
 - **An end that does not release.** A cancelled walk keeps the legs, and the body is stuck.
 - **A skill inside `sim`, or a `pub(crate)` door.** Inside one crate a later `pub(crate)` reopens state silently; a
   crate boundary cannot.
+- **A pointer's address in a skill** (`&x as *const u8 as usize`). It differs from run to run; no scan sees it.
 - **A static, a thread-local or a clock in a skill.** Two runs of one log would differ; the scan catches the ones the
   compiler allows.
 - **A skill's progress stored as state.** A restart would resume a half-step against a changed world.
