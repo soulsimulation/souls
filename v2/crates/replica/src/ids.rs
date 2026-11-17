@@ -195,7 +195,7 @@ impl Hash {
     /// The hash of `stored` bytes for `purpose`: SHA-256 over the label (one profile text item) and then the bytes.
     pub fn of(purpose: Purpose, stored: &[u8]) -> Hash {
         let label = Name::new(purpose.label()).expect("labels are names");
-        let mut input = encode(&Value::Text(label));
+        let mut input = encode(&Value::Text(label)).expect("a label is one flat item");
         input.extend_from_slice(stored);
         Hash(sha256(&input))
     }
@@ -483,15 +483,19 @@ fn name_one(
             }
         }
     }
-    let meaning = encode(&Value::Map(meaning));
+    let encoded =
+        |v: Value| encode(&v).map_err(|e| KindRefusal::Source(format!("{}: {e}", kind.name)));
+    let meaning = encoded(Value::Map(meaning))?;
     let hash = Hash::of(Purpose::Kind, &meaning);
     let beside: BTreeMap<u64, Value> = kind
         .sections
         .range(BESIDE_FROM..)
         .map(|(k, v)| (*k, v.clone()))
         .collect();
-    let beside =
-        (!beside.is_empty()).then(|| Hash::of(Purpose::KindBeside, &encode(&Value::Map(beside))));
+    let beside = match beside.is_empty() {
+        true => None,
+        false => Some(Hash::of(Purpose::KindBeside, &encoded(Value::Map(beside))?)),
+    };
     named.insert(
         kind.name.clone(),
         KindName {
@@ -588,7 +592,7 @@ pub fn ids_goldens() -> String {
         ("version", version.to_value()),
         ("fork-then-travel-back", world),
     ] {
-        let bytes = encode(&value);
+        let bytes = encode(&value).expect("fixture values are shallow");
         let hash = Hash::of(Purpose::Fixture, &bytes);
         lines.push(format!("{case} {} {hash}", to_hex(&bytes)));
     }
