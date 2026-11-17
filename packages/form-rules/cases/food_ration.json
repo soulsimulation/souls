@@ -1,0 +1,346 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:ration_tin (from #1759). A sealed tin of beans (two bites) is opened once, in four seconds with a free hand ('Put down what you are holding before opening the ration'); an open tin cannot be opened again or resealed ('This tin is already open ... it cannot be resealed'). It is eaten in two bites, only once open ('Open the sealed ration on a fixed work surface first; its packed contents are not yet edible', fix: open), and the empty tin stays ('This ration is empty').",
+  "cases": [
+    {
+      "name": "ration_tin_take_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "ration_tin_take_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:bread_roll"
+          },
+          "x2": {
+            "kind": "eden:bread_roll"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "ration_tin_open_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "ration_tin_open_already_open",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "open",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "ration_tin_open_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:bread_roll"
+          },
+          "x2": {
+            "kind": "eden:bread_roll"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "ration_tin_bite_every_need_met",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "ration_tin_bite_not_held",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "take",
+          "thing": "t1"
+        }
+      }
+    },
+    {
+      "name": "ration_tin_bite_still_sealed",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin",
+            "fields": {
+              "open": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "open",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "ration_tin_bite_nothing_left",
+      "act": {
+        "this": "t1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:ration_tin",
+            "fields": {
+              "open": true,
+              "bites": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "t1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {
+          "field": "bites",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,797 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:cold_meal_bench and eden:cold_wrap (from #1690). The bench holds three portions each of greens, tomato and beans. With a wrap on its board and a free hand, a Soul adds one chosen portion in ten seconds: the portion and one mouthful (portions) move from the bench into that wrap, two transfers in one act. Refused as the original refused: no free hand ('Put down what you are holding before preparing food'), none of that ingredient left (not_enough: 'No supplied greens portion remains'), and a wrap that has no room for it (no_room: 'The wrap is full'). The wrap is taken and eaten a portion at a time.",
+  "cases": [
+    {
+      "name": "cold_meal_bench_add_greens_every_need_met",
+      "act": {
+        "this": "m1",
+        "form": "add_greens",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_greens_hands_full",
+      "act": {
+        "this": "m1",
+        "form": "add_greens",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:bread_roll"
+          },
+          "x2": {
+            "kind": "eden:bread_roll"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_greens_none_left",
+      "act": {
+        "this": "m1",
+        "form": "add_greens",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "fields": {
+              "greens": 0,
+              "portions": 6
+            },
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {
+          "node": "m1",
+          "field": "greens",
+          "has": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_greens_wrap_full",
+      "act": {
+        "this": "m1",
+        "form": "add_greens",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "greens": 3,
+              "portions": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 2,
+        "detail": {
+          "node": "w1",
+          "field": "greens",
+          "room": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_tomato_every_need_met",
+      "act": {
+        "this": "m1",
+        "form": "add_tomato",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_tomato_hands_full",
+      "act": {
+        "this": "m1",
+        "form": "add_tomato",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:bread_roll"
+          },
+          "x2": {
+            "kind": "eden:bread_roll"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_tomato_none_left",
+      "act": {
+        "this": "m1",
+        "form": "add_tomato",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "fields": {
+              "tomato": 0,
+              "portions": 6
+            },
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {
+          "node": "m1",
+          "field": "tomato",
+          "has": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_tomato_wrap_full",
+      "act": {
+        "this": "m1",
+        "form": "add_tomato",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "tomato": 3,
+              "portions": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 2,
+        "detail": {
+          "node": "w1",
+          "field": "tomato",
+          "room": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_beans_every_need_met",
+      "act": {
+        "this": "m1",
+        "form": "add_beans",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_beans_hands_full",
+      "act": {
+        "this": "m1",
+        "form": "add_beans",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:bread_roll"
+          },
+          "x2": {
+            "kind": "eden:bread_roll"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_beans_none_left",
+      "act": {
+        "this": "m1",
+        "form": "add_beans",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "fields": {
+              "beans": 0,
+              "portions": 6
+            },
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_enough",
+        "need": 1,
+        "detail": {
+          "node": "m1",
+          "field": "beans",
+          "has": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "cold_meal_bench_add_beans_wrap_full",
+      "act": {
+        "this": "m1",
+        "form": "add_beans",
+        "args": {
+          "wrap": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "m1": {
+            "kind": "eden:cold_meal_bench",
+            "slots": {
+              "out": [
+                "w1"
+              ]
+            }
+          },
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "beans": 3,
+              "portions": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 2,
+        "detail": {
+          "node": "w1",
+          "field": "beans",
+          "room": 0,
+          "amount": 1
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "cold_wrap_take_every_need_met",
+      "act": {
+        "this": "w1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "greens": 1,
+              "portions": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cold_wrap_take_hands_full",
+      "act": {
+        "this": "w1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "greens": 1,
+              "portions": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:bread_roll"
+          },
+          "x2": {
+            "kind": "eden:bread_roll"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "cold_wrap_bite_every_need_met",
+      "act": {
+        "this": "w1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "greens": 1,
+              "tomato": 1,
+              "portions": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "cold_wrap_bite_not_held",
+      "act": {
+        "this": "w1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "greens": 1,
+              "tomato": 1,
+              "portions": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_held",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "take",
+          "thing": "w1"
+        }
+      }
+    },
+    {
+      "name": "cold_wrap_bite_nothing_left",
+      "act": {
+        "this": "w1",
+        "form": "bite"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "w1": {
+            "kind": "eden:cold_wrap",
+            "fields": {
+              "greens": 1,
+              "tomato": 1,
+              "portions": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "portions",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null
+      }
+    }
+  ]
+}

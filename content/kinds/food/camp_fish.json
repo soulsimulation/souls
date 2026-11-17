@@ -1,0 +1,119 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_fish",
+  "owner": "thing",
+  "state": {
+    "heat": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "bites": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [-70, 25, 0]
+    },
+    "bite": {
+      "role": "contact",
+      "at_mm": [70, 25, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [200, 55, 70]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "bite": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "heat",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "bites",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "bite"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "bites",
+          "by": -1,
+          "event": "bitten"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:camp_fish",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,25,0],"size":[140,50,70],"tint":"raw","when":"@heat<1"},{"kind":"box","at":[0,25,0],"size":[140,50,70],"tint":"cooked","when":"@heat>=1&@bites>=2"},{"kind":"box","at":[-35,25,0],"size":[70,50,70],"tint":"cooked","when":"@heat>=1&@bites=1"},{"kind":"box","at":[0,4,0],"size":[120,8,55],"tint":"skin","when":"@heat>=1&@bites<1"},{"kind":"box","at":[-85,12,0],"size":[30,15,55],"tint":"skin"}],"palette":{"raw":"#d9a69b","cooked":"#bc713a","skin":"#606963"},"tags":["camping","item","food","fish","object"]}
+  },
+  "text": {
+    "card": "A fish portion: cook it on a lit camp grill, then eat it in two bites.",
+    "food": "food",
+    "fish": "fish",
+    "trout": "trout"
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "fish",
+      "trout"
+    ]
+  }
+}

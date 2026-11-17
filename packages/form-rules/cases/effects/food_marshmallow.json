@@ -1,0 +1,273 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Marshmallow skewer (from #1817): a Soul takes a skewer, lights the fire and toasts the held skewer twice, one side then the other (each toast one unit of the fire's heat into the skewer); a third toast is refused (both sides golden), the skewer is bitten (2 to 1) and the fire put out.",
+  "cases": [
+    {
+      "name": "take_light_toast_twice_bite_put_out",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "fi1",
+              "sk1"
+            ]
+          },
+          "fi1": {
+            "kind": "eden:marshmallow_fire"
+          },
+          "sk1": {
+            "kind": "eden:marshmallow_skewer"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "sk1",
+            "form": "take"
+          },
+          "receipt": "rf1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "sk1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "sk1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "fi1",
+            "form": "light"
+          },
+          "receipt": "rf2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "fi1",
+                "field": "lit",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lit",
+                "node": "fi1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "fi1",
+            "form": "toast",
+            "args": {
+              "skewer": "sk1"
+            }
+          },
+          "receipt": "rf3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "fi1",
+                "field": "heat",
+                "n": 2,
+                "to": 99,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "sk1",
+                "field": "heat",
+                "n": 1,
+                "to": 1,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:toasted",
+                "node": "fi1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "fi1",
+            "form": "toast",
+            "args": {
+              "skewer": "sk1"
+            }
+          },
+          "receipt": "rf4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "fi1",
+                "field": "heat",
+                "n": 2,
+                "to": 98,
+                "by": -1
+              },
+              {
+                "change": "set",
+                "node": "sk1",
+                "field": "heat",
+                "n": 1,
+                "to": 2,
+                "by": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:toasted",
+                "node": "fi1",
+                "changes": [
+                  0,
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "fi1",
+            "form": "toast",
+            "args": {
+              "skewer": "sk1"
+            }
+          },
+          "receipt": "rf5",
+          "expect": {
+            "verdict": "no",
+            "reason": "no_room",
+            "need": 3
+          }
+        },
+        {
+          "act": {
+            "this": "sk1",
+            "form": "bite"
+          },
+          "receipt": "rf6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sk1",
+                "field": "bites",
+                "n": 2,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bitten",
+                "node": "sk1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "fi1",
+            "form": "put_out"
+          },
+          "receipt": "rf7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "fi1",
+                "field": "lit",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:put_out",
+                "node": "fi1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "fi1": {
+          "kind": "eden:marshmallow_fire",
+          "fields": {
+            "lit": 0,
+            "heat": 98
+          }
+        },
+        "sk1": {
+          "kind": "eden:marshmallow_skewer",
+          "fields": {
+            "heat": 2,
+            "bites": 1
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "sk1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

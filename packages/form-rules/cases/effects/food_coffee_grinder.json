@@ -1,0 +1,217 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Coffee grinder (from #1885): three grinds turn three bean portions into three ground (beans 6 to 3, grounds 0 to 3); a fourth is refused (the drawer holds three); the grinder is taken into a hand.",
+  "cases": [
+    {
+      "name": "grind_three_then_drawer_full_then_take",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "cg1"
+            ]
+          },
+          "cg1": {
+            "kind": "eden:coffee_grinder"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "cg1",
+            "form": "grind"
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "cg1",
+                "field": "beans",
+                "n": 1,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "cg1",
+                "field": "grounds",
+                "n": 2,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:beans_ground",
+                "node": "cg1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:grounds_made",
+                "node": "cg1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "cg1",
+            "form": "grind"
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "cg1",
+                "field": "beans",
+                "n": 1,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "cg1",
+                "field": "grounds",
+                "n": 2,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:beans_ground",
+                "node": "cg1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:grounds_made",
+                "node": "cg1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "cg1",
+            "form": "grind"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "cg1",
+                "field": "beans",
+                "n": 1,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "cg1",
+                "field": "grounds",
+                "n": 2,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:beans_ground",
+                "node": "cg1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:grounds_made",
+                "node": "cg1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "cg1",
+            "form": "grind"
+          },
+          "receipt": "rc4",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "cg1",
+            "form": "take"
+          },
+          "receipt": "rc5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "cg1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "cg1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "cg1": {
+          "kind": "eden:coffee_grinder",
+          "fields": {
+            "beans": 3,
+            "grounds": 3
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "cg1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}
