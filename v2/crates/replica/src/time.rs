@@ -33,6 +33,8 @@ pub enum TimeRefusal {
     TempoPeriodNotPositive,
     /// A tempo whose period is shorter than a microsecond: two beats would fall on one microsecond.
     TempoPeriodBelowMicrosecond,
+    /// A fraction of zero or below, a denominator of zero included (rule 5).
+    FractionNotPositive,
     /// A fraction's numerator or denominator above 2^32 − 1 (rule 5).
     FractionTooWide,
     /// A new mapping whose world anchor is not the world time the mapping before gives at its real anchor (rule 3).
@@ -43,6 +45,12 @@ pub enum TimeRefusal {
     TempoNotOnABeat,
     /// An effect anchored before the effect it follows.
     AnchorBeforePrevious,
+    /// An effect anchored before the first tick, beat or world time at or after the time it is written: it would
+    /// renumber what the world has already passed (rule 2).
+    AnchorInPast,
+    /// An effect anchored after the first tick, beat or world time at or after the time it is written: a held change
+    /// waiting for a time, which is the agent's client's to schedule (rule 2).
+    AnchorInFuture,
     /// A world's start whose effects are not anchored at world time 0, tick 0 and beat 0.
     StartNotAtZero,
     /// A time before the world's start, which has no tick or beat.
@@ -62,11 +70,14 @@ impl TimeRefusal {
             TimeRefusal::TickRateAboveMicrosecond => "tick-rate-above-microsecond",
             TimeRefusal::TempoPeriodNotPositive => "tempo-period-not-positive",
             TimeRefusal::TempoPeriodBelowMicrosecond => "tempo-period-below-microsecond",
+            TimeRefusal::FractionNotPositive => "fraction-not-positive",
             TimeRefusal::FractionTooWide => "fraction-too-wide",
             TimeRefusal::MappingNotContinuous => "mapping-not-continuous",
             TimeRefusal::TickRateNotOnATick => "tick-rate-not-on-a-tick",
             TimeRefusal::TempoNotOnABeat => "tempo-not-on-a-beat",
             TimeRefusal::AnchorBeforePrevious => "anchor-before-previous",
+            TimeRefusal::AnchorInPast => "anchor-in-past",
+            TimeRefusal::AnchorInFuture => "anchor-in-future",
             TimeRefusal::StartNotAtZero => "start-not-at-zero",
             TimeRefusal::BeforeWorldStart => "before-world-start",
             TimeRefusal::OutOfRange => "out-of-range",
@@ -91,9 +102,13 @@ pub struct Fraction {
 }
 
 impl Fraction {
-    /// The fraction `num / den`, or `not_positive` when it is zero or below (a denominator of zero included), or
-    /// `fraction-too-wide`.
-    fn new(num: i64, den: i64, not_positive: TimeRefusal) -> Result<Fraction, TimeRefusal> {
+    /// The fraction `num / den`, refused as `fraction-not-positive` or `fraction-too-wide`.
+    pub fn new(num: i64, den: i64) -> Result<Fraction, TimeRefusal> {
+        Fraction::checked(num, den, TimeRefusal::FractionNotPositive)
+    }
+
+    /// The fraction `num / den`, or `not_positive` when it is zero or below, or `fraction-too-wide`.
+    fn checked(num: i64, den: i64, not_positive: TimeRefusal) -> Result<Fraction, TimeRefusal> {
         if num <= 0 || den <= 0 {
             return Err(not_positive);
         }
@@ -119,9 +134,10 @@ impl Fraction {
     }
 }
 
-/// A line: `y = y0 + (x − x0) · p / q`, read either way with one rounding rule (rule 4).
+/// A rising line: `y = y0 + (x − x0) · p / q`, read either way with one rounding rule (rule 4). Ticks, beats and the
+/// mapping are lines; a later task that needs a quantity rising with world time (T4's tracks) uses this one too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Line {
+pub struct Line {
     x0: i64,
     y0: i64,
     p: u32,
@@ -129,14 +145,24 @@ struct Line {
 }
 
 impl Line {
+    /// The line through `(x0, y0)` rising `ratio` of y per unit of x.
+    pub fn new(x0: i64, y0: i64, ratio: Fraction) -> Line {
+        Line {
+            x0,
+            y0,
+            p: ratio.num,
+            q: ratio.den,
+        }
+    }
+
     /// The whole y reached at x: rounded down.
-    fn y_at(self, x: i64) -> Result<i64, TimeRefusal> {
+    pub fn y_at(self, x: i64) -> Result<i64, TimeRefusal> {
         let product = (i128::from(x) - i128::from(self.x0)) * i128::from(self.p);
         narrow(i128::from(self.y0) + product.div_euclid(i128::from(self.q)))
     }
 
     /// The first whole x at which y is reached: rounded up.
-    fn x_of(self, y: i64) -> Result<i64, TimeRefusal> {
+    pub fn x_of(self, y: i64) -> Result<i64, TimeRefusal> {
         let product = (i128::from(y) - i128::from(self.y0)) * i128::from(self.q);
         narrow(i128::from(self.x0) - (-product).div_euclid(i128::from(self.p)))
     }
@@ -151,7 +177,7 @@ fn narrow(n: i128) -> Result<i64, TimeRefusal> {
 pub struct Mapping {
     pub world_us: Micros,
     pub real_us: Micros,
-    pub rate: Fraction,
+    rate: Fraction,
 }
 
 impl Mapping {
@@ -162,12 +188,17 @@ impl Mapping {
         num: i64,
         den: i64,
     ) -> Result<Mapping, TimeRefusal> {
-        let rate = Fraction::new(num, den, TimeRefusal::MappingRateNotPositive)?;
+        let rate = Fraction::checked(num, den, TimeRefusal::MappingRateNotPositive)?;
         Ok(Mapping {
             world_us,
             real_us,
             rate,
         })
+    }
+
+    /// World microseconds per real microsecond.
+    pub fn rate(self) -> Fraction {
+        self.rate
     }
 
     fn line(self) -> Line {
@@ -225,7 +256,7 @@ impl TickRate {
 pub struct Tempo {
     pub anchor_us: Micros,
     pub anchor_beat: i64,
-    pub period: Fraction,
+    period: Fraction,
 }
 
 impl Tempo {
@@ -236,7 +267,7 @@ impl Tempo {
         num: i64,
         den: i64,
     ) -> Result<Tempo, TimeRefusal> {
-        let period = Fraction::new(num, den, TimeRefusal::TempoPeriodNotPositive)?;
+        let period = Fraction::checked(num, den, TimeRefusal::TempoPeriodNotPositive)?;
         if period.num < period.den {
             return Err(TimeRefusal::TempoPeriodBelowMicrosecond);
         }
@@ -255,6 +286,11 @@ impl Tempo {
         per_minute: i64,
     ) -> Result<Tempo, TimeRefusal> {
         Tempo::new(anchor_us, anchor_beat, 60 * MICROS_PER_SECOND, per_minute)
+    }
+
+    /// A beat's length in microseconds.
+    pub fn period(self) -> Fraction {
+        self.period
     }
 
     fn line(self) -> Line {
@@ -381,15 +417,18 @@ impl Timeline {
         })
     }
 
-    /// Applies a later effect, or refuses it by name and changes nothing. Each takes over from the one before
-    /// exactly where that one's line is: world time does not jump, and a tick or beat is neither skipped nor split.
-    pub fn apply(&mut self, effect: TimeEffect) -> Result<(), TimeRefusal> {
+    /// Applies a later effect written at world time `written_us` (its envelope's time, T6), or refuses it by name and
+    /// changes nothing. Its anchor is the first world time, tick or beat at or after `written_us` (rule 2), and it
+    /// takes over from the one before exactly where that one's line is: world time does not jump, and a tick or beat
+    /// is neither skipped nor split.
+    pub fn apply(&mut self, effect: TimeEffect, written_us: Micros) -> Result<(), TimeRefusal> {
         match effect {
             TimeEffect::Mapping(m) => {
                 let last = *self.mappings.last().ok_or(TimeRefusal::StartNotAtZero)?;
                 if m.real_us < last.real_us {
                     return Err(TimeRefusal::AnchorBeforePrevious);
                 }
+                now(m.world_us, written_us)?;
                 if last.line().y_at(m.real_us)? != m.world_us {
                     return Err(TimeRefusal::MappingNotContinuous);
                 }
@@ -400,6 +439,13 @@ impl Timeline {
                 if t.anchor_tick < last.anchor_tick {
                     return Err(TimeRefusal::AnchorBeforePrevious);
                 }
+                let n = self.tick_of(written_us)?;
+                let next = if self.tick_start(n)? < written_us {
+                    n + 1
+                } else {
+                    n
+                };
+                now(t.anchor_tick, next)?;
                 if last.line().x_of(t.anchor_tick)? != t.anchor_us {
                     return Err(TimeRefusal::TickRateNotOnATick);
                 }
@@ -410,6 +456,13 @@ impl Timeline {
                 if t.anchor_beat < last.anchor_beat {
                     return Err(TimeRefusal::AnchorBeforePrevious);
                 }
+                let k = self.beat_of(written_us)?;
+                let next = if self.beat_time(k)? < written_us {
+                    k + 1
+                } else {
+                    k
+                };
+                now(t.anchor_beat, next)?;
                 if last.line().x_of(t.anchor_beat)? != t.anchor_us {
                     return Err(TimeRefusal::TempoNotOnABeat);
                 }
@@ -420,14 +473,14 @@ impl Timeline {
     }
 
     /// The world time a recorded real-time reading maps to (rule 3), from the last mapping anchored at or before it.
+    /// A reading before the first mapping's real anchor is before the world's start.
     pub fn world_at(&self, real_us: Micros) -> Result<Micros, TimeRefusal> {
         let m = self
             .mappings
             .iter()
             .rev()
             .find(|m| m.real_us <= real_us)
-            .or(self.mappings.first())
-            .ok_or(TimeRefusal::StartNotAtZero)?;
+            .ok_or(TimeRefusal::BeforeWorldStart)?;
         m.line().y_at(real_us)
     }
 
@@ -453,6 +506,15 @@ impl Timeline {
     pub fn beat_time(&self, k: i64) -> Result<Micros, TimeRefusal> {
         let tempo = last_at(&self.tempos, |p| p.anchor_beat <= k, k)?;
         tempo.line().x_of(k)
+    }
+}
+
+/// An anchor against the first world time, tick or beat at or after the time its effect is written (rule 2).
+fn now(anchor: i64, first: i64) -> Result<(), TimeRefusal> {
+    match anchor.cmp(&first) {
+        std::cmp::Ordering::Less => Err(TimeRefusal::AnchorInPast),
+        std::cmp::Ordering::Greater => Err(TimeRefusal::AnchorInFuture),
+        std::cmp::Ordering::Equal => Ok(()),
     }
 }
 
@@ -505,7 +567,10 @@ fn goldens(lines: &mut Vec<String>) -> Result<(), TimeRefusal> {
         TickRate::new(0, 0, 20)?,
         Tempo::per_minute(0, 0, 130)?,
     )?;
-    world.apply(TimeEffect::TickRate(TickRate::new(1_000_000, 20, 30)?))?;
+    world.apply(
+        TimeEffect::TickRate(TickRate::new(1_000_000, 20, 30)?),
+        1_000_000,
+    )?;
     lines.push(format!("tick-31-at-30 {}", world.tick_start(31)?));
     lines.push(format!(
         "tick-of-1033333-at-30 {}",
