@@ -2,7 +2,8 @@
 // free block of ports, from a registry (and recorded horizons) written before the launcher opens.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crawlerAgent, openLauncher } from './launcher.mjs';
@@ -13,11 +14,13 @@ import { testPort } from '../../apps/server/test/test-port.ts';
 const N = 50;
 const fake = new URL('./fake-world.mjs', import.meta.url).pathname;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (ok, ms, what) => { const t0 = Date.now(); for (;;) { if (await ok()) return; if (Date.now() - t0 > ms) assert.fail(`not within ${ms} ms: ${what}`); await wait(20); } };
+const until = async (ok, ms, what) => { const t0 = Date.now(); for (;;) { if (await ok()) return; if (Date.now() - t0 > ms) assert.fail(`not within ${ms} ms: ${typeof what === 'function' ? what() : what}`); await wait(20); } };
 const slugs = (n) => Array.from({ length: n }, (_, i) => `w${String(i + 1).padStart(2, '0')}`);
 const SOUL = { authorization: 'Bearer soul_test', 'content-type': 'application/json' };
 const GOOGLEBOT = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
 
+/** Each launcher's log lines (a failed wait prints them). */
+const logs = new WeakMap();
 /** A launcher over `n` registered worlds, none running; `horizon(slug)` (optional) is each one's recorded horizon. */
 async function launcher(n, { bootMs = 50, horizon, ...o } = {}) {
   const P = await testPort(n + 2);   // (each launcher its own block: a stopped world's port may linger)
@@ -26,14 +29,21 @@ async function launcher(n, { bootMs = 50, horizon, ...o } = {}) {
   const webDir = join(dir, 'web'); mkdirSync(join(webDir, 'assets'), { recursive: true });
   writeFileSync(join(webDir, 'index.html'), '<!doctype html><html><head><title>Souls</title><link rel="canonical" href="https://x/"></head><body></body></html>');
   writeFileSync(join(webDir, 'assets', 'app.js'), 'console.log(1)');
-  const names = slugs(n);
+  const names = slugs(n), lines = [];
   writeFileSync(join(dataDir, 'worlds.json'), JSON.stringify({ worlds: names.map((slug, i) => ({ slug, name: `World ${slug}`, template: 'empty', createdAt: i })) }));
   if (horizon) writeFileSync(join(dataDir, 'horizons.json'), JSON.stringify(Object.fromEntries(names.map((s) => [s, horizon(s)]))));
   const command = (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port), FAKE_ACT: '1', FAKE_BOOT_MS: String(bootMs) } });
-  const L = await openLauncher({ port: P, range: [P + 1, P + n + 1], dataDir, webDir, templatesDir, command, eager: 0, keepAlive: false, prewarm: false, maxRunning: n + 1, log: () => {},
+  const L = await openLauncher({ port: P, range: [P + 1, P + n + 1], dataDir, webDir, templatesDir, command, eager: 0, keepAlive: false, prewarm: false, maxRunning: n + 1, log: (l) => lines.push(l),
     stillEveryMs: 1e9, stillAlarmMs: 1e9, ...o });
+  logs.set(L, lines);
   return { L, base: `http://127.0.0.1:${P}`, names };
 }
+/** On a failed wait: each world not running, its pool status, its launcher log lines and the tail of its own log. */
+const notRunning = (L, names) => () => names.filter((s) => L.pool.status(s).status !== 'running').map((s) => {
+  const { status, port, restarts, lastExit, lastLoad } = L.pool.status(s); let own = '';
+  try { own = readFileSync(join(L.dataDir, 'logs', `${s}.log`), 'utf8').trim().split('\n').slice(-6).join(' / '); } catch { /* none */ }
+  return `\n  ${s}: ${JSON.stringify({ status, port, restarts, lastExit, lastLoad, lastError: L.pool.state(s)?.lastError })}; launcher: ${(logs.get(L) ?? []).filter((l) => l.includes(s)).slice(-4).join(' / ')}; own log: ${own}`;
+}).join('');
 const act = (base, slug) => { const t0 = Date.now(); return fetch(`${base}/w/${slug}/v1/edge/act`, { method: 'POST', headers: SOUL, body: '{}' }).then(async (r) => ({ status: r.status, ms: Date.now() - t0, retry: r.headers.get('retry-after'), body: await r.json() })); };
 
 test('A6/A1/A7: 50 alarms due in the same second load at most 4 at a time and are all served; an act meanwhile goes first', { timeout: 120_000 }, async () => {
@@ -51,7 +61,7 @@ test('A6/A1/A7: 50 alarms due in the same second load at most 4 at a time and ar
     assert.equal(r.status, 200); assert.equal(r.body.acted, true);
     const up = (s) => L.pool.state(s)?.upSince ?? Infinity, before = names.filter((s) => s !== last && up(s) > up(last)).length;
     assert.ok(before >= N - 12, `the act's world loaded before ${before} of the other ${N - 1} (they were waiting)`);
-    await until(() => names.every((s) => L.pool.status(s).status === 'running'), 60_000, 'every alarm served');
+    await until(() => names.every((s) => L.pool.status(s).status === 'running'), 60_000, () => `every alarm served; not running:${notRunning(L, names)()}`);
     clearInterval(watch);
     assert.ok(peak <= 4, `at most 4 loads at once (peak ${peak})`);
     const s = (await (await fetch(`${base}/__sim/healthz`)).json()).loads;
@@ -144,4 +154,19 @@ test('#2393 A2: a page asked of a loading world gets the waking page, which asks
     const after = await fetch(`${base}/w/w01/`, { headers: { accept: 'text/html' } });
     assert.notEqual(after.status, 503); assert.match(await after.text(), /window\.__simConfig/, 'the refresh then gets the world\'s own answer');
   } finally { await L.close(); }
+});
+
+test('an alarm load that finds no free port leaves the world unloaded, and the next alarm loads it', { timeout: 30_000 }, async () => {
+  const due = Date.now() - 1, { L } = await launcher(1, { unloadStill: true, horizon: () => ({ still: true, untilWallMs: null, moveWallMs: due, at: due }) }), lines = logs.get(L);
+  const [lo, hi] = L.pool.o.range, squat = [];   // something else holds every port of the range
+  for (let p = lo; p <= hi; p++) { const s = createServer(); await new Promise((ok) => s.listen(p, '127.0.0.1', ok)); squat.push(s); }
+  try {
+    assert.deepEqual(L.still.alarms(), ['w01']);
+    await until(() => lines.some((l) => l.includes('w01: its alarm could not load it: no free port')), 5000, () => lines.join(' / '));
+    assert.equal(L.pool.status('w01').status, 'stopped', 'unloaded, not starting with no process');
+    assert.equal(L.pool.loadStats().loading, 0, 'its load slot is free');
+    for (const s of squat) await new Promise((ok) => s.close(ok));
+    assert.deepEqual(L.still.alarms(), ['w01'], 'the next alarm asks again');
+    await until(() => L.pool.status('w01').status === 'running', 5000, () => JSON.stringify(L.pool.status('w01')));
+  } finally { for (const s of squat) s.close(); await L.close(); }
 });
