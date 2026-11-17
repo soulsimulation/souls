@@ -1,0 +1,17 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:radio",
+  "owner": "thing",
+  "state": {
+    "volume": { "n": 1, "type": "int", "unit": "permille", "default": 0, "min": 0, "max": 1000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [300, 200, 120] },
+  "looks": {
+    "model": "look:looks_radio",
+    "table": [
+      { "part": "speaker", "field": "volume", "do": "sound", "sound": "tune", "tune": "tune:sunday_stroll", "mode": "loop", "range": [0, 1000], "to": [0, 900], "reach_mm": 9000, "link": "link:broadcast" }
+    ]
+  },
+  "text": { "card": "A radio that plays a tune as loud as its dial says, taking it from the link it is tuned to." },
+  "card": { "text": "card" }
+}
