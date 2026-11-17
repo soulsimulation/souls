@@ -5,7 +5,8 @@
 //
 // A move states what it claims on the body (by resource class, never anatomy: contract T9), what it blocks and what
 // cancels it, its effector and reach in whole millimetres, and its phases in whole microseconds. Contact is the one
-// instant at the end of start-up. Nothing is counted in ticks and no number is floating-point. Where the hand is at a
+// instant at the end of start-up; a pour has a contact window (`pour_us`) after it. The effector `held_point` is a named
+// point of the thing in the hand (a spout): reach is measured from it, not from the hand. Nothing is counted in ticks and no number is floating-point. Where the hand is at a
 // time is `pose.mjs`. This file reads `format.mjs` and changes nothing in it.
 import {createHash} from 'node:crypto';
 import {readdirSync, readFileSync} from 'node:fs';
@@ -16,8 +17,8 @@ import {parseEntry, canonical} from './format.mjs';
 export const MOVE_FORMAT = 'souls-move/1';
 export const RESOURCE_CLASSES = Object.freeze(['locomotion', 'manipulator', 'gaze', 'voice']);
 export const CANCELS_ON = Object.freeze(['claim_taken', 'out_of_reach']);
-export const EFFECTORS = Object.freeze(['hand']);
-export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'recovery_us']);
+export const EFFECTORS = Object.freeze(['hand', 'held_point']);
+export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'recovery_us']);
 export const REACH_MAX_MM = 700;
 const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'phases'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
@@ -56,6 +57,8 @@ export function validateMove(m) {
     for (const k of ['start_up_us', 'recovery_us']) if (m.phases[k] === undefined) err(`phases.${k}`, 'required');
     for (const [k, v] of Object.entries(m.phases)) if (!(Number.isSafeInteger(v) && v > 0)) err(`phases.${k}`, 'whole microseconds above zero');
   }
+  if (isObj(m.phases) && m.phases.slide_us !== undefined && m.phases.pour_us !== undefined) err('phases', 'a move slides or pours, not both');
+  if (isObj(m.phases) && m.phases.pour_us !== undefined && m.effector !== 'held_point') err('effector', "a pour's effector is a point of the held thing (held_point)");
   return errors;
 }
 

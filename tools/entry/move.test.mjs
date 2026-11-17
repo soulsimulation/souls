@@ -15,7 +15,7 @@ const moves = Object.fromEntries(loaded.map(r => [r.move.move, r.move]));
 const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
 
 test('A1: press and slide validate as moves; a move with a duration in ticks is refused', () => {
-  assert.deepEqual(loaded.map(r => r.file), ['press.json', 'slide.json']);
+  assert.deepEqual(loaded.map(r => r.file), ['pour.json', 'press.json', 'slide.json']);
   for (const r of loaded) { assert.deepEqual(r.errors, [], r.file); assert.match(r.ref, /^[a-z]+@prov-1220[0-9a-f]{64}$/); }
   assert.notEqual(loaded[0].ref, loaded[1].ref);
   for (const c of cases.refused) {
@@ -48,5 +48,27 @@ test('A3: the same record and time give the same position in Node and in a brows
       assert.deepEqual(Array.from(bare.handAt(moves[c.move], c.record, t)), want, `${c.why} at ${t} (bare context)`);
     }
   }
-  assert.equal(refOf(moves.press), loaded[0].ref);
+  assert.equal(refOf(moves.press), loaded.find(r => r.file === 'press.json').ref);
+});
+
+test('SA-D5a A1: pour validates; its spout is within 2 cm of the rim for the whole contact window (kettle to cup, can to planter)', () => {
+  const m = moves.pour;
+  assert.deepEqual(loaded.find(r => r.file === 'pour.json').errors, []);
+  assert.ok(validateMove({...structuredClone(m), phases: {...m.phases, slide_us: 1000}}).some(e => e.path === 'phases' && e.reason.includes('not both')));
+  assert.ok(validateMove({...structuredClone(m), effector: 'hand'}).some(e => e.path === 'effector'));
+  const {contact_us, slide_end_us, end_us} = P.timesOf(m);
+  assert.equal(slide_end_us - contact_us, m.phases.pour_us);
+  for (const c of cases.pour) {
+    let off = c.effector_mm;
+    if (c.from_kind) {
+      const pts = F.parseEntry(readFileSync(root + c.from_kind, 'utf8')).entry.points;
+      off = pts[c.spout].at_mm.map((v, i) => v - pts[c.grip].at_mm[i]);
+    }
+    const record = {...c.record, effector_mm: off};
+    const rim = record.contact_mm, s = record.start_us;
+    for (let t = contact_us; t < slide_end_us; t += 50000) assert.ok(dist(P.effectorAt(m, record, s + t), rim) <= 20, `${c.why} at ${t}`);
+    assert.ok(dist(P.effectorAt(m, record, s + contact_us / 2), rim) > 20, 'before the window the spout is still on its way');
+    assert.ok(dist(P.effectorAt(m, record, s + slide_end_us + m.phases.recovery_us / 2), rim) > 20, 'after the window it leaves');
+    assert.deepEqual(P.handAt(m, record, s + end_us), record.from_mm, 'the hand ends at rest');
+  }
 });

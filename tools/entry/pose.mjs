@@ -24,15 +24,30 @@ const between = (a, b, k) => a.map((v, i) => v + Math.trunc(((b[i] - v) * k) / P
 
 /** Each phase's time in microseconds after the start: contact is the instant, `end_us` the end of recovery. */
 export function timesOf(move) {
-  const {start_up_us: up, slide_us: slide = 0, recovery_us: rec} = move.phases;
-  return {contact_us: up, slide_end_us: up + slide, end_us: up + slide + rec};
+  const {start_up_us: up, slide_us: slide = 0, pour_us: pour = 0, recovery_us: rec} = move.phases;
+  return {contact_us: up, slide_end_us: up + slide + pour, end_us: up + slide + pour + rec};
+}
+
+/** Where the hand must be for the move's effector to be at the contact point. A `held_point` effector is a point of the
+ *  held thing (a spout): the record carries `effector_mm`, its offset from the hand in the world's axes at the pose it
+ *  is held in, and the hand goes to the contact point minus that offset. A pour holds the hand there for `pour_us`. */
+export function handTarget(move, record) {
+  const {contact_mm: at, effector_mm: off} = record;
+  return move.effector === 'held_point' ? at.map((v, i) => v - off[i]) : [...at];
+}
+
+/** Where the effector is at `t_us`: the hand, plus the held point's offset for a `held_point` move. */
+export function effectorAt(move, record, t_us) {
+  const h = handAt(move, record, t_us);
+  return move.effector === 'held_point' ? h.map((v, i) => v + record.effector_mm[i]) : h;
 }
 
 /** The hand's position in whole millimetres at `t_us` (the same clock as `record.start_us`). */
 export function handAt(move, record, t_us) {
   const {contact_us, slide_end_us, end_us} = timesOf(move);
   const t = t_us - record.start_us;
-  const {from_mm: rest, contact_mm: at} = record;
+  const {from_mm: rest} = record;
+  const at = handTarget(move, record);
   const away = move.phases.slide_us ? record.to_mm : at;
   if (t <= 0) return [...rest];
   if (t < contact_us) return between(rest, at, eased(t, contact_us));
