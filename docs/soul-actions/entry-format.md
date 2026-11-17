@@ -61,13 +61,29 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
+| 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
+| 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
-Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
-(SA-F10).
+Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
+
+**How it moves and how long it lasts loose** (sections 18 and 19, SA-F10, [#2882](https://github.com/soulsimulation/souls/issues/2882)).
+Every kind of thing states both. `motion.how` is one closed list, shared with Engine v2 E5
+([#2778](https://github.com/soulsimulation/souls/issues/2778)): `one_hand` and `two_hands` are carried (a cup; a chair),
+`pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
+by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
+moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+`loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
+([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
+owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
+**The six things any thing allows** (go to, look at, point at, touch, lean on, wait by) are forms of the body's own entry
+(`content/kinds/body/humanoid.json`, SA-G3) that take any thing; a kind writes none of them. A kind forbids one by name in an
+area's `forbids`: leaning is `lean`, the others are `go_to`, `look_at`, `point`, `touch`, `wait_by`
+(`content/kinds/street/railing.json` forbids leaning; `allowsBase(entry, form)` answers `forbidden` with the name and the area).
+Cases are data: `tools/entry/cases/motion.json` and `packages/form-rules/cases/base.json` (a lamp post with no forms).
 
 **Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
 ([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
@@ -327,7 +343,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
-| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `moves` | a thing says neither how it moves nor how long it lasts loose | no |
 | `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
 | `no-labels` | a mood word in the card | no |
 | `refs` | a kind that is not loaded, or kinds in a circle | no |

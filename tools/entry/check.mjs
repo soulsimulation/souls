@@ -128,8 +128,11 @@ function rules(entry) {
     if (h.answers === 'verdict' && h.reads.every(r => 'field' in r && entry.state?.[r.field]?.type === 'bool')) add('hatch', `${p}.answers`, 'a verdict over bool fields only is a list of state needs', 'write each field as a state need and drop the hatch');
   }
 
-  // moves: the sections are SA-F10's. Until the format defines them, data cannot break this rule and it is not checked.
-  if (!('motion' in F.RESERVED) && entry.owner === 'thing' && movable(entry)) for (const s of ['motion', 'loose']) if (entry[s] === undefined) add('moves', s, `a thing that can be carried says nothing of its ${s}`, `add a "${s}" section`);
+  // moves: a thing says how it moves and how long it lasts loose (SA-F10, sections 18 and 19), whether or not it can be carried.
+  if (entry.owner === 'thing') {
+    if (entry.motion === undefined) add('moves', 'motion', 'the kind does not say how it moves', `add "motion": {"how": "<one of ${F.MOTIONS.join(', ')}>"}`);
+    if (entry.loose === undefined) add('moves', 'loose', 'the kind does not say how long it lasts loose', 'add "loose": {"ever": true}, or {"us": <microseconds>} for a stated time');
+  }
 
   // card: a kind has one line of purpose, short enough to read at a glance.
   if (entry.card === undefined) add('card', 'card', 'the kind has no card', 'add "card": {"text": "<key>"} naming a text entry that says what it is for, in one line');
@@ -141,9 +144,6 @@ function rules(entry) {
   if (label) add('no-labels', `text.${entry.card.text}`, `the card says "${label[1]}", a label`, `cut "${label[1]}" and say the facts: what it has and what can be done`);
   return out;
 }
-
-const movable = e => Object.values(e.forms ?? {}).some(f => (f.needs ?? []).some(n => n.need === 'held_by_actor') || (f.steps ?? []).some(s => s.step === 'take' || s.step === 'put') ||
-  (f.effects ?? []).some(x => x.change === 'reparent' && x.what === 'this'));
 
 /** Every chain of needs has a way out. A form is reachable when the state its needs ask for can be reached from the
  *  defaults through reachable forms (a timer form also needs a reachable form to arm it). A field something outside

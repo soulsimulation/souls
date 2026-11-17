@@ -16,11 +16,11 @@ export const FORMAT = 'souls-entry/1';
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640).
  *  Section 10 is Engine v2 T3's table of referenced kinds, written by the encoder, never in a file; 12 is `reactions`. */
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16, roles: 17,
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11, vehicle: 13, ride: 14, stock: 15, areas: 16, roles: 17, motion: 18, loose: 19,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
-export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10'});
+export const RESERVED = Object.freeze({reactions: 'SA-F15'});
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
@@ -150,6 +150,7 @@ export function validateEntry(entry) {
   stock(entry, err);
   areas(entry, err);
   roles(entry, err);
+  motion(entry, err);
   if (entry.vehicle !== undefined) vehicle(entry, err);
   if (entry.ride !== undefined) ride(entry, err);
   if (entry.vehicle !== undefined && entry.ride !== undefined) err('ride', 'a kind is a vehicle (steered) or a ride (a set trip), not both');
@@ -405,7 +406,7 @@ function areas(entry, err) {
       }
     }
     if (a.forbids !== undefined) {
-      if (!Array.isArray(a.forbids) || !a.forbids.length || !a.forbids.every(k => REST_POSTURES.includes(k)) || new Set(a.forbids).size !== a.forbids.length) err(`${p}.forbids`, `one or more different postures of ${REST_POSTURES.join(', ')}`);
+      if (!Array.isArray(a.forbids) || !a.forbids.length || !a.forbids.every(k => REST_POSTURES.includes(k) || FORBIDDABLE.includes(k)) || new Set(a.forbids).size !== a.forbids.length) err(`${p}.forbids`, `one or more different names of ${[...REST_POSTURES, ...FORBIDDABLE].join(', ')}`);
       else for (const k of forbids) {
         if (k in allows) err(`${p}.forbids`, `"${k}" is both admitted and forbidden`);
         if (slotList.some(s => s.admits === 'body' && s.posture === k)) err(`${p}.forbids`, `"${k}" is forbidden, but a slot of this kind seats a body in that posture`);
@@ -423,6 +424,58 @@ function areas(entry, err) {
     const takesRepeat = takes.every(k => slotList.some(s => s.admits === 'thing' && (!s.kinds || s.kinds.includes(k))));
     if (!placed && !forbids.length && restRepeats && takesRepeat) err(p, 'only repeats what the slots of this kind already say; leave the area out');
   }
+}
+
+/** How a kind moves and how long it lasts loose (SA-F10, #2882; sections 18 and 19). One closed list, shared with Engine v2 E5
+ *  (#2778): `one_hand` and `two_hands` are carried, `pushed_by_one` and `wheeled` are pushed by one Soul, `two_souls` needs
+ *  two (Engine v2 B9), `fixed` does not move. `loose`: how long a thing lasts once nobody holds or owns it, Engine v2 F10
+ *  (#2773): `{"ever": true}` or `{"us": <microseconds>}`; owned, or in a slot, a thing lasts. */
+export const MOTIONS = Object.freeze(['one_hand', 'two_hands', 'pushed_by_one', 'two_souls', 'wheeled', 'fixed']);
+export const CARRIED = Object.freeze({one_hand: 1, two_hands: 2});
+export const PUSHED = Object.freeze({pushed_by_one: 1, wheeled: 1, two_souls: 2});
+/** The six things any thing allows are forms of the body's own family (SA-G3), so a kind writes none of them. */
+export const BASE_FORMS = Object.freeze(['go_to', 'look_at', 'point', 'touch', 'lean_on', 'wait_by']);
+/** A kind forbids one by name in an area's `forbids`: leaning is the posture `lean`; the others by their form's name. */
+export const FORBIDDABLE = Object.freeze(['go_to', 'look_at', 'point', 'touch', 'wait_by']);
+function motion(entry, err) {
+  if (entry.motion !== undefined) {
+    const m = entry.motion;
+    if (entry.owner !== 'thing') err('motion', 'a thing says how it moves');
+    else if (!isObj(m)) err('motion', `an object: {"how": one of ${MOTIONS.join(', ')}}`);
+    else { only(m, ['how'], 'motion', err); if (!MOTIONS.includes(m.how)) err('motion.how', `how it moves, one of ${MOTIONS.join(', ')}`); }
+  }
+  if (entry.loose !== undefined) {
+    const l = entry.loose;
+    if (entry.owner !== 'thing') err('loose', 'a thing says how long it lasts loose');
+    else if (!isObj(l)) err('loose', 'an object: {"ever": true} or {"us": <microseconds>}');
+    else {
+      only(l, ['ever', 'us'], 'loose', err);
+      if ((l.ever === undefined) === (l.us === undefined)) err('loose', 'says exactly one of "ever": true, or "us": whole microseconds');
+      else if (l.ever !== undefined && l.ever !== true) err('loose.ever', 'true: it lasts for ever');
+      else if (l.us !== undefined && !(isInt(l.us) && l.us > 0)) err('loose.us', 'whole microseconds above zero');
+    }
+  }
+}
+
+/** Whether a body may carry, or push, a copy of this kind, by how the kind moves. A refusal names how it moves. */
+export function moveBy(entry, {act, souls = 1}) {
+  const how = entry?.motion?.how;
+  if (!MOTIONS.includes(how)) return {ok: false, code: 'unsaid', how: null, reason: `${entry?.kind} does not say how it moves`};
+  if (act === 'carry') return how in CARRIED ? {ok: true, how, hands: CARRIED[how]} : {ok: false, code: 'moves_by', how, reason: `${entry.kind} is ${how}: it moves that way, not carried`};
+  if (act === 'push') {
+    if (!(how in PUSHED)) return {ok: false, code: 'moves_by', how, reason: `${entry.kind} is ${how}: it moves that way, not pushed`};
+    return souls >= PUSHED[how] ? {ok: true, how, souls: PUSHED[how]} : {ok: false, code: 'souls', how, reason: `${entry.kind} is ${how}: it takes ${PUSHED[how]} Souls, not ${souls}`};
+  }
+  return {ok: false, code: 'unknown_act', how, reason: `"${act}" is neither carry nor push`};
+}
+
+/** Whether a body may do one of the six base forms on a copy of this kind: allowed unless an area of the kind forbids it by
+ *  name (leaning is `lean`). The form is the body's own, so the kind writes nothing for the rest. */
+export function allowsBase(entry, form) {
+  if (!BASE_FORMS.includes(form)) return {ok: false, code: 'not_base', reason: `"${form}" is not one of ${BASE_FORMS.join(', ')}`};
+  const name = form === 'lean_on' ? 'lean' : form;
+  for (const [area, a] of Object.entries(entry?.areas ?? {})) if (Array.isArray(a?.forbids) && a.forbids.includes(name)) return {ok: false, code: 'forbidden', name, area, reason: `${entry.kind} forbids "${name}" (area ${area})`};
+  return {ok: true};
 }
 
 function speed(v, path, err) {

@@ -9,6 +9,8 @@
   },
   "geometry": { "bounds_mm": [120, 350, 250] },
   "forms": {},
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "looks": { "model": "look:tap" },
   "text": {
     "card": "A tap: it gives cold water to anything held under its outlet.",
