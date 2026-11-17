@@ -28,7 +28,7 @@ test('each attraction ride names itself and what it does; balloon and punt wordi
  assert.equal(vehicleOf({id:'ride-e_1',route:{id:'steer'}},'carousel'),'carousel');
  assert.match(rideKind.actions.join.apply(car,{},{} as any).bodies![0].label,/^Ride the carousel$/);
  const bal=rideKind.initial({carrier:'eden-balloon'},ctx({...view('eden-balloon','commons-hop'),route:{id:'commons-hop',seconds:360}}));
- assert.equal(bal.vehicle,'balloon');assert.equal(label(bal),'Board the balloon: it lifts off by itself ~30 s after you are seated, flies about 6 minutes and lands where it started; you cannot get off in the air');
+ assert.equal(bal.vehicle,'balloon');assert.equal(label(bal),'Board the balloon: it lifts off by itself ~30 s after you are seated, flies about 6 minutes and lands where it started unless a rider steers it (once aloft: steer to a place or a direction, and land there); you cannot get off in the air');
  const punt=rideKind.initial({carrier:'p1'},ctx({...view('p1','p1-loop','rowing-punt'),route:{id:'p1-loop',seconds:60}}));
  assert.equal(punt.vehicle,'punt');assert.match(label(punt),/^Board the punt: it pushes off by itself ~30 s after you are aboard, rows 60 seconds on the water/);
 });

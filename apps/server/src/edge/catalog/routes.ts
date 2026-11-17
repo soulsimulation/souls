@@ -2,7 +2,7 @@
 // no Soul and no admission; behind the launcher it is a C3 public read answered from the micro-cache.
 import type {Context, Hono} from 'hono';
 import type {EdgeLedger} from '../ledger/ledger.ts';
-import {buildCatalog, type CatalogThingIn} from './catalog.ts';
+import {buildCatalog, type CatalogRideIn, type CatalogThingIn} from './catalog.ts';
 import {inPoly} from '../ledger/places.ts';
 
 type WorldEntity = {def?: string; label?: string; name?: string; human?: unknown; pose?: {p: number[]}};
@@ -23,7 +23,15 @@ export function ledgerCatalog(L: EdgeLedger) {
   }
   // a spot of a thing the world no longer has (a god removed it; a world's authored spots outlive it) is not an act
   const spots = L.spots.spots.filter(s => !L.spotThingGone(s.id));
-  return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots, things, interiors: L.spots.interiors});
+  // the rides the world runs, each boarded through its ride object (`object:<ride>:join`)
+  const rides: CatalogRideIn[] = [];
+  for (const o of L.comms?.objects.all() ?? []) {
+    if (o.kind !== 'ride') continue;
+    const carrier = L.rideCarrier(o.id); if (!carrier) continue;
+    const vehicle = (L.comms?.objects.objectTable?.()?.get(o.id)?.state as {vehicle?: unknown} | null)?.vehicle;
+    rides.push({id: o.id, carrier, name: (o as {name?: string}).name ?? carrier, ...(typeof vehicle === 'string' ? {vehicle} : {})});
+  }
+  return buildCatalog({worldId: L.host.worldId, places: [...L.places.byId.values()].filter(p => open(p.id)), spots, things, interiors: L.spots.interiors, rides});
 }
 
 const STARTING_MAX_MS = 30_000;
@@ -36,7 +44,8 @@ export function mountCatalogRoute(app: Hono, deps: {ledger: EdgeLedger}) {
     // rebuilds nothing. (#1751: and which things a shut container keeps out of sight: opening a drawer publishes what is in it)
     let things = 0, hidden = '';
     for (const [id, e] of Object.entries((L.host.engine.world as unknown as {entities: Record<string, WorldEntity>}).entities)) if (e.def && !e.human) {things++; if (L.concealedThing?.(id)) hidden += id + ',';}
-    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}|${L.thingsVersion?.() ?? ''}|${hidden}`;
+    const rides = (L.comms?.objects.all() ?? []).filter(o => o.kind === 'ride').length;
+    const key = `${L.staticVersion()}|${L.knowledge?.version ?? 0}|${things}|${rides}|${L.thingsVersion?.() ?? ''}|${hidden}`;
     if (kept?.key !== key) kept = {key, value: ledgerCatalog(L)};
     return kept.value;
   };

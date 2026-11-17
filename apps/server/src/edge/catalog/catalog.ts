@@ -27,11 +27,14 @@ export type CatalogKindAct = {verb: string; label: string; params?: Record<strin
 export type CatalogThingIn = {id: string; kind: string; name: string; at: V2; place: string | null; seat?: boolean; hand?: {acts: readonly CatalogKindAct[]; state: Record<string, unknown>} | null};
 /** activity-spots/1 `interiors[]`: a building made enterable through its doors (each door a segment `[x0, z0, x1, z1]` across its wall). */
 export type CatalogInteriorIn = {place: string; doors: readonly (readonly number[])[]; shell?: [number, number, number, number]; wall?: number};
-export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]; interiors?: readonly CatalogInteriorIn[]};
+/** A ride the world runs (a ride object on a carrier thing): `vehicle` is balloon, punt, ferris-wheel or carousel. */
+export type CatalogRideIn = {id: string; carrier: string; name: string; vehicle?: string};
+export type CatalogInput = {worldId: string; places: readonly CatalogPlaceIn[]; spots: readonly CatalogSpotIn[]; things: readonly CatalogThingIn[]; interiors?: readonly CatalogInteriorIn[]; rides?: readonly CatalogRideIn[]};
 /** #2261: a door of a building: the middle of its gap `[x, z]`, its level, and the way it faces out (north is -z, east +x). */
 export type CatalogDoor = {at: [number, number]; level: number; facing: string; /** where to stand in front of it, 1 m out */ approach: [number, number]};
 
 export type CatalogPlace = {id: string; ref?: string; name: string; kind: string; parent: string | null; at: [number, number]; level?: number; aliases?: string[]; what?: string; fixed?: true;
+  /** A place on a carrier (a balloon basket): the thing it rides on, whose own act boards it. */ of?: string;
   /** #1915: its polygon, `[x, z]` to 0.1 m. None for a place on a carrier, whose polygon is in the carrier's own frame. */ outline?: [number, number][];
   /** #2261: a building's doors, from its interior's door gaps. None for a building that cannot be entered. */ doors?: CatalogDoor[]};
 /** `seat`: the thing has a seat a body sits on, so `sit:<id>` is an act the world takes from anywhere. */
@@ -44,6 +47,14 @@ export type Catalog = {contract: typeof CATALOG_CONTRACT; worldId: string; scope
   kinds: Record<string, {acts: CatalogKindAct[]; state: Record<string, unknown>}>;
   counts: {places: number; things: number; acts: number; kinds: number; handKinds: number; handThings: number}};
 
+const carrierOf = (c: unknown) => typeof (c as {entity?: unknown} | null)?.entity === 'string' ? (c as {entity: string}).entity : undefined;
+/** What boarding a ride does, in the words a person asks for it with. */
+export function rideLabel(r: CatalogRideIn): string {
+  return r.vehicle === 'punt' ? `Row the ${r.name} (a punt): board it for a loop on the water`
+    : r.vehicle === 'ferris-wheel' ? `Ride the ${r.name} (ferris wheel): board a gondola and go round`
+    : r.vehicle === 'carousel' ? `Ride the ${r.name} (carousel): board it and go round`
+    : `Fly the ${r.name} (hot-air balloon): board its basket; in the air, steer it to a place or a direction and land it on clear ground`;
+}
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const centre = (poly: readonly V2[]): [number, number] => [r1(poly.reduce((s, v) => s + v[0], 0) / poly.length), r1(poly.reduce((s, v) => s + v[1], 0) / poly.length)];
 /** A thing's kind as people name it: `ew:core-bowl@1:c56a7cb231` (entity-world def, revision, params hash) is `core-bowl`. */
@@ -93,7 +104,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   const interiors = new Map((input.interiors ?? []).filter(i => i.doors.length).map(i => [i.place, i]));
   const places: CatalogPlace[] = input.places.filter(p => p.polygon.length >= 1).map(p => ({
     id: p.id, ...(p.ref && p.ref !== p.id && refs.get(p.ref) === 1 ? {ref: p.ref} : {}), name: p.name, kind: p.kind, parent: p.parent, at: centre(p.polygon), ...(p.level ? {level: p.level} : {}),
-    ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const} : {outline: p.polygon.map(v => [r1(v[0]), r1(v[1])] as [number, number])}),
+    ...(p.aliases?.length ? {aliases: [...p.aliases]} : {}), ...(p.description ? {what: p.description.slice(0, 200)} : {}), ...(p.carrier ? {fixed: true as const, ...(carrierOf(p.carrier) ? {of: carrierOf(p.carrier)} : {})} : {outline: p.polygon.map(v => [r1(v[0]), r1(v[1])] as [number, number])}),
     ...(p.carrier ? {} : p.doors?.length ? {doors: p.doors.map(d => ({...d}))} : interiors.has(p.id) ? {doors: placeDoors(p, interiors.get(p.id)!)} : {})})).sort(byId);
   const known = new Set(input.places.map(p => p.id));   // #1262: no place is secret, whatever its data says
   const shown = input.things.filter(t => !t.place || known.has(t.place));
@@ -120,6 +131,12 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
     const thing = spotThing(s.id), where = s.label ?? s.place ?? s.id;
     for (const verb of [s.activity, ...(s.also ?? [])]) acts.push({id: `${verb}:${s.id}`, verb, place: s.place ?? null, ...(thing ? {thing} : {}), at: [r1(s.at[0]), r1(s.at[1])],
       label: verb === s.activity && s.title ? `${s.title} (${where})` : `${verb.replace(/-/g, ' ')} (${where})`, ...(s.together ? {with: s.together.need} : {}), ...(s.requires ? {needs: s.requires} : {})});
+  }
+  // a ride is one act on the thing it rides on (the balloon, not its basket), found by the thing's words and by its own
+  const shownThings = new Map(things.map(t => [t.id, t]));
+  for (const r of input.rides ?? []) {
+    const t = shownThings.get(r.carrier); if (!t) continue;
+    acts.push({id: `object:${r.id}:join`, verb: 'ride', place: t.place, thing: t.id, at: t.at, label: rideLabel(r)});
   }
   acts.sort(byId);
   const payload: Catalog = {contract: CATALOG_CONTRACT, worldId: input.worldId, scope: 'public', placeVerbs: PLACE_VERBS, anywhere: ANYWHERE.map(([verb, label]) => ({id: `${verb}:here`, verb, label})), places, things, acts, kinds,
