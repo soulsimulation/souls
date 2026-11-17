@@ -19,15 +19,22 @@
 //   A move toward an argument with no point (`hold_under`) is a walk to clear ground by it and a short stand there.
 //   The kinds are read from content/kinds, then the rules' own test kinds (the entry format has no amount yet); a
 //   published kind wins. The argument is chosen again at the end (no reservation): the nearest one then is debited.
-// - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list),
-//   reparent, create and remove are new engine only or later tasks; a link has no field in today's def. Interruption
-//   and restart are today's: the receipt fails and nothing is applied.
+// - Take and put (SA-F4b, #2930): a change of parent is today's item verbs. A `take` step becomes mars:take_item of
+//   the thing the form's reparent moves, into the hand the rules chose; a `put` step becomes mars:put_item onto a free
+//   place on top of the anchor (placement `on`), the place nearest the body. The stand point is the entry's (the
+//   thing's for a take, the anchor's for a put) where one has room; else today's own approach. The body's forms that
+//   change a thing argument's parent (its `put`) are offered on each entry thing, with the thing as that argument.
+//   Such a form is decided when it starts (the motion itself makes the change, so its needs no longer hold at the end:
+//   a hand that was free now holds the cup); at the end the adapter checks that the thing is where the rules put it.
+// - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list), create,
+//   remove, a put into a named slot and other placement words are new engine only or later tasks; a link has no field
+//   in today's def. Interruption and restart are today's: the receipt fails and nothing is applied.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { opSchema, type Op, type StoredDef, type WorldModel } from '@souls/world-compiler';
 import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
 import { apply, effects, type Change } from '../../../../packages/form-rules/src/effects.ts';
-import { heldGodThing } from './held.ts';
+import { surfaceSlotsOf, slotOccupant } from '../../../../mars/viewer/engine/items/model.ts';
 import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -41,13 +48,21 @@ const ROOT = resolve(import.meta.dirname, '../../../..');
 const KINDS_DIRS = [join(ROOT, 'content/kinds'), join(ROOT, 'packages/form-rules/cases/kinds')], MOVES_DIR = join(ROOT, 'content/moves');
 /** Moves today's hand can make at a point (a slide is pressed: see the header). */
 const HAND_MOVES = new Set(['press', 'slide']);
-/** Effects that become changes today's store holds. */
-const KEPT = new Set(['set', 'transfer']);
+/** Effects that become changes today's store holds (a reparent is made by today's take and put, SA-F4b). */
+const KEPT = new Set(['set', 'transfer', 'reparent']);
+/** The body's kind (lane A's entry, SA-G3): its forms that move a thing argument are offered on that thing. */
+const BODY_KIND = 'eden:humanoid';
+/** The node the rules see as the actor's place (here). */
+const HERE = '@here';
 /** Who may start a form here: anyone, or its holder (the rules' held_by_actor need decides who holds it). */
 const WHO = new Set([undefined, 'anyone', 'holder']);
 type Takes = Record<string, { type?: string; select?: { of?: string; kind?: string; order?: string; rank?: number } }>;
+/** A form offered on an entry thing: its own, or the body's with the thing as its argument `thing`. */
+type FormRef = { form: Form & { takes?: Takes }; body: Entry | null };
 const argName = (v: unknown) => (v && typeof v === 'object' && 'arg' in (v as object) ? String((v as { arg: unknown }).arg) : null);
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
+// entry 41's M04 finding (tea.ts): an idle gesture is let go before a hand reaches
+const LET_GO: Step = { verb: 'mars:let_go_v1', params: {} };
 
 function jsonFiles(dir: string): string[] {
   try { return readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? jsonFiles(join(dir, e.name)) : e.name.endsWith('.json') ? [join(dir, e.name)] : []); } catch { return []; }
@@ -80,35 +95,63 @@ export function entryOf(def: StoredDef | undefined): Entry | null {
   return kinds(kind)[kind] ?? null;
 }
 
-/** Why this adapter cannot carry a form out on today's engine, or null when it can. */
-export function unmapped(form: Form & { takes?: unknown }): string | null {
+/** Why this adapter cannot carry a form out on today's engine, or null when it can. `offered` names the argument the
+ *  thing it is offered on fills (the body's forms, SA-F4b). */
+export function unmapped(form: Form & { takes?: unknown }, offered?: string): string | null {
   if (form.starts !== 'act' || !WHO.has(form.who as string)) return 'not started by anyone\'s act';
   // the rules do not read `who`: a holder's form is mapped only when its needs check the holding
   if (form.who === 'holder' && !(form.needs ?? []).some((n) => n.need === 'held_by_actor')) return 'a holder\'s form that does not need the holding';
   // an argument is chosen here only when it is a thing picked by its select, the nearest first (SA-F4a)
-  for (const [, a] of Object.entries((form.takes ?? {}) as Takes)) {
+  for (const [name, a] of Object.entries((form.takes ?? {}) as Takes)) {
+    if (name === offered || a?.type === 'placement') continue;   // the offered thing; a placement word (see `put`)
     const sel = a?.select as Record<string, unknown> | undefined;
     if (a?.type !== 'thing' || !sel || (sel.of ?? 'things') !== 'things' || (sel.in ?? 'here') !== 'here' || (sel.anchor ?? 'me') !== 'me' || (sel.order ?? 'nearest') !== 'nearest' || (sel.rank ?? 1) !== 1) return 'an argument chosen otherwise than the nearest thing: a later task';
   }
+  const parents = (form.effects ?? []).filter((e) => e.change === 'reparent');
   for (const s of form.steps ?? []) {
     const toward = argName((s as { toward?: unknown }).toward);
     if (s.step === 'move' && s.at === undefined && toward && (form.takes as Takes | undefined)?.[toward]) continue;   // walk by it, stand
     if (s.step === 'move' && !HAND_MOVES.has(String(s.move))) return `the move ${s.move}: a later task`;
     if (s.step === 'move' && typeof s.at !== 'string') return 'a move at an argument: a later task';
     if (s.step === 'walk_to' && typeof (s as { point?: unknown } & typeof s).point !== 'string') return 'a walk to an argument: a later task';
-    if (!['move', 'walk_to', 'wait'].includes(s.step)) return `the step ${s.step}: take, put, sit and rise are later tasks (SA-F4)`;
+    if (s.step === 'take' || s.step === 'put') {
+      // SA-F4b: the item and where it goes come from the form's reparent; today's slots are not named as the entry's
+      if ((s as { slot?: unknown }).slot !== undefined) return `a ${s.step} at a named slot: a later task`;
+      const into = s.step === 'take' ? 'actor_hand' : 'here', at = (s as { place?: { at?: unknown } }).place?.at;
+      if (!parents.some((e) => e.into === into)) return `a ${s.step} that does not move a thing ${s.step === 'take' ? 'into a hand' : 'down here'}: a later task`;
+      if (at !== undefined && at !== 'on' && !(argName(at) && (form.takes as Takes | undefined)?.[argName(at)!]?.type === 'placement')) return `the placement ${JSON.stringify(at)}: new engine only (E4)`;
+      continue;
+    }
+    if (!['move', 'walk_to', 'wait'].includes(s.step)) return `the step ${s.step}: sit and rise are later tasks (SA-F4)`;
   }
+  if (parents.length && (form.effects ?? []).some((e) => e.change !== 'reparent' && e.change !== 'timer')) return 'a change of parent with other changes: a later task';
+  if (parents.length && !(form.steps ?? []).some((s) => s.step === 'take' || s.step === 'put')) return 'a change of parent with no take or put step: a later task';
   for (const e of form.effects ?? []) {
     if (e.change === 'timer') continue;   // new engine only (a due list): listed, not run
+    if (e.change === 'reparent' && (e.what === 'this' || argName(e.what)) && (e.into === 'actor_hand' || e.into === 'here')) continue;
+    if (e.change === 'reparent') return 'a change of parent into a slot or of the actor: a later task';
     if (!KEPT.has(e.change)) return `the effect ${e.change}: ${e.change === 'link' || e.change === 'unlink' ? 'a link has no field in today\'s def' : 'new engine only or a later task'}`;
   }
   return null;
 }
 
+/** The body's forms that change the parent of a thing argument named `thing` (its `put`), mapped here (SA-F4b). */
+function bodyForms(): [string, FormRef['form']][] {
+  const body = kinds(BODY_KIND)[BODY_KIND]; if (!body) return [];
+  return (Object.entries(body.forms ?? {}) as [string, FormRef['form']][]).filter(([, f]) => f.takes?.thing?.type === 'thing' && (f.effects ?? []).some((e) => e.change === 'reparent' && argName(e.what) === 'thing') && !unmapped(f, 'thing'));
+}
+/** The form offered on an entry thing by this name: its own, else the body's with the thing as its argument. */
+export function formOf(entry: Entry, action: string): FormRef | null {
+  const own = entry.forms?.[action]; if (own) return unmapped(own) ? null : { form: own, body: null };
+  const b = bodyForms().find(([n]) => n === action);
+  return b ? { form: b[1], body: kinds(BODY_KIND)[BODY_KIND] } : null;
+}
+
 /** The actions an entry thing's def is offered (actuators.ts `actionsOf`): one per form this adapter can carry out. */
 export function formActions(def: StoredDef): Action[] {
   const entry = entryOf(def); if (!entry) return [];
-  return Object.entries(entry.forms ?? {}).filter(([, f]) => !unmapped(f)).map(([name]) => (
+  const names = [...Object.entries(entry.forms ?? {}).filter(([, f]) => !unmapped(f)).map(([n]) => n), ...bodyForms().map(([n]) => n).filter((n) => !entry.forms?.[n])];
+  return names.map((name) => (
     { name, label: name.replace(/_/g, ' '), roles: 'anyone', reach: 'anywhere', params: {}, when: [], then: [] }
   )) as unknown as Action[];
 }
@@ -122,34 +165,68 @@ export type FormsHost = {
 };
 
 export function createFormsAdapter(h: FormsHost) {
-  const M = () => h.model;
+  const M = () => h.model, all = () => h.engine.world.entities, world = () => h.engine.world as never;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
+  /** The rules' answer for a form that changes a parent, as it was when the act was planned (SA-F4b): by body|capability. */
+  const planned = new Map<string, any>();
   /** god local → world (mending.ts, the contact actuator's convention); entry points are whole millimetres. */
   const toWorld = (wp: { x: number; y: number; z: number; yaw: number; s: number }, mm: number[]): Vec3 => {
     const l = [mm[0] / 1000, mm[1] / 1000, mm[2] / 1000], c = Math.cos(wp.yaw), s = Math.sin(wp.yaw);
     return [wp.x + (l[0] * c + l[2] * s) * wp.s, wp.y + l[1] * wp.s, wp.z + (-l[0] * s + l[2] * c) * wp.s];
   };
+  /** The god things in a body's hands, by today's support (it names the hand); a gripped thing counts as the right. */
+  const handsOf = (body: string) => {
+    const out: Record<string, string | null> = { left: null, right: null };
+    for (const x of Object.values(all())) if (x?.tags?.includes('entity-world') && x.support?.kind === 'in-hand' && x.support.by === body && (x.support.hand === 'left' || x.support.hand === 'right')) out[x.support.hand] = x.id;
+    const gripped = all()[body]?.human?.grip?.entity;
+    if (!out.right && typeof gripped === 'string' && out.left !== gripped) out.right = gripped;
+    return out;
+  };
   /** What the form needs and does now, asked of @souls/form-rules as the world: the thing's fields as today's store holds
-   *  them, the god thing the body holds in its right hand, the form's argument things, and its effector in the thing's frame (whole millimetres). */
-  function ask(t: NonNullable<ReturnType<typeof thing>>, id: string, action: string, bodyId: string, effector: number[], receipt: string): any {
-    const args = argsOf(t, id, action, bodyId), kinds: Record<string, Entry> = {}, nodes: Record<string, any> = {};
-    for (const n of new Set([id, ...Object.values(args)])) { const x = n === id ? t : thing(n)!; kinds[x.entry.kind] = x.entry; nodes[n] = { kind: x.entry.kind, fields: fieldsOf(x) }; }
-    const all = h.engine.world.entities, gripped = all[bodyId]?.human?.grip?.entity, held = heldGodThing(all, bodyId)?.id ?? (typeof gripped === 'string' ? gripped : null);
-    nodes[bodyId] = { hands: { left: null, right: held }, effector_mm: effector };
-    const input = { kinds, act: { this: id, form: action, args }, state: { actor: bodyId, nodes, moves: moves() } };
+   *  them, the god things the body holds, the form's argument things, its effector in the thing's frame (whole
+   *  millimetres) and where each thing is: in a hand, in a place on another thing, or loose in the actor's place. */
+  function ask(t: NonNullable<ReturnType<typeof thing>>, id: string, f: FormRef, action: string, bodyId: string, effector: number[], receipt: string): any {
+    const args = argsOf(t, id, f, bodyId), kinds: Record<string, Entry> = {}, nodes: Record<string, any> = {};
+    for (const n of new Set([id, ...Object.values(args)])) {
+      const x = n === id ? t : thing(n);
+      if (x) { kinds[x.entry.kind] = x.entry; nodes[n] = { kind: x.entry.kind, fields: fieldsOf(x) }; } else if (M().entities.has(n)) nodes[n] = {};
+    }
+    if (f.body) kinds[f.body.kind] = f.body;
+    nodes[bodyId] = { ...(f.body ? { kind: f.body.kind } : {}), hands: handsOf(bodyId), effector_mm: effector };
+    const keys = Object.keys(nodes), here: string[] = [bodyId];
+    nodes[HERE] = { loose: here };
+    for (const n of keys) {
+      if (n === bodyId) continue;
+      const s = all()[n]?.support;
+      if (s?.kind === 'in-hand' && s.by === bodyId) continue;   // in its hands above
+      if (s?.kind === 'in-hand' && typeof s.by === 'string') { nodes[s.by] ??= { hands: {} }; nodes[s.by].hands = { ...nodes[s.by].hands, [s.hand]: n }; if (!here.includes(s.by)) here.push(s.by); continue; }
+      if (s?.kind === 'resting-on' && typeof s.on === 'string') {
+        nodes[s.on] ??= {}; const slot = String(s.slot ?? 'top');
+        nodes[s.on].slots = { ...nodes[s.on].slots, [slot]: [...(nodes[s.on].slots?.[slot] ?? []), n] };
+        if (!keys.includes(s.on) && !here.includes(s.on)) here.push(s.on);
+        continue;
+      }
+      here.push(n);
+    }
+    const input = { kinds, act: { this: f.body ? bodyId : id, form: action, args }, state: { actor: bodyId, nodes, moves: moves() } };
     return Object.assign(effects({ ...input, receipt }), { input });
   }
   const fieldsOf = (x: NonNullable<ReturnType<typeof thing>>) => { const f: Record<string, unknown> = {}; for (const [k, d] of Object.entries(x.entry.state ?? {})) f[k] = x.e.state?.[k] ?? d.default; return f; };
-  /** A form's arguments, each the entry thing nearest the actor that its select admits (a kind, when it names one). */
-  function argsOf(t: NonNullable<ReturnType<typeof thing>>, id: string, action: string, bodyId: string): Record<string, string> {
-    const takes = (t.entry.forms?.[action] as { takes?: Takes } | undefined)?.takes ?? {}, out: Record<string, string> = {};
-    const p = h.engine.world.entities[bodyId]?.pose?.p as Vec3 | undefined;
-    for (const [name, a] of Object.entries(takes)) {
+  /** A form's arguments: the thing it is offered on (the body's forms), `on` for a placement (today's one word), and each
+   *  other the thing nearest the actor that its select admits: of its kind; with no kind, an entry thing or a thing with
+   *  places on top today. */
+  function argsOf(t: NonNullable<ReturnType<typeof thing>>, id: string, f: FormRef, bodyId: string): Record<string, string> {
+    const out: Record<string, string> = f.body ? { thing: id } : {};
+    const p = all()[bodyId]?.pose?.p as Vec3 | undefined;
+    for (const [name, a] of Object.entries(f.form.takes ?? {})) {
+      if (name in out) continue;
+      if (a.type === 'placement') { out[name] = 'on'; continue; }
       let best = Infinity;
       for (const [eid, e] of M().entities) {
         if (eid === id || Object.values(out).includes(eid)) continue;
-        const x = thing(eid); if (!x || (a.select?.kind && x.entry.kind !== a.select.kind)) continue;
+        const x = thing(eid);
+        if (a.select?.kind ? x?.entry.kind !== a.select.kind : !x && !surfaceSlotsOf(world(), eid).length) continue;
         const wp = M().worldPose(e), d = p ? Math.hypot(wp.x - p[0], wp.z - p[2]) : 0;
         if (d < best) { best = d; out[name] = eid; }
       }
@@ -157,27 +234,53 @@ export function createFormsAdapter(h: FormsHost) {
     return out;
   }
   const clear = (p: Vec3, level: number) => (h.engine.clearanceAtV1 ? h.engine.clearanceAtV1(p[0], p[2], level) : Infinity) >= HUMAN_RADIUS + 0.02;
+  /** An entry thing's stand points, in the world. */
+  const standsOf = (id: string): Vec3[] => { const x = thing(id); if (!x) return []; const wp = M().worldPose(x.e); return Object.values(x.entry.points ?? {}).filter((p) => (p as { role?: string }).role === 'stand').map((p) => toWorld(wp, p.at_mm)); };
   /** The steps of a form for this body, or a refusal; null when this is not an entry thing's form. */
   function plan(soul: { entityId: string }, id: string, action: string): { steps: Step[]; summary: string } | Refusal | null {
-    const t = thing(id), form = t?.entry.forms?.[action]; if (!t || !form || unmapped(form)) return null;
-    const body = h.engine.world.entities[soul.entityId]; if (!body?.pose?.p) return null;
+    const t = thing(id), f = t && formOf(t.entry, action); if (!t || !f) return null;
+    const form = f.form, body = all()[soul.entityId]; if (!body?.pose?.p) return null;
     // the needs as they stand now, with the hand where the form's move puts it (its walk meets within_reach)
-    const mv = (form.steps ?? []).find((s) => s.step === 'move'), now = ask(t, id, action, soul.entityId, (mv && t.entry.points?.[mv.at as string]?.at_mm) ?? [0, 0, 0], 'plan');
+    const mv = (form.steps ?? []).find((s) => s.step === 'move'), now = ask(t, id, f, action, soul.entityId, (mv && t.entry.points?.[mv.at as string]?.at_mm) ?? [0, 0, 0], 'plan');
     if (now.verdict !== 'yes') return { code: `form.${now.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), now)}.` };
     const wp = M().worldPose(t.e), level = h.levelAt(wp.x, wp.z, wp.y), points = t.entry.points ?? {};
-    const stands = Object.entries(points).filter(([, p]) => (p as { role?: string }).role === 'stand').map(([, p]) => toWorld(wp, p.at_mm));
     const steps: Step[] = [{ verb: 'stand', params: {} }];
     let at: Vec2 = [body.pose.p[0], body.pose.p[2]];
     const walk = (to: Vec2, face: Vec3) => {
       if (Math.hypot(to[0] - at[0], to[1] - at[1]) > 0.1) steps.push({ verb: 'mars:walk_to', params: { x: r3(to[0]), z: r3(to[1]), level, face: r3(Math.atan2(face[2] - to[1], face[0] - to[0])) } });
       at = to;
     };
+    /** Walk to the entry's stand point of `of` nearest `target` that has room; with none, today's item verb approaches. */
+    const standBy = (of: string, target: Vec3) => {
+      let stand: Vec2 | null = null, best = Infinity;
+      for (const q of standsOf(of)) { const d = Math.hypot(q[0] - target[0], q[2] - target[2]); if (d < best && clear(q, level)) { best = d; stand = [q[0], q[2]]; } }
+      if (stand) walk(stand, target);
+    };
     for (const s of form.steps ?? []) {
+      if (s.step === 'take' || s.step === 'put') {
+        // SA-F4b: today's take_item / put_item of the thing the rules reparent, into the hand they chose or onto the anchor
+        const c = (now.changes as Change[]).find((x) => x.change === 'reparent' && (s.step === 'take' ? 'hand' in x.to && x.to.node === soul.entityId : x.to.node === HERE)) as Extract<Change, { change: 'reparent' }> | undefined;
+        const e = c && all()[c.node];
+        if (!c || !e?.pose?.p) return { code: 'form.bad_input', reason: `${nameOf(id)}: nothing to ${s.step} in today's world.` };
+        if (s.step === 'take') {
+          if (e.support?.kind === 'in-hand' && e.support.by === soul.entityId) return { code: 'form.already_held', reason: `You already hold ${nameOf(c.node)}.` };
+          standBy(c.node, e.pose.p as Vec3);
+          steps.push(LET_GO, { verb: 'mars:take_item', params: { item: c.node, hand: (c.to as { hand: string }).hand } });
+          continue;
+        }
+        const anchor = now.input.act.args?.[argName((s as { place?: { anchor?: unknown } }).place?.anchor) ?? ''];
+        if (typeof anchor !== 'string') return { code: 'form.argument_missing', reason: `There is nothing near to put ${nameOf(c.node)} on.` };
+        const w = world(), free = surfaceSlotsOf(w, anchor).filter((x) => !x.inside && !x.hang && !slotOccupant(w, x.owner, x.slot)).sort((a, b) => Math.hypot(a.p[0] - at[0], a.p[2] - at[1]) - Math.hypot(b.p[0] - at[0], b.p[2] - at[1]))[0];
+        if (!free) return { code: 'form.no-room', reason: `There is no free place on ${nameOf(anchor)} to put ${nameOf(c.node)}.` };
+        standBy(anchor, free.p);
+        steps.push({ verb: 'mars:put_item', params: { item: c.node, surfaceSlot: free.id } });
+        continue;
+      }
       if (s.step === 'walk_to') { const p = points[String((s as { point?: string } & typeof s).point)]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${(s as { point?: string } & typeof s).point}.` }; const w = toWorld(wp, p.at_mm); walk([w[0], w[2]], toWorld(wp, [0, 0, 0])); continue; }
       const toward = argName((s as { toward?: unknown }).toward);
       if (s.step === 'move' && s.at === undefined && toward) {
         // a move toward an argument with no point (hold under a tap): walk to clear ground by it and stand there a moment
-        const other = argsOf(t, id, action, soul.entityId)[toward], oe = other && M().entities.get(other);
+        const other = argsOf(t, id, f, soul.entityId)[toward], oe = other && M().entities.get(other);
         if (!oe) return { code: 'form.argument_missing', reason: `There is nothing near to ${action.replace(/_/g, ' ')} ${nameOf(id)} from.` };
         const ow = M().worldPose(oe), by = h.engine.standableNearV1?.([ow.x, ow.z], level, soul.entityId, 0.4, 16) ?? null;
         if (!by) return { code: 'form.no-room', reason: `There is no room to stand by ${nameOf(other)}.` };
@@ -189,21 +292,39 @@ export function createFormsAdapter(h: FormsHost) {
       // where to stand: the entry's stand point nearest the hand's point; else today's approach, the nearest clear ground
       let stand: Vec2 | null = null, best = Infinity;
       // (only a stand point with room to stand: mending.ts's clearance test)
-      for (const q of stands) { const d = Math.hypot(q[0] - hand[0], q[2] - hand[2]); if (d < best && clear(q, level)) { best = d; stand = [q[0], q[2]]; } }
+      for (const q of standsOf(id)) { const d = Math.hypot(q[0] - hand[0], q[2] - hand[2]); if (d < best && clear(q, level)) { best = d; stand = [q[0], q[2]]; } }
       stand ??= h.engine.standableNearV1?.([hand[0], hand[2]], level, soul.entityId, 0.4, 16) ?? null;
       if (!stand) return { code: 'form.no-room', reason: `There is no room to stand and reach ${nameOf(id)}.` };
       walk(stand, hand);
-      steps.push({ verb: 'mars:let_go_v1', params: {} }, { verb: 'mars:hand_actuator_v1', params: { target: id, at: hand.map(r3) } });
+      steps.push(LET_GO, { verb: 'mars:hand_actuator_v1', params: { target: id, at: hand.map(r3) } });
     }
+    // a change of parent is made by today's motion: keep the rules' answer as it was now, to check against at the end
+    if ((now.changes as Change[]).some((c) => c.change === 'reparent')) planned.set(`${soul.entityId}|object:${id}:${action}`, now);
     return { steps, summary: `${action.replace(/_/g, ' ')} ${nameOf(id)}` };
   }
   /** The ledger's actOutcome: when a form's programme ends, ask its needs again and apply its changes once. Null for
    *  anything that is not an entry thing's form, and for a programme that did not finish (today's failure stands). */
   function outcome(capability: string, bodyId: string, finished: boolean): 'done' | Refusal | null {
     const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); if (!m) return null;
-    const [, id, action] = m, t = thing(id), form = t?.entry.forms?.[action];
-    if (!t || !form || unmapped(form) || !finished) return null;
-    const body = h.engine.world.entities[bodyId]; if (!body?.pose?.p) return { code: 'body.unavailable', reason: 'Your body is unavailable; nothing changed.' };
+    const [, id, action] = m, t = thing(id), f = t && formOf(t.entry, action);
+    if (!t || !f) return null;
+    const form = f.form, key = `${bodyId}|${capability}`, before = planned.get(key); planned.delete(key);
+    if (!finished) return null;
+    const body = all()[bodyId]; if (!body?.pose?.p) return { code: 'body.unavailable', reason: 'Your body is unavailable; nothing changed.' };
+    if ((form.effects ?? []).some((e) => e.change === 'reparent')) {
+      // SA-F4b: today's take or put made the change; the rules' answer when it started says where the thing must be now
+      if (!before) return { code: 'form.unplanned', reason: `${nameOf(id)}: this act was not planned by the forms adapter.` };
+      const checked = apply(before.input.state, before);
+      if (!checked.ok) return { code: `form.${checked.reason}`, reason: `${nameOf(id)}: the change could not be applied (${checked.reason.replace(/_/g, ' ')}).` };
+      const anchor = before.input.act.args?.anchor;
+      for (const c of before.changes as Change[]) {
+        if (c.change !== 'reparent') continue;
+        const s = all()[c.node]?.support, inHand = 'hand' in c.to;
+        if (inHand ? s?.kind === 'in-hand' && s.by === bodyId : s?.kind === 'resting-on' && (typeof anchor !== 'string' || s.on === anchor)) continue;
+        return { code: 'form.not_moved', reason: `${nameOf(c.node)} is not ${inHand ? 'in your hand' : `on ${typeof anchor === 'string' ? nameOf(anchor) : 'a place here'}`} at the end of the motion.` };
+      }
+      return 'done';
+    }
     // The hand's reach: today's press completes only once the hand has touched the point, so a finished programme puts the
     // effector at the form's point when the body still stands within the move's reach of it; else the body's own place.
     const wp = M().worldPose(t.e), mv = (form.steps ?? []).find((s) => s.step === 'move'), point = mv && t.entry.points?.[mv.at as string];
@@ -214,7 +335,7 @@ export function createFormsAdapter(h: FormsHost) {
       if (near) effector = point.at_mm;
       else { const dx = body.pose.p[0] - wp.x, dz = body.pose.p[2] - wp.z, c = Math.cos(wp.yaw), s = Math.sin(wp.yaw); effector = [Math.round((dx * c - dz * s) * 1000), 0, Math.round((dx * s + dz * c) * 1000)]; }
     }
-    const r = ask(t, id, action, bodyId, effector, `${capability}@${h.engine.world.tick}`);
+    const r = ask(t, id, f, action, bodyId, effector, `${capability}@${h.engine.world.tick}`);
     if (r.verdict !== 'yes') return { code: `form.${r.reason ?? 'refused'}`, reason: `${refusalText(nameOf(id), r)}; nothing changed.` };
     // every set, on any thing it names, checked by the rules' own apply (whole, balanced) and committed as one edit
     const checked = apply(r.input.state, r);
@@ -233,8 +354,8 @@ export function createFormsAdapter(h: FormsHost) {
     if (r.timers?.length) h.log(`forms: ${action} on ${id}: ${r.timers.length} timer(s) not run (new engine only)`);
     return 'done';
   }
-  /** Is this capability a form of an entry thing (so tea.ts does not watch the body for it)? */
-  const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); return !!m && !!thing(m[1])?.entry.forms?.[m[2]]; };
+  /** Is this capability a form of an entry thing, its own or the body's (so tea.ts does not watch the body for it)? */
+  const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability), t = m && thing(m[1]); return !!t && (!!t.entry.forms?.[m![2]] || bodyForms().some(([n]) => n === m![2])); };
   return { plan, outcome, owns };
 }
 export type FormsAdapter = ReturnType<typeof createFormsAdapter>;
