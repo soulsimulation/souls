@@ -8,6 +8,36 @@
   "links": {
     "signed": { "n": 1, "from": "soul", "most": 1, "most_per": 3, "audience": { "rule": "everyone" } }
   },
+  "points": {
+    "line": { "role": "contact", "at_mm": [0, 4, 0] }
+  },
+  "geometry": { "bounds_mm": [330, 8, 40] },
+  "forms": {
+    "sign": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "unlinked", "link": "signed" },
+        { "need": "within_reach", "point": "line" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "line" }],
+      "effects": [{ "change": "link", "link": "signed", "from": "actor", "event": "signed_up" }]
+    },
+    "cross_off": {
+      "who": { "link": "signed" },
+      "starts": "act",
+      "needs": [
+        { "need": "linked", "link": "signed" },
+        { "need": "within_reach", "point": "line" }
+      ],
+      "steps": [{ "step": "move", "move": "slide", "at": "line" }],
+      "effects": [{ "change": "unlink", "link": "signed", "from": "actor", "event": "crossed_off" }]
+    }
+  },
+  "looks": {
+    "model": "look:signup_slot",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1,0],"size":[330,2,40],"tint":"sheet"},{"kind":"box","at":[0,3,-14],"size":[320,2,2],"tint":"rule"}],"palette":{"sheet":"#fbfaf4","rule":"#9fb3c8"},"tags":["sheet","object"]}
+  },
   "text": { "card": "One place on a sheet; who signed it is a link." },
   "card": { "text": "card" }
 }

@@ -1,0 +1,53 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pinned_note",
+  "owner": "thing",
+  "state": {
+    "words": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "author": { "n": 1, "from": "soul", "most": 1, "most_per": 2, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "card": { "role": "contact", "at_mm": [0, 120, 6] }
+  },
+  "geometry": { "bounds_mm": [340, 240, 12] },
+  "forms": {
+    "pin": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "words": { "type": "text" } },
+      "needs": [
+        { "need": "unlinked", "link": "author" },
+        { "need": "within_reach", "point": "card" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "card" }],
+      "effects": [
+        { "change": "link", "link": "author", "from": "actor", "event": "note_pinned" },
+        { "change": "set", "field": "words", "to": { "arg": "words" }, "event": "note_written" }
+      ]
+    },
+    "take_down": {
+      "who": { "link": "author" },
+      "starts": "act",
+      "needs": [
+        { "need": "linked", "link": "author" },
+        { "need": "within_reach", "point": "card" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "card" }],
+      "effects": [
+        { "change": "unlink", "link": "author", "from": "actor", "event": "note_taken_down" },
+        { "change": "set", "field": "words", "to": null, "event": "note_cleared" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:pinned_note",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,120,2],"size":[320,220,4],"tint":"paper"},{"kind":"box","at":[0,215,8],"size":[16,16,8],"tint":"pin"},{"kind":"box","at":[-20,150,5],"size":[220,8,1],"tint":"ink"},{"kind":"box","at":[-40,110,5],"size":[180,8,1],"tint":"ink"},{"kind":"box","at":[60,60,5],"size":[120,8,1],"tint":"ink"}],"palette":{"paper":"#fbf3c9","pin":"#c0392b","ink":"#2a2622"},"tags":["note","board","object"]}
+  },
+  "text": {
+    "card": "A place for one signed note on a notice board; only its author takes it down.",
+    "note": "note"
+  },
+  "card": { "text": "card", "category": "note" }
+}
