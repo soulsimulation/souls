@@ -70,7 +70,8 @@ export const ARG_ALLOW = {
   meetup: { '--profile': (v) => ['even', 'meetup', 'even,meetup'].includes(v), '--active-min': int(20, 240), '--short': FLAG },
   'slopes-profile': {},
   load: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--boots': int(1, 5), '--souls': (v) => ['0', '10'].includes(v), '--profile': FLAG, '--short': FLAG },
-  settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': (v) => ['0', '10', '0,10'].includes(v), '--settle-min': int(1, 20), '--short': FLAG },
+  settled: { '--world': (v) => ['small', 'eden', 'small,eden'].includes(v), '--souls': list(/^(300|[12]\d\d|[1-9]?\d)$/, 6), '--settle-min': int(1, 20), '--short': FLAG,
+    '--raw': FLAG, '--look': FLAG, '--present-only': FLAG, '--heap-at': list(/^(300|[12]\d\d|[1-9]?\d)$/, 4), '--wave': FLAG, '--acting': int(1, 100), '--wave-n': int(1, 300), '--wave-per-sec': int(1, 20), '--shape': (v) => ['uniform', 'event'].includes(v), '--seed': int(1, 99) },   // #2553
   hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
   colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
   // #2511: 0 is the zero-viewer arm; arrivals, a burst (<n>@<s>), stays and the Souls' pacing
@@ -263,7 +264,7 @@ export const PUBLISH = {
   meetup: ['meetup/summary.json', 'meetup/VERDICT.md', 'meetup/*/receipt.json', 'meetup/*/result.json', 'meetup/*/REPORT.md', 'meetup.log'],
   'slopes-profile': ['slopes/receipt.json', 'slopes/results.json', 'slopes/REPORT.md', 'slopes/*/result.json', 'slopes-profile.log'],
   load: ['load/results.json', 'load/REPORT.md', 'load.log'],
-  settled: ['settled/results.json', 'settled/REPORT.md', 'settled.log'],
+  settled: ['settled/results.json', 'settled/REPORT.md', 'settled/wave.json', 'settled/WAVE.md', 'settled/*/world.log', 'settled/*/data/stall-*.json', 'settled.log'],
   // #2475 A3: the launcher's own log (what loaded or unloaded each world, and why), scrubbed like every text file
   hundred: ['hundred/results.json', 'hundred/REPORT.md', 'hundred/hundred.log', 'hundred/launcher.log', 'hundred.log'],
   colocate: ['colocate/results.json', 'colocate/REPORT.md', 'colocate.log'],
