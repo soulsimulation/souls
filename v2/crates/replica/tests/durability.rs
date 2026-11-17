@@ -1,9 +1,11 @@
 //! Durability twice, one writer by epoch, and the directory (Engine v2 T11, #2665; `v2/docs/durability.md`): against a
-//! fake directory and fake stores, one of two writers writes, a paused writer is refused by the store, an effect that
-//! cannot be undone waits for the off-machine mark, and the directory record changes only by conditional writes.
+//! fake directory and fake stores, one of two writers writes (on two machines or on one), a paused writer is refused
+//! by the store, an effect that cannot be undone waits for the off-machine mark, and the directory record changes only
+//! by conditional writes.
 
 use replica::durability::{
-    SoulRecord, Stakes, Store, Takeover, When, WorldRecord, Writer, change, read_record, readable,
+    Readable, SoulRecord, Stakes, Store, Takeover, Token, When, WorldRecord, Writer, change,
+    part_key, read_record, readable,
 };
 use replica::effects::fixture_bytes;
 use replica::encode::Name;
@@ -51,42 +53,106 @@ fn record(store: &Store) -> WorldRecord {
     read_record(store, &WORLD, zone()).expect("a record").1
 }
 
+fn parts(store: &Store) -> Readable {
+    readable(store, &WORLD, zone()).expect("parts")
+}
+
 #[test]
 fn a1_of_two_writers_one_writes_and_the_store_refuses_the_other() {
+    // On two machines, and as two processes on one machine: a claim is its token, not its machine.
+    for (ma, mb) in [
+        ("souls:machine-a", "souls:machine-b"),
+        ("souls:machine-a", "souls:machine-a"),
+    ] {
+        let mut store = world();
+        let (mut a, mut b) = (writer(ma), writer(mb));
+        // Both start at once: both read the record before either writes.
+        let read = read_record(&store, &WORLD, zone()).expect("a record");
+        let ra = a.claim_from(&mut store, read.clone()).map_err(|r| r.name);
+        let rb = b.claim_from(&mut store, read).map_err(|r| r.name);
+        println!("{ma} claims: {ra:?}; {mb} claims: {rb:?}");
+        assert_eq!(ra, Ok(1));
+        assert_eq!(rb, Err("precondition-failed"));
+        // b ignores its own refusal and ships travel first, as if it held epoch 1 under the token it drew.
+        b.claim = Some(Takeover {
+            epoch: 1,
+            from: 0,
+            machine: b.machine.clone(),
+            token: Token::draw().expect("a token"),
+        });
+        b.next = 0;
+        let lost = b.write(Stakes::OffMachine).expect("b's own disk takes it");
+        let next = b.ship(&mut store).map_err(|r| r.name);
+        println!(
+            "  b ships anyway, first: {next:?}; b acknowledged travel: {}",
+            b.acknowledged.contains(&lost)
+        );
+        assert_eq!(next, Err("precondition-failed"));
+        assert!(!b.acknowledged.contains(&lost));
+        // a then writes travel at the same sequence and ships under its own claim's token: acknowledged.
+        let travel = a.write(Stakes::OffMachine).expect("travel");
+        let shipped = a.ship(&mut store).map_err(|r| r.name);
+        println!("  a ships: {shipped:?}; acknowledged {:?}", a.acknowledged);
+        assert_eq!(shipped, Ok(Some(0)));
+        assert!(a.acknowledged.contains(&travel));
+        let r = parts(&store);
+        println!("  a reader keeps {:?} and ignores {:?}", r.kept, r.ignored);
+        assert_eq!(r.kept, vec![(1, 0)]);
+        assert_eq!(r.ignored, vec![(1, 0, "superseded-epoch")]);
+        assert!(r.unreadable.is_empty());
+        assert_eq!(record(&store).current(), a.claim.as_ref());
+    }
+}
+
+#[test]
+fn a_machine_name_with_a_slash_keeps_its_parts_readable() {
     let mut store = world();
-    let (mut a, mut b) = (writer("souls:machine-a"), writer("souls:machine-b"));
-    // Both start at once: both read the record before either writes.
-    let read = read_record(&store, &WORLD, zone()).expect("a record");
-    let ra = a.claim_from(&mut store, read.clone()).map_err(|r| r.name);
-    let rb = b.claim_from(&mut store, read).map_err(|r| r.name);
-    println!("machine a claims: {ra:?}; machine b claims: {rb:?}");
-    assert_eq!(ra, Ok(1));
-    assert_eq!(rb, Err("precondition-failed"));
-    // b ignores its own refusal and ships first, as if it held epoch 1: the store refuses its mark.
-    b.claim = Some(Takeover {
-        epoch: 1,
-        from: 0,
-        machine: b.machine.clone(),
-    });
-    b.next = 0;
-    b.write(Stakes::Disk).expect("b's own disk takes it");
-    let next = b.ship(&mut store).map_err(|r| r.name);
-    println!("b ships anyway, first: {next:?}");
-    assert_eq!(next, Err("precondition-failed"));
-    // a then writes travel at the same sequence and ships under its own claim's name: acknowledged.
-    let travel = a.write(Stakes::OffMachine).expect("travel");
+    let mut a = writer("souls:rack/7");
+    a.claim(&mut store).expect("a claims");
+    for _ in 0..3 {
+        a.write(Stakes::Disk).expect("a writes");
+    }
     let shipped = a.ship(&mut store).map_err(|r| r.name);
-    println!("a ships: {shipped:?}; acknowledged {:?}", a.acknowledged);
-    assert_eq!(shipped, Ok(Some(0)));
-    assert!(a.acknowledged.contains(&travel));
-    let (kept, ignored) = readable(&store, &WORLD, zone()).expect("parts");
-    println!("a reader keeps {kept:?} and ignores {ignored:?}");
-    assert_eq!(kept, vec![(1, 0)]);
-    assert_eq!(ignored, vec![(1, 0, "superseded-epoch")]);
-    assert_eq!(
-        record(&store).current().map(|t| t.machine.as_str()),
-        Some("souls:machine-a")
+    // A key under the zone's prefix that is not a part's name is named, not skipped.
+    let token = a.claim.as_ref().expect("a claim").token.hex();
+    let stray = part_key(&WORLD, zone(), a.claim.as_ref().expect("a claim"), 9)
+        .replace(&token, "not-a-token");
+    store
+        .put(&stray, vec![0xa0], When::Absent)
+        .expect("a stray key");
+    let r = parts(&store);
+    println!(
+        "souls:rack/7 ships {shipped:?}; a reader keeps {:?}, ignores {:?}, cannot read {:?}",
+        r.kept, r.ignored, r.unreadable
     );
+    assert_eq!(shipped, Ok(Some(2)));
+    assert_eq!(r.kept, vec![(1, 0), (1, 1), (1, 2)]);
+    assert!(r.ignored.is_empty());
+    assert_eq!(r.unreadable, vec![stray]);
+}
+
+#[test]
+fn a_part_name_under_ones_own_token_is_a_retry_and_any_other_stops_the_ship() {
+    let mut store = world();
+    let mut a = writer("souls:machine-a");
+    a.claim(&mut store).expect("a claims");
+    a.write(Stakes::Disk).expect("0");
+    a.ship(&mut store).expect("a ships 0");
+    // a ships again: every part of its claim is sent again, and the one already there (0) is its own, retried.
+    a.write(Stakes::Disk).expect("1");
+    let retried = a.ship(&mut store).map_err(|r| r.name);
+    // A name under a's token holding other bytes is not a's: the ship stops.
+    a.write(Stakes::Disk).expect("2");
+    let claim = a.claim.clone().expect("a claim");
+    let taken = part_key(&WORLD, zone(), &claim, 2);
+    store
+        .put(&taken, vec![0xa0], When::Absent)
+        .expect("planted");
+    let stopped = a.ship(&mut store).map_err(|r| r.name);
+    println!("ship again over its own parts: {retried:?}; over another's bytes: {stopped:?}");
+    assert_eq!(retried, Ok(Some(1)));
+    assert_eq!(stopped, Err("part-exists"));
+    assert_eq!(record(&store).mark, Some(1));
 }
 
 #[test]
@@ -127,12 +193,16 @@ fn a2_a_writer_paused_past_its_lease_is_refused_by_the_store() {
     ));
     let r = a.ship(&mut store).map_err(|r| r.name);
     line.push(format!("t5  a ships: {r:?}"));
-    let (kept, ignored) = readable(&store, &WORLD, zone()).expect("parts");
+    let Readable { kept, ignored, .. } = parts(&store);
     line.push(format!(
         "t6  a reader keeps {kept:?} and ignores {ignored:?}"
     ));
     c.claim(&mut store).expect("c claims");
-    let (kept3, ignored3) = readable(&store, &WORLD, zone()).expect("parts");
+    let Readable {
+        kept: kept3,
+        ignored: ignored3,
+        ..
+    } = parts(&store);
     line.push(format!(
         "t7  c claims epoch 3; a reader still keeps {kept3:?} and ignores {ignored3:?}"
     ));
@@ -192,7 +262,7 @@ fn a_machine_that_claims_again_keeps_no_entry_past_its_takeover() {
     a.claim(&mut store).expect("a claims again, from 3");
     a.write(Stakes::Disk).expect("a writes 3 again");
     a.ship(&mut store).expect("a ships");
-    let (kept, ignored) = readable(&store, &WORLD, zone()).expect("parts");
+    let Readable { kept, ignored, .. } = parts(&store);
     println!("after claiming again: keeps {kept:?}, ignores {ignored:?}");
     assert_eq!(kept, vec![(1, 0), (1, 1), (1, 2), (2, 3)]);
     assert!(ignored.is_empty());

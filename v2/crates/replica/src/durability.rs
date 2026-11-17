@@ -72,17 +72,41 @@ impl Store {
 
 // --- The directory --------------------------------------------------------------------------------------------------
 
-/// One claim of a zone (rule 5): its epoch, the sequence it took over at, and the machine that made it.
+/// A claim's token (rule 5): 16 bytes the claimant draws from the operating system's random source each time it
+/// claims, like a T3 scope. It, not the machine's name, is what tells one claim from another: two processes on one
+/// machine, or one machine claiming again, draw different tokens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Token(pub [u8; 16]);
+
+impl Token {
+    /// Draws a token from the operating system's random source, never from the world's random numbers.
+    pub fn draw() -> R<Token> {
+        use std::io::Read;
+        let mut bytes = [0u8; 16];
+        std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut bytes))
+            .or_else(|e| refuse("no-random-source", e.to_string()))?;
+        Ok(Token(bytes))
+    }
+
+    pub fn hex(&self) -> String {
+        to_hex(&self.0)
+    }
+}
+
+/// One claim of a zone (rule 5): its epoch, the sequence it took over at, the machine it runs on, and the token its
+/// claimant drew. The token names the claim; the machine is only where it runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Takeover {
     pub epoch: u64,
     pub from: u64,
     pub machine: Name,
+    pub token: Token,
 }
 
 /// A world's directory record (rules 9 and 10), one per zone of a lineage (a world has one zone today), at
 /// `world/<lineage>/<zone>`: `{1: lineage, 2: zone, 3: where it runs, 4: epoch, 5: takeovers, 6: off-machine mark,
-/// 7: when it must wake, 8: pinned build}`. 5 is `[[epoch, from, machine], ...]` since the last checkpoint, oldest
+/// 7: when it must wake, 8: pinned build}`. 5 is `[[epoch, from, machine, token], ...]` since the last checkpoint, oldest
 /// first, its last the claim in force (3 and 4 repeat it). 6 is left out until the first part is off the machine, 7
 /// while the world is awake.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,7 +123,12 @@ pub struct WorldRecord {
 }
 
 fn key(lineage: &[u8; 16], zone: Id) -> String {
-    format!("{}/{}", to_hex(lineage), crate::world_model::show(zone))
+    format!(
+        "{}/{}-{}",
+        to_hex(lineage),
+        to_hex(&zone.scope().0),
+        zone.counter()
+    )
 }
 
 fn nobody() -> Name {
@@ -133,6 +162,7 @@ impl WorldRecord {
                     Value::Uint(t.epoch),
                     Value::Uint(t.from),
                     Value::Text(t.machine.clone()),
+                    Value::Bytes(t.token.0.to_vec()),
                 ])
             })
             .collect();
@@ -184,13 +214,23 @@ impl WorldRecord {
         let mut takeovers = Vec::new();
         for t in ts {
             let Value::Array(t) = t else { return bad() };
-            let [Value::Uint(e), Value::Uint(f), Value::Text(n)] = t.as_slice() else {
+            let [
+                Value::Uint(e),
+                Value::Uint(f),
+                Value::Text(n),
+                Value::Bytes(k),
+            ] = t.as_slice()
+            else {
+                return bad();
+            };
+            let Ok(token) = <[u8; 16]>::try_from(k.as_slice()) else {
                 return bad();
             };
             takeovers.push(Takeover {
                 epoch: *e,
                 from: *f,
                 machine: n.clone(),
+                token: Token(token),
             });
         }
         if build.len() != 34 {
@@ -257,15 +297,25 @@ pub fn change(store: &mut Store, read: u64, rec: &WorldRecord) -> R<u64> {
 
 // --- Writers, disks and parts -------------------------------------------------------------------------------------
 
-/// A part's name in the object store (rule 8): lineage, zone, epoch, the claiming machine and sequence, created only,
-/// never replaced. No other writer makes a part under a claim, because no other has its machine and epoch.
+/// A part's name in the object store (rule 8): `part/<lineage>/<zone>/<epoch>/<token>/<sequence>`, the token in hex
+/// and the numbers as 20 digits, created only, never replaced. No other writer makes a part under a claim, because no
+/// other drew its token. The machine is not in the name.
 pub fn part_key(lineage: &[u8; 16], zone: Id, t: &Takeover, sequence: u64) -> String {
     format!(
         "part/{}/{:020}/{}/{sequence:020}",
         key(lineage, zone),
         t.epoch,
-        t.machine.as_str()
+        t.token.hex()
     )
+}
+
+/// A part's bytes: `[epoch, sequence]` (the fake's stand-in for the entries it carries).
+fn part_bytes(epoch: u64, sequence: u64) -> R<Vec<u8>> {
+    encode(&Value::Array(vec![
+        Value::Uint(epoch),
+        Value::Uint(sequence),
+    ]))
+    .or_else(|e| refuse("encoding", e.to_string()))
 }
 
 /// A machine's disk (rule 1), the first durable point: what is written there, by sequence, with the epoch that wrote
@@ -336,8 +386,8 @@ impl Writer {
         }
     }
 
-    /// Claims the zone (rule 5): reads the record and writes it back with a new takeover (the next epoch, this
-    /// machine, and the mark plus one), conditional on the version read.
+    /// Claims the zone (rule 5): reads the record and writes it back with a new takeover (the next epoch, the mark
+    /// plus one, this machine, and a token drawn now), conditional on the version read.
     pub fn claim(&mut self, store: &mut Store) -> R<u64> {
         let read = read_record(store, &self.lineage, self.zone)?;
         self.claim_from(store, read)
@@ -351,6 +401,7 @@ impl Writer {
             epoch: rec.current().map_or(0, |t| t.epoch) + 1,
             from: rec.mark.map_or(0, |m| m + 1),
             machine: self.machine.clone(),
+            token: Token::draw()?,
         };
         rec.takeovers.push(t.clone());
         self.version = change(store, v, &rec)?;
@@ -394,11 +445,13 @@ impl Writer {
         self.waiting = later;
     }
 
-    /// Ships its claim's entries off the machine (rule 7): each part created only, under this claim's name, then the
-    /// record's mark moved by a conditional write. A part's name already taken stops the ship (`part-exists`). A
-    /// refused record write is read again: if the claim is still in force (another field changed), it is retried once
-    /// on the new version; otherwise the claim was taken, and nothing waiting is acknowledged. With nothing new it
-    /// still rewrites the record: a heartbeat. A success renews the lease from before its write was sent.
+    /// Ships its claim's entries off the machine (rules 7 and 8): each part created only, under this claim's token,
+    /// then the record's mark moved by a write conditional on the version of the same read it writes from. A part
+    /// already there with the same bytes is this claim's own earlier ship, retried; any other refused create stops the
+    /// ship (`part-exists`). The claim must still be in force, token and all; otherwise it was taken, and nothing
+    /// waiting is acknowledged. A record write refused because the record changed after that read is read and tried
+    /// once more. With nothing new it still rewrites the record: a heartbeat. A success renews the lease from before
+    /// its write was sent.
     pub fn ship(&mut self, store: &mut Store) -> R<Option<u64>> {
         let Some(t) = self.claim.clone() else {
             return refuse("not-claimed", "a writer ships only under a claim it holds");
@@ -413,14 +466,14 @@ impl Writer {
             .collect();
         for s in &mine {
             let k = part_key(&self.lineage, self.zone, &t, *s);
-            if store.get(&k).is_none() {
-                store
-                    .put(&k, vec![0xa0], When::Absent)
-                    .or_else(|_| refuse("part-exists", k.clone()))?;
+            let bytes = part_bytes(t.epoch, *s)?;
+            if store.put(&k, bytes.clone(), When::Absent).is_err()
+                && store.get(&k).map(|(_, b)| b) != Some(bytes)
+            {
+                return refuse("part-exists", k);
             }
         }
         let last = mine.last().copied();
-        let mut at = self.version;
         for _ in 0..2 {
             let (v, mut rec) = read_record(store, &self.lineage, self.zone)?;
             if rec.current() != Some(&t) {
@@ -429,47 +482,63 @@ impl Writer {
             if let Some(l) = last {
                 rec.mark = Some(rec.mark.map_or(l, |m| m.max(l)));
             }
-            match change(store, at, &rec) {
-                Ok(n) => {
-                    self.version = n;
-                    self.since_renewed = self.since_renewed.saturating_sub(sent);
-                    self.acknowledge(rec.mark);
-                    return Ok(rec.mark);
-                }
-                Err(_) => at = v,
+            if let Ok(n) = change(store, v, &rec) {
+                self.version = n;
+                self.since_renewed = self.since_renewed.saturating_sub(sent);
+                self.acknowledge(rec.mark);
+                return Ok(rec.mark);
             }
         }
         refuse("precondition-failed", "the record kept changing")
     }
 }
 
-/// The parts a reader keeps, as (epoch, sequence), and those it ignores, with the name why.
-pub type Readable = (Vec<(u64, u64)>, Vec<(u64, u64, &'static str)>);
+/// What a reader makes of a zone's parts (rule 8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Readable {
+    /// The history, as (epoch, sequence).
+    pub kept: Vec<(u64, u64)>,
+    /// Parts ignored, as (epoch, sequence, why): `superseded-epoch` or `past-the-mark`.
+    pub ignored: Vec<(u64, u64, &'static str)>,
+    /// Keys under the zone's prefix that are not a part's name, named, never skipped silently.
+    pub unreadable: Vec<String>,
+}
 
-/// The parts a reader keeps (rule 8): a part is history only if its claim (epoch and machine) is the one in force at
+/// A part's name after the zone's prefix: `<epoch>/<token>/<sequence>`, 20 digits, 32 lowercase hex, 20 digits.
+fn parse_part(rest: &str) -> Option<(u64, &str, u64)> {
+    let digits = |p: &str| {
+        (p.len() == 20 && p.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| p.parse::<u64>().ok())
+            .flatten()
+    };
+    let hex = |p: &str| p.len() == 32 && p.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+    let [e, k, s] = rest.split('/').collect::<Vec<_>>()[..] else {
+        return None;
+    };
+    Some((digits(e)?, hex(k).then_some(k)?, digits(s)?))
+}
+
+/// The parts a reader keeps (rule 8): a part is history only if its claim (epoch and token) is the one in force at
 /// its sequence and it is at or before the mark. Any other is ignored by name: `superseded-epoch` (another claim holds
-/// that sequence) or `past-the-mark` (not acknowledged off the machine).
+/// that sequence) or `past-the-mark` (not acknowledged off the machine). A key that is not a part's name is listed as
+/// unreadable.
 pub fn readable(store: &Store, lineage: &[u8; 16], zone: Id) -> R<Readable> {
     let (_, rec) = read_record(store, lineage, zone)?;
     let prefix = format!("part/{}/", key(lineage, zone));
-    let mut kept = Vec::new();
-    let mut ignored = Vec::new();
+    let mut out = Readable::default();
     for k in store.list(&prefix) {
-        let mut it = k[prefix.len()..].split('/');
-        let (Some(e), Some(machine), Some(s)) = (it.next(), it.next(), it.next()) else {
-            continue;
-        };
-        let (Ok(e), Ok(s)) = (e.parse::<u64>(), s.parse::<u64>()) else {
+        let Some((e, token, s)) = parse_part(&k[prefix.len()..]) else {
+            out.unreadable.push(k);
             continue;
         };
         let force = rec.in_force(s);
-        if force.is_none_or(|t| t.epoch != e || t.machine.as_str() != machine) {
-            ignored.push((e, s, "superseded-epoch"));
+        if force.is_none_or(|t| t.epoch != e || t.token.hex() != token) {
+            out.ignored.push((e, s, "superseded-epoch"));
         } else if rec.mark.is_none_or(|m| s > m) {
-            ignored.push((e, s, "past-the-mark"));
+            out.ignored.push((e, s, "past-the-mark"));
         } else {
-            kept.push((e, s));
+            out.kept.push((e, s));
         }
     }
-    Ok((kept, ignored))
+    Ok(out)
 }

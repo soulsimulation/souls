@@ -24,10 +24,12 @@ and rolling builds (O1, O7) are not here.
 4. **One writer per zone, by an epoch:** a number in the zone's directory record that only grows. A world has one
    zone today.
 5. **A claim is a conditional write.** A writer reads the record and writes it back with a new takeover, `[epoch,
-   from, machine]`: the next epoch, the mark plus one, and its machine, on condition that the record is the version
-   it read. Of two writers that start at once, the store lets exactly one through; the other is refused
-   (`precondition-failed`, HTTP 412). A machine that claims again keeps nothing on its disk at or after its new
-   takeover.
+   from, machine, token]`: the next epoch, the mark plus one, its machine, and a token, on condition that the record
+   is the version it read. The token is 16 bytes the claimant draws from the operating system's random source at each
+   claim, like a T3 scope, never from the world's random numbers. The token names the claim; the machine is only
+   where it runs, so two processes on one machine, or one machine claiming again, are two claims. Of two writers that
+   start at once, the store lets exactly one through; the other is refused (`precondition-failed`, HTTP 412). A
+   machine that claims again keeps nothing on its disk at or after its new takeover.
 6. **A lease is for liveness, never for safety.** It is elapsed time on the writer's own machine, never a comparison
    of clocks across machines, counted from when its last renewing write was sent. A writer renews by moving the mark,
    or, with nothing new, by rewriting the record (a heartbeat). Past its lease it acknowledges nothing. Another
@@ -36,15 +38,22 @@ and rolling builds (O1, O7) are not here.
 7. **The store refuses a stale writer's record write.** The stores are asked for only two conditions, which S3 and R2
    both offer atomically: create if absent (`If-None-Match: *`) and replace if unchanged (`If-Match`). There is no
    plain write. A writer whose claim was taken, a paused one that resumes included, may still write to its own disk,
-   and the store accepts the parts it creates under its own claim's name, but its move of the mark is refused. So it
-   acknowledges nothing that waits for the mark, and readers ignore its parts (rule 8). A writer refused because
-   another field changed (a build pinned) reads again and retries while its claim is still in force.
-8. **Parts are named by lineage, zone, epoch, claiming machine and sequence, and created only;** a part whose name is
-   taken stops the ship (`part-exists`). The record keeps every takeover since the last checkpoint (K5 trims them
-   there). A reader keeps a part only if its claim is the one in force at its sequence (the last takeover at or before
-   it) and it is at or before the mark; any other is ignored by name, `superseded-epoch` or `past-the-mark`. A disk
-   refuses a write of an epoch lower than one it has seen (`epoch-stale`). Other S3-compatible stores must be tested
-   for both conditions before use.
+   and the store accepts the parts it creates under its own claim's token, but its move of the mark is refused: it
+   writes the record on condition of the version it read, and only while the claim in force there carries its token.
+   So it acknowledges nothing that waits for the mark, and readers ignore its parts (rule 8). A writer refused because
+   another field changed between its read and its write (a build pinned) reads again and retries while its claim is
+   still in force.
+8. **Parts are named `part/<lineage>/<zone>/<epoch>/<token>/<sequence>`, and created only:** the token in hex, the
+   numbers as 20 digits, and no machine name, so no name a machine chooses can break a key. Only the claim that drew
+   a token makes parts under it, so a name already there under one's own token, holding the same bytes, is one's own
+   earlier ship, retried; a create refused for any other reason (the same name with other bytes) stops the ship
+   (`part-exists`). The record keeps every takeover since the last checkpoint. K5 trims them there, and must keep
+   the takeover in force at the checkpoint's sequence and every one after it. A reader keeps a part only if its claim
+   (epoch and token) is the one in force at its sequence (the last takeover at or before it) and it is at or before
+   the mark; any other is ignored by name, `superseded-epoch` or `past-the-mark`. A key under the zone's prefix that
+   is not a part's name is named in the reader's result (`unreadable`), never skipped. A disk refuses a write of an
+   epoch lower than one it has seen (`epoch-stale`). Other S3-compatible stores must be tested for both conditions
+   before use.
 
 ## The directory
 
@@ -52,13 +61,13 @@ and rolling builds (O1, O7) are not here.
    4: epoch, 5: takeovers, 6: off-machine mark, 7: when it must wake, 8: pinned build}`:
    - **where it runs:** the machine, by a name (never a host or an address in anything published);
    - **its epoch,** with 3 and 4 repeating the last takeover (`record-inconsistent` otherwise);
-   - **the takeovers:** `[[epoch, from, machine], ...]` since the last checkpoint;
+   - **the takeovers:** `[[epoch, from, machine, token], ...]` since the last checkpoint;
    - **the off-machine mark;**
    - **when it must wake:** real time in microseconds since 1970, left out while it is awake;
    - **its pinned build:** the hash of the build that runs it, which a client's checker is loaded by (T10 rule 13).
 
    A fork keeps its parent's ids (T3), so the lineage is in every key: a fork's record and parts sit beside its
-   parent's.
+   parent's. The zone is in every key whole, its scope in hex and its counter.
 10. **Every field changes only by a conditional write on the version read,** the pinned build and the wake included,
     so a build change and a claim cannot both win: the loser reads again. A record is created once. A real store's
     version is an ETag, a hash of the content; that serves because a record's takeovers never repeat.
@@ -80,8 +89,15 @@ ignores the same. The modelled store refuses the stale writer.
 - **A plain write to the record,** for the build, the wake or the mark. It can undo a claim made in between.
 - **Only the latest takeover in the record.** A third claim would bring a stale writer's parts back into history.
 - **A key without the lineage.** A fork's record and parts would collide with its parent's.
-- **A part taken as one's own because its name exists,** or a part name without its claim. Two writers' parts would
-  mix, and travel would be acknowledged on another writer's part.
+- **A claim known by its machine.** A second process on the same machine that ignores its refusal passes the check,
+  and both acknowledge travel at one sequence. Only a token drawn per claim tells them apart.
+- **A part taken as one's own because its name exists,** with other bytes, or a part name without its claim's token.
+  Two writers' parts would mix, and travel would be acknowledged on another writer's part.
+- **A free-form name in a part's key.** A machine named with a `/` makes its parts unreadable; a reader that skips
+  such keys loses history silently.
+- **A record write conditional on an older version than the one it read from,** or a checkpoint that trims the
+  takeover in force at its sequence. The first is refused needlessly; the second lets a stale writer's parts back
+  into history.
 - **Comparing clocks across machines** for a lease, or counting it from the reply. A stale writer acknowledges late.
 - **Acknowledging travel at the disk.** A dead machine loses a Soul between worlds.
 - **A store that ignores the conditions.** Test each S3-compatible store; one that accepts a stale `If-Match` lets
