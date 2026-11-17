@@ -2,17 +2,90 @@
   "format": "souls-entry/1",
   "kind": "eden:piano",
   "owner": "thing",
-  "geometry": { "bounds_mm": [1500, 1000, 600] },
-  "areas": {
-    "lid": { "forbids": ["sit", "lie"] }
+  "state": {
+    "music": {"n":1,"type":"enum","values":["silent","calm","happy","sad"],"default":"silent","audience":{"rule":"everyone"}}
   },
-  "motion": { "how": "two_souls" },
-  "loose": { "ever": true },
-  "looks": { "model": "look:piano" },
+  "links": {"player":{"n":1,"from":"soul","most":1,"audience":{"rule":"everyone"}}},
+  "points": {"player":{"role":"stand","at_mm":[0,0,650]},"keys":{"role":"contact","at_mm":[0,780,100]}},
+  "geometry": {"bounds_mm":[1420,1290,600]},
+  "forms": {
+    "play": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"calm","event":"played_calm"}
+      ]
+    },
+    "play_happy": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"happy","event":"played_happy"}
+      ]
+    },
+    "play_sad": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","is":"silent"},{"need":"unlinked","link":"player"}],
+      "steps": [{"step":"walk_to","point":"player"}],
+      "effects": [
+        {"change":"link","link":"player","from":"actor","event":"took_up_playing"},
+        {"change":"set","field":"music","to":"sad","event":"played_sad"}
+      ]
+    },
+    "stop": {
+      "who": {"link":"player"},
+      "starts": "act",
+      "needs": [{"need":"state","field":"music","not":"silent"}],
+      "steps": [],
+      "effects": [
+        {"change":"set","field":"music","to":"silent","event":"stopped_playing"},
+        {"change":"unlink","link":"player","from":"actor","event":"stepped_away"}
+      ]
+    }
+  },
+  "areas": {"lid":{"forbids":["sit","lie"]}},
+  "motion": {"how":"two_souls"},
+  "loose": {"ever":true},
+  "looks": {
+    "model": "look:piano",
+    "table": [
+      {"do":"sound","sound":"tune","mood":"calm","mode":"loop","field":"music","at":{"calm":700},"reach_mm":18000},
+      {"do":"sound","sound":"tune","mood":"happy","mode":"loop","field":"music","at":{"happy":700},"reach_mm":18000},
+      {"do":"sound","sound":"tune","mood":"sad","mode":"loop","field":"music","at":{"sad":700},"reach_mm":18000}
+    ],
+    "shape": {
+      "round": 15,
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [0,70,-150],
+          "polygon": [[-710,-145],[710,-145],[710,145],[-710,145]],
+          "h": 1220,
+          "tint": "wood"
+        },
+        {"kind":"extrude","at":[0,725,80],"polygon":[[-710,-115],[710,-115],[710,115],[-710,115]],"h":30,"tint":"wood"},
+        {"kind":"box","at":[0,780,100],"size":[1300,25,160],"round":0,"tint":"keys","role":"key"},
+        {"kind":"box","at":[0,795,60],"size":[1300,20,70],"round":0,"tint":"black"},
+        {"kind":"box","at":[-680,370,80],"size":[60,740,280],"round":0,"tint":"wood"},
+        {"kind":"box","at":[680,370,80],"size":[60,740,280],"round":0,"tint":"wood"}
+      ],
+      "palette": {"wood":"#3a2a22","keys":"#f4f2ec","black":"#222222"},
+      "tags": ["furniture","music","piano","instrument"]
+    }
+  },
   "text": {
-    "card": "A piano, to play, never to sit or lie on.",
+    "card": "An upright piano: play a tune at its keys, by mood; never sit or lie on it.",
     "instrument": "instrument",
-    "keys": "keys"
+    "keys": "keys",
+    "howto_play": "Play it (a tune by mood: play, play_happy or play_sad), then stop."
   },
-  "card": { "text": "card", "category": "instrument", "synonyms": ["keys"] }
+  "card": {"text":"card","category":"instrument","synonyms":["keys"]},
+  "howtos": {"play":{"text":"howto_play","steps":[{"form":"play_sad"},{"form":"stop"}]}}
 }

@@ -12,7 +12,7 @@
 // What the picture is drawn from: `looks.shape` of the entry, the parts of a thing (round, shapes, palette, tags) written in whole millimetres
 // (the format has no floating-point number and names nothing of today's engine, #2855). look.mjs wraps it for today's studio
 // and converts it to metres when it is
-// drawn: a length (at, size, r, r2, h, round, the points of a profile or a path) is divided by 1000, an angle (roll, arc,
+// drawn: a length (at, size, r, r2, h, round, the points of a profile, a polygon or a path) is divided by 1000, an angle (roll, arc,
 // yaw, pitch) is whole millidegrees and becomes radians, a count (segments) stays. A number under any other key is refused
 // by name, so a unit is never guessed. A state value the entry holds as a whole number reaches the picture as the number
 // the viewer draws with (permille / 1000); the viewer, not the entry, uses fractions, and nothing here decides anything
@@ -52,7 +52,7 @@ export function framesOf(entry) {
 }
 
 const metres = v => v.map(x => x / 1000);
-const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
+const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'polygon', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
 const ANGLE_KEYS = new Set(['roll', 'arc', 'yaw', 'pitch']);
 const COUNT_KEYS = new Set(['segments']);
 
