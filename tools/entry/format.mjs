@@ -56,7 +56,7 @@ export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'durati
 /** A described target: one closed list with Engine v2 E2 (#2709): a candidate set, an anchor, an order and a rank. */
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'linked', 'unlinked']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked']);
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait']);
 export const CHANGES = Object.freeze(['set', 'reparent', 'link', 'unlink', 'create', 'remove', 'timer']);
 export const SUBJECTS = Object.freeze(['actor', 'this']);
@@ -414,14 +414,26 @@ function form(f, path, ctx, err) {
 
   list(f.needs, `${path}.needs`, 'need', NEEDS, err, (n, p) => {
     if (n.need === 'state') {
-      only(n, ['need', 'field', 'is', 'not'], p, err);
+      only(n, ['need', 'field', 'is', 'not', 'at_least', 'at_most'], p, err);
       fieldName(n.field, `${p}.field`);
-      if (('is' in n) === ('not' in n)) err(p, 'exactly one of is, not');
-      else value(n.field, 'is' in n ? n.is : n.not, `${p}.${'is' in n ? 'is' : 'not'}`);
+      const ranged = 'at_least' in n || 'at_most' in n, exact = 'is' in n, negated = 'not' in n;
+      if (ranged) {
+        if (exact || negated) err(p, 'a range (at_least, at_most) or one of is, not; not both');
+        const fd = ctx.state[n.field];
+        if (fd && fd.type !== 'int' && fd.type !== 'duration') err(`${p}.field`, 'a range needs an int or duration field');
+        for (const k of ['at_least', 'at_most']) if (k in n && !isInt(n[k])) err(`${p}.${k}`, 'a whole number');
+        if (isInt(n.at_least) && isInt(n.at_most) && n.at_least > n.at_most) err(p, 'at_least is above at_most; nothing is in that range');
+      } else if (exact === negated) err(p, 'exactly one of is, not, or a range (at_least, at_most)');
+      else value(n.field, exact ? n.is : n.not, `${p}.${exact ? 'is' : 'not'}`);
     } else if (n.need === 'slot_free') { only(n, ['need', 'slot'], p, err); slot(n.slot, `${p}.slot`); }
     else if (n.need === 'within_reach') { only(n, ['need', 'point'], p, err); place(n.point, `${p}.point`); }
     else if (n.need === 'held_by_actor') only(n, ['need'], p, err);
-    else { only(n, ['need', 'link'], p, err); linkName(n.link, `${p}.link`); }
+    else if (n.need === 'hand') {
+      only(n, ['need', 'free', 'holds'], p, err);
+      if (('free' in n) === ('holds' in n)) err(p, 'exactly one of free, holds');
+      else if ('free' in n) { if (n.free !== true) err(`${p}.free`, 'true (a hand that must hold something is "holds")'); }
+      else if (!(typeof n.holds === 'string' && KIND.test(n.holds))) err(`${p}.holds`, 'a kind, "namespace:name"');
+    } else { only(n, ['need', 'link'], p, err); linkName(n.link, `${p}.link`); }
   });
   list(f.steps, `${path}.steps`, 'step', STEPS, err, (s, p) => {
     if (s.step === 'walk_to') { only(s, ['step', 'point'], p, err); place(s.point, `${p}.point`); }
@@ -498,7 +510,7 @@ export function kindRefs(entry) {
   const refs = new Set();
   const walk = v => {
     if (Array.isArray(v)) v.forEach(walk);
-    else if (isObj(v)) for (const [k, x] of Object.entries(v)) { if (k === 'kind' && typeof x === 'string' && KIND.test(x)) refs.add(x); else walk(x); }
+    else if (isObj(v)) for (const [k, x] of Object.entries(v)) { if ((k === 'kind' || k === 'holds') && typeof x === 'string' && KIND.test(x)) refs.add(x); else walk(x); }
   };
   walk(entry.forms);
   for (const c of Object.values(entry.children ?? {})) if (isObj(c) && typeof c.kind === 'string') refs.add(c.kind);
