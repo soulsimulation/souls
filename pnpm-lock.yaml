@@ -311,6 +311,12 @@ importers:
         specifier: ^22.19.19
         version: 22.20.4
 
+  packages/form-rules:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.19
+        version: 22.19.19
+
   packages/generators:
     dependencies:
       '@souls/ground':
