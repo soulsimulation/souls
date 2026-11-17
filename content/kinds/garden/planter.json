@@ -193,6 +193,8 @@
       ]
     }
   },
+  "motion": {"how": "fixed"},
+  "loose": {"ever": true},
   "looks": {
     "model": "look:planter",
     "table": [
