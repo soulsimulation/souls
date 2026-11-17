@@ -369,7 +369,7 @@ function queueTrain({ prs, state = {}, rules = [{ type: 'pull_request' }, { type
     hold: s => { const a = holdAction(s); if (a) reads.held.push(s.number); return a?.[0] ?? null; },
     pause: () => {},
   };
-  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', freeze, api }), reads };
+  return { run: () => next({ repo: 'o/r', maintainer: M, notifyIssue: '755', freeze, api }), reads, api };
 }
 
 test('queue: the rule is read from the branch rules; without it the train picks as before', () => {
@@ -402,6 +402,18 @@ test('queue: a queued PR is skipped, so the self-dispatch ends', () => {
   assert.equal(r.more, false);
   assert.deepEqual(r.skipped.map(s => [s.pr, s.why]), [[20, 'queued'], [21, 'queued']]);
   assert.equal(queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: state[20] } }).run().pr, 21);
+});
+
+test('queue: a PR with auto-merge on and a failed required check is reported, once, not skipped silently', () => {
+  const failing = path => path.startsWith('repos/o/r/issues/755/comments') ? t.reads.comments : path.includes('/check-runs') ? [{ check_runs: DEFAULT_CHECKS.map((name, id) => ({ id, name, status: 'completed', conclusion: name === 'proof-ok' ? 'failure' : 'success' })) }] : null;
+  const t = queueTrain({ prs: { 20: {}, 21: {} }, state: { 20: { autoMergeRequest: { enabledAt: 'x' } }, 21: { isInMergeQueue: true } } });
+  const ghAll = t.api.ghAll; t.api.ghAll = path => failing(path) ?? ghAll(path);
+  const r = t.run();
+  assert.deepEqual(r.skipped.map(s => [s.pr, s.why, s.failed]), [[20, 'queued', ['proof-ok (failure)']], [21, 'queued', undefined]]);
+  assert.equal(t.reads.comments.length, 1);
+  assert.match(t.reads.comments[0].body, /#20 has auto-merge on.*proof-ok/);
+  t.run(); // the notice is not repeated for the same head
+  assert.equal(t.reads.comments.length, 1);
 });
 
 test('queue: a conflict takes the strict steps, then enqueues; unknown mergeability is asked again', () => {
