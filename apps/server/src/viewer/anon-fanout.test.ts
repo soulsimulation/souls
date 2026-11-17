@@ -237,7 +237,8 @@ test('#2522 A2: a fanout viewer that stalls for 10 s is skipped, re-pictured whe
   // it reads again: once its queue drains it gets the picture and the batches after it
   const snapshots = count(fan.seen, 'snapshot');
   sock.resume();
-  for (let i = 0; i < 400 && counts.repictures === 0; i++) await w.drive(1);
+  // the queue drains in real time (a loaded runner takes longer), so wait on the clock, not on a count of ticks
+  for (const stop = performance.now() + 20_000; performance.now() < stop && counts.repictures === 0;) { await w.drive(1); await new Promise((r) => setTimeout(r, 20)); }
   assert.equal(counts.repictures, 1, 're-pictured once its queue drained');
   await quiet(conns); hubSide.seen.rec = other.seen.rec = false;
   // A4: an ordinary fanout viewer got every live message the hub viewer got, the same and in the same order
@@ -282,7 +283,8 @@ test('#2522 A5: in green, a fanout viewer that stops reading for 30 s at 200 KB/
   // it reads again: one picture, the same socket, then V1's oracle bars against the hub viewer
   const snapshots = count(fan.seen, 'snapshot');
   sock.resume();
-  for (let i = 0; i < 400 && counts.repictures === 0; i++) await w.drive(1);
+  // the queue drains in real time (a loaded runner takes longer), so wait on the clock, not on a count of ticks
+  for (const stop = performance.now() + 20_000; performance.now() < stop && counts.repictures === 0;) { await w.drive(1); await new Promise((r) => setTimeout(r, 20)); }
   assert.equal(counts.repictures, 1, 're-pictured once its queue drained');
   await until(() => [hubSide.c, fan.c].every((c) => c.replica.seq === w.host.currentBatchSeq), 'caught up after the picture');
   assert.equal(count(fan.seen, 'snapshot'), snapshots + 1, 'one picture again');
