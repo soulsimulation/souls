@@ -103,7 +103,7 @@ export function buildCatalog(input: CatalogInput): {payload: Catalog; serialized
   const shown = input.things.filter(t => !t.place || known.has(t.place));
   // SA-C3: a thing loaded from an entry is of the entry's kind, and the entry is published once by it
   const kindOfThing = (t: CatalogThingIn) => t.entry?.kind ?? kindOf(t.kind), entries = new Map<string, unknown>();
-  for (const t of shown) if (t.entry && !entries.has(t.entry.kind)) entries.set(t.entry.kind, t.entry.body);
+  for (const t of [...shown].sort(byId)) if (t.entry && !entries.has(t.entry.kind)) entries.set(t.entry.kind, t.entry.body);
   const things: CatalogThing[] = shown.map(t => ({id: t.id, name: t.name, kind: kindOfThing(t), place: t.place, at: [r1(t.at[0]), r1(t.at[1])] as [number, number], ...(t.seat ? {seat: true as const} : {})})).sort(byId);
   // one entry per kind (`state`: what a thing of it is in until the live picture says otherwise). A revision whose acts or
   // defaults differ from the kind's first (in id order) gets its own entry, `<kind>@<revision>`, named by its things' `hands`.
