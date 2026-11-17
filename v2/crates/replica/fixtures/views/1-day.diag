@@ -1,7 +1,7 @@
-# The views' fixture log (Engine v2 T7, #2661, v2/docs/views.md): nine entries applied after T6's base
+# The views' fixture log (Engine v2 T7, #2661, v2/docs/views.md): eleven entries applied after T6's base
 # (fixtures/effects/0-base.diag), under T6's header. Soul 100's body walks (four motion samples in 1.6 s, then one
 # that stops it), the room gains a note seen only by the audience aa..aa:1 and the note is set, the crate is set and
-# the cup is removed. Layout as in 0-base.diag. Ids are [scope, counter]: the world's ee..ee, Souls' dd..dd.
+# the cup is removed, and the key is put down on the crate (a leave and an arrive). Layout as in 0-base.diag. Ids are [scope, counter]: the world's ee..ee, Souls' dd..dd.
 {
   1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
   2: [
@@ -38,6 +38,13 @@
      8: [{1: "souls:poured", 2: {1: 100}, 3: [0]}]},
     {1: 10, 2: 5000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 10]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],
      7: [{1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4]}],
-     8: [{1: "souls:broke", 3: [0]}]}
+     8: [{1: "souls:broke", 3: [0]}]},
+    {1: 11, 2: 6000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 11]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6],
+     9: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9], 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 6],       # the key leaves the floor (transfer ee:9)
+         4: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],
+         6: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7]], 2: [0, 600000, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7], 3: 0}}},
+     8: [{1: "souls:put-down"}]},
+    {1: 12, 2: 6050000, 3: {1: 2, 2: 11}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7],
+     9: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 9]}}                                                    # and arrives on the crate
   ]
 }

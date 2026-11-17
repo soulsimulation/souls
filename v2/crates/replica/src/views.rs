@@ -47,7 +47,7 @@ fn map(pairs: Vec<(u64, Value)>) -> Value {
 
 /// A level of detail (rule 3). Its number never changes; a level added later takes the next unused number and its
 /// place in [`ORDER`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Level {
     /// 1: every entry the audience may see, as stored.
     Full,
@@ -63,6 +63,9 @@ pub enum Level {
 
 /// The levels, most detail first. A server lowers a subscription by walking down this list.
 pub const ORDER: [Level; 4] = [Level::Full, Level::Sampled, Level::Outline, Level::Counts];
+
+/// The views' revision: raised whenever what any level keeps, or how it writes a record, changes.
+pub const REVISION: u64 = 1;
 
 /// How far apart, in world time, the samples `Sampled` keeps of one moving node are.
 pub const SAMPLE_US: Micros = 1_000_000;
@@ -112,7 +115,7 @@ impl Level {
         let mut m = vec![
             (1, Value::Uint(self.number())),
             (2, name(self.name())),
-            (3, Value::Uint(1)),
+            (3, Value::Uint(REVISION)),
         ];
         if self == Level::Sampled {
             m.push((4, int(SAMPLE_US)));
@@ -171,7 +174,7 @@ pub struct Position {
 /// What a view is computed for, once (rule 4): a node (its subtree), a level and an audience. The audience is
 /// everyone or one audience id; a viewer in an audience is sent the public view and that audience's view, merged by
 /// sequence (rule 5).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {
     pub node: Id,
     pub level: Level,
@@ -188,9 +191,10 @@ pub enum Scope {
 
 impl Scope {
     /// The nodes whose views this scope is made of, in the state given: the world is its root, a Soul is the body
-    /// linked to it by `souls:body-of`, and a node that is gone is left out.
+    /// linked to it by `souls:body-of` (plain or pinned), a node that is gone is left out, and so is a node under
+    /// another node of the scope, whose view already holds it.
     pub fn nodes(&self, state: &State) -> Vec<Id> {
-        match self {
+        let ids: Vec<Id> = match self {
             Scope::Nodes(ids) => ids
                 .iter()
                 .copied()
@@ -200,10 +204,20 @@ impl Scope {
             Scope::Soul(soul) => state
                 .links
                 .values()
-                .filter(|l| l.ty.as_str() == "souls:body-of" && l.ends[1] == *soul)
+                .filter(|l| {
+                    l.ty.as_str().split('@').next() == Some("souls:body-of") && l.ends[1] == *soul
+                })
                 .map(|l| l.ends[0])
                 .collect(),
+        };
+        let mut out: Vec<Id> = Vec::new();
+        for i in &ids {
+            let held = ids.iter().any(|o| o != i && under(state, *i, *o));
+            if !held && !out.contains(i) {
+                out.push(*i);
+            }
         }
+        out
     }
 }
 
@@ -236,14 +250,26 @@ impl Grant {
     }
 }
 
+/// The least budget a subscription may ask for (rule 7): [`MIN_BUDGET`] for each view it is sent, one per node of
+/// its scope and audience (everyone, and each audience the viewer is in).
+pub fn least(views: u64) -> u64 {
+    MIN_BUDGET.saturating_mul(views)
+}
+
 /// Grants a subscription its level (rule 7): the highest level, from the one asked for down, whose busiest world
-/// second (`peak`) fits the budget. Counts always fits a budget of at least [`MIN_BUDGET`]; a smaller budget is
-/// refused when asked for (`budget-below-minimum`), never accepted and then dropped.
-pub fn grant(sub: &Subscription, peak: impl Fn(Level) -> u64) -> R<Grant> {
-    if sub.budget < MIN_BUDGET {
+/// second (`peak`, over all the views the subscription is sent) fits the budget. `views` is how many views that is.
+/// Counts fits every budget of at least [`least`]; a smaller budget is refused when asked for
+/// (`budget-below-minimum`), never accepted and then dropped. `counts-over-bound` would mean a counts view broke its
+/// bound: a fault in the view, never a dropped subscription.
+pub fn grant(sub: &Subscription, views: u64, peak: impl Fn(Level) -> u64) -> R<Grant> {
+    if sub.budget < least(views) {
         return refuse(
             "budget-below-minimum",
-            format!("{} bytes a second; the least is {MIN_BUDGET}", sub.budget),
+            format!(
+                "{} bytes a second for {views} views; the least is {}",
+                sub.budget,
+                least(views)
+            ),
         );
     }
     let mut level = sub.level;
@@ -262,6 +288,15 @@ pub fn grant(sub: &Subscription, peak: impl Fn(Level) -> u64) -> R<Grant> {
         level,
         asked: sub.level,
     })
+}
+
+/// The busiest world second, in bytes of records, of views sent together (rule 7).
+pub fn peak(outputs: &[Output]) -> R<u64> {
+    let mut per: BTreeMap<i64, u64> = BTreeMap::new();
+    for (at, r) in outputs.iter().flat_map(|o| &o.records) {
+        *per.entry(at.div_euclid(1_000_000)).or_default() += len(&bytes_of(r)?);
+    }
+    Ok(per.values().copied().max().unwrap_or(0))
 }
 
 // --- A view -------------------------------------------------------------------------------------------------------
@@ -303,13 +338,9 @@ impl Output {
         bytes_of(&self.to_value())
     }
 
-    /// The most bytes of records the view gave in any one world second (rule 7).
+    /// The most bytes of records this view gave in any one world second (rule 7).
     pub fn peak(&self) -> R<u64> {
-        let mut per: BTreeMap<i64, u64> = BTreeMap::new();
-        for (at, r) in &self.records {
-            *per.entry(at.div_euclid(1_000_000)).or_default() += len(&bytes_of(r)?);
-        }
-        Ok(per.values().copied().max().unwrap_or(0))
+        peak(std::slice::from_ref(self))
     }
 }
 
@@ -388,8 +419,9 @@ impl View {
         }
     }
 
-    /// Feeds one entry (rule 4). It is seen when its audience is the view's and its node is the view's node or under
-    /// it just before the entry. Every entry moves the view's position, seen or not.
+    /// Feeds one entry (rule 4). It is seen when its audience is the view's, and its node was the view's node or under
+    /// it just before the entry, or a node it creates or brings in is under it just after. Every entry moves the
+    /// view's position, seen or not.
     pub fn step(
         &mut self,
         before: &State,
@@ -399,7 +431,10 @@ impl View {
     ) -> R<()> {
         let env = entry.envelope;
         self.out.position.sequence = Some(env.sequence);
-        if env.audience != self.key.audience || !under(before, env.node, self.key.node) {
+        let brought = brought(entry, before);
+        let seen = under(before, env.node, self.key.node)
+            || brought.iter().any(|n| under(after, *n, self.key.node));
+        if env.audience != self.key.audience || !seen {
             return Ok(());
         }
         let seq = Value::Uint(env.sequence);
@@ -416,7 +451,7 @@ impl View {
                 }
             }
             Level::Outline => {
-                for r in outline(entry) {
+                for r in outline(entry, before, after) {
                     let mut m = vec![(1, seq.clone())];
                     m.extend(r);
                     self.out.records.push((env.at, map(m)));
@@ -494,30 +529,82 @@ impl View {
     }
 }
 
-/// An entry's outline records (rule 3): `{2: 1 created, 3: node, 4: kind, 5: parent}`, `{2: 2 removed, 3: node}`,
-/// `{2: 3 left, 3: node}` or `{2: 4 arrived, 3: under}`. A change of slot under the same parent is not in it.
-fn outline(entry: &Effect) -> Vec<Vec<(u64, Value)>> {
-    let under = entry.envelope.node;
-    match &entry.body {
-        Body::Changes(cs) => cs
-            .iter()
+/// The nodes an entry creates or brings in (rule 4): its creates, the root of a subtree that arrives from this zone,
+/// and the creates an arrive from another zone carries.
+fn brought(entry: &Effect, before: &State) -> Vec<Id> {
+    let creates = |cs: &[crate::effects::ChangeRec]| -> Vec<Id> {
+        cs.iter()
             .filter_map(|c| match &c.change {
-                Change::Create { node, kind, .. } => Some(vec![
-                    (2, Value::Uint(1)),
-                    (3, node.to_value()),
-                    (4, Value::Text(kind.clone())),
-                    (5, under.to_value()),
-                ]),
+                Change::Create { node, .. } => Some(*node),
+                _ => None,
+            })
+            .collect()
+    };
+    match &entry.body {
+        Body::Changes(cs) => creates(cs),
+        Body::Transfer(TransferRec::Arrive { transfer, carried }) => {
+            let mut out = creates(carried);
+            out.extend(before.in_flight.get(transfer).map(|f| f.root));
+            out
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn created(node: Id, kind: &crate::encode::Name, after: &State) -> Vec<(u64, Value)> {
+    let mut r = vec![
+        (2, Value::Uint(1)),
+        (3, node.to_value()),
+        (4, Value::Text(kind.clone())),
+    ];
+    r.extend(
+        after
+            .nodes
+            .get(&node)
+            .and_then(|n| n.parent)
+            .map(|p| (5, p.to_value())),
+    );
+    r
+}
+
+/// An entry's outline records (rule 3): `{2: 1 created, 3: node, 4: kind, 5: parent}`, `{2: 2 removed, 3: node}`,
+/// `{2: 3 left, 3: node}`, `{2: 4 arrived, 3: node, 5: parent}` and `{2: 5 back, 3: node}` (a return). An arrive
+/// from another zone also writes each node it carries as created. A change of slot under one parent is not in it.
+fn outline(entry: &Effect, before: &State, after: &State) -> Vec<Vec<(u64, Value)>> {
+    let creates = |cs: &[crate::effects::ChangeRec]| -> Vec<Vec<(u64, Value)>> {
+        cs.iter()
+            .filter_map(|c| match &c.change {
+                Change::Create { node, kind, .. } => Some(created(*node, kind, after)),
                 Change::Remove { node } => Some(vec![(2, Value::Uint(2)), (3, node.to_value())]),
                 _ => None,
             })
-            .collect(),
+            .collect()
+    };
+    let root = |t: &Id| before.in_flight.get(t).map(|f| f.root);
+    match &entry.body {
+        Body::Changes(cs) => creates(cs),
         Body::Transfer(TransferRec::Leave { node, .. }) => {
             vec![vec![(2, Value::Uint(3)), (3, node.to_value())]]
         }
-        Body::Transfer(TransferRec::Arrive { .. }) => {
-            vec![vec![(2, Value::Uint(4)), (3, under.to_value())]]
+        Body::Transfer(TransferRec::Arrive { transfer, carried }) => {
+            let mut out = creates(carried);
+            if let Some(n) = root(transfer) {
+                let mut r = vec![(2, Value::Uint(4)), (3, n.to_value())];
+                r.extend(
+                    after
+                        .nodes
+                        .get(&n)
+                        .and_then(|s| s.parent)
+                        .map(|p| (5, p.to_value())),
+                );
+                out.push(r);
+            }
+            out
         }
+        Body::Transfer(TransferRec::Return { transfer, .. }) => root(transfer)
+            .map(|n| vec![(2, Value::Uint(5)), (3, n.to_value())])
+            .into_iter()
+            .collect(),
         _ => Vec::new(),
     }
 }
