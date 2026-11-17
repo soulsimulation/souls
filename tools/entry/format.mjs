@@ -15,7 +15,7 @@ export const FORMAT = 'souls-entry/1';
 
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640). */
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8,
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
@@ -26,8 +26,11 @@ export const OWNERS = Object.freeze(['thing', 'family', 'place']);
 export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text']);
 /** Whole-number units for an `int` field; a rate is `<unit>/s`. Durations are their own type, in microseconds. */
 export const UNITS = Object.freeze(['count', 'mm', 'g', 'mC', 'permille']);
-/** Audience rules a kind may name. Each resolves to an audience id when a record is written (contract T8, #2662). */
-export const AUDIENCES = Object.freeze(['public', 'holder', 'owner', 'members', 'creator']);
+/** The audience rules a field may declare: the one closed list (SA-F8, #2849). A rule names a link type, never a Soul;
+ *  each resolves to a set of principals when a value is written (contract T8, #2662). `everyone`; `owner` (the
+ *  thing's owner); `linked` (whoever is linked to this thing by the named link of this kind: its members, the Soul
+ *  whose turn it is); `creator` (the world's creator). Written `{"rule": "everyone"}` or `{"rule": "linked", "link": "<name>"}`. */
+export const AUDIENCE_RULES = Object.freeze(['everyone', 'owner', 'linked', 'creator']);
 export const LINK_ENDS = Object.freeze(['soul', 'body', 'thing']);
 export const POINT_ROLES = Object.freeze(['stand', 'grip', 'contact', 'outlet']);
 export const SLOT_ADMITS = Object.freeze(['body', 'thing']);
@@ -85,14 +88,16 @@ export function validateEntry(entry) {
   const slots = section(entry, 'slots', err), forms = section(entry, 'forms', err), text = section(entry, 'text', err);
   numbered(state, 'state', err);
   numbered(links, 'links', err);
-  for (const [name, f] of Object.entries(state)) field(f, `state.${name}`, err);
+  const closedNames = isObj(entry.closed) && Array.isArray(entry.closed.fields) ? entry.closed.fields : [];
+  for (const [name, f] of Object.entries(state)) field(f, `state.${name}`, links, err, closedNames.includes(name));
+  if (entry.closed !== undefined) closed(entry.closed, state, links, err);
   for (const [name, l] of Object.entries(links)) {
     const p = `links.${name}`;
     if (!isObj(l)) { err(p, 'a link type is an object'); continue; }
     only(l, ['n', 'from', 'most', 'audience'], p, err);
     if (!LINK_ENDS.includes(l.from)) err(`${p}.from`, `must be one of ${LINK_ENDS.join(', ')}`);
     if (l.most !== undefined && !(isInt(l.most) && l.most > 0)) err(`${p}.most`, 'a whole number above zero');
-    audience(l, p, err);
+    audience(l, p, links, err);
   }
   for (const [name, pt] of Object.entries(points)) {
     const p = `points.${name}`;
@@ -178,19 +183,44 @@ function numbered(table, key, err) {
   }
 }
 
-function audience(obj, path, err) {
-  if (obj.audience === undefined) err(`${path}.audience`, 'every field says who may see it');
-  else if (!AUDIENCES.includes(obj.audience)) err(`${path}.audience`, `must be one of ${AUDIENCES.join(', ')}`);
+/** Check one audience rule. `links` is this kind's link table, so a `linked` rule can only name a link the kind has. */
+function rule(a, path, links, err) {
+  if (!isObj(a)) { err(path, `a rule is an object, {"rule": one of ${AUDIENCE_RULES.join(', ')}}`); return; }
+  if (!AUDIENCE_RULES.includes(a.rule)) { err(`${path}.rule`, `must be one of ${AUDIENCE_RULES.join(', ')}`); return; }
+  only(a, a.rule === 'linked' ? ['rule', 'link'] : ['rule'], path, err);
+  if (a.rule === 'linked' && !(typeof a.link === 'string' && a.link in links)) err(`${path}.link`, 'names a link type of this kind (a rule never names a Soul)');
+}
+
+function audience(obj, path, links, err) {
+  if (obj.audience === undefined) err(`${path}.audience`, 'every field says who may see it; the default is written out, never implied');
+  else rule(obj.audience, `${path}.audience`, links, err);
+}
+
+/** The rule that decides who may see a state field: its own, or, when the kind is closed and names it, the container's. */
+export function audienceOf(entry, name) {
+  if (entry.closed?.fields?.includes(name)) return entry.closed.audience;
+  return entry.state?.[name]?.audience;
+}
+
+/** A closed kind: the fields it names (stock counts) and its children take the container's own audience until it is opened (Engine v2 E22, #2792). */
+function closed(c, state, links, err) {
+  if (!isObj(c)) { err('closed', 'an object: {"audience": rule, "fields": [state field names]}'); return; }
+  only(c, ['audience', 'fields'], 'closed', err);
+  if (c.audience === undefined) err('closed.audience', 'the container\'s own audience, written out');
+  else rule(c.audience, 'closed.audience', links, err);
+  if (!Array.isArray(c.fields)) { err('closed.fields', 'a list of state field names'); return; }
+  c.fields.forEach((n, i) => { if (!(n in state)) err(`closed.fields.${i}`, `"${n}" is not a state field of this kind`); });
 }
 
 function vec(v, path, err, positive = false) {
   if (!Array.isArray(v) || v.length !== 3 || !v.every(x => isInt(x) && (!positive || x > 0))) err(path, `three whole numbers of millimetres${positive ? ' above zero' : ''}`);
 }
 
-function field(f, path, err) {
+function field(f, path, links, err, taken = false) {
   if (!isObj(f)) { err(path, 'a field is an object'); return; }
   only(f, ['n', 'type', 'default', 'audience', 'values', 'unit', 'min', 'max'], path, err);
-  audience(f, path, err);
+  if (taken) { if (f.audience !== undefined) err(`${path}.audience`, 'this field takes the container\'s audience (closed); it declares none of its own'); }
+  else audience(f, path, links, err);
   if (ID_TYPES.has(f.type)) { err(`${path}.type`, `"${f.type}" would put an id inside a field; a relation is a link (links section)`); return; }
   if (!FIELD_TYPES.includes(f.type)) { err(`${path}.type`, `must be one of ${FIELD_TYPES.join(', ')}`); return; }
   if (!('default' in f)) err(`${path}.default`, 'every field has a default');

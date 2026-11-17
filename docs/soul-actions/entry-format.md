@@ -44,7 +44,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 0 | `format` | `souls-entry/1` |
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
-| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference), `default`, `audience` |
+| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference), `default`, `audience` (a rule) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`), `most`, `audience` |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm` |
@@ -58,8 +58,14 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
-**Audience** is a rule resolved to an audience id when a record is written: `public`, `holder`, `owner`, `members`
-(those linked to the node) or `creator`. Point and slot names share one namespace, so a form's argument of type
+**Audience** is a rule on every state field and link type, written out (there is no implied default), from one closed
+list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"rule": "owner"}` (the thing's owner),
+`{"rule": "linked", "link": "<link type>"}` (whoever is linked to this thing by that link of this kind: its members,
+the Soul whose turn it is) and `{"rule": "creator"}` (the world's creator). A rule names a link type, never a Soul.
+A kind may add a `closed` section (9), `{"audience": rule, "fields": ["stock"]}`: the fields it names, and its
+children, take the container's own audience until it is opened (Engine v2 E22,
+[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own.
+Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
 
 ## A form
