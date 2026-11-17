@@ -248,6 +248,17 @@ export function readChecks(api, repo, sha) {
   };
 }
 
+/** A PR with auto-merge on but a failed required check never enters the queue: say so on the notify issue, once per head. */
+function reportStuck({ repo, pr, sha, failed, notifyIssue, api }) {
+  console.error(`::warning::merge-train: #${pr} has auto-merge on but required checks failed, so it will not enter the queue: ${failed.join(', ')}`);
+  if (!notifyIssue) return;
+  try {
+    const marker = `<!-- merge-train-stuck ${pr} ${sha} -->`;
+    if (!api.ghAll(`repos/${repo}/issues/${notifyIssue}/comments?per_page=100`).some(c => String(c.body).startsWith(marker)))
+      api.comment(repo, notifyIssue, `${marker}\nMerge train: #${pr} has auto-merge on, but required checks failed at \`${sha.slice(0, 9)}\` (${failed.join(', ')}), so it is not in the queue and will not enter it. Fix the checks, or remove \`merge:ready\` to let the train re-pick it.`);
+  } catch (e) { console.error(`merge-train: could not post the stuck-PR notice on #${notifyIssue}: ${e.message}`); }
+}
+
 export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh, ghAll, comment, queueState, hold } }) {
   const repoInfo = api.gh(`repos/${repo}`);
   const defaultBranch = repoInfo.default_branch;
@@ -285,7 +296,16 @@ export function next({ repo, maintainer, notifyIssue, freeze = null, api = { gh,
       }
     }
     if (why) { skipped.push({ pr: n, tier, why }); continue; }
-    if (queue && queued(api.queueState(repo, n))) { skipped.push({ pr: n, tier, why: 'queued' }); continue; }
+    if (queue) {
+      const qs = api.queueState(repo, n);
+      if (queued(qs)) {
+        // Auto-merge waits for green checks; one that failed never enqueues, so report it instead of skipping forever.
+        const failed = !qs.isInMergeQueue ? summarizeChecks({ ...readChecks(api, repo, pr.head.sha), required: DEFAULT_CHECKS }).failed : [];
+        if (failed.length) reportStuck({ repo, pr: n, sha: pr.head.sha, failed, notifyIssue, api });
+        skipped.push({ pr: n, tier, why: 'queued', ...(failed.length ? { failed } : {}) });
+        continue;
+      }
+    }
     const mode = queue ? queueMode({ repo, pr, api }) : pickMode({ repo, pr, tier, files, defaultBranch, notifyIssue, api });
     return {
       pr: n, tier, head_ref: pr.head.ref, head_sha: pr.head.sha, base_ref: pr.base.ref, title: pr.title,
