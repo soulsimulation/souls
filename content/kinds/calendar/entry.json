@@ -41,6 +41,8 @@
       "effects": [{ "change": "unlink", "link": "interested", "from": "actor", "event": "interest_dropped" }]
     }
   },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
   "text": {
     "card": "A notice of something that happens: where, when, and who is interested.",
     "calendar": "calendar",

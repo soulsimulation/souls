@@ -55,6 +55,8 @@
       "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": "room", "event": "drawn" }]
     }
   },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
   "looks": {
     "model": "look:rain_collector",
     "table": [

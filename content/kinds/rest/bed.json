@@ -6,6 +6,8 @@
   "areas": {
     "mattress": { "allows": { "lie": "on", "sit": "edge" } }
   },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
   "looks": { "model": "look:bed" },
   "text": {
     "card": "A bed to lie on, or to sit on the edge of.",

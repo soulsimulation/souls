@@ -62,13 +62,44 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
+| 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
+| 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
 | 20 | `looks` | How it looks: `model` (a look id), `table`, the looks table, and `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
-Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
-(SA-F10), `hatch` (SA-F9).
+Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
+
+**How it moves and how long it lasts loose** (sections 18 and 19, SA-F10, [#2882](https://github.com/soulsimulation/souls/issues/2882)).
+Every kind of thing states both. `motion.how` is one closed list, shared with Engine v2 E5
+([#2778](https://github.com/soulsimulation/souls/issues/2778)): `one_hand` and `two_hands` are carried (a cup; a chair),
+`pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
+by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
+moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+`loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
+([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
+owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
+**The six things any thing allows** (go to, look at, point at, touch, lean on, wait by) are forms of the body's own entry
+(`content/kinds/body/humanoid.json`, SA-G3) that take any thing; a kind writes none of them. A kind forbids one by name in an
+area's `forbids`: leaning is `lean`, the others are `go_to`, `look_at`, `point`, `touch`, `wait_by`
+(`content/kinds/street/railing.json` forbids leaning; `allowsBase(entry, form)` answers `forbidden` with the name and the area).
+Cases are data: `tools/entry/cases/motion.json` and `packages/form-rules/cases/base.json` (a lamp post with no forms).
+
+**Where to put it** (SA-F11, [#2883](https://github.com/soulsimulation/souls/issues/2883); one list with Engine v2 E2
+[#2709](https://github.com/soulsimulation/souls/issues/2709) and E4 [#2772](https://github.com/soulsimulation/souls/issues/2772)).
+A `put` step may carry `place` instead of a `slot`: `{"at": word, "anchor": {"arg": ...}, "facing": ...}`. The words are one closed
+list in `packages/form-rules/placements.json`, which the format reads and nothing else repeats: `on`, `in`, `here`, `next_to`,
+`in_front_of`, `behind`, `against`, `facing`, `middle` (of this room). The anchor is an argument of type thing, named or described
+by a selector (a `takes` entry with `select`). `facing` is `{"toward": argument}`, `as_it_was` or `to_wall`; the word `facing`
+turns a thing where it stands, so the position is not touched and no `facing` field is written beside it. A kind with no front
+(a round table) says `geometry.front: "none"`; the default is `"z"`, the front the frame names. `place(thing, placement,
+{anchor, facingAnchor, node, anchorNode})` decides only what plain data can: the thing may be moved (`fixed` is refused), the
+anchor is named and is another node (`self` is decided by node id, so two chairs of one kind may stand next to each other), a
+front exists where the word needs one (`behind` and `in_front_of` need the anchor's, `facing` and `toward` need the thing's). A
+refusal has a `code` (`no_front`, `no_anchor`, `fixed`, `unsaid`, `self`, `unknown_word`, `unknown_facing`) and names the word and
+the kind. The spot is the engine's choice, recorded (E4); whether it is free and legal is the world's answer. Cases:
+`tools/entry/cases/placements.json`.
 
 **Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
 ([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
@@ -206,6 +237,26 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 `tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
 `look.mjs` converts to metres only when it draws.
 
+**The code hatch** (SA-F9, [#2850](https://github.com/soulsimulation/souls/issues/2850); Engine v2 F8
+[#2823](https://github.com/soulsimulation/souls/issues/2823), T9 [#2663](https://github.com/soulsimulation/souls/issues/2663)).
+A form may carry one `hatch`, for the rare thing no declared form can say (whether a chess move is legal, which step of a
+lamp's pattern is lit). It is not a section: it is a key of the form, so the kind's hash covers it. It holds no code:
+
+```json
+"hatch": { "module": "prov-1220<64 hex>", "reads": [{"field": "pieces"}, {"field": "turn"}, {"arg": "from"}, {"arg": "to"}],
+           "steps_most": 20000, "answers": "verdict", "why": "why_chess" }
+```
+
+`module` is the hash of the function's WASM module; `reads` is every field (a bool, enum, int, duration, timed value or
+list) and every `count` or `duration` argument the function may see, and nothing else; `steps_most` is the meter, from 1 to
+1 000 000; `answers` is `"verdict"` (the form can be done only if the function says yes) or `{"field": <name>}` (its whole
+number answer is that field's new value); `why` names a text entry saying what no declared form could do. The function is
+pure: no I/O, no clock, no randomness, no float, the same bytes in Node, the browser and the new engine. The check gate
+(rule `hatch`) refuses a hatch that reads fewer than two things, or only bool fields with a verdict (a declared form's needs
+say those), and a kind with more than four. It prints the number of hatches in the kit, and marks an entry that names one
+`waiting_for_engine`: until Engine v2 runs hatches, such an entry is validated, hashed and checked, never run. Cases for the
+two known uses are data (`tools/entry/cases/hatch.json`). No function is written.
+
 ## A form
 
 ```json
@@ -220,35 +271,44 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 
 - **who** may: `anyone`, `holder`, `world` (a form a timer starts, and only such a form), or `{"link": <type>}`.
 - **starts**: `act` (a Soul's act) or `timer` (set by a `timer` change).
-- **takes**: named arguments, typed `slot`, `part`, `thing`, `text`, `duration` or `count`. A `slot` or `thing` may
+- **takes**: named arguments, typed `slot`, `part`, `thing`, `text`, `duration`, `count` or `placement` (one of the
+  placement words below, chosen when the form is done; a `put` step's `place.at` may be such an argument). A `slot` or `thing` may
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
-  a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
+  a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor` (this thing,
+  or `{"thing": {"arg": ...}}`), `moves` (`{"thing": {"arg": ...}, "by": "carry" | "push"}`: the thing's kind moves
+  that way by its section 18 `motion.how`; carrying takes as many free hands as it says, a push by one body is refused
+  for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
   `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
   `timed` field.
-  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
-  water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
-  `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
-  as its fix. Reach to another thing's point is not a need the rules can read yet, so `fill` holds the kettle and needs
-  it empty.
+  SA-F2 evaluates them. **Reach to a loose thing is the walk, taken as done**: entries store no position for a loose
+  thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a `thing` argument that the form
+  `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach` when it is elsewhere. A kettle's
+  `fill` takes the nearest `eden:tap` (a selector on a kind) and needs it within reach: the water comes from a thing in
+  the world, never from a refill the kettle does by itself. Its effect is a `transfer` of `water` (grams) out of the tap
+  and into the kettle until it is full, so a need for water on the switch names `fill` as its fix.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
-- **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
-  into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
-  slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
-  defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
-  per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
-  boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
-  an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
-  count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
+- **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor, this thing or a
+  `thing` argument, into a slot, the actor's hand or `here`, loose in the actor's place: holding is a change of
+  parent), `link`, `unlink`, `create` (a kind, `here`, in a slot or in the hand), `remove` (the actor, this thing or a
+  `thing` argument), `timer`, `transfer`, `draw`. The body's `pick_up` and `push` reparent a thing argument into a free
+  hand (a push holds the thing while it moves), and its `put` sets a held one down `here` by a placement word and an
+  anchor described by a selector; another body has no `motion`, so it is never picked up or pushed.
+  `packages/form-rules/README.md` ("What a form does") defines what each does. A `set` on a timed value gives no `to`
+  but its new `rate` (a whole number, in the field's unit per second): its value is settled at the act's time. The
+  kettle's switch gives its heat a rate and a timer for the boil; the timer's form needs the heat at the boil, so it
+  reads boiled at that microsecond and not before. A `set` on an `int` field may give `by` (signed, never 0) instead of
+  `to`: it adds to the value, within the field's bounds, for a count or an amount used up that nothing balances. A cup's
+  `sip` lowers its `water` by 50 and raises its `sips` by 1.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
@@ -352,7 +412,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
-| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `moves` | a thing says neither how it moves nor how long it lasts loose | no |
 | `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
 | `no-labels` | a mood word in the card | no |
 | `refs` | a kind that is not loaded, or kinds in a circle | no |
