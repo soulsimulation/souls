@@ -11,13 +11,20 @@
 //! - **A preference.** The push is resolved on the walker's own axes: forward, where it may slow the walker but never
 //!   below a tenth of its free speed (no waiting at a narrow place yet: N8), and sideways. The sum never exceeds free
 //!   speed. Overlap is allowed, and measured ([`Crowd::close`]).
+//! - **Turns at a narrow place** (N8, `crate::links::turns`). Walking to a link the world takes in turns, a walker
+//!   without leave marks itself waiting once within [`MARK`] of the link's near end, and stands once within [`QUEUE`]
+//!   of it, or behind a waiting walker for the same link within [`BEHIND`] and nearer the end. It never writes the
+//!   link's state: at the start of each tick the world reads every walker's mark as of the last tick
+//!   ([`World::turns`]) and the link's owner writes who may enter; a walker crosses only with leave
+//!   ([`World::pass`]). Those waiting make way: they push only each other, so the walker let in and those
+//!   coming out pass through. A crossing, once begun, runs to its end.
 //! - **One trait.** Everything the skill reads of the world or asks of it (the route's legs, the next corner, a step
-//!   of the mover, a tick of crossing a link) goes through [`World`], so K13 can re-link it. [`town::Town`] is the
-//!   trait over N5's map, N6's mover and N4's links and doors.
+//!   of the mover, a tick of crossing a link, the marks read and the leave to enter) goes through [`World`], so K13
+//!   can re-link it. [`town::Town`] is the trait over N5's map, N6's mover and N4's links, doors and turns.
 //! - **Integers.** Positions in µm, velocities in µm a second, time in µs; square roots by `isqrt`. Nothing is hashed
 //!   or decided by a float.
 //!
-//! Not here: turns (N8), standing spots (N9), the ladder (N10), the neighbour index proper (N16), the transfer records
+//! Not here: standing spots (N9), the ladder (N10), the neighbour index proper (N16), the transfer records
 //! of a crossing (N6's `mover::cross` needs the zone's pose scene, which no caller holds yet).
 
 pub mod town;
@@ -41,6 +48,36 @@ pub const LEAN: i64 = 2;
 pub const AT_LINK: i64 = 50_000;
 /// A walk's goal is reached within this, µm.
 pub const AT_GOAL: i64 = 300_000;
+/// A walker without leave marks itself waiting for a narrow link within this of its near end, µm.
+pub const MARK: i64 = 3_000_000;
+/// A walker without leave stands within this of a narrow link's near end, µm.
+pub const QUEUE: i64 = 1_200_000;
+/// A walker without leave stands behind a waiting walker for the same link this near and nearer the end, µm.
+pub const BEHIND: i64 = 700_000;
+
+/// May a walker enter a link now?
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pass {
+    /// The link is not taken in turns.
+    Free,
+    /// Its owner let this walker in.
+    Granted,
+    /// Not yet: wait.
+    Wait,
+}
+
+/// One body as the world reads it at the start of a tick (as it stood at the end of the last): where it is, the
+/// link it waits for and how far from that link's near end (µm), the link it is crossing, and whether it stays
+/// where it is by its own order.
+#[derive(Clone, Copy, Debug)]
+pub struct Mark {
+    pub who: Id,
+    pub node: Id,
+    pub at: Vec3,
+    pub waiting: Option<(Id, i64)>,
+    pub crossing: Option<Id>,
+    pub staying: bool,
+}
 
 /// One leg of a walk: walk to `to` (µm, in the frame of the node the body stands on), then cross `link`, or arrive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +112,15 @@ pub trait World {
         dt: Micros,
         at: Micros,
     ) -> Result<bool, Refusal>;
+    /// At the start of a tick ending at `at`: every body's mark as of the last tick, for the owners of the links
+    /// taken in turns to write who may enter. A world with no such links needs nothing.
+    fn turns(&mut self, _marks: &[Mark], _at: Micros) -> Result<(), Refusal> {
+        Ok(())
+    }
+    /// Whether `who` may enter `link` now.
+    fn pass(&self, _link: Id, _who: Id) -> Pass {
+        Pass::Free
+    }
 }
 
 /// The node a body stands on.
@@ -98,6 +144,10 @@ pub struct Walker {
     pub crossing: bool,
     /// When it arrived, µs of world time.
     pub arrived: Option<Micros>,
+    /// The narrow link it waits for, and how far from its near end, µm (its mark, read by the link's owner).
+    pub waiting: Option<(Id, i64)>,
+    /// It stays where it is by its own order (E3's order; a scripted marker here): never moved, never waiting.
+    pub staying: bool,
 }
 
 /// What a neighbour is, as of the previous tick.
@@ -107,6 +157,7 @@ struct Seen {
     node: Id,
     at: [i64; 2],
     v: [i64; 2],
+    waiting: Option<(Id, i64)>,
 }
 
 /// The bodies of one tick by node and cell of [`RANGE`].
@@ -124,6 +175,7 @@ impl Grid {
                 node: node_of(&w.body),
                 at: [p.x, p.z],
                 v: [w.body.linear.x, w.body.linear.z],
+                waiting: w.waiting,
             };
             cells.entry(Grid::key(s.node, s.at)).or_default().push(s);
         }
@@ -216,6 +268,17 @@ fn wanted(
     ]
 }
 
+/// The turns a stalled step is tried at, in order: none, then 45 degrees either way, then 70 either way (cosine and
+/// sine in thousandths).
+const TURNS: [(i64, i64); 5] = [(1000, 0), (707, 707), (707, -707), (342, 940), (342, -940)];
+
+/// `v` turned by `(cos, sin)` (thousandths) and shortened by the cosine: the part of the step that still goes along
+/// `v`'s way.
+fn turned(v: [i64; 2], (c, s): (i64, i64)) -> [i64; 2] {
+    let r = [(v[0] * c - v[1] * s) / 1000, (v[0] * s + v[1] * c) / 1000];
+    [r[0] * c / 1000, r[1] * c / 1000]
+}
+
 /// Walkers walked together, a tick at a time, with what the overlap measure counted.
 pub struct Crowd {
     /// In id order.
@@ -258,6 +321,8 @@ impl Crowd {
             leg: 0,
             crossing: false,
             arrived: None,
+            waiting: None,
+            staying: false,
         };
         let k = self.walkers.partition_point(|o| o.body.id < w.body.id);
         self.walkers.insert(k, w);
@@ -273,8 +338,22 @@ impl Crowd {
     pub fn step(&mut self, world: &mut impl World) -> Result<(), Refusal> {
         let grid = Grid::of(&self.walkers);
         let (dt, at) = (self.tick, self.now + self.tick);
+        // The marks as of the last tick, read by the owners of the links taken in turns.
+        let marks: Vec<Mark> = self
+            .walkers
+            .iter()
+            .map(|w| Mark {
+                who: w.body.id,
+                node: node_of(&w.body),
+                at: w.body.pose.position,
+                waiting: w.waiting.filter(|_| w.arrived.is_none()),
+                crossing: w.crossing.then(|| w.legs[w.leg].link).flatten(),
+                staying: w.staying,
+            })
+            .collect();
+        world.turns(&marks, at)?;
         for w in self.walkers.iter_mut() {
-            if w.arrived.is_some() {
+            if w.arrived.is_some() || w.staying {
                 continue;
             }
             if w.crossing {
@@ -288,9 +367,29 @@ impl Crowd {
             let leg = w.legs[w.leg];
             let p = w.body.pose.position;
             let gap = len([leg.to.x - p.x, leg.to.z - p.z]);
+            // The wait: no leave to enter a narrow link, so mark, and stand near its end or behind one waiting.
+            let pass = leg.link.map_or(Pass::Free, |l| world.pass(l, w.body.id));
+            w.waiting = match leg.link {
+                Some(l) if pass != Pass::Free && gap <= MARK => Some((l, gap)),
+                _ => None,
+            };
+            if pass == Pass::Wait {
+                let behind = grid
+                    .near(w.body.id, node_of(&w.body), [p.x, p.z], BEHIND)
+                    .iter()
+                    .any(|(n, _)| {
+                        n.waiting
+                            .is_some_and(|(l, g)| Some(l) == leg.link && g < gap)
+                    });
+                if gap <= QUEUE || (gap <= MARK && behind) {
+                    w.body.linear = Vec3::ZERO;
+                    continue;
+                }
+            }
             match leg.link {
-                Some(link) if gap <= AT_LINK => {
+                Some(link) if gap <= AT_LINK && pass != Pass::Wait => {
                     w.crossing = true;
+                    w.waiting = None;
                     if world.cross(&mut w.body, link, w.order, w.speed, dt, at)? {
                         w.crossing = false;
                         w.leg += 1;
@@ -305,9 +404,22 @@ impl Crowd {
             }
             let aim = world.corner(&w.body, leg.to)?;
             let node = node_of(&w.body);
-            let near = grid.near(w.body.id, node, [p.x, p.z], RANGE);
+            // Those waiting at a narrow place make way: they push only others waiting.
+            let mut near = grid.near(w.body.id, node, [p.x, p.z], RANGE);
+            if pass != Pass::Wait {
+                near.retain(|(n, _)| n.waiting.is_none());
+            }
             let v = wanted(w.body.id, [p.x, p.z], aim, w.speed, dt, &near);
-            world.step(&mut w.body, v, dt, at)?;
+            // Along an edge: a step the mover cuts to nothing is tried turned by 45 and then 70 degrees, either way
+            // (the mover cuts a step at the ground's edge and does not slide).
+            let before = w.body;
+            for turn in TURNS {
+                w.body = before;
+                world.step(&mut w.body, turned(v, turn), dt, at)?;
+                if w.body.pose.position != p || v == [0, 0] {
+                    break;
+                }
+            }
         }
         self.now = at;
         // The overlap measure, on where the bodies stand now.

@@ -12,10 +12,15 @@
 //!   at the line's end. The line is followed in the frame of the node the body stands on: a body coming in from the
 //!   open ground follows it placed on the ground by the building's frame, and stands at the far end on the floor; a
 //!   body going out follows it in the building's frame and stands at the far end on the open ground.
+//! - **Turns** (N8). A link under 1.2 m wide is taken in turns (`crate::links::turns`): at the start of each tick
+//!   the marks of the last are read into each such link's facts (who waits at which end and how far from it, who is
+//!   inside and how far along, whether each end has room to step out into), and its owning node writes who may
+//!   enter. Without turns ([`Town::turns`] `None`) every link is free, as N7 walked them.
 
-use super::{Leg, World, node_of};
+use super::{Leg, Mark, Pass, World, node_of};
 use crate::ground::scene::FLOOR;
 use crate::ground::{HUMAN_RADIUS, OpenGround, Scene};
+use crate::links::turns::{Facts, ROOM, Turns, narrow};
 use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
@@ -44,6 +49,9 @@ struct Crossing {
     line: Vec<Vec3>,
     to: Id,
     arrive: Option<Vec3>,
+    /// The end it came in by, and where the body stood when it began.
+    from: u8,
+    start: Vec3,
 }
 
 /// The engine as the walk skill reads it.
@@ -55,6 +63,8 @@ pub struct Town {
     pub surfaces: BTreeMap<Id, Surface>,
     pub buildings: Vec<Building>,
     pub doors: Doors,
+    /// The turn states of the narrow links, written by their owners; `None` walks every link free.
+    pub turns: Option<Turns>,
     crossings: BTreeMap<Id, Crossing>,
 }
 
@@ -120,6 +130,7 @@ impl Town {
             surfaces,
             buildings,
             doors,
+            turns: Some(Turns::new()),
             crossings: BTreeMap::new(),
         })
     }
@@ -162,11 +173,81 @@ fn dist2(a: Vec3, b: Vec3) -> i128 {
 }
 
 impl World for Town {
+    fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
+        let Town {
+            turns,
+            buildings,
+            crossings,
+            ..
+        } = self;
+        let Some(turns) = turns.as_mut() else {
+            return Ok(());
+        };
+        // The links waited for, crossed, or with a state already.
+        let mut ids: std::collections::BTreeSet<Id> = marks
+            .iter()
+            .flat_map(|m| [m.waiting.map(|w| w.0), m.crossing])
+            .flatten()
+            .collect();
+        ids.extend(turns.owners.values().flat_map(|m| m.keys().copied()));
+        for id in ids {
+            let Some(l) = buildings.iter().find_map(|b| b.link(id)) else {
+                continue;
+            };
+            if !narrow(l) {
+                continue;
+            }
+            let mut f = Facts::default();
+            for m in marks {
+                if let Some((w, gap)) = m.waiting
+                    && w == id
+                    && let Some(k) = (0..2)
+                        .filter(|&k| l.ends[k].is_some_and(|e| e.floor == m.node))
+                        .min_by_key(|&k| l.ends[k].map_or(i128::MAX, |e| dist2(m.at, e.middle())))
+                {
+                    f.waiting[k].push((gap, m.who));
+                }
+                if m.crossing == Some(id)
+                    && let Some(c) = crossings.get(&m.who)
+                {
+                    f.inside
+                        .push((c.from, dist2(c.start, m.at).isqrt() as i64, m.who));
+                }
+            }
+            for (k, e) in l.ends.iter().enumerate() {
+                f.room[k] = e.is_some_and(|e| {
+                    !marks.iter().any(|m| {
+                        m.node == e.floor
+                            && m.crossing.is_none()
+                            && !m.staying
+                            && m.waiting.map(|w| w.0) != Some(id)
+                            && dist2(m.at, e.middle()) < i128::from(ROOM) * i128::from(ROOM)
+                    })
+                });
+            }
+            turns.write(l.owner, l, &f, at)?;
+        }
+        Ok(())
+    }
+
+    fn pass(&self, link: Id, who: Id) -> Pass {
+        let (Some(turns), Some(l)) = (self.turns.as_ref(), self.link(link)) else {
+            return Pass::Free;
+        };
+        if !narrow(l) {
+            Pass::Free
+        } else if turns.granted(l, who) {
+            Pass::Granted
+        } else {
+            Pass::Wait
+        }
+    }
+
     fn plan(&mut self, body: &Body, node: Id, goal: Vec3) -> Result<Vec<Leg>, Refusal> {
         let here = node_of(body);
         let from = self
             .map
-            .spot(here, body.pose.position)
+            .spot_near(here, body.pose.position, AT_EDGE)
             .ok_or_else(|| refusal("off-ground", show(here)))?;
         let to = self
             .map
@@ -206,7 +287,7 @@ impl World for Town {
         }
         let node = node_of(body);
         let (Some(from), Some(goal)) = (
-            self.map.spot(node, body.pose.position),
+            self.map.spot_near(node, body.pose.position, AT_EDGE),
             // A link's near end lies on its piece's edge, within the grid's rounding.
             self.map.spot_near(node, to, AT_EDGE),
         ) else {
@@ -297,8 +378,16 @@ impl World for Town {
                 }
             }
             let door = l.door;
-            self.crossings
-                .insert(body.id, Crossing { line, to, arrive });
+            self.crossings.insert(
+                body.id,
+                Crossing {
+                    line,
+                    to,
+                    arrive,
+                    from: near as u8,
+                    start: p,
+                },
+            );
             if let Some(door) = door {
                 let shut = self
                     .tree

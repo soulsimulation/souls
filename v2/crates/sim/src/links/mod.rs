@@ -33,6 +33,8 @@
 //! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
 //! locked door (no stored field says a door is locked yet), the durable log (K4).
 
+pub mod turns;
+
 use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Xform};
 use crate::ground::{HUMAN_RADIUS, MARGIN, Meet, Patch, SQUARE, Scene, Turn, cut_floor};
 use replica::effects::{
