@@ -26,9 +26,7 @@
 //!   search came to and could not use, the one whose far end is nearest the goal.
 //!
 //! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), other body sizes (B12), routes across
-//! water (N11). Nor a floor that lies on the ground with no link to it (Eden's footpaths, lawns and shores are such
-//! floors of things of their own): N3 cuts it out of the open ground and nothing joins the two, so it walls off what
-//! it surrounds.
+//! water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
 
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};

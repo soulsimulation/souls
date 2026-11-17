@@ -7,6 +7,12 @@
 //!   box whose height span meets the body's ([`BODY_LOW`] to [`BODY_HIGH`] above the floor) is taken away, grown by
 //!   the same amount, and so are the doorways (a doorway is never floor), the floors of buildings standing on the
 //!   open ground (each is a node of its own) and the waters (N11, #2735, cuts water patches from the outlines kept here).
+//! - **Ground cover.** A floor on the open ground that holds no room and lies within [`STEP`] of the ground
+//!   (Eden's footpaths, lawns, garden beds, shores, piers) is not a node of its own to walk: it is open ground, added
+//!   back over any water it lies on, so a pier reaches out over the sea. A body on it stays on the open ground (its
+//!   support, at the ground's height, T4 rule 6), crossing its edge is no hop and no transfer, and a named place
+//!   holds nobody (T2). Its thing's boxes (a pier's rails, a court's posts) are cut like any other. Its floor node
+//!   has no ground of its own (`ground-cover`).
 //!   Boxes overlap and cross the floor's edge, so they are a union taken away, never a list of holes; a floor may
 //!   fall into several pieces, and each piece is cut into triangles that keep its edges (`i_triangle`, then
 //!   Delaunay flips).
@@ -47,6 +53,9 @@ pub const MARGIN: i64 = 60;
 /// The body's height span above the floor, mm: a box that meets it blocks.
 pub const BODY_LOW: i64 = 220;
 pub const BODY_HIGH: i64 = 1_800;
+/// The highest a floor with no room may lie above the ground and still be ground cover, walked as the open ground,
+/// mm: what a body steps over, as a box lower than [`BODY_LOW`] never blocks it.
+pub const STEP: i64 = BODY_LOW;
 /// The open ground's square, mm.
 pub const SQUARE: i64 = 16_000;
 /// Today's walking body, mm (`HUMAN_PROFILE`).
@@ -380,8 +389,12 @@ struct Grown {
     levels: Vec<(i64, Vec<Vec<P>>)>,
     /// Grown boxes, each with its height span and bounds.
     boxes: Vec<(Vec<P>, i64, i64, [i32; 4])>,
-    /// Grown doorways, footprints (with their heights) and waters: never walkable.
+    /// Grown doorways and footprints (with their heights): never walkable.
     never: Vec<(Vec<P>, i64, [i32; 4])>,
+    /// Waters, taken from the open ground before its cover is added back.
+    waters: Vec<(Vec<P>, [i32; 4])>,
+    /// Ground cover: open ground, over water too.
+    covers: Vec<(Vec<P>, [i32; 4])>,
     doors: Vec<Door>,
     d: i64,
 }
@@ -477,11 +490,12 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             }
         }
     }
+    let mut waters = Vec::new();
     for w in &s.waters {
         if w.ring.len() >= 3 {
             let r = ccw(w.ring.iter().map(|p| g(*p)).collect::<Result<_, _>>()?);
             let bb = bounds(&r);
-            never.push((r, i64::MIN, bb));
+            waters.push((r, bb));
         }
         if w.line.len() >= 2 {
             // A river: its line there and back is a ring of no area, whose bands are the river's two halves.
@@ -492,14 +506,22 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             edges_grown(&vec![vec![ring]], w.width / 2000 + 1, &mut parts);
             for r in parts {
                 let bb = bounds(&r);
-                never.push((r, i64::MIN, bb));
+                waters.push((r, bb));
             }
         }
+    }
+    let mut covers = Vec::new();
+    for c in &s.covers {
+        let r = ccw(c.ring.iter().map(|p| g(*p)).collect::<Result<_, _>>()?);
+        let bb = bounds(&r);
+        covers.push((r, bb));
     }
     Ok(Grown {
         levels,
         boxes,
         never,
+        waters,
+        covers,
         doors,
         d,
     })
@@ -659,6 +681,7 @@ impl OpenGround {
             .iter()
             .map(|x| &x.3)
             .chain(g.never.iter().map(|x| &x.2))
+            .chain(g.waters.iter().chain(&g.covers).map(|x| &x.1))
         {
             b = [
                 b[0].min(bb[0]),
@@ -684,7 +707,22 @@ impl OpenGround {
     pub fn cut_square(&self, i: i32, j: i32) -> Patch {
         let sq = SQUARE as i32;
         let w = [i * sq, j * sq, (i + 1) * sq, (j + 1) * sq];
-        let shapes = cut_level(&self.0, vec![vec![square_ring(w)]], 0, Some(w));
+        let g = &self.0;
+        let near = |v: &[(Vec<P>, [i32; 4])]| -> Vec<Vec<P>> {
+            v.iter()
+                .filter(|(_, bb)| meets_box(bb, &w))
+                .map(|(r, _)| r.clone())
+                .collect()
+        };
+        let (wet, cover) = (near(&g.waters), near(&g.covers));
+        let mut open = op(&[square_ring(w)], &wet, OverlayRule::Difference);
+        if !cover.is_empty() {
+            // The cover inside the square, added back over the water it lies on (a pier, a shore).
+            let on = op(&cover, &[square_ring(w)], OverlayRule::Intersect);
+            let on: Vec<Vec<P>> = on.into_iter().flatten().collect();
+            open = shapes_op(&open, &on, OverlayRule::Union);
+        }
+        let shapes = cut_level(g, open, 0, Some(w));
         let mut meets_out = Vec::new();
         meets(&self.0, &shapes, 0, 0, Some(w), &mut meets_out);
         Patch {

@@ -11,6 +11,8 @@ use replica::pose::{Quat, Vec3};
 use replica::tree::{Handle, Tree};
 use replica::world_model::plain;
 
+use super::STEP;
+
 pub const F_OPEN_DOOR_LINK: u64 = 7; // a door thing: the doorway link it stands in (N1's F_DOORWAY)
 pub const F_OUTLINE: u64 = 11;
 pub const F_SOLIDS: u64 = 12;
@@ -77,6 +79,9 @@ pub struct Scene {
     pub solids: Vec<Solid>,
     /// Floors of buildings standing on the open ground: never open ground (each is a node of its own).
     pub footprints: Vec<Surface>,
+    /// Ground cover on the open ground (footpaths, lawns, beds, shores, piers): floors with no room whose every
+    /// surface is within [`STEP`] of the ground. They are walked as the open ground, over water too (a pier).
+    pub covers: Vec<Surface>,
     pub doorways: Vec<Doorway>,
     pub waters: Vec<Water>,
 }
@@ -227,8 +232,26 @@ fn surfaces_of(tree: &Tree, floor: Handle, x: &Xform) -> Result<Vec<Surface>, St
         .collect()
 }
 
+/// Ground cover: the floor `floor` holds no room (no walls bound it) and every surface of it lies within [`STEP`] of
+/// the ground, read in `frame` (the open ground's, whose height is 0 until N11, #2735, brings terrain). Its surfaces
+/// in `frame` when it is; `None` when it is a floor of its own.
+fn cover_of(tree: &Tree, floor: Handle, frame: Handle) -> Result<Option<Vec<Surface>>, String> {
+    let kids = tree.children(floor).ok_or("a node that is gone")?;
+    if kids.iter().any(|&c| kind_of(tree, c) == ROOM) {
+        return Ok(None);
+    }
+    let thing = tree
+        .node(floor)
+        .and_then(|n| n.parent())
+        .and_then(|p| tree.handle(p))
+        .ok_or("a floor")?;
+    let s = surfaces_of(tree, floor, &xform_to(tree, thing, frame)?)?;
+    let low = !s.is_empty() && s.iter().all(|f| f.y.abs() <= STEP * 1000);
+    Ok(low.then_some(s))
+}
+
 /// Every thing in the subtree at `top` (itself included), in the frame `frame`: its boxes, and, when `footprints` is
-/// given, the floors it holds as footprints. A door standing in a doorway is the link's, never an obstacle. Floors are
+/// given, the floors it holds as footprints, or as cover when they are ground cover. A door standing in a doorway is the link's, never an obstacle. Floors are
 /// not walked into when footprints are taken (their things stand on those floors, not here).
 fn things_below(
     tree: &Tree,
@@ -245,8 +268,13 @@ fn things_below(
         if k == FLOOR
             && let Some(f) = footprints.as_deref_mut()
         {
-            let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
-            f.extend(surfaces_of(tree, h, &xform_to(tree, thing, frame)?)?);
+            match cover_of(tree, h, frame)? {
+                Some(c) => s.covers.extend(c),
+                None => {
+                    let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
+                    f.extend(surfaces_of(tree, h, &xform_to(tree, thing, frame)?)?);
+                }
+            }
             continue;
         }
         if k != FLOOR && k != ROOM && k != WINDOW && k != PLACE {
@@ -341,7 +369,9 @@ fn doorways_at(tree: &Tree, ends: &[Handle], frame: Handle, s: &mut Scene) -> Re
 
 impl Scene {
     /// The ground of node `id`: a floor (its surfaces, everything its building holds, its doorways) or the open ground
-    /// (everything on it, the footprints of its buildings, its doorways, its waters). Anything else has no ground.
+    /// (everything on it, the footprints of its buildings, its ground cover, its doorways, its waters). Anything else
+    /// has no ground, and nor has a floor that is ground cover on the open ground (`ground-cover`): it is walked as the
+    /// open ground, so a body on it stays on the open ground and crossing its edge is no transfer.
     pub fn of(tree: &Tree, id: Id) -> Result<Scene, String> {
         let h = tree.handle(id).ok_or("no such node")?;
         let mut s = Scene::default();
@@ -353,6 +383,19 @@ impl Scene {
                     return Err("a floor not at its building's origin".into());
                 }
                 let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
+                let mut up = Some(thing);
+                while let Some(a) = up {
+                    if kind_of(tree, a) == GROUND {
+                        if cover_of(tree, h, a)?.is_some() {
+                            return Err("ground-cover: walked as the open ground".into());
+                        }
+                        break;
+                    }
+                    up = tree
+                        .node(a)
+                        .and_then(|x| x.parent())
+                        .and_then(|p| tree.handle(p));
+                }
                 s.surfaces = surfaces_of(tree, h, &Xform::IDENTITY)?;
                 if s.surfaces.is_empty() {
                     return Err("a floor with no surfaces".into());
