@@ -23,6 +23,18 @@
       "move": "slide",
       "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [100, 500, 0], "to_mm": [300, 500, 0] },
       "at_us": [[250000, [100, 500, 0]], [450000, [200, 500, 0]], [650000, [300, 500, 0]]]
+    },
+    {
+      "why": "rounding: a position rounds to the nearest millimetre, halves away from zero (Engine v2 rule); halfway of 3, -3 and 1 is 2, -2 and 1",
+      "move": "press",
+      "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [3, -3, 1] },
+      "at_us": [[125000, [2, -2, 1]]]
+    },
+    {
+      "why": "the same press mirrored through zero gives the mirrored positions",
+      "move": "press",
+      "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [-3, 3, -1] },
+      "at_us": [[125000, [-2, 2, -1]]]
     }
   ],
   "consume": [
