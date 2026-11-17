@@ -59,7 +59,7 @@
         "moves": { "press": { "reach_mm": 600 } }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2, "detail": { "point": "switch", "move": "press" }, "fix": { "step": "walk_to", "point": "switch" } }
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2, "detail": { "point": "button", "move": "press" }, "fix": { "step": "walk_to", "point": "button" } }
     },
     {
       "name": "switch_on_exactly_at_reach",
