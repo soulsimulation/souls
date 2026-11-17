@@ -1,0 +1,16 @@
+# A thrown ball (Engine v2 T4, #2644): from 1.5 m up at 8 m/s across and 6 m/s up, under standard gravity
+# (9.80665 m/s^2), owned by a thrown track, supported by nothing. Layout as in boat.diag. After 10 s, by hand:
+# x = 8,000,000 * 10 = 80,000,000 um; y = 1,500,000 + 6,000,000 * 10 - 9,806,650 * 100 / 2 = -428,832,500 um
+# (the ground is not modelled here). g * t^2 in microseconds is 9.8e20, past 2^63: 128-bit intermediates.
+{
+  1: 1,
+  2: [
+    {1: 2,
+     2: {1: [1], 2: [0, 1500000, 0], 3: [1073741824, 0, 0, 0], 4: {1: 0}},
+     3: {1: 3, 2: {1: 3, 2: 0, 3: [0, 1500000, 0], 4: [8000000, 6000000, 0], 5: [0, -9806650, 0], 6: [0, 0, 0]}}}
+  ],
+  3: [
+    [2, 1000000, [8000000, 2596675, 0]],
+    [2, 10000000, [80000000, -428832500, 0]]
+  ]
+}
