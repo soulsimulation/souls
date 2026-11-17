@@ -45,6 +45,20 @@ export function loadCases(dir: string = CASES): [string, Case][] {
   return out;
 }
 
+export type EffectStep = { act: Input['act']; actor?: string; receipt: string; expect?: Record<string, unknown> };
+export type EffectCase = { name: string; state: Input['state']; do: EffectStep[]; after?: Record<string, unknown> };
+
+/** Every effect case in `dir` (souls-effect-cases/1), as [file, case]. */
+export function loadEffectCases(dir: string = join(CASES, 'effects')): [string, EffectCase][] {
+  const out: [string, EffectCase][] = [];
+  for (const file of jsonFiles(dir, false)) {
+    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    if (doc.format !== 'souls-effect-cases/1') throw new Error(`${file}: format is not souls-effect-cases/1`);
+    for (const c of doc.cases) out.push([file, c]);
+  }
+  return out;
+}
+
 /** Deep equality of JSON values; object key order does not matter, array order does. */
 export function same(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -55,6 +69,6 @@ export function same(a: unknown, b: unknown): boolean {
 }
 
 /** The keys of `expect` that the verdict does not match (each key compared whole). */
-export function mismatches(expect: Record<string, unknown>, verdict: Verdict): string[] {
+export function mismatches(expect: Record<string, unknown>, verdict: Verdict | Record<string, unknown>): string[] {
   return Object.keys(expect).filter((k) => !same(expect[k], (verdict as Record<string, unknown>)[k]));
 }
