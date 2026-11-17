@@ -80,8 +80,17 @@ layers of Engine v2's contract T6:
   and for an amount the signed `by`), `link` / `unlink` (`node`, `link`, `n`, `end`), `reparent` (`node`, `to`),
   `create` (`node`, `kind`, `to`) and `remove` (`node`, with everything it holds). A place `to` is a slot
   `{node, slot}`, a hand `{node, hand}`, or loose in a node `{node}`.
-- `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes.
+- `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes. The name
+  is `namespace:name`: the declaring kind's namespace before the plain name its entry writes (`poured` in an
+  `eden:` kind is `eden:poured`).
 - `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event.
+
+Every value in a result is one that Engine v2's encoding profile holds (T0, `v2/docs/encoding.md`): whole numbers and
+names, never a float, a boolean or `null`. A flag is 0 or 1 (an entry may still write `true` or `false`, and the
+rules compare them as 1 and 0); text is a key by reference, `{"text": <key>}`, never words; a value that is missing
+is left out, and a `set` without `to` clears the field to its default. `outsideProfile(value)` names where a value
+leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
+`effects` refuses to write such a value and `apply` refuses to accept one.
 
 The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
@@ -94,7 +103,7 @@ done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
 
 `apply(state, result)` applies a result to plain state, all of it or none: a refusal changes nothing; a receipt
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
-change that cannot apply, refuses the batch with its index.
+change that cannot apply or a value outside the profile, refuses the batch with its index.
 
 ## An effect case
 
@@ -103,6 +112,32 @@ and the acts done in it, in order, each with its `receipt`, an optional `actor` 
 what `effects` should return (`expect`, compared like a rule case's). `after` names nodes and what each should be
 once every act is applied (`null`: removed), compared whole. Every act that is done is also applied a second time
 with its receipt, which must change nothing.
+
+## A timed value
+
+A field of type `timed` changes by itself with time (a kettle heats, a candle burns down) and is stored as three whole
+numbers, `{value, per_s, set_us}`: its value when it was set, its rate per second in the field's unit, and the world
+time it was set, in microseconds. Nothing is written between events; Engine v2's F5
+([#2770](https://github.com/soulsimulation/souls/issues/2770)) settles and rewrites the three on any change and runs
+the same cases.
+
+- `valueAt(def, stored, now_us)`: the value plus `per_s x (now_us - set_us) / 1,000,000`, truncated toward zero (whole
+  units accrued, so rising and falling behave alike), held within the field's `min` and `max`. The rounding of a
+  falling value is F5's ([#2770](https://github.com/soulsimulation/souls/issues/2770)) to settle: a floor instead of
+  truncating the change would read one unit lower for a falling value mid-step (a candle 1 mm shorter after 1 us).
+- `crossing(def, stored, {at_least | at_most: level}, from_us)`: the first whole microsecond at or after `from_us` at
+  which that value meets the level, so the crossing is rounded up and a need on the field turns from no to yes at
+  exactly that time; `null` when it never does (the rate is zero or points away, or a bound stops it short).
+- World time is a signed 64-bit count that never stops. Every number (the three, `now_us`, `from_us`, a level, `min`,
+  `max`) may be a safe integer or a big integer, as T0's encoding reads a whole number beyond 2^53; everything is
+  worked in big integers, and a result is a number when it is a safe integer, else a big integer. Only a number or
+  result outside the signed 64-bit range is refused, as `{bad: "beyond_i64"}`; a time before `set_us` is refused as
+  `{bad: "time_before_set"}`. A Rust build needs 128-bit intermediates (rate x elapsed time exceeds 64 bits).
+  Case files are read with whole numbers beyond 2^53 as big integers (`parse` in `src/load.ts`).
+
+A file in `cases/timed/` is `{"format": "souls-timed-cases/1", "about": ..., "cases": [...]}`. A case names a kind
+and a field, a stored value, `values` as `[now_us, value]` and `crossings` as a level, `from_us` and the expected
+time (or `null`). The `timed` type is not in the entry format yet; its cases use `cases/kinds/test/timed_kettle.json`.
 
 ## Looks
 
