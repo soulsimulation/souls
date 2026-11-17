@@ -177,9 +177,12 @@ body's family declares it.
 
 **Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
 takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
-time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit), and a default
+time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit: `count`, `mm`,
+`g`, `mg`, `mC` or `permille`), and a default
 of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
-world time it was set, in microseconds. A range need reads it at the state's time; the arithmetic is
+world time it was set, in microseconds. A slow process takes a small unit so its rate stays a whole number a second:
+the planter's water (SA-V4a) is in mg and dries at 5 mg a second (18 g an hour), and its stages come from timers a
+world day apart. A range need reads it at the state's time; the arithmetic is
 `packages/form-rules/README.md` ("A timed value").
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
@@ -303,8 +306,9 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   hand (a push holds the thing while it moves), and its `put` sets a held one down `here` by a placement word and an
   anchor described by a selector; another body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
   defines what each does.
-  A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit per second): its
-  value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the boil; the timer's
+  A `set` on a timed value gives its new `rate` (a whole number, in the field's unit per second) and, if it gives no
+  `to`, its value is settled at the act's time; a `to` (a whole number) is the value from the act's time on (SA-V4b:
+  watering soaks the planter's soil full). The kettle's switch gives its heat a rate and a timer for the boil; the timer's
   form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on an `int` field
   may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a count or an
   amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
@@ -328,7 +332,9 @@ the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`),
 `scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
 of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
 of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
-burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+burning on the part, 0 is out), `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting; a value with no
+amount draws no plants) and `wilt` (permille of how far those plants hang, 0 fresh to 1000 wilted; the planter's falls as its
+water runs out, `content/kinds/garden/planter.json`). The part
 is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
 `range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
 `over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`

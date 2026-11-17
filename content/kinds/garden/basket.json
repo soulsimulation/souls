@@ -1,0 +1,27 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:basket",
+  "owner": "thing",
+  "state": {
+    "fruit": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 305, 0] }
+  },
+  "geometry": { "bounds_mm": [300, 310, 220] },
+  "forms": {},
+  "looks": {
+    "model": "look:basket",
+    "table": [
+      { "part": "fill", "field": "fruit", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fill", "field": "fruit", "do": "scale", "axis": "y", "range": [0, 6], "to": [1, 1000] }
+    ],
+    "shape": {"round":6,"shapes":[{"kind":"box","at":[0,45,0],"size":[280,90,200],"round":20,"tint":"wicker"},{"kind":"box","at":[0,92,0],"size":[290,10,210],"round":4,"tint":"band"},{"kind":"box","at":[0,125,0],"size":[220,70,150],"round":30,"tint":"fruit","role":"fill","pivot":[0,92,0]},{"kind":"sweep","at":[0,0,0],"path":[[-130,95,0],[-90,260,0],[0,305,0],[90,260,0],[130,95,0]],"r":10,"segments":5,"tint":"band"}],"palette":{"wicker":"#b98a4e","band":"#8a6235","fruit":"#d8452f"},"tags":["garden","basket","object"]}
+  },
+  "text": {
+    "card": "A basket that holds what is picked from a planter, up to six.",
+    "garden": "garden",
+    "harvest": "harvest"
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["harvest"] }
+}

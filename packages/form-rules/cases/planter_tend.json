@@ -1,0 +1,1234 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:planter's plant, weed and feed. Plant uses the supplied tray of seedlings (a count, 1 to 0) and starts the bare soil at sprout; weed clears the weeds into one eden:weed_bundle on the out ledge; feed moves one compost portion by transfer from the nearest eden:compost_bin into the planter's own compost count (at most 4) and makes its stage ripe, so the next stage comes at once. Every number is worked from the entry by hand.",
+ "cases": [
+  {
+   "name": "plant_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "plant"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "tray": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "plant_already_sown",
+   "act": {
+    "this": "p1",
+    "form": "plant"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "tray": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "bare"
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "plant_with_the_tray_used",
+   "act": {
+    "this": "p1",
+    "form": "plant"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "tray": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "tray",
+     "found": 0,
+     "wanted": {
+      "at_least": 1
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "plant_with_both_hands_full",
+   "act": {
+    "this": "p1",
+    "form": "plant"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "c1",
+       "right": "bk1"
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "tray": 1
+      }
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "plant_out_of_reach",
+   "act": {
+    "this": "p1",
+    "form": "plant"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       2000
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "tray": 1
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "point": "soil",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "soil"
+    }
+   }
+  },
+  {
+   "name": "weed_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "weed"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "weeds": true
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "weed_with_no_weeds_left",
+   "act": {
+    "this": "p1",
+    "form": "weed"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "weeds": false
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "weeds",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "weed_with_a_bundle_still_on_the_ledge",
+   "act": {
+    "this": "p1",
+    "form": "weed"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "weeds": true
+      },
+      "slots": {
+       "out": [
+        "w1"
+       ]
+      }
+     },
+     "w1": {
+      "kind": "eden:weed_bundle"
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "p1",
+     "slot": "out"
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "weed_with_both_hands_full",
+   "act": {
+    "this": "p1",
+    "form": "weed"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "c1",
+       "right": "bk1"
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "weeds": true
+      }
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 2,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "weed_out_of_reach",
+   "act": {
+    "this": "p1",
+    "form": "weed"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       2000
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "weeds": true
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 3,
+    "detail": {
+     "point": "soil",
+     "move": "pick"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "soil"
+    }
+   }
+  },
+  {
+   "name": "feed_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "compost": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "feed_bare_soil",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "stage",
+     "found": "bare",
+     "wanted": {
+      "not": "bare"
+     }
+    },
+    "fix": {
+     "form": "pick"
+    }
+   }
+  },
+  {
+   "name": "feed_when_fruiting",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "fruiting",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "fruit": 3
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1,
+    "detail": {
+     "field": "stage",
+     "found": "fruiting",
+     "wanted": {
+      "not": "fruiting"
+     }
+    },
+    "fix": {
+     "form": "pick"
+    }
+   }
+  },
+  {
+   "name": "feed_dry_soil",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 2,
+    "detail": {
+     "field": "water",
+     "found": 1000000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    },
+    "fix": {
+     "form": "water"
+    }
+   }
+  },
+  {
+   "name": "feed_from_an_empty_bin",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "compost": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 0
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_enough",
+    "need": 3,
+    "detail": {
+     "node": "k1",
+     "field": "compost",
+     "has": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "feed_soil_holding_all_it_takes",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "compost": 4
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_room",
+    "need": 4,
+    "detail": {
+     "node": "p1",
+     "field": "compost",
+     "room": 0,
+     "amount": 1
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "feed_with_both_hands_full",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": "c1",
+       "right": "bk1"
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "compost": 0
+      }
+     },
+     "c1": {
+      "kind": "eden:watering_can"
+     },
+     "bk1": {
+      "kind": "eden:basket",
+      "fields": {
+       "fruit": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 5,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "feed_out_of_reach",
+   "act": {
+    "this": "p1",
+    "form": "feed",
+    "args": {
+     "bin": "k1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       2000
+      ]
+     },
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       },
+       "ripening": {
+        "value": 0,
+        "per_s": 1,
+        "set_us": 0
+       },
+       "compost": 0
+      }
+     },
+     "k1": {
+      "kind": "eden:compost_bin",
+      "fields": {
+       "compost": 3
+      }
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "pick": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 6,
+    "detail": {
+     "point": "soil",
+     "move": "slide"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "soil"
+    }
+   }
+  }
+ ]
+}
