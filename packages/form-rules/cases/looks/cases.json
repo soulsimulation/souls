@@ -87,6 +87,21 @@
       "table": [{ "part": "p", "field": "heat", "do": "tint", "range": [0, 100], "to": ["#8899aa", "#cc4422"] }],
       "state": { "heat": 60 },
       "expect": { "p": { "tint": "#cc4422" } }
-    }
+    },
+    { "name": "kettle_cold_does_not_steam", "kind": "looks:kettle", "state": { "heat": 0}, "expect": { "lid": { "steam_permille": 0}}},
+    { "name": "kettle_at_the_stated_level_does_not_steam", "kind": "looks:kettle", "state": { "heat": 600}, "expect": { "lid": { "steam_permille": 0}}},
+    { "name": "kettle_just_above_the_level_steams_a_little", "kind": "looks:kettle", "state": { "heat": 610}, "expect": { "lid": { "steam_permille": 25}}},
+    { "name": "kettle_at_eighty_steams_half", "kind": "looks:kettle", "state": { "heat": 800}, "expect": { "lid": { "steam_permille": 500}}},
+    { "name": "kettle_boiling_steams_fully", "kind": "looks:kettle", "state": { "heat": 1000}, "expect": { "lid": { "steam_permille": 1000}}},
+    { "name": "kettle_hotter_than_the_range_is_clamped", "kind": "looks:kettle", "state": { "heat": 1300}, "expect": { "lid": { "steam_permille": 1000}}},
+    { "name": "candle_out", "kind": "looks:candle", "state": { "burn": 0}, "expect": { "flame": { "flame_permille": 0}}},
+    { "name": "candle_half", "kind": "looks:candle", "state": { "burn": 500}, "expect": { "flame": { "flame_permille": 500}}},
+    { "name": "candle_over_burning_is_clamped", "kind": "looks:candle", "state": { "burn": 1500}, "expect": { "flame": { "flame_permille": 1000}}},
+    { "name": "planter_seed", "kind": "looks:planter", "state": { "ripeness": 0}, "expect": { "fill": { "growth_permille": 0}}},
+    { "name": "planter_leafy", "kind": "looks:planter", "state": { "ripeness": 500}, "expect": { "fill": { "growth_permille": 2000}}},
+    { "name": "planter_fruiting", "kind": "looks:planter", "state": { "ripeness": 1000}, "expect": { "fill": { "growth_permille": 4000}}},
+    { "name": "planter_past_the_last_stage_is_clamped", "kind": "looks:planter", "state": { "ripeness": 2250}, "expect": { "fill": { "growth_permille": 4000}}},
+    { "name": "steam_follows_a_field_by_choice_not_by_name", "table": [{ "part": "vent", "field": "state", "do": "steam", "at": { "idle": 0, "venting": 800}}], "state": { "state": "venting"}, "expect": { "vent": { "steam_permille": 800}}},
+    { "name": "steam_eases_in_over_its_time", "table": [{ "part": "vent", "field": "heat", "do": "steam", "range": [0, 100], "to": [0, 1000], "over_us": 2000000}], "state": { "heat": 100}, "prev": { "heat": 0}, "t_us": 500000, "expect": { "vent": { "steam_permille": 250}}}
   ]
 }
