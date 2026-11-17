@@ -19,16 +19,19 @@ const PACKAGE = join(import.meta.dirname, '..'), ROOT = join(PACKAGE, '../..'), 
 const kinds = readdirSync(join(DIR, 'kinds')).map((f) => JSON.parse(readFileSync(join(DIR, 'kinds', f), 'utf8')));
 const doc = JSON.parse(readFileSync(join(DIR, 'cases.json'), 'utf8'));
 
-const inputs = doc.cases.map((c) => ({ table: c.table ?? kinds.find((k) => k.kind === c.kind).looks.table, state: c.state, prev: c.prev, t_us: c.t_us }));
+const kindOf = (c) => kinds.find((k) => k.kind === c.kind);
+const inputs = doc.cases.map((c) => ({ table: c.table ?? kindOf(c).looks.table, state: c.state, prev: c.prev, t_us: c.t_us, now_us: c.now_us, fields: c.kind ? kindOf(c).state : undefined }));
 // generated: a fixed little generator (no Math.random) over every state field of every kind, with a time between two states
 let seed = 2885;
 const next = (n) => { seed = (Math.imul(seed, 1103515245) + 12345) >>> 0; return seed % n; };
-const pickValue = (f) => (f.type === 'bool' ? next(2) === 1 : f.type === 'enum' ? f.values[next(f.values.length)] : (f.min ?? 0) + next((f.max ?? 1000) - (f.min ?? 0) + 1));
+const pickInt = (f) => (f.min ?? 0) + next((f.max ?? 1000) - (f.min ?? 0) + 1);
+// a timed field (SA-D1b): a stored value, a rate either way and a set time, read at a world time after it
+const pickValue = (f) => (f.type === 'bool' ? next(2) === 1 : f.type === 'enum' ? f.values[next(f.values.length)] : f.type === 'timed' ? { value: pickInt(f), per_s: next(81) - 40, set_us: next(10000000) } : pickInt(f));
 const stateOf = (k) => Object.fromEntries(Object.entries(k.state ?? {}).map(([name, f]) => [name, pickValue(f)]));
 for (let i = 0; i < Number(values.count); i++) {
   const k = kinds[i % kinds.length];
   const table = k.looks.table.map((r) => (i % 3 === 0 ? { ...r, over_us: 1000000 } : r));
-  inputs.push({ table, state: stateOf(k), prev: stateOf(k), t_us: next(1200000) });
+  inputs.push({ table, state: stateOf(k), prev: stateOf(k), t_us: next(1200000), now_us: next(130000000), fields: k.state });
 }
 
 const require = createRequire(join(ROOT, 'mars/viewer/package.json'));

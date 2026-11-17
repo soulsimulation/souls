@@ -5,7 +5,7 @@
 // input gives the same answer in Node and in any browser build; the viewer, not this file, turns millidegrees,
 // millimetres and permille into the numbers its renderer wants.
 //
-// Rules this file keeps (the same as rules.ts): no imports, plain data in and out, whole numbers only (no floating
+// Rules this file keeps (the same as rules.ts): no imports but rules.ts's timed value, plain data in and out, whole numbers only (no floating
 // point reaches an answer; division truncates toward zero on exact integers), loops over what the table declares.
 // Collision shapes never follow looks: nothing here reads or writes geometry, only the picture's parts.
 //
@@ -22,7 +22,12 @@
 //           clamped outside. A fractional field is carried in permille, so a half-full cup is 500.
 //   over_us the part takes this long, in microseconds, to get from the amount of the previous state to this one
 //
+// A timed field (SA-D1b, #2886) is held as its three stored numbers {value, per_s, set_us}; given `now_us` (world time
+// on the viewer) a range row reads it at that time with SA-F5a's `valueAt`, so a level rises with nothing sent.
+//
 // Names (parts, picks) keep to letters, digits and _ - . : / @ so Engine v2's encoding accepts them.
+
+import { valueAt, type Timed } from './rules.ts';
 
 export const DOS = Object.freeze(['rotate', 'slide', 'scale', 'show', 'glow', 'tint', 'pick', 'steam', 'flame', 'grow', 'sound']);
 /** The synthesised sounds the page makes (apps/web/src/gen-mesh/sound-plan.ts KINDS: a test keeps the two equal), and a tune played as notes. */
@@ -34,7 +39,7 @@ export const AXES = Object.freeze(['x', 'y', 'z']);
 export const NAME = /^[A-Za-z0-9_\-.:/@]+$/;
 export const MAX_ROWS = 64;
 
-export type Value = boolean | number | string;
+export type Value = boolean | number | string | Timed;
 export type LookRow = {
   part?: string;
   field: string;
@@ -74,7 +79,12 @@ export type LooksInput = {
   /** The state before the last change, and the microseconds since it changed: only rows with `over_us` use them. */
   prev?: Record<string, Value>;
   t_us?: number;
+  /** World time on the viewer, in whole microseconds, and the kind's fields (their min and max): only timed fields use them. */
+  now_us?: number | bigint;
+  fields?: Record<string, { min?: number | bigint; max?: number | bigint }>;
 };
+/** A value stored as a timed field's three whole numbers. */
+export const isTimed = (v: unknown): v is Timed => isObj(v) && 'value' in v && 'per_s' in v && 'set_us' in v;
 
 const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v);
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -119,7 +129,7 @@ export function checkTable(table: unknown, fields?: Record<string, { type?: stri
       if (!Array.isArray(to) || to.length !== 2) errs.push(`${p}.to: [amount at min, amount at max]`);
       else { amount(to[0], `${p}.to.0`); amount(to[1], `${p}.to.1`); }
       if (r.do === 'pick') errs.push(`${p}: a pick uses at`);
-      if (f && f.type !== 'int' && f.type !== 'number') errs.push(`${p}.field: range needs a number field; use at for ${f.type}`);
+      if (f && f.type !== 'int' && f.type !== 'number' && f.type !== 'timed') errs.push(`${p}.field: range needs a number field; use at for ${f.type}`);
     }
   });
   return errs;
@@ -170,9 +180,21 @@ function lerp(a: number, b: number, num: number, den: number): number {
 }
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
+/** Whether whole number `a` is before `b` (false when either is not a whole number). */
+const before = (a: unknown, b: unknown) => { try { return BigInt(a as bigint) < BigInt(b as bigint); } catch { return false; } };
+/** A timed field's value at `now_us` as a number a range can clamp (a big integer lies beyond any range); undefined when it
+ *  cannot be read. A viewer whose world time is still before the value was set (it runs behind the world) draws it as set. */
+function timedNow(v: Timed, def: { min?: number | bigint; max?: number | bigint } | undefined, now_us: number | bigint | undefined): number | undefined {
+  if (now_us === undefined) return undefined;
+  const n = valueAt(def ?? {}, v, before(now_us, v.set_us) ? v.set_us : now_us);
+  if (typeof n === 'number') return n;
+  return typeof n === 'bigint' ? (n < 0n ? Number.MIN_SAFE_INTEGER : Number.MAX_SAFE_INTEGER) : undefined;
+}
+
 /** The amount a row gives for a state, or undefined when the field is unset or no `at` entry covers its value. */
-function amountOf(row: LookRow, state: Record<string, Value>): number | string | undefined {
-  const v = state[row.field];
+function amountOf(row: LookRow, state: Record<string, Value>, input: LooksInput): number | string | undefined {
+  const held = state[row.field];
+  const v = isTimed(held) ? timedNow(held, input.fields?.[row.field], input.now_us) : held;
   if (v === undefined) return undefined;
   if (row.at) return row.at[String(v)];
   if (!isInt(v) || !row.range || !row.to) return undefined;
@@ -246,9 +268,9 @@ export function looks(input: LooksInput): Record<string, Placement> {
   const out: Record<string, Placement> = {};
   const part = (name: string) => (out[name] ??= {});
   const at = (row: LookRow): number | string | undefined => {
-    const now = amountOf(row, input.state);
+    const now = amountOf(row, input.state, input);
     if (now === undefined || !row.over_us || !input.prev || input.t_us === undefined || typeof now !== 'number') return now;
-    const was = amountOf(row, input.prev);
+    const was = amountOf(row, input.prev, input);
     if (typeof was !== 'number') return now;
     return lerp(was, now, clamp(input.t_us, 0, row.over_us), row.over_us);
   };
@@ -289,11 +311,12 @@ export function looks(input: LooksInput): Record<string, Placement> {
 }
 
 /** The state the page holds, as the entry declares it: a permille field is held as a fraction by today's viewer, so only
- *  that is scaled back to whole thousandths; every other number passes as it is (rounded), in its stated unit. */
+ *  that is scaled back to whole thousandths; every other number passes as it is (rounded), in its stated unit. A timed
+ *  field passes as its three stored whole numbers, read at the viewer's world time by `looks`. */
 export function declaredState(held: Record<string, unknown>, units: Record<string, string> = {}): Record<string, Value> {
   const out: Record<string, Value> = {};
   for (const [k, v] of Object.entries(held)) {
-    if (typeof v === 'boolean' || typeof v === 'string') out[k] = v;
+    if (typeof v === 'boolean' || typeof v === 'string' || isTimed(v)) out[k] = v;
     else if (typeof v === 'number') out[k] = Math.round(v * (units[k] === 'permille' ? 1000 : 1));
   }
   return out;

@@ -109,6 +109,13 @@
     { "name": "planter_fruiting", "kind": "looks:planter", "state": { "ripeness": 1000}, "expect": { "fill": { "growth_permille": 4000}}},
     { "name": "planter_past_the_last_stage_is_clamped", "kind": "looks:planter", "state": { "ripeness": 2250}, "expect": { "fill": { "growth_permille": 4000}}},
     { "name": "steam_follows_a_field_by_choice_not_by_name", "table": [{ "part": "vent", "field": "state", "do": "steam", "at": { "idle": 0, "venting": 800}}], "state": { "state": "venting"}, "expect": { "vent": { "steam_permille": 800}}},
-    { "name": "steam_eases_in_over_its_time", "table": [{ "part": "vent", "field": "heat", "do": "steam", "range": [0, 100], "to": [0, 1000], "over_us": 2000000}], "state": { "heat": 100}, "prev": { "heat": 0}, "t_us": 500000, "expect": { "vent": { "steam_permille": 250}}}
+    { "name": "steam_eases_in_over_its_time", "table": [{ "part": "vent", "field": "heat", "do": "steam", "range": [0, 100], "to": [0, 1000], "over_us": 2000000}], "state": { "heat": 100}, "prev": { "heat": 0}, "t_us": 500000, "expect": { "vent": { "steam_permille": 250}}},
+    { "name": "timed_kettle_level_as_set", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 5000000, "expect": { "fill": { "show": false, "scale_permille": [1000, 1, 1000] } } },
+    { "name": "timed_kettle_level_30_s_later", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 35000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 480, 1000] } } },
+    { "name": "timed_kettle_level_60_s_later", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 65000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 960, 1000] } } },
+    { "name": "timed_kettle_level_held_at_its_max", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "now_us": 200000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 1000, 1000] } } },
+    { "name": "timed_kettle_emptying_falls", "kind": "looks:timed_kettle", "state": { "level": { "value": 1000, "per_s": -25, "set_us": 0 } }, "now_us": 20000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 500, 1000] } } },
+    { "name": "timed_kettle_without_world_time_is_not_drawn", "kind": "looks:timed_kettle", "state": { "level": { "value": 0, "per_s": 16, "set_us": 5000000 } }, "expect": {} },
+    { "name": "timed_kettle_viewer_behind_its_set_time_draws_it_as_set", "kind": "looks:timed_kettle", "state": { "level": { "value": 400, "per_s": 16, "set_us": 5000000 } }, "now_us": 1000000, "expect": { "fill": { "show": true, "scale_permille": [1000, 400, 1000] } } }
   ]
 }
