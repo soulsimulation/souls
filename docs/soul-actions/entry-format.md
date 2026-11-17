@@ -231,13 +231,21 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
-  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
-  `timed` field.
+  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less), `sum` (below). A range
+  need also takes a `timed` field.
   A `state` need with a `link` reads the **place the thing stands in**: `{"need": "state", "link": "place", "field":
   "rain", "at_least": 101}`, where the link type is declared `{"from": "place", "most": 1}`. The field is the place
   kind's, read by its number and only by its audience; the place is never read from the tree, since a parent means
   lifetime and frame only (Engine v2 T2, `v2/docs/world-model.md`), and never from a global weather call. Who links a
   thing to its place is outside the kind (Engine v2 E4, E6); a rain collector collects only while it rains there.
+  A `state` need with `of` reads the **thing an argument names**: `{"need": "state", "of": {"arg": "mug"}, "field":
+  "dirt", "at_most": 0}`, where `mug` is a `thing` argument. The field is the named thing's kind's, read by its number
+  and only by its audience (an asker outside it gets `unknown` naming the thing and the field); a missing argument is
+  `bad_input`. A coffee grinder doses only a washed, empty mug; a fire toasts only the skewer side not yet golden.
+  A `sum` need adds two or more `int` fields of this kind, of one unit: `{"need": "sum", "fields": ["well_green",
+  "well_mint"], "at_most": 4}` (`at_least` and/or `at_most`, whole numbers). With `"after_moves": true` it adds them as
+  the form's transfers would leave them, so a capacity shared by several fields is never overfilled: a tea caddy's well
+  holds four portions across its green and mint.
   Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
   conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
@@ -265,7 +273,11 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
   argument, or `"room"` (fill to the target's `max`, so a field filled to the brim here has a `max`). It moves the least of
-  what it asks and what the source has above its `min`: two `set`s whose amounts sum to zero.
+  what it asks and what the source has above its `min`: two `set`s whose amounts sum to zero. Between **two fields of
+  one thing**, `from` and `into` are both `"this"` and `into_field` names the `int` field it lands in, of the same unit:
+  `{"change": "transfer", "field": "green", "from": "this", "into": "this", "into_field": "well_green", "amount":
+  {"arg": "green"}}`. It is two `set`s on the one thing that still sum to zero; to move a field's whole value, ask for
+  its `max` (it moves what is there).
 - **draw** (SA-F13, [#2852](https://github.com/soulsimulation/souls/issues/2852)): an outcome nobody chose.
   `{"change": "draw", "outcomes": [{"name", "weight", "event", "set": [{"field", "to"}]}]}`. Each `weight` is a whole
   number from 0 or `{"field": <an int field of this kind>}` (a practice count); names differ. The world draws a whole

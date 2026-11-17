@@ -72,10 +72,12 @@ export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'durati
 /** A described target: one closed list with Engine v2 E2 (#2709): a candidate set, an anchor, an order and a rank. */
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough']);
+/** `sum`: the sum of two or more int fields of this kind, such as a well whose portions are kept in two fields. */
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'sum']);
 /** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
-/** `transfer` moves an amount between two int fields of one name (SA-F2b, #2844); `draw` is an outcome nobody chose,
+/** `transfer` moves an amount between two int fields of one name (SA-F2b, #2844), or between two fields of one thing
+ *  (`into_field`); `draw` is an outcome nobody chose,
  *  from a weighted table the world draws from (SA-F13, #2852). */
 export const CHANGES = Object.freeze(['set', 'reparent', 'link', 'unlink', 'create', 'remove', 'timer', 'transfer', 'draw']);
 /** An activity's roles (SA-G1a, #2872; Engine v2 B5, #2724): how much a role is needed, and where its members may be. */
@@ -704,14 +706,19 @@ function form(f, path, ctx, err) {
     // `says`: the words of this need's refusal, a key of the text table (words by reference, SA-F6b).
     const {says, ...n} = withWords;
     if ('says' in withWords && !(typeof says === 'string' && says in ctx.text)) err(`${p}.says`, 'names an entry of the text table: the words of this need\'s refusal');
-    if (n.need === 'state' && 'link' in n) {
-      // A field of the place at the end of a link (`from: "place"`, most 1): it is that place's kind's field, numbered
-      // and with its audience there, so its name and values are checked when the rules read it.
-      only(n, ['need', 'link', 'field', 'is', 'not', 'at_least', 'at_most'], p, err);
-      linkName(n.link, `${p}.link`);
-      const l = ctx.links[n.link];
-      if (isObj(l) && !(l.from === 'place' && l.most === 1)) err(`${p}.link`, 'a link to the place this thing stands in: from "place", most 1');
-      if (!(typeof n.field === 'string' && IDENT.test(n.field))) err(`${p}.field`, 'names a state field of the place\'s kind, lower_snake_case');
+    if (n.need === 'state' && ('link' in n || 'of' in n)) {
+      // A field of another node: the place at the end of a link (`from: "place"`, most 1), or the thing a `thing`
+      // argument names (`of`). It is that node's kind's field, numbered and with its audience there, so its name and
+      // values are checked when the rules read it.
+      only(n, ['need', 'link', 'of', 'field', 'is', 'not', 'at_least', 'at_most'], p, err);
+      if ('link' in n && 'of' in n) err(p, 'one of link (the place this thing stands in) or of (the thing an argument names), not both');
+      else if ('link' in n) {
+        linkName(n.link, `${p}.link`);
+        const l = ctx.links[n.link];
+        if (isObj(l) && !(l.from === 'place' && l.most === 1)) err(`${p}.link`, 'a link to the place this thing stands in: from "place", most 1');
+      } else if (isArg(n.of)) arg(n.of, `${p}.of`, ['thing']);
+      else err(`${p}.of`, 'a thing argument: {"arg": <name>}');
+      if (!(typeof n.field === 'string' && IDENT.test(n.field))) err(`${p}.field`, `names a state field of the ${'link' in n ? 'place\'s' : 'named thing\'s'} kind, lower_snake_case`);
       const ranged = 'at_least' in n || 'at_most' in n, exact = 'is' in n, negated = 'not' in n;
       if (ranged) {
         if (exact || negated) err(p, 'a range (at_least, at_most) or one of is, not; not both');
@@ -741,6 +748,19 @@ function form(f, path, ctx, err) {
       else if ('free' in n) { if (n.free !== true) err(`${p}.free`, 'true (a hand that must hold something is "holds")'); }
       else if ('empty' in n) { if (n.empty !== true) err(`${p}.empty`, 'true: every hand holds nothing'); }
       else if (!(typeof n.holds === 'string' && KIND.test(n.holds))) err(`${p}.holds`, 'a kind, "namespace:name"');
+    } else if (n.need === 'sum') {
+      // The sum of int fields of this kind, one unit, `at_least` and/or `at_most` a whole number; with `after_moves`,
+      // as this form's transfers would leave them (a capacity shared by several fields).
+      only(n, ['need', 'fields', 'at_least', 'at_most', 'after_moves'], p, err);
+      const fs = Array.isArray(n.fields) ? n.fields : [];
+      if (fs.length < 2 || new Set(fs).size !== fs.length) err(`${p}.fields`, 'two or more different state fields of this kind');
+      fs.forEach((x, k) => { if (ctx.state[x]?.type !== 'int') err(`${p}.fields.${k}`, 'names an int state field of this kind'); });
+      if (new Set(fs.map(x => ctx.state[x]?.unit)).size > 1) err(`${p}.fields`, 'fields of one unit: only amounts of one unit add up');
+      if (!('at_least' in n) && !('at_most' in n)) err(p, 'at_least and/or at_most');
+      for (const k of ['at_least', 'at_most']) if (k in n && !isInt(n[k])) err(`${p}.${k}`, 'a whole number');
+      if (isInt(n.at_least) && isInt(n.at_most) && n.at_least > n.at_most) err(p, 'at_least is above at_most; nothing is in that range');
+      if ('after_moves' in n && n.after_moves !== true) err(`${p}.after_moves`, 'true: the sum as this form\'s transfers leave it; leave it out for the sum now');
+      if (n.after_moves === true && !(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer' && (e.from === 'this' || e.into === 'this')))) err(`${p}.after_moves`, 'this form has no transfer into or out of this thing');
     } else if (n.need === 'room' || n.need === 'enough') {
       only(n, ['need'], p, err);
       if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, `${n.need} is about every amount the form's transfers move (room where it lands, enough at its source); this form has no transfer`);
@@ -782,11 +802,19 @@ function form(f, path, ctx, err) {
       if (e.into !== 'here' && e.into !== 'actor_hand') slot(e.into, `${p}.into`);
     } else if (e.change === 'remove') { only(e, ['change', 'what', 'event'], p, err); if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`); }
     else if (e.change === 'transfer') {
-      only(e, ['change', 'field', 'from', 'into', 'amount', 'event'], p, err);
+      only(e, ['change', 'field', 'from', 'into', 'into_field', 'amount', 'event'], p, err);
       if (ctx.state[e.field]?.type !== 'int') err(`${p}.field`, 'names an int state field of this kind; both ends move that field');
       for (const k of ['from', 'into']) { if (isArg(e[k])) arg(e[k], `${p}.${k}`, ['thing']); else if (e[k] !== 'this') err(`${p}.${k}`, '"this", or a thing argument'); }
+      // `into_field`: between two fields of this one thing (a portion moved from a stock into a well), one unit.
+      const lands = 'into_field' in e ? e.into_field : e.field;
+      if ('into_field' in e) {
+        if (!(e.from === 'this' && e.into === 'this')) err(`${p}.into_field`, 'moves between two fields of this one thing: from and into are both "this"');
+        if (ctx.state[e.into_field]?.type !== 'int') err(`${p}.into_field`, 'names an int state field of this kind');
+        else if (e.into_field === e.field) err(`${p}.into_field`, 'a field other than field; leave it out to move one field between two things');
+        else if (ctx.state[e.field]?.type === 'int' && ctx.state[e.field].unit !== ctx.state[e.into_field].unit) err(`${p}.into_field`, `"${e.field}" and "${e.into_field}" are of different units`);
+      } else if (e.from === 'this' && e.into === 'this') err(`${p}.into`, 'the same thing as from: name the field it lands in with into_field');
       if (isArg(e.amount)) arg(e.amount, `${p}.amount`, ['count']);
-      else if (e.amount === 'room') { if (e.into === 'this' && ctx.state[e.field]?.type === 'int' && !isInt(ctx.state[e.field].max)) err(`${p}.amount`, `"room" fills to the field's max; "${e.field}" has none`); }
+      else if (e.amount === 'room') { if (e.into === 'this' && ctx.state[lands]?.type === 'int' && !isInt(ctx.state[lands].max)) err(`${p}.amount`, `"room" fills to the field's max; "${lands}" has none`); }
       else if (!(isInt(e.amount) && e.amount > 0)) err(`${p}.amount`, 'a whole number above zero, a count argument, or "room"');
     } else if (e.change === 'timer') {
       only(e, ['change', 'form', 'after_us', 'event'], p, err);
