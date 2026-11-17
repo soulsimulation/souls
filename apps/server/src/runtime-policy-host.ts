@@ -7,4 +7,5 @@ export const HOST_RUNTIME_POLICY_FLAGS = [
   'humanRestNeedsV1',   // human rest needs: recognize enacted rest
   'needAnchorsV1',      // #2296 need-anchor/1: a Soul's needs are an anchor and a rate, rewritten only when a rate changes
   'nonFiniteHoldV1',    // #1496 nonfinite-hold/1: a non-finite number in the hashed head is put back to its last good value, logged
+  'nonFiniteMarkV1',    // #1513 nonfinite-mark/1: an object broken again and again is held by one standing mark
 ] as const;

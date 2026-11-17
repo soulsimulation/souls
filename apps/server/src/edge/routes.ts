@@ -33,6 +33,7 @@ import {RESOLVE_GONE} from '../client-minimum.ts';
 import type {Souls} from '../souls.ts';
 import {loadOf, worldBlock} from '../load/admission.ts';
 import {clockNow} from '../load/clock-source.ts';
+import {actTiming} from '../load/api-times.ts';
 import {clockBlockOf} from '../load/shared.ts';
 
 export function edgeSoulResolver(host: WorldHost, souls: Souls, bearer: (c: Context) => string | undefined) {
@@ -90,7 +91,7 @@ export function mountEdgeRoutes(app: Hono, deps: EdgeDeps & {ledger: EdgeLedger}
     // #1327: a key without a clientRef names the act too, so a retry of an act handed over and not yet recorded is that act
     {const key = c.req.header('idempotency-key'); if (input.clientRef === undefined && key && key.length <= 100) input.clientRef = key;}
     // CTRL-1 (#1093), #1911: an act is an offered id, whatever client sends it; words are refused by the strict gate
-    {const no = L.offerGate(s, input); if (no) return no;}
+    {const t = actTiming.getStore(), t0 = t ? performance.now() : 0, no = L.offerGate(s, input); if (t) t.bindMs += performance.now() - t0; if (no) return no;}   // #2508: offerGate's bind is the act's bind
     if (forMessage !== undefined && loop) {const no = loop.check(s, forMessage); if (no) throw new EdgeError(400, 'invalid', no);}
     // #1327: once this request commits a receipt, that receipt is its answer: a fault after the commit point answers
     // accepted with it, never a 503 (or a refusal) that reads as "not done". Faults before it keep their own answer.

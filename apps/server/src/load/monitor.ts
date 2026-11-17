@@ -144,7 +144,8 @@ export class QuietBaseline {
  *  windows (~50 s, half-life ~33 s), long enough to average over a large world's heavy ticks (one every 10-15 s) and short
  *  enough to follow a world that grows within a minute or two. Until the first quiet window, non-warm windows with tick
  *  service >= 0.95 seed it provisionally (a world that boots straight into load still calibrates); the first quiet window
- *  replaces that seed. A window needs >= 20 ticks of its own (1 s) to count. */
+ *  replaces that seed. Any other window whose ticks averaged less than the value moves it down by alpha (#2559), never
+ *  up. A window needs >= 20 ticks of its own (1 s) to count. */
 export const QUIET_TICK_ALPHA = 0.1, QUIET_TICK_MIN_TICKS = 20;
 export class QuietTick {
   value = 0;
@@ -155,6 +156,12 @@ export class QuietTick {
     if (!Number.isFinite(avgMs) || avgMs < 0) return this.value;
     if (quiet && !this.quietSeen) { this.quietSeen = true; this.value = avgMs; return this.value; }
     if (quiet || (!this.quietSeen && served)) this.value = this.value > 0 ? this.value + QUIET_TICK_ALPHA * (avgMs - this.value) : avgMs;
+    // #2559 (after #2470's round 2): any window whose own ticks averaged less than the learned value shows that value is
+    // stale-high (load only adds to a tick, so the quiet tick is at most this), and moves it down by alpha, served or not,
+    // quiet seen or not. Never up. Learned once from heavy setup ticks (a boot, Souls joining), the quiet tick otherwise
+    // stayed high for good: it left requests the 2 ms floor budget on a mostly idle thread, the acts queued past their
+    // deadline, and with acts queued no window was quiet again to relearn it. Viewers arriving tipped worlds into it.
+    else if (this.value > 0 && avgMs < this.value) this.value += QUIET_TICK_ALPHA * (avgMs - this.value);
     return this.value;
   }
 }
@@ -189,7 +196,7 @@ export type MonitorOpts = {
   baselineMs?: number;
   souls?: () => {awake: number; waiting: number; connected: number};
   onLevel?: (from: Level, to: Level, s: Signals) => void;
-  /** Black for this long → planned restart (main.ts: snapshot, exit 75). */
+  /** Black for this long with no tick completed in it (#2622) → planned restart (world-main.ts: snapshot, exit 75). */
   onBlackTooLong?: () => void; blackLimitMs?: number;
   shared?: Float64Array; now?: () => number; sampleMs?: number;
   /** Loop-delay window (default 5 s; tests shorten it). */
@@ -309,6 +316,11 @@ export class LoadMonitor {
     let owed = 0; for (let i = 1; i < this.ticks.length; i++) owed += this.ticks[i].due;
     const ran = this.ticks.at(-1)!.tick - this.ticks[0].tick;
     const service = owed >= 2 ? Math.min(1, ran / owed) : 1;
+    // #2440: the same over the last ~1 s, for admission's spare time: from the newest sample at least 1 s old, so a hold
+    // longer than 1 s (one sample before it, one after) counts its owed ticks instead of reading 1
+    let i1 = this.ticks.length - 1; while (i1 > 0 && now - this.ticks[i1].at < 1000) i1--;
+    let owed1 = 0; for (let i = i1 + 1; i < this.ticks.length; i++) owed1 += this.ticks[i].due;
+    const service1 = owed1 >= 2 ? Math.min(1, (this.ticks.at(-1)!.tick - this.ticks[i1].tick) / owed1) : 1;
     // event-loop delay p99 over the last ~5 s (two rotating windows)
     const q = this.o.queue?.() ?? {depth: 0, oldestMs: 0};
     this.quiet.depth = Math.max(this.quiet.depth, q.depth); this.quiet.service = Math.min(this.quiet.service, service);
@@ -342,10 +354,14 @@ export class LoadMonitor {
     this.holds = to === 'amber' ? this.state.amberHolds(judged) : [];
     if (to === 'black') {
       this.blackSince ??= now;
-      if (now - this.blackSince >= (this.o.blackLimitMs ?? 60_000)) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
+      // #2622: only a world that has stopped making progress restarts: its clock owes ticks and has completed none for the
+      // limit (the stall clock above: paused, halted, asleep or just started owes none). A busy world still ticking stays
+      // up at black, admission refusing softly, until it recovers. The drill exercises the restart path whatever the ticks.
+      const limit = this.o.blackLimitMs ?? 60_000, stuck = !!this.o.drill || (a[S.stallMs] > 0 && now - a[S.tickAt] >= limit);
+      if (now - this.blackSince >= limit && stuck) { this.blackSince = null; try { this.o.onBlackTooLong?.(); } catch (e) { console.error('[load] planned restart failed', e); } }
     } else this.blackSince = null;
     const shed = this.o.shed?.() ?? {reads: 0, acts: 0};
-    a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
+    a[S.worldTick] = h.engine.world.tick; a[S.service5s] = service; a[S.service1s] = service1; a[S.tickP99Ms] = this.tickStats.p99; a[S.loopP99Ms] = loopP99;
     a[S.heapUsedMb] = hs.used_heap_size / 1048576; a[S.heapLimitMb] = hs.heap_size_limit / 1048576; a[S.gcPct10s] = 100 * gcMs / 10_000;
     a[S.level] = LEVELS.indexOf(to); a[S.queueDepth] = q.depth; a[S.queueOldestMs] = q.oldestMs;
     a[S.awake] = this.souls.awake; a[S.waiting] = this.souls.waiting; a[S.connected] = this.souls.connected;
@@ -382,6 +398,7 @@ export class LoadMonitor {
       w.prevDue = due; if (gap > w.maxGap) w.maxGap = gap;
     } else { w.prevLate = false; w.prevDue = start; }
     w.prevStart = start; w.prevTick = h.engine.world.tick; w.ms.push(own);
+    this.a[S.tickSpentMs] += own;   // #2440: admission's job timing leaves the ticks out
   }
   /** #1944 A3: count the time since the last sample at the level it was at; close and publish a full window. */
   private tickWindowSample(now: number, owing: boolean) {

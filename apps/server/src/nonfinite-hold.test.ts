@@ -12,15 +12,16 @@ import { fixture, invite, accept, seed, worldId } from '../test/native-owner-fix
 import { rowsOf } from '../test/glitch-rows.ts';
 
 const repair = await marsFactory({ ...MEAL_WORLD, sharedCarryV1: true, soulsRepairV1: true });
-async function world(t: any, opts: { hold?: boolean; baseline?: boolean } = {}) {
-  const { hold = true, baseline = true } = opts;
+async function world(t: any, opts: { hold?: boolean; baseline?: boolean; mark?: boolean; factory?: typeof repair } = {}) {
+  const { hold = true, baseline = true, mark = false, factory = repair } = opts;
   t.mock.method(console, 'warn', () => {}); t.mock.method(console, 'error', () => {}); t.mock.method(console, 'log', () => {});
-  const f = fixture(':memory:', repair, { durableClockV1: true }); f.brain.quiesce();
+  const f = fixture(':memory:', factory, { durableClockV1: true }); f.brain.quiesce();
   t.after(() => { try { f.host.stop(); f.db.close(); } catch { /* closed */ } });
   const tick = (n: number) => { for (let i = 0; i < n; i++) { f.host.tickOnce(); f.host.drainInputs(); } };
   tick(5);
   await accept<unknown>(f.host, f.host.enableQuarantineV1('test'));
   if (hold) await accept<unknown>(f.host, f.host.enableNonFiniteHoldV1('test'));
+  if (mark) await accept<unknown>(f.host, f.host.enableNonFiniteMarkV1('test'));   // #1513
   await invite(f, 'ada');
   const row = await accept(f.host, f.souls.create('dev:ada', { name: 'Ada', description: 'nonfinite test' })) as { entity_id: string };
   tick(5);
@@ -31,7 +32,7 @@ async function world(t: any, opts: { hold?: boolean; baseline?: boolean } = {}) 
     assert.ok(h.recoveryBaseline, 'a recovery baseline');
   } else { h.recoveryBaseline = null; h.recoveryCapture = null; }   // nothing good to go back to
   const ents = () => f.host.engine.world.entities as Record<string, any>;
-  const boot = () => { const next = new WorldHost(f.db, repair, seed, 1e9, worldId, { durableClockV1: true }); next.boot(); return next; };
+  const boot = () => { const next = new WorldHost(f.db, factory, seed, 1e9, worldId, { durableClockV1: true }); next.boot(); return next; };
   return { f, h, ents, tick, ada: row.entity_id, boot };
 }
 /** One tick with `brk` run at the end of the engine's own step, as a bug outside any rule would leave the head: the next
@@ -251,4 +252,31 @@ test('#1496 a boat with a seated passenger, its pose broken, plans nothing (the 
   const base = bf.restore(e.snapshot()), boat = e.world.entities[native.policy.boatId] as any;
   boat.pose.p[0] = NaN;
   assert.deepEqual(e.planNonFiniteV1!(base), [], 'nothing: a boat is not a free component, though the baseline has its whole pose');
+});
+
+// #1513 nonfinite-mark/1: a bug inside the engine's step that breaks one object every tick (an invariant first in the end-of-tick
+// pass, as #1458's in-step case) wrote one event per tick under nonfinite-hold/1 alone. The bug is in every engine the factory
+// makes, so it is real in a replay too.
+function breaking(control: { from: number; to: number; n: number }): typeof repair {
+  const wrap = (e: any) => { let last = -1; e.rt.invariants = [(r: any) => { if (r.tick >= control.from && r.tick < control.to && r.tick !== last) { last = r.tick; r.world.entities.bowl1.pose.p[0] = NaN; control.n++; } return []; }, ...e.rt.invariants]; return e; };
+  return { ...repair, create: (w: any) => wrap(repair.create(w)), restore: (s: any) => wrap(repair.restore(s)) } as typeof repair;
+}
+for (const mark of [false, true]) test(`#1513 an object broken inside the step every tick ${mark ? 'under nonfinite-mark/1 is held by one standing mark: 3 events' : 'without nonfinite-mark/1 writes one event a tick, as before'}; a boot agrees`, async (t) => {
+  const control = { from: Infinity, to: Infinity, n: 0 }, { f, h, ents, boot } = await world(t, { mark, factory: breaking(control) });
+  const reads: boolean[] = [], hash = h.hashOrQuarantine.bind(h); h.hashOrQuarantine = () => { const out = hash(); reads.push(Number.isFinite(ents().bowl1.pose.p[0])); return out; };
+  control.from = f.host.engine.world.tick + 1; control.to = control.from + 40;
+  for (let i = 0; i < 45; i++) { f.host.tickOnce(); f.host.drainInputs(); }
+  assert.equal(control.n, 40); assert.equal(f.host.clockAvailable, true, 'the clock goes on');
+  assert.ok(reads.length >= 45 && reads.every(Boolean), 'whole at every host read');
+  const marks = events(f).filter((e: any) => e.payload.nonFiniteHoldV1.standing);
+  if (mark) {
+    assert.equal(events(f).length, 3, `3 events for 40 broken ticks: ${events(f).length}`);
+    assert.deepEqual(marks.map((e: any) => e.payload.nonFiniteHoldV1.standing), [[{ id: 'bowl1', fields: [['pose']] }]], 'one standing mark, on the third');
+    assert.equal(marks[0].seq, events(f)[2].seq);
+  } else { assert.equal(events(f).length, 40, 'one event a tick, as recorded'); assert.equal(marks.length, 0); assert.equal((f.host.engine.world as any).standingHoldsV1, undefined); }
+  assert.equal(held(f).length, 2, 'the row twice a cooldown');
+  const next = boot();
+  assert.equal(next.engine.world.tick, f.host.engine.world.tick);
+  assert.equal(next.engine.stateHash(), f.host.engine.stateHash(), 'a boot from the log agrees');
+  assert.deepEqual((next.engine.world as any).standingHoldsV1, (f.host.engine.world as any).standingHoldsV1, 'and keeps the same mark');
 });

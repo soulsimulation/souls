@@ -3668,7 +3668,7 @@ return { SHOOT_KINDS, SHOOT_USAGE, NO_BROWSER, parseShootArgs, findPlaywright, h
 // every fetch this client makes goes through the proxy its environment names (HTTPS_PROXY, NO_PROXY), as worldFetch does
 const fetch = soulNet.netFetch;
 
-const VERSION = "2.36.0";
+const VERSION = "2.36.1";
 // #1936: every request this client makes says which client it is
 const CLIENT = { "x-soul-client": VERSION };
 const STATE = ".eden-agent.json";
@@ -5442,6 +5442,14 @@ export function findNext(id, { code, did_you_mean, candidates } = {}, way) {
   const words = id.split(/[:._/-]+/).filter((w) => w && w !== "here").join(" ");
   return words ? { next: `${CLI} find "${words}"` } : {};
 }
+/** A timed act asked for longer than the world takes (`capability.params`, its `params.seconds.max` or "seconds … 1..<max>"):
+ *  the act at the most it takes, and the exact wake that lets a promise of the rest be kept (harder-hamlet-v2 refused-recover). */
+export function secondsNext(id, d, params, forId, at = Date.now()) {
+  const max = Number(d?.params?.seconds?.max ?? /seconds must be (?:an )?integer,? \d+\.\.(\d+)/.exec(d?.reason ?? "")?.[1]), asked = params?.seconds;
+  if (d?.code !== "capability.params" || typeof id !== "string" || !Number.isInteger(asked) || !(asked > max)) return {};
+  const ends = new Date(at + (max + 60) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");   // about when it ends, a walk there included
+  return { next: `${CLI} act ${id} '${JSON.stringify({ ...params, seconds: max })}'${forId ? ` --for ${forId}` : ""} --wait (${max} s is the most); the other ${asked - max} s is for later: promise it only after \`${CLI} wake add at ${ends}\`, else tell your owner ${max} s is the most` };
+}
 /** #2452: a walk the world refuses as place.unwalkable: the nearest place a walk reaches (the world's `next`), and a refresh
  *  only when this machine's copy of the catalog is older than the world's (the local files; no call). */
 export function unwalkableNext(d, stale = () => catalogOld(readJsonFile(CATALOG_FILE), load().world, readJsonFile(LIVE_FILE))) {
@@ -5679,7 +5687,7 @@ async function act(...argv) {
     noteSteerRefusal(parsed, d);
     const card = forId ? await cardAfter(forId, `Couldn't: ${d.reason ?? d.code}`, false) : {};
     if (json) return { ...d, ...card };
-    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
+    return { accepted: false, code: d.code, reason: d.reason, ...card, ...refusalList(d), ...findNext(parsed.capability, d, await soulWay(parsed.capability)), ...secondsNext(parsed.capability, d, parsed.params, forId),...unwalkableNext(d), ...(d.alternatives?.length ? { alternatives: shortAlternatives(d.alternatives) } : {}), ...(d.params ? { params: d.params } : {}), ...(d.retry_after ? { retry_after: d.retry_after } : {}) };
   }
   let out = { accepted: true, receipt: d.receipt, ...(d.stopped ? { stopped: d.stopped } : {}), ...(d.resolved ? { resolved: d.resolved } : {}), ...(d.result?.landing ? { landing: d.result.landing } : {}), ...(d.world?.stalled === true ? { stalled: d.world } : {}), ...(d.chosen ? { chosen: d.chosen } : {}), channel: d.channel, ...(d.for ? { for: d.for } : {}), ...(d.repeat ? { repeat: true } : {}), ...(d.open ? { open: true } : {}), ...again };
   if (d.receipt?.id && d.channel !== "attention" && d.channel !== "none") save({ lastReceipt: d.receipt.id, lastActAt: now() });
@@ -6975,13 +6983,22 @@ export function planFix(p, fixes, step) {
   p.state = "running"; delete p.stoppedAt;
   return null;
 }
+/** Pure (#2498 F1): a plan that replaces one whose running act is its own first step keeps that act's receipt as step 1, so the
+ *  act is not sent again: sent again, the world refuses it, its slot held by the Soul's own act (Eden's eat: slot.none-free). */
+export function planCarry(old, next) {
+  const s = old?.steps?.[old.at], n = next?.steps?.[0];
+  if (!s?.receipt || s.state !== "running" || !n || n.state !== "pending" || next.at !== 0) return next;
+  if (n.id !== s.id || JSON.stringify(n.params ?? null) !== JSON.stringify(s.params ?? null)) return next;
+  n.state = "running"; n.receipt = s.receipt; n.carried = old.id;
+  return next;
+}
 /** Pure: a refused step nobody replaced ends the plan, so the owner hears. */
 export function planExpired(p, at = Date.now(), waitMs = PLAN_FIX_WAIT_MS) { return p?.state === "stopped" && at - p.stoppedAt >= waitMs ? planOver(p, "failed", at) : p; }
 export function planView(p) {
   const refused = p.steps.find((s) => s.state === "refused");
   return {
     id: p.id, state: p.state, step: Math.min(p.at + 1, p.steps.length), of: p.steps.length, ...(p.for ? { for: p.for } : {}),
-    steps: p.steps.map((s, i) => ({ n: i + 1, id: s.id, state: s.state, ...(s.receipt ? { receipt: s.receipt } : {}), ...(s.why ? s.why : {}) })),
+    steps: p.steps.map((s, i) => ({ n: i + 1, id: s.id, state: s.state, ...(s.receipt ? { receipt: s.receipt } : {}), ...(s.carried ? { carried: "the act already under way, kept from the plan this replaced" } : {}), ...(s.why ? s.why : {}) })),
     ...(p.state === "stopped" && refused ? { next: `Step ${p.at + 1} was refused. Send one replacement: plan '[{"id":"<offered id>","fixes":${p.at + 1}}]'. Otherwise the plan ends failed.` } : {}),
   };
 }
@@ -7356,7 +7373,10 @@ async function serveForeground() {
         const r = await forward({ url: `${world}/v1/edge/act`, method: "POST", headers: { ...auth, "idempotency-key": s.clientRef }, timeoutMs: 40_000,
           body: { capability: s.id, ...(s.params ? { params: s.params } : {}), clientRef: s.clientRef, strict: true, ...(p.for ? { for: p.for, ...(last ? {} : { forDefault: true }) } : {}) } });
         reportRequest(`${world}/v1/edge/act`, "POST", reportT0, r);
-        if (st.plan !== p || s.state !== "pending") return;   // replaced while it was asking
+        if (st.plan !== p || s.state !== "pending") {   // replaced while it was asking: a newer plan that starts with this act keeps it (#2498)
+          if (st.plan && st.plan !== p && s.state === "pending" && r.status >= 200 && r.status < 300 && r.data?.accepted && r.data.receipt?.id) { s.state = "running"; s.receipt = r.data.receipt.id; planCarry(p, st.plan); persist(); }
+          return;
+        }
         if (r.status === 0 || r.status === 429 || r.status >= 500 || isBusy(r.status, r.data)) return;   // the next tick tries again
         const wasStopped = p.state;
         if (r.status >= 200 && r.status < 300) acted(r.data);   // #2309
@@ -7391,7 +7411,9 @@ async function serveForeground() {
         if (!PLAN_OVER.has(old.state)) { if (old.for && old.for === m.for) old.resultSent = true; planOver(old, "replaced", Date.now()); }
         pendingClose.push(old);
       }
-      st.plan = newPlan(m.steps, m.for);
+      st.plan = planCarry(old, newPlan(m.steps, m.for));
+      const c = st.plan.steps[0], seen = c.carried ? st.receipts[c.receipt] : null;
+      if (seen?.phase) planPhase(st.plan, { id: c.receipt, phase: seen.phase, reason: seen.reason });   // it ended just now
     }
     persist();
     for (const p of pendingClose.splice(0)) closeLater(p);
@@ -7714,9 +7736,35 @@ function heartbeat(argv) {
   };
 }
 
+/** Pure (#2498 F2): whether this machine's copy of the catalog knows nothing of a step's id: a place verb to no place, or a verb
+ *  on a target that is no place, thing, Soul or published act's (`walk:fire-circle` on Eden, which has two fire circles). An id
+ *  with no target, `here`, or a target the copy has, is not called unknown even when the copy cannot vouch for the act. */
+export function planUnknown(ix, id, souls = []) {
+  if (!ix || ix.knows(id)) return false;
+  const i = id.indexOf(":"); if (i < 0) return false;
+  const verb = id.slice(0, i), rest = id.slice(i + 1);
+  if ((ix.cat.placeVerbs ?? []).includes(verb)) return !ix.place(rest);
+  if (rest === "here" || /^s_[A-Za-z0-9]+$/.test(rest) || souls.some((x) => x?.id === rest)) return false;
+  const head = rest.split(":")[0], tail = rest.slice(rest.indexOf(".") + 1);
+  if (ix.place(rest) || ix.place(head) || ix.things.has(head) || ix.things.has(tail)) return false;
+  for (const k of ix.acts.keys()) if (k.slice(k.indexOf(":") + 1) === rest) return false;
+  return true;
+}
+/** #2498 F2: the answer to a plan with an unknown step id: nothing is sent, and the top `find` rows for its words. */
+export function planUnknownAnswer(ix, n, id, { at, here, states, souls } = {}) {
+  const i = id.indexOf(":"), verb = id.slice(0, i), words = id.slice(i + 1).split(/[:._/-]+/).filter((w) => w && w !== "here" && !/^(g|e|place|s)$/.test(w)).join(" ");
+  const asVerb = !(ix.cat.placeVerbs ?? []).includes(verb) && ix.verbs?.has(verb) ? verb : undefined, o = { at, here, states, souls, limit: 3 };
+  let rows = words ? soulCatalog.find(ix, words, { ...o, verb: asVerb }).found : [];
+  if (!rows.length && asVerb && words) rows = soulCatalog.find(ix, words, o).found;
+  return { accepted: false, code: "capability.unknown", step: n, id, reason: `Step ${n}: no offer here has the id ${id}. Nothing was sent, so a plan already running goes on.`,
+    ...(rows.length ? { found: rows } : {}),
+    next: rows.length ? `Put a row's act in step ${n}'s place and send the plan again.` : `${CLI} find "<words>" for step ${n}'s id, then send the plan again.` };
+}
+
 // plan '<ordered offered ids>' [--for <id>|none]: run by the serve, one step after another. #1921: no step is read back
 // through the world: each id is checked against the local catalog, and a step it cannot vouch for (a Soul target, a thing's
 // own offers, a step with params) is listed in `unchecked` and still runs; the act refuses it if it must, and that stops the plan.
+// #2498: an id the copy knows nothing of (planUnknown) is answered here with find's rows, and no step is sent.
 async function plan(...argv) {
   if (argv[0] === "--status") {
     const a = await askServe({ op: "planStatus" });
@@ -7727,7 +7775,10 @@ async function plan(...argv) {
   const { steps, fixes } = parsePlanSteps(args[0] ?? "");
   const up = await askServe({ op: "status" });
   if (!up?.serving) throw new Error(`A plan runs in serve, and none is up in this folder. Start one: ${CLI} serve`);
-  let known = null; try { known = (await worldCopy()).ix; } catch { /* no local copy: no step is vouched for */ }
+  let copy = null; try { copy = await worldCopy(); } catch { /* no local copy: no step is vouched for */ }
+  const known = copy?.ix ?? null, souls = otherSouls(copy?.live);
+  const bad = known ? steps.findIndex((x) => planUnknown(known, x.id, souls)) : -1;
+  if (bad >= 0) { process.exitCode = 2; return planUnknownAnswer(known, fixes ?? bad + 1, steps[bad].id, { at: copy.me?.at, here: copy.me?.place, states: copy.live?.live?.things, souls }); }
   const unchecked = steps.filter((x) => x.params || !known?.knows(x.id)).map((x) => x.id);
   const s = load(), implicit = forArg === undefined && s.lastAcked && !s.lastAckedActed && Date.now() - Date.parse(s.lastAckedAt ?? 0) < IMPLICIT_FOR_MS;
   const forId = forArg === "none" ? undefined : forArg ?? (implicit ? s.lastAcked : undefined);

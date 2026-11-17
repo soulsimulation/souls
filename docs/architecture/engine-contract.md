@@ -349,6 +349,15 @@ for example an object's pose, a field of the world such as the weather, or a pro
   the edge ledger ends its open acts and tells it.
 - The baseline is restored once per baseline, into a scratch engine that is only read. A break that comes back every tick
   writes its event every tick, because a replay needs it. Its glitch row is written at most twice a cooldown.
+- **nonfinite-mark/1 (#1513)**, a host-only logged runtime policy (`runtimePolicy.nonFiniteMarkV1`, adopted at boot right
+  after nonfinite-hold/1) uses quarantine-mark/1's `standingHoldsV1` for objects. The third hold of the same fields in a
+  cooldown carries `standing: [{id, fields}]` for each object (never a body) it put back. `fields` are paths inside the
+  entity, `['pose']` for a pose. From then the engine itself puts those fields back to their last whole values whenever it
+  finds them broken, at the start and end of each step, and the mark follows them while they are whole. A pose comes back
+  only as the hold would: a free component, on the support it had, clear of every body. Anything else is left for the host,
+  which plans as above. A mark ends after 1200 whole ticks, or when the object is gone. A replay folds the same event and
+  keeps the same marks; without the policy, every hold is logged as before. A break made outside the engine, between its
+  step and the host's read, is not one a replay makes again, so it is still logged at every hold.
 - One `nonFiniteHoldV1` rules event (author `world:nonfinite-hold`) carries the exact patches. A replay writes the same
   ones through the same engine method (`applyNonFiniteV1`) and reads nothing. The glitch row (rung `contained`, rule
   `state.non-finite`) names each field and where its value came from. The hash is then taken again, and the frontier is
@@ -404,6 +413,10 @@ The Mars engine is hard-forked under `mars/viewer/engine`. `load.ts` imports tha
   strict gate's offer for the act in the same synchronous turn. `SIM_PLAN_ONCE=0` turns both off;
   `SIM_PLAN_ONCE_ORACLE=1` compares every reuse with a fresh computation and logs `[plan-once-oracle]` on a difference.
   The viewer's engine does not keep routes.
+- **Birth placement (#2621).** A lifecycle birth is placed on the live engine (`nativeBirthPlacement`: `spawnHuman`'s
+  own search, no snapshot or restore); a world on whole (non-paged) ground keeps the detached probe. In the world's env
+  (`worldConfig(host).env`, passed to `nativeBirthPlacement`), `SIM_BIRTH_PROBE=1` decides by the probe again (the
+  rollback); `SIM_BIRTH_PROBE=oracle` checks every placement against it and throws on a difference.
 - **Broadcast.** Moving bodies send two-point keyframe paths every 5 ticks; activity and seat changes are field changes.
 - **Snapshot** format `sim-mars-snapshot/1`: Mars's own snapshot plus the adapter's programs and world configuration.
   A program whose actions cannot be serialized defers the checkpoint; replay of the logged suffix continues it.

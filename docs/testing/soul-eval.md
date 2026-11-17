@@ -15,7 +15,8 @@ One episode is one instruction to one fresh Soul on its own fresh world:
    `skill.md`, runs `register` and `create`, and turns on the client's own trace: `.eden-report-on` in the Soul's runtime
    folder, which writes `.eden-report.jsonl`, `soul-trace/1`. Then it starts `serve`. None of this is measured.
 3. **Kickoff.** The seat gets one kickoff turn: "read skill.md, then start listening". The arena wake loop then plays
-   Claude Code's background `listen`.
+   Claude Code's background `listen`. A listen that ends on serve's `plan-stopped` or `plan-finished` wake, with no
+   message, is a turn too (#2498), as the owner's scheduler would give one.
 4. **The instruction.** The instruction goes in as an owner message through the owner inbox, as the Soul's web card sends
    it.
 5. **The observer.** An observer reads the public Soul view (`/v1/edge/public/souls/<id>`) and the owner card every
@@ -117,12 +118,13 @@ instruction goes. `instruction: null` sends no owner message; `heartbeat` then f
 (`wake heartbeat`, gated by `pending --check`) as one turn in the seat's session, and `holdSec` sets how long the check
 must hold. Three checks read the world's live picture (`GET /v1/edge/live`) or receipts: `said` (a line this Soul said
 since the instruction), `near` (`{soul, within}` metres of a named Soul) and `quiet` (no act since the message beyond
-the verbs `except` names).
+the verbs `except` names). `harder-v2.json` (#2498) is the same battery with the errand's timeout at 600 s, which
+Eden's default eat and read durations need, and the world's 3600 s cap in the note; v1 stays as scored.
 
 Seats: `seats/claude-sonnet.json` (Claude Code, Sonnet) runs under `live.sh`. `seats/codex.json` (Codex CLI) is not
 runnable yet: the world budget refuses every turn of a seat that reports no dollar cost (#1098), and Codex bills by
-subscription. `live.sh` passes `SIM_LOAD_BLACK_MS` to the episode worlds: a world black for that long restarts itself
-for a launcher an episode world does not have, so on a loaded host set it high (the #2364 runs used 900000).
+subscription. `live.sh` passes `SIM_LOAD_BLACK_MS` to the episode worlds: a world black for that long with no tick completed in it
+restarts itself for a launcher an episode world does not have, so on a loaded host set it high (the #2364 runs used 900000).
 
 A world whose client copy still has no acts after setup (a loaded host lays its places out slowly) errors that episode
 as `world.starting` and the run goes on; setup waits up to 300 s for the acts.

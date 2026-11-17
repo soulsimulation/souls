@@ -178,7 +178,8 @@ test('in a Souls home `serve` reads the switch in the Soul\'s runtime folder, an
     writeFileSync(join(runtime, '.eden-report-on'), '');
     const acted = w.seen.filter((s) => s.url.includes('/v1/edge/act')).length;
     assert.equal((await run(home, 'serve')).code, 0);
-    assert.equal((await run(home, 'plan', '["walk:yes"]')).code, 0);
+    // #2498: another act than the first plan's walk, still under way, which a newer plan would keep rather than send again
+    assert.equal((await run(home, 'plan', '["walk:there"]')).code, 0);
     const log = join(runtime, '.eden-report.jsonl'), lines = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
     await until(() => lines().some((r) => r.route === '/v1/edge/act'));
     assert.equal((await run(home, 'serve', '--stop')).code, 0);

@@ -29,6 +29,8 @@ export function listenMessages(stdout) {
   const l = d?.inbox?.latest; return l && l.state !== 'acknowledged' ? [l] : [];
 }
 
+/** #2498: a Soul CLI listen that ended on serve's plan wake (a stopped plan, plan-stopped or plan-finished), with no message. */
+export const planWake = (stdout) => { let d = null; try { d = JSON.parse(stdout); } catch { return false; } return !!d?.plan || (d?.wakes ?? []).some((w) => ['plan-stopped', 'plan-finished'].includes(w?.kind)); };
 const parseJsonStatus = (stdout, code) => { try { return { ok: code === 0, data: JSON.parse(stdout) }; } catch { return { ok: false, reason: stdout.slice(0, 300) }; } };
 /** chat-as-rendered.md → [{turn, text}] split at the `<!-- turn N (...) -->` markers each turn writes. */
 export function splitRendered(md) {
@@ -305,12 +307,12 @@ export class Seat {
     const tr = this.seat.diagnostics?.trace;
     const h = start('node', tr ? ['--import', tr.tap, ...args] : args, { cwd: this.folder, env: tr ? { SOUL_TRACE_FILE: tr.file, SOUL_TRACE_RUN: tr.run, SOUL_TRACE_SEAT: tr.seat } : undefined, onExit: ({ code, signal, stdout, stderr }) => {
       const killed = h.killedByUs; if (this.listener === h) this.listener = null;
-      const msgs = listenMessages(stdout);
+      const msgs = listenMessages(stdout), planWoke = !msgs.length && !!this.rails.planWakes && planWake(stdout);   // #2498: as an owner's scheduler would
       appendJsonl(join(this.dir, 'listen.jsonl'), { ...now(), startMono: startedAt.mono, cmd: cmdLine, code, signal, killedByUs: !!killed, messages: msgs.map((m) => m.id), stdout: killed ? undefined : stdout, stderr: stderr.slice(-500) || undefined });
       if (killed || this.stopped) return;
       if (/superseded/i.test(stdout)) { this.supersededAt = Date.now(); if (!this.inTurn) setTimeout(() => this.startListen(), 2000); return; }
-      if (msgs.length) {
-        this.listenFailures = 0; this.lastListenId = msgs.at(-1).id;
+      if (msgs.length || planWoke) {
+        this.listenFailures = 0; if (msgs.length) this.lastListenId = msgs.at(-1).id;
         if (++this.wakesSinceRequest > this.rails.maxTurnsPerRequest) { this.info.wakeCapped = (this.info.wakeCapped ?? 0) + 1; this.save(); return; }
         this.chat(wakeText(cmdLine, stdout), { reason: 'wake' }).catch(() => {});
       } else {

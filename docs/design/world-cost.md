@@ -172,8 +172,11 @@ hash, and each restored exactly the state it saved.
 
 ### Capacity on the production host: estimates
 
-These are estimates from this runner's Pss. They assume quiet fresh worlds, a 16 GB host, 7.4 GB for worlds under
-today's unit or 12.5 GB with the whole host, and shards of 8. Form 2's shard cost is the program (about 170 MB) plus
+These are estimates from this runner's Pss. They assume quiet fresh worlds, the 16 GB host production had before
+#2241, 7.4 GB for worlds under that unit or 12.5 GB with the whole host, and shards of 8. The production host now has
+31 GB, of which its worlds may use 24 GB: `install.sh capacity` sets `--worlds-mem-mb` 2 GB below that, so 22 GB
+(`tools/world-launcher/deploy/install.sh`, [operations](../operations.md#services-and-stages)). Counts grow roughly in proportion
+to the memory, about three times the 7.4 GB column; the tables keep the old budgets. Form 2's shard cost is the program (about 170 MB) plus
 98 MB per small world, or plus 338 MB for the first Eden world and 255 MB for each further one.
 
 | Form | Small worlds at 7.4 GB | Eden worlds at 7.4 GB | Small at 12.5 GB | Eden at 12.5 GB |
@@ -281,7 +284,7 @@ hang or a memory runaway.
   of the last 10 s (it thrashes), is ended with SIGKILL. A steady live set near the cap that collects calmly is left
   alone: a restart would only rebuild it and loop. A rule holds only over two looks in a
   row, and a gap between looks (the process was frozen) starts it again. live.json gets `killed`; the launcher
-  restarts the world as `wedged`, and the stall stack (#457, after 2 s) names the frame it was stuck in. A SIGKILL
+  restarts the world as `wedged`, and, with `SIM_STALL_STACK=1` (#2607), the stall stack (#457, after 2 s) names the frame it was stuck in. A SIGKILL
   loses nothing accepted: acts are logged before they are answered, and the boot replays the log and catches the
   clock up (#2235).
 - `SIM_FAULT_INJECT=1` (tests only) adds a loopback `POST /__sim/fault?kind=tick|timer|rejection|request|hang|alloc|leak|stop|storm`,
@@ -347,7 +350,7 @@ What is left, named so it is not mistaken for covered:
 
 - A step that is the engine's own (the step, the drain of logged inputs) and hangs or throws on every boot is not
   skipped: skipping it would change world state. It cycles through kills (or storm exits), the breaker's rest and a
-  retry; the stall stack names the frame.
+  retry; with `SIM_STALL_STACK=1` the stall stack names the frame.
 - A listener step that still hangs after its quarantine window dies once more and is skipped again for twice the window
   (up to 72 000 ticks, an hour): the world serves between, but that step's work is missing while it is skipped.
 - A process that aborts (SIGABRT at V8's heap limit) before its watchdog names a step leaves no step to quarantine; a

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,6 +110,8 @@ const runIn = (cwd, home, printed = []) => (...args) => new Promise((resolve) =>
   child.on('exit', (code) => { printed.push({ args: args.join(' '), text: out + err }); let d = null; try { d = JSON.parse(out); } catch { /* words */ } resolve({ code, d, out, err }); });
 });
 const read = (root, file) => JSON.parse(readFileSync(join(root, file), 'utf8'));
+/** Edit a home file the way the client writes it: a temp file beside it, then a rename, so a running command never reads half of it. */
+const put = (file, value) => { writeFileSync(`${file}.test.tmp`, JSON.stringify(value)); renameSync(`${file}.test.tmp`, file); };
 const tree = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? tree(join(dir, e.name)) : e.isSocket() ? [] : [join(dir, e.name)]);
 /** login, then the fake person approves it as `accountId`, then login wait. */
 async function logIn(w, run, accountId, ...args) {
@@ -376,9 +378,32 @@ test('#2258 A3: login wait and retire wait keep polling while the request is ope
   const first = await run('retire', 's_kai'); assert.equal(first.d?.retire, 'pending', first.out + first.err);
   const before = polls(), old = run('retire', 'wait');
   await until(() => polls() >= before + 3);
-  const state = seat(); state.pendingRetire = { ...state.pendingRetire, requestId: 'aq_' + '0'.repeat(32) }; writeFileSync(join(root, 'pending', 'acct', 'state.json'), JSON.stringify(state));
+  const state = seat(); put(join(root, 'pending', 'acct', 'state.json'), { ...state, pendingRetire: { ...state.pendingRetire, requestId: 'aq_' + '0'.repeat(32) } });
   w.decide(first.d.requestId, 'cancelled', 'replaced');
   const replaced = await old;
   assert.equal(replaced.code, 0, replaced.err); assert.equal(replaced.d.retire, 'replaced'); assert.equal(replaced.d.retired, false); assert.match(replaced.d.why, /newer request/);
   assert.equal(seat().pendingRetire?.requestId, 'aq_' + '0'.repeat(32), 'the newer request stays in the seat');
+});
+
+// The A3 test above edits the seat while `retire wait` polls. Written in place, a poll could read half the file and stop
+// with "state.json cannot be read: Unexpected end of JSON input" (seen in CI). The client writes by temp file and rename.
+test('#2258 A3: a seat edited while retire wait polls is read whole when written by rename; a truncated one is refused by name', async (t) => {
+  const w = await world(t), home = tmp(t), run = runIn(home, home), file = join(home, '.souls', 'pending', 'acct', 'state.json');
+  const polls = () => w.count('POST', '/v1/agent/account/requests/poll');
+  await logIn(w, run, 'acct_1', w.url);
+  w.souls.set('s_kai', { name: 'Kai', account: 'acct_1' });
+  const asked = await run('retire', 's_kai'); assert.equal(asked.d?.retire, 'pending', asked.out + asked.err);
+  const whole = readFileSync(file, 'utf8');
+  // a writer stalled mid-write, in place: the file is truncated and its bytes are not there yet. The wait names the file.
+  writeFileSync(file, '');
+  const half = await run('retire', 'wait');
+  assert.equal(half.code, 1); assert.match(half.err, /state\.json cannot be read: Unexpected end of JSON input/);
+  writeFileSync(file, whole);
+  // rewritten again and again by rename while the wait polls: every poll reads a whole file, and the wait ends on the answer
+  const before = polls(), waiting = run('retire', 'wait');
+  let done = false, edits = 0; waiting.then(() => { done = true; });
+  for (; !done && (polls() < before + 3 || edits < 200); edits++) { put(file, JSON.parse(whole)); await new Promise((r) => setImmediate(r)); }
+  w.decide(asked.d.requestId, 'cancelled', 'refused');
+  const ended = await waiting;
+  assert.equal(ended.code, 0, ended.err); assert.equal(ended.d.retire, 'refused'); assert.ok(edits >= 200, `${edits} edits`);
 });

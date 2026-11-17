@@ -58,7 +58,7 @@ import { poolOf } from './god/builds.ts';
 import {VerifyUse} from './god/verify-use.ts';
 import { mountModeration } from './moderation/routes.ts';
 import { defaultSiteLog } from './moderation/store.ts';
-import { mountEdgeSnapshot, safeKey, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
+import { mountEdgeSnapshot, safeKey, snapshotEpoch, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
 import { withInlineConfig, withWorldMeta } from './inline-config.ts';
 import { mountSharedLibraryRoutes } from './god/shared-library.ts';
 import { mountArtRoutes } from './art/routes.ts';
@@ -77,12 +77,16 @@ import {soulLink} from './soul-link.ts';
 import {mountOperatorSouls} from './op-souls.ts';
 import { strandedMetrics } from '../../../mars/viewer/engine/spatial/path.ts';
 import {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
+import {addressKey} from './address-key.ts';
 export {SECURITY_HEADERS, withFrameAncestors} from './security-headers.ts';
 /** #1326: the edge writes that wait on the clock (an act's body, a plan's acts): refused with 503 world.stalled while it is
  *  stalled. Travel isn't: it is store writes and a relay, and leaving is a Soul's way out of a stalled world. */
 const STALL_REFUSED = new Set(['/v1/edge/act', '/v1/edge/plan']);
 // #894: the world page and its public guides may be indexed; every other answer carries X-Robots-Tag (buildApp)
 const INDEXABLE = new Set(['/', '/SKILL.md', '/skill.md', '/instructions.md', '/llms.txt', '/cards.md']);
+/** #2515 (E3): a public answer, the same for every caller without a token, that the CDN may keep for 5 s and serve stale
+ *  for 30 s while it asks again (a plain s-maxage would turn the revalidation off). docs/operations/cdn.md */
+const EDGE_BRIEF = { 'Cloudflare-CDN-Cache-Control': 'max-age=5, stale-while-revalidate=30' };
 
 /** The edge requests that build a Soul's menu (here, except its body view; observe; capabilities; around; and
  *  act/converse, which bind offers through the same caches) and so wait for a serving warm instead of building it cold
@@ -203,7 +207,8 @@ export function buildApp(d: Deps) {
   // G8 moderation: first, so its veto checks run before the asset, body and world routes answer
   const moderation = mountModeration(app, { db: d.db.db, worldId: d.host.worldId, bearer, requireUser: (c) => requireUser(c), god: d.god, ownerId: d.cfg.ownerId, siteLog: defaultSiteLog(d.cfg.env) });
   // lane O2: the first snapshot is edge-cacheable when the page asks for it by the current key (edge-snapshot.ts)
-  const godForKey = d.god, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version() }) : null;
+  // E6: + the epoch kept beside sim.db, so a restored world never answers a key the edge already holds
+  const godForKey = d.god, epoch = godForKey && d.cfg.dataDir ? snapshotEpoch(d.cfg.dataDir) : undefined, currentSnapshotKey = godForKey ? () => snapshotKey({ editSeq: godForKey.model.editSeq, buildsRev: godForKey.store.buildsRev(), moderation: moderation.version(), epoch }) : null;
   if (currentSnapshotKey) mountEdgeSnapshot(app, currentSnapshotKey);
   mountSoulNow(app, {host: d.host, souls: d.souls, inbox: () => ownerInbox}); // LINK: the agent's public `now` line (before the routes it rides on)
   // POST /v1/souls/<id>/command (#982): this one decision picks its handler for the world's mode. An edge world's
@@ -233,7 +238,7 @@ export function buildApp(d: Deps) {
   // visitors read every world page makes (SoulTravel.tsx): travel is not available here and nobody is visiting. Before
   // this it was a 404 in every visitor's console, again every 15 s (lane L2, live old worlds 2026-10-17).
   if (!travel) app.get('/v1/world/visitors', c => c.json({contract: TRAVEL_CONTRACT, world: d.cfg.worldKey, available: false, open: false, visitors: [], recent: []}, 200, {'cache-control': 'no-store'}));
-  const ip = (c: Context) => (c.req.header('x-forwarded-for') ?? 'local').split(',')[0].trim();
+  const ip = (c: Context) => addressKey(c.req.header('x-forwarded-for')) ?? 'local';   // #2543: an IPv6 network by its /64
   const requireUser = async (c: Context): Promise<UserRow> => { const u = await d.auth.userFromToken(bearer(c)); if (!u) throw new ApiError(401, 'unauthorized', 'sign in first'); return u; };
   const requireAdmin = async (c: Context): Promise<UserRow> => { const u = await requireUser(c); if (u.role !== 'admin') throw new ApiError(403, 'forbidden', 'admin only'); return u; };
   // Authentication establishes identity across an await; it does not freeze
@@ -320,7 +325,9 @@ export function buildApp(d: Deps) {
   // One object for the page and the route, so what a page's inline config says and /v1/config says can't drift apart.
   const soulClientField = () => { const soulClient = soulClientManifest(d.cfg.controllerCliFile, d.cfg.skillFile); return soulClient ? {soulClient} : {}; };
   const configOf = (c: Context) => ({ ...soulClientField(), authProvider:d.cfg.authProvider, authenticationOrigin:d.cfg.authProvider==='clerk'&&d.auth.ready?new URL(d.cfg.publicUrl).origin:'', clerkPublishableKey:d.cfg.authProvider==='clerk'?d.cfg.clerkPublishableKey:'', clerkIssuer:d.cfg.authProvider==='clerk'?d.cfg.clerkIssuer:'', ...(d.cfg.authProvider==='clerk'&&d.cfg.clerkSatelliteDomain?{clerkSatellite:{domain:d.cfg.clerkSatelliteDomain,signInUrl:d.cfg.clerkSignInUrl}}:{}), privyAppId:d.cfg.authProvider==='privy'?d.cfg.privyAppId:'', publicUrl: baseOf(c), worldURL:baseOf(c), instructionsURL:baseOf(c)+'/instructions.md', accountAuthRequired:d.cfg.accountAuthRequired, accountApproval:d.souls.accounts?{contract:'account-soul-approval/1',start:'/v1/agent/approval/start',poll:'/v1/agent/approval/poll',cancel:'/v1/agent/approval/cancel'}:null, ...(d.souls.accounts?{accountLogin:true}:{}), soulProfile:{contract:'soul-profile/1',auth:'owner',edit:'PATCH /v1/souls/:id/profile',photo:'POST /v1/souls/:id/photo',resetPhoto:'DELETE /v1/souls/:id/photo',autoPortrait:portraits.enabled,photoFormat:'PNG RGB/RGBA8',maxPhotoBytes:262144,maxPhotoDimension:512}, worldId: d.host.worldId, worldKey: d.cfg.worldSlug ?? d.cfg.worldKey, worldEngine: d.cfg.worldEngine, worldName: displayWorldName, worldPath: d.cfg.worldPath, authReady: d.auth.ready, devAuth: d.auth.devAuth, inviteRequired: d.cfg.inviteRequired, build: d.cfg.build });
-  app.get('/v1/config', (c) => c.json(configOf(c)));
+  // #2515 (E3): the same for every caller without a token, so the CDN may keep it briefly (it varies only by the host the
+  // caller reached, which is part of the edge's key); a caller with a token is never answered from an edge cache
+  app.get('/v1/config', (c) => c.json(configOf(c), 200, c.req.header('authorization') ? undefined : EDGE_BRIEF));
   const safeConfig = (c: Context) => { try { return configOf(c); } catch { return null; } };  // the page never fails because of it
   app.get('/v1/world', (c) => c.json(d.souls.worldSummary()));
   app.get('/v1/debug/world', (c) => c.json(d.host.engine.world));
@@ -681,7 +688,9 @@ export function buildApp(d: Deps) {
     app.use('/assets/*', serveStatic({ root: d.cfg.webDir }));
     // lane P4: the installable-app manifest beside the page (apps/web/src/pwa-manifest.ts: its start_url "./" is this world)
     app.get('/manifest.webmanifest', async (c, next) => { const r = await serveStatic({ root: d.cfg.webDir, path: 'manifest.webmanifest' })(c, next); if (r?.ok) r.headers.set('Cache-Control', 'public, max-age=3600'); return r ?? c.notFound(); });
-    app.get('*', (c) => (c.req.path.startsWith('/v1/') || c.req.path.startsWith('/mcp') ? c.json({ ok: false, code: 'not-found', message: 'no such route' }, 404) : c.html(withInlineConfig(withSnapshotKey(withWorldClock(currentIndex(), worldClockNow(), worldSoulsNow()), safeKey(currentSnapshotKey), godRoutes?.partRefs()), safeConfig(c)), 200, { 'Cache-Control': 'no-cache' })));
+    // #2515 (E3): X-Sim-Page marks the world page (no cookie, nonce or per-caller value in it), which the launcher keeps 2 s
+    // for every query variant of its path: `index` where the query-less page may be indexed (the launcher marks the rest noindex as above)
+    app.get('*', (c) => (c.req.path.startsWith('/v1/') || c.req.path.startsWith('/mcp') ? c.json({ ok: false, code: 'not-found', message: 'no such route' }, 404) : c.html(withInlineConfig(withSnapshotKey(withWorldClock(currentIndex(), worldClockNow(), worldSoulsNow()), safeKey(currentSnapshotKey), godRoutes?.partRefs()), safeConfig(c)), 200, { 'Cache-Control': 'no-cache', 'X-Sim-Page': INDEXABLE.has(c.req.path) ? 'index' : 'world' })));
   } else app.get('/', (c) => c.text('A Souls world server is running. The web app has not been built (pnpm build).'));
   return app;
 }

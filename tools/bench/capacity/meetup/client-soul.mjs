@@ -17,6 +17,11 @@ export const clientHeaders = ({ token, address }, { auth = true, key = null } = 
   ...(address ? { 'x-forwarded-for': address } : {}), ...(auth && token ? { authorization: `Bearer ${token}` } : {}), ...(key ? { 'idempotency-key': key } : {}) });
 /** An act by catalog id: strict (offered ids only), keyed; the key is also the clientRef. */
 export const actBody = (id, key) => ({ capability: id, params: {}, strict: true, clientRef: key });
+/** #2556: speech for the social mix of the load shapes: POST it to SAY_PATH with the act's headers (keyed, like an act). */
+export const SAY_PATH = '/v1/edge/say';
+export const sayBody = (text) => ({ text: String(text).slice(0, 500) });
+/** #2556: the gestures of the social mix, by verb; their ids are the catalog's anywhere acts (`wave:here`, ...). */
+export const GESTURE_VERBS = Object.freeze(['wave', 'nod', 'clap', 'cheer', 'bow']);
 
 function retryAfterMs(r, d) {
   const h = r.headers.get('retry-after'), n = Number(h); if (h && Number.isFinite(n) && n >= 0) return n * 1000;
@@ -25,10 +30,10 @@ function retryAfterMs(r, d) {
 }
 /** One call with the client's retry rules. `jitter` is the caller's [0,1) source (seeded in the meetup bench). The
  *  optional `deadlineMs` and `signal` end the call early (status -1). → {status, code, data, bytes, busy, failed,
- *  waitMs, refusals}: status -1 timed out, 0 nothing answered. */
+ *  waitMs, refusals, timing}: status -1 timed out, 0 nothing answered; `timing` the last answer's Server-Timing. */
 export async function clientCall(url, { method = 'GET', headers, body, jitter = Math.random, deadlineMs = Infinity, signal = null } = {}) {
   const t = performance.now(), tryMs = method === 'GET' ? 25_000 : 40_000, refusals = [];
-  let status = 0, code = null, data = null, bytes = 0, busy = 0, failed = 0, waitMs = 0;
+  let status = 0, code = null, data = null, bytes = 0, busy = 0, failed = 0, waitMs = 0, timing = null;
   const wait = async (ms) => { const w0 = performance.now(); await sleep(Math.min(ms, deadlineMs - (performance.now() - t))); waitMs += performance.now() - w0; };
   for (;;) {
     const left = deadlineMs - (performance.now() - t); if (left <= 0 || signal?.aborted) { status = -1; break; }
@@ -38,7 +43,7 @@ export async function clientCall(url, { method = 'GET', headers, body, jitter = 
     // and the call ended with status 0 ("unreachable") though the world was never asked again.
     try {
       r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.any([AbortSignal.timeout(Math.ceil(Math.min(left, tryMs))), ...(signal ? [signal] : [])]) });
-      const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; try { data = JSON.parse(text); } catch { data = null; }
+      const text = await r.text(); bytes = Buffer.byteLength(text); status = r.status; timing = r.headers.get('server-timing'); try { data = JSON.parse(text); } catch { data = null; }
     } catch (e) {
       if (++failed >= 6 || signal?.aborted) { status = e?.name === 'TimeoutError' || signal?.aborted ? -1 : 0; break; }
       await wait(jitter() * Math.min(60_000, 1000 * 2 ** (failed - 1))); continue;
@@ -49,7 +54,7 @@ export async function clientCall(url, { method = 'GET', headers, body, jitter = 
     if (later && busy < 3) { busy++; const ra = retryAfterMs(r, data); await wait(Math.min(60_000, ra ?? Math.max(1000, jitter() * Math.min(60_000, 1000 * 2 ** (busy + 1)))) * (1 + 0.2 * jitter())); continue; }
     break;
   }
-  return { status, code, data, bytes, busy, failed, waitMs: Math.round(waitMs), refusals };
+  return { status, code, data, bytes, busy, failed, waitMs: Math.round(waitMs), refusals, timing };   // #2509: the last answer's Server-Timing
 }
 /** The Soul's start: the public catalog and the live picture, once each. → the catalog (null when it did not answer). */
 export async function startPicture(base, soul) {
@@ -58,13 +63,15 @@ export async function startPicture(base, soul) {
   return { catalog: cat.status === 200 ? cat.data : null, catalogStatus: cat.status, liveStatus: live.status };
 }
 
-/** Catalog ids by act kind, as bench.mjs reads them: the walks (buildings first, then other open places), the spots, and
- *  the kinds of the profiles' mixes. A kind the world does not offer has no ids; the caller sends a walk and counts it. */
+/** Catalog ids by act kind, as bench.mjs reads them: the walks (buildings first, then other open places), the spots, the
+ *  kinds of the profiles' mixes and (#2556) the gestures. A kind the world does not offer has no ids; the caller sends a
+ *  walk and counts it. Speech is not an act: it is sent with SAY_PATH and sayBody. */
 export function catalogIds(cat) {
   const walkOf = (p) => `walk:${p.ref ?? p.id}`, spots = (cat?.acts ?? []).filter((a) => !a.with && !a.needs), verb = (v) => spots.filter((a) => a.verb === v).map((a) => a.id);
   const walks = [...(cat?.places ?? []).filter((p) => p.kind === 'building'), ...(cat?.places ?? []).filter((p) => p.kind !== 'building' && !p.fixed && !p.parent)].map(walkOf);
   return { walk: walks, spot: spots.map((a) => a.id), 'sit-ground': ['sit-ground:here'], sit: [...verb('sit'), ...(cat?.things ?? []).filter((t) => t.seat).map((t) => `sit:${t.id}`)],
-    read: verb('read'), eat: verb('eat'), 'play-music': verb('play-music'), swim: verb('swim') };
+    read: verb('read'), eat: verb('eat'), 'play-music': verb('play-music'), swim: verb('swim'),
+    gesture: (cat?.anywhere ?? []).filter((a) => GESTURE_VERBS.includes(a.verb)).map((a) => a.id) };
 }
 
 // ------------------------------------------------------------------ pacing (cadence.json), deterministic given u in [0,1)
