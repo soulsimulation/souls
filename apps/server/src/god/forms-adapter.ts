@@ -320,8 +320,8 @@ export function createFormsAdapter(h: FormsHost) {
       for (const c of before.changes as Change[]) {
         if (c.change !== 'reparent') continue;
         const s = all()[c.node]?.support, inHand = 'hand' in c.to;
-        if (inHand ? s?.kind === 'in-hand' && s.by === bodyId : s?.kind === 'resting-on' && (typeof anchor !== 'string' || s.on === anchor)) continue;
-        return { code: 'form.not_moved', reason: `${nameOf(c.node)} is not ${inHand ? 'in your hand' : `on ${typeof anchor === 'string' ? nameOf(anchor) : 'a place here'}`} at the end of the motion.` };
+        if (inHand ? s?.kind === 'in-hand' && s.by === bodyId && s.hand === (c.to as { hand: string }).hand : s?.kind === 'resting-on' && (typeof anchor !== 'string' || s.on === anchor)) continue;
+        return { code: 'form.not_moved', reason: `${nameOf(c.node)} is not ${inHand ? `in your ${(c.to as { hand: string }).hand} hand` :`on ${typeof anchor === 'string' ? nameOf(anchor) : 'a place here'}`} at the end of the motion.` };
       }
       return 'done';
     }
