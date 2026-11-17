@@ -1,16 +1,17 @@
-# The kinds the world-model fixtures use (Engine v2 T2, #2641, v2/docs/world-model.md). Only what a kind admits is
-# here, in the entry format's section numbers (SA-F1, #2842): 1 the name, 6 its slots (slot number: the kinds that
-# slot admits), 10 the kinds it admits as children. A kind lists nothing it does not admit.
-[
-  {1: "souls:place", 10: ["souls:room", "souls:boat", "souls:body", "souls:carry", "souls:group", "souls:key"]},
-  {1: "souls:room", 10: ["souls:door", "souls:body", "souls:crate", "souls:key"]},
-  {1: "souls:boat", 10: ["souls:room", "souls:body"]},
-  {1: "souls:door"},
-  {1: "souls:body", 6: {1: ["souls:cup", "souls:key"], 2: ["souls:cup", "souls:key"]}},  # 1 left hand, 2 right
-  {1: "souls:carry", 10: ["souls:sofa", "souls:crate"]},  # a joint activity is a node (contract T1)
-  {1: "souls:group"},
-  {1: "souls:cup"},
-  {1: "souls:key"},
-  {1: "souls:crate"},
-  {1: "souls:sofa"}
-]
+# The kinds the world-model fixtures use (Engine v2 T2, #2641, v2/docs/world-model.md), one kind per line, each read
+# by T3's kind reader and named namespace:name@hash (v2/docs/ids.md). Only what decides admission is written, in the
+# entry format's section numbers (coordinator's decision on #2641, 17 Nov): 1 the name; 2 the owner (`thing`,
+# `family` for a body, `place`); 6 its slots (slot number: what that slot admits); 11 what it admits as children.
+# An admit list names kinds by plain namespace:name, or a category: `thing` (an owner of `thing`) or `body` (an owner
+# of `family`). It never goes through section 10, T3's hashed references, so a new kind renames no container.
+{1: "souls:place", 2: "place", 11: ["souls:room", "souls:boat", "body", "souls:carry", "souls:group", "thing"]}
+{1: "souls:room", 2: "place", 11: ["souls:door", "body", "thing"]}
+{1: "souls:boat", 2: "thing", 11: ["souls:room", "body"]}
+{1: "souls:door", 2: "thing"}
+{1: "souls:body", 2: "family", 6: {1: ["thing"], 2: ["thing"]}}    # 1 left hand, 2 right; each admits a thing
+{1: "souls:carry", 2: "place", 11: ["souls:sofa", "souls:crate"]}  # a joint activity is a node (contract T1)
+{1: "souls:group", 2: "place"}
+{1: "souls:cup", 2: "thing"}
+{1: "souls:key", 2: "thing"}
+{1: "souls:crate", 2: "thing"}
+{1: "souls:sofa", 2: "thing"}

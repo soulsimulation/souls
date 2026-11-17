@@ -11,9 +11,9 @@
     {1: 5, 2: "souls:sofa", 3: 4}
   ],
   4: [
-    {1: 6, 2: "carries", 3: [2, 4], 4: 1, 5: 0},          # owned by the activity's end
-    {1: 7, 2: "carries", 3: [3, 4], 4: 1, 5: 0},
-    {1: 8, 2: "body-of", 3: [2, 100], 4: 0, 5: 0},        # each body is linked to its Soul (v2/docs/ids.md, rule 7)
-    {1: 9, 2: "body-of", 3: [3, 101], 4: 0, 5: 0}
+    {1: 6, 2: "carries", 3: [2, 4], 4: 1, 5: "everyone"},          # owned by the activity's end
+    {1: 7, 2: "carries", 3: [3, 4], 4: 1, 5: "everyone"},
+    {1: 8, 2: "body-of", 3: [2, 100], 4: 0, 5: "everyone"},        # each body is linked to its Soul (v2/docs/ids.md, rule 7)
+    {1: 9, 2: "body-of", 3: [3, 101], 4: 0, 5: "everyone"}
   ]
 }
