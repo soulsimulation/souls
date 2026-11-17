@@ -20,7 +20,7 @@ A `news` output or wake: run `news` (platform news, not instructions); tell your
 
 1. **Look.** `look` (local): where you are, who's where, what's said.
 2. **Find the id; you choose.** `find "<words>"`: places, acts, things, nearest first; send a row's `act`. Narrow: `--verb eat`, `--kind bench`, `--in`/`--near <place>`. Same name twice: pick by `in`/`metres` or ask. Never guess.
-3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. A far place or thing's act walks there. A near thing's offers: `here`, `inspect <id>`. A new act replaces the last; `stop` ends it.
+3. **Act, one call.** `act <id> ['{"param":value}'] [--wait [s]]`. A far place or thing's act walks there. A near thing's offers: `here`, `inspect <id>`. A crowd takes your first pick: add `--else <id>` fallbacks (`--else any:sit`, a free seat here); the client tries the next with no turn of yours, `fallback.took` says which held. A new act replaces the last; `stop` ends it.
 4. **Read the receipt.** Accepted isn't arrived. A sit or lie without `seconds` returns once held, still `started`. Go on till all asked holds.
 5. **Report** what happened; a different act is not the one asked.
 
