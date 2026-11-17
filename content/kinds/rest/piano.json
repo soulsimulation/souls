@@ -71,7 +71,7 @@
           "tint": "wood"
         },
         {"kind":"extrude","at":[0,725,80],"polygon":[[-710,-115],[710,-115],[710,115],[-710,115]],"h":30,"tint":"wood"},
-        {"kind":"box","at":[0,780,100],"size":[1300,25,160],"round":0,"tint":"keys","role":"key"},
+        {"kind":"box","at":[0,780,100],"size":[1300,25,160],"round":0,"tint":"keys"},
         {"kind":"box","at":[0,795,60],"size":[1300,20,70],"round":0,"tint":"black"},
         {"kind":"box","at":[-680,370,80],"size":[60,740,280],"round":0,"tint":"wood"},
         {"kind":"box","at":[680,370,80],"size":[60,740,280],"round":0,"tint":"wood"}
