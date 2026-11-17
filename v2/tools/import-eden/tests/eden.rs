@@ -5,8 +5,9 @@
 
 use import_eden::json::{self, Json};
 use import_eden::{
-    F_DOORWAY, F_DOORWAYS, F_OUTLINE, F_PLACE_OF, F_SILL, F_STAIRS, F_WIDTH, FLOOR, Import, PLACE,
-    ROOM, WINDOW, count, load, world_of,
+    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PLACE_KIND,
+    F_PLACE_OF, F_SILL, F_STAIRS, F_WIDTH, FLOOR, Import, PLACE, ROOM, WINDOW, count, load,
+    world_of,
 };
 use replica::encode::Value;
 use replica::world_model::plain;
@@ -170,6 +171,48 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
         "a shore for each water"
     );
     assert_eq!(extra.get("doors in a doorway"), Some(&651));
+
+    // Every window is under a room, with its width, height and sill, and joins nothing. Every named place is under
+    // the open ground with a name, a kind and an outline (a polygon, or a line and a width), and holds nobody.
+    let t = &im.tree;
+    let (mut windows, mut places) = (0, 0);
+    for (key, id) in &im.nodes {
+        let Some(h) = t.handle(*id) else { continue };
+        let n = t.node(h).unwrap();
+        let f = n.fields();
+        match plain(n.kind().as_str()) {
+            WINDOW => {
+                windows += 1;
+                assert_eq!(kind_of(&im, &parent_key(&im, key)), ROOM, "{key}");
+                assert!(
+                    [F_WIDTH, F_HEIGHT, F_SILL]
+                        .iter()
+                        .all(|k| f.contains_key(k)),
+                    "{key}"
+                );
+                assert!(t.links_of(h).unwrap().is_empty(), "{key} joins nothing");
+            }
+            PLACE => {
+                places += 1;
+                assert_eq!(parent_key(&im, key), "ground", "{key}");
+                assert!(
+                    [F_NAME, F_PLACE_KIND, F_PLACE_OF]
+                        .iter()
+                        .all(|k| f.contains_key(k)),
+                    "{key}"
+                );
+                assert!(
+                    f.contains_key(&F_OUTLINE)
+                        || (f.contains_key(&F_LINE) && f.contains_key(&F_LINE_WIDTH)),
+                    "{key}"
+                );
+                assert!(t.children(h).unwrap().is_empty(), "{key} holds nobody");
+            }
+            _ => {}
+        }
+    }
+    println!("{windows} windows under their rooms; {places} named places under the open ground");
+    assert_eq!(windows, 2574);
 
     // Every thing's pose, composed up the tree, lands where today's worldPose puts it.
     let f = json::parse(&text).unwrap();
