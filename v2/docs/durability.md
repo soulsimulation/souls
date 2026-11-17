@@ -13,11 +13,12 @@ and rolling builds (O1, O7) are not here.
 2. **What cannot be undone waits for the second.** That is travel between worlds, and anything the owner names later
    (the final audit's ruling on TRUNK's "anything with stakes"). A swap of things or amounts has no stakes and is
    acknowledged at the first point.
-3. **What a takeover loses, exactly:** acts acknowledged on a writer's disk after the mark, when another machine
-   takes the zone over at the mark (rule 5). That holds for a writer that died and for one that only paused past its
-   lease, and those acts stay lost if the old disk comes back, since the new claim holds those sequences (rule 8). The
-   window is at most what a writer acknowledges between ships, within its lease; shipping often keeps it small, and
-   what cannot be undone is never in it.
+3. **What a takeover loses, exactly:** acts acknowledged on a writer's disk after the mark, when another claim takes
+   the zone over at the mark (rule 5). That holds for a writer that died and for one that only paused past its
+   lease, and those acts stay lost if the old disk comes back, since the new claim holds those sequences (rule 8). A
+   process that restarts has lost its token, so it claims again and loses the same. The window is at most what a
+   writer acknowledges between ships, within its lease; shipping often keeps it small, and what cannot be undone is
+   never in it.
 
 ## One writer per zone
 
@@ -26,13 +27,15 @@ and rolling builds (O1, O7) are not here.
 5. **A claim is a conditional write.** A writer reads the record and writes it back with a new takeover, `[epoch,
    from, machine, token]`: the next epoch, the mark plus one, its machine, and a token, on condition that the record
    is the version it read. The token is 16 bytes the claimant draws from the operating system's random source at each
-   claim, like a T3 scope, never from the world's random numbers. The token names the claim; the machine is only
+   claim, like a T3 scope, never from the world's random numbers (the fake reads `/dev/urandom`; only servers claim).
+   The token names the claim; the machine is only
    where it runs, so two processes on one machine, or one machine claiming again, are two claims. Of two writers that
    start at once, the store lets exactly one through; the other is refused (`precondition-failed`, HTTP 412). A
    machine that claims again keeps nothing on its disk at or after its new takeover.
 6. **A lease is for liveness, never for safety.** It is elapsed time on the writer's own machine, never a comparison
    of clocks across machines, counted from when its last renewing write was sent. A writer renews by moving the mark,
-   or, with nothing new, by rewriting the record (a heartbeat). Past its lease it acknowledges nothing. Another
+   or, with nothing new, by rewriting the record (a heartbeat, which changes its bytes: rule 10). Past its lease it
+   acknowledges nothing. Another
    machine claims only after the record's version has not changed for a lease; the claim itself is what makes it
    safe.
 7. **The store refuses a stale writer's record write.** The stores are asked for only two conditions, which S3 and R2
@@ -58,19 +61,21 @@ and rolling builds (O1, O7) are not here.
 ## The directory
 
 9. **A world's directory record** is the object `world/<lineage>/<zone>`, `{1: lineage, 2: zone, 3: where it runs,
-   4: epoch, 5: takeovers, 6: off-machine mark, 7: when it must wake, 8: pinned build}`:
+   4: epoch, 5: takeovers, 6: off-machine mark, 7: when it must wake, 8: pinned build, 9: writes}`:
    - **where it runs:** the machine, by a name (never a host or an address in anything published);
    - **its epoch,** with 3 and 4 repeating the last takeover (`record-inconsistent` otherwise);
    - **the takeovers:** `[[epoch, from, machine, token], ...]` since the last checkpoint;
    - **the off-machine mark;**
    - **when it must wake:** real time in microseconds since 1970, left out while it is awake;
-   - **its pinned build:** the hash of the build that runs it, which a client's checker is loaded by (T10 rule 13).
+   - **its pinned build:** the hash of the build that runs it, which a client's checker is loaded by (T10 rule 13);
+   - **its writes:** how many times the record has been written, one more at every write.
 
    A fork keeps its parent's ids (T3), so the lineage is in every key: a fork's record and parts sit beside its
    parent's. The zone is in every key whole, its scope in hex and its counter.
 10. **Every field changes only by a conditional write on the version read,** the pinned build and the wake included,
     so a build change and a claim cannot both win: the loser reads again. A record is created once. A real store's
-    version is an ETag, a hash of the content; that serves because a record's takeovers never repeat.
+    version is an ETag, a hash of the content; that serves because every write adds one to field 9, so no write
+    leaves the bytes as they were, a heartbeat included, and no version repeats.
 11. **Per Soul, the directory records where it is:** `soul/<soul>`, `{1: soul, 2: lineage of its world, 3: zone}`,
     changed the same way when a Soul travels (T1).
 12. **The directory's truth is a few small objects in the object store,** each written conditionally; machines keep
@@ -98,6 +103,8 @@ ignores the same. The modelled store refuses the stale writer.
 - **A record write conditional on an older version than the one it read from,** or a checkpoint that trims the
   takeover in force at its sequence. The first is refused needlessly; the second lets a stale writer's parts back
   into history.
+- **A heartbeat that writes back the bytes it read.** A real store's ETag would not change, and a waiting machine
+  would take over a healthy writer every lease, losing what it acknowledged after the mark.
 - **Comparing clocks across machines** for a lease, or counting it from the reply. A stale writer acknowledges late.
 - **Acknowledging travel at the disk.** A dead machine loses a Soul between worlds.
 - **A store that ignores the conditions.** Test each S3-compatible store; one that accepts a stale `If-Match` lets

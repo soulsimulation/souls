@@ -30,7 +30,7 @@ pub enum When {
 
 /// A fake object store (rules 7 and 8): objects by key, each with a version. A write whose condition fails is refused
 /// by the store, `precondition-failed` (HTTP 412), whatever the writer believes. A real store's version is an ETag,
-/// a hash of the content; that is as good here because a record's takeovers never repeat (rule 10).
+/// a hash of the content; a counter is as good here because every write to a record changes its bytes (rule 10).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Store {
     objects: BTreeMap<String, (u64, Vec<u8>)>,
@@ -106,9 +106,9 @@ pub struct Takeover {
 
 /// A world's directory record (rules 9 and 10), one per zone of a lineage (a world has one zone today), at
 /// `world/<lineage>/<zone>`: `{1: lineage, 2: zone, 3: where it runs, 4: epoch, 5: takeovers, 6: off-machine mark,
-/// 7: when it must wake, 8: pinned build}`. 5 is `[[epoch, from, machine, token], ...]` since the last checkpoint, oldest
-/// first, its last the claim in force (3 and 4 repeat it). 6 is left out until the first part is off the machine, 7
-/// while the world is awake.
+/// 7: when it must wake, 8: pinned build, 9: writes}`. 5 is `[[epoch, from, machine, token], ...]` since the last
+/// checkpoint, oldest first, its last the claim in force (3 and 4 repeat it). 6 is left out until the first part is off
+/// the machine, 7 while the world is awake. 9 counts the writes to the record, so every write changes its bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldRecord {
     pub lineage: [u8; 16],
@@ -120,6 +120,9 @@ pub struct WorldRecord {
     pub wake: Option<u64>,
     /// The hash of the build that runs it, which a client's checker is loaded by (T10).
     pub build: Vec<u8>,
+    /// How many times the record has been written; [`change`] adds one, so a heartbeat changes the bytes and a real
+    /// store's ETag (rule 10).
+    pub writes: u64,
 }
 
 fn key(lineage: &[u8; 16], zone: Id) -> String {
@@ -173,6 +176,7 @@ impl WorldRecord {
             (4, Value::Uint(epoch)),
             (5, Value::Array(takeovers)),
             (8, Value::Bytes(self.build.clone())),
+            (9, Value::Uint(self.writes)),
         ]);
         m.extend(self.mark.map(|s| (6, Value::Uint(s))));
         m.extend(self.wake.map(|w| (7, Value::Uint(w))));
@@ -187,11 +191,11 @@ impl WorldRecord {
         let bad = || {
             refuse(
                 "record-not-a-record",
-                "{1: lineage, 2: zone, 3: where, 4: epoch, 5: takeovers, 6: mark, 7: wake, 8: build}",
+                "{1: lineage, 2: zone, 3: where, 4: epoch, 5: takeovers, 6: mark, 7: wake, 8: build, 9: writes}",
             )
         };
         let Value::Map(m) = v else { return bad() };
-        if m.keys().any(|k| *k == 0 || *k > 8) {
+        if m.keys().any(|k| *k == 0 || *k > 9) {
             return bad();
         }
         let uint = |k| match m.get(&k) {
@@ -204,7 +208,8 @@ impl WorldRecord {
             Some(epoch),
             Some(Value::Array(ts)),
             Some(Value::Bytes(build)),
-        ) = (m.get(&1), m.get(&3), uint(4), m.get(&5), m.get(&8))
+            Some(writes),
+        ) = (m.get(&1), m.get(&3), uint(4), m.get(&5), m.get(&8), uint(9))
         else {
             return bad();
         };
@@ -243,6 +248,7 @@ impl WorldRecord {
             mark: uint(6),
             wake: uint(7),
             build: build.clone(),
+            writes,
         };
         let current = rec
             .current()
@@ -285,12 +291,17 @@ pub fn read_record(store: &Store, lineage: &[u8; 16], zone: Id) -> R<(u64, World
     Ok((v, WorldRecord::read(&bytes)?))
 }
 
-/// Changes a world's record by a conditional write on the version read (rule 10). A write between the read and this
-/// one makes it `precondition-failed`; the caller reads again.
+/// Changes a world's record by a conditional write on the version read (rule 10), counting the write in field 9 so
+/// the bytes always change. A write between the read and this one makes it `precondition-failed`; the caller reads
+/// again.
 pub fn change(store: &mut Store, read: u64, rec: &WorldRecord) -> R<u64> {
+    let next = WorldRecord {
+        writes: rec.writes.wrapping_add(1),
+        ..rec.clone()
+    };
     store.put(
         &WorldRecord::key(&rec.lineage, rec.zone),
-        rec.to_bytes()?,
+        next.to_bytes()?,
         When::Is(read),
     )
 }
@@ -482,11 +493,15 @@ impl Writer {
             if let Some(l) = last {
                 rec.mark = Some(rec.mark.map_or(l, |m| m.max(l)));
             }
-            if let Ok(n) = change(store, v, &rec) {
-                self.version = n;
-                self.since_renewed = self.since_renewed.saturating_sub(sent);
-                self.acknowledge(rec.mark);
-                return Ok(rec.mark);
+            match change(store, v, &rec) {
+                Ok(n) => {
+                    self.version = n;
+                    self.since_renewed = self.since_renewed.saturating_sub(sent);
+                    self.acknowledge(rec.mark);
+                    return Ok(rec.mark);
+                }
+                Err(r) if r.name == "precondition-failed" => {}
+                Err(r) => return Err(r),
             }
         }
         refuse("precondition-failed", "the record kept changing")

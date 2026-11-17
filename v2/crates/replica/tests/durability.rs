@@ -29,6 +29,7 @@ fn directory(store: &mut Store, lineage: [u8; 16]) {
         mark: None,
         wake: None,
         build: build_hash(b"souls:build-1"),
+        writes: 0,
     };
     store
         .put(
@@ -102,6 +103,29 @@ fn a1_of_two_writers_one_writes_and_the_store_refuses_the_other() {
         assert!(r.unreadable.is_empty());
         assert_eq!(record(&store).current(), a.claim.as_ref());
     }
+}
+
+#[test]
+fn a_heartbeat_changes_the_records_bytes() {
+    // A real store's version is a hash of the bytes: a heartbeat that wrote back what it read would look, to a
+    // machine waiting to claim, like a writer that stopped.
+    let mut store = world();
+    let mut a = writer("souls:machine-a");
+    a.claim(&mut store).expect("a claims");
+    a.write(Stakes::Disk).expect("0");
+    a.ship(&mut store).expect("a ships");
+    let key = WorldRecord::key(&WORLD, zone());
+    let before = store.get(&key).expect("a record").1;
+    a.elapse(LEASE - 1);
+    let beat = a.ship(&mut store).map_err(|r| r.name);
+    let after = store.get(&key).expect("a record").1;
+    println!(
+        "heartbeat: {beat:?}; writes {} -> {}",
+        WorldRecord::read(&before).expect("a record").writes,
+        record(&store).writes
+    );
+    assert_eq!(beat, Ok(Some(0)));
+    assert_ne!(before, after);
 }
 
 #[test]
