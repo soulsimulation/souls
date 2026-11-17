@@ -3,6 +3,7 @@
 // block of it. Edit the module, then run this. `--check` changes nothing and fails on a stale block (the test does that).
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { stripTypeScriptTypes } from "node:module";
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const mark = (file) => file.split("/").pop();
@@ -19,6 +20,9 @@ export const MODULES = [
   ["catalog.mjs", "soulCatalog"],
   ["live.mjs", "soulLive"],
   ["wake.mjs", "soulWake"],
+  // SA-C3: the rules package as the world runs it (its TypeScript with the types taken out), then the client's own use of it
+  ["../../../packages/form-rules/src/rules.ts", "formRules"],
+  ["can-i.mjs", "soulCanI"],
   ["net.mjs", "soulNet"],
   ["dashboard.mjs", "soulDashboard"],
   ["render.mjs", "soulRender"],
@@ -48,7 +52,7 @@ export function inlineBlock(source, file, name) {
     body.replace(/^export /gm, "").trim(), `return { ${[...new Set(exported)].join(", ")} };`, "})();", `// </inline ${mark(file)}>`].join("\n");
 }
 
-export function withBlocks(cli, read = (f) => readFileSync(here(f), "utf8")) {
+export function withBlocks(cli, read = (f) => { const text = readFileSync(here(f), "utf8"); return f.endsWith(".ts") ? stripTypeScriptTypes(text) : text; }) {
   let out = cli;
   for (const [file, name] of MODULES) {
     const block = inlineBlock(read(file), file, name);
