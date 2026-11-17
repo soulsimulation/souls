@@ -14,7 +14,8 @@
 //   with the reason and nothing is applied. Otherwise its `set` changes are committed once, as one engine edit.
 // - Not here: no reservation (two Souls may both set off; the second fails at the end). A timer (a due list),
 //   reparent, create and remove are new engine only or later tasks; a link has no field in today's def. Interruption
-//   and restart are today's: the receipt fails and nothing is applied.
+//   and restart are today's: the receipt fails and nothing is applied. A thing removed before its form ends fails the
+//   receipt (`form.thing_removed`), where today's programme alone would report it completed.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { opSchema, type Op, type StoredDef, type WorldModel } from '@souls/world-compiler';
@@ -104,6 +105,8 @@ export type FormsHost = {
 export function createFormsAdapter(h: FormsHost) {
   const M = () => h.model;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
+  /** Things with a form under way, by how many: a thing removed before its form ends fails that receipt, never completes it. */
+  const underWay = new Map<string, number>();
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
   /** god local → world (mending.ts, the contact actuator's convention); entry points are whole millimetres. */
   const toWorld = (wp: { x: number; y: number; z: number; yaw: number; s: number }, mm: number[]): Vec3 => {
@@ -148,13 +151,16 @@ export function createFormsAdapter(h: FormsHost) {
       walk(stand, hand);
       steps.push({ verb: 'mars:let_go_v1', params: {} }, { verb: 'mars:hand_actuator_v1', params: { target: id, at: hand.map(r3) } });
     }
+    underWay.set(id, (underWay.get(id) ?? 0) + 1);
     return { steps, summary: `${action.replace(/_/g, ' ')} ${nameOf(id)}` };
   }
   /** The ledger's actOutcome: when a form's programme ends, ask its needs again and apply its changes once. Null for
    *  anything that is not an entry thing's form, and for a programme that did not finish (today's failure stands). */
   function outcome(capability: string, bodyId: string, finished: boolean): 'done' | Refusal | null {
     const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); if (!m) return null;
-    const [, id, action] = m, t = thing(id), form = t?.entry.forms?.[action];
+    const [, id, action] = m, t = thing(id), form = t?.entry.forms?.[action], n = underWay.get(id) ?? 0;
+    if (n) { if (n > 1) underWay.set(id, n - 1); else underWay.delete(id); }
+    if (!t && n && !M().entities.get(id)) return finished ? { code: 'form.thing_removed', reason: 'The thing was removed before this was done; nothing changed.' } : null;
     if (!t || !form || unmapped(form) || !finished) return null;
     const body = h.engine.world.entities[bodyId]; if (!body?.pose?.p) return { code: 'body.unavailable', reason: 'Your body is unavailable; nothing changed.' };
     // The hand's reach: today's press completes only once the hand has touched the point, so a finished programme puts the
