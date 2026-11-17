@@ -158,8 +158,9 @@ export class ShardSet {
   }
   /** The program's part of a world's command (null: the world does not go into a shard). */
   programOf({ cmd, args, env }) {
-    // (read workers are threads of the world's own program, on its own ports: not in a shard yet)
-    if (args.at(-1) !== WORLD_SCRIPT || env.SIM_STANDBY === '1' || env.SIM_READ_WORKER === '1') return null;
+    // (read workers are threads of the world's own program, on its own ports: not in a shard yet; nor is a world whose
+    // anonymous viewers have their own sender, #2520)
+    if (args.at(-1) !== WORLD_SCRIPT || env.SIM_STANDBY === '1' || env.SIM_READ_WORKER === '1' || env.SIM_ANON_FANOUT === '1') return null;
     const own = Object.fromEntries(Object.entries(env).filter(([k]) => !PER_WORLD.includes(k)).sort(([a], [b]) => (a < b ? -1 : 1)));
     return { cmd, execArgv: args.slice(0, -1), env: own, key: JSON.stringify([cmd, args.slice(0, -1), own]) };
   }
