@@ -147,7 +147,9 @@ fn a1_one_pass_equals_effect_by_effect_at_every_level_for_two_audiences() {
             .expect("a key");
         one_pass[i].records.len()
     };
-    assert_eq!(room(Level::Full, private()), 2);
+    // The room's view for aa:1: its note created and set, the cushion's note created, and that note as it was in flight
+    // when the (public) cushion carried it onto the crate.
+    assert_eq!(room(Level::Full, private()), 4);
     // The room's public view holds the base entry that furnished it, though that entry's node is the root.
     assert_eq!(room(Level::Full, Audience::Everyone), 13);
     // Its outline: the room itself, the body, the cup, the key and the crate created, the cup removed, the key left
@@ -177,27 +179,49 @@ fn a1_one_pass_equals_effect_by_effect_at_every_level_for_two_audiences() {
             k.node == id(0xee, 7) && k.level == Level::Full && k.audience == Audience::Everyone
         })
         .expect("a key")];
-    let carried: Vec<_> = full
-        .records
-        .iter()
-        .filter_map(|(_, r)| match r {
-            Value::Map(m) if m.get(&2) == Some(&Value::Uint(6)) => Some(m.clone()),
-            _ => None,
-        })
-        .collect();
-    println!(
-        "the crate's full view carries {} subtree(s) in flight",
-        carried.len()
+    let carried = |o: &Output| -> Vec<Vec<Value>> {
+        o.records
+            .iter()
+            .filter_map(|(_, r)| match r {
+                Value::Map(m) => match m.get(&0) {
+                    Some(Value::Map(c)) => match c.get(&2) {
+                        Some(Value::Array(nodes)) => Some(
+                            nodes
+                                .iter()
+                                .map(|p| match p {
+                                    Value::Array(p) => p[0].clone(),
+                                    _ => panic!("a pair"),
+                                })
+                                .collect(),
+                        ),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect()
+    };
+    let public = carried(full);
+    println!("the crate's public full view carries, in flight: {public:?}");
+    assert_eq!(
+        public,
+        vec![vec![id(0xee, 6).to_value()], vec![id(0xee, 12).to_value()]]
     );
-    assert_eq!(carried.len(), 2, "the key and the cushion, as in flight");
-    let Some(Value::Array(nodes)) = carried[1].get(&3) else {
-        panic!("nodes")
-    };
-    assert_eq!(nodes.len(), 1);
-    let Value::Array(pair) = &nodes[0] else {
-        panic!("a pair")
-    };
-    assert_eq!(pair[0], id(0xee, 12).to_value());
+    // The note for aa:1 in the cushion is in aa:1's view of the crate, and never in the public one.
+    let private_full = &one_pass[keys
+        .iter()
+        .position(|k| k.node == id(0xee, 7) && k.level == Level::Full && k.audience == private())
+        .expect("a key")];
+    let mine = carried(private_full);
+    println!("aa:1's full view of the crate carries, in flight: {mine:?}");
+    assert_eq!(mine, vec![vec![id(0xee, 20).to_value()]]);
+    let leaked = encode(&full.to_value()).expect("bytes");
+    let note = encode(&id(0xee, 20).to_value()).expect("bytes");
+    assert!(
+        !leaked.windows(note.len()).any(|w| w == note.as_slice()),
+        "the public view names the note"
+    );
 }
 
 /// Each level's busiest second over every view a viewer in `audiences` is sent for `scope`, and how many views that
@@ -406,7 +430,7 @@ fn a4_each_output_names_its_log_position_redaction_list_and_version() {
             out.version
         );
         assert_eq!(m.get(&4), Some(&header.hash().to_value()));
-        assert_eq!(m.get(&5), Some(&Value::Uint(15)));
+        assert_eq!(m.get(&5), Some(&Value::Uint(16)));
         assert_eq!(m.get(&6), Some(&list.hash().to_value()));
         assert_eq!(m.get(&7), Some(&Level::Full.version().to_value()));
     }

@@ -436,10 +436,25 @@ impl View {
         let brought = brought(entry, before);
         let seen = under(before, env.node, self.key.node)
             || brought.iter().any(|n| under(after, *n, self.key.node));
-        if env.audience != self.key.audience || !seen {
+        let seq = Value::Uint(env.sequence);
+        if !seen {
             return Ok(());
         }
-        let seq = Value::Uint(env.sequence);
+        if env.audience != self.key.audience {
+            // An arrival of another audience may carry this audience's nodes (a private note in a public box).
+            if let (
+                Level::Full | Level::Sampled,
+                Body::Transfer(TransferRec::Arrive { transfer, .. }),
+            ) = (self.key.level, &entry.body)
+                && let Some(r) = before
+                    .in_flight
+                    .get(transfer)
+                    .and_then(|f| carried(&seq, f, self.key.audience))
+            {
+                self.out.records.push((env.at, redactions.scrub(r)));
+            }
+            return Ok(());
+        }
         match self.key.level {
             Level::Full | Level::Sampled => {
                 if self.key.level == Level::Full || self.keep_sample(entry) {
@@ -447,13 +462,20 @@ impl View {
                         Body::Transfer(TransferRec::Leave { transfer, .. }) => {
                             self.left.insert(*transfer);
                         }
+                        Body::Transfer(
+                            TransferRec::Settle { transfer } | TransferRec::Return { transfer, .. },
+                        ) => {
+                            self.left.remove(transfer);
+                        }
                         Body::Transfer(TransferRec::Arrive { transfer, .. })
                             if !self.left.remove(transfer) =>
                         {
-                            if let Some(f) = before.in_flight.get(transfer) {
-                                self.out
-                                    .records
-                                    .push((env.at, redactions.scrub(carried(&seq, f))));
+                            if let Some(r) = before
+                                .in_flight
+                                .get(transfer)
+                                .and_then(|f| carried(&seq, f, self.key.audience))
+                            {
+                                self.out.records.push((env.at, redactions.scrub(r)));
                             }
                         }
                         _ => {}
@@ -550,9 +572,12 @@ impl View {
     }
 }
 
-/// The record a `full` or `sampled` view writes before an arrival whose leave it did not hold (rule 4): `{1: sequence,
-/// 2: 6 carried, 3: [[id, node], ...], 4: [[id, link], ...]}`, the subtree as it was in flight, in T6's state layout.
-fn carried(seq: &Value, f: &crate::effects::Flight) -> Value {
+/// The record a `full` or `sampled` view writes before an arrival whose leave it did not hold (rule 4): `{0: {1:
+/// sequence, 2: [[id, node], ...], 3: [[id, link], ...]}}` (field 0, which no entry has), the subtree as it was in
+/// flight, in T6's state layout. It holds only the nodes of the view's audience, and the links of that audience whose
+/// ends in the flight are seen by it (T2 rule 9); none, when the flight holds nothing of that audience.
+fn carried(seq: &Value, f: &crate::effects::Flight, aud: Audience) -> Option<Value> {
+    let sees = |a: Audience| a == Audience::Everyone || a == aud;
     let pairs = |m: Vec<(Id, Value)>| {
         Value::Array(
             m.into_iter()
@@ -560,9 +585,10 @@ fn carried(seq: &Value, f: &crate::effects::Flight) -> Value {
                 .collect(),
         )
     };
-    let nodes = f
+    let nodes: Vec<(Id, Value)> = f
         .nodes
         .iter()
+        .filter(|(_, n)| n.audience == aud)
         .map(|(i, n)| {
             let mut m = vec![
                 (1, Value::Text(n.kind.clone())),
@@ -576,9 +602,18 @@ fn carried(seq: &Value, f: &crate::effects::Flight) -> Value {
             (*i, map(m))
         })
         .collect();
+    if nodes.is_empty() {
+        return None;
+    }
     let links = f
         .links
         .iter()
+        .filter(|(_, l)| {
+            l.audience == aud
+                && l.ends
+                    .iter()
+                    .all(|e| f.nodes.get(e).is_none_or(|n| sees(n.audience)))
+        })
         .map(|(i, l)| {
             let m = vec![
                 (1, Value::Text(l.ty.clone())),
@@ -595,12 +630,8 @@ fn carried(seq: &Value, f: &crate::effects::Flight) -> Value {
             (*i, map(m))
         })
         .collect();
-    map(vec![
-        (1, seq.clone()),
-        (2, Value::Uint(6)),
-        (3, pairs(nodes)),
-        (4, pairs(links)),
-    ])
+    let inner = map(vec![(1, seq.clone()), (2, pairs(nodes)), (3, pairs(links))]);
+    Some(map(vec![(0, inner)]))
 }
 
 /// The nodes an entry creates or brings in (rule 4): its creates, the root of a subtree that arrives from this zone,

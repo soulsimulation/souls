@@ -32,9 +32,11 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
 4. **A view is computed once per key: (node, level, audience),** by the tier that reads the log, never by the clock
    thread. It holds each entry whose audience is the key's and that touches the key's subtree: its node was the key's
    node or under it just before the entry, or a node it creates or brings in (a create, an arrive's subtree) is under
-   it just after. When `full` or `sampled` keeps an arrival whose leave it did not hold, it first writes the subtree
-   as it was in flight, `{1: sequence, 2: 6 carried, 3: [[id, node], ...], 4: [[id, link], ...]}` in T6's state
-   layout, so a view can draw what came in from elsewhere. One walk of the log feeds every key; any number of subscriptions with one key share one view. Every
+   it just after. When an arrival lands under the key and the view did not hold its leave, `full` and `sampled` first
+   write the subtree as it was in flight, `{0: {1: sequence, 2: [[id, node], ...], 3: [[id, link], ...]}}` (field 0,
+   which no entry has) in T6's state layout, so a view can draw what came in from elsewhere. It holds only the nodes of
+   the key's audience, and links of that audience whose ends it may see (T2 rule 9); a view of another audience than
+   the arrival's gets its own nodes this way too (a private note in a public box), and no record when there are none. One walk of the log feeds every key; any number of subscriptions with one key share one view. Every
    entry moves the view's position, seen or not. For one redaction list and version a stream only appends: a record
    once sent is never rewritten, except that a counts view's open second is its last record until a later second
    closes it.
@@ -75,6 +77,7 @@ delivery, after the view. How busy a view is (rule 7) is read by the grant, not 
 - **A private view in a shared cache.** Anyone with the URL reads another audience's records.
 - **Dropping a subscription, or slowing the world, under load.** Detail gives way; nothing else does.
 - **Thinning away the sample that stops a body.** The viewer would move it on for ever.
+- **A subtree carried into a view whole.** A public box carrying a private note would show the note to everyone.
 - **A crossing without its old place.** A node cannot show that something left it unless the leave or reparent
   names where it was (T6 rule 3).
 - **Words copied into a view's records.** A redaction would then have to rewrite every built view.
