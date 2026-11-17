@@ -84,6 +84,9 @@ pub struct Scene {
     pub covers: Vec<Surface>,
     pub doorways: Vec<Doorway>,
     pub waters: Vec<Water>,
+    /// The outlines of the open ground's other named places (a square, a park): open ground, which they only widen
+    /// the extent of, so an empty square is cut as well as one with things on it.
+    pub areas: Vec<Vec<Xz>>,
 }
 
 /// A rigid move from one frame to another, micrometres (T4's integer arithmetic).
@@ -427,6 +430,8 @@ impl Scene {
                                 width: f.get(&F_LINE_WIDTH).and_then(int).unwrap_or(0) * 1000,
                                 level: f.get(&F_WATER_LEVEL).and_then(int).unwrap_or(0) * 1000,
                             });
+                        } else if let Some(r) = n.fields().get(&F_OUTLINE) {
+                            s.areas.push(ring_mm(r)?);
                         }
                         continue;
                     }

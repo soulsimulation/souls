@@ -395,6 +395,8 @@ struct Grown {
     waters: Vec<(Vec<P>, [i32; 4])>,
     /// Ground cover: open ground, over water too.
     covers: Vec<(Vec<P>, [i32; 4])>,
+    /// The bounds of the open ground's named places: they only widen the squares cut.
+    areas: Vec<[i32; 4]>,
     doors: Vec<Door>,
     d: i64,
 }
@@ -516,12 +518,19 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         let bb = bounds(&r);
         covers.push((r, bb));
     }
+    let mut areas = Vec::new();
+    for a in s.areas.iter().filter(|a| !a.is_empty()) {
+        areas.push(bounds(
+            &a.iter().map(|p| g(*p)).collect::<Result<Vec<_>, _>>()?,
+        ));
+    }
     Ok(Grown {
         levels,
         boxes,
         never,
         waters,
         covers,
+        areas,
         doors,
         d,
     })
@@ -687,6 +696,7 @@ impl OpenGround {
             .map(|x| &x.3)
             .chain(g.never.iter().map(|x| &x.2))
             .chain(g.waters.iter().chain(&g.covers).map(|x| &x.1))
+            .chain(&g.areas)
         {
             b = [
                 b[0].min(bb[0]),
