@@ -3,8 +3,8 @@
 
 use replica::encode::to_hex;
 use replica::ids::{
-    FIXTURE_CUP, FIXTURE_KETTLE, FIXTURE_SCOPE_A, Hash, KindSource, Purpose, fork_then_travel_back,
-    ids_goldens, name_kinds, sha256,
+    FIXTURE_CUP, FIXTURE_KETTLE, FIXTURE_SCOPE_A, FIXTURE_SCOPE_B, Hash, Held, KindSource, Minter,
+    Purpose, Scope, arrive, fork_then_travel_back, ids_goldens, name_kinds, sha256,
 };
 use std::collections::BTreeSet;
 use std::fs;
@@ -209,4 +209,121 @@ fn a4_kinds_in_a_circle_are_refused_by_name() {
     let alone = name_kinds(&[kind("t:a", "t:a")]).unwrap_err();
     println!("A4: {alone}");
     assert_eq!(alone.to_string(), "kind-circular: t:a -> t:a");
+}
+
+#[test]
+fn two_zone_writers_in_one_world_mint_from_two_scopes() {
+    // Rule 1: the world's first zone mints from the world's scope; a second zone writer gets its own.
+    let (mut first, mut second) = (Minter::new(FIXTURE_SCOPE_A), Minter::new(Scope([0xcc; 16])));
+    let mut ids = BTreeSet::new();
+    for _ in 0..1000 {
+        assert!(ids.insert(first.mint().unwrap()));
+        assert!(ids.insert(second.mint().unwrap()));
+    }
+    // Had the second writer minted from the world's scope, its first id would be the first writer's.
+    assert_eq!(
+        Minter::new(FIXTURE_SCOPE_A).mint(),
+        Minter::new(FIXTURE_SCOPE_A).mint()
+    );
+    println!("rule 1: two zone writers, {} ids, all distinct", ids.len());
+}
+
+#[test]
+fn an_id_never_names_two_things_in_one_worlds_history() {
+    // Rule 6, the path from the trunk review: A's a:2 travels to C; B's copy of a:2 (forked before) arrives in A;
+    // then the original comes home from C. "Ever held" renames both arrivals, so a:2 names one thing in A's history.
+    let (mut mint_a, mut held_a) = (Minter::new(FIXTURE_SCOPE_A), Held::default());
+    let mut history = Vec::new();
+    for _ in 0..4 {
+        let id = mint_a.mint().unwrap();
+        held_a.minted(id);
+        history.push(id);
+    }
+    let held_b = held_a.clone(); // B is forked from A and holds a copy of a:2.
+    let a2 = history[2];
+    let (mut mint_c, mut held_c) = (Minter::new(Scope([0xcc; 16])), Held::default());
+    let in_c = arrive(a2, &mut held_c, &mut mint_c).unwrap();
+    assert_eq!(
+        (in_c.id, in_c.origin),
+        (a2, None),
+        "C never held a:2: it keeps its id"
+    );
+    assert!(
+        held_b.knows(a2) && held_a.knows(a2),
+        "a:2 left A, and A still counts it as held"
+    );
+    let copy_from_b = arrive(a2, &mut held_a, &mut mint_a).unwrap();
+    let home_from_c = arrive(in_c.id, &mut held_a, &mut mint_a).unwrap();
+    for (what, arrived) in [
+        ("B's copy", copy_from_b),
+        ("the original, home", home_from_c),
+    ] {
+        println!(
+            "rule 6: {what} of a:2 arrives in A as a:{}, origin a:2",
+            arrived.id.counter()
+        );
+        assert_eq!(arrived.origin, Some(a2));
+        history.push(arrived.id);
+    }
+    let distinct: BTreeSet<_> = history.iter().collect();
+    assert_eq!(
+        distinct.len(),
+        history.len(),
+        "every id A ever held names one thing"
+    );
+    // An id from a scope A never minted from arrives once under its own id; a second arrival of it is renamed.
+    let foreign = Minter::new(FIXTURE_SCOPE_B).mint().unwrap();
+    assert_eq!(
+        arrive(foreign, &mut held_a, &mut mint_a).unwrap().origin,
+        None
+    );
+    assert_eq!(
+        arrive(foreign, &mut held_a, &mut mint_a).unwrap().origin,
+        Some(foreign)
+    );
+}
+
+#[test]
+fn the_sections_beside_a_kind_have_their_own_hash() {
+    // Rule 15: a look changes the souls/kind-beside/1 hash and not the kind's name.
+    let cup = KindSource::parse(FIXTURE_CUP).unwrap();
+    let named = |kettle: &str| {
+        let kinds = [KindSource::parse(kettle).unwrap(), cup.clone()];
+        name_kinds(&kinds).unwrap().remove("souls:kettle").unwrap()
+    };
+    let steel = named(FIXTURE_KETTLE);
+    let copper = named(&edit(FIXTURE_KETTLE, "kettle-steel", "kettle-copper"));
+    println!(
+        "rule 15: steel beside {}, copper beside {}",
+        steel.beside.unwrap(),
+        copper.beside.unwrap()
+    );
+    assert_eq!(steel.hash, copper.hash);
+    assert_ne!(steel.beside, copper.beside);
+    assert_eq!(
+        name_kinds(&[cup]).unwrap()["souls:cup"].beside,
+        None,
+        "no beside sections, no beside hash"
+    );
+    assert_ne!(
+        Hash::of(Purpose::KindBeside, b"\xa0"),
+        Hash::of(Purpose::Kind, b"\xa0")
+    );
+}
+
+#[test]
+fn kind_names_are_lower_case() {
+    // Rule 12: SA-F1's pattern, so no two kinds differ only in case.
+    for bad in [
+        "Souls:kettle",
+        "souls:Kettle",
+        "souls:ket-tle",
+        "so_uls:kettle",
+        "souls:kettle@1220",
+        "souls:1k",
+    ] {
+        let refused = KindSource::parse(&format!("{{1: \"{bad}\"}}")).unwrap_err();
+        assert_eq!(refused.name(), "kind-source", "{bad}");
+    }
+    assert!(KindSource::parse("{1: \"mars-college:bench_2\"}").is_ok());
 }

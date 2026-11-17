@@ -8,19 +8,24 @@ hash tree (K5) and loading kinds (K3) are not here.
 
 ## Ids
 
-1. **An id is a scope and a counter.** The scope is 16 random bytes, new for every world and every fork. It comes
-   from the directory or the operating system's random source, never from the world's random numbers, which a fork
-   replays. Sixteen bytes, because 8 would give a 3 % chance of a clash at a billion scopes.
+1. **An id is a scope and a counter, and every writer that mints has its own scope.** A world's first zone mints
+   from the world's scope. Each fork, and each zone writer after the first (contract T1), gets a fresh scope. So two
+   writers in one world never give out the same id. A scope is 16 random bytes from the directory or the operating
+   system's random source. It never comes from the world's random numbers, which a fork replays. Sixteen bytes,
+   because 8 would give a 3 % chance of a clash at a billion scopes.
 2. **The counter starts at 0 and stays below 2^53**, the largest range a JavaScript number holds exactly. A scope
    that runs out is refused by name, `id-counter-exhausted`.
 3. **An id is encoded `[h'<scope>', counter]`.**
-4. **An id is never given to a different thing.** A counter is minted once. Undoing a removal brings back the same
-   thing with its id.
+4. **In one world's history, an id is never given to a different thing.** A counter is minted once. Undoing a
+   removal brings back the same thing with its id.
 5. **A fork keeps the ids it carries;** they are shared with the parent. New things in the fork get the fork's
    scope. A fork carries no bodies, since a Soul is in one world; what a body held is set down where it stood (K6).
-6. **An arrival whose id the destination knows gets a fresh id there and keeps the old one as its origin.** Known
-   means the destination holds a node with that id, or holds a removal that undo could bring back. A thing that
-   left by travel is not known, since travel is not undone. Otherwise the arrival keeps its id.
+6. **An arrival whose id the destination has ever held gets a fresh id there and keeps the old one as its origin.**
+   Otherwise it keeps its id. "Ever held" covers three kinds of id. The first two are the counters below a bound in
+   each scope the world minted from or inherited at its fork. The third is the ids that arrived from other scopes
+   (`Held`). It includes things that left, so a fork's copy and a thing coming home are both renamed, and one id
+   never names two things in the world's history. The destination's writer applies arrivals one after another, and
+   each arrival is recorded before the next, so two arrivals in one tick never keep the same id.
 7. **Souls are global.** A Soul's id is minted by the directory, not by a world, so it is the same in every world.
    A body is a node of its world, linked to its Soul (contract T2).
 8. **A version is (lineage, zone, epoch, sequence),** encoded `[h'<lineage>', <zone id>, epoch, sequence]`. The
@@ -35,7 +40,8 @@ hash tree (K5) and loading kinds (K3) are not here.
    a name it is those bytes as lower-case hex, `1220` and 64 digits. A new algorithm is a new code, and old hashes
    keep theirs.
 10. **A hash's input is its purpose label, as one profile text item, and then the stored bytes.** The labels are
-    `souls/kind/1`, `souls/geometry/1`, `souls/state-public/1`, `souls/state-private/1` and `souls/fixture/1`.
+    `souls/kind/1`, `souls/kind-beside/1`, `souls/geometry/1`, `souls/state-public/1`, `souls/state-private/1`
+    and `souls/fixture/1`.
     Hashing something new, or the same thing differently, takes a new label.
 11. **Public and private state are hashed apart.** A node's public fields have one hash and each private audience's
     fields another. A hash of small private state can be guessed by trying values, so it is shown only to those
@@ -43,19 +49,22 @@ hash tree (K5) and loading kinds (K3) are not here.
 
 ## Kinds
 
-12. **A kind is named `namespace:name@hash`.** Each part is made of name characters, with one `:` and no `@`. The
-    hash is the `souls/kind/1` hash of the kind's meaning: every section numbered below 20, the name included.
+12. **A kind is named `namespace:name@hash`,** in lower case as SA-F1 has it. The namespace is `a-z 0-9 -` and the
+    name is `a-z 0-9 _`, each starting with a letter, so no two kinds differ only in case. The hash is the
+    `souls/kind/1` hash of the kind's meaning: every section numbered below 20, the name included.
 13. **Everything is numbered.** Sections, fields, points and forms are maps keyed by number. A field's name, type,
     default and audience are in its entry, so changing any of them or its number renames the kind.
 14. **A kind refers to other kinds through section 10,** which maps a local number to `namespace:name`. The rest of
     the kind uses that number. In the hashed bytes each name becomes the full `namespace:name@hash`, so a change in a
     referred kind renames every kind that refers to it. Geometry is covered by its `souls/geometry/1` hash
     (section 7).
-15. **Sections 20 and up sit beside the kind:** looks, words, card and how-tos. They are kept under their own
-    hash, so a better picture renames no placed thing (SA-F1, #2842).
-16. **A form step names a move by plain name.** The kind's hash covers that name, not the move. The record of a move
-    in progress carries the move's own hash, so a replay uses that exact revision. A change in what a move claims
-    is a new move name. Retuning only its timing keeps the name (SA-D4, PR #2958).
+15. **Sections 20 and up sit beside the kind:** looks, words, card and how-tos. They have their own
+    `souls/kind-beside/1` hash, so a better picture renames no placed thing (SA-F1, #2842).
+16. **A form step names a move by plain name.** The kind's hash covers that name, not the move. A move's reach,
+    effector, resources, blocks and cancels are its claims. A change to any of them needs a new move name. Only its
+    timing may be retuned under the same name (SA-D4, PR #2958). The record of a move in progress carries the move's
+    own hash, so a replay uses that exact revision. To check an act before any record exists, a client uses the
+    move revisions that the current log segment's header names by hash, beside the kinds (contract T6, #2645).
 17. **Kinds that refer to each other in a circle are refused** as `kind-circular`, with the circle listed:
     `t:a -> t:b -> t:c -> t:a`. A kind naming itself is a circle of one. Also refused by name are
     `kind-unknown-reference`, `kind-duplicate` and `kind-source` (text that is not a kind).
@@ -66,6 +75,14 @@ hash tree (K5) and loading kinds (K3) are not here.
 20. **The golden file** `fixtures/ids/goldens.txt` holds an id, a version, the fork fixture and the two fixture kinds,
     each with its bytes and its hash or name. Both builds must give this file exactly. It changes only in its own
     commit, with the reason.
+
+## Open for K3
+
+- A local reference number that points at no entry of section 10 is not checked here. K3 must refuse it, or a
+  referred kind escapes the hash.
+- Renumbering local references renames a kind without a change of meaning. K3 should number them in order of
+  first use.
+- SA-F1's inline geometry (`bounds_mm`) becomes a `souls/geometry/1` hash in section 7.
 
 ## The hash cases
 
@@ -86,7 +103,9 @@ Base: `fixtures/ids/kettle.diag`, which refers to `cup.diag`. Each case edits th
 ## What would quietly break this
 
 - **A scope drawn from the world's random numbers.** A fork replays them, so parent and fork would mint the same ids.
-- **Treating a removed id as free.** Undo would then bring back a thing that shares its id with an arrival.
+- **A second zone writer minting from the world's scope.** Two writers would give out the same ids.
+- **Narrowing "ever held" to "held now".** A thing that left, or a removed one that undo brings back, would then
+  share its id with an arrival.
 - **Hashing the source text.** Comments and key order would rename kinds. Only the encoded meaning is hashed.
 - **A reference written as a plain name in the hashed bytes.** A change in the referred kind would leave the
   referring kind's name unchanged.
