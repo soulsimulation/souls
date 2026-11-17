@@ -44,7 +44,7 @@ test('A1: a hand free or holding a kind is accepted; a malformed one is refused;
   assert.ok(F.kindRefs(withNeed({need: 'hand', holds: 'eden:cup'})).includes('eden:cup'));
 });
 
-test('A2: the kettle fills from a tap (data: a thing of kind eden:tap within reach), so its tea how-to runs from the default state', () => {
+test('A2: the kettle fills from a tap (data: the nearest thing of kind eden:tap), so its tea how-to runs from the default state', () => {
   const kettle = load('content/kinds/kitchen/kettle.json'), tap = load('content/kinds/kitchen/tap.json');
   assert.deepEqual(F.validateEntry(tap), []);
   assert.equal(tap.points.outlet.role, 'outlet');
@@ -52,7 +52,8 @@ test('A2: the kettle fills from a tap (data: a thing of kind eden:tap within rea
   assert.equal(kettle.state.water.default, 'empty');
   const fill = kettle.forms.fill;
   assert.deepEqual(fill.needs.find(n => n.need === 'state'), {need: 'state', field: 'water', is: 'empty'});
-  assert.deepEqual(fill.needs.find(n => n.need === 'within_reach'), {need: 'within_reach', point: {arg: 'from'}});
+  assert.ok(fill.needs.some(n => n.need === 'held_by_actor'));
+  assert.deepEqual(fill.steps, [{step: 'move', move: 'fill', toward: {arg: 'from'}}]);
   assert.deepEqual(fill.effects.map(e => [e.field, e.to]), [['water', 'cold']]);
   assert.deepEqual(kettle.howtos.tea.steps.map(s => s.form), ['fill', 'switch_on', 'pour']);
   // Without the tap in its selector the fill would be a magic refill: the selector names the kind.
