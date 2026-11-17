@@ -8,7 +8,7 @@
 // - Steps: `walk_to` a point → mars:walk_to; a `move` (press, slide) at a point → a walk to the entry's nearest stand
 //   point, then mars:hand_actuator_v1 at the point (a slide is pressed: today's slide needs a direction the entry does
 //   not give, so the motion is cruder); `wait` → a standing pose of that length. Points are the entry's, in the thing's
-//   frame; where there is no stand point, today's approach (the nearest clear ground) is used.
+//   frame; where none has room to stand, today's approach (the nearest clear ground) is used.
 // - Effects: nothing changes when the act is accepted. When its programme ends (the ledger's actOutcome), the form is
 //   asked again with @souls/form-rules `effects()` as the world sees it now; if a need no longer holds, the receipt fails
 //   with the reason and nothing is applied. Otherwise its `set` changes are committed once, as one engine edit.
@@ -18,6 +18,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { opSchema, type Op, type StoredDef, type WorldModel } from '@souls/world-compiler';
+import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
 import { effects, type Change } from '../../../../packages/form-rules/src/effects.ts';
 import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 
@@ -94,7 +95,7 @@ export function formActions(def: StoredDef): Action[] {
 
 export type FormsHost = {
   model: WorldModel;
-  engine: { world: { entities: Record<string, any>; tick: number }; standableNearV1?(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null };
+  engine: { world: { entities: Record<string, any>; tick: number }; standableNearV1?(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null; clearanceAtV1?(x: number, z: number, level?: number): number };
   levelAt(x: number, z: number, y: number): number;
   commit(ops: Op[], note: string): { accepted: boolean };
   log(m: string): void;
@@ -117,6 +118,7 @@ export function createFormsAdapter(h: FormsHost) {
     return effects({ kinds: { [kind]: t.entry }, act: { this: id, form: action }, receipt,
       state: { actor: bodyId, nodes: { [id]: { kind, fields }, [bodyId]: { hands: { left: null, right: null }, effector_mm: effector } }, moves: moves() } });
   }
+  const clear = (p: Vec3, level: number) => (h.engine.clearanceAtV1 ? h.engine.clearanceAtV1(p[0], p[2], level) : Infinity) >= HUMAN_RADIUS + 0.02;
   /** The steps of a form for this body, or a refusal; null when this is not an entry thing's form. */
   function plan(soul: { entityId: string }, id: string, action: string): { steps: Step[]; summary: string } | Refusal | null {
     const t = thing(id), form = t?.entry.forms?.[action]; if (!t || !form || unmapped(form)) return null;
@@ -134,12 +136,13 @@ export function createFormsAdapter(h: FormsHost) {
     };
     for (const s of form.steps ?? []) {
       if (s.step === 'walk_to') { const p = points[String((s as { point?: string } & typeof s).point)]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${(s as { point?: string } & typeof s).point}.` }; const w = toWorld(wp, p.at_mm); walk([w[0], w[2]], toWorld(wp, [0, 0, 0])); continue; }
-      if (s.step === 'wait') { steps.push({ verb: 'mars:pose_v1', params: { activity: 'listen', seconds: Math.max(0.5, Number((s as { us?: number }).us ?? 0) / 1e6) } }); continue; }
+      if (s.step === 'wait') { steps.push({ verb: 'mars:pose_v1', params: { activity: 'listen', seconds: Math.min(3600, Math.max(0.5, Number((s as { us?: number }).us ?? 0) / 1e6)) } }); continue; }
       const p = points[s.at as string]; if (!p) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${s.at}.` };
       const hand = toWorld(wp, p.at_mm);
       // where to stand: the entry's stand point nearest the hand's point; else today's approach, the nearest clear ground
       let stand: Vec2 | null = null, best = Infinity;
-      for (const q of stands) { const d = Math.hypot(q[0] - hand[0], q[2] - hand[2]); if (d < best) { best = d; stand = [q[0], q[2]]; } }
+      // (only a stand point with room to stand: mending.ts's clearance test)
+      for (const q of stands) { const d = Math.hypot(q[0] - hand[0], q[2] - hand[2]); if (d < best && clear(q, level)) { best = d; stand = [q[0], q[2]]; } }
       stand ??= h.engine.standableNearV1?.([hand[0], hand[2]], level, soul.entityId, 0.4, 16) ?? null;
       if (!stand) return { code: 'form.no-room', reason: `There is no room to stand and reach ${nameOf(id)}.` };
       walk(stand, hand);
