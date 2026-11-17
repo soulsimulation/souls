@@ -1,0 +1,14 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:chime_door",
+  "owner": "thing",
+  "state": {
+    "chimes": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [900, 2100, 60] },
+  "reactions": {
+    "chime": { "when": { "on": "body_entered" }, "do": [{ "change": "add", "field": "chimes", "by": 1, "event": "chimed" }] }
+  },
+  "text": { "card": "A test shop door for reactions: it chimes each time a body comes into the place it is in." },
+  "card": { "text": "card" }
+}

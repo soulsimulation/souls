@@ -3,13 +3,15 @@
 What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://github.com/soulsimulation/souls/issues/2843)),
 what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)),
 the value of a field that changes with time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)),
-and who may do a form, as a test on links (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)).
+who may do a form, as a test on links (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)),
+and how a thing reacts, by rules on its kind (SA-F15, [#2853](https://github.com/soulsimulation/souls/issues/2853)).
 `decide(input)` answers whether a form of a kind written in the [entry format](../../docs/soul-actions/entry-format.md)
 can be done now. Nothing in today's server or client calls it yet; Engine v2's shared rules (R2,
 [#2685](https://github.com/soulsimulation/souls/issues/2685)) write it again and run the same cases.
 
 ```sh
-node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/ and cases/who/, plus the library's own checks
+node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/, cases/who/ and cases/react/, plus the library's own checks
+node packages/form-rules/bin/check-reactions.mjs     # the check gate's rule check over every kind (exit 1 on a refusal)
 node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed values and crossings in Node and in a browser build
 ```
 
@@ -174,6 +176,46 @@ outside the asker's audience, so a hidden members list is never read or named; o
 
 A file in `cases/who/` is `{"format": "souls-who-cases/1", "about": ..., "cases": [...]}`, each case shaped like a rule
 case. Its three examples, a private workbench, a chess move and a lecture speech, use the test kinds in
+`cases/kinds/test/`.
+
+## Things react
+
+A kind may carry `reactions`: named rules, each `{"when": <trigger>, "do": [<effect>, ...]}`, that answer what
+happens to a thing, or to a thing linked to it, with no Soul acting. The trigger and the effects come from two closed
+lists in [`src/reactions.json`](src/reactions.json), the one file shared with Engine v2 E18
+([#2788](https://github.com/soulsimulation/souls/issues/2788)), which runs them.
+
+- **Triggers** (`when.on`): `changed` (a `field` of this thing), `linked_changed` (a `field` of a thing at the other
+  end of a `link`), `support_changed` (a `field` of the thing it rests on, or it comes to rest on a thing where that
+  field differs), `rested` and `left` (something comes to rest on it or leaves), `body_entered` and `body_left` (a
+  body enters or leaves the place it is in), `due` (a `timer` one of its forms set comes due) and `world` (the world
+  announces a change of `light` or `weather`, Engine v2 E6). A trigger that carries a new value may filter on it
+  with `is` or `not`.
+- **Effects** (`do[].change`): `set` a field to a constant or to the trigger's new value (`{"trigger": "value"}`),
+  `add` a whole amount to an int field (held within its `min` and `max`), or set the `rate` (`per_s`) of a timed field,
+  which settles its value at `now_us` first. Each acts on this thing, or with `"target": {"link": <type>}` on every
+  thing at the far end of that link, and may name its `event`.
+- A rule never chooses, never draws, never moves a body and acts on no offer or activity. Only `set`, never "flip":
+  setting a field to its own value is no change, and starts nothing.
+
+`react({kinds, state, cause, receipt})` takes the state before a cause, which is a generic `set` or `reparent`
+change or `{"due": <timer>, "node"}`, and returns what the rules do, in the shape `effects` returns (`actor:
+"world"`), plus `fired`, the `[node, rule]` pairs started; `apply` applies it. A body is a node whose kind's owner is
+`family`; `state.world` names the world's own node. It answers one cause: a chain of rules, its depth and a fan-out
+spread over ticks are E18's.
+
+`checkReactions(kinds)` is the check gate's: it refuses a rule outside the lists, one that names a body, an offer or
+a draw (`acts_on_body`, `acts_on_offer`, `draws`), and any set of rules that could feed itself. It builds the graph
+whose nodes are (kind, field), with an edge from what a rule watches to what it writes, across a link type to every
+kind that declares it, and refuses each cycle with its fields and rules, as the kind loaded last among them. The
+graph is drawn wide (every kind with the field may be a support), so it can refuse a safe set but never accepts a
+loop.
+
+A file in `cases/react/` is `{"format": "souls-react-cases/1", "about": ..., "cases": [...]}`: a state, a `cause`, a
+`receipt`, what `react` should return (`expect`, compared like a rule case's) and the nodes `after` the cause and the
+changes are applied. A file in `cases/react/check/` (`souls-react-check-cases/1`) is a list of kinds, loaded in that
+order, and every error expected. The `reactions` section is not in the entry format yet; the five examples (a wall
+switch and its lamps, a street lamp, a kettle on a stove, a shop, a chiming door) use test kinds in
 `cases/kinds/test/`.
 
 ## Looks
