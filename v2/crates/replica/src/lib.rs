@@ -10,6 +10,7 @@ pub mod ids;
 pub mod pose;
 pub mod time;
 pub mod tree;
+pub mod views;
 pub mod world_model;
 pub mod zones;
 

@@ -173,6 +173,10 @@ pub enum Purpose {
     Schema,
     /// A golden fixture's bytes, and nothing else.
     Fixture,
+    /// A view's definition: its level and revision (contract T7, `v2/docs/views.md`).
+    View,
+    /// A redaction list: the references removed so far (contracts T7 and T8).
+    Redactions,
 }
 
 impl Purpose {
@@ -186,6 +190,8 @@ impl Purpose {
             Purpose::Header => "souls/header/1",
             Purpose::Schema => "souls/schema/1",
             Purpose::Fixture => "souls/fixture/1",
+            Purpose::View => "souls/view/1",
+            Purpose::Redactions => "souls/redactions/1",
         }
     }
 }
