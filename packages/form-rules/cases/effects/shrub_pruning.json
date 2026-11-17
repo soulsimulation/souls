@@ -1,0 +1,321 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Shrub pruning (from #1748): a Soul with empty hands prunes the six shoots one by one, in an order it chose; each removes only that shoot and keeps one more cutting in the tray (0 to 6). Pruning the first shoot again is refused: it does not regrow.",
+  "cases": [
+    {
+      "name": "prune_all_six_one_refused_again",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "sh1"
+            ]
+          },
+          "sh1": {
+            "kind": "eden:pruning_shrub"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_left_low"
+          },
+          "receipt": "rs1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "left_low",
+                "n": 1,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "cuttings",
+                "n": 7,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pruned",
+                "node": "sh1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cutting_kept",
+                "node": "sh1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_left_low"
+          },
+          "receipt": "rs1b",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_right_low"
+          },
+          "receipt": "rs2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "right_low",
+                "n": 2,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "cuttings",
+                "n": 7,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pruned",
+                "node": "sh1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cutting_kept",
+                "node": "sh1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_left_mid"
+          },
+          "receipt": "rs3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "left_mid",
+                "n": 3,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "cuttings",
+                "n": 7,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pruned",
+                "node": "sh1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cutting_kept",
+                "node": "sh1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_right_mid"
+          },
+          "receipt": "rs4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "right_mid",
+                "n": 4,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "cuttings",
+                "n": 7,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pruned",
+                "node": "sh1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cutting_kept",
+                "node": "sh1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_left_high"
+          },
+          "receipt": "rs5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "left_high",
+                "n": 5,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "cuttings",
+                "n": 7,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pruned",
+                "node": "sh1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cutting_kept",
+                "node": "sh1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "sh1",
+            "form": "prune_right_high"
+          },
+          "receipt": "rs6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "right_high",
+                "n": 6,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "sh1",
+                "field": "cuttings",
+                "n": 7,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pruned",
+                "node": "sh1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:cutting_kept",
+                "node": "sh1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "sh1": {
+          "kind": "eden:pruning_shrub",
+          "fields": {
+            "left_low": 0,
+            "cuttings": 6,
+            "right_low": 0,
+            "left_mid": 0,
+            "right_mid": 0,
+            "left_high": 0,
+            "right_high": 0
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": null,
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}

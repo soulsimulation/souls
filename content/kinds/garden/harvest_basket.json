@@ -1,0 +1,54 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:harvest_basket",
+  "owner": "thing",
+  "state": {
+    "fruit": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 700] },
+    "board": { "role": "contact", "at_mm": [200, 10, 0] }
+  },
+  "slots": {
+    "out": { "admits": "thing", "kinds": ["eden:tomato"], "most": 1, "at_mm": [200, 10, 0], "fits_mm": [120, 120, 120] }
+  },
+  "geometry": { "bounds_mm": [700, 320, 360] },
+  "forms": {
+    "prepare": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "fruit", "at_least": 1 },
+        { "need": "slot_free", "slot": "out" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "board" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "fruit", "by": -1, "event": "fruit_used" },
+        { "change": "create", "kind": "eden:tomato", "into": "out", "event": "prepared" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:harvest_basket",
+    "table": [
+      { "part": "fill", "field": "fruit", "do": "scale", "axis": "y", "range": [0, 6], "to": [0, 1000] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"lathe","at":[-150,0,0],"profile":[[0,0],[120,0],[150,40],[165,200],[160,210],[0,210]],"segments":10,"tint":"wicker"},{"kind":"sweep","at":[-150,0,0],"path":[[-150,200,0],[-120,280,0],[0,315,0],[120,280,0],[150,200,0]],"r":10,"segments":6,"tint":"wicker"},{"kind":"cyl","at":[-150,215,0],"r":140,"h":70,"segments":10,"tint":"fruit","role":"fill","pivot":[-150,180,0]},{"kind":"box","at":[200,5,0],"size":[240,10,240],"tint":"board"}],"palette":{"wicker":"#a9844f","fruit":"#d2402a","board":"#c8a873"},"tags":["garden","basket","harvest","object"]}
+  },
+  "text": {
+    "card": "A harvest basket of up to six tomatoes: prepare one onto the board beside it.",
+    "garden": "garden",
+    "harvest": "harvest",
+    "produce": "produce",
+    "howto_tomato": "With a hand free and the board beside the basket clear, prepare a tomato for three seconds, then take it and eat it."
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["harvest", "produce"] },
+  "howtos": {
+    "tomato": { "text": "howto_tomato", "steps": [{ "form": "prepare" }] }
+  }
+}
