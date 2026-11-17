@@ -40,8 +40,8 @@ node tools/entry/asks.mjs --json     # the same as one JSON line
   is one occurrence.
 - `given` (optional): the state the request's own words presume, as `{"<thing>": {"<field>": <value>}}`, set before
   the chain runs. Every thing starts in a copy's default state, so "turn the lamp off" gives the lamp on and "join the
-  class" gives a class running. A given is written only for what the words presume, never to make a chain pass: "lock
-  the door" presumes nothing, so its chain starts from the door as a copy starts, shut. A given field the kind does not
+  class" gives a class running. A given is written only for what the words presume, never to make a chain pass, and a
+  step the words ask for is never dropped instead: "wash your hands" presumes nothing of the tap, so its chain turns it on. A given field the kind does not
   have is reported as missing, and a value its field cannot hold is refused.
 - `none` instead of `chain`: `{"why": ...}`, one of `home`, `animal`, `game`, `refused` (the list is in
   `tools/entry/asks.mjs`). A request with no chain is counted, never dropped.
