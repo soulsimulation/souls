@@ -26,6 +26,7 @@ const FIX = {
   'no-waiting': () => mk(0, 'no-waiting', e => { e.forms.boiled.effects.push({change: 'timer', form: 'boiled', after_us: 1000000, event: 'checked_again'}); }),
   bounded: () => mk(2, 'bounded', e => { delete e.links.listener.most; }),
   'way-out': () => mk(0, 'way-out', e => { e.state.water.values = ['empty', 'hot']; }),
+  card: () => mk(0, 'card', e => { delete e.card; }),
   'no-labels': () => mk(0, 'no-labels', e => { e.text.card = 'A cosy kettle for quiet afternoons.'; }),
   refs: () => mk(0, 'refs', e => { e.forms.pour.effects.push({change: 'remove', what: 'this', event: 'used_up'}, {change: 'create', kind: 'fixture:missing', into: 'actor_hand', event: 'made'}); }),
 };
@@ -46,6 +47,17 @@ test('A1: one fixture per rule fails with that rule\'s finding and nothing else'
     assert.equal(r.status, 1, `${rule}: exits non-zero`);
     assert.ok(r.stdout.includes(`"rule":"${rule}"`), `${rule}: named in the output`);
   }
+});
+
+test('card: a card with a purpose text over 80 characters is refused, with the field and the fix', () => {
+  const long = JSON.parse(FIX.card()); long.card = {text: 'card'}; long.text.card = 'A kettle: fill it, switch it on, and it boils water for tea, which you can then pour into a cup.';
+  const f = C.checkText(JSON.stringify(long)).findings;
+  assert.deepEqual(f.map(x => x.rule), ['card']);
+  assert.equal(f[0].field, 'card');
+  assert.match(f[0].fix, /80/);
+  const none = C.checkText(FIX.card()).findings;
+  assert.deepEqual(none.map(x => [x.rule, x.path]), [['card', 'card']]);
+  assert.match(none[0].fix, /"card"/);
 });
 
 test('A1: a finding names the form and the field', () => {

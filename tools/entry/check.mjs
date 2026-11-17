@@ -26,6 +26,7 @@ export const RULES = Object.freeze({
   bounded: 'state is bounded and counted at its maximum',
   'way-out': 'every chain of needs has a way out that needs nothing',
   moves: 'every kind says how it moves and how long it lasts loose',
+  card: 'every kind has a card: one line of purpose, at most 80 characters',
   'no-labels': 'no card carries a label such as "quiet" or "cosy"',
   shape: 'the entry is well formed (the format\'s own rules)',
   refs: 'every kind it refers to is loaded, and kinds do not refer to each other in a circle',
@@ -36,6 +37,7 @@ export const BUDGET = Object.freeze({stateBytes: 9216, linkEdges: 1024, forms: 3
 const BYTES = {bool: 1, enum: 1, int: 8, duration: 8, text: 8};
 const LINK_EDGE_BYTES = 8;
 
+const CARD_MOST = 80;
 const ENGINE_WORDS = new Set(['engine', 'server', 'mars', 'wire', 'tick', 'ticks', 'eden', 'mjs', 'json', 'glb', 'ts', 'js', 'file', 'path', 'api', 'rpc', 'cmd', 'sim']);
 const TIME_WORDS = new Set(['hour', 'hours', 'noon', 'midnight', 'daily', 'weekly', 'weekday', 'clock', 'dawn', 'dusk', 'morning', 'evening', 'sunrise', 'sunset', 'oclock', 'am', 'pm']);
 const LABEL_WORDS = ['quiet', 'cosy', 'cozy', 'calm', 'peaceful', 'lively', 'busy', 'bustling', 'crowded', 'lonely', 'relaxing', 'romantic', 'comfy', 'charming', 'popular', 'boring', 'cheerful', 'gloomy'];
@@ -117,6 +119,10 @@ function rules(entry) {
 
   // moves: the sections are SA-F10's. Until the format defines them, data cannot break this rule and it is not checked.
   if (!('motion' in F.RESERVED) && entry.owner === 'thing' && movable(entry)) for (const s of ['motion', 'loose']) if (entry[s] === undefined) add('moves', s, `a thing that can be carried says nothing of its ${s}`, `add a "${s}" section`);
+
+  // card: a kind has one line of purpose, short enough to read at a glance.
+  if (entry.card === undefined) add('card', 'card', 'the kind has no card', 'add "card": {"text": "<key>"} naming a text entry that says what it is for, in one line');
+  else if (typeof entry.text?.[entry.card.text] === 'string' && [...entry.text[entry.card.text]].length > CARD_MOST) add('card', `text.${entry.card.text}`, `the card is ${[...entry.text[entry.card.text]].length} characters, over ${CARD_MOST}`, `shorten it to at most ${CARD_MOST} characters: what it is and what can be done`);
 
   // no-labels: the card is facts, not a mood.
   const card = entry.text?.[entry.card?.text];
