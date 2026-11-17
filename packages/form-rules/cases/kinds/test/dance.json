@@ -3,21 +3,21 @@
   "kind": "test:dance",
   "owner": "thing",
   "state": {
-    "phase": {"n": 1, "type": "enum", "values": ["offered", "joined"], "default": "offered", "audience": "public"},
+    "phase": {"n": 1, "type": "enum", "values": ["offered", "joined"], "default": "offered", "audience": {"rule": "everyone"}},
     "left_us": {
       "n": 2,
       "type": "timed",
       "unit": "us",
       "default": {"value": 60000000, "per_s": -1000000, "set_us": 0},
       "min": 0,
-      "audience": "public"
+      "audience": {"rule": "everyone"}
     }
   },
   "links": {
-    "invited": {"n": 1, "from": "body", "most": 1, "audience": "public"},
-    "proposer": {"n": 2, "from": "body", "most": 1, "audience": "public"},
-    "lead": {"n": 3, "from": "body", "most": 1, "audience": "public"},
-    "partner": {"n": 4, "from": "body", "most": 1, "audience": "public"}
+    "invited": {"n": 1, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "proposer": {"n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "lead": {"n": 3, "from": "body", "most": 1, "audience": {"rule": "everyone"}},
+    "partner": {"n": 4, "from": "body", "most": 1, "audience": {"rule": "everyone"}}
   },
   "slots": {
     "lead": {"admits": "body", "most": 1, "at_mm": [-300, 0, 0]},

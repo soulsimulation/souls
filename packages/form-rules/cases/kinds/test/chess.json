@@ -3,9 +3,9 @@
   "kind": "test:chess",
   "owner": "thing",
   "links": {
-    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" },
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} },
     "player": { "n": 2, "from": "soul", "most": 2, "audience": "players" },
-    "turn": { "n": 3, "from": "soul", "most": 1, "audience": "public" }
+    "turn": { "n": 3, "from": "soul", "most": 1, "audience": {"rule": "everyone"} }
   },
   "forms": {
     "move": {

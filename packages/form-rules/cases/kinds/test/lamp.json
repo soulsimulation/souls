@@ -3,10 +3,10 @@
   "kind": "test:lamp",
   "owner": "thing",
   "state": {
-    "lit": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
   },
   "links": {
-    "works": { "n": 1, "from": "thing", "most": 1, "audience": "public" }
+    "works": { "n": 1, "from": "thing", "most": 1, "audience": {"rule": "everyone"} }
   },
   "geometry": { "bounds_mm": [200, 400, 200] },
   "text": { "card": "A test lamp for reactions: a wall switch it is linked to lights it." },

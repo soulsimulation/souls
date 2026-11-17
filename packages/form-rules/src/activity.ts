@@ -39,7 +39,7 @@
 // removes it at that time, members or not; `lapse` then releases every member first. Nothing waits for a time.
 
 import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State } from './effects.ts';
-import { crossing, whoMay, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
+import { crossing, seesAudience, whoMay, type Audience, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
@@ -331,7 +331,7 @@ export function nowLine(input: { kinds: Record<string, Entry>; state: { nodes: I
   if (!parts || typeof parts !== 'object') return bad('no_now');
   const extra = Object.keys(parts).filter((k) => !NOW_PARTS.includes(k));
   if (extra.length) return bad('malformed_now', { parts: extra });
-  const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
+  const sees = (audience: Audience) => seesAudience(asker.sees, audience);
   const now: NowLine = {};
   const unseen: string[] = [];
   if (parts.floor !== undefined) {

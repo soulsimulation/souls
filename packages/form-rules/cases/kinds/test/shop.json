@@ -3,10 +3,10 @@
   "kind": "test:shop",
   "owner": "place",
   "state": {
-    "open": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+    "open": { "n": 1, "type": "bool", "default": false, "audience": {"rule": "everyone"} }
   },
   "links": {
-    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" }
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} }
   },
   "forms": {
     "close_until_eight": { "who": { "link": "owner" }, "starts": "act", "needs": [{ "need": "state", "field": "open", "is": true }], "steps": [], "effects": [{ "change": "set", "field": "open", "to": false, "event": "closed" }, { "change": "timer", "form": "opening", "after_us": 50400000000, "event": "opening_set" }] }

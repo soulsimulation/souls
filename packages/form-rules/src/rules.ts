@@ -91,6 +91,16 @@ export type Node = {
 };
 /** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
 export type Audience = string | { rule: 'everyone' | 'owner' | 'creator' } | { rule: 'linked'; link: string };
+
+/** Whether an asker whose `sees` is `sees` belongs to `audience`: the one resolver every audience read uses. */
+export function seesAudience(sees: unknown, audience: Audience): boolean {
+  if (sees === 'all') return true;
+  const list = Array.isArray(sees) ? sees : [];
+  if (typeof audience !== 'object' || audience === null) return typeof audience === 'string' && list.includes(audience); // a bare string keeps its old meaning; none declared is seen by no list
+  if (audience.rule === 'everyone') return true;
+  if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+  return list.includes(audience.rule);
+}
 export type Input = {
   kinds: Record<string, Entry>;
   act: { this: string; form: string; args?: Record<string, unknown> };
@@ -138,14 +148,7 @@ export function decide(input: Input): Verdict {
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
   // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
-  const sees = (audience: Audience) => {
-    if (asker.sees === 'all') return true;
-    const list = Array.isArray(asker.sees) ? asker.sees : [];
-    if (typeof audience === 'string') return list.includes(audience);
-    if (audience.rule === 'everyone') return true;
-    if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
-    return list.includes(audience.rule);
-  };
+  const sees = (audience: Audience) => seesAudience(asker.sees, audience);
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
   const formFix = (meets: (e: Effect) => boolean): Fix | null => {
@@ -452,7 +455,7 @@ export function whoMay(input: Input): WhoVerdict {
   if (typeof type !== 'string') return bad('unknown_who', { who });
   const def = has(entry.links, type) ? entry.links![type] : undefined;
   if (!def) return bad('no_such_link', { link: type });
-  const sees = asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(def.audience));
+  const sees = seesAudience(asker.sees, def.audience);
   if (!sees) return { verdict: 'unknown', who, node: act.this, link: type, read };
   const list = self.links?.[type];
   const ends = Array.isArray(list) ? list : [];

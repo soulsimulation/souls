@@ -3,7 +3,7 @@
   "kind": "test:chime_door",
   "owner": "thing",
   "state": {
-    "chimes": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "audience": "public" }
+    "chimes": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "audience": {"rule": "everyone"} }
   },
   "geometry": { "bounds_mm": [900, 2100, 60] },
   "reactions": {
