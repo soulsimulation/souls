@@ -276,7 +276,7 @@ pub fn read_pose(v: &Value) -> R<Pose> {
         },
         Some(2) => Support::Slot,
         Some(3) => Support::Volume { volume: node(2)? },
-        Some(4) => Support::Track { rail: node(2)? },
+        Some(4) => Support::Track,
         _ => return not_record("a support's kind is 0 to 4"),
     };
     let pose = Pose {
