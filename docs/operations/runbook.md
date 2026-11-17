@@ -96,6 +96,9 @@ Nightly at 03:30 UTC `sim-worlds-backup@<stage>.service` runs `deploy/backup-res
    nothing), then `check` reads a seventh of the data, so all of it is read once a week.
 5. Copies the new snapshots to `SIM_BACKUP_OFFSITE` and applies the same retention there, when that is set.
 
+The nightly retention has two rules, one per group of snapshots: the nightly rule above, and the newest 24 hourly
+snapshots ([hourly run](#hourly-run)); the nightly rule never removes an hourly snapshot.
+
 The run exits 1 if any database fails its check (the others are still snapshotted); host-health then reports it.
 Until restic is set up (no binary, password file or repository) it falls back to dated full copies
 (`deploy/backup.mjs`) and says so. The script never creates a repository: create it once with `restic init`.
@@ -109,6 +112,9 @@ set -a; . /etc/sim-worlds/backup.env; set +a
 node $R/tools/world-launcher/deploy/backup-restic.mjs list [<stage>]
 node $R/tools/world-launcher/deploy/backup-restic.mjs restore <stage> <latest|YYYY-MM-DD|id> <empty dir>
 ```
+
+`restore <stage> YYYY-MM-DD` picks that day's newest snapshot, which may be an hourly one; to get that night's nightly
+snapshot, use its id from `list`.
 
 Restore refuses a non-empty directory, lays it out like `/srv/sim-worlds-data/<stage>` and quick-checks every
 database (exit 1 if any is bad). To boot one restored world on any machine:
@@ -133,6 +139,41 @@ the plan has it, otherwise purge everything:
   that world's parts and snapshot.
 - **After a restore** of a world's data, purge that world: its snapshot key can repeat a key the edge already holds for
   other contents.
+
+### Hourly run
+
+`sim-worlds-backup-hourly@<stage>.service` runs `deploy/backup-restic.mjs backup-hourly <stage>` at minute 15 of each
+hour, once its timer is enabled. It uses the same settings file and staging mirror as the nightly run, and both run
+under one lock (`flock /srv/sim-worlds-backups/.lock-<stage>`), so they never overlap. Each run:
+
+1. Skips each database whose file and write-ahead log are no newer than its copy in the mirror (a copy's time is when
+   it began, so a write during a copy is caught the next hour), and copies and quick-checks the others.
+2. Refreshes the small files, uploads and host settings as the nightly run does.
+3. Takes one snapshot tagged `<stage>,hourly` (every database, so it restores the whole stage) and copies it to
+   `SIM_BACKUP_OFFSITE`. No forget, prune or check: the nightly run keeps the newest 24 hourly snapshots
+   (`SIM_BACKUP_KEEP_HOURLY`, default `--keep-hourly 24`) and checks the repository.
+
+It never falls back to dated copies: without restic set up it exits 1. Its result is in `<data>/backup-hourly-last.json`
+(the nightly one stays in `backup-last.json`). To enable it (the maintainer, once; `install.sh` never does):
+
+```sh
+systemctl enable --now sim-worlds-backup-hourly@production.timer
+systemctl start sim-worlds-backup-hourly@production.service    # one run now
+journalctl -u sim-worlds-backup-hourly@production -n 5          # "N/N changed databases ok (quick_check), M unchanged skipped"
+```
+
+To restore from an hourly snapshot, list them (hourly ones carry the `hourly` tag) and restore one by id, or `latest`,
+into an empty directory, locally or from the off-site copy:
+
+```sh
+set -a; . /etc/sim-worlds/backup.env; set +a
+node $R/tools/world-launcher/deploy/backup-restic.mjs list production            # <id>  <time>Z  <host>  production,hourly  ...
+node $R/tools/world-launcher/deploy/backup-restic.mjs restore production <id> <empty dir>
+RESTIC_REPOSITORY="$SIM_BACKUP_OFFSITE" node $R/tools/world-launcher/deploy/backup-restic.mjs restore production latest <empty dir>
+```
+
+Then boot one world from it as above. Tests: `node --test tools/world-launcher/backup-hourly.test.mjs` (a local
+directory stands in for the off-site bucket; skips without restic).
 
 Release backups (`ship.sh` step `backup`) are separate: row-verified compact copies in
 `/srv/sim-worlds-data/release-backups/pre-r<label>-<stage>-<date>-<time>-XXXXXX` (a random six-character suffix; older
