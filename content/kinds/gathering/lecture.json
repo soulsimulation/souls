@@ -63,9 +63,13 @@
   },
   "text": {
     "card": "A lecture: one Soul speaks from the lectern while others sit and listen.",
+    "gathering": "gathering",
+    "lectern": "lectern",
+    "speech": "speech",
+    "talk": "talk",
     "howto_give": "Begin the lecture with its topic, speak, then finish it."
   },
-  "card": { "text": "card" },
+  "card": { "text": "card", "category": "gathering", "synonyms": ["lectern", "speech", "talk"] },
   "howtos": {
     "give": { "text": "howto_give", "steps": [{ "form": "begin" }, { "form": "finish" }] }
   }

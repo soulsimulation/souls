@@ -151,10 +151,7 @@ export function validateEntry(entry) {
   }
   for (const [key, v] of Object.entries(text)) if (typeof v !== 'string' || !IDENT.test(key)) err(`text.${key}`, 'text is a table of name to words');
   if (entry.looks !== undefined && !isObj(entry.looks)) err('looks', 'an object (its table is SA-D1a\'s)');
-  if (entry.card !== undefined) {
-    if (!isObj(entry.card) || !(entry.card.text in text)) err('card.text', 'names an entry of the text table');
-    else only(entry.card, ['text'], 'card', err);
-  }
+  if (entry.card !== undefined) card(entry.card, text, err);
   for (const [name, h] of Object.entries(section(entry, 'howtos', err))) {
     const p = `howtos.${name}`;
     if (!isObj(h)) { err(p, 'a how-to is an object'); continue; }
@@ -187,6 +184,24 @@ function section(entry, key, err) {
   if (!isObj(v)) { err(key, 'a table of name to value'); return {}; }
   for (const name of Object.keys(v)) if (!IDENT.test(name)) err(`${key}.${name}`, 'a name is lower_snake_case');
   return v;
+}
+
+// A card is the line a search ranks a kind on: its purpose (at most CARD_PURPOSE_MAX characters), one category word and
+// synonyms. All are words, so all are named by reference to the text table.
+const CARD_PURPOSE_MAX = 80;
+function card(c, text, err) {
+  if (!isObj(c)) { err('card', 'an object'); return; }
+  only(c, ['text', 'category', 'synonyms'], 'card', err);
+  if (!(typeof c.text === 'string' && c.text in text)) err('card.text', 'names an entry of the text table');
+  else if ([...text[c.text]].length > CARD_PURPOSE_MAX) err('card.text', `the purpose line is at most ${CARD_PURPOSE_MAX} characters`);
+  if (c.category !== undefined) {
+    if (!(typeof c.category === 'string' && c.category in text)) err('card.category', 'names an entry of the text table (one word)');
+    else if (/\s/.test(text[c.category].trim())) err('card.category', 'one word: its text entry has more than one');
+  }
+  if (c.synonyms !== undefined) {
+    if (!Array.isArray(c.synonyms) || c.synonyms.length === 0) err('card.synonyms', 'a list of names of the text table');
+    else c.synonyms.forEach((k, i) => { if (!(typeof k === 'string' && k in text)) err(`card.synonyms.${i}`, 'names an entry of the text table (the words themselves are not written here)'); });
+  }
 }
 
 function only(obj, keys, path, err) {

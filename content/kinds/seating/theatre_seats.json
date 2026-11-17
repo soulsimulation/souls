@@ -35,7 +35,7 @@
   },
   "looks": { "model": "look:theatre_seats" },
   "text": {
-    "card": "Two rows of three theatre seats, each row with a first and a last seat at its ends."
+    "card": "Two rows of three theatre seats, each with a first and a last seat."
   },
   "card": { "text": "card" }
 }

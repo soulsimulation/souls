@@ -56,7 +56,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
-| 22 | `card` | `{"text": <key>}`: one line of purpose |
+| 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
