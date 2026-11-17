@@ -223,8 +223,9 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   type SnapshotRequest = (reason: string, o?: { now?: boolean }) => { tick: number; pending: boolean } | null;
   const plannedSnapshot = (reason: string) => { try { const req = (host as unknown as { requestSnapshot?: SnapshotRequest }).requestSnapshot; if (req) req.call(host, reason, { now: true }); else host.saveSnapshot(true); } catch (e) { console.error('[load] planned snapshot failed', e); } };
   // srv-load: the load sensor (load/monitor.ts) and in-world admission (load/admission.ts; SIM_ADMISSION=0 turns it off).
-  // Black for 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once, no backoff penalty).
-  const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission({ api: load.api, quietTickMs: () => load.shared[S.quietTickMs] });
+  // Black for 60 s with no tick completed in those 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once,
+  // no backoff penalty). A busy world that still ticks stays up at black (#2622).
+  const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission({ api: load.api, shared: load.shared });
   const drill = config.env.SIM_LOAD_DRILL_LEVEL as 'amber' | 'red' | 'black' | undefined;   // drill: hold a level (L1 tests 'planned' restarts with black)
   const monitor = new LoadMonitor({ host, shared: load.shared, api: load.api, drill: drill && ['amber', 'red', 'black'].includes(drill) ? drill : undefined, blackLimitMs: Number(config.env.SIM_LOAD_BLACK_MS) || 60_000, queue: () => admission?.queueStats() ?? { depth: 0, oldestMs: 0 }, shed: () => ({ reads: admission?.shed.reads ?? 0, acts: admission?.shed.acts ?? 0 }),
     requestMs: () => admission?.spentMs ?? 0, baselineMs: config.env.SIM_LOAD_BASELINE_MS !== undefined && config.env.SIM_LOAD_BASELINE_MS !== '' ? Number(config.env.SIM_LOAD_BASELINE_MS) : undefined,
@@ -413,7 +414,10 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     host.owedTicks = 0;
     const ms = performance.now() - at;
     if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
-    if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
+    // still behind (a host slower than the wall at the tail): the clock's first frames run what is owed, never dropped
+    const behind = owed > 0 && !host.paused && host.clockAvailable;
+    if (behind) host.oweToClock(owed);
+    if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): ${behind ? 'the clock runs them first' : 'not run'}`);
   }
   // a Soul whose birth threw at boot replay or that a rewind left out is born again (WorldHost.unbornV1), once the clock runs
   const startClock = () => { wallClock.start(); host.start(); souls.rebirthUnborn(); };

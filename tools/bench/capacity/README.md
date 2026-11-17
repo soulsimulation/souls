@@ -308,6 +308,37 @@ node tools/bench/capacity/slopes/slopes.mjs --root <built checkout> --axis inven
 
 `--slice` wraps each world on its own, so a CPU quota there is per world, unlike the meetup bench. A qualifying slopes run needs no slice: it measures cost per call, not headroom.
 
+## Viewers on one world (#2308, #2511, #2512)
+
+`viewers/viewers.mjs` measures what anonymous viewers cost one Eden 2026 world (fake minds, behind the checkout's own launcher) while Souls act, from zero viewers up. Each viewer does what the web page's entry does, with no browser: it fetches the world page, the snapshot, the config and the parts the snapshot names, then holds the world's socket open. A closed socket is reopened with the product client's own backoff (`reconnectDelayMs` in `viewers/stats.mjs` mirrors `packages/client`; its test fails if the client changes). Every viewer and every Soul has its own documentation or benchmarking address.
+
+The viewers are held by `--drivers` child processes (`viewers/driver.mjs`), each with a share, so the bench reaches 10,000 viewers without one process being the limit. A viewer's socket is a raw one (`viewers/frames.mjs`): the WebSocket upgrade with compression offered, then frame headers only. It counts frames, messages and their payload bytes as sent (compressed), and never inflates or parses them; it answers pings. One viewer in a hundred (the first, then every hundredth) is the product client's own `Connection` (`packages/client`). Those full clients give first motion, the bytes they received inflated, resyncs and failed view-hash checks. Since #2512, **bytes per viewer is the compressed stream** per raw viewer (before, it was the inflated text). The full clients' inflated figure is its own column. The open-file limit and the local port range are checked at the start, and a run that would run out fails at once with what to raise.
+
+| option | meaning |
+|---|---|
+| `--viewers 0,50,200` | the arms, in rising order; `0` is the zero-viewer arm |
+| `--souls <n>` (to 100) and `--act-sec <s>` | Souls joined with the world's CLI; each acts every `s` seconds from the start of its last act (without it, 6–10 s after the last answer) |
+| `--arrive-per-sec <n>` (default 20) | the rate at which viewers arrive while fewer than the arm's count are present |
+| `--dwell-sec <median>` | each viewer leaves after a heavy-tailed stay (log-normal, sigma 1, seeded per repeat); arrivals continue all window to hold the count |
+| `--arrive-burst <n>@<s>` | `n` more viewers arrive within 5 s, `s` seconds into each window with viewers (a link was just posted); they leave by their own stay, or at the window's end |
+| `--drivers <k>` (default 1, to 16) | driver processes; viewer `i` is held by driver `i mod k` |
+| `--slow-readers <n>` | `n` more raw sockets join at each window's midpoint, read for 5 s (the join) and then stop reading, to the window's end; the report gives the world's resident memory and heap, and the launcher's memory, as the mean before they join against the peak after, per slow reader, and how many the server cut |
+| `--restart-at <s>` | `s` seconds into the first window with viewers, the world process gets SIGTERM and the launcher restarts it; the reconnect table gives the viewers back within 30 s (a new socket received its first message), later or never, where they landed (the upgrade's `x-sim-served-by`, else the world), and the world's downtime, tick and memory through it. The window needs 30 s after it |
+| `--stub` and `--stub-kb <n>` (default 50) | no world and no launcher: the drivers against `viewers/stub.mjs`, which sends each socket `n` kB/s in 10 messages a second; the timed run pins the stub to the world's cores, so the drivers' own processor use is measured alone |
+
+Per window it reports the existing columns (tick, act queue and handler time, load levels, world, launcher and driver processor use, bytes per viewer, world calls by viewers, refusals) and: viewers held, joins and leaves per second, reconnects, **first motion** (seconds from a newcomer's first socket to its first take that carries a chunk, p50 and p95; only up to 50 newcomers waiting at once read their messages' heads, and nothing else is parsed), the main thread's heap beside the process's resident memory, and acts achieved against intended. The world's log and any `stall-*.json` are kept in each repeat's folder and in the timed run's artifact.
+
+```bash
+# the timed runner (all timing): command viewers, repeats 2
+#   args: --viewers 0,50,200 --souls 24 --act-sec 10 --arrive-per-sec 20                      (even)
+#   args: --viewers 0,200 --souls 24 --act-sec 10 --dwell-sec 60 --arrive-burst 100@30        (uneven)
+#   args: --viewers 2000 --drivers 4 --slow-readers 50 --restart-at 40                       (#2512)
+#   args: --viewers 5000 --drivers 4 --stub                                                   (the drivers alone)
+```
+
+The world's own cap is 2,000 sockets (the hub's `MAX_CLIENTS`). Arms above it measure refusals until the viewer thread
+exists. On today's three-core timed runners, the drivers share one physical core with the launcher.
+
 ## Recorded baseline (2026-10-31, before the server-reliability fixes)
 
 Fixture: the compact Eden 2026 copy, sha256 `d0921000a7ef…`, heap cap 768 MB unless noted; two repeats per arm, shown

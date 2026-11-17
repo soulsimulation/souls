@@ -4,6 +4,7 @@
 // person or agent sends: more than 30 requests a second from one god token, or 100 API requests/writes a second from one
 // address (several people behind one NAT included). Page and static-file GETs are never counted here.
 import { createHash } from 'node:crypto';
+import { addressKey } from '../../apps/server/src/address-key.ts';
 
 export const LAUNCHER_FLOOD = Object.freeze({ godTokenPerS: 30, godTokenBurst: 900, ipPerS: 100, ipBurst: 2000 });
 
@@ -51,8 +52,8 @@ export function launcherFlood({ limits = {}, now = Date.now, log = (l) => consol
     const what = `${req.method} ${slug} ${rest.split('?')[0]}`;
     const auth = req.headers.authorization ?? '', m = /^Bearer\s+(god_\S+)/i.exec(auth);
     if (m) { const key = short(m[1]), wait = tokens.take(key); if (wait) return refuse('god-token', key, `more than ${L.godTokenPerS * 60} requests a minute from this god token`, wait, what); }
-    const xff = behindProxy ? req.headers['x-forwarded-for'] : undefined;
-    if (xff) { const ip = String(xff).split(',')[0].trim(), key = short(ip), wait = ips.take(ip); if (wait) return refuse('address', key, `more than ${L.ipPerS * 60} requests a minute from your address`, wait, what); }
+    const ip = behindProxy ? addressKey(req.headers['x-forwarded-for']) : null;   // #2543: an IPv6 network by its /64
+    if (ip) { const key = short(ip), wait = ips.take(ip); if (wait) return refuse('address', key, `more than ${L.ipPerS * 60} requests a minute from your address`, wait, what); }
     return null;
   };
 }
@@ -197,7 +198,7 @@ export function soulCeilings({ limitsFor = () => null, now = Date.now, log = (l)
       // only the Soul API is ceilinged: god and world routes (the world creator's own coding agent) keep the god-token
       // bucket and the address flood guard (launcherFlood); a C3 public read still gets its class for the micro-cache
       if (!edge) return cls === 'C3' ? { cls, soul: null, release() {} } : null;
-      const xff = behindProxy ? req.headers['x-forwarded-for'] : undefined, ip = xff ? String(xff).split(',')[0].trim() : null;
+      const ip = behindProxy ? addressKey(req.headers['x-forwarded-for']) : null;   // #2543: an IPv6 network by its /64
       const soul = soulOf(req), acct = soul ? accounts.get(soul) ?? soul : null, heavy = edge && (cls === 'C1' || cls === 'C2');
       const len = Number(req.headers['content-length'] ?? 0);
       if (edge && !rest.startsWith('/v1/edge/body/uploads') && len > l.maxBodyKb * 1024) { note(slug, 'request.too-large', 'body'); return { refuse: { status: 413, headers: { 'cache-control': 'no-store' }, body: { ok: false, code: 'request.too-large', message: `A request body may be at most ${l.maxBodyKb} KB; this one is larger, so it was not sent to the world`, limit: { scope: 'body' } } } }; }
@@ -268,6 +269,8 @@ export class MicroCache {
     this.flying.set(key, p);
     return { ...(await p), cache: 'miss' };
   }
+  /** The answer kept under `key` if it is younger than `ttlMs`, else null (#2515: the world page, which the launcher keeps itself). */
+  peek(key, ttlMs) { const e = this.m.get(key); if (!e || this.now() - e.at >= ttlMs) return null; this.hits++; return e.r; }
   keep(key, r) {
     this.drop(key); this.m.set(key, { at: this.now(), r }); this.bytes += r.body.length;
     while (this.m.size > this.maxEntries || this.bytes > this.maxTotalBytes) this.drop(this.m.keys().next().value);

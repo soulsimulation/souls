@@ -18,6 +18,7 @@
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
 //   GET  /__sim/launcher         children, ports, pids, restarts (diagnostics; direct local requests only)
+//   GET  /__sim/whoami           {address}: the address this request is keyed on (first X-Forwarded-For entry, else the peer)
 //   GET  /__sim/healthz          {ok, build, worlds, running, caps, memAvailableMb} (also /healthz); clientErrorsNew = error kinds
 //                                pages first reported since this build went live (client-errors.mjs)
 //   GET  /__sim/glitches         loopback: every world's recoveries and halts by rule and rung; ?world=<slug>[&limit=N] adds its records
@@ -35,6 +36,9 @@
 //   POST /__sim/op/set-claimable operator only: {slug, claimable} → a world with no god that nobody may claim (false)
 //   POST /__sim/op/set-unlisted  operator only: {slug, unlisted} → left out of worlds.json (the public list), still served
 //   POST /__sim/op/set-heap      operator only: {slug, worldHeapMb: MB|null} → that world's heap cap from its next boot
+//   POST /__sim/op/set-site      operator only: {uploads?, creation?: boolean} → #2540 site switches, at once (worlds.json
+//                                `site`, an audit row): off answers POST to the upload routes 503 site.uploads-paused and
+//                                POST /__sim/worlds 503 site.creation-paused, with Retry-After; healthz `site` shows both
 //   POST /__sim/op/set-read-workers operator only: {slug, readWorkers: 0-4|null} → Stage B read workers from its next boot
 //                                (0 = off; null = the launcher's default: 1 with SIM_READ_WORKER=1, else off)
 //                                at its URL (listing.mjs; bench worlds and "… (scratch)" names are unlisted by default)
@@ -105,8 +109,9 @@ import { healthDash } from './health-dash.mjs';
 import { readGlitches } from './glitches.mjs';
 import { usageRollup } from './usage.mjs';
 import { ownerOverview } from './owner-overview.mjs';
-import { connect } from 'node:net';
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { connect, isIP } from 'node:net';
+import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from 'node:fs';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -121,8 +126,10 @@ import { EXISTING_WORLDS, decorateCommand, memAvailableMb, productionSettings } 
 import { makeHandoff } from './handoff.mjs';
 import { MicroCache, launcherFlood, listenTimeoutMs, refusalBody, requestClass, short, soulCeilings } from './flood.mjs';
 import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
+import { readAlertProblems } from './telemetry/alerts.mjs';   // #2541
 import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
 import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
+import { addressKey, forwardedAddress } from '../../apps/server/src/address-key.ts';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
@@ -131,6 +138,17 @@ import { opSoul, opSetTest } from './op-souls.mjs';
 import { accountSouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
+/** <data>/launcher-settings.json (written by deploy/install.sh unload-still), read once at each launcher's start, so a
+ *  reload (the keeper's new generation) picks up a change without touching the stage's conf: { unloadStill: 0|1 }.
+ *  Absent: {}. Unreadable or a bad value: {} (the args' defaults), said in the log. */
+export function launcherSettings(dataDir, log = () => {}) {
+  const f = join(dataDir, 'launcher-settings.json');
+  let j; try { j = JSON.parse(readFileSync(f, 'utf8')); } catch (e) { if (e.code !== 'ENOENT') log(`launcher-settings.json unreadable (${e.message}); the args' defaults apply`); return {}; }
+  const v = j?.unloadStill;
+  if (v !== 0 && v !== 1 && v !== true && v !== false) { log(`launcher-settings.json: unloadStill must be 0 or 1 (got ${JSON.stringify(v)}); the args' defaults apply`); return {}; }
+  log(`launcher-settings.json: unloadStill ${v ? 1 : 0}`);
+  return { unloadStill: v === 1 || v === true };
+}
 /** The world's heap cap (lane L1, LOAD-CONTRACT §4: per world from the registry, registry.mjs worldHeapMb). A node child gets
  *  it as its own command-line flag, so a NODE_OPTIONS the auth env file sets (tests' preloads) still applies and a heap
  *  flag there loses to this one; any other command gets it in NODE_OPTIONS. */
@@ -152,6 +170,12 @@ const LEVELS = ['green', 'amber', 'red', 'black'], HOT = new Set(['red', 'black'
 /** A viewer's arrival reads (#2308 follow-up): a snapshot part is content-addressed and immutable (kept for the world
  *  process's life, at most PART_TTL_MS); /v1/config is the world's public settings, kept as briefly as a C3 read. */
 const PART_PATH = /^\/v1\/world\/part\/[0-9a-f]{32}$/, PART_TTL_MS = 3600_000;
+/** #2515 (E3): the world page is built at most once per PAGE_TTL_MS for every arrival (a 2 s old world clock or snapshot
+ *  key on it costs one snapshot miss, which the snapshot route answers with the current world). */
+const PAGE_TTL_MS = 2000;
+/** #2515 (E3): what the CDN may keep of a public answer that is the same for every caller without a token (as the world's
+ *  /v1/config, apps/server/src/http.ts): 5 s, then served stale for 30 s while it asks again. docs/operations/cdn.md */
+const EDGE_BRIEF = { 'cloudflare-cdn-cache-control': 'max-age=5, stale-while-revalidate=30' };
 /** Only a public answer is shared between callers: none that sets a cookie or says it is private or not to be kept. */
 const shareable = (r) => !r.headers['set-cookie'] && !/\b(private|no-store)\b/i.test(String(r.headers['cache-control'] ?? ''));
 function hostHealth(dataDir) {
@@ -239,6 +263,13 @@ const BUILD = (() => { try { return readFileSync(join(dirname(fileURLToPath(impo
 const CLAIM_PATHS = new Set(['/v1/god/claim', '/v1/god/mint', '/v1/god/pair/approve']);
 const sameName = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 const direct = (req) => !req.headers['x-forwarded-for'] && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
+/** #2540: a world's upload routes (POST): god assets, art media, bodies. The world thumbnail is the launcher's own route. */
+const UPLOAD_ROUTE = /^\/v1\/(?:god\/assets|art\/media|edge\/body\/uploads)\/?$/;
+/** #2540: the operator's switches (op.mjs set-site): a named, retriable answer, never a failure midway. */
+const SITE_PAUSED = {
+  uploads: [refusalBody('site.uploads-paused', 'Uploads are paused on this site for now; everything else in the world works as usual. Nothing was stored. Try again in 10 minutes.', 600_000, 'site'), { 'retry-after': '600', 'cache-control': 'no-store' }],
+  creation: [refusalBody('site.creation-paused', 'New worlds are paused on this site for now; existing worlds are open as usual. Nothing was made. Try again in 10 minutes.', 600_000, 'site'), { 'retry-after': '600', 'cache-control': 'no-store' }],
+};
 
 /**
  * @param {{ port?: number, dataDir?: string, range?: [number, number], root?: string, webDir?: string,
@@ -271,6 +302,7 @@ export async function openLauncher(cfg = {}) {
   // lane L1, LOAD-CONTRACT §2b: exact ceilings on the Soul API per address, Soul, account and world (registry `limits`)
   const ceilings = soulCeilings({ limitsFor: (slug) => ({ ...(cfg.soulLimits ?? {}), ...(registry.get(slug)?.limits ?? {}) }), log });
   const c3 = new MicroCache();
+  const pageFlights = new Map();   // #2515: the world page being asked of the world now, by its key: arrivals meanwhile wait for it
   const partCache = new MicroCache({ maxEntries: 256, maxTotalBytes: 64 * 2 ** 20 });   // snapshot parts: long-lived, so bounded in bytes too
   const errors = clientErrors({ dir: join(dataDir, 'client-errors'), build: BUILD, log, limits: cfg.clientErrorLimits });   // lane ERR, client-errors.mjs
   const feed = platformFeed({ dataDir, log });   // #1876: the platform feed, feed.mjs
@@ -298,6 +330,13 @@ export async function openLauncher(cfg = {}) {
   const waitHandBack = async (slug, e) => (e.code === 'handed-back' || canaryRun?.slug === slug) && (await canaryRun?.passed) === false && handedBack();
   const adopting = Array.isArray(cfg.adopt) ? cfg.adopt : null;
   const createLimit = cfg.createLimit ?? Infinity, made = new Map();
+  // #2541: what a spike needs exported (metrics.mjs): worlds created here since start, and this process's own loop delay
+  let worldsCreated = 0; const loopDelay = monitorEventLoopDelay({ resolution: 20 }); loopDelay.enable();
+  const launcherGauges = () => {
+    const p99 = loopDelay.count ? loopDelay.percentile(99) / 1e6 : null; loopDelay.reset();   // ns → ms, since the previous scrape
+    let disk = null; try { const s = statfsSync(dataDir); disk = { free: s.bavail * s.bsize, size: s.blocks * s.bsize }; } catch { /* left out: "no data", not 0 */ }
+    return { loopDelayP99Ms: p99, worldsCreated, diskFreeBytes: disk?.free, diskSizeBytes: disk?.size };
+  };
   /** Open WebSocket (upgraded) connections per world: a world someone is watching never goes to sleep. */
   const live = new Map();
   /** HTTP requests in flight per world (a god's long-poll listen): such a world is not idle either. */
@@ -311,8 +350,13 @@ export async function openLauncher(cfg = {}) {
    *  alarm loads it at moveWallMs, or at untilWallMs while a resident reads it. Times are cfg-overridable for tests.
    *  #2367 A1: the alarm loads it leadMs before its next deadline of any kind (a reminder, a plan step, a body's move:
    *  untilWallMs), listener or not, so the deadline is met by the world running, not by its next visitor. */
-  const unloadStill = cfg.unloadStill === true;
-  const STILL = { leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
+  // the 0.130 switch: an explicit cfg.unloadStill (--unload-still) wins; else <data>/launcher-settings.json, read once here
+  const fileSettings = cfg.unloadStill !== undefined ? {} : launcherSettings(dataDir, log);
+  const unloadStill = cfg.unloadStill !== undefined ? cfg.unloadStill === true : fileSettings.unloadStill === true;
+  log(`unload-still ${unloadStill ? 1 : 0} (${cfg.unloadStill !== undefined ? 'the --unload-still arg' : fileSettings.unloadStill !== undefined ? 'launcher-settings.json' : 'the default'})`);
+  // #2490: dueGraceMs, how long past its deadline (or its late load) an alarm-loaded world is kept from being unloaded to
+  // make room; loadMs, the load time the alarm plans with until the pool has measured some (ChildPool.loadMs)
+  const STILL = { dueGraceMs: cfg.stillDueGraceMs ?? 5000, loadMs: cfg.stillLoadMs ?? 5000, leadMs: cfg.stillLeadMs ?? 30_000, quietMs: cfg.stillQuietMs ?? 600_000, horizonMs: cfg.stillHorizonMs ?? 600_000, servedMs: cfg.stillServedMs ?? 30_000, listenerMs: cfg.stillListenerMs ?? 600_000, everyMs: cfg.stillEveryMs ?? 15_000, alarmMs: cfg.stillAlarmMs ?? 1000 };
   const horizonsFile = join(dataDir, 'horizons.json');
   const horizons = new Map((() => { try { return Object.entries(JSON.parse(readFileSync(horizonsFile, 'utf8'))); } catch { return []; } })());
   const saveHorizons = () => { try { writeFileSync(`${horizonsFile}.tmp`, JSON.stringify(Object.fromEntries(horizons), null, 1) + '\n'); renameSync(`${horizonsFile}.tmp`, horizonsFile); } catch (e) { log(`horizons: ${e.message}`); } };
@@ -350,7 +394,7 @@ export async function openLauncher(cfg = {}) {
   const siteKey = randomBytes(32).toString('hex');
   const siteOk = (req) => { const h = String(req.headers['x-sim-site-key'] ?? ''); return direct(req) && h.length === siteKey.length && timingSafeEqual(Buffer.from(h), Buffer.from(siteKey)); };
   const pool = new ChildPool({ root, range, site: { url: `${origin}${prod.base}`, key: siteKey }, logDir: join(dataDir, 'logs'), pidFile: join(dataDir, 'children.json'), libraryDir: join(dataDir, 'library'), compileCache: cfg.compileCache === false || process.env.SIM_COMPILE_CACHE === '0' ? null : compileCacheDir(dataDir, BUILD), cobuilders: cfg.cobuilders ?? process.env.SIM_COBUILDERS === '1', idleMs: cfg.idleMs, marsWebDir, publicOrigin, auth: auth?.child, soulControllerCliFile: resolve(cfg.soulControllerCli ?? SOUL.controllerCli), soulSkillFile: resolve(cfg.soulSkill ?? SOUL.skill), soulInstructionsFile: resolve(cfg.soulInstructions ?? SOUL.instructions), command: cfg.command ?? ((w, p, o) => (w.fork ? forkCommand : defaultCommand)(w, p, o)), healthPath: (s) => `${wp(s)}/healthz`,
-    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* #2367 A2 */ roomWaitMs: cfg.roomWaitMs, refreshStill: () => lookAtWorlds(), /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0, sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
+    maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, worldsMemMb: prod.worldsMemMb, still: (k) => stillSeen.get(k.slug) ?? null, /* #2367 A2 */ roomWaitMs: cfg.roomWaitMs, refreshStill: () => lookAtWorlds(), /* handover pre-warm: only world commands that know SIM_STANDBY (this release's own) */ prewarm: cfg.prewarm ?? (!cfg.command && process.env.SIM_PREWARM !== '0'), busy: (slug) => (live.get(slug) ?? 0) > 0 || (httpLive.get(slug) ?? 0) > 0 || heldForDue(slug), /* #2490 */ sleepMs: cfg.sleepMs ?? SLEEP_MS, exitMs: cfg.exitMs ?? idleExitMs(), exitForks: cfg.exitForks ?? process.env.SIM_WORLD_IDLE_EXIT_FORKS === '1', decorate: (c, w) => { const d = decorateCommand({ ...c, env: { ...c.env, WEB_DIR: webDir } }, { ...prod, worldHeapMb: 0 }); withHeap(d, d.env.SIM_FORK ? (w?.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb)); if (Number.isInteger(w?.loadBaselineMs) && w.loadBaselineMs >= 0) d.env.SIM_LOAD_BASELINE_MS = String(w.loadBaselineMs); /* LOAD-CONTRACT §1: per-world quiet-baseline pin (lane L2) */ if (d.env.SIM_FORK && oldRoot) Object.assign(d.env, { SIM_FORK_ROOT: '1', INVITE_REQUIRED: '0', SEED_NATIVES: '0' }); return d; }, /* lane L1: the guard (guard.mjs; cfg.guard overrides its numbers, false: off) and the watchdog port (real worlds, a range of 2 per running world) */ log, guard: cfg.guard || undefined, /* Stage B (lane B-port): read workers per world (registry readWorkers, SIM_READ_WORKER=1) */ readWorkers: (w) => readWorkersOf(w, cfg.readWorkerEnv ?? process.env), healthPorts: cfg.healthPorts ?? (!cfg.command && range[1] - range[0] + 1 >= 2 * prod.maxRunning),   /* (a second port per running world: only where the range has one for each) */
     /* worlds serve the same web build, with its --base */ onChange: (slug) => { const s = pool.status(slug); if (s.port && registry.get(slug) && registry.get(slug).port !== s.port) registry.update(slug, { port: s.port }); if (unloadStill && s.status === 'running') loaded(slug); wakeParked(slug); },
     /* #2304: at most loadParallel worlds load at once, in order of reason */ loadParallel: cfg.loadParallel ?? 4,
     ...(unloadStill ? { beforeStop: (k) => recordHorizon(k), afterRelease: (slug) => moveOnHandover(slug) } : {}) });
@@ -551,7 +595,7 @@ export async function openLauncher(cfg = {}) {
     if (!/^[A-Za-z0-9_:.-]{3,96}$/.test(owner)) return [400, { ok: false, code: 'invalid', message: 'owner (account id) or ownerOf (slug of a world it owns) is required' }];
     if (!accountExists(owner)) return [404, { ok: false, code: 'no-account', message: `no account ${owner} in this launcher's account registry` }];
     const run = creating.then(() => createWorld(body, undefined, { owner })); creating = run.catch(() => {});
-    return run;
+    return run.then((out) => { if (out[0] === 201) worldsCreated++; return out; });
   }
 
   // ---------- operator: forks of the old worlds (lane FORKS). Only FORK_SLUGS, only from this machine, only onto a
@@ -900,11 +944,16 @@ export async function openLauncher(cfg = {}) {
     return out.filter(Boolean);
   }
   /** The alarm (A2): an unloaded world loads when a body is due to move or its next deadline nears (#2367 A1); one
-   *  unloaded while not still loads once there is room (#2475 A1). */
-  const alarmLoading = new Set();
+   *  unloaded while not still loads once there is room (#2475 A1). #2490: deadlines that fall together are loaded in
+   *  deadline order, each early enough that it and every world behind it can load in time, loadParallel at a time at the
+   *  pool's measured load time; before its deadline a load starts only into room (or with one world to unload for it, one
+   *  a pass), so it never holds a load slot waiting; and a world so loaded is not unloaded for room until its deadline
+   *  is dueGraceMs past (dueHeld), so early loads never unload one another. */
+  const alarmLoading = new Set(), dueHeld = new Map();
+  const heldForDue = (slug, now = Date.now()) => { const u = dueHeld.get(slug); if (u == null) return false; if (now < u) return true; dueHeld.delete(slug); return false; };
   function alarmScan(now = Date.now()) {
     if (!unloadStill || phase !== 'active' || gate || pool.closing || pool.fenced) return [];
-    const due = []; let roomed = false;
+    const due = [], deadlines = []; let roomed = false;
     for (const [slug, h] of horizons) {
       const w = registry.get(slug);
       if (!w) { horizons.delete(slug); saveHorizons(); continue; }
@@ -917,13 +966,31 @@ export async function openLauncher(cfg = {}) {
         pool.ensure(worldEnv(w), { passive: true, reason: 'background', timeoutMs: 0 }).then((p) => log(`${slug} loaded by its alarm (unloaded while not still; room now) on :${p}`), (e) => log(`${slug}: its alarm could not load it: ${e.message}`)).finally(() => alarmLoading.delete(slug));
         continue;
       }
+      // #2367 A1: any deadline (a reminder is one: edge.reminder.* in the world's horizon)
+      const dueAt = Math.min(h.moveWallMs ?? Infinity, h.untilWallMs ?? Infinity);
+      if (Number.isFinite(dueAt)) deadlines.push({ slug, w, h, dueAt });
+    }
+    // #2490: startAt[j] = min(dueAt[j] - leadMs, startAt[j + parallel] - loadMs): world j and the ones behind it in the
+    // load slots each load before their own deadline (a fixed lead loaded a burst late: the 15 Nov #2301 re-run, p50 59 s)
+    deadlines.sort((a, b) => a.dueAt - b.dueAt || (a.slug < b.slug ? -1 : 1));
+    const par = pool.o.loadParallel > 0 ? pool.o.loadParallel : Infinity, loadMs = pool.loadMs() ?? STILL.loadMs, startAt = [];
+    for (let j = deadlines.length - 1; j >= 0; j--) startAt[j] = Math.min(deadlines[j].dueAt - STILL.leadMs, j + par < deadlines.length ? startAt[j + par] - loadMs : Infinity);
+    const early = []; let unloading = false;
+    for (const [j, { slug, w, h, dueAt }] of deadlines.entries()) {
+      if (startAt[j] > now) continue;
+      if (now < dueAt) {
+        const r = pool.roomFor(slug, [...pool.loadWaiting.map((x) => x.k.world), ...early]);
+        if (!r.ok) { if (r.low || unloading || !pool.roomVictim(slug, now)) continue; unloading = true; }
+        early.push(worldEnv(w));
+      }
       const listener = now - (residentAt.get(slug) ?? -Infinity) < STILL.listenerMs;
-      // #2367 A1: any deadline (a reminder is one: edge.reminder.* in the world's horizon), leadMs early to load in time
-      const why = h.moveWallMs != null && h.moveWallMs - STILL.leadMs <= now ? 'a body is due to move' : h.untilWallMs != null && h.untilWallMs - STILL.leadMs <= now ? (listener ? 'its next event, with a listener' : 'its next deadline') : null;
-      if (!why) continue;
+      const why = h.moveWallMs != null && h.moveWallMs === dueAt ? 'a body is due to move' : listener ? 'its next event, with a listener' : 'its next deadline';
+      const ahead = Math.max(0, Math.round((dueAt - now) / 1000));
       alarmLoading.add(slug); due.push(slug);
       // #2304: in the load queue behind acts and visitors: a listener's alarm, then a wind-down step
-      pool.ensure(worldEnv(w), { passive: true, reason: why === 'a body is due to move' && !listener ? 'winddown' : 'listener', timeoutMs: 0 }).then((p) => log(`${slug} loaded by its alarm (${why}) on :${p}`), (e) => log(`${slug}: its alarm could not load it: ${e.message}`)).finally(() => alarmLoading.delete(slug));
+      pool.ensure(worldEnv(w), { passive: true, reason: why === 'a body is due to move' && !listener ? 'winddown' : 'listener', timeoutMs: 0 })
+        .then((p) => { dueHeld.set(slug, Math.max(dueAt, Date.now()) + STILL.dueGraceMs); log(`${slug} loaded by its alarm (${why}${ahead ? `, asked ${ahead} s before it` : ''}) on :${p}`); }, (e) => log(`${slug}: its alarm could not load it: ${e.message}`))
+        .finally(() => alarmLoading.delete(slug));
     }
     return due;
   }
@@ -940,7 +1007,7 @@ export async function openLauncher(cfg = {}) {
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
-  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData } = {}) {
+  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep } = {}) {
     if (clientGone(req, res)) return;
     const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
@@ -960,6 +1027,7 @@ export async function openLauncher(cfg = {}) {
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
       if (onData) r.on('data', onData);
+      if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
       r.pipe(res);
     });
     // A world that was just handed over (or restarted) refused the connection before answering: a GET/HEAD is asked again
@@ -1021,6 +1089,8 @@ export async function openLauncher(cfg = {}) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
       json(res, 404, { ok: false, code: 'world.not-served', slug }); return;
     }
+    // #2540: uploads paused site-wide: a POST to one of the world's upload routes is answered here (reads and everything else pass)
+    if (req.method === 'POST' && UPLOAD_ROUTE.test(url.pathname.slice(wp(slug).length)) && !registry.site().uploads) { res.shouldKeepAlive = false; json(res, 503, ...SITE_PAUSED.uploads); return; }
     // lane L1 (LOAD-CONTRACT §4): the Soul API of a world just restarted or at red/black is answered here at once, and
     // that of a booting world waits here for it (#2231), both before the ceilings: a boot is not a client's fault
     const edgeRest = url.pathname.slice(wp(slug).length) || '/', edgeCls = !retried && edgeRest.startsWith('/v1/edge/') ? requestClass(edgeRest, req.method) : null;
@@ -1112,9 +1182,42 @@ export async function openLauncher(cfg = {}) {
       void cachedRead(req, res, p, slug, url, part ? PART_TTL_MS : HOT.has(levelOf(slug)) ? Math.max(lim.c3CacheMs, 2000) : lim.c3CacheMs, { cache: part ? partCache : c3, key, storable: shareable });
       return;
     }
+    // #2515 (E3): the world page. It is the same for every caller (no cookie, nonce or per-caller value) and every query, so
+    // it is kept by its path, the world process and the host headers its URLs are made from, never by the query (a random
+    // one would pass the cache) or the cookie. Only an answer the world marks as its page (X-Sim-Page), from a GET that
+    // reached it, is kept; arrivals while it is asked wait for it (a wave costs one build). The world's other routes are
+    // proxied as before. Its robots tag is the world's own rule, set for each request. Only a GET that asks for HTML (a
+    // browser's arrival) is a page: any other GET, such as a long-poll, never waits behind another caller's flight.
+    let keep;
+    if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
+      const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
+      let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
+      if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
+      if (kept) {
+        const { 'server-timing': _t, 'x-robots-tag': _r, ...headers } = kept.headers;
+        if (headers['x-sim-page'] !== 'index' || req.url.includes('?')) headers['x-robots-tag'] = NOINDEX;   // as apps/server/src/http.ts (INDEXABLE)
+        res.writeHead(200, robotsOf(slug, { ...headers, 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(kept.body);
+        return;
+      }
+      // the first arrival asks the world; the flight ends with the kept page, or with nothing (not the page, an error, gone)
+      let done = () => {};
+      if (!retried && !pageFlights.has(pageKey)) {
+        const flight = new Promise((y) => { done = (v) => { if (pageFlights.get(pageKey) === flight) pageFlights.delete(pageKey); y(v); }; });
+        pageFlights.set(pageKey, flight); res.once('close', () => done(null));
+      }
+      keep = (u) => {
+        if (u.statusCode !== 200 || !/^(index|world)$/.test(u.headers['x-sim-page'] ?? '') || u.headers['content-encoding'] || !shareable({ headers: u.headers })) { done(null); return; }
+        const chunks = []; u.on('data', (c) => chunks.push(c)); u.on('error', () => done(null));
+        u.on('end', () => {
+          const { connection: _c, 'keep-alive': _k, 'transfer-encoding': _t, 'x-sim-account': _a, ...headers } = u.headers, body = Buffer.concat(chunks), r = { status: 200, headers: { ...headers, 'content-length': String(body.length) }, body };
+          if (body.length <= c3.maxBytes) c3.keep(pageKey, r);
+          done(r);
+        });
+      };
+    }
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
-    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)
     const rp = retried ? null : readTarget(slug, w, rest, req.method, url.search);
     if (rp) { proxyRead(req, res, slug, rp, p, { ...opts, worldDeferred: !!gated?.worldDeferred }); return; }
@@ -1290,7 +1393,7 @@ export async function openLauncher(cfg = {}) {
         if (req.method === 'POST') {
           const chunks = []; let n = 0;
           for await (const c of req) { n += c.length; if (n > 8192) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
-          const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+          const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543
           const [st, out] = errors.ingest(who, req.headers['user-agent'], Buffer.concat(chunks));
           if (out) json(res, st, out); else res.writeHead(st, { 'cache-control': 'no-store' }).end(); return;
         }
@@ -1306,7 +1409,8 @@ export async function openLauncher(cfg = {}) {
         if (may !== 200) { json(res, may, { ok: false, code: may === 401 ? 'sign-in' : may === 403 ? 'not-owner' : 'busy' }); return; }
         const d = await dash.json(); json(res, 200, d, { 'server-timing': `dash;dur=${(performance.now() - t0).toFixed(1)}` }); return;
       }
-      if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson()); return; }
+      // #2515 (E3): the public world list is the same for everyone; without a token the CDN may keep it briefly
+      if (path === '/__sim/worlds.json' && req.method === 'GET') { json(res, 200, await worldsJson(), req.headers.authorization ? {} : EDGE_BRIEF); return; }
       if (path === '/__sim/my-souls.json' && req.method === 'GET') {
         const souls = await mySouls(req.headers.authorization);
         if (!souls) { json(res, 401, { ok: false, code: 'signin-required', message: 'sign in to see your Souls' }, { vary: 'authorization' }); return; }
@@ -1324,15 +1428,16 @@ export async function openLauncher(cfg = {}) {
         json(res, 403, { ok: false, code: 'creation.elsewhere', message: 'This server keeps the original worlds. Make new worlds at /worlds/.', url: '/worlds/' }); return;
       }
       if (path === '/__sim/worlds' && req.method === 'POST') {
+        if (!registry.site().creation) { res.shouldKeepAlive = false; json(res, 503, ...SITE_PAUSED.creation); return; }   // #2540
         const chunks = []; let n = 0;
         for await (const c of req) { n += c.length; if (n > 16_384) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { json(res, 400, { ok: false, code: 'bad-json' }); return; }
         // per-client creation limit (production): the first x-forwarded-for hop is the visitor Caddy saw
-        const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+        const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
         const recent = (made.get(who) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
         if (recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
         const run = creating.then(() => createWorld(body, req.headers.authorization)); creating = run.catch(() => {});
-        const out = await run; if (out[0] === 201) made.set(who, [...recent, Date.now()]);
+        const out = await run; if (out[0] === 201) { made.set(who, [...recent, Date.now()]); worldsCreated++; }
         json(res, out[0], out[1], out[1].retry_after ? { 'retry-after': String(out[1].retry_after) } : {}); return;
       }
       if (path === '/__sim/op/create-world' && req.method === 'POST') {
@@ -1342,7 +1447,7 @@ export async function openLauncher(cfg = {}) {
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { json(res, 400, { ok: false, code: 'bad-json' }); return; }
         const out = await opCreateWorld(body); json(res, out[0], out[1]); return;
       }
-      const forkOp = path.match(/^\/__sim\/op\/(register-fork|remove-fork|set-claimable|set-unlisted|set-heap|set-read-workers|set-limits|resume-world|archive-world|restore-world|list-archive|audit)$/)?.[1];
+      const forkOp = path.match(/^\/__sim\/op\/(register-fork|remove-fork|set-claimable|set-unlisted|set-heap|set-read-workers|set-limits|set-site|resume-world|archive-world|restore-world|list-archive|audit)$/)?.[1];
       if (forkOp && req.method === 'POST') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'local-only', message: 'operator commands are accepted only from this machine' }); return; }
         const chunks = []; for await (const c of req) chunks.push(c);
@@ -1358,6 +1463,8 @@ export async function openLauncher(cfg = {}) {
           'archive-world': (b) => { const w = registry.get(typeof b?.slug === 'string' ? b.slug : ''); return w ? archive(w, 'operator', b?.reason) : [404, { ok: false, code: 'not-found', message: 'no world by that slug' }]; },
           'restore-world': (b) => { const r = restoreWorld({ registry, dataDir }, b?.id, 'operator'); if (r[0] === 200) log(`restored ${r[1].slug} from ${r[1].id} (operator)`); return r; },
           'list-archive': () => [200, { ok: true, archive: listArchive(dataDir) }],
+          // #2540: the site switches (uploads, creation: true on, false paused), at once, kept in worlds.json, audited
+          'set-site': (b) => { const ch = Object.fromEntries(['uploads', 'creation'].filter((k) => b?.[k] !== undefined).map((k) => [k, b[k]])); if (!Object.keys(ch).length || Object.values(ch).some((v) => typeof v !== 'boolean')) return [400, { ok: false, code: 'bad-site', message: 'uploads, creation: true (on) or false (off)' }]; const before = registry.site(), site = registry.setSite(ch); audit(dataDir, { op: 'set-site', by: 'operator', before, site }); log(`site ${JSON.stringify(site)} (operator)`); return [200, { ok: true, site }]; },
           'audit': (b) => [200, { ok: true, audit: readAudit(dataDir, typeof b?.slug === 'string' ? b.slug : undefined) }] })[forkOp](body); json(res, out[0], out[1]); return;
       }
       // lane OPS2: the operator's TEST-Soul commands and the test-world flag (op-souls.mjs), direct loopback only
@@ -1388,6 +1495,7 @@ export async function openLauncher(cfg = {}) {
       const thumbOwn = path.match(/^\/__sim\/worlds\/([a-z][a-z0-9-]{0,31})\/thumbnail$/);
       if (thumbOwn) {
         if (req.method !== 'POST' && req.method !== 'DELETE') { json(res, 405, { ok: false, code: 'method', message: 'POST a JPEG, or DELETE' }, { allow: 'POST, DELETE' }); return; }
+        if (req.method === 'POST' && !registry.site().uploads) { res.shouldKeepAlive = false; json(res, 503, ...SITE_PAUSED.uploads); return; }   // #2540
         const w = registry.get(registry.resolveSlug(thumbOwn[1]) ?? ''); if (!w || closing.has(w.slug)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
         if (Number(req.headers['content-length']) > THUMB.maxBytes) { res.shouldKeepAlive = false; json(res, ...TOO_BIG); return; }
         // the body is read only after the owner is known: nobody else makes the launcher hold half a megabyte
@@ -1464,7 +1572,7 @@ export async function openLauncher(cfg = {}) {
         json(res, 200, { origin, publicOrigin: prod.publicOrigin, devAuth: prod.devAuth, dataDir, range, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, minFreeMb: prod.minFreeMb, memAvailableMb: memAvailableMb(), children: registry.worlds.map((w) => ({ slug: w.slug, viewers: live.get(w.slug) ?? 0, ...(unloaded(w.slug) && pool.status(w.slug).status !== 'running' ? { unloaded: horizons.get(w.slug) } : {}), heapMb: w.fork ? (w.worldHeapMb ?? cfg.forkHeapMb ?? 1536) : worldHeapMb(w, prod.worldHeapMb), ...pool.status(w.slug), state: stateOf(w.slug) })), worldsMemMb: prod.worldsMemMb, memory: pool.memUse() }); return;
       }
       // lane L7: Prometheus text for the worlds and the launcher (LOAD-CONTRACT §5), loopback only
-      if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
+      if (path === '/__sim/metrics' && req.method === 'GET') { if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; } serveMetrics(res, { launcher: { build: BUILD, maxRunning: prod.maxRunning, maxWorlds: MAX_WORLDS, memAvailableMb: memAvailableMb(), ...launcherGauges() }, clientErrors: errors, worlds: registry.worlds.map((w) => ({ slug: w.slug, ...pool.status(w.slug), viewers: live.get(w.slug) ?? 0, refused: ceilings.refused(w.slug), listenHeld: ceilings.held(w.slug), ...(readStats.has(w.slug) ? { read: { ...readStats.get(w.slug) } } : {}), live: readLive(registry.worldDir(w.slug)) })) }); return; }
       // #1150: every world's recoveries and halts from its own store, asleep or not; ?world= adds that world's records. Loopback only.
       if (path === '/__sim/glitches' && req.method === 'GET') {
         if (!direct(req)) { json(res, 404, { ok: false, code: 'not-found' }); return; }
@@ -1473,13 +1581,22 @@ export async function openLauncher(cfg = {}) {
         json(res, 200, { ok: true, worlds }); return;
       }
       if (path === '/__sim/usage' && req.method === 'GET') { json(res, ...(direct(req) ? usage.report(url.searchParams.get('days') ?? undefined, registry.worlds.filter((w) => w.test === true).map((w) => w.slug)) : [404, { ok: false, code: 'not-found' }])); return; }   // #1942, loopback only
+      // #2513: the address this request is keyed on: the first X-Forwarded-For entry behind the proxy (as the flood guard
+      // and the ceilings take it), else the TCP peer. Public, since it is the caller's own address; never a header
+      // verbatim: anything that is not an address answers null. deploy/caddy/check-soul-game.mjs compares it from outside.
+      if (path === '/__sim/whoami' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const a = (behindProxy ? forwardedAddress(req.headers['x-forwarded-for']) : null) || (req.socket.remoteAddress ?? '');   // #2543
+        json(res, 200, { address: isIP(a) ? a : null }); return;
+      }
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
         const running = registry.worlds.filter((w) => pool.status(w.slug).status === 'running').length;
         const host = hostHealth(dataDir); // deploy/host-health.mjs (timer): `hostOk` (+ short `hostCodes` when not ok) public, the numbers loopback-only
         // lane L1: the guard's findings now, not at the timer's next run: wedged, held, crashloop, bootSlow, halted (codes public, texts loopback)
-        const worldProblems = pool.problems(), wcodes = [...new Set(worldProblems.map((x) => x.code))];
-        const hostOk = (host ? host.ok : true) && !wcodes.length, hostCodes = [...new Set([...(host && !host.ok ? host.codes ?? [] : []), ...wcodes])];
-        json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, ...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), loads: pool.loadStats(), ...(host ? { host } : {}) } : {}) }); return;
+        const worldProblems = pool.problems(), wcodes = [...new Set([...worldProblems.map((x) => x.code), ...readAlertProblems(dataDir).map((x) => x.code)])];   // #2541: firing telemetry alerts too
+        // the alerts file read now supersedes the timer's copy of it, so a resolved alert clears at once
+        const hc = host && !host.ok ? (host.codes ?? []).filter((c) => !c.startsWith('alert:')) : [];
+        const hostOk = (host ? host.ok || (host.codes?.length > 0 && !hc.length) : true) && !wcodes.length, hostCodes = [...new Set([...hc, ...wcodes])];
+        json(res, 200, { ok: true, service: 'world-launcher', build: BUILD, auth: auth ? 'clerk' : 'dev', worlds: registry.worlds.length, running, maxWorlds: MAX_WORLDS, maxRunning: prod.maxRunning, site: registry.site() /* #2540 */,...(host || wcodes.length ? { hostOk, ...(hostOk ? {} : { hostCodes }) } : {}), ...(direct(req) && worldProblems.length ? { worldProblems } : {}), clientErrorsNew: errors.newSinceRelease(), clientErrorsRate10m: errors.rate10m(), refused: refusedByWorld(), ...(direct(req) ? { memAvailableMb: memAvailableMb(), loads: pool.loadStats(), ...(host ? { host } : {}) } : {}) }); return;
       }
       const to = redirects?.target(req, path, url);
       if (to) { res.writeHead(302, { location: to, 'cache-control': 'no-store' }).end(); return; }
@@ -1571,7 +1688,7 @@ export async function openLauncher(cfg = {}) {
     const w = slug && !closing.has(slug) && registry.get(slug);
     if (!w) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
     // lane L1: WebSockets count toward the address's concurrent ceiling
-    const slot = ceilings.socket(slug, behindProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : null);
+    const slot = ceilings.socket(slug, behindProxy ? addressKey(req.headers['x-forwarded-for']) : null);   // #2543
     if (!slot) { socket.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\nConnection: close\r\n\r\n'); return; }
     socket.once('close', slot.release);
     const eyes = eyesAgent(req.headers['user-agent']);
@@ -1771,7 +1888,7 @@ export async function openLauncher(cfg = {}) {
       const live = () => [...sockets].filter((s) => !s.simUpgraded);
       if (gentle) for (const t0 = Date.now(); live().length && Date.now() - t0 < drainMs && (Date.now() - t0 < idleMs || live().some((s) => s.simBusy));) await new Promise((r) => setTimeout(r, 20));
       const done = new Promise((r) => server.close(() => r()));   // (Node's close() also cuts idle connections: only now)
-      clearInterval(problemsTimer); for (const s of sockets) s.destroy(); await pool.closeAll(); await done;
+      clearInterval(problemsTimer); loopDelay.disable(); for (const s of sockets) s.destroy(); await pool.closeAll(); await done;
     },
   };
 }

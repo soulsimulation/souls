@@ -1,9 +1,10 @@
 // Internal opt-in native producer. Production bootstrap/HTTP do not install it.
 import { TERMINAL } from '@souls/engine-contract';
-import { probeNativeHumanBirth } from '@souls/engine-mars';
+import { nativeBirthPlacement } from '@souls/engine-mars';
 import { planNativeBirth } from './arrival-placement.ts';
 import { soulLifecycleSchema, ownerLifecycleListSchema, type SoulLifecycle } from '@souls/protocol';
 import { LifecycleJournal, type LifecycleOperation, type LifecycleScope } from './lifecycle-journal.ts';
+import { worldConfig } from './config.ts';
 import type { WorldHost } from './world.ts';
 
 class LifecycleDeferred extends Error {}
@@ -67,7 +68,9 @@ export class LifecycleRunner {
   private inflight=new Set<string>();
   /** Births queued and not yet settled (lane srv-join-stall). Each birth costs a full detached-world probe when
    * planned and again under the host writer lock; with every pending birth queued at once, one drainInputs ran
-   * every guard back to back (4 joins ~ 8 s of one tick on eden2) and /healthz missed its 5 s answer. */
+   * every guard back to back (4 joins ~ 8 s of one tick on eden2) and /healthz missed its 5 s answer. A13 (#2621): the
+   * placement now runs on the live engine (nativeBirthPlacement: spawnHuman's own search, a route plan or two), with no
+   * snapshot or restore; the one-at-a-time pacing below is kept as it was. */
   private births=new Set<string>();
   /** A detached probe already ran in this macrotask. pump plans no further birth while it is set; the host's guard itself
    * always runs. Cleared by whichever of setImmediate / setTimeout(0) fires first: either is a later macrotask, after
@@ -165,7 +168,7 @@ export class LifecycleRunner {
     checks();
     this.spendProbe();
     const {probe:preview,near}=planNativeBirth(this.host,who);
-    const probe=()=>{checks();this.spendProbe();return probeNativeHumanBirth(this.host.engine,this.host.factory,{...who,...(near?{near}:{})});};
+    const probe=()=>{checks();this.spendProbe();return nativeBirthPlacement(this.host.engine,this.host.factory,{...who,...(near?{near}:{})},worldConfig(this.host).env.SIM_BIRTH_PROBE);};
     if(preview.outcome==='deferred')return;
     if(preview.outcome==='unavailable'&&preview.diagnostic.code==='birth.arrival-unavailable'){
       this.journal.refuseArrival(s,op.requestId,()=>{

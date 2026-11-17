@@ -104,6 +104,12 @@ online-backup copies), `worlds.json`, `audit.jsonl`, `worlds/assets` (uploads) a
 A restore brings back each world's event log, Souls, accounts and uploads as of the snapshot. It does not bring back
 activity since then (the recovery point is up to a day), sign-in sessions (people sign in again) or pairing tokens.
 
+Nor does it bring back each world's `snapshot-epoch`, the file beside `sim.db` that is the last part of the world's
+snapshot key (`apps/server/src/edge-snapshot.ts`). A restored world writes a new one at first boot, so the edge, which
+keeps a keyed snapshot for a day, never serves the pre-restore picture under a reused edit sequence. `restore-world`
+removes the file too. If you copy a single `sim.db` into an existing world folder by hand, delete that folder's
+`snapshot-epoch` before the world boots.
+
 ## 5. Start
 
 ```sh

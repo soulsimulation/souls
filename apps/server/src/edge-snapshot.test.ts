@@ -1,7 +1,7 @@
 // Lane O2: the keyed snapshot is the only snapshot a shared cache may keep, and only while its key is current.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -11,7 +11,7 @@ import { ApiError } from './souls.ts';
 import { GodMode } from './god/god.ts';
 import { mountGodRoutes } from './god/routes.ts';
 import { mountModeration } from './moderation/routes.ts';
-import { EDGE_SNAPSHOT_CACHE, SNAPSHOT_KEY_HEADER, mountEdgeSnapshot, safeKey, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
+import { EDGE_SNAPSHOT_CACHE, SNAPSHOT_EPOCH_FILE, SNAPSHOT_KEY_HEADER, mountEdgeSnapshot, safeKey, snapshotEpoch, snapshotKey, withSnapshotKey, withWorldClock } from './edge-snapshot.ts';
 
 /** The http.ts wiring in miniature: moderation first, then the edge snapshot, then the god routes. */
 function world(t: { after(f: () => void): void }) {
@@ -90,4 +90,56 @@ test("P7d: the page HTML carries the world's clock for the phone's early poster;
   assert.ok(withWorldClock(html, '2026-03-04T21:15:00.000Z', 7).includes('<head><script>window.__simWorldClock="2026-03-04T21:15:00.000Z";window.__simWorldSouls=7;</script><title>'));
   assert.ok(withWorldClock(html, null, 0).includes('<head><script>window.__simWorldSouls=0;</script><title>'));
   for (const bad of [null, -1, 1.5, '3', NaN]) assert.equal(withWorldClock(html, null, bad), html);
+});
+
+/** E6: a world on disk as a launcher child runs it (<dataDir>/sim.db), its key wired as http.ts does. The site log sits
+ *  outside the world folder, as in production, so a restore does not bring it back. */
+function diskWorld(dataDir: string, siteLog: string) {
+  mkdirSync(dataDir, { recursive: true });
+  const db = new Db(join(dataDir, 'sim.db'));
+  const god = new GodMode(db, { worldId: 'edge-1', ownerId: 'dev:owner', tick: () => 1, emit: () => {}, assetDir: dataDir } as never);
+  const bearer = (c: Context) => c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+  const requireUser = async () => { throw new ApiError(401, 'unauthorized', 'sign in'); };
+  const moderation = mountModeration(new Hono(), { db: db.db, worldId: 'edge-1', bearer, requireUser, god, siteLog });
+  const epoch = snapshotEpoch(dataDir);
+  const key = () => snapshotKey({ editSeq: god.model.editSeq, buildsRev: god.store.buildsRev(), moderation: moderation.version(), epoch });
+  const place = (name: string, p: [number, number]) => assert.equal(god.act({ ops: [{ op: 'place', def: 'core/box@1', p, name }] }).accepted, true);
+  return { db, god, key, place };
+}
+const withoutEpoch = (k: string) => k.split('.').slice(0, -1).join('.');
+
+test('E6 A1: a world restored to an earlier state answers a different key than it had before the restore', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'edge-epoch-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const site = join(dir, 'site.jsonl'), live = diskWorld(join(dir, 'live'), site);
+  live.place('crate', [3, 4]);
+  const atBackup = live.key();
+  // the nightly backup: an online copy of sim.db alone (backup-restic.mjs carries only sim.db from a world's folder)
+  mkdirSync(join(dir, 'backup')); live.db.db.exec(`VACUUM INTO '${join(dir, 'backup', 'sim.db')}'`);
+  live.place('barrel', [9, 9]);
+  const beforeRestore = live.key();
+  live.db.close();
+  // the restore: restic writes that copy into an empty folder, and the world boots from it
+  mkdirSync(join(dir, 'restored')); copyFileSync(join(dir, 'backup', 'sim.db'), join(dir, 'restored', 'sim.db'));
+  const back = diskWorld(join(dir, 'restored'), site);
+  assert.equal(back.god.model.editSeq, 1, 'the database is back at the earlier state');
+  assert.equal(withoutEpoch(back.key()), withoutEpoch(atBackup), 'the three old parts alone would repeat the old key');
+  assert.notEqual(back.key(), atBackup, 'the restored seq answers a new key');
+  back.place('lamp', [1, 1]);   // a different edit reuses seq 2
+  assert.equal(withoutEpoch(back.key()), withoutEpoch(beforeRestore));
+  assert.notEqual(back.key(), beforeRestore, 'the reused seq answers a key the edge has never held');
+  assert.match(back.key(), /^[0-9]+(\.[0-9]+)*$/, 'A3: still digits and dots');
+  back.db.close();
+});
+
+test('E6 A2: a restart keeps the key', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'edge-epoch-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const site = join(dir, 'site.jsonl'), data = join(dir, 'world');
+  const first = diskWorld(data, site);
+  first.place('crate', [3, 4]);
+  const k = first.key(), epoch = readFileSync(join(data, SNAPSHOT_EPOCH_FILE), 'utf8').trim();
+  first.db.close();
+  const again = diskWorld(data, site);
+  assert.equal(again.key(), k, 'same world, same history: the same key after the restart');
+  assert.equal(k.split('.').at(-1), epoch, 'the epoch is the last part');
+  again.db.close();
 });
