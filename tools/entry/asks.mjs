@@ -120,7 +120,8 @@ function runChain(chain, ctx, state) {
       else if (s.field === 'stock' ? !e.stock : s.field !== undefined && !e.state?.[s.field]) missing.push(`${s.field === 'stock' ? 'stock' : 'field ' + s.field} of ${e.kind}`);
       continue;
     }
-    const self = s.this ?? 'me', kind = kindOf(self), args = s.args ?? {}, entry = kinds[kind];
+    const self = s.this ?? 'me', kind = kindOf(self), entry = kinds[kind];
+    let args = s.args ?? {};
     const named = [...Object.values(args).map(v => isObj(v) ? v.node : v), s.carry, s.push, s.place?.thing, s.place?.anchor]
       .filter(v => typeof v === 'string' && v in things).map(kindOf);
     const absent = [kind, ...named].filter(k => !kinds[k]);
@@ -146,6 +147,17 @@ function runChain(chain, ctx, state) {
       if (!r.ok) { refuse(i, `${r.code}: ${r.reason}`); continue; }
     }
     if (!form) continue;
+    // An argument the form does not take is refused, never dropped: "play a sad tune" on a form with no mood is no yes.
+    const untaken = Object.keys(args).filter(a => !Object.hasOwn(form.takes ?? {}, a));
+    if (untaken.length) { refuse(i, `not_taken: ${kind} ${s.form} takes no argument ${untaken.map(a => `"${a}"`).join(', ')}`); continue; }
+    // A slot argument the chain leaves out is chosen as the engine would choose it, by the form's selector: a free slot of
+    // this thing (the request stands everyone in one place, so the first free one in the kind's own order is the nearest).
+    // It is chosen before the hand is placed, so a reach for that slot starts there.
+    for (const [name, t] of Object.entries(form.takes ?? {})) {
+      if (name in args || t.type !== 'slot' || t.select?.of !== 'free_slots' || t.select?.in !== 'this') continue;
+      const free = Object.entries(entry.slots ?? {}).find(([slot, d]) => (state.nodes[self]?.slots?.[slot]?.length ?? 0) < d.most);
+      if (free) args = {...args, [name]: free[0]};
+    }
     // The walk to the thing is taken as done: the hand starts at the point the form reaches for.
     const nodes = structuredClone(state.nodes);
     for (const n of form.needs ?? []) {
