@@ -14,15 +14,30 @@
 // Either way only a slot that admits a body, and, if the role names one, in its `posture`. The first one with room
 // is the place; if none has room, the answer is no, `no_free_place`, naming the role and how many places it looked at.
 // Positions (`at_mm` on a node) are its origin in the frame of the place it is in, supplied by the engine.
+//
+// Leaving, the "now" line and the end (SA-G1b, #2873):
+// - Leaving is an ordinary form of the kind too: the form that unlinks exactly one role from the actor (and moves the
+//   actor out of its place by the actor's own `reparent`). `leave` runs it, then the role's rule for leaving: a
+//   `required` role leaving ends the activity; a `replaceable` one re-opens its place (its link and its slot are free
+//   again); an `optional` one changes nothing. A one-off activity also ends when its last member leaves.
+// - Ending releases every member, unlinking each from its role (a body seated in another thing's slot stays seated:
+//   the world moves no body), moves any body still in the activity's own slots out to the place the activity is in,
+//   so that removing the activity removes no body, and removes the activity. Nothing removes a member for being quiet.
+// - The `now` section names the parts of the activity's "now" line, a fact Souls read and schedule themselves by:
+//   `floor`, the link type whose ends have the floor; `stage`, an enum field; `ends`, a timed field (SA-F5a) counting
+//   down, whose crossing of 0 is when it ends. An activity nobody entered is removed at that time by its own world form
+//   (`who: "world"`, `starts: "timer"`), whose needs are that time and no member; the engine's timer runs it.
 
-import { effects, type Done, type Refused } from './effects.ts';
-import { whoMay, type Entry, type Input, type Read, type Verdict, type WhoVerdict } from './rules.ts';
+import { apply, effects, parentOf, type Change, type Done, type Event, type Refused } from './effects.ts';
+import { crossing, whoMay, type Entry, type Input, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
 export type Places = { in: string; slots?: string[]; within_mm?: number; posture?: string };
 export type Role = { need: string; places: Places };
-export type Activity = Entry & { roles?: Record<string, Role> };
+export const NOW_PARTS = Object.freeze(['floor', 'stage', 'ends']);
+export type Now = { floor?: string; stage?: string; ends?: string };
+export type Activity = Entry & { roles?: Record<string, Role>; now?: Now };
 export type SlotPlace = { node: string; slot: string };
 export type PlaceVerdict =
   | { verdict: 'yes'; role: string; place: SlotPlace; args: Record<string, unknown>; read: Read[] }
@@ -116,4 +131,121 @@ export function enter(input: Input & { receipt: string }): Entered {
   if (at.verdict !== 'yes') return at;
   const done = effects({ kinds: input.kinds, state: input.state, act: { ...input.act, args: at.args }, receipt: input.receipt });
   return done.verdict === 'yes' && 'changes' in done ? { ...done, role: at.role, place: at.place } : done;
+}
+
+/** The role a form leaves: the form that unlinks exactly one role from the actor. */
+export function leaving(entry: Activity, form: string): { role: string } | { bad: string } {
+  const f = has(entry.forms, form) ? entry.forms![form] : undefined;
+  if (!f) return { bad: 'no_such_form' };
+  const roles = (f.effects ?? []).filter((e) => e && e.change === 'unlink' && (e.from ?? 'actor') === 'actor' && has(entry.roles, e.link ?? ''));
+  return roles.length === 1 ? { role: roles[0].link! } : { bad: 'not_a_leaving_form' };
+}
+
+export type LeaveBad = { verdict: 'no'; reason: 'bad_input'; detail: Record<string, unknown> };
+/** `ended` is 1 when this leave ended the activity, which is then removed; else 0. */
+export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad;
+
+/**
+ * Leave the role a form leaves: who may (SA-F7a), the form's own needs and effects (SA-F2b), then the role's rule for
+ * leaving. When the activity ends, the rules add two events of the activity's own: `released`, unlinking every
+ * remaining member and moving a body still in the activity's own slots out to its place, and `ended`, removing it.
+ */
+export function leave(input: Input & { receipt: string }): Left {
+  const bad = (what: string, extra: Record<string, unknown> = {}): LeaveBad => ({ verdict: 'no', reason: 'bad_input', detail: { what, ...extra } });
+  const who = whoMay(input);
+  if (who.verdict !== 'yes') return who;
+  const { kinds, act, state } = input;
+  const entry = kinds[state.nodes[act.this].kind!] as Activity;
+  const leaves = leaving(entry, act.form);
+  if ('bad' in leaves) return bad(leaves.bad, { form: act.form });
+  const need = entry.roles![leaves.role]?.need;
+  if (!ROLE_NEEDS.includes(need)) return bad('malformed_role', { role: leaves.role });
+  const done = effects({ kinds, state, act, receipt: input.receipt });
+  if (done.verdict !== 'yes' || !('changes' in done)) return done;
+  const after = apply(state, done);
+  if (!after.ok) return bad(after.reason, { change: after.change });
+  const nodes = after.state.nodes;
+  const self = nodes[act.this];
+  const members: [string, string][] = [];
+  for (const role of Object.keys(entry.roles!)) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
+  if (need !== 'required' && members.length > 0) return { ...done, role: leaves.role, ended: 0 };
+
+  // The activity ends: release every member, then remove it.
+  const at = parentOf(nodes, act.this);
+  if (!at || has(at, 'slot') || has(at, 'hand')) return bad('not_in_a_place', { node: act.this });
+  const ns = entry.kind.includes(':') ? entry.kind.slice(0, entry.kind.indexOf(':')) : entry.kind;
+  const changes: Change[] = [...done.changes];
+  const events: Event[] = [...done.events];
+  const released: Event = { event: `${ns}:released`, node: act.this, changes: [] };
+  for (const [role, end] of members) {
+    released.changes.push(changes.length);
+    changes.push({ change: 'unlink', node: act.this, link: role, n: entry.links![role].n, end });
+  }
+  for (const slot of Object.keys(self.slots ?? {}).sort()) {
+    for (const body of (self.slots![slot] ?? []) as string[]) {
+      released.changes.push(changes.length);
+      changes.push({ change: 'reparent', node: body, to: { node: at.node } });
+    }
+  }
+  if (released.changes.length) events.push(released);
+  events.push({ event: `${ns}:ended`, node: act.this, changes: [changes.length] });
+  changes.push({ change: 'remove', node: act.this });
+  const result: Done & { role: string; ended: 1 } = { ...done, changes, events, role: leaves.role, ended: 1 };
+  const check = apply(state, result);
+  return check.ok ? result : bad(check.reason, { change: check.change });
+}
+
+export type NowLine = { floor?: string[]; stage?: unknown; ends_us?: number };
+export type NowVerdict =
+  | { verdict: 'yes'; now: NowLine; unseen: string[]; read: Read[] }
+  | { verdict: 'no'; reason: 'bad_input'; detail: Record<string, unknown>; read: Read[] };
+
+/**
+ * The activity's "now" line as the asker may see it: who has the floor, the stage, and when it ends (the first
+ * microsecond at which its `ends` field reaches 0, by SA-F5a's `crossing`; left out when it never does). A part outside
+ * the asker's audience is left out and named in `unseen`. Never throws.
+ */
+export function nowLine(input: { kinds: Record<string, Entry>; state: { nodes: Input['state']['nodes'] }; node: string; asker: Input['asker'] }): NowVerdict {
+  const read: Read[] = [];
+  const bad = (what: string, extra: Record<string, unknown> = {}): NowVerdict => ({ verdict: 'no', reason: 'bad_input', detail: { what, ...extra }, read });
+  if (!input || !input.kinds || !input.state || !input.asker) return bad('malformed');
+  const { kinds, state, node, asker } = input;
+  const n = has(state.nodes, node) ? state.nodes[node] : undefined;
+  const entry = n?.kind && has(kinds, n.kind) ? (kinds[n.kind] as Activity) : undefined;
+  if (!n || !entry) return bad('no_such_kind');
+  const parts = entry.now;
+  if (!parts || typeof parts !== 'object') return bad('no_now');
+  const extra = Object.keys(parts).filter((k) => !NOW_PARTS.includes(k));
+  if (extra.length) return bad('malformed_now', { parts: extra });
+  const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
+  const now: NowLine = {};
+  const unseen: string[] = [];
+  if (parts.floor !== undefined) {
+    const def = has(entry.links, parts.floor) ? entry.links![parts.floor] : undefined;
+    if (!def) return bad('no_such_link', { link: parts.floor });
+    if (!sees(def.audience)) unseen.push('floor');
+    else {
+      now.floor = [...((n.links?.[parts.floor] ?? []) as string[])];
+      read.push([`${node}/link/${def.n}/ends`, now.floor]);
+    }
+  }
+  for (const part of ['stage', 'ends'] as const) {
+    const field = parts[part];
+    if (field === undefined) continue;
+    const def = has(entry.state, field) ? entry.state![field] : undefined;
+    if (!def || def.type !== (part === 'stage' ? 'enum' : 'timed')) return bad('malformed_now', { part, field: field ?? null });
+    if (!sees(def.audience)) {
+      unseen.push(part);
+      continue;
+    }
+    const value = has(n.fields, field) ? n.fields![field] : def.default;
+    read.push([`${node}/field/${def.n}`, value]);
+    if (part === 'stage') now.stage = value;
+    else {
+      const at = crossing(def, value, { at_most: 0 }, (value as { set_us?: unknown } | null)?.set_us);
+      if (at !== null && typeof at === 'object') return bad(at.bad, { field });
+      if (at !== null) now.ends_us = at;
+    }
+  }
+  return { verdict: 'yes', now, unseen, read };
 }

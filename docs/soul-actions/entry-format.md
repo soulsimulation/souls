@@ -109,7 +109,7 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
 
 - A **role** is one of the kind's link types; membership is that link to the body, and the link's `most` is how many
   the role takes. `need` is `required` (the activity cannot start without it), `replaceable` (required, and another
-  may take it while it runs) or `optional`. Starting, leaving and ending are SA-G1b's and Engine v2 B5's.
+  may take it while it runs) or `optional`. Starting is Engine v2 B5's; leaving and ending are below.
 - **places** say where a member of the role may be, in a fixed order. `in: "this"`: the activity's own `slots`, in
   the order listed, so a body becomes the activity's child. `in: "here"`: the slots of things in the same place as
   the activity whose origin is within `within_mm` of the activity's, nearest first, then by node id, then in the
@@ -119,6 +119,29 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   (`reparent`), and the role's places fill that argument. Who may enter a role is that form's `who`.
 - The world moves no body. Each Soul walks and sits by its own steps; the form's effects only link and set the parent.
   Anything that needs another Soul's yes is an offer with an expiry (Engine v2 E8, [#2779](https://github.com/soulsimulation/souls/issues/2779)).
+- **Leaving is a form** too: the one that unlinks one role from the actor, and moves the actor out of its place by
+  its own `reparent` (SA-G1b, [#2873](https://github.com/soulsimulation/souls/issues/2873)). The role's `need` is its
+  rule for leaving. A `required` role leaving ends the activity. A `replaceable` one re-opens its place: its link
+  and its slot are free for the next Soul. An `optional` one changes nothing. A one-off activity also ends when its
+  last member leaves.
+- **Ending** releases every member: each is unlinked from its role. A body seated in another thing's slot stays
+  seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
+  activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
+  Nothing removes a member for being quiet.
+- **The "now" line** (proposed: a `now` section) names the parts of the activity's state that say what is happening
+  now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
+
+  ```json
+  "now": { "floor": "speaker", "stage": "phase", "ends": "left_us" }
+  ```
+
+  `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)
+  counting down in microseconds; the activity ends at the first microsecond it reaches 0. A part the asker may not
+  see is left out and named as unseen.
+- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`),
+  whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
+  anyone is in it, the form is refused and nothing changes.
+  The example is `packages/form-rules/cases/kinds/test/talk.json`.
 
 ## The hash, provisional
 

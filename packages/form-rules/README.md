@@ -215,3 +215,22 @@ state, the `activity` node, and the Souls who `enter` in order: each with its `a
 `enter` should return (`expect`). The test checks that every body is where the rules placed it and that no place is
 given twice. Then it compares the nodes `after`. The examples are a lecture in three rooms and a supper whose host
 must be its owner. Both are test kinds, because `roles` is not in the entry format yet.
+
+### Leaving, the "now" line and the end
+
+`leave(input)` takes a rule case's input whose act is a leaving form: the form that unlinks one role from the actor.
+It asks who may, works out the form's effects, then applies the role's rule for leaving. A `required` role leaving,
+or the last member leaving, ends the activity: the rules add a `released` event (every remaining member unlinked, and
+a body in the activity's own slots moved out to its place) and an `ended` event (the activity removed). Their names
+carry the kind's namespace. It returns the effects with `role` and `ended` (1 or 0).
+
+`nowLine({kinds, state, node, asker})` reads the kind's `now` section: `{floor, stage, ends_us}`. `ends_us` is the
+first microsecond the `ends` timed field reaches 0 (SA-F5a's `crossing`). A part outside the asker's audience is left
+out and named in `unseen`. An activity nobody entered is removed by its own world form at that time; the engine's
+timer runs it with `effects`.
+
+A file in `cases/activity/leave/` is `{"format": "souls-activity-steps/1", "about": ..., "cases": [...]}`. Each case
+has a state, the `activity` node and `steps` in order. A step does `enter`, `leave`, `now` (the now line) or `world`
+(the world's form at `now_us`), with what it should return (`expect`). The test checks that no step removes a body.
+Then it compares the nodes `after` and checks that the nodes in `gone` are removed. The example is a one-off talk
+(`test:talk`).
