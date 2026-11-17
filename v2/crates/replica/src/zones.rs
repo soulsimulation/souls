@@ -10,7 +10,7 @@
 
 use crate::encode::{self, Value, encode};
 use crate::ids::{Exhausted, Hash, Held, Id, Minter, Purpose, Scope, arrive};
-use crate::world_model::{Link, Node, show};
+use crate::world_model::{DEPTH_LIMIT, End, Link, Node, show};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -116,6 +116,8 @@ pub enum Fault {
     HoldsUnowned { body: Id, thing: Id },
     /// `arrive-parent-missing`: the place a transfer was sent to is not in this zone.
     ArriveParentMissing { transfer: Id, parent: Id },
+    /// `arrive-too-deep`: the subtree's deepest node would have more than [`DEPTH_LIMIT`] ancestors there.
+    ArriveTooDeep { transfer: Id, depth: u32 },
     /// `log-without-start`: a log whose first record, and only its first, is not its start.
     LogWithoutStart,
     /// `log-out-of-step`: replaying a leave minted another transfer id than the record holds.
@@ -132,6 +134,7 @@ impl Fault {
             Fault::LeaveNotHere(_) => "leave-not-here",
             Fault::HoldsUnowned { .. } => "leave-holds-unowned",
             Fault::ArriveParentMissing { .. } => "arrive-parent-missing",
+            Fault::ArriveTooDeep { .. } => "arrive-too-deep",
             Fault::LogWithoutStart => "log-without-start",
             Fault::LogOutOfStep(_) => "log-out-of-step",
             Fault::Exhausted(_) => "id-counter-exhausted",
@@ -171,6 +174,11 @@ impl fmt::Display for Fault {
                 "transfer {} is sent to {}, which is not here",
                 show(*transfer),
                 show(*parent)
+            ),
+            Fault::ArriveTooDeep { transfer, depth } => write!(
+                f,
+                "transfer {}'s deepest node would have {depth} ancestors, over {DEPTH_LIMIT}",
+                show(*transfer)
             ),
             Fault::LogOutOfStep(t) => {
                 write!(f, "the leave of transfer {} replays out of step", show(*t))
@@ -252,9 +260,10 @@ pub fn tick(prev: &Frame, systems: &Systems) -> Result<Frame, Fault> {
 pub const BODY_OF: &str = "body-of";
 pub const OWNS: &str = "owns";
 
-/// Where a transfer is sent: a zone, and the node (and slot) its root arrives under.
+/// Where a transfer is sent: a world (by its lineage), a zone, and the node (and slot) its root arrives under.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Place {
+    pub lineage: Scope,
     pub zone: Id,
     pub parent: Id,
     pub slot: Option<u64>,
@@ -272,7 +281,8 @@ pub struct Transfer {
     pub nodes: Vec<Node>,
     /// The links whose every end is in the subtree or a Soul.
     pub links: Vec<Link>,
-    /// The links between the subtree and a node that stays; the leave ends them.
+    /// The links between the subtree and a node that stays, when it leaves for another world: the leave ends them.
+    /// Within one world such a link stays with its owning end and is in neither list.
     pub ended: Vec<Link>,
     /// Each carried id that arrived somewhere under a new id, and the id it came with.
     pub origins: BTreeMap<Id, Id>,
@@ -458,6 +468,21 @@ impl Zone {
         out
     }
 
+    /// How many ancestors `node` has in this zone, walked with a loop and bounded by the zone's size, so a cycle
+    /// cannot hang it. A zone's root counts as depth 0 here; K2 adds the depth of the root's own parent.
+    fn depth(&self, node: Id) -> u32 {
+        let mut depth = 0u32;
+        let mut at = self.nodes.get(&node).and_then(|n| n.parent);
+        while let Some(p) = at.and_then(|p| self.nodes.get(&p)) {
+            depth = depth.saturating_add(1);
+            if u64::from(depth) > self.nodes.len() as u64 {
+                break;
+            }
+            at = p.parent;
+        }
+        depth
+    }
+
     /// The Soul a body belongs to, from its `body-of` link.
     fn soul_of(&self, body: Id) -> Option<Id> {
         self.links.values().find_map(|l| match l.ends {
@@ -485,19 +510,27 @@ impl Zone {
                 return Err(Fault::HoldsUnowned { body: root, thing });
             }
         }
+        // A link between the subtree and a node that stays (rule 5): within one world it stays with its owning end,
+        // and the far end's index is derived; to another world it is ended and listed. A link whose other end is
+        // not a node of this zone (a Soul, or a node of another zone) goes with the subtree.
+        let within = to.lineage == self.lineage;
         let (mut links, mut ended) = (Vec::new(), Vec::new());
         for l in self.links.values() {
             let here = |e: &Id| inside.contains(e);
             if !l.ends.iter().any(here) {
                 continue;
             }
-            // An end that is neither in the subtree nor a node of this zone is a Soul: Souls are global.
+            let owner = match l.owner {
+                End::First => l.ends[0],
+                End::Second => l.ends[1],
+            };
             if l.ends
                 .iter()
                 .all(|e| here(e) || !self.nodes.contains_key(e))
+                || (within && here(&owner))
             {
                 links.push(l.clone());
-            } else {
+            } else if !within {
                 ended.push(l.clone());
             }
         }
@@ -542,6 +575,16 @@ impl Zone {
                 return Err(Fault::ArriveParentMissing {
                     transfer: t.id,
                     parent: t.to.parent,
+                });
+            }
+            let depth = self
+                .depth(t.to.parent)
+                .saturating_add(1)
+                .saturating_add(height(t));
+            if depth > DEPTH_LIMIT {
+                return Err(Fault::ArriveTooDeep {
+                    transfer: t.id,
+                    depth,
                 });
             }
             self.write(Record::Arrive(t.clone()))?;
@@ -592,6 +635,21 @@ impl Zone {
         self.origins.extend(origins);
         Ok(())
     }
+}
+
+/// How many levels a transfer's subtree has below its root (its nodes come root first, parents before children).
+fn height(t: &Transfer) -> u32 {
+    let mut below: BTreeMap<Id, u32> = BTreeMap::new();
+    let mut most = 0;
+    for (i, n) in t.nodes.iter().enumerate() {
+        let d = match (i, n.parent.and_then(|p| below.get(&p))) {
+            (0, _) | (_, None) => 0,
+            (_, Some(d)) => d.saturating_add(1),
+        };
+        below.insert(n.id, d);
+        most = most.max(d);
+    }
+    most
 }
 
 /// A minter for `scope` that has already given out every counter in `ids` of that scope: the state of a writer

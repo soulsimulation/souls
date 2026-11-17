@@ -47,14 +47,76 @@ fn zone_b() -> Zone {
 
 fn to_garden(b: &Zone) -> Place {
     Place {
+        lineage: FIXTURE_SCOPE_A,
         zone: b.id(),
         parent: node(21),
         slot: None,
     }
 }
 
+fn to_hall(a: &Zone) -> Place {
+    Place {
+        lineage: FIXTURE_SCOPE_A,
+        zone: a.id(),
+        parent: node(2),
+        slot: None,
+    }
+}
+
+/// The lineage, and the one zone's scope, of another world W.
+const SCOPE_W: Scope = Scope([0xee; 16]);
+
+/// A world with one zone: a place and a chain of `levels` rooms below it, each minted from `scope`. Returns the
+/// zone and its node ids, the place first; the node at index k has k ancestors.
+fn world(scope: Scope, levels: u64) -> (Zone, Vec<Id>) {
+    let mut m = Minter::new(scope);
+    let mut held = Held::default();
+    let mut nodes: Vec<Node> = Vec::new();
+    for k in 0..=levels {
+        let id = m.mint().unwrap();
+        held.minted(id);
+        nodes.push(Node {
+            id,
+            kind: if k == 0 { "souls:place" } else { "souls:room" }.into(),
+            parent: nodes.last().map(|n| n.id),
+            slot: None,
+            audience: 0,
+            fields: BTreeMap::new(),
+        });
+    }
+    let ids: Vec<Id> = nodes.iter().map(|n| n.id).collect();
+    (
+        Zone::start(ids[0], scope, m, held, nodes, vec![]).unwrap(),
+        ids,
+    )
+}
+
 fn state(z: &Zone) -> (Vec<Node>, Vec<Link>) {
     (z.nodes().cloned().collect(), z.links().cloned().collect())
+}
+
+/// The zone's state with every id that arrived under a new one written as the id it came with.
+fn as_before(z: &Zone) -> (Vec<Node>, Vec<Link>) {
+    let old = |id: Id| z.origin(id).unwrap_or(id);
+    let mut nodes: Vec<Node> = z
+        .nodes()
+        .map(|n| Node {
+            id: old(n.id),
+            parent: n.parent.map(old),
+            ..n.clone()
+        })
+        .collect();
+    let mut links: Vec<Link> = z
+        .links()
+        .map(|l| Link {
+            id: old(l.id),
+            ends: l.ends.map(old),
+            ..l.clone()
+        })
+        .collect();
+    nodes.sort_by_key(|n| n.id);
+    links.sort_by_key(|l| l.id);
+    (nodes, links)
 }
 
 /// How many copies of the body (node 3) and its cup (node 4) exist in the zones, in place or in flight.
@@ -258,16 +320,7 @@ fn a3_there_and_back_unchanged() {
         Some(node(3)),
         "the cup is still in the hand"
     );
-    let back = b
-        .leave(
-            node(3),
-            Place {
-                zone: a.id(),
-                parent: node(2),
-                slot: None,
-            },
-        )
-        .unwrap();
+    let back = b.leave(node(3), to_hall(&a)).unwrap();
     println!(
         "A3 back: transfer {} (zone B's own scope) returns it",
         show(back.id)
@@ -284,6 +337,143 @@ fn a3_there_and_back_unchanged() {
     );
     assert_eq!(before, after);
     assert_eq!((a.in_flight().count(), b.in_flight().count()), (0, 0));
+
+    // To another world W and home again: A has held these ids, so they come home under new ones that keep the old
+    // as their origin (T3 rule 6), and the carried links are rewritten to them. Otherwise nothing changed.
+    let (mut w, w_ids) = world(SCOPE_W, 1);
+    let out = a
+        .leave(
+            node(3),
+            Place {
+                lineage: SCOPE_W,
+                zone: w.id(),
+                parent: w_ids[1],
+                slot: None,
+            },
+        )
+        .unwrap();
+    w.arrive_all(std::slice::from_ref(&out)).unwrap();
+    a.settle(out.id).unwrap();
+    assert!(
+        w.node(node(3)).is_some(),
+        "W never held aa:3, so it keeps it"
+    );
+    let home = w.leave(node(3), to_hall(&a)).unwrap();
+    a.arrive_all(std::slice::from_ref(&home)).unwrap();
+    w.settle(home.id).unwrap();
+    let renamed: Vec<String> = a
+        .nodes()
+        .map(|n| n.id)
+        .chain(a.links().map(|l| l.id))
+        .filter_map(|id| {
+            a.origin(id)
+                .map(|o| format!("{} (origin {})", show(id), show(o)))
+        })
+        .collect();
+    let body = a
+        .nodes()
+        .find(|n| a.origin(n.id) == Some(node(3)))
+        .unwrap()
+        .id;
+    let cup = a.nodes().find(|n| a.origin(n.id) == Some(node(4))).unwrap();
+    println!(
+        "A3 to world W and home: renamed {}; the cup's parent is {}; equal to before but for the ids: {}",
+        renamed.join(", "),
+        show(cup.parent.unwrap()),
+        as_before(&a) == before
+    );
+    assert_eq!(renamed.len(), 4, "the body, the cup and their two links");
+    assert_eq!(cup.parent, Some(body));
+    assert!(
+        a.links()
+            .all(|l| !l.ends.contains(&node(3)) && !l.ends.contains(&node(4)))
+    );
+    assert_eq!(as_before(&a), before);
+}
+
+#[test]
+fn a_leave_keeps_or_ends_links_to_nodes_that_stay() {
+    // The body leans on the crate (a link the body owns), and the crate is marked as resting against the body (a
+    // link the crate owns). Both join the leaving body to a node that stays.
+    let text = edit(
+        FIXTURE_ZONE_A,
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}",
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}, {1: 8, 2: \"leans-on\", 3: [3, 5], 4: 0, 5: 0}, \
+         {1: 9, 2: \"rests-against\", 3: [5, 3], 4: 0, 5: 0}",
+    );
+    let ids = |ls: &[Link]| ls.iter().map(|l| show(l.id)).collect::<Vec<_>>().join(",");
+    // Within one world: each stays with its owning end; nothing is ended.
+    let (mut a, mut b) = (zone(&text, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A), zone_b());
+    let before = state(&a);
+    let t = a.leave(node(3), to_garden(&b)).unwrap();
+    let kept: Vec<String> = a.links().map(|l| show(l.id)).collect();
+    println!(
+        "links within one world: carried {}, ended [{}], kept in zone A {}",
+        ids(&t.links),
+        ids(&t.ended),
+        kept.join(",")
+    );
+    assert_eq!(ids(&t.links), "aa:6,aa:7,aa:8");
+    assert!(t.ended.is_empty());
+    assert_eq!(kept, vec!["aa:9"]);
+    b.arrive_all(std::slice::from_ref(&t)).unwrap();
+    let back = b.leave(node(3), to_hall(&a)).unwrap();
+    a.arrive_all(std::slice::from_ref(&back)).unwrap();
+    assert_eq!(state(&a), before, "both links are whole again at home");
+    // To another world: both are ended, and the leave lists them.
+    let mut a = zone(&text, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A);
+    let (w, w_ids) = world(SCOPE_W, 1);
+    let to_w = Place {
+        lineage: SCOPE_W,
+        zone: w.id(),
+        parent: w_ids[1],
+        slot: None,
+    };
+    let t = a.leave(node(3), to_w).unwrap();
+    println!(
+        "links to another world: carried {}, ended {}, left in zone A {}",
+        ids(&t.links),
+        ids(&t.ended),
+        a.links().count()
+    );
+    assert_eq!(ids(&t.links), "aa:6,aa:7");
+    assert_eq!(ids(&t.ended), "aa:8,aa:9");
+    assert_eq!(a.links().count(), 0);
+}
+
+#[test]
+fn an_arrive_too_deep_is_refused_by_name() {
+    // A world whose chain of rooms reaches 31 ancestors. The body with its cup is two levels.
+    let (mut deep, ids) = world(SCOPE_W, 31);
+    let deep_id = deep.id();
+    let send = |parent: Id| {
+        let mut a = zone_a();
+        let t = a
+            .leave(
+                node(3),
+                Place {
+                    lineage: SCOPE_W,
+                    zone: deep_id,
+                    parent,
+                    slot: None,
+                },
+            )
+            .unwrap();
+        (a, t)
+    };
+    let (a, t) = send(ids[31]);
+    let r = deep.arrive_all(std::slice::from_ref(&t)).unwrap_err();
+    println!("under a node with 31 ancestors: {r}");
+    assert_eq!(r.name(), "arrive-too-deep");
+    assert_eq!(
+        a.in_flight().count(),
+        1,
+        "refused, the transfer stays in flight"
+    );
+    assert!(deep.node(node(3)).is_none());
+    let (_, t) = send(ids[30]);
+    deep.arrive_all(std::slice::from_ref(&t)).unwrap();
+    println!("under a node with 30 ancestors: arrives, the cup with 32");
 }
 
 #[test]
@@ -384,29 +574,9 @@ fn a4_a_body_leaves_only_with_what_its_soul_owns() {
 #[test]
 fn two_arrivals_of_one_id_in_one_tick_get_two_ids() {
     const SCOPE_C: Scope = Scope([0xcc; 16]);
-    const SCOPE_W: Scope = Scope([0xee; 16]);
     let world_w = || {
-        let mut m = Minter::new(SCOPE_W);
-        let (place, room) = (m.mint().unwrap(), m.mint().unwrap());
-        let mut held = Held::default();
-        held.minted(place);
-        held.minted(room);
-        let node = |id, kind: &str, parent| Node {
-            id,
-            kind: kind.into(),
-            parent,
-            slot: None,
-            audience: 0,
-            fields: BTreeMap::new(),
-        };
-        let nodes = vec![
-            node(place, "souls:place", None),
-            node(room, "souls:room", Some(place)),
-        ];
-        (
-            Zone::start(place, SCOPE_W, m, held, nodes, vec![]).unwrap(),
-            room,
-        )
+        let (w, ids) = world(SCOPE_W, 1);
+        (w, ids[1])
     };
     let (_, room) = world_w();
     let mut a = zone_a();
@@ -419,6 +589,7 @@ fn two_arrivals_of_one_id_in_one_tick_get_two_ids() {
     let (_, held_c) = minter_past(FIXTURE_SCOPE_A, fork.iter().map(|n| n.id)).unwrap();
     let mut c = Zone::start(node(1), SCOPE_C, Minter::new(SCOPE_C), held_c, fork, vec![]).unwrap();
     let to = |w: &Zone| Place {
+        lineage: SCOPE_W,
         zone: w.id(),
         parent: room,
         slot: None,

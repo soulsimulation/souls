@@ -39,8 +39,10 @@ transfers: the type `Transfer`, the log records `Leave`, `Arrive` and `Settle`, 
 
 5. **A change that crosses zones is a leave and an arrive sharing a transfer id,** minted by the leaving writer
    from its scope. The transfer carries the subtree, its root first and every parent before its children, and the
-   links whose ends are all in it or are Souls. The leave ends each link to a node that stays and lists it.
-   (When a world has more than one zone, N17 may instead keep such a link with its owning end.)
+   links whose ends are all in it or are Souls. A leave is not a `remove` (T2 rule 3): a link between the subtree
+   and a node that stays is not taken with it. Within one world it stays with its owning end, so it travels if the
+   subtree owns it and stays behind if the node that stays does; the other end's index is derived. To another
+   world, the leave ends it and lists it in the transfer.
 6. **A transfer in flight is named state with a restart rule.** The leave is written to the leaving zone's log
    first. The transfer stays in flight there until the destination's arrive is durable; then the leaving zone
    writes `Settle`. After a stop, both writers replay their logs, and the leaving writer sends every transfer
@@ -48,10 +50,14 @@ transfers: the type `Transfer`, the log records `Leave`, `Arrive` and `Settle`, 
    and a log holding it twice replays to one copy. So a stop anywhere between leave and settle neither loses the
    subtree (the leave is durable) nor doubles it.
 7. **Arrivals in one tick are applied one after another, in transfer id order,** whatever order they were
-   delivered in. Within one lineage, every id is kept: the world already holds it. From another lineage (travel,
-   a fork's copy), each id goes through T3 rule 6 against the writer's `Held`, which includes the arrivals before
-   it in the same tick. So two arrivals of one id never keep that id. Arrivals from another world are applied
-   by the world's first zone, whose writer keeps the world's `Held`.
+   delivered in. A move between zones of one world is not an arrival in T3's sense: every id is kept, so a thing
+   crossing back is not renamed. From another lineage (travel, a fork's copy), each id, links' ids included, goes
+   through T3 rule 6 against the writer's `Held`, which includes the arrivals before it in the same tick. So two
+   arrivals of one id never keep that id, and a thing coming home gets a new id carrying its origin, with the
+   carried links rewritten to it. Arrivals from another world are applied by the world's first zone, whose writer
+   keeps the world's `Held`. An arrive whose deepest node would have more than 32 ancestors (T2 rule 6: the
+   parent's depth, plus one, plus the subtree's height) is refused as `arrive-too-deep` before it is logged, and
+   the transfer stays in flight.
 8. **Travel between worlds is the same transfer** (X9 builds it). The subtree that leaves carries the body and
    what its Soul owns. Anything else the body holds or wears must be put down first: the leave is refused as
    `leave-holds-unowned`, naming the thing, and writes nothing.
@@ -70,6 +76,8 @@ transfers: the type `Transfer`, the log records `Leave`, `Arrive` and `Settle`, 
 - **A leave made final before its arrive is durable.** A crash loses a Soul.
 - **An arrive that does not check its transfer id.** A restart doubles a Soul and what it holds.
 - **Arrivals checked against the held ids of the previous tick.** Two arrivals of one id would both keep it.
+- **A move between zones of one world treated as an arrival.** Everything crossing back would be renamed.
+- **A leave treated as a `remove`.** A Soul walking into the next zone would lose its memberships.
 - **Writing the far end's link index directly.** That is a write outside the system's node.
 - **A second zone writer minting from the world's scope.** Two writers would give out the same ids.
 - **A body allowed to leave holding what its Soul does not own.** Someone else's thing leaves the world.
