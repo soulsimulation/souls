@@ -155,7 +155,15 @@ function runChain(chain, ctx, state) {
       if (at) nodes.me.effector_mm = at;
     }
     const step = {...state, nodes, actor: 'me'};
-    const result = effects({kinds, act: {this: self, form: s.form, args}, state: step, receipt: `ask-${++receipt}-${i}`});
+    // A slot argument the chain leaves out is chosen as the engine would choose it, by the form's selector: a free slot of
+    // this thing (the request stands everyone in one place, so the first free one in the kind's own order is the nearest).
+    const chosen = {...args};
+    for (const [name, t] of Object.entries(form.takes ?? {})) {
+      if (name in chosen || t.type !== 'slot' || t.select?.of !== 'free_slots' || t.select?.in !== 'this') continue;
+      const free = Object.entries(entry.slots ?? {}).find(([slot, d]) => (nodes[self]?.slots?.[slot]?.length ?? 0) < d.most);
+      if (free) chosen[name] = free[0];
+    }
+    const result = effects({kinds, act: {this: self, form: s.form, args: chosen}, state: step, receipt: `ask-${++receipt}-${i}`});
     if (result.verdict !== 'yes') { refuse(i, `${result.reason ?? 'unknown'}${result.detail?.what ? ': ' + result.detail.what : ''}`); continue; }
     const next = apply(step, result);
     if (!next.ok) { refuse(i, next.reason); continue; }
