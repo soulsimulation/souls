@@ -31,6 +31,36 @@
       "move": "press",
       "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [-3, 3, -1] },
       "at_us": [[125000, [-2, 2, -1]]]
+    },
+    {
+      "why": "a swing: a hand pushes a hinged leaf from the handle at contact to its far position; the middle of the swing is halfway",
+      "move": "swing",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [-300, 1000, 500], "to_mm": [300, 1000, 900] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [-150, 950, 400]], [2300000, [-300, 1000, 500]], [2650000, [0, 1000, 700]], [3000000, [300, 1000, 900]], [3175000, [150, 950, 600]], [3350000, [0, 900, 300]]]
+    },
+    {
+      "why": "a stroke: a hand drawn along a line at one height, from its start at contact to its end",
+      "move": "stroke",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [-200, 700, 500], "to_mm": [200, 700, 500] },
+      "at_us": [[1999999, [0, 900, 300]], [2125000, [-100, 800, 400]], [2250000, [-200, 700, 500]], [2700000, [0, 700, 500]], [3150000, [200, 700, 500]], [3300000, [100, 800, 400]], [3450000, [0, 900, 300]]]
+    },
+    {
+      "why": "a tug: a hand takes a pull handle high and draws it down; contact is at the handle, the end is the pulled position",
+      "move": "tug",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [100, 1500, 400], "to_mm": [100, 1000, 400] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [50, 1200, 350]], [2300000, [100, 1500, 400]], [2475000, [100, 1250, 400]], [2650000, [100, 1000, 400]], [2825000, [50, 950, 350]], [3000000, [0, 900, 300]]]
+    },
+    {
+      "why": "a knock: one rap on a leaf; contact is the instant the knuckle meets it, then the hand returns",
+      "move": "knock",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [0, 1400, 500] },
+      "at_us": [[1999999, [0, 900, 300]], [2150000, [0, 1150, 400]], [2300000, [0, 1400, 500]], [2525000, [0, 1150, 400]], [2750000, [0, 900, 300]]]
+    },
+    {
+      "why": "a lock: a hand at a keyhole or latch; contact is at the lock, then the hand returns",
+      "move": "lock",
+      "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [150, 1000, 450] },
+      "at_us": [[1999999, [0, 900, 300]], [2200000, [75, 950, 375]], [2400000, [150, 1000, 450]], [2600000, [75, 950, 375]], [2800000, [0, 900, 300]]]
     }
   ]
 }
