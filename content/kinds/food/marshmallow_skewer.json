@@ -9,7 +9,7 @@
       "unit": "count",
       "default": 0,
       "min": 0,
-      "max": 2,
+      "max": 1,
       "audience": {
         "rule": "everyone"
       }
@@ -21,6 +21,17 @@
       "default": 2,
       "min": 0,
       "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "back": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
       "audience": {
         "rule": "everyone"
       }
@@ -71,9 +82,13 @@
           "need": "held_by_actor"
         },
         {
-          "need": "state",
-          "field": "heat",
-          "at_least": 2
+          "need": "sum",
+          "fields": [
+            "heat",
+            "back"
+          ],
+          "at_least": 2,
+          "says": "toast_both"
         },
         {
           "need": "state",
@@ -96,17 +111,54 @@
           "event": "bitten"
         }
       ]
+    },
+    "turn": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "enough",
+          "says": "toast_first"
+        },
+        {
+          "need": "room",
+          "says": "already_toasted"
+        }
+      ],
+      "steps": [
+        {
+          "step": "wait",
+          "us": 750000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "heat",
+          "from": "this",
+          "into": "this",
+          "into_field": "back",
+          "amount": 1,
+          "event": "turned"
+        }
+      ]
     }
   },
   "looks": {
     "model": "look:marshmallow_skewer",
-    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,35,0],"size":[440,15,18],"tint":"wood"},{"kind":"box","at":[140,70,-29],"size":[100,90,55],"tint":"raw","when":"@heat<1"},{"kind":"box","at":[140,70,29],"size":[100,90,55],"tint":"raw","when":"@heat<2"},{"kind":"box","at":[140,70,-29],"size":[100,90,55],"tint":"gold","when":"@heat>=1&@bites>=2"},{"kind":"box","at":[140,70,29],"size":[100,90,55],"tint":"gold","when":"@heat>=2&@bites>=2"},{"kind":"box","at":[140,50,0],"size":[60,50,80],"tint":"gold","when":"@heat>=2&@bites=1"}],"palette":{"wood":"#785137","raw":"#fff2dc","gold":"#b9652b"},"tags":["camping","item","food","marshmallow","object"]}
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,35,0],"size":[440,15,18],"tint":"wood"},{"kind":"box","at":[140,70,-29],"size":[100,90,55],"tint":"raw","when":"@heat<1"},{"kind":"box","at":[140,70,29],"size":[100,90,55],"tint":"raw","when":"@back<1"},{"kind":"box","at":[140,70,-29],"size":[100,90,55],"tint":"gold","when":"@heat>=1&@bites>=2"},{"kind":"box","at":[140,70,29],"size":[100,90,55],"tint":"gold","when":"@back>=1&@bites>=2"},{"kind":"box","at":[140,50,0],"size":[60,50,80],"tint":"gold","when":"@heat>=1&@back>=1&@bites=1"}],"palette":{"wood":"#785137","raw":"#fff2dc","gold":"#b9652b"},"tags":["camping","item","food","marshmallow","object"]}
   },
   "text": {
-    "card": "A marshmallow on a stick: toast both sides at a campfire, then eat it.",
+    "card": "A marshmallow on a stick: toast a side at a campfire, turn it, toast the other.",
     "food": "food",
     "marshmallow": "marshmallow",
-    "smore": "smore"
+    "smore": "smore",
+    "toast_both": "Toast both sides before eating; an empty stick cannot supply more food.",
+    "toast_first": "Toast the side facing the fire before turning the skewer.",
+    "already_toasted": "This marshmallow is already toasted or eaten; enjoy it or keep the empty stick."
   },
   "card": {
     "text": "card",

@@ -46,6 +46,14 @@
       "audience": {
         "rule": "everyone"
       }
+    },
+    "bitten": {
+      "n": 5,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
     }
   },
   "points": {
@@ -111,6 +119,12 @@
           "field": "portions",
           "by": -1,
           "event": "bitten"
+        },
+        {
+          "change": "set",
+          "field": "bitten",
+          "to": true,
+          "event": "eaten_into"
         }
       ]
     }

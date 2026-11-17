@@ -106,6 +106,76 @@
           "event": "grounds_made"
         }
       ]
+    },
+    "dose": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "mug": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:coffee_mug",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "grounds",
+          "at_least": 1,
+          "says": "grind_first"
+        },
+        {
+          "need": "state",
+          "of": {
+            "arg": "mug"
+          },
+          "field": "dirt",
+          "at_most": 0,
+          "says": "wash_first"
+        },
+        {
+          "need": "state",
+          "of": {
+            "arg": "mug"
+          },
+          "field": "grounds",
+          "at_most": 0,
+          "says": "wash_first"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "put_down_first"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "grounds",
+          "from": "this",
+          "into": {
+            "arg": "mug"
+          },
+          "amount": 1,
+          "event": "dosed"
+        }
+      ]
     }
   },
   "looks": {
@@ -116,7 +186,10 @@
     "card": "A hand coffee grinder with six bean portions; its drawer holds three ground.",
     "kitchen": "kitchen",
     "coffee": "coffee",
-    "grinder": "grinder"
+    "grinder": "grinder",
+    "grind_first": "Grind at least one supplied bean portion before dosing a mug.",
+    "wash_first": "Wash and empty the selected coffee mug first; do not replace existing grounds or drink.",
+    "put_down_first": "Put down held objects before using this supported coffee grinder."
   },
   "card": {
     "text": "card",

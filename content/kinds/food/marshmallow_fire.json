@@ -118,7 +118,13 @@
           "need": "enough"
         },
         {
-          "need": "room"
+          "need": "state",
+          "of": {
+            "arg": "skewer"
+          },
+          "field": "heat",
+          "at_most": 0,
+          "says": "turn_first"
         }
       ],
       "steps": [
@@ -165,7 +171,8 @@
     "camp": "camp",
     "campfire": "campfire",
     "fire": "fire",
-    "howto_toast": "Light the fire, hold a marshmallow skewer and toast it twice, once for each side; then eat it."
+    "howto_toast": "Light the fire, hold a marshmallow skewer and toast the side facing the fire; turn it and toast the other side; then eat it.",
+    "turn_first": "This exposed side is already golden; turn the skewer to expose the other side."
   },
   "card": {
     "text": "card",
