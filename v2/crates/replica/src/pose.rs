@@ -37,6 +37,12 @@ pub enum PoseRefusal {
     OrientationNotUnit,
     /// An orientation that breaks the sign rule: the first non-zero of w, x, y, z must be positive (rule 4).
     OrientationSign,
+    /// A whole multiple of a rotation's one byte form, not the form itself (rule 4).
+    OrientationNotCanonical,
+    /// A frame chain of more than 32 ancestors, as T2 limits it (`depth-over-limit`).
+    DepthOverLimit,
+    /// A support on a track whose motion is not owned by a rail track (rule 6).
+    SupportNotTrack,
     /// A pose in a slot that is not supported by the slot, or supported by a slot it is not in (rule 6).
     SupportNotSlot,
     /// A surface support with a height below the surface (rule 6).
@@ -68,6 +74,9 @@ impl PoseRefusal {
         match self {
             PoseRefusal::OrientationNotUnit => "orientation-not-unit",
             PoseRefusal::OrientationSign => "orientation-sign",
+            PoseRefusal::OrientationNotCanonical => "orientation-not-canonical",
+            PoseRefusal::DepthOverLimit => "depth-over-limit",
+            PoseRefusal::SupportNotTrack => "support-not-track",
             PoseRefusal::SupportNotSlot => "support-not-slot",
             PoseRefusal::HeightBelowSurface => "height-below-surface",
             PoseRefusal::OwnerNotSlot => "owner-not-slot",
@@ -207,8 +216,72 @@ impl fmt::Display for Vec3 {
     }
 }
 
-/// An orientation: a unit quaternion `w + xi + yj + zk` as four integers scaled by 2^30 (rule 4). A stored one keeps
-/// the sign rule (the first non-zero number is positive), so q and −q, one rotation, have one byte form.
+/// π scaled by 2^60, rounded down.
+const PI_2_60: i128 = 3_622_009_729_038_561_421;
+
+/// The sine and cosine of `x` radians, `x` and the results scaled by 2^60, by their power series in integers. `x` is
+/// in [0, π]; terms are added until one is zero.
+fn sin_cos_2_60(x: i128) -> R<(i128, i128)> {
+    let one: i128 = 1 << 60;
+    let x2 = mul(x, x)? / one;
+    let (mut sin, mut cos) = (x, one);
+    let (mut ts, mut tc) = (x, one);
+    let mut k: i128 = 1;
+    while ts != 0 || tc != 0 {
+        tc = -(mul(tc, x2)? / one) / (k * (k + 1));
+        ts = -(mul(ts, x2)? / one) / ((k + 1) * (k + 2));
+        sin += ts;
+        cos += tc;
+        k += 2;
+    }
+    Ok((sin, cos))
+}
+
+/// Whether four numbers' squared norm is within 2^32 of 2^60 (rule 4).
+fn in_band(q: [i128; 4]) -> bool {
+    let n: i128 = q.iter().map(|c| c * c).sum();
+    (n - (1i128 << 60)).abs() <= NORM_TOLERANCE
+}
+
+/// The sign rule: the first non-zero number positive.
+fn signed(q: [i128; 4]) -> [i128; 4] {
+    if q.iter().find(|n| **n != 0).is_some_and(|n| *n < 0) {
+        q.map(|n| -n)
+    } else {
+        q
+    }
+}
+
+/// The one byte form among the whole multiples of one direction (rule 4). `q` is g·p with p's numbers sharing no
+/// factor; every k·p is the same rotation, and the form kept is the k whose squared norm is nearest 2^60, the smaller
+/// on a tie. A rounded `q` almost always has g = 1 and is its own form; axis-aligned and symmetric turns are not.
+fn canonical(q: [i128; 4]) -> [i128; 4] {
+    let g = q.iter().fold(0i128, |a, c| {
+        let (mut a, mut b) = (a, c.abs());
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a
+    });
+    if g <= 1 {
+        return q;
+    }
+    let p = q.map(|c| c / g);
+    let pp: i128 = p.iter().map(|c| c * c).sum();
+    let off = |k: i128| (k * k * pp - (1i128 << 60)).abs();
+    let k0 = i128::try_from(isqrt(((1u128) << 60) / pp.unsigned_abs())).unwrap_or(1);
+    let mut best = (k0 - 1).max(1);
+    for k in k0..=k0 + 2 {
+        if off(k) < off(best) {
+            best = k;
+        }
+    }
+    p.map(|c| c * best)
+}
+
+/// An orientation: a unit quaternion `w + xi + yj + zk` as four integers scaled by 2^30 (rule 4). A stored one is in
+/// its one byte form: the sign rule (the first non-zero number is positive, so q and −q have one form) and the
+/// canonical multiple (so 2^30 and 2^30 + 1 are not both the identity).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Quat {
     w: i32,
@@ -226,7 +299,8 @@ impl Quat {
         z: 0,
     };
 
-    /// The orientation, or refused as `orientation-not-unit` or `orientation-sign`.
+    /// The orientation, or refused as `orientation-not-unit`, `orientation-sign` or `orientation-not-canonical` (rule
+    /// 4): a reader checks the one byte form of a rotation and refuses any other.
     pub fn new(w: i64, x: i64, y: i64, z: i64) -> R<Quat> {
         let part = |n: i64| i32::try_from(n).map_err(|_| PoseRefusal::OrientationNotUnit);
         let q = Quat {
@@ -235,13 +309,25 @@ impl Quat {
             y: part(y)?,
             z: part(z)?,
         };
-        if (q.norm() - i128::from(UNIT) * i128::from(UNIT)).abs() > NORM_TOLERANCE {
+        if !in_band(q.wide()) {
             return Err(PoseRefusal::OrientationNotUnit);
         }
-        match q.parts().into_iter().find(|n| *n != 0) {
-            Some(n) if n > 0 => Ok(q),
-            _ => Err(PoseRefusal::OrientationSign),
+        if signed(q.wide()) != q.wide() || w == 0 && x == 0 && y == 0 && z == 0 {
+            return Err(PoseRefusal::OrientationSign);
         }
+        if canonical(q.wide()) != q.wide() {
+            return Err(PoseRefusal::OrientationNotCanonical);
+        }
+        Ok(q)
+    }
+
+    /// A yaw (a turn about +y) of whole millidegrees, as SA-D3's `yaw_mdeg` writes it, in its one byte form. The half
+    /// angle's sine and cosine come from an integer series in 2^60 fixed point: no float and no platform `sin`.
+    pub fn from_yaw_mdeg(mdeg: i64) -> R<Quat> {
+        // Half of the yaw, in radians scaled by 2^60: q and −q are one turn, so 360 degrees of yaw is enough.
+        let x = i128::from(mdeg.rem_euclid(360_000)) * PI_2_60 / 360_000;
+        let (sin, cos) = sin_cos_2_60(x)?;
+        Quat::normalized([cos, 0, sin, 0])
     }
 
     pub fn parts(self) -> [i64; 4] {
@@ -266,7 +352,8 @@ impl Quat {
         }
     }
 
-    /// The four numbers `q` scaled to norm 2^30 and rounded, with the sign rule (rule 4). `q` is not zero.
+    /// The four numbers `q`, of any scale, scaled to norm 2^30 through an integer square root and rounded, then put in
+    /// their one byte form (rule 4). `q` is not zero.
     fn normalized(q: [i128; 4]) -> R<Quat> {
         let n: i128 = q.iter().try_fold(0i128, |s, c| add(s, mul(*c, *c)?))?;
         let n = u128::try_from(n).map_err(|_| PoseRefusal::OutOfRange)?;
@@ -274,26 +361,37 @@ impl Quat {
         if root == 0 {
             return Err(PoseRefusal::OrientationNotUnit);
         }
-        let mut out = [0i64; 4];
+        let mut out = [0i128; 4];
         for (o, c) in out.iter_mut().zip(q) {
-            *o = narrow(div_round(mul(c, UNIT.into())?, root)?)?;
+            *o = div_round(mul(c, UNIT.into())?, root)?;
         }
-        if out.iter().find(|n| **n != 0).is_some_and(|n| *n < 0) {
-            out = out.map(|n| -n);
-        }
-        Quat::new(out[0], out[1], out[2], out[3])
+        Quat::from_wide(canonical(signed(out)))
     }
 
-    /// `self ⊗ o` (turn by `o`, then by `self`), normalized.
+    fn from_wide(q: [i128; 4]) -> R<Quat> {
+        Quat::new(narrow(q[0])?, narrow(q[1])?, narrow(q[2])?, narrow(q[3])?)
+    }
+
+    /// `self ⊗ o` (turn by `o`, then by `self`). The product is divided by 2^30 and rounded, so a turn by the identity
+    /// changes nothing; only a product whose norm has left the band goes through the square root (rule 4).
     pub fn then(self, o: Quat) -> R<Quat> {
         let [w1, x1, y1, z1] = self.wide();
         let [w2, x2, y2, z2] = o.wide();
-        Quat::normalized([
+        let product = [
             w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
             w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
             w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
             w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        ])
+        ];
+        let mut scaled = [0i128; 4];
+        for (s, p) in scaled.iter_mut().zip(product) {
+            *s = div_round(p, UNIT.into())?;
+        }
+        if in_band(scaled) {
+            Quat::from_wide(canonical(signed(scaled)))
+        } else {
+            Quat::normalized(product)
+        }
     }
 
     /// `v` turned by this orientation: exact over the quaternion's own norm, then rounded once (rule 3).
@@ -363,8 +461,8 @@ pub enum Support {
     Slot,
     /// A volume it floats or swims in (water, a tank).
     Volume { volume: Id },
-    /// The rail of the track that owns its motion.
-    Track { rail: Id },
+    /// The rail of the track that owns its motion, named once, in the track.
+    Track,
     /// Nothing: in flight.
     None,
 }
@@ -399,17 +497,12 @@ impl Pose {
 pub enum Track {
     /// At rest where the pose is.
     Rest,
-    /// From `from` at `t0`, at a constant velocity in micrometres a second.
-    Straight {
-        t0: Micros,
-        from: Vec3,
-        velocity: Vec3,
-    },
-    /// Thrown from `from` at `t0` with `velocity`, under `gravity` (micrometres a second squared, in the frame's
+    /// From the pose's position at `t0`, at a constant velocity in micrometres a second.
+    Straight { t0: Micros, velocity: Vec3 },
+    /// Thrown from the pose's position at `t0` with `velocity`, under `gravity` (micrometres a second squared, in the frame's
     /// axes), and a spin carried as data (micro-radians a second) until N14 turns it.
     Thrown {
         t0: Micros,
-        from: Vec3,
         velocity: Vec3,
         gravity: Vec3,
         spin: Vec3,
@@ -424,9 +517,10 @@ pub enum Track {
 }
 
 impl Track {
-    /// Position and velocity at world time `t`, for a track whose pose is at `rest` (rule 8). One rounding per
+    /// Position and velocity at world time `t`, for a track that starts (or rests) at its pose's position `start`
+    /// (rule 8): the start is stored once, in the pose. One rounding per
     /// number: `p0 + (2·10^6·v·dt + g·dt²) / (2·10^12)`.
-    pub fn at(&self, rest: Vec3, t: Micros) -> R<(Vec3, Vec3)> {
+    pub fn at(&self, start: Vec3, t: Micros) -> R<(Vec3, Vec3)> {
         let since = |t0: Micros| -> R<i128> {
             let dt = i128::from(t) - i128::from(t0);
             if dt < 0 {
@@ -436,18 +530,17 @@ impl Track {
             }
         };
         match *self {
-            Track::Rest => Ok((rest, Vec3::ZERO)),
-            Track::Straight { t0, from, velocity } => {
+            Track::Rest => Ok((start, Vec3::ZERO)),
+            Track::Straight { t0, velocity } => {
                 let dt = since(t0)?;
                 let step = velocity
                     .wide()
                     .map(|v| mul(v, dt).and_then(|n| div_round(n, MICRO)));
                 let step = Vec3::from_wide([step[0]?, step[1]?, step[2]?])?;
-                Ok((from.plus(step)?, velocity))
+                Ok((start.plus(step)?, velocity))
             }
             Track::Thrown {
                 t0,
-                from,
                 velocity,
                 gravity,
                 ..
@@ -461,7 +554,7 @@ impl Track {
                     step[i] = div_round(n, 2 * MICRO * MICRO)?;
                     vel[i] = add(v[i], div_round(mul(g[i], dt)?, MICRO)?)?;
                 }
-                Ok((from.plus(Vec3::from_wide(step)?)?, Vec3::from_wide(vel)?))
+                Ok((start.plus(Vec3::from_wide(step)?)?, Vec3::from_wide(vel)?))
             }
             Track::Rail { .. } => Err(PoseRefusal::RailNeedsPath),
         }
@@ -481,8 +574,10 @@ impl Track {
 pub enum Owner {
     /// The slot it is in: it moves with its frame and has no motion of its own (a held cup).
     Slot,
-    /// A mover (N6), steered by `driver`'s controller: a body's own, or a joint skill's on an activity node.
-    Mover { driver: Id },
+    /// Its own mover (N6), steered by its own controller: a body's by its Soul's (or, while it is joined, by the joint
+    /// skill that claims its movement), an activity node's by the joint skill. No driver is named, so no record can
+    /// say that one body drives another (rule 7).
+    Mover,
     /// A closed-form track.
     Track(Track),
     /// A physics island: reserved, refused.
@@ -505,9 +600,13 @@ impl Movable {
     /// The pose's support checks, and the owner fits the frame (rule 7).
     pub fn check(&self) -> R<()> {
         self.pose.check()?;
+        let on_rail = matches!(self.owner, Owner::Track(Track::Rail { .. }));
+        if (self.pose.support == Support::Track) != on_rail {
+            return Err(PoseRefusal::SupportNotTrack);
+        }
         match (self.pose.frame.slot.is_some(), self.owner) {
             (_, Owner::Island) => Err(PoseRefusal::IslandReserved),
-            (true, Owner::Slot) | (false, Owner::Mover { .. } | Owner::Track(_)) => Ok(()),
+            (true, Owner::Slot) | (false, Owner::Mover | Owner::Track(_)) => Ok(()),
             _ => Err(PoseRefusal::OwnerNotSlot),
         }
     }
@@ -616,9 +715,11 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// A scene, each movable checked and listed after its frame (`frame-order`, `frame-missing`).
+    /// A scene, each movable checked and listed after its frame (`frame-order`, `frame-missing`), none with more
+    /// than T2's 32 ancestors (`depth-over-limit`).
     pub fn new(root: Id, list: Vec<Movable>) -> R<Scene> {
         let mut movables = BTreeMap::new();
+        let mut depth: BTreeMap<Id, u32> = BTreeMap::new();
         for m in list {
             m.check()?;
             if m.id == root || movables.contains_key(&m.id) {
@@ -633,6 +734,11 @@ impl Scene {
             } else if f.slot.is_some() {
                 return Err(PoseRefusal::FrameMissing);
             }
+            let d = depth.get(&f.node).copied().unwrap_or(0) + 1;
+            if d > crate::world_model::DEPTH_LIMIT {
+                return Err(PoseRefusal::DepthOverLimit);
+            }
+            depth.insert(m.id, d);
             movables.insert(m.id, m);
         }
         Ok(Scene { root, movables })
@@ -662,7 +768,7 @@ impl Scene {
                 let (p, v) = track.at(m.pose.position, t)?;
                 (p, v, track.spin())
             }
-            Owner::Mover { .. } => (m.pose.position, m.linear, m.angular),
+            Owner::Mover => (m.pose.position, m.linear, m.angular),
             Owner::Slot | Owner::Island => (m.pose.position, Vec3::ZERO, Vec3::ZERO),
         };
         Ok(Motion {
@@ -680,10 +786,11 @@ impl Scene {
         let mut at = id;
         while at != self.root {
             let m = self.movables.get(&at).ok_or(PoseRefusal::FrameMissing)?;
-            if chain.len() > crate::world_model::DEPTH_LIMIT as usize {
-                return Err(PoseRefusal::FrameOrder);
-            }
             chain.push(m);
+            // The node's ancestors are the rest of the chain and the root: as many as the chain is long (T2).
+            if chain.len() > crate::world_model::DEPTH_LIMIT as usize {
+                return Err(PoseRefusal::DepthOverLimit);
+            }
             at = m.pose.frame.node;
         }
         let crossed = u32::try_from(chain.len()).map_err(|_| PoseRefusal::OutOfRange)?;
@@ -697,7 +804,8 @@ impl Scene {
     /// Hands `id`'s motion at `t` to `to` in `frame`, with `support`, adding `push` (micrometres a second, in the new
     /// frame's axes) to the velocity it keeps (rule 10). The movable's pose, owner and velocity in the new frame are
     /// what keeps its motion in the root frame, to one unit per frame crossed. Returns the hand-off and the frames
-    /// crossed, old and new. A track handed to starts at `t` from the new pose with the new velocity.
+    /// crossed, old and new. A track handed to starts at `t` from the new pose with the new velocity. A slot or a
+    /// rest track keeps the position only: its velocity, and the record's, is zero.
     pub fn hand_off(
         &mut self,
         id: Id,
@@ -729,19 +837,21 @@ impl Scene {
         }
         let (new_frame, new) = self.motion(frame.node, t)?;
         let local = new_frame.local_of(self.offset(frame)?, &world)?;
-        let linear = local.linear.plus(push)?;
+        // A slot or a rest track carries no velocity: a catch ends the motion on purpose, and the record says so.
+        let (linear, angular) = match to {
+            Owner::Slot | Owner::Track(Track::Rest) => (Vec3::ZERO, Vec3::ZERO),
+            _ => (local.linear.plus(push)?, local.angular),
+        };
         let to = match to {
             Owner::Track(Track::Straight { .. }) => Owner::Track(Track::Straight {
                 t0: t,
-                from: local.position,
                 velocity: linear,
             }),
             Owner::Track(Track::Thrown { gravity, .. }) => Owner::Track(Track::Thrown {
                 t0: t,
-                from: local.position,
                 velocity: linear,
                 gravity,
-                spin: local.angular,
+                spin: angular,
             }),
             other => other,
         };
@@ -756,7 +866,7 @@ impl Scene {
             pose,
             owner: to,
             linear,
-            angular: local.angular,
+            angular,
             slots: m.slots.clone(),
         };
         moved.check()?;
@@ -769,7 +879,7 @@ impl Scene {
                 to,
                 pose,
                 linear,
-                angular: local.angular,
+                angular,
             },
             old + new + 1,
         ))
@@ -846,7 +956,7 @@ impl Frame {
 }
 
 impl Support {
-    /// `{1: which, 2: node, 3: height}`: 1 surface, 2 slot, 3 volume, 4 track, 0 none.
+    /// `{1: which, 2: node, 3: height}`: 1 surface, 2 slot, 3 volume, 4 track (the rail is the track's), 0 none.
     fn to_value(self) -> Value {
         match self {
             Support::None => map(vec![(1, Value::Uint(0))]),
@@ -857,7 +967,7 @@ impl Support {
             ]),
             Support::Slot => map(vec![(1, Value::Uint(2))]),
             Support::Volume { volume } => map(vec![(1, Value::Uint(3)), (2, volume.to_value())]),
-            Support::Track { rail } => map(vec![(1, Value::Uint(4)), (2, rail.to_value())]),
+            Support::Track => map(vec![(1, Value::Uint(4))]),
         }
     }
 
@@ -873,9 +983,7 @@ impl Support {
             3 => Ok(Support::Volume {
                 volume: fixture_id(field(m, 2)?)?,
             }),
-            4 => Ok(Support::Track {
-                rail: fixture_id(field(m, 2)?)?,
-            }),
+            4 => Ok(Support::Track),
             _ => Err(PoseRefusal::NotARecord),
         }
     }
@@ -906,27 +1014,24 @@ impl Pose {
 }
 
 impl Track {
-    /// `{1: which, 2: t0, 3: from, 4: velocity, 5: gravity, 6: spin}` (2 straight, 3 thrown); rest is `{1: 1}`;
-    /// a rail is `{1: 4, 2: t0, 3: s0, 4: speed, 7: rail}`.
+    /// `{1: which, 2: t0, 4: velocity, 5: gravity, 6: spin}` (2 straight, 3 thrown; the start is the pose's
+    /// position); rest is `{1: 1}`; a rail is `{1: 4, 2: t0, 3: s0, 4: speed, 7: rail}`.
     fn to_value(self) -> Value {
         match self {
             Track::Rest => map(vec![(1, Value::Uint(1))]),
-            Track::Straight { t0, from, velocity } => map(vec![
+            Track::Straight { t0, velocity } => map(vec![
                 (1, Value::Uint(2)),
                 (2, int(t0)),
-                (3, from.to_value()),
                 (4, velocity.to_value()),
             ]),
             Track::Thrown {
                 t0,
-                from,
                 velocity,
                 gravity,
                 spin,
             } => map(vec![
                 (1, Value::Uint(3)),
                 (2, int(t0)),
-                (3, from.to_value()),
                 (4, velocity.to_value()),
                 (5, gravity.to_value()),
                 (6, spin.to_value()),
@@ -952,12 +1057,10 @@ impl Track {
             1 => Ok(Track::Rest),
             2 => Ok(Track::Straight {
                 t0: read_int(field(m, 2)?)?,
-                from: vec(3)?,
                 velocity: vec(4)?,
             }),
             3 => Ok(Track::Thrown {
                 t0: read_int(field(m, 2)?)?,
-                from: vec(3)?,
                 velocity: vec(4)?,
                 gravity: vec(5)?,
                 spin: vec(6)?,
@@ -974,11 +1077,11 @@ impl Track {
 }
 
 impl Owner {
-    /// `{1: which, 2: driver | track}`: 1 slot, 2 mover, 3 track, 4 island.
+    /// `{1: which, 2: track}`: 1 slot, 2 mover (its own: no driver is named), 3 track, 4 island.
     fn to_value(self) -> Value {
         match self {
             Owner::Slot => map(vec![(1, Value::Uint(1))]),
-            Owner::Mover { driver } => map(vec![(1, Value::Uint(2)), (2, driver.to_value())]),
+            Owner::Mover => map(vec![(1, Value::Uint(2))]),
             Owner::Track(t) => map(vec![(1, Value::Uint(3)), (2, t.to_value())]),
             Owner::Island => map(vec![(1, Value::Uint(4))]),
         }
@@ -988,9 +1091,7 @@ impl Owner {
         let m = as_map(v)?;
         match uint(field(m, 1)?)? {
             1 => Ok(Owner::Slot),
-            2 => Ok(Owner::Mover {
-                driver: fixture_id(field(m, 2)?)?,
-            }),
+            2 => Ok(Owner::Mover),
             3 => Ok(Owner::Track(Track::from_fixture(as_map(field(m, 2)?)?)?)),
             4 => Err(PoseRefusal::IslandReserved),
             _ => Err(PoseRefusal::NotARecord),
@@ -1192,7 +1293,7 @@ pub fn hand_offs(n: u32) -> R<Drift> {
                 slot: None,
             },
             support,
-            Owner::Mover { driver: body },
+            Owner::Mover,
             Vec3::ZERO,
         )?;
         let (after, _) = scene.motion(body, t)?;
