@@ -68,7 +68,11 @@ export type Effect = {
   amount?: unknown;
   form?: string;
   after_us?: number;
+  /** A `draw`: the table the world draws one outcome from (SA-F13). */
+  outcomes?: DrawRow[];
 };
+/** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
+export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
 export type Entry = {
   kind: string;
   state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;
@@ -91,6 +95,16 @@ export type Node = {
 };
 /** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
 export type Audience = string | { rule: 'everyone' | 'owner' | 'creator' } | { rule: 'linked'; link: string };
+
+/** Whether an asker whose `sees` is `sees` belongs to `audience`: the one resolver every audience read uses. */
+export function seesAudience(sees: unknown, audience: Audience): boolean {
+  if (sees === 'all') return true;
+  const list = Array.isArray(sees) ? sees : [];
+  if (typeof audience !== 'object' || audience === null) return typeof audience === 'string' && list.includes(audience); // a bare string keeps its old meaning; none declared is seen by no list
+  if (audience.rule === 'everyone') return true;
+  if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+  return list.includes(audience.rule);
+}
 export type Input = {
   kinds: Record<string, Entry>;
   act: { this: string; form: string; args?: Record<string, unknown> };
@@ -112,6 +126,8 @@ const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() :
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
 /** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
 const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigint';
+/** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
+const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 export function decide(input: Input): Verdict {
@@ -138,14 +154,7 @@ export function decide(input: Input): Verdict {
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
   // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
-  const sees = (audience: Audience) => {
-    if (asker.sees === 'all') return true;
-    const list = Array.isArray(asker.sees) ? asker.sees : [];
-    if (typeof audience === 'string') return list.includes(audience);
-    if (audience.rule === 'everyone') return true;
-    if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
-    return list.includes(audience.rule);
-  };
+  const sees = (audience: Audience) => seesAudience(asker.sees, audience);
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
   const formFix = (meets: (e: Effect) => boolean): Fix | null => {
@@ -180,8 +189,8 @@ export function decide(input: Input): Verdict {
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
       const meets = (v: unknown) =>
-        (!has(n, 'is') || v === n.is) &&
-        (!has(n, 'not') || v !== n.not) &&
+        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
+        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
         (!has(n, 'at_least') || (int(v) && v >= (n.at_least as number))) &&
         (!has(n, 'at_most') || (int(v) && v <= (n.at_most as number)));
       if (meets(value)) return { ok: true };
@@ -452,7 +461,7 @@ export function whoMay(input: Input): WhoVerdict {
   if (typeof type !== 'string') return bad('unknown_who', { who });
   const def = has(entry.links, type) ? entry.links![type] : undefined;
   if (!def) return bad('no_such_link', { link: type });
-  const sees = asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(def.audience));
+  const sees = seesAudience(asker.sees, def.audience);
   if (!sees) return { verdict: 'unknown', who, node: act.this, link: type, read };
   const list = self.links?.[type];
   const ends = Array.isArray(list) ? list : [];

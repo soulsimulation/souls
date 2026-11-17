@@ -3,12 +3,12 @@
   "kind": "test:supper",
   "owner": "thing",
   "state": {
-    "course": { "n": 1, "type": "enum", "values": ["laid", "served", "cleared"], "default": "laid", "audience": "public" }
+    "course": { "n": 1, "type": "enum", "values": ["laid", "served", "cleared"], "default": "laid", "audience": {"rule": "everyone"} }
   },
   "links": {
-    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" },
-    "host": { "n": 2, "from": "body", "most": 1, "audience": "public" },
-    "diner": { "n": 3, "from": "body", "most": 11, "audience": "public" }
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": {"rule": "everyone"} },
+    "host": { "n": 2, "from": "body", "most": 1, "audience": {"rule": "everyone"} },
+    "diner": { "n": 3, "from": "body", "most": 11, "audience": {"rule": "everyone"} }
   },
   "roles": {
     "host": { "need": "replaceable", "places": { "in": "here", "posture": "sit", "within_mm": 1500 } },
