@@ -20,7 +20,7 @@ export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, l
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
-export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', hatch: 'SA-F9'});
+export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10'});
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
@@ -90,6 +90,15 @@ export const VEHICLE_GROUNDS = Object.freeze(['level', 'deep_water']);
 export const SPOTS = Object.freeze(['level', 'shallow', 'deep_water', 'door', 'stairs', 'ladder', 'blocked']);
 export const SPOTS_STAND = Object.freeze(['level', 'shallow']);
 export const SPOTS_SWIM = Object.freeze(['deep_water']);
+/** The code hatch (SA-F9, #2850): a form may name one pure function by the hash of its WASM module (Engine v2 F8, #2823; T9,
+ *  #2663), with the state it reads and a step limit. It is metered, has no clock, randomness or float, and cannot reach a thing
+ *  it did not declare. No code lives in an entry; only the name, the reads and the limit. The kind's hash covers all three. */
+export const HATCH_KEYS = Object.freeze(['module', 'reads', 'steps_most', 'answers', 'why']);
+export const HATCH_MODULE = /^prov-1220[0-9a-f]{64}$/;
+export const HATCH_READS_MOST = 16;
+export const HATCH_STEPS_MOST = 1_000_000;
+export const HATCH_ARGS = Object.freeze(['count', 'duration']);
+export const HATCH_FIELDS = Object.freeze(['bool', 'enum', 'int', 'duration', 'timed', 'list']);
 
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const KIND = /^[a-z][a-z0-9-]*:[a-z][a-z0-9_]*$/;
@@ -121,7 +130,8 @@ export function validateEntry(entry) {
   if (!isObj(entry)) return [{path: '', reason: 'an entry is an object'}];
   scan(entry, '', err);
   for (const key of Object.keys(entry)) {
-    if (key in RESERVED) err(key, `section "${key}" is not defined yet; ${RESERVED[key]} adds it`);
+    if (key === 'hatch') err(key, 'a hatch is declared by the form that uses it, under its "hatch" key; there is no section of this name');
+    else if (key in RESERVED) err(key, `section "${key}" is not defined yet; ${RESERVED[key]} adds it`);
     else if (key === 'extends') err(key, 'a published kind is written out in full; it extends nothing');
     else if (!(key in SECTIONS)) err(key, `unknown section "${key}"`);
   }
@@ -181,7 +191,7 @@ export function validateEntry(entry) {
     else { only(entry.geometry, ['bounds_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true); }
   }
 
-  const ctx = {state, links, points, slots, forms, areas: isObj(entry.areas) ? entry.areas : {}};
+  const ctx = {text, state, links, points, slots, forms, areas: isObj(entry.areas) ? entry.areas : {}};
   for (const [name, f] of Object.entries(forms)) {
     if (!IDENT.test(name)) err(`forms.${name}`, 'a form name is lower_snake_case');
     form(f, `forms.${name}`, ctx, err);
@@ -657,7 +667,8 @@ const isArg = v => isObj(v) && Object.keys(v).length === 1 && typeof v.arg === '
 
 function form(f, path, ctx, err) {
   if (!isObj(f)) { err(path, 'a form is an object'); return; }
-  only(f, ['who', 'starts', 'takes', 'needs', 'steps', 'effects'], path, err);
+  only(f, ['who', 'starts', 'takes', 'needs', 'steps', 'effects', 'hatch'], path, err);
+  if (f.hatch !== undefined) hatch(f, path, ctx, err);
   const takes = isObj(f.takes) ? f.takes : {};
   if (f.takes !== undefined && !isObj(f.takes)) err(`${path}.takes`, 'a table of argument name to type');
   for (const [name, a] of Object.entries(takes)) {
@@ -772,6 +783,44 @@ function form(f, path, ctx, err) {
   });
 }
 
+/** A hatch: one pure function, named by the hash of its module, with the fields and arguments it reads and a step limit.
+ *  `answers` is "verdict" (the form can be done only if the function says yes) or {"field": <a field of this kind>} (the
+ *  function's whole-number answer is that field's new value). `why` names a text entry saying what no declared form could do. */
+function hatch(f, path, ctx, err) {
+  const p = `${path}.hatch`, h = f.hatch;
+  if (!isObj(h)) { err(p, 'an object: {"module", "reads", "steps_most", "answers", "why"}'); return; }
+  only(h, HATCH_KEYS, p, err);
+  if (!(typeof h.module === 'string' && HATCH_MODULE.test(h.module))) err(`${p}.module`, 'the hash of the function\'s module, "prov-1220" and 64 hex digits (never the code itself)');
+  if (!Array.isArray(h.reads) || h.reads.length === 0) err(`${p}.reads`, 'the fields and arguments the function reads, a list of {"field"} or {"arg"}; a hatch that reads nothing declares nothing');
+  else {
+    if (h.reads.length > HATCH_READS_MOST) err(`${p}.reads`, `at most ${HATCH_READS_MOST} reads`);
+    const seen = new Set();
+    h.reads.forEach((r, i) => {
+      const rp = `${p}.reads.${i}`;
+      if (!isObj(r) || Object.keys(r).length !== 1 || !('field' in r || 'arg' in r)) { err(rp, 'exactly one of {"field": <state field>} or {"arg": <argument>}'); return; }
+      const key = 'field' in r ? `f:${r.field}` : `a:${r.arg}`;
+      if (seen.has(key)) err(rp, 'already read; list each once');
+      seen.add(key);
+      if ('field' in r) {
+        const t = ctx.state[r.field]?.type;
+        if (!t) err(`${rp}.field`, 'names a state field of this kind');
+        else if (!HATCH_FIELDS.includes(t)) err(`${rp}.field`, `a function reads whole values only: a field of type ${HATCH_FIELDS.join(', ')}, not ${t}`);
+      } else {
+        const t = isObj(f.takes) ? f.takes[r.arg]?.type : undefined;
+        if (!t) err(`${rp}.arg`, 'names an argument in takes');
+        else if (!HATCH_ARGS.includes(t)) err(`${rp}.arg`, `a function reads a count or a duration, not a ${t}`);
+      }
+    });
+  }
+  if (!(isInt(h.steps_most) && h.steps_most > 0 && h.steps_most <= HATCH_STEPS_MOST)) err(`${p}.steps_most`, `the most steps the function may take before it is stopped, a whole number from 1 to ${HATCH_STEPS_MOST}`);
+  if (h.answers === 'verdict') { /* a yes or a no */ }
+  else if (isObj(h.answers) && Object.keys(h.answers).length === 1 && 'field' in h.answers) {
+    const t = ctx.state[h.answers.field]?.type;
+    if (!t || !['bool', 'enum', 'int', 'duration'].includes(t)) err(`${p}.answers.field`, 'names a bool, enum, int or duration state field of this kind that takes the answer');
+  } else err(`${p}.answers`, '"verdict", or {"field": <a state field of this kind>}');
+  if (!(typeof h.why === 'string' && h.why in ctx.text)) err(`${p}.why`, 'names an entry of the text table saying what no declared form could do');
+}
+
 /** A draw: a table of outcomes, each a name, a weight (a whole number, or one int field of this kind), an event and the
  *  fields it sets. The world draws a whole number below the total and passes it in as data (SA-F13). */
 function draw(e, p, ctx, value, fieldName, err) {
@@ -873,6 +922,11 @@ export function hashKinds(entries) {
   };
   for (const e of entries) visit(e.kind);
   return done;
+}
+
+/** The hatches an entry declares, one per form that names one. A kind with any waits for Engine v2 to run (SA-F9). */
+export function hatchesOf(entry) {
+  return Object.entries(isObj(entry?.forms) ? entry.forms : {}).filter(([, f]) => isObj(f) && isObj(f.hatch)).map(([form, f]) => ({form, ...f.hatch}));
 }
 
 export function loadDir(dir) {

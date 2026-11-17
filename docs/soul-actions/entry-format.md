@@ -67,7 +67,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
-(SA-F10), `hatch` (SA-F9).
+(SA-F10).
 
 **Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
 ([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
@@ -204,6 +204,26 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
 `tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
 `look.mjs` converts to metres only when it draws.
+
+**The code hatch** (SA-F9, [#2850](https://github.com/soulsimulation/souls/issues/2850); Engine v2 F8
+[#2823](https://github.com/soulsimulation/souls/issues/2823), T9 [#2663](https://github.com/soulsimulation/souls/issues/2663)).
+A form may carry one `hatch`, for the rare thing no declared form can say (whether a chess move is legal, which step of a
+lamp's pattern is lit). It is not a section: it is a key of the form, so the kind's hash covers it. It holds no code:
+
+```json
+"hatch": { "module": "prov-1220<64 hex>", "reads": [{"field": "pieces"}, {"field": "turn"}, {"arg": "from"}, {"arg": "to"}],
+           "steps_most": 20000, "answers": "verdict", "why": "why_chess" }
+```
+
+`module` is the hash of the function's WASM module; `reads` is every field (a bool, enum, int, duration, timed value or
+list) and every `count` or `duration` argument the function may see, and nothing else; `steps_most` is the meter, from 1 to
+1 000 000; `answers` is `"verdict"` (the form can be done only if the function says yes) or `{"field": <name>}` (its whole
+number answer is that field's new value); `why` names a text entry saying what no declared form could do. The function is
+pure: no I/O, no clock, no randomness, no float, the same bytes in Node, the browser and the new engine. The check gate
+(rule `hatch`) refuses a hatch that reads fewer than two things, or only bool fields with a verdict (a declared form's needs
+say those), and a kind with more than four. It prints the number of hatches in the kit, and marks an entry that names one
+`waiting_for_engine`: until Engine v2 runs hatches, such an entry is validated, hashed and checked, never run. Cases for the
+two known uses are data (`tools/entry/cases/hatch.json`). No function is written.
 
 ## A form
 
