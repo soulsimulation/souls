@@ -53,7 +53,9 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
-| 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
+| 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 12 | (reserved) | `reactions` (SA-F15) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
@@ -67,9 +69,9 @@ Not defined yet, and refused with the name of the task that adds each: `reaction
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
 end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
-it is a child node, declared in `children` with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
-the sheet (`content/kinds/signup/`). Holding is a change of parent, not a link.
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
 whole on every change, Engine v2 F11, [#2774](https://github.com/soulsimulation/souls/issues/2774)), `of` (one to eight
@@ -173,3 +175,32 @@ picture or a fixed typo never renames a placed thing. Reordering keys changes ne
 
 **The provisional hash will change once**, when the real encoding lands. Nothing may store it as permanent, which
 is why entries name each other by `namespace:name` and the tool resolves the hash.
+
+## The check gate
+
+```sh
+node tools/entry/check.mjs kitchen        # one family (a folder of content/kinds); no argument checks them all
+pnpm entry check kitchen                  # the same
+node --test tools/entry/check.test.mjs    # one fixture per rule
+```
+
+One JSON line per file, then a summary; exit 1 if any entry has a finding. A finding is `{rule, form, field, path,
+reason, fix}`: the rule broken, where, and the smallest change that passes. The format's own refusals are reported
+under the rule they break; the rest are checked on top (`tools/entry/check.mjs`, `RULES`).
+
+| Rule | Broken by | Format already refuses |
+|---|---|---|
+| `exact` | a float or a count in ticks | yes |
+| `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
+| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
+| `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
+| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
+| `no-labels` | a mood word in the card | no |
+| `refs` | a kind that is not loaded, or kinds in a circle | no |
+
+A state field that no form of the kind sets to some declared value is taken as set from outside, so a need on it is not
+a dead end (the kettle's water is filled by something else).

@@ -58,8 +58,9 @@ test('matrix bits, world pose, geometry replacement and instance count revalidat
  for(let i=0;i<8;i++)mesh.setMatrixAt(i,new THREE.Matrix4().makeTranslation(i?20+i:0,0,0));geometry.computeBoundingSphere();mesh.computeBoundingSphere();root.add(mesh);const v=new WorldRenderedVisibility();
  assert.equal(score(v,[root]),0);const cache=caches(v).cache.get(mesh);assert.ok(cache);
  assert.equal(score(v,[root]),0);assert.equal(caches(v).cache.get(mesh),cache);
- mesh.setMatrixAt(0,new THREE.Matrix4().makeTranslation(12,0,0));mesh.computeBoundingSphere();assert.equal(score(v,[root]),1);assert.notEqual(caches(v).cache.get(mesh),cache);
- mesh.position.x=-12;assert.equal(score(v,[root]),0);mesh.position.x=0;
+ // #2617: a mesh is revalidated when a ray first reaches it in a query; one no ray reaches keeps its stale cache unused.
+ mesh.setMatrixAt(0,new THREE.Matrix4().makeTranslation(12,0,0));mesh.computeBoundingSphere();assert.equal(score(v,[root]),1);
+ mesh.position.x=-12;assert.equal(score(v,[root]),0);assert.notEqual(caches(v).cache.get(mesh),cache);mesh.position.x=0;
  const replacement=new THREE.BoxGeometry(3,3,.4);replacement.computeBoundingSphere();mesh.geometry=replacement;mesh.setMatrixAt(0,new THREE.Matrix4());mesh.computeBoundingSphere();assert.equal(score(v,[root]),0);
  mesh.count=0;mesh.computeBoundingSphere();assert.equal(score(v,[root]),1);
  v.reset();geometry.dispose();replacement.dispose();material.dispose();
