@@ -124,10 +124,13 @@ mem() { local d=/etc/systemd/system/sim-worlds@$1.service.d; install -d "$d"; [ 
 mem staging 2500M 3G; mem production 8G 9G
 install -m 644 "$HERE/sim-worlds-backup@.service" /etc/systemd/system/sim-worlds-backup@.service
 install -m 644 "$HERE/sim-worlds-backup@.timer" /etc/systemd/system/sim-worlds-backup@.timer
+# the hourly backup (#2542): installed, never enabled here (enabling it is the maintainer's step; docs/operations.md#backups)
+install -m 644 "$HERE/sim-worlds-backup-hourly@.service" /etc/systemd/system/sim-worlds-backup-hourly@.service
+install -m 644 "$HERE/sim-worlds-backup-hourly@.timer" /etc/systemd/system/sim-worlds-backup-hourly@.timer
 install -m 644 "$HERE/sim-worlds-health@.service" /etc/systemd/system/sim-worlds-health@.service
 install -m 644 "$HERE/sim-worlds-health@.timer" /etc/systemd/system/sim-worlds-health@.timer
 # #2541: the telemetry collector and its alerts. Installed, never enabled here (this runs on every release): enabling is
 # the maintainer's step, docs/operations/telemetry.md.
 install -m 644 "$HERE/sim-worlds-telemetry@.service" /etc/systemd/system/sim-worlds-telemetry@.service
 systemctl daemon-reload
-echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,health}@.{service,timer}, sim-worlds-telemetry@.service (nothing started)"
+echo "installed: user simworlds, /srv/sim-worlds{,-data}, /etc/sim-worlds/{staging,production}.conf, sim-worlds@.service, sim-worlds-{backup,backup-hourly,health}@.{service,timer}, sim-worlds-telemetry@.service (nothing started)"
