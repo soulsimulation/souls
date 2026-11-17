@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "What a form needs, decided from plain data: yes, no with a named reason, or unknown. No imports; its cases are data in cases/.",
+  "description": "What a form needs and what it does, from plain data: a verdict, then generic changes plus named events. No imports; its cases are data in cases/.",
   "exports": {
     ".": "./src/rules.ts"
   },

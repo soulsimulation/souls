@@ -1,12 +1,13 @@
 # @souls/form-rules
 
-What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://github.com/soulsimulation/souls/issues/2843)).
+What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://github.com/soulsimulation/souls/issues/2843)),
+and what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)).
 `decide(input)` answers whether a form of a kind written in the [entry format](../../docs/soul-actions/entry-format.md)
 can be done now. Nothing in today's server or client calls it yet; Engine v2's shared rules (R2,
 [#2685](https://github.com/soulsimulation/souls/issues/2685)) write it again and run the same cases.
 
 ```sh
-node --test packages/form-rules/src/*.test.ts        # every case in cases/, plus the library's own checks
+node --test packages/form-rules/src/*.test.ts        # every case in cases/ and cases/effects/, plus the library's own checks
 node packages/form-rules/bin/browser-check.mjs       # the same verdicts in Node and in a browser build (1,000 generated cases)
 ```
 
@@ -31,8 +32,10 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts in Node
 `NEEDS` is one closed list, shared with R2: `state` (a field `is` or is `not` a value, or lies within `at_least` and
 `at_most`, whole numbers), `slot_free`, `within_reach` (of a point, by the reach of the move the form's step makes
 there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
-/ `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a).
-The range and hand needs are not in the entry format yet; their cases use the test kind in `cases/kinds/test/`.
+/ `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
+`room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
+overflows). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+the test kinds in `cases/kinds/test/`.
 
 ## A case
 
@@ -64,3 +67,37 @@ the state and the asker, and the expected verdict; adding one changes no code.
   Arguments arrive resolved: choosing them from a selector is not a rule.
 - `asker.sees` is the audience rules the asker satisfies for these nodes, or `"all"` for the world itself.
 - `expect` lists the keys to compare with the verdict; each key is compared whole, object key order aside.
+
+## What a form does
+
+`effects({kinds, act, state, receipt})` asks the rules as the world; if the answer is not yes, it returns that
+verdict and no changes. Otherwise it returns `{verdict: "yes", receipt, actor, changes, events, timers}`, in the two
+layers of Engine v2's contract T6:
+
+- `changes`, generic changes any viewer can apply without the kinds: `set` (`node`, `field`, its number `n`, `to`,
+  and for an amount the signed `by`), `link` / `unlink` (`node`, `link`, `n`, `end`), `reparent` (`node`, `to`),
+  `create` (`node`, `kind`, `to`) and `remove` (`node`, with everything it holds). A place `to` is a slot
+  `{node, slot}`, a hand `{node, hand}`, or loose in a node `{node}`.
+- `events`, one per effect the entry declares, in order: its name, the node, and the indexes of its changes.
+- `timers`: a `timer` effect is not a change to state; it is returned here with the index of its event.
+
+The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
+int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
+`"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
+to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);
+`create` makes a thing in a slot, the actor's first free hand or `here`, loose in the place the actor is in (where
+on the ground or a surface is Engine v2's set-down, E4), with the id `<receipt>.<n>`; `link` / `unlink` join the
+actor to the thing. Effects are worked out in order on a copy, so a later one sees an earlier one; one that cannot be
+done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
+
+`apply(state, result)` applies a result to plain state, all of it or none: a refusal changes nothing; a receipt
+already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
+change that cannot apply, refuses the batch with its index.
+
+## An effect case
+
+A file in `cases/effects/` is `{"format": "souls-effect-cases/1", "about": ..., "cases": [...]}`. A case is a state
+and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state) and
+what `effects` should return (`expect`, compared like a rule case's). `after` names nodes and what each should be
+once every act is applied (`null`: removed), compared whole. Every act that is done is also applied a second time
+with its receipt, which must change nothing.
