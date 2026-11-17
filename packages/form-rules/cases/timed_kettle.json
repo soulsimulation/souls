@@ -1,0 +1,47 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "test:timed_kettle (cases/kinds/test/timed_kettle.json): a need on a timed field reads its value at the state's now_us. Switched on at 7 s at 533 mC per second, the heat reaches 100000 at 157093809 us (cases/timed/kettle.json), so pour_boiling is no one microsecond before that time and yes at it.",
+  "cases": [
+    {
+      "name": "pour_boiling_one_microsecond_before_the_crossing",
+      "act": { "this": "k1", "form": "pour_boiling" },
+      "state": {
+        "actor": "b1",
+        "now_us": 157093808,
+        "nodes": {
+          "k1": { "kind": "test:timed_kettle", "fields": { "heat": { "value": 20000, "per_s": 533, "set_us": 7000000 } } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "heat", "found": 99999, "wanted": { "at_least": 100000 } }, "fix": null, "read": [["k1/field/1", 99999]] }
+    },
+    {
+      "name": "pour_boiling_at_the_crossing",
+      "act": { "this": "k1", "form": "pour_boiling" },
+      "state": {
+        "actor": "b1",
+        "now_us": 157093809,
+        "nodes": {
+          "k1": { "kind": "test:timed_kettle", "fields": { "heat": { "value": 20000, "per_s": 533, "set_us": 7000000 } } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["k1/field/1", 100000]] }
+    },
+    {
+      "name": "pour_boiling_with_no_time_is_bad_input",
+      "act": { "this": "k1", "form": "pour_boiling" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "test:timed_kettle", "fields": { "heat": { "value": 20000, "per_s": 533, "set_us": 7000000 } } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "bad_input", "need": 0, "detail": { "what": "no_time", "field": "heat" } }
+    }
+  ]
+}
