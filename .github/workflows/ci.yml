@@ -253,6 +253,8 @@ jobs:
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
+              # the entry format and its gates (check, look, prove); picked by tools/entry, content and packages/form-rules
+              node --test --test-concurrency=4 tools/entry/*.test.mjs
               ;;
             v2)
               # Engine v2 (K15, #2637): not a gate step; picked by ci-scope.mjs from its own paths
