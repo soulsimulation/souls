@@ -119,6 +119,8 @@ type Outcome = { ok: true } | { ok: false; no: Verdict } | { ok: 'unknown'; unkn
 const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
+/** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
+const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 export function decide(input: Input): Verdict {
@@ -182,8 +184,8 @@ export function decide(input: Input): Verdict {
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !whole(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
       const meets = (v: unknown) =>
-        (!has(n, 'is') || v === n.is) &&
-        (!has(n, 'not') || v !== n.not) &&
+        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
+        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
         (!has(n, 'at_least') || (whole(v) && v >= (n.at_least as number))) &&
         (!has(n, 'at_most') || (whole(v) && v <= (n.at_most as number)));
       if (meets(value)) return { ok: true };
