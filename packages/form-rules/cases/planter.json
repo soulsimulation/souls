@@ -1,0 +1,628 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:planter grows by itself. Its water is a timed value in mg falling 5 mg a second (18 g an hour; a 4 L soak stays at or above the dry line, 1 360 000 mg, for 528 000.2 s, about six days). Sown, it arms a timer one world day ahead for the next stage; a stage comes only while the soil is moist. Every number is worked from the value, rate and time; nothing is written between events.",
+ "cases": [
+  {
+   "name": "sow_every_need_met",
+   "act": {
+    "this": "p1",
+    "form": "sow"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/2",
+      "bare"
+     ],
+     [
+      "b1/effector_mm",
+      [
+       0,
+       400,
+       300
+      ]
+     ],
+     [
+      "move/press/reach_mm",
+      600
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sow_already_sown",
+   "act": {
+    "this": "p1",
+    "form": "sow"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       300
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "stage",
+     "found": "seed",
+     "wanted": {
+      "is": "bare"
+     }
+    }
+   }
+  },
+  {
+   "name": "sow_out_of_reach",
+   "act": {
+    "this": "p1",
+    "form": "sow"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 0,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "bare",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       400,
+       2000
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "out_of_reach",
+    "need": 1,
+    "detail": {
+     "point": "soil",
+     "move": "press"
+    },
+    "fix": {
+     "step": "walk_to",
+     "point": "soil"
+    }
+   }
+  },
+  {
+   "name": "sprout_moist_on_day_1",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      3568000
+     ]
+    ]
+   }
+  },
+  {
+   "name": "leaf_moist_on_day_2",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 172800000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      3136000
+     ]
+    ]
+   }
+  },
+  {
+   "name": "flower_moist_on_day_3",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 259200000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      2704000
+     ]
+    ]
+   }
+  },
+  {
+   "name": "fruit_moist_on_day_4",
+   "act": {
+    "this": "p1",
+    "form": "fruit"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 345600000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "flowering",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      2272000
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sprout_dry_on_day_1",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 86400000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 568000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "sprout_dry_still_refused_on_day_10",
+   "act": {
+    "this": "p1",
+    "form": "sprout"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 864000000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "seed",
+       "water": {
+        "value": 1000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 0,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "leaf_after_the_soil_dried",
+   "act": {
+    "this": "p1",
+    "form": "leaf"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 604800000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "sprout",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 976000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "flower_after_the_soil_dried",
+   "act": {
+    "this": "p1",
+    "form": "flower"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 604800000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "leafy",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 976000,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "fruit_a_microsecond_before_the_soil_turns_dry",
+   "act": {
+    "this": "p1",
+    "form": "fruit"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 528000199999,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "flowering",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "yes",
+    "read": [
+     [
+      "p1/field/1",
+      1360000
+     ]
+    ]
+   }
+  },
+  {
+   "name": "fruit_refused_the_microsecond_the_soil_turns_dry",
+   "act": {
+    "this": "p1",
+    "form": "fruit"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 528000200000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "flowering",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 1359999,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  },
+  {
+   "name": "fruit_empty_on_day_10",
+   "act": {
+    "this": "p1",
+    "form": "fruit"
+   },
+   "state": {
+    "actor": "b1",
+    "now_us": 864000000000,
+    "nodes": {
+     "p1": {
+      "kind": "eden:planter",
+      "fields": {
+       "stage": "fruiting",
+       "water": {
+        "value": 4000000,
+        "per_s": -5,
+        "set_us": 0
+       }
+      }
+     },
+     "b1": {
+      "hands": {}
+     }
+    }
+   },
+   "asker": {
+    "sees": "all"
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "water",
+     "found": 0,
+     "wanted": {
+      "at_least": 1360000
+     }
+    }
+   }
+  }
+ ]
+}
