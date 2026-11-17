@@ -102,6 +102,26 @@ test('the soul-tools job runs on its own paths, full scope included, and on noth
   assert.ok(!('paths' in jobsFor(['tools/soul-trace/x.test.mjs']).include.find(j => j.name === 'soul-tools')));
 });
 
+test('a v2/-only change runs the v2 job alone, scope none; v2 runs on nothing else (K15, #2637)', () => {
+  for (const files of [['v2/x.rs'], ['v2/crates/seed/src/lib.rs', 'v2/docs/TRUNK.md', 'v2/Cargo.lock']]) {
+    assert.deepEqual(names(files), ['v2'], files.join());
+    assert.equal(jobsFor(files).scope, 'none');
+    assert.equal(smokeFor(files), false);
+  }
+  for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).includes('v2'), f);
+  assert.ok(names(['pnpm-lock.yaml']).includes('v2'), 'full scope includes it');
+  assert.ok(!('paths' in jobsFor(['v2/x.rs']).include[0]));
+});
+
+test('ci.yml: the v2 job skips the pnpm install and runs v2/tools/ci.sh on the pinned toolchain', () => {
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const qualify = /^  qualify:[\s\S]*?(?=^  \S)/m.exec(workflow)?.[0] ?? '';
+  assert.match(qualify, /if: matrix\.kind != 'v2'\n\s+run: pnpm install --frozen-lockfile/);
+  assert.match(qualify, /^\s+v2\)\n.*\n\s+bash v2\/tools\/ci\.sh$/m);
+  assert.match(qualify, /rust-toolchain\.toml/);
+  assert.match(qualify, /key: v2-cargo-.*hashFiles\('v2\/rust-toolchain\.toml', 'v2\/Cargo\.lock'\)/);
+});
+
 test('unmapped paths (lockfile, .github, mars) run every job', () => {
   for (const f of ['pnpm-lock.yaml', '.github/workflows/ci.yml', 'mars/viewer/x.js']) assert.equal(names([f]).length, JOBS.length, f);
 });
