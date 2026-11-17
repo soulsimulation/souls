@@ -22,6 +22,8 @@ step format cargo fmt --all --check
 step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 # replica's WASM-only code (the wasm-bindgen export) is linted on its own target too.
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
+# The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
+step arch node tools/arch/check.mjs
 step tests cargo test --workspace --locked
 
 # The WASM build: one artifact (wasm-bindgen --target web) that Node loads with initSync and a page with init().

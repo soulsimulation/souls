@@ -1,6 +1,8 @@
 //! The shared library: built natively and to WASM, loaded by the world, the client and the page (Engine v2, #2635).
 //! Empty but for the load probe (K1, #2638).
 #![forbid(unsafe_code)]
+// No float in a verdict (K14, #2648; v2/tools/arch/README.md): a module of drawing helpers allows it by name.
+#![deny(clippy::float_arithmetic)]
 
 pub mod effects;
 pub mod encode;

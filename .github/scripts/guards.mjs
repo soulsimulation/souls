@@ -103,13 +103,17 @@ export const SCRUB_RULES = [
   ['ssh target', line => [...line.matchAll(/\b(?:root|ubuntu|admin|deploy)@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)/g)].some(m => !ALLOWED_EMAIL.test(m[0]))
     || [...line.matchAll(/\b(?:ssh|scp|sftp|mosh)\b[^\n]*?(?<![\w.%+-])([\w.-]+)@([A-Za-z0-9][\w.-]*[\w])/g)].some(m => !ALLOWED_EMAIL.test(`${m[1]}@${m[2]}`) && !sshPlaceholder(m[1], m[2]))
     || [...line.matchAll(/(?<![\w.%+-])([\w.-]+)@(\d{1,3}(?:\.\d{1,3}){3})(?![\w.])/g)].some(m => privateIPv4(m[2]))],
+  // Engine v2 K14 (#2648): nothing outside v2/ imports from it, and the pnpm workspace names no path under it (the v2
+  // job does not run on such a change).
+  ['import from v2/ [tranche #2635, K14: nothing outside v2/ imports from it] fix: keep v2/ apart and read what it exports as data (v2/tools/arch/README.md)', (line, file) => file != null && !file.startsWith('v2/')
+    && (/(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)['"`](?:[^'"`]*\/)?v2\//.test(line) || (file === 'pnpm-workspace.yaml' && /(?:^|[\s'"/])v2\//.test(line)))],
   // Not URL userinfo (`user:pw@host`), systemd instance units (`name@instance.service`) or matrix products (`a@np.dot(`).
   ['email address', line => [...line.matchAll(/(?<![\w.%+:\/-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]{2,}(?:\.[A-Za-z0-9-]+)*\.(?!(?:service|socket|timer|target|mount|path)\b)[A-Za-z]{2,}\b(?![(\[.])/g)].some(m => !ALLOWED_EMAIL.test(m[0]))],
 ];
 
-export function scrubLine(line) {
+export function scrubLine(line, file) {
   if (line.includes('scrub-guard: allow')) return [];
-  return SCRUB_RULES.filter(([, test]) => test(line)).map(([name]) => name);
+  return SCRUB_RULES.filter(([, test]) => test(line, file)).map(([name]) => name);
 }
 
 /** Added lines of a unified diff (`git diff -U0`), as {file, line, text}. */
@@ -125,7 +129,7 @@ export function addedLines(diff) {
 }
 
 export function checkScrub(lines) {
-  return lines.filter(l => !SKIP_FILES.has(l.file)).flatMap(l => scrubLine(l.text).map(rule => `${l.file}:${l.line}: ${rule}`));
+  return lines.filter(l => !SKIP_FILES.has(l.file)).flatMap(l => scrubLine(l.text, l.file).map(rule => `${l.file}:${l.line}: ${rule}`));
 }
 
 // ── main ────────────────────────────────────────────────────────────────────────────────────────────────────────
