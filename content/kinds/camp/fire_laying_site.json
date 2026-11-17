@@ -1,0 +1,55 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:fire_laying_site",
+  "owner": "thing",
+  "state": {
+    "supplies": { "n": 1, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 1250], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "out": { "admits": "thing", "kinds": ["eden:campfire"], "most": 1, "at_mm": [0, 0, 0], "fits_mm": [1200, 900, 1200] }
+  },
+  "geometry": { "bounds_mm": [5800, 700, 1000] },
+  "forms": {
+    "lay": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "supplies", "at_least": 1, "says": "no_supplies" },
+        { "need": "slot_free", "slot": "out", "says": "occupied" },
+        { "need": "hand", "empty": true, "says": "put_down_first" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 10000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "supplies", "by": -1, "event": "supplies_used" },
+        { "change": "create", "kind": "eden:campfire", "into": "out", "event": "campfire_laid" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:fire_laying_site",
+    "table": [
+      { "part": "fill", "field": "supplies", "do": "show", "range": [0, 1], "to": [0, 1] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[-2700,280,0],"size":[60,560,60],"tint":"marker"},{"kind":"box","at":[-2700,550,0],"size":[380,150,50],"tint":"marker"},{"kind":"cyl","at":[0,5,0],"r":600,"h":10,"segments":12,"tint":"earth"},{"kind":"sphere","at":[1250,110,-150],"r":110,"tint":"stone","role":"fill"},{"kind":"sphere","at":[1500,110,150],"r":110,"tint":"stone","role":"fill"},{"kind":"sphere","at":[1750,110,-150],"r":110,"tint":"stone","role":"fill"},{"kind":"cyl","at":[1500,260,0],"r":90,"h":800,"segments":6,"tint":"wood","pitch":90000,"role":"fill"},{"kind":"cyl","at":[1500,400,0],"r":90,"h":800,"segments":6,"tint":"wood","pitch":90000,"yaw":90000,"role":"fill"}],"palette":{"marker":"#9b7951","earth":"#5b4a3a","stone":"#817b70","wood":"#806045"},"tags":["camping","fire","site","object"]}
+  },
+  "text": {
+    "card": "A marked camp fire site with one set of stones and logs: lay a campfire.",
+    "no_supplies": "This site has no supplied stones and logs left to arrange.",
+    "occupied": "The marked fire site is occupied; clear it before laying a campfire.",
+    "put_down_first": "Put down what you are holding before laying the campfire.",
+    "camp": "camp",
+    "campfire": "campfire",
+    "fire_pit": "fire pit",
+    "howto_lay": "With empty hands, lay the supplied stones and logs for ten seconds; a campfire is left on the site to light."
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["campfire", "fire_pit"] },
+  "howtos": {
+    "lay": { "text": "howto_lay", "steps": [{ "form": "lay" }] }
+  }
+}

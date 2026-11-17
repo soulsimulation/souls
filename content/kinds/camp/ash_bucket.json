@@ -1,0 +1,35 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:ash_bucket",
+  "owner": "thing",
+  "state": {
+    "ash": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 400, 0] }
+  },
+  "geometry": { "bounds_mm": [300, 420, 300] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    }
+  },
+  "looks": {
+    "model": "look:ash_bucket",
+    "table": [
+      { "part": "fill", "field": "ash", "do": "scale", "axis": "y", "range": [0, 4], "to": [0, 1000] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,8],[120,8],[145,300],[137,300],[113,18],[0,18]],"segments":12,"tint":"pail"},{"kind":"cyl","at":[0,150,0],"r":118,"h":270,"segments":12,"tint":"ash","role":"fill","pivot":[0,10,0]},{"kind":"torus","at":[0,360,0],"r":140,"r2":6,"segments":10,"tint":"handle"}],"palette":{"pail":"#87928b","ash":"#aaa79c","handle":"#453627"},"tags":["camping","item","bucket","object"]}
+  },
+  "text": {
+    "card": "A portable bucket that holds up to four measures of hearth ash: take it.",
+    "camp": "camp",
+    "pail": "pail",
+    "ash": "ash"
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["pail", "ash"] }
+}
