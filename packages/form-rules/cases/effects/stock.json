@@ -62,7 +62,7 @@
       ],
       "events": [
        {
-        "event": "taken",
+        "event": "test:taken",
         "node": "s1",
         "changes": [
          0,

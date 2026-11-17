@@ -70,7 +70,11 @@ export type Effect = {
   amount?: unknown;
   form?: string;
   after_us?: number;
+  /** A `draw`: the table the world draws one outcome from (SA-F13). */
+  outcomes?: DrawRow[];
 };
+/** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
+export type DrawRow = { name: string; weight: number | { field: string }; event: string; set: { field: string; to: unknown }[] };
 export type Entry = {
   kind: string;
   state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;
@@ -124,6 +128,8 @@ const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() :
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
 /** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
 const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigint';
+/** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
+const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 export function decide(input: Input): Verdict {
@@ -185,8 +191,8 @@ export function decide(input: Input): Verdict {
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
       const meets = (v: unknown) =>
-        (!has(n, 'is') || v === n.is) &&
-        (!has(n, 'not') || v !== n.not) &&
+        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
+        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
         (!has(n, 'at_least') || (int(v) && v >= (n.at_least as number))) &&
         (!has(n, 'at_most') || (int(v) && v <= (n.at_most as number)));
       if (meets(value)) return { ok: true };
