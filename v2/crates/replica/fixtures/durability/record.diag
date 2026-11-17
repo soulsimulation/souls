@@ -14,5 +14,5 @@
   6: 1834,                                                                         # the off-machine mark: last sequence stored there
   7: 1795000000000000,                                                             # when it must wake: real time, us since 1970
   8: h'12208c854707e5559d7b4a982e5c32ff0071e295bba0179f3bddd098d2c9ac239b57',      # its pinned build (a stand-in hash)
-  9: 2210                                                                          # writes: each changes the bytes, so the ETag
+  9: 2210                                                                          # its writes: each changes the bytes and ETag
 }

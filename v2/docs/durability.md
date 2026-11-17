@@ -28,16 +28,15 @@ and rolling builds (O1, O7) are not here.
    from, machine, token]`: the next epoch, the mark plus one, its machine, and a token, on condition that the record
    is the version it read. The token is 16 bytes the claimant draws from the operating system's random source at each
    claim, like a T3 scope, never from the world's random numbers (the fake reads `/dev/urandom`; only servers claim).
-   The token names the claim; the machine is only
-   where it runs, so two processes on one machine, or one machine claiming again, are two claims. Of two writers that
-   start at once, the store lets exactly one through; the other is refused (`precondition-failed`, HTTP 412). A
-   machine that claims again keeps nothing on its disk at or after its new takeover.
+   The token names the claim; the machine is only where it runs, so two processes on one machine, or one machine
+   claiming again, are two claims. Of two writers that start at once, the store lets exactly one through; the other
+   is refused (`precondition-failed`, HTTP 412). A machine that claims again keeps nothing on its disk at or after its
+   new takeover.
 6. **A lease is for liveness, never for safety.** It is elapsed time on the writer's own machine, never a comparison
    of clocks across machines, counted from when its last renewing write was sent. A writer renews by moving the mark,
    or, with nothing new, by rewriting the record (a heartbeat, which changes its bytes: rule 10). Past its lease it
-   acknowledges nothing. Another
-   machine claims only after the record's version has not changed for a lease; the claim itself is what makes it
-   safe.
+   acknowledges nothing. Another machine claims only after the record's version has not changed for a lease; the
+   claim itself is what makes it safe.
 7. **The store refuses a stale writer's record write.** The stores are asked for only two conditions, which S3 and R2
    both offer atomically: create if absent (`If-None-Match: *`) and replace if unchanged (`If-Match`). There is no
    plain write. A writer whose claim was taken, a paused one that resumes included, may still write to its own disk,
