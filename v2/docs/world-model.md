@@ -9,7 +9,9 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
 
 1. **A node is an id, a kind, a parent and numbered fields,** plus the parent's slot it sits in, if any, and its
    audience. **A parent means two things only: lifetime and frame of reference.** A child ends when its parent ends
-   and moves when its parent moves. Nothing else is read from the tree.
+   and moves when its parent moves. Nothing else is read from the tree. **The tree is written flat:** one record
+   per node, naming its parent, in the fixtures and in anything that stores or checkpoints it, never as nested
+   values. The encoding refuses nesting deeper than 32, and containment depth is not bounded by the encoding.
 2. **Nothing has two parents.** Holding and resting are changes of parent, never links. A thing held in a hand is
    a child of the hand's slot. A load carried by several bodies is a child of the carry activity's node, and each
    carrier is linked to that activity. A thing set down is a child of the place, or of the thing it rests on (E4).
@@ -28,7 +30,7 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
 
 ## Links
 
-7. **Every other relation is a typed link:** an id (from the same counter as nodes), a type, two ends, the end that
+7. **Every other relation is a typed link:** an id (minted as a node's is, by T3's rules), a type, two ends, the end that
    owns it and an audience. An end is a node of this world or a Soul (Souls are global, [ids.md](ids.md) rule 7).
    An end that is neither is refused as `link-end-missing`. The owning end is a node, since a Soul is in no zone
    (`link-owner-not-node`). Owning, membership, a body's Soul, a carrier and a door's far side are links.
@@ -62,4 +64,5 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
 - **A cascade written in code rather than in `remove`.** A future viewer would keep links whose end is gone.
 - **Kinds checked when a change is applied.** A viewer without the kinds could no longer replay history.
 - **A recursive walk of the tree.** Depth is data; a WASM stack is small.
+- **The tree stored as nested values.** A world deeper than the encoding's nesting limit could not be written.
 - **A link owned by a Soul.** No zone would write it.
