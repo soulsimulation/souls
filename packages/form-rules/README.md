@@ -92,7 +92,7 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing; `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us` with the new rate, `{value, per_s, set_us}` written whole); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
 to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);
@@ -108,7 +108,7 @@ change that cannot apply or a value outside the profile, refuses the batch with 
 ## An effect case
 
 A file in `cases/effects/` is `{"format": "souls-effect-cases/1", "about": ..., "cases": [...]}`. A case is a state
-and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state) and
+and the acts done in it, in order, each with its `receipt`, an optional `actor` (another body in the same state), an optional `now_us` (the act's world time, when it differs from the state's) and
 what `effects` should return (`expect`, compared like a rule case's). `after` names nodes and what each should be
 once every act is applied (`null`: removed), compared whole. Every act that is done is also applied a second time
 with its receipt, which must change nothing.
@@ -123,6 +123,11 @@ Its cases are `cases/looks/` (kinds in `cases/looks/kinds/`); `node --test packa
 them and `node packages/form-rules/bin/looks-browser-check.mjs` checks Node against a browser build. Today's page
 calls it for a def whose `make.args.looks_table` carries a table (`apps/web/src/gen-mesh/vocab-look.ts`); the wiring is
 thrown away when Engine v2 draws things (V17, V8), the table and the function carry over.
+
+A row may follow a timed field (below; SA-D1b, [#2886](https://github.com/soulsimulation/souls/issues/2886)): the
+state holds its three stored numbers and `looks({..., now_us, fields})` reads it with `valueAt` at the viewer's world
+time, so a level rises on screen with nothing sent after the record (a viewer behind the set time draws it as set).
+The page sets its world clock with `setLooksClock` (`vocab-look.ts`) and places such parts again each frame.
 
 ## A timed value
 

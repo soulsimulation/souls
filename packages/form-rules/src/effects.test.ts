@@ -13,7 +13,7 @@ for (const [file, c] of cases) {
   test(`${file.slice(CASES.length + 1)}: ${c.name}`, () => {
     let state: State = structuredClone(c.state);
     c.do.forEach((step, k) => {
-      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt });
+      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor, now_us: step.now_us ?? state.now_us }, receipt: step.receipt });
       if (step.expect) assert.deepEqual(mismatches(step.expect, result), [], `step ${k}: ${JSON.stringify(result)}`);
       const once = apply(state, result);
       if (!once.ok) return assert.fail(`step ${k}: ${JSON.stringify(once)}`);
@@ -84,7 +84,7 @@ function results(): Done[] {
   for (const [, c] of cases) {
     let state: State = structuredClone(c.state);
     for (const step of c.do) {
-      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor }, receipt: step.receipt });
+      const result = effects({ kinds, act: step.act, state: { ...state, actor: step.actor ?? state.actor, now_us: step.now_us ?? state.now_us }, receipt: step.receipt });
       const once = apply(state, result);
       if (result.verdict === 'yes' && 'changes' in result && once.ok) (out.push(result), (state = once.state));
     }

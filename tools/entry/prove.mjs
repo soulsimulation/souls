@@ -31,7 +31,7 @@ import {apply, effects} from '../../packages/form-rules/src/effects.ts';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 /** The gates that need a runner (Engine v2). The verdict names them as waiting. */
 export const RUNNER_GATES = Object.freeze(['run', 'body-look', 'find']);
-const NO_SHAPE = 'looks.shape.make is missing: there is nothing to draw';
+const NO_SHAPE = 'looks.shape.shapes is missing: there is nothing to draw';
 
 /** The files a target names: a file or folder on disk, else a family under content/kinds. */
 export function filesOf(target) {
@@ -52,7 +52,7 @@ function effectCase(kinds, c) {
   const out = [];
   let state = structuredClone(c.state);
   for (const [k, step] of c.do.entries()) {
-    const result = effects({kinds, act: step.act, state: {...state, actor: step.actor ?? state.actor}, receipt: step.receipt});
+    const result = effects({kinds, act: step.act, state: {...state, actor: step.actor ?? state.actor, now_us: step.now_us ?? state.now_us}, receipt: step.receipt});
     const off = step.expect ? mismatches(step.expect, result) : [];
     if (off.length) { out.push(`step ${k}: ${off.join(', ')} differ: got ${JSON.stringify(Object.fromEntries(off.map(x => [x, result[x]])))}`); break; }
     const once = apply(state, result);

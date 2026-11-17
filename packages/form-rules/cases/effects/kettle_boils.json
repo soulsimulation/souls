@@ -1,0 +1,64 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:kettle boils by itself. A Soul switches it on at one minute: the switch goes down and the heat is given a rate of 500 mC a second from room heat, and a timer for the boil is set 150 s ahead. The timer form is refused a microsecond before the boil and done at it: the switch comes up and the heat starts to cool at 50 mC a second. Each act carries its own world time.",
+  "cases": [
+    {
+      "name": "switched_on_at_one_minute_boils_at_three_and_a_half",
+      "state": {
+        "actor": "b1",
+        "now_us": 60000000,
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 0 } },
+          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [-60, 40, 400] }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "switch_on" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 1 },
+              { "change": "set", "node": "k1", "field": "heat", "n": 3, "to": { "value": 25000, "per_s": 500, "set_us": 60000000 } }
+            ],
+            "events": [
+              { "event": "eden:switched_on", "node": "k1", "changes": [0] },
+              { "event": "eden:warming", "node": "k1", "changes": [1] },
+              { "event": "eden:will_boil", "node": "k1", "changes": [] }
+            ],
+            "timers": [{ "node": "k1", "form": "boiled", "after_us": 150000000, "event": 2 }]
+          }
+        },
+        {
+          "act": { "this": "k1", "form": "boiled" },
+          "now_us": 209999999,
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "field_differs", "need": 1 }
+        },
+        {
+          "act": { "this": "k1", "form": "boiled" },
+          "now_us": 210000000,
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 0 },
+              { "change": "set", "node": "k1", "field": "heat", "n": 3, "to": { "value": 100000, "per_s": -50, "set_us": 210000000 } }
+            ],
+            "events": [
+              { "event": "eden:boiled", "node": "k1", "changes": [0] },
+              { "event": "eden:cooling", "node": "k1", "changes": [1] }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 0, "heat": { "value": 100000, "per_s": -50, "set_us": 210000000 } } }
+      }
+    }
+  ]
+}

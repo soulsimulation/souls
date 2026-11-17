@@ -1,0 +1,25 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tree",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1200, 6000, 1200] },
+  "areas": {
+    "shade": { "at_mm": [0, 0, 2500], "radius_mm": 3000, "allows": { "sit": "on", "lie": "on" } }
+  },
+  "forms": {
+    "go_to_shade": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [{ "step": "walk_to", "point": "shade" }],
+      "effects": []
+    }
+  },
+  "looks": { "model": "look:tree" },
+  "text": {
+    "card": "A tree with shade underneath to rest in.",
+    "plant": "plant",
+    "shade": "shade"
+  },
+  "card": { "text": "card", "category": "plant", "synonyms": ["shade"] }
+}

@@ -1,0 +1,109 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:sailboat",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "west_landing": {
+      "role": "stand",
+      "at_mm": [
+        -2500,
+        0,
+        0
+      ]
+    },
+    "east_landing": {
+      "role": "stand",
+      "at_mm": [
+        2500,
+        0,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "port": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        -500,
+        450,
+        0
+      ]
+    },
+    "starboard": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        500,
+        450,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2000,
+      4000,
+      5000
+    ]
+  },
+  "forms": {
+    "sail": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "slot_free",
+          "slot": "port"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "west_landing"
+        },
+        {
+          "step": "sit",
+          "slot": "port"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "actor",
+          "into": "port",
+          "event": "boarded"
+        }
+      ]
+    }
+  },
+  "text": {
+    "card": "A sailboat: it makes a set trip across the water and back; nobody steers.",
+    "getting_around": "transport",
+    "boat": "boat"
+  },
+  "card": {
+    "text": "card",
+    "category": "getting_around",
+    "synonyms": [
+      "boat"
+    ]
+  },
+  "ride": {
+    "seats": [
+      "port",
+      "starboard"
+    ],
+    "stops": [
+      "west_landing",
+      "east_landing"
+    ],
+    "returns": true,
+    "start": "sail",
+    "speed_mm_s": 2000,
+    "ground": "deep_water"
+  }
+}

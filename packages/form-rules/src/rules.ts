@@ -68,6 +68,8 @@ export type Effect = {
   amount?: unknown;
   form?: string;
   after_us?: number;
+  /** A set on a timed value: its new rate per second, settled at the act's time. */
+  rate?: number;
 };
 export type Entry = {
   kind: string;

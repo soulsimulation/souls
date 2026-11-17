@@ -25,7 +25,7 @@ const FIX = {
   'engine-names': () => mk(0, 'engine-names', e => { e.state.server_flag = {...e.state.heating, n: 9}; }),
   'no-waiting': () => mk(0, 'no-waiting', e => { e.forms.boiled.effects.push({change: 'timer', form: 'boiled', after_us: 1000000, event: 'checked_again'}); }),
   bounded: () => mk(2, 'bounded', e => { delete e.links.listener.most; }),
-  'way-out': () => mk(0, 'way-out', e => { e.state.water.values = ['empty', 'hot']; }),
+  'way-out': () => mk(0, 'way-out', e => { e.forms.switch_on.needs.find(n => n.field === 'heating').is = true; }),
   card: () => mk(0, 'card', e => { delete e.card; }),
   'no-labels': () => mk(0, 'no-labels', e => { e.text.card = 'A cosy kettle for quiet afternoons.'; }),
   refs: () => mk(0, 'refs', e => { e.forms.pour.effects.push({change: 'remove', what: 'this', event: 'used_up'}, {change: 'create', kind: 'fixture:missing', into: 'actor_hand', event: 'made'}); }),

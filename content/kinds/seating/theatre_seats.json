@@ -1,0 +1,41 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:theatre_seats",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "front_aisle_first": { "role": "stand", "at_mm": [-1100, 0, -450] },
+    "front_aisle_last": { "role": "stand", "at_mm": [1100, 0, -450] },
+    "back_aisle_first": { "role": "stand", "at_mm": [-1100, 0, 450] },
+    "back_aisle_last": { "role": "stand", "at_mm": [1100, 0, 450] }
+  },
+  "slots": {
+    "front_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-500, 450, -450], "stand": "front_aisle_first", "row": "front", "place": 1, "end": "first" },
+    "front_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, -450], "stand": "front_aisle_first", "row": "front", "place": 2 },
+    "front_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [500, 450, -450], "stand": "front_aisle_last", "row": "front", "place": 3, "end": "last" },
+    "back_1": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-500, 450, 450], "stand": "back_aisle_first", "row": "back", "place": 1, "end": "first" },
+    "back_2": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 450], "stand": "back_aisle_first", "row": "back", "place": 2 },
+    "back_3": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [500, 450, 450], "stand": "back_aisle_last", "row": "back", "place": 3, "end": "last" }
+  },
+  "geometry": { "bounds_mm": [1700, 900, 1500] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": { "type": "slot", "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    }
+  },
+  "looks": { "model": "look:theatre_seats" },
+  "text": {
+    "card": "Two rows of three theatre seats, each with a first and a last seat."
+  },
+  "card": { "text": "card" }
+}

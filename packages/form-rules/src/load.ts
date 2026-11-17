@@ -45,7 +45,8 @@ export function loadCases(dir: string = CASES): [string, Case][] {
   return out;
 }
 
-export type EffectStep = { act: Input['act']; actor?: string; receipt: string; expect?: Record<string, unknown> };
+/** `now_us`: world time of this act, when it differs from the state's (a timed value read later). */
+export type EffectStep = { act: Input['act']; actor?: string; now_us?: number; receipt: string; expect?: Record<string, unknown> };
 export type EffectCase = { name: string; state: Input['state']; do: EffectStep[]; after?: Record<string, unknown> };
 
 /** Every effect case in `dir` (souls-effect-cases/1), as [file, case]. */

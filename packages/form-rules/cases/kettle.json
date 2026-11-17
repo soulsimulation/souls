@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:kettle. No form fills it, so a need for water has no fix here.",
+  "about": "eden:kettle. Its fill form gives the water from a tap; a need for water has no fix here, since the rules name no form that fills from a thing they cannot see.",
   "cases": [
     {
       "name": "switch_on_every_need_met",
@@ -59,7 +59,7 @@
         "moves": { "press": { "reach_mm": 600 } }
       },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2, "detail": { "point": "switch", "move": "press" }, "fix": { "step": "walk_to", "point": "switch" } }
+      "expect": { "verdict": "no", "reason": "out_of_reach", "need": 2, "detail": { "point": "button", "move": "press" }, "fix": { "step": "walk_to", "point": "button" } }
     },
     {
       "name": "switch_on_exactly_at_reach",
@@ -80,13 +80,14 @@
       "act": { "this": "k1", "form": "boiled" },
       "state": {
         "actor": "b1",
+        "now_us": 150000000,
         "nodes": {
-          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": true } },
+          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": true, "heat": { "value": 25000, "per_s": 500, "set_us": 0 } } },
           "b1": { "hands": {} }
         }
       },
       "asker": { "sees": "all" },
-      "expect": { "verdict": "yes", "read": [["k1/field/2", true]] }
+      "expect": { "verdict": "yes", "read": [["k1/field/2", true], ["k1/field/3", 100000]] }
     },
     {
       "name": "boiled_not_heating_fixed_by_switch_on",
@@ -144,11 +145,53 @@
       "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": "empty", "wanted": { "not": "empty" } }, "fix": null }
     },
     {
+      "name": "fill_every_need_met",
+      "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kettle", "fields": { "water": "empty" } },
+          "t1": { "kind": "eden:tap" },
+          "b1": { "hands": { "left": "k1", "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", "k1"], ["b1/hand/right", null], ["k1/field/1", "empty"]] }
+    },
+    {
+      "name": "fill_not_held",
+      "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kettle", "fields": { "water": "empty" } },
+          "t1": { "kind": "eden:tap" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": { "step": "take", "thing": "k1" } }
+    },
+    {
+      "name": "fill_already_has_water",
+      "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "k1": { "kind": "eden:kettle", "fields": { "water": "cold" } },
+          "t1": { "kind": "eden:tap" },
+          "b1": { "hands": { "left": "k1", "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": "cold", "wanted": { "is": "empty" } }, "fix": null }
+    },
+    {
       "name": "no_such_form",
-      "act": { "this": "k1", "form": "fill" },
+      "act": { "this": "k1", "form": "brew" },
       "state": { "actor": "b1", "nodes": { "k1": { "kind": "eden:kettle" }, "b1": { "hands": {} } } },
       "asker": { "sees": ["public"] },
-      "expect": { "verdict": "no", "reason": "bad_input", "need": -1, "detail": { "what": "no_such_form", "form": "fill" }, "fix": null }
+      "expect": { "verdict": "no", "reason": "bad_input", "need": -1, "detail": { "what": "no_such_form", "form": "brew" }, "fix": null }
     }
   ]
 }

@@ -9,12 +9,14 @@
 // in headless Chrome, tools/god-skill/scripts/gallery.mjs) and prints one JSON line per kind: its sheet, frames and errors.
 // With --plan it prints the frames it would draw and renders nothing. Sheets are attached to a pull request, never committed.
 //
-// What the picture is drawn from: `looks.shape` of the entry, today's generated-shape data carried as it is
-// ({make, params?, palette?, tags?}). SA-D1a owns the rest of the looks table. A state value the entry holds as a whole
-// number reaches the picture as the number the viewer draws with (permille / 1000); the viewer, not the entry, uses
-// fractions, and nothing here decides anything from them. A kind whose shape is missing is reported, not drawn.
-// Open point for the format (lane A): format.mjs refuses any float, and a shape in metres has them; look.mjs checks an
-// entry without its `looks.shape` until SA-D1a says how a shape is carried.
+// What the picture is drawn from: `looks.shape` of the entry, the parts of a thing (round, shapes, palette, tags) written in whole millimetres
+// (the format has no floating-point number and names nothing of today's engine, #2855). look.mjs wraps it for today's studio
+// and converts it to metres when it is
+// drawn: a length (at, size, r, r2, h, round, the points of a profile or a path) is divided by 1000, an angle (roll, arc,
+// yaw, pitch) is whole millidegrees and becomes radians, a count (segments) stays. A number under any other key is refused
+// by name, so a unit is never guessed. A state value the entry holds as a whole number reaches the picture as the number
+// the viewer draws with (permille / 1000); the viewer, not the entry, uses fractions, and nothing here decides anything
+// from them. A kind whose shape is missing is reported, not drawn. SA-D1a owns the rest of the looks table.
 import {createHash} from 'node:crypto';
 import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
@@ -29,10 +31,11 @@ const MAX_COLS = 6;
 
 /** The values one state field takes in a sheet, its default first. A field with nothing to vary is its default alone. */
 export function valuesOf(f) {
-  const d = f.default, more = [];
+  // a timed value is drawn at a value it holds, from its default to its bounds (the sheet stops the clock)
+  const d = f.type === 'timed' ? f.default.value : f.default, more = [];
   if (f.type === 'bool') more.push(!d);
   else if (f.type === 'enum') more.push(...f.values.filter(v => v !== d));
-  else if (f.type === 'int' && Number.isInteger(f.min) && Number.isInteger(f.max)) more.push(f.min, f.min + Math.floor((f.max - f.min) / 2), f.max);
+  else if ((f.type === 'int' || f.type === 'timed') && Number.isInteger(f.min) && Number.isInteger(f.max)) more.push(f.min, f.min + Math.floor((f.max - f.min) / 2), f.max);
   return [d, ...more.filter((v, i) => v !== d && more.indexOf(v) === i)];
 }
 
@@ -42,27 +45,42 @@ const drawn = (f, v) => (f.type === 'int' && f.unit === 'permille' ? v / 1000 : 
 /** The frames of an entry: its default state, then each field varied alone. The label names the field and its value. */
 export function framesOf(entry) {
   const fields = Object.entries(entry.state ?? {}).sort((a, b) => a[1].n - b[1].n);
-  const base = Object.fromEntries(fields.map(([k, f]) => [k, f.default]));
+  const base = Object.fromEntries(fields.map(([k, f]) => [k, f.type === 'timed' ? f.default.value : f.default]));
   const frames = [{label: fields.length ? `${fields.map(([k]) => `${k}=${base[k]}`).join(' ')} (default)` : 'no state', values: base}];
   for (const [k, f] of fields) for (const v of valuesOf(f).slice(1)) frames.push({label: `${k}=${v}`, values: {...base, [k]: v}});
   return frames.map(fr => ({label: fr.label, values: fr.values, state: Object.fromEntries(fields.map(([k, f]) => [k, drawn(f, fr.values[k])]))}));
 }
 
 const metres = v => v.map(x => x / 1000);
+const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
+const ANGLE_KEYS = new Set(['roll', 'arc', 'yaw', 'pitch']);
+const COUNT_KEYS = new Set(['segments']);
+
+/** A shape written in whole millimetres and millidegrees, as the metres and radians the viewer draws with. */
+export function shapeInMetres(node, key = '') {
+  if (Array.isArray(node)) return node.map(v => shapeInMetres(v, key));
+  if (node !== null && typeof node === 'object') return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, shapeInMetres(v, k)]));
+  if (typeof node !== 'number') return node;
+  if (LENGTH_KEYS.has(key)) return node / 1000;
+  if (ANGLE_KEYS.has(key)) return node * Math.PI / 180000;
+  if (COUNT_KEYS.has(key)) return node;
+  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, counts)`);
+}
 
 /** The def the gallery studio draws: the entry's shape, with its state fields as the def's state. */
 export function defOf(entry) {
   const name = `core-${entry.kind.split(':')[1]}`, shape = entry.looks?.shape;
-  if (!shape?.make) return null;
+  if (!shape?.shapes) return null;
   const state = Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k,
     f.type === 'bool' ? {type: 'bool', default: f.default}
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
-        : {type: 'number', default: drawn(f, f.default)}]));
+        : {type: 'number', default: drawn(f, f.type === 'timed' ? f.default.value : f.default)}]));
   const b = entry.geometry?.bounds_mm;
   // SA-D1a: the looks table rides in the def's make.args, where the page's one drawing function reads it
-  const make = entry.looks?.table ? {...shape.make, args: {...shape.make.args, looks_table: entry.looks.table, looks_units: Object.fromEntries(Object.entries(entry.state ?? {}).filter(([, f]) => f.unit).map(([k, f]) => [k, f.unit]))}} : shape.make;
+  const args = shapeInMetres({round: shape.round, shapes: shape.shapes});
+  const make = {kind: 'gen', gen: 'kit/2', args: entry.looks?.table ? {...args, looks_table: entry.looks.table, looks_units: Object.fromEntries(Object.entries(entry.state ?? {}).filter(([, f]) => f.unit).map(([k, f]) => [k, f.unit]))} : args};
   return {schema: 'def/1', name, version: 1, description: entry.text?.[entry.card?.text] ?? entry.kind, tags: shape.tags ?? [], form: 'point',
-    make, params: shape.params ?? {}, palette: shape.palette ?? {}, state, size: {box: b ? metres(b) : [1, 1, 1]}};
+    make, params: {}, palette: shape.palette ?? {}, state, size: {box: b ? metres(b) : [1, 1, 1]}};
 }
 
 /** The named places to mark: points by role, slots as slots. */
@@ -78,17 +96,8 @@ export function loadEntries(target, rootDir) {
   const path = (() => { try { statSync(asPath); return asPath; } catch { return join(resolve(root, rootDir), target); } })();
   const rows = [];
   for (const file of loadDir(path)) {
-    // The format refuses a floating-point number anywhere, looks included, and a shape in metres has them (see the header
-    // note): the shape is set aside, the rest of the entry is parsed and checked as the format does (a `1.0` written in
-    // another section is then read as 1; format.mjs on the entry itself still catches it).
-    const text = readFileSync(file, 'utf8');
-    let whole; try { whole = JSON.parse(text); } catch (e) { rows.push({file, entry: undefined, errors: [{path: '', reason: `not JSON: ${e.message}`}]}); continue; }
-    const shape = whole?.looks?.shape;
-    if (shape && whole.looks) delete whole.looks.shape;
-    const {entry, errors} = parseEntry(JSON.stringify(whole));
-    const all = entry ? [...errors, ...validateEntry(entry)] : errors;
-    if (entry && shape) { entry.looks ??= {}; entry.looks.shape = shape; }
-    rows.push({file, entry, errors: all});
+    const {entry, errors} = parseEntry(readFileSync(file, 'utf8'));
+    rows.push({file, entry, errors: entry ? [...errors, ...validateEntry(entry)] : errors});
   }
   return rows;
 }
@@ -99,9 +108,10 @@ export function look(target, {root: rootDir = 'content/kinds', out, kind, plan =
   for (const {file, entry, errors} of loadEntries(target, rootDir)) {
     if (!entry || errors.length) { results.push({file, errors: errors.map(e => `${e.path}: ${e.reason}`)}); continue; }
     if (kind && entry.kind.split(':')[1] !== kind && entry.kind !== kind) continue;
-    const def = defOf(entry), frames = framesOf(entry), result = {kind: entry.kind, file, frames: frames.map(f => f.label)};
+    let def; try { def = defOf(entry); } catch (e) { results.push({kind: entry.kind, file, errors: [e.message]}); continue; }
+    const frames = framesOf(entry), result = {kind: entry.kind, file, frames: frames.map(f => f.label)};
     results.push(result);
-    if (!def) { result.errors = ['looks.shape.make is missing: there is nothing to draw']; continue; }
+    if (!def) { result.errors = ['looks.shape.shapes is missing: there is nothing to draw']; continue; }
     if (plan) continue;
     const dir = join(outDir, entry.kind.replace(':', '-'));
     mkdirSync(dir, {recursive: true});

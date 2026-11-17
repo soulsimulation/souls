@@ -6,6 +6,7 @@
       "name": "kettle_switch_on_boil_pour",
       "state": {
         "actor": "b1",
+        "now_us": 0,
         "nodes": {
           "room": { "loose": ["b1"] },
           "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 0 } },
@@ -19,32 +20,38 @@
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 1 }],
+            "changes": [
+              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 1 },
+              { "change": "set", "node": "k1", "field": "heat", "n": 3, "to": { "value": 25000, "per_s": 500, "set_us": 0 } }
+            ],
             "events": [
               { "event": "eden:switched_on", "node": "k1", "changes": [0] },
-              { "event": "eden:boil_started", "node": "k1", "changes": [] }
+              { "event": "eden:warming", "node": "k1", "changes": [1] },
+              { "event": "eden:will_boil", "node": "k1", "changes": [] }
             ],
-            "timers": [{ "node": "k1", "form": "boiled", "after_us": 150000000, "event": 1 }]
+            "timers": [{ "node": "k1", "form": "boiled", "after_us": 150000000, "event": 2 }]
           }
         },
         {
           "act": { "this": "k1", "form": "boiled" },
+          "now_us": 150000000,
           "receipt": "rc2",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "set", "node": "k1", "field": "water", "n": 1, "to": "hot" },
-              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 0 }
+              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": 0 },
+              { "change": "set", "node": "k1", "field": "heat", "n": 3, "to": { "value": 100000, "per_s": -50, "set_us": 150000000 } }
             ],
             "events": [
               { "event": "eden:boiled", "node": "k1", "changes": [0] },
-              { "event": "eden:switched_off", "node": "k1", "changes": [1] }
+              { "event": "eden:cooling", "node": "k1", "changes": [1] }
             ],
             "timers": []
           }
         },
         {
           "act": { "this": "k1", "form": "pour", "args": { "into": "c1" } },
+          "now_us": 160000000,
           "receipt": "rc3",
           "expect": {
             "verdict": "yes",
@@ -54,7 +61,7 @@
         }
       ],
       "after": {
-        "k1": { "kind": "eden:kettle", "fields": { "water": "empty", "heating": 0 } }
+        "k1": { "kind": "eden:kettle", "fields": { "water": "empty", "heating": 0, "heat": { "value": 100000, "per_s": -50, "set_us": 150000000 } } }
       }
     },
     {
