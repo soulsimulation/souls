@@ -18,7 +18,7 @@ for (const c of doc.cases) {
     const table = c.table ?? kinds[c.kind].looks.table;
     const got = looks({ table, state: c.state, prev: c.prev, t_us: c.t_us });
     assert.deepEqual(JSON.parse(JSON.stringify(got)), c.expect);
-    for (const p of Object.values(got)) for (const v of [p.rotate_mdeg, p.slide_mm, p.scale_permille, p.glow_permille].flat()) if (v !== undefined) assert.ok(Number.isInteger(v));
+    for (const p of Object.values(got)) for (const v of [p.rotate_mdeg, p.slide_mm, p.scale_permille, p.glow_permille, p.steam_permille, p.flame_permille, p.growth_permille].flat()) if (v !== undefined) assert.ok(Number.isInteger(v));
     assert.deepEqual(looks({ table, state: c.state, prev: c.prev, t_us: c.t_us }), got, 'the same input gives the same answer');
   });
 }

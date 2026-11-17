@@ -27,7 +27,10 @@ format's whole vocabulary; this page explains them. Examples: [the kettle](../..
 3. **A relation is a link, never an id in a field.** A field cannot hold a Soul, body or node, and no value may be a
    Soul's id. Who speaks, who owns, whose turn it is: a typed link (contract T2).
 4. **Human words go by reference.** Every phrase lives in the entry's `text` table and is named by its key; a string
-   with a space anywhere else is refused (contract T8).
+   with a space anywhere else is refused (contract T8). A `text` state field holds a reference to words kept
+   elsewhere, so they can be removed later without rewriting history: its default is `null`, and a form sets it only
+   from a `text` argument (`{"arg": ...}`), never from words written in the entry or from another type. Words the
+   entry's author wrote (a card, a form's label, a refusal's wording) are part of the kind and stay in `text`.
 5. **Closed lists.** Owners, field types, audiences, point roles, needs, steps and changes are closed lists. The
    task that first needs a new member adds it, with its proof.
 6. **No time of day and no waiting for a condition.** A `wait` step is a pause of stated microseconds. Opening hours
@@ -44,12 +47,15 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 0 | `format` | `souls-entry/1` |
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
-| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference), `default`, `audience` (a rule) |
-| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`), `most`, `audience` |
+| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`), `default`, `audience` (a rule) |
+| 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below) |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm` |
 | 7 | `geometry` | `bounds_mm` |
 | 8 | `forms` | What can be done with it (below) |
+| 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
+| 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 12 | (reserved) | `reactions` (SA-F15) |
 | 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
@@ -57,6 +63,22 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
+
+**Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
+[#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
+the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
+`from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
+end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+`eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
+
+A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
+whole on every change, Engine v2 F11, [#2774](https://github.com/soulsimulation/souls/issues/2774)), `of` (one to eight
+named fields, each `bool`, `enum`, `int` or `duration`; never text and never an id, so a Soul cannot be inside a
+record), an optional `key` (a field of the record; the rules add, remove or set one item by it) and an empty default.
+`stateAtMax(entry)` counts a kind's state with every list full and every child kind at its bound; the check gate uses
+it rather than the empty default.
 
 **Audience** is a rule on every state field and link type, written out (there is no implied default), from one closed
 list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"rule": "owner"}` (the thing's owner),
@@ -103,7 +125,10 @@ A form owned by a body's family or a kind of ground is written the same way (`ow
 `looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
 the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`), `slide` (millimetres along an `axis`),
 `scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
-of several parts a choice shows). The amount comes from `at` (field value to amount, for a bool or enum) or from
+of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
+of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
+burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
 `range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
 `over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
 only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
