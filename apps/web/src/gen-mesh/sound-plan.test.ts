@@ -195,3 +195,16 @@ test('PERF-ARRIVAL: emitters and trees on areas and paths read the ground throug
   assert.ok(baked.cachedTiles > 4, 'sampling bakes a tile for each part of the world it reads');
   assert.equal(peeked.cachedTiles, 0, 'peek bakes none');
 });
+
+// SA-D7 (#2888): a looks table's sound rows are specs with the reach the row states; the names are the page's own set.
+test('a looks-table sound row is a spec with its stated reach, and the table may name only the page\'s own sounds', async () => {
+  const { SOUNDS } = await import('../../../../packages/form-rules/src/looks.ts');
+  assert.deepEqual([...SOUNDS].filter((s) => s !== 'tune'), [...KINDS]);
+  const table = [
+    { do: 'sound', sound: 'tune', mood: 'sad', field: 'playing', at: { true: 700, false: 0 }, reach_mm: 18000 },
+    { do: 'sound', sound: 'bell', mode: 'loop', field: 'ringing', at: { true: 400, false: 0 }, reach_mm: 6000 },
+    { do: 'sound', sound: 'bell', event: 'struck', mode: 'once', level: 800, reach_mm: 40000 },
+  ];
+  const specs = specsOf({ components: {}, make: { kind: 'gen', args: { looks_table: table } } } as never);
+  assert.deepEqual(specs.map((s) => [s.kind, s.radius, s.volume, s.mood ?? s.when]), [['music', 18, 0.7, 'sad'], ['bell', 6, 0.4, 'ringing']]);
+});
