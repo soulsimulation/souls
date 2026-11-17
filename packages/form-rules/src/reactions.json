@@ -1,0 +1,28 @@
+{
+  "format": "souls-reaction-lists/1",
+  "about": "The two closed lists of things reacting (Soul Actions SA-F15, #2853), one file shared with Engine v2 E18 (#2788): what may start a rule, and what a rule may do. A rule never chooses, never draws, never moves a body and acts on no offer or activity. Each list grows only with the task that first needs a new member.",
+  "triggers": {
+    "changed": { "means": "a field of this thing changes", "takes": ["field"], "carries_value": true },
+    "linked_changed": { "means": "a field of a thing linked to it by a named link changes", "takes": ["link", "field"], "carries_value": true },
+    "support_changed": { "means": "a field of the thing it rests on changes, or it comes to rest on a thing where that field differs", "takes": ["field"], "carries_value": true },
+    "rested": { "means": "something comes to rest on it", "takes": [], "carries_value": false },
+    "left": { "means": "something resting on it leaves", "takes": [], "carries_value": false },
+    "body_entered": { "means": "a body enters the place it is in", "takes": [], "carries_value": false },
+    "body_left": { "means": "a body leaves the place it is in", "takes": [], "carries_value": false },
+    "due": { "means": "a time it scheduled comes due: a timer one of its forms set, by name", "takes": ["timer"], "carries_value": false },
+    "world": { "means": "the world announces a change of light or weather (Engine v2 E6, #2755)", "takes": ["field"], "carries_value": true, "fields": ["light", "weather"] }
+  },
+  "filters": ["is", "not"],
+  "effects": {
+    "set": { "means": "set a field to a constant, or to the trigger's new value; setting a field to its own value is no change and triggers nothing", "takes": ["field", "to"], "types": ["bool", "enum", "int", "duration"] },
+    "add": { "means": "add a whole amount to an int field, held within its min and max", "takes": ["field", "by"], "types": ["int"] },
+    "rate": { "means": "set the rate per second of a timed field, settling its value at that time (Engine v2 F5, #2770)", "takes": ["field", "per_s"], "types": ["timed"] }
+  },
+  "targets": ["this", "link"],
+  "trigger_value": { "trigger": "value" },
+  "refused": {
+    "acts_on_body": ["actor", "body", "bodies", "soul", "reparent", "walk_to", "move", "pose"],
+    "acts_on_offer": ["form", "forms", "offer", "act", "activity", "starts", "who"],
+    "draws": ["draw", "random", "choose", "pick", "chance", "roll"]
+  }
+}
