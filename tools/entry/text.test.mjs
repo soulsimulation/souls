@@ -43,8 +43,8 @@ test('card: a purpose line, one category word and synonyms, all by reference to 
   refused(b, 'card.category', 'text table');
   const c = good(); c.text.long = 'two words'; c.card.category = 'long';
   refused(c, 'card.category', 'one word');
-  const d = good(); d.text.card = 'x'.repeat(81);
-  refused(d, 'card.text', '80 characters');
+  const d = good(); d.text.card = 'x'.repeat(81); // the length is the check's rule (check.mjs), not the format's
+  assert.deepEqual(F.validateEntry(d), []);
   const e = good(); e.text.card = 'x'.repeat(80);
   assert.deepEqual(F.validateEntry(e), []);
   const g = good(); g.card.synonyms = [];
