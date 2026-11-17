@@ -1,0 +1,36 @@
+{
+  "refused": [
+    { "why": "a duration in ticks (key)", "edit": { "phases": { "start_up_us": 250000, "start_up_ticks": 5, "recovery_us": 300000 } }, "path": "phases.start_up_ticks", "word": "ticks" },
+    { "why": "a duration in ticks (named phase)", "edit": { "phases": { "start_up_ticks": 5, "recovery_us": 300000 } }, "path": "phases.start_up_ticks", "word": "ticks" },
+    { "why": "a float duration", "raw": "{\"format\":\"souls-move/1\",\"move\":\"press\",\"claims\":[\"manipulator\"],\"blocks\":[\"manipulator\"],\"cancels_on\":[],\"effector\":\"hand\",\"reach_mm\":600,\"phases\":{\"start_up_us\":250000.0,\"recovery_us\":300000}}", "word": "floating" },
+    { "why": "a claim by anatomy", "edit": { "claims": ["right_arm"] }, "path": "claims.0", "word": "anatomy" },
+    { "why": "a reach of a full arm and more", "edit": { "reach_mm": 900 }, "path": "reach_mm", "word": "arm" },
+    { "why": "no recovery", "edit": { "phases": { "start_up_us": 250000 } }, "path": "phases.recovery_us", "word": "required" }
+  ],
+  "pose": [
+    {
+      "why": "a press on a button: rest, middle of start-up, contact, after recovery",
+      "move": "press",
+      "record": { "start_us": 1000000, "from_mm": [0, 900, 300], "contact_mm": [-118, 236, 0] },
+      "at_us": [[900000, [0, 900, 300]], [1125000, [-59, 568, 150]], [1250000, [-118, 236, 0]], [1550000, [0, 900, 300]], [9000000, [0, 900, 300]]]
+    },
+    {
+      "why": "a slide from one point to another: contact, middle of the slide, its end",
+      "move": "slide",
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [100, 500, 0], "to_mm": [300, 500, 0] },
+      "at_us": [[250000, [100, 500, 0]], [450000, [200, 500, 0]], [650000, [300, 500, 0]]]
+    },
+    {
+      "why": "rounding: a position rounds to the nearest millimetre, halves away from zero (Engine v2 rule); halfway of 3, -3 and 1 is 2, -2 and 1",
+      "move": "press",
+      "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [3, -3, 1] },
+      "at_us": [[125000, [2, -2, 1]]]
+    },
+    {
+      "why": "the same press mirrored through zero gives the mirrored positions",
+      "move": "press",
+      "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [-3, 3, -1] },
+      "at_us": [[125000, [-2, 2, -1]]]
+    }
+  ]
+}

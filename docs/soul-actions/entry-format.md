@@ -61,6 +61,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
+
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
@@ -147,6 +151,28 @@ draws; a text, list or schedule field changes no part, so it is not drawn.
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
+
 ## The looks table
 
 `looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
@@ -161,6 +187,16 @@ is a role of the model (the closed list of roles of the shape language), not the
 only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
 function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
 cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+A `sound` row says what is heard (SA-D7). `sound` is one of the page's own synthesised set (`sound-plan.ts`: water, bell, hum,
+chime, kettle and the rest) or `tune`; there are no audio files. `mode` is `loop` (default) or `once`. `reach_mm`, how far it
+carries, is required on every sound row. It is driven by a `field` (`at` or `range` + `to` give the loudness in permille, 0 is
+silent, so the sound stops when the field says so) or by a named `event` (with `level`, permille; played once from the record).
+A `tune` row names a tune by id (`tune`) or a mood tag (`mood`, which picks one from `content/tunes/tunes.json` by hashing the
+thing's id). A thing that carries sound to another place names the `link`. The function answers with what is heard
+(`sounds` on the part, or on `@self` when the row has no part): which sound, loud how, reaching how far, and the microseconds
+since the state began. A tune is notes, `[midi, start step, steps long]` over steps of `step_us`, repeating; which notes sound in
+a window of world time is `tuneNotes`, a pure function of time, so every viewer, live or in replay, is at the same point of it.
 
 ```json
 "table": [
