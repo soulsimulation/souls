@@ -8,7 +8,8 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
 ## The tree
 
 1. **A node is an id, a kind, a parent and numbered fields,** plus the parent's slot it sits in, if any, and its
-   audience. **A parent means two things only: lifetime and frame of reference.** A child ends when its parent ends
+   audience. Its kind is stored as T3's full name, `namespace:name@hash`, so a new revision of a kind never changes
+   the meaning of a thing already placed (the fixtures write the plain name and the reader pins it). **A parent means two things only: lifetime and frame of reference.** A child ends when its parent ends
    and moves when its parent moves. Nothing else is read from the tree. **The tree is written flat:** one record
    per node, naming its parent, in the fixtures and in anything that stores or checkpoints it, never as nested
    values. The encoding refuses nesting deeper than 32, and containment depth is not bounded by the encoding.
@@ -20,10 +21,13 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
    that applies a removal is left with no dangling link and needs no code of its own.
 4. **There are no fixed levels.** A world, a town, a room, a boat, a body and a cup are all nodes. A door between
    two rooms is a child of the room it belongs to (contract T1), linked to the other.
-5. **A kind says what it admits:** kinds as children (its entry's section 10) and kinds in each slot (section 6),
-   as in the entry format (SA-F1, #2842). This is checked when a change is committed, never when it is applied, so
-   a viewer that knows no kinds still applies the change. A child its parent's kind does not admit is refused as
-   `child-not-admitted`.
+5. **A kind says what it admits,** as children (its entry's section 11, SA-F6a #2846) and in each slot (section 6).
+   Each list names a kind by its plain `namespace:name`, or a category: `thing` takes a child whose own kind has
+   owner `thing`, `body` one whose owner is `family` (section 2, SA-F1 #2842). Admission is a check made when a
+   change is committed, not part of a kind's meaning: the lists never go through T3's hashed references (section
+   10), so a new kind renames no container and two kinds that admit each other (a boat, a boathouse) form no
+   circle. It is never checked when a change is applied, so a viewer that knows no kinds still applies it. A child
+   its parent's kind (or that slot) does not admit is refused as `child-not-admitted`.
 6. **A node has at most 32 ancestors.** One more is refused as `depth-over-limit`, and a parent chain that comes
    back to itself as `tree-cycle`, with the cycle listed. The check walks up with a loop, never by recursion, and
    finds each node's depth once.
@@ -35,22 +39,34 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
    An end that is neither is refused as `link-end-missing`. The owning end is a node, since a Soul is in no zone
    (`link-owner-not-node`). Owning, membership, a body's Soul, a carrier and a door's far side are links.
 8. **A link is indexed at both ends.** Each index entry carries the link's id, type, other end and audience, so the
-   links at a node are listed from the index alone: the asked node is read once, nothing else is visited.
-9. **A link is shown only to an audience that can see both its ends.** Audience 0 is everyone; any other is a set
-   of Souls, resolved when written (contract T8). A Soul is seen by everyone. A link may be narrower than its ends
+   links at a node are listed from the index alone: the asked node is read once, and no other node and no link.
+   The link is written once, by its owning end's zone; the index at the far end is derived from it (rule 10). What
+   becomes of a link from a subtree that leaves (travel, or a move to another zone) to a node that stays is T1's
+   to state (#2642), not `remove`'s: a leave is not a removal.
+9. **A link is shown only to an audience that can see both its ends.** An audience is everyone, or an id (T3's)
+   naming a set of principals resolved when written (contract T8); never a number that means something only in one
+   world, which a fork or a travelling thing would carry into a world where it means another set. A Soul is seen by everyone. A link may be narrower than its ends
    (who is in a public choir, shown to the members); one wider than an end is refused as `link-audience-wider`. A
    listing skips entries the viewer is not in, so a private link at a public node does not show that it exists.
 
 ## Derived, never stored
 
-10. **Cells and the spatial index are derived.** The engine splits a node that fills up into cells and keeps an
-    index for "what is near" (N16). Neither is ever a parent, part of an id, or in the log.
+10. **Cells, the spatial index and the reference index are derived.** The engine splits a node that fills up into
+    cells and keeps an index for "what is near" (N16). The reference index (rule 8) is rebuilt from the links. None
+    is ever a parent, part of an id, in the log, or checkpointed as another zone's state.
 
 ## The check and the fixtures
 
 11. **The validity check runs at commit** and refuses the first fault in this order: ids, audiences, parents, the
     tree's shape, kinds, links. Its other names: `audience-unknown`, `parent-missing`, `kind-unknown`,
-    `world-source` (text that is not a fixture).
+    `world-source` (text that is not a fixture). **It does not cover, and who does:**
+    - a link's type against the kinds at its ends (the entry's `links` and `from`): K3 (#2667) and SA-F2;
+    - counts: `most`, `most_per`, one occupant per slot: SA-F2's rules at commit;
+    - membership after it was resolved: when a node's audience or an audience's members change, the links at that
+      node are checked again, or a narrower link becomes wider unnoticed: T8 (#2662);
+    - a self-link (both ends one node) and a root node with a slot: allowed here and meaningless; refusing them in
+      the per-change commit check is K2's (#2646);
+    - checking one change rather than the whole world (a reparent walks at most 32 steps up): K2.
 12. **The five fixtures** are a door joining two rooms, a boat holding rooms, a load carried by two bodies,
     ownership (with a cup held in a hand) and membership. They are diagnostic notation with `#` comments; each
     names its layout. `kinds.diag` holds what each kind admits.
@@ -66,3 +82,6 @@ spatial index (N16), poses (T4) and importing Eden (N1) are not here.
 - **A recursive walk of the tree.** Depth is data; a WASM stack is small.
 - **The tree stored as nested values.** A world deeper than the encoding's nesting limit could not be written.
 - **A link owned by a Soul.** No zone would write it.
+- **Admits read through T3's references.** Every new cup would rename every body, every room and every boat.
+- **A parent edge shown to an audience that cannot see the parent.** A public crate in a members-only room names
+  the room's id, as a link would. Not checked here; E22 and T8 decide what a closed or private parent shows.

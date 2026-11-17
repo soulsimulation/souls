@@ -6,7 +6,7 @@
 //! applied. Types, the validity check and fixtures only: no runtime and no speed work (K2 builds those).
 
 use crate::encode::{Value, parse_diagnostic};
-use crate::ids::{FIXTURE_SCOPE_A, Id, Scope};
+use crate::ids::{FIXTURE_SCOPE_A, Id, KindSource, Scope, name_kinds};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -15,28 +15,56 @@ use std::fmt;
 /// a hangar of a station, with room to spare; refused by name beyond it.
 pub const DEPTH_LIMIT: u32 = 32;
 
-/// Audience 0 is everyone (rule 9).
-pub const EVERYONE: u64 = 0;
-
 /// The scope the fixtures' Souls are minted in: the directory's, never a world's (`v2/docs/ids.md`, rule 7).
 pub const FIXTURE_SCOPE_SOULS: Scope = Scope([0xdd; 16]);
 
-/// What a kind admits (rule 5): kinds as children, and kinds in each numbered slot. Section numbers follow the entry
-/// format (SA-F1, #2842): 6 slots, 10 children.
+/// The entry format's section for a kind's owner (`thing`, `family`, `place`; SA-F1, #2842).
+pub const SECTION_OWNER: u64 = 2;
+/// The entry format's section for a kind's slots, each with what it admits.
+pub const SECTION_SLOTS: u64 = 6;
+/// The entry format's section for the children a kind admits (SA-F6a, #2846; numbered by the coordinator, #2641).
+pub const SECTION_CHILDREN: u64 = 11;
+
+/// What a kind admits (rule 5): as children, and in each numbered slot. Each list holds plain `namespace:name`s and
+/// categories (`thing`, `body`); a category is matched against the child kind's own [`Kind::owner`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Kind {
+    pub owner: String,
     pub children: BTreeSet<String>,
     pub slots: BTreeMap<u64, BTreeSet<String>>,
 }
 
-/// A node: id, kind, parent (with the parent's slot it sits in, if any), audience and numbered fields (rule 1).
+/// Whether an admit list takes a child of kind `name` (plain `namespace:name`) whose kind's owner is `owner`.
+fn takes(list: &BTreeSet<String>, name: &str, owner: &str) -> bool {
+    let category = match owner {
+        "thing" => Some("thing"),
+        "family" => Some("body"),
+        _ => None,
+    };
+    list.contains(name) || category.is_some_and(|c| list.contains(c))
+}
+
+/// `namespace:name` of a full kind name `namespace:name@hash`.
+pub fn plain(kind: &str) -> &str {
+    kind.split('@').next().unwrap_or(kind)
+}
+
+/// Who may see a node or a link: everyone, or an audience, named by its id (contract T8).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Audience {
+    Everyone,
+    Of(Id),
+}
+
+/// A node: id, kind (T3's full `namespace:name@hash`), parent (with the parent's slot it sits in, if any), audience
+/// and numbered fields (rule 1).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     pub id: Id,
     pub kind: String,
     pub parent: Option<Id>,
     pub slot: Option<u64>,
-    pub audience: u64,
+    pub audience: Audience,
     pub fields: BTreeMap<u64, Value>,
 }
 
@@ -54,36 +82,27 @@ pub struct Link {
     pub ty: String,
     pub ends: [Id; 2],
     pub owner: End,
-    pub audience: u64,
+    pub audience: Audience,
 }
 
-/// Who an audience is, resolved when written (contract T8): everyone, or a set of Souls.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Members {
-    Everyone,
-    Only(BTreeSet<Id>),
-}
-
-impl Members {
-    /// Whether everyone in `self` is also in `wider`.
-    fn within(&self, wider: &Members) -> bool {
-        match (self, wider) {
-            (_, Members::Everyone) => true,
-            (Members::Everyone, Members::Only(_)) => false,
-            (Members::Only(a), Members::Only(b)) => a.is_subset(b),
-        }
-    }
-}
-
-/// A world as written, before the check: the kinds it is checked against, the Souls it knows, its audiences, its
-/// nodes and its links.
+/// A world as written, before the check: the kinds it is checked against (by full name), the Souls it knows, the
+/// members of each audience as resolved when written, its nodes and its links.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Draft {
     pub kinds: BTreeMap<String, Kind>,
     pub souls: BTreeSet<Id>,
-    pub audiences: BTreeMap<u64, Members>,
+    pub audiences: BTreeMap<Id, BTreeSet<Id>>,
     pub nodes: Vec<Node>,
     pub links: Vec<Link>,
+}
+
+/// Whether everyone in audience `a` can see what audience `wider` shows.
+fn within(audiences: &BTreeMap<Id, BTreeSet<Id>>, a: Audience, wider: Audience) -> bool {
+    match (a, wider) {
+        (_, Audience::Everyone) => true,
+        (Audience::Everyone, Audience::Of(_)) => false,
+        (Audience::Of(x), Audience::Of(y)) => audiences[&x].is_subset(&audiences[&y]),
+    }
 }
 
 /// Why a world is refused. Each has a name ([`Refusal::name`]).
@@ -94,7 +113,7 @@ pub enum Refusal {
     /// `id-duplicate`: two records with one id; a node written twice would have two parents.
     IdDuplicate(Id),
     /// `audience-unknown`.
-    AudienceUnknown(u64),
+    AudienceUnknown(Id),
     /// `parent-missing`.
     ParentMissing { node: Id, parent: Id },
     /// `tree-cycle`: the nodes of the cycle, each the parent of the one before.
@@ -147,7 +166,7 @@ impl fmt::Display for Refusal {
         match self {
             Refusal::Source(why) => write!(f, "{why}"),
             Refusal::IdDuplicate(id) => write!(f, "{} is written twice", show(*id)),
-            Refusal::AudienceUnknown(n) => write!(f, "audience {n} is not declared"),
+            Refusal::AudienceUnknown(a) => write!(f, "audience {} is not declared", show(*a)),
             Refusal::ParentMissing { node, parent } => {
                 write!(
                     f,
@@ -171,14 +190,17 @@ impl fmt::Display for Refusal {
                 kind,
                 parent_kind,
                 slot,
-            } => match slot {
-                Some(s) => write!(
-                    f,
-                    "{parent_kind} slot {s} does not admit {kind} ({})",
-                    show(*node)
-                ),
-                None => write!(f, "{parent_kind} does not admit {kind} ({})", show(*node)),
-            },
+            } => {
+                let (kind, parent_kind) = (plain(kind), plain(parent_kind));
+                match slot {
+                    Some(s) => write!(
+                        f,
+                        "{parent_kind} slot {s} does not admit {kind} ({})",
+                        show(*node)
+                    ),
+                    None => write!(f, "{parent_kind} does not admit {kind} ({})", show(*node)),
+                }
+            }
             Refusal::EndMissing { link, end } => {
                 write!(f, "link {}'s end {} is not here", show(*link), show(*end))
             }
@@ -202,7 +224,7 @@ pub struct Entry {
     pub link: Id,
     pub ty: String,
     pub other: Id,
-    pub audience: u64,
+    pub audience: Audience,
 }
 
 /// Who is asking.
@@ -212,48 +234,56 @@ pub enum Viewer {
     Soul(Id),
 }
 
-/// A world that passed the check, with its reference index. Every read of a node goes through [`World::node`],
-/// which counts it, so a test can show that a listing visits nothing unrelated.
+/// A world that passed the check, with its reference index. Every read of a node or a link goes through a counting
+/// accessor, so a test can show that a listing reads nothing unrelated and scans no table.
 #[derive(Debug)]
 pub struct World {
     nodes: BTreeMap<Id, Node>,
     links: BTreeMap<Id, Link>,
     souls: BTreeSet<Id>,
-    audiences: BTreeMap<u64, Members>,
+    audiences: BTreeMap<Id, BTreeSet<Id>>,
     index: BTreeMap<Id, Vec<Entry>>,
-    visits: Cell<u64>,
+    node_reads: Cell<u64>,
+    link_reads: Cell<u64>,
+}
+
+fn bump(counter: &Cell<u64>) {
+    counter.set(counter.get() + 1);
 }
 
 impl World {
-    /// The node, counted as one visit.
+    /// The node, counted as one node read.
     pub fn node(&self, id: Id) -> Option<&Node> {
-        self.visits.set(self.visits.get() + 1);
+        bump(&self.node_reads);
         self.nodes.get(&id)
     }
 
+    /// The link, counted as one link read.
     pub fn link(&self, id: Id) -> Option<&Link> {
+        bump(&self.link_reads);
         self.links.get(&id)
     }
 
-    /// Node reads since the world was built or the counter last reset.
-    pub fn visits(&self) -> u64 {
-        self.visits.get()
+    /// Node reads and link reads since the world was built or the counters last reset.
+    pub fn reads(&self) -> (u64, u64) {
+        (self.node_reads.get(), self.link_reads.get())
     }
 
-    pub fn reset_visits(&self) {
-        self.visits.set(0);
+    pub fn reset_reads(&self) {
+        self.node_reads.set(0);
+        self.link_reads.set(0);
     }
 
-    /// The links ending at `end` (a node or a Soul) that `viewer` may see, from the index alone. A node end is visited
-    /// once, to confirm it is here; nothing else is read.
+    /// The links ending at `end` (a node or a Soul) that `viewer` may see, from the index alone. A node end is read
+    /// once, to confirm it is here; no other node and no link is read.
     pub fn links_at(&self, end: Id, viewer: Viewer) -> Vec<&Entry> {
         if !self.souls.contains(&end) && self.node(end).is_none() {
             return Vec::new();
         }
-        let sees = |audience: u64| match (&self.audiences[&audience], viewer) {
-            (Members::Everyone, _) => true,
-            (Members::Only(set), Viewer::Soul(soul)) => set.contains(&soul),
-            (Members::Only(_), Viewer::Anyone) => false,
+        let sees = |audience: Audience| match (audience, viewer) {
+            (Audience::Everyone, _) => true,
+            (Audience::Of(a), Viewer::Soul(soul)) => self.audiences[&a].contains(&soul),
+            (Audience::Of(_), Viewer::Anyone) => false,
         };
         self.index
             .get(&end)
@@ -265,13 +295,18 @@ impl World {
         self.nodes.len() as u64
     }
 
-    /// Every node and every link, in id order.
-    pub fn nodes(&self) -> impl Iterator<Item = &Node> {
-        self.nodes.values()
+    pub fn link_count(&self) -> u64 {
+        self.links.len() as u64
     }
 
+    /// Every node, in id order, each counted as a read.
+    pub fn nodes(&self) -> impl Iterator<Item = &Node> {
+        self.nodes.values().inspect(|_| bump(&self.node_reads))
+    }
+
+    /// Every link, in id order, each counted as a read.
     pub fn links(&self) -> impl Iterator<Item = &Link> {
-        self.links.values()
+        self.links.values().inspect(|_| bump(&self.link_reads))
     }
 }
 
@@ -281,17 +316,18 @@ impl World {
 pub fn check(draft: &Draft) -> Result<World, Refusal> {
     let mut seen = BTreeSet::new();
     let all_ids = draft.souls.iter().copied();
+    let all_ids = all_ids.chain(draft.audiences.keys().copied());
     let all_ids = all_ids.chain(draft.nodes.iter().map(|n| n.id));
     for id in all_ids.chain(draft.links.iter().map(|l| l.id)) {
         if !seen.insert(id) {
             return Err(Refusal::IdDuplicate(id));
         }
     }
-    let mut audiences = draft.audiences.clone();
-    audiences.insert(EVERYONE, Members::Everyone);
     let used = draft.nodes.iter().map(|n| n.audience);
     for a in used.chain(draft.links.iter().map(|l| l.audience)) {
-        if !audiences.contains_key(&a) {
+        if let Audience::Of(a) = a
+            && !draft.audiences.contains_key(&a)
+        {
             return Err(Refusal::AudienceUnknown(a));
         }
     }
@@ -314,14 +350,14 @@ pub fn check(draft: &Draft) -> Result<World, Refusal> {
     let links: BTreeMap<Id, Link> = draft.links.iter().map(|l| (l.id, l.clone())).collect();
     for l in links.values() {
         for end in l.ends {
-            let members = if draft.souls.contains(&end) {
-                &Members::Everyone
+            let seen_by = if draft.souls.contains(&end) {
+                Audience::Everyone
             } else if let Some(n) = nodes.get(&end) {
-                &audiences[&n.audience]
+                n.audience
             } else {
                 return Err(Refusal::EndMissing { link: l.id, end });
             };
-            if !audiences[&l.audience].within(members) {
+            if !within(&draft.audiences, l.audience, seen_by) {
                 return Err(Refusal::AudienceWider { link: l.id, end });
             }
         }
@@ -345,9 +381,10 @@ pub fn check(draft: &Draft) -> Result<World, Refusal> {
         nodes,
         links,
         souls: draft.souls.clone(),
-        audiences,
+        audiences: draft.audiences.clone(),
         index,
-        visits: Cell::new(0),
+        node_reads: Cell::new(0),
+        link_reads: Cell::new(0),
     })
 }
 
@@ -386,6 +423,7 @@ fn shape(nodes: &BTreeMap<Id, Node>) -> Result<(), Refusal> {
     Ok(())
 }
 
+/// The parent's kind admits the child's: as a child, or in the named slot; by plain name or by category (rule 5).
 fn admitted(draft: &Draft, nodes: &BTreeMap<Id, Node>, n: &Node) -> Result<(), Refusal> {
     let kind_of = |node: &Node| {
         draft
@@ -396,16 +434,16 @@ fn admitted(draft: &Draft, nodes: &BTreeMap<Id, Node>, n: &Node) -> Result<(), R
                 kind: node.kind.clone(),
             })
     };
-    kind_of(n)?;
+    let own = kind_of(n)?;
     let Some(p) = n.parent.map(|p| &nodes[&p]) else {
         return Ok(());
     };
     let pk = kind_of(p)?;
-    let admits = match n.slot {
-        Some(s) => pk.slots.get(&s).is_some_and(|k| k.contains(&n.kind)),
-        None => pk.children.contains(&n.kind),
+    let list = match n.slot {
+        Some(s) => pk.slots.get(&s),
+        None => Some(&pk.children),
     };
-    if admits {
+    if list.is_some_and(|l| takes(l, plain(&n.kind), &own.owner)) {
         Ok(())
     } else {
         Err(Refusal::NotAdmitted {
@@ -463,37 +501,50 @@ fn names(v: Option<&Value>, what: &str) -> Result<BTreeSet<String>, Refusal> {
     }
 }
 
-/// Reads the kinds file: an array of `{1: name, 6: {slot: [kinds]}, 10: [kinds]}`.
+/// Reads the kinds file: one kind per line, `{1: name, 2: owner, 6: {slot: [admits]}, 11: [admits]}`. Each line is
+/// also read by T3's kind reader, and the kinds are keyed by their full names, `namespace:name@hash`.
 pub fn parse_kinds(text_: &str) -> Result<BTreeMap<String, Kind>, Refusal> {
+    let lines: Vec<&str> = text_
+        .lines()
+        .filter(|l| !l.split('#').next().unwrap_or("").trim().is_empty())
+        .collect();
+    let sources = lines
+        .iter()
+        .map(|l| KindSource::parse(l).map_err(|r| Refusal::Source(r.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+    let full = name_kinds(&sources).map_err(|r| Refusal::Source(r.to_string()))?;
     let mut kinds = BTreeMap::new();
-    for k in array(Some(&read(text_)?), "the kinds")? {
-        let Value::Map(k) = k else {
+    for line in lines {
+        let Value::Map(k) = read(line)? else {
             return source("a kind is a map");
         };
         let name = text(k.get(&1), "a kind's section 1")?;
         let mut slots = BTreeMap::new();
-        if let Some(s) = k.get(&6) {
+        if let Some(s) = k.get(&SECTION_SLOTS) {
             let Value::Map(s) = s else {
-                return source(format!("{name}: section 6 maps slots to kinds"));
+                return source(format!("{name}: section 6 maps slots to what they admit"));
             };
             for (n, admits) in s {
-                slots.insert(*n, names(Some(admits), "a slot's kinds")?);
+                slots.insert(*n, names(Some(admits), "a slot's admits")?);
             }
         }
-        let children = names(k.get(&10), "section 10")?;
-        if kinds
-            .insert(name.clone(), Kind { children, slots })
-            .is_some()
-        {
-            return source(format!("{name} is written twice"));
-        }
+        let kind = Kind {
+            owner: text(k.get(&SECTION_OWNER), "a kind's owner, section 2")?,
+            children: names(k.get(&SECTION_CHILDREN), "section 11")?,
+            slots,
+        };
+        let Some(full_name) = full.get(&name) else {
+            return source(format!("{name} was not named by T3's kind reader"));
+        };
+        kinds.insert(full_name.to_string(), kind);
     }
     Ok(kinds)
 }
 
-/// Reads a world fixture (layout in `fixtures/world-model/door.diag`) against `kinds`. A counter listed as a Soul is in
-/// [`FIXTURE_SCOPE_SOULS`]; every other counter is in the scope of the world's one zone writer, [`FIXTURE_SCOPE_A`] (each writer mints in
-/// its own scope, `v2/docs/ids.md` rule 1).
+/// Reads a world fixture (layout in `fixtures/world-model/door.diag`) against `kinds`. A node's kind is written as a
+/// plain `namespace:name` and stored as the full name of the kind of that name in `kinds`. A counter listed as a Soul
+/// is in [`FIXTURE_SCOPE_SOULS`]; every other counter is in the scope of the world's one zone writer,
+/// [`FIXTURE_SCOPE_A`] (each writer mints in its own scope, `v2/docs/ids.md` rule 1).
 pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft, Refusal> {
     let Value::Map(w) = read(text_)? else {
         return source("a world is a map");
@@ -514,6 +565,21 @@ pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft,
         };
         mint(scope, n)
     };
+    let audience = |v: Option<&Value>| -> Result<Audience, Refusal> {
+        match v {
+            None => Ok(Audience::Everyone),
+            Some(Value::Text(t)) if t.as_str() == "everyone" => Ok(Audience::Everyone),
+            Some(v) => Ok(Audience::Of(id(Some(v), "an audience")?)),
+        }
+    };
+    // The full name of the one kind with this plain name; an unknown name is kept, and the check refuses it.
+    let full = |name: String| {
+        let mut found = kinds.keys().filter(|k| plain(k) == name);
+        match (found.next(), found.next()) {
+            (Some(k), None) => k.clone(),
+            _ => name,
+        }
+    };
     let mut draft = Draft {
         kinds: kinds.clone(),
         ..Draft::default()
@@ -525,14 +591,11 @@ pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft,
         return source("section 2 maps audiences to Souls");
     };
     for (n, members) in auds {
-        if *n == EVERYONE {
-            return source("audience 0 is everyone and is not written");
-        }
         let set = array(Some(members), "an audience")?
             .iter()
             .map(|m| id(Some(m), "a member"))
             .collect::<Result<_, _>>()?;
-        draft.audiences.insert(*n, Members::Only(set));
+        draft.audiences.insert(mint(FIXTURE_SCOPE_A, *n)?, set);
     }
     for n in array(w.get(&3), "section 3, the nodes")? {
         let Value::Map(n) = n else {
@@ -540,12 +603,10 @@ pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft,
         };
         draft.nodes.push(Node {
             id: id(n.get(&1), "a node's id")?,
-            kind: text(n.get(&2), "a node's kind")?,
+            kind: full(text(n.get(&2), "a node's kind")?),
             parent: n.get(&3).map(|p| id(Some(p), "a parent")).transpose()?,
             slot: n.get(&4).map(|s| uint(Some(s), "a slot")).transpose()?,
-            audience: n
-                .get(&5)
-                .map_or(Ok(EVERYONE), |a| uint(Some(a), "an audience"))?,
+            audience: audience(n.get(&5))?,
             fields: match n.get(&6) {
                 None => BTreeMap::new(),
                 Some(Value::Map(f)) => f.clone(),
@@ -561,6 +622,9 @@ pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft,
         let [a, b] = ends else {
             return source("a link has two ends");
         };
+        if l.get(&5).is_none() {
+            return source("a link's audience is written, section 5");
+        }
         draft.links.push(Link {
             id: id(l.get(&1), "a link's id")?,
             ty: text(l.get(&2), "a link's type")?,
@@ -570,7 +634,7 @@ pub fn parse_world(kinds: &BTreeMap<String, Kind>, text_: &str) -> Result<Draft,
                 1 => End::Second,
                 _ => return source("a link's owning end is 0 or 1"),
             },
-            audience: uint(l.get(&5), "a link's audience")?,
+            audience: audience(l.get(&5))?,
         });
     }
     Ok(draft)

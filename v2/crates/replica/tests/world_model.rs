@@ -1,5 +1,5 @@
-//! The world model against its fixtures (Engine v2 T2, #2641; rules in `v2/docs/world-model.md`). Each test is one
-//! acceptance box; each prints what it saw.
+//! The world model against its fixtures (Engine v2 T2, #2641; rules in `v2/docs/world-model.md`). Each `aN_` test is
+//! one acceptance box; each test prints what it saw.
 
 use replica::ids::{FIXTURE_SCOPE_A, Id};
 use replica::world_model::{
@@ -33,11 +33,12 @@ fn edit(text: &str, from: &str, to: &str) -> String {
     text.replacen(from, to, 1)
 }
 
-/// A chain of boxes `nodes` long under one place: the last box has `nodes - 1` ancestors.
+/// A chain of crates `nodes` long under one place: the last crate has `nodes - 1` ancestors. Written flat, one record
+/// per node, so the reader's nesting limit (32) does not bound it.
 fn chain(nodes: u64) -> String {
-    let mut text = String::from("[{1: \"souls:place\", 10: [\"souls:crate\"]},");
-    text.push_str("{1: \"souls:crate\", 10: [\"souls:crate\"]}]");
-    let kinds = parse_kinds(&text).unwrap();
+    let kinds = "{1: \"souls:place\", 2: \"place\", 11: [\"souls:crate\"]}\n\
+                 {1: \"souls:crate\", 2: \"thing\", 11: [\"souls:crate\"]}";
+    let kinds = parse_kinds(kinds).unwrap();
     let mut w = String::from("{1: [], 2: {}, 3: [{1: 1, 2: \"souls:place\"}");
     for n in 2..=nodes {
         w.push_str(&format!(", {{1: {n}, 2: \"souls:crate\", 3: {}}}", n - 1));
@@ -60,6 +61,10 @@ fn a1_the_five_fixtures_pass_the_check() {
             w.node_count()
         );
     }
+    let door = world("door.diag");
+    let kind = &door.node(node(4)).unwrap().kind;
+    println!("A1 a stored node's kind is T3's full name: {kind}");
+    assert!(kind.starts_with("souls:door@1220"));
 }
 
 #[test]
@@ -96,10 +101,10 @@ fn a2_the_check_refuses_each_fault_by_name() {
                 &edit(
                     fixture("membership.diag"),
                     "3: 1, 6: {1: \"choir\"}",
-                    "3: 1, 5: 1, 6: {1: \"choir\"}",
+                    "3: 1, 5: 9, 6: {1: \"choir\"}",
                 ),
-                "3: [101, 2], 4: 1, 5: 1",
-                "3: [101, 2], 4: 1, 5: 0",
+                "3: [101, 2], 4: 1, 5: 9",
+                "3: [101, 2], 4: 1, 5: \"everyone\"",
             )),
         ),
     ];
@@ -136,25 +141,44 @@ fn a3_a_link_is_listed_from_either_end_visiting_no_unrelated_node() {
     ];
     for (name, a, b, ty) in cases {
         let w = world(name);
-        for (from, to) in [(a, b), (b, a)] {
-            w.reset_visits();
-            let viewer = Viewer::Soul(soul(100));
-            let listed = w.links_at(from, viewer);
-            let visits = w.visits();
+        let is_node = |id: Id| w.nodes().any(|n| n.id == id);
+        let ends_are_nodes = (is_node(a), is_node(b));
+        for ((from, to), from_is_node) in [((a, b), ends_are_nodes.0), ((b, a), ends_are_nodes.1)] {
+            w.reset_reads();
+            let listed = w.links_at(from, Viewer::Soul(soul(100)));
+            let (node_reads, link_reads) = w.reads();
             let hit = listed.iter().find(|e| e.ty == ty && e.other == to);
             println!(
-                "A3 {name}: from {} {} links, `{ty}` to {} {}, {visits} of {} nodes visited",
+                "A3 {name}: from {} {} links, `{ty}` to {} {}, {node_reads} of {} nodes and {link_reads} of {} links read",
                 show(from),
                 listed.len(),
                 show(to),
                 if hit.is_some() { "listed" } else { "MISSING" },
-                w.node_count()
+                w.node_count(),
+                w.link_count()
             );
             assert!(hit.is_some());
-            let is_node = w.nodes().any(|n| n.id == from);
-            assert_eq!(visits, u64::from(is_node), "only the asked node is visited");
+            assert_eq!(
+                node_reads,
+                u64::from(from_is_node),
+                "only the asked node is read"
+            );
+            assert_eq!(
+                link_reads, 0,
+                "no link is read: the index entry carries what is listed"
+            );
         }
     }
+    // The counters see a scan: reading every link to find the ones at a node counts each.
+    let w = world("carried-load.diag");
+    w.reset_reads();
+    let scanned = w.links().filter(|l| l.ends.contains(&node(4))).count();
+    let (_, link_reads) = w.reads();
+    println!(
+        "A3 a scan for the same answer reads {link_reads} of {} links ({scanned} found)",
+        w.link_count()
+    );
+    assert_eq!(link_reads, w.link_count());
     // The index carries the audience: who is in the choir is not listed to anyone else from the public choir.
     let w = world("membership.diag");
     let to_member = w.links_at(node(2), Viewer::Soul(soul(101))).len();
@@ -211,4 +235,31 @@ fn a4_held_and_carried_things_are_children_and_nothing_has_two_parents() {
     let r = check(&draft(&twice)).unwrap_err();
     println!("A4 every fixture node written once; the cup written in both hands: {r}");
     assert_eq!(r.name(), "id-duplicate");
+}
+
+#[test]
+fn a_slot_admits_by_category_read_from_the_childs_own_kind() {
+    // The body's hands admit `thing`. A cup's and a key's kinds have owner `thing`; a body's kind has owner `family`.
+    let held = edit(
+        fixture("ownership.diag"),
+        "{1: 5, 2: \"souls:key\", 3: 2}",
+        "{1: 5, 2: \"souls:key\", 3: 3, 4: 1}",
+    );
+    let w = check(&draft(&held)).unwrap();
+    println!(
+        "category: a cup and a key, both things, in the body's two hands: passes, {} nodes",
+        w.node_count()
+    );
+    let body_in_hand = edit(
+        fixture("ownership.diag"),
+        "{1: 5, 2: \"souls:key\", 3: 2}",
+        "{1: 5, 2: \"souls:key\", 3: 2}, {1: 9, 2: \"souls:body\", 3: 3, 4: 1}",
+    );
+    let r = check(&draft(&body_in_hand)).unwrap_err();
+    println!("category: a body in a hand that admits `thing`: {r}");
+    assert_eq!(r.name(), "child-not-admitted");
+    assert!(
+        r.to_string()
+            .contains("souls:body slot 1 does not admit souls:body")
+    );
 }
