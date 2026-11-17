@@ -13,6 +13,9 @@ publish = false
 [workspace.dependencies]
 # The `wasm-bindgen` command v2/tools/ci.sh installs takes its version from Cargo.lock, so the two always match.
 wasm-bindgen = "=0.2.130"
+# The walkable ground (N3, #2651): union and difference on an integer grid, and the cut into triangles.
+i_overlay = "=9.2.0"
+i_triangle = "=0.51.0"
 
 # Native builds unwind on a panic (K11 catches them per controller). WASM aborts on a panic whatever this says, so
 # `replica` never relies on catching one.

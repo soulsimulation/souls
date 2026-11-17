@@ -6,3 +6,10 @@ publish.workspace = true
 description = "The world: tree, clock, controllers, movers, log; native only (Engine v2, #2635). Empty (K1, #2638)."
 
 [dependencies]
+replica = { path = "../replica" }
+i_overlay.workspace = true
+i_triangle.workspace = true
+
+[dev-dependencies]
+import-eden = { path = "../../tools/import-eden" }
+testworld = { path = "../../tools/testworld" }
