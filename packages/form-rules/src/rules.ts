@@ -149,11 +149,12 @@ export function decide(input: Input): Verdict {
     return list.includes(audience.rule);
   };
 
-  // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
+  // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
+  // that meets the need. A holder's form refused for want of holding names its own fix (take).
   const formFix = (meets: (e: Effect) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
-      if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
+      if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
     return null;
@@ -189,7 +190,9 @@ export function decide(input: Input): Verdict {
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
-      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to));
+      // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does
+      const fix = formFix((e) => (e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 

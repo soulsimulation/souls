@@ -231,8 +231,10 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`). A range need also takes a `timed` field.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
-  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
-  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
+  water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
+  `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
+  as its fix. Reach to another thing's point is not a need the rules can read yet, so `fill` holds the kettle and needs
+  it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;

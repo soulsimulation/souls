@@ -9,7 +9,7 @@
         "now_us": 60000000,
         "nodes": {
           "room": { "loose": ["b1", "k1"] },
-          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 0 } },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 1700, "heating": 0 } },
           "b1": { "hands": { "left": null, "right": null }, "effector_mm": [-60, 40, 400] }
         },
         "moves": { "press": { "reach_mm": 600 } }
@@ -57,7 +57,7 @@
         }
       ],
       "after": {
-        "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 0, "heat": { "value": 100000, "per_s": -50, "set_us": 210000000 } } }
+        "k1": { "kind": "eden:kettle", "fields": { "water": 1700, "heating": 0, "heat": { "value": 100000, "per_s": -50, "set_us": 210000000 } } }
       }
     }
   ]
