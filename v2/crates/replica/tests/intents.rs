@@ -129,7 +129,7 @@ fn a4_an_order_outside_the_list_and_an_oversized_intent_are_refused_by_name() {
         2,
         Value::Text(replica::encode::Name::new("souls:hold").expect("a name")),
     );
-    later.insert(11, Value::Uint(1_000_000));
+    later.insert(12, Value::Uint(1_000_000));
     let r = Intent::read(&encode(&Value::Map(later)).expect("bytes")).map_err(|r| r.name);
     assert_eq!(r, Err("intent-not-a-record"));
     // Over the limit, refused before parsing: these bytes are not even CBOR.
@@ -137,6 +137,83 @@ fn a4_an_order_outside_the_list_and_an_oversized_intent_are_refused_by_name() {
     let r = Intent::read(&big).map_err(|r| (r.name, r.detail));
     println!("{} bytes of 0xff: {r:?}", big.len());
     assert_eq!(r.map_err(|r| r.0), Err("intent-too-large"));
+    // Each refusal of the kinds' shapes, by name.
+    let with = |name: &str, k: u64, v: Value| {
+        let (bytes, _) = intent(name);
+        let Value::Map(mut m) = decode(&bytes).expect("decodes").value else {
+            panic!("a map")
+        };
+        m.insert(k, v);
+        Intent::read(&encode(&Value::Map(m)).expect("bytes")).map_err(|r| r.name)
+    };
+    let verb = |t: &str| Value::Text(replica::encode::Name::new(t).expect("a name"));
+    let fb = |t: &str| Value::Array(vec![Value::Map([(2, verb(t))].into())]);
+    for (what, got, want) in [
+        (
+            "an order as a fallback",
+            with("act", 9, fb("souls:wait")),
+            "fallback-not-an-act",
+        ),
+        (
+            "a hold as a fallback",
+            with("act", 9, fb("souls:hold")),
+            "fallback-not-an-act",
+        ),
+        (
+            "fallbacks on an order",
+            with("hold", 9, fb("eden:sit")),
+            "fallbacks-not-on-an-act",
+        ),
+        (
+            "a cancel with a target",
+            with(
+                "cancel",
+                3,
+                Value::Array(vec![Value::Bytes(vec![0xee; 16]), Value::Uint(8)]),
+            ),
+            "cancel-not-bare",
+        ),
+        (
+            "a Soul naming a body",
+            with(
+                "act",
+                11,
+                Value::Array(vec![Value::Bytes(vec![0xee; 16]), Value::Uint(40)]),
+            ),
+            "body-not-a-creators",
+        ),
+        (
+            "a basis that is not a version",
+            with(
+                "act",
+                6,
+                Value::Array(vec![
+                    Value::Uint(1),
+                    Value::Uint(2),
+                    Value::Uint(3),
+                    Value::Uint(4),
+                ]),
+            ),
+            "intent-not-a-record",
+        ),
+    ] {
+        println!("{what}: {got:?}");
+        assert_eq!(got, Err(want), "{what}");
+    }
+    let (bytes, _) = intent("follow");
+    let Value::Map(mut m) = decode(&bytes).expect("decodes").value else {
+        panic!("a map")
+    };
+    m.remove(&11);
+    let r = Intent::read(&encode(&Value::Map(m)).expect("bytes")).map_err(|r| r.name);
+    assert_eq!(r, Err("creator-without-body"));
+    let (bytes, _) = intent("queue");
+    let Value::Map(mut m) = decode(&bytes).expect("decodes").value else {
+        panic!("a map")
+    };
+    m.remove(&3);
+    let r = Intent::read(&encode(&Value::Map(m)).expect("bytes")).map_err(|r| r.name);
+    assert_eq!(r, Err("order-without-target"));
     // Five fallbacks are more than the bound.
     let (bytes, _) = intent("fallbacks");
     let Value::Map(mut f) = decode(&bytes).expect("decodes").value else {
@@ -148,4 +225,19 @@ fn a4_an_order_outside_the_list_and_an_oversized_intent_are_refused_by_name() {
     f.insert(9, Value::Array(a.iter().cycle().take(5).cloned().collect()));
     let r = Intent::read(&encode(&Value::Map(f)).expect("bytes")).map_err(|r| r.name);
     assert_eq!(r, Err("fallbacks-too-many"));
+}
+
+/// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of
+/// `v2/tools/ci.sh`), it loads by its own hash. Without the variable this test says so and checks nothing.
+#[test]
+fn the_built_checker_artifact_loads_by_its_hash() {
+    let Some(path) = std::env::var_os("CHECKER_WASM") else {
+        println!("CHECKER_WASM is not set: the checker-artifact step of v2/tools/ci.sh runs this");
+        return;
+    };
+    let bytes = std::fs::read(&path).expect("the checker artifact");
+    let want = build_hash(&bytes);
+    let r = Checker::load(&bytes, &want).map(|c| to_hex(&c.build));
+    println!("{} bytes: {r:?}", bytes.len());
+    assert!(r.is_ok(), "{r:?}");
 }

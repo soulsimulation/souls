@@ -88,3 +88,8 @@ step intents-goldens node --input-type=module -e '
   const got = r.intents_goldens(), want = readFileSync("crates/replica/fixtures/intents/goldens.txt", "utf8");
   console.log(`${got}intents-goldens: WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} the file`);
   if (got !== want) process.exit(1);'
+# The checker a client loads by hash (T10, #2664): replica for wasm32 with no wasm-bindgen exports, so no imports.
+step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p replica --release \
+    --target wasm32-unknown-unknown --locked --features checker &&
+  CHECKER_WASM="$PWD/target/checker/wasm32-unknown-unknown/release/replica.wasm" \
+    cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'

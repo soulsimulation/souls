@@ -26,11 +26,13 @@ fn not<T>(what: &str) -> R<T> {
     refuse("intent-not-a-record", what.to_owned())
 }
 
-/// The most bytes an intent may have. It is checked before any byte is parsed (rule 9).
+/// The most bytes an intent may have. It is checked before any byte is parsed (rule 11).
+/// The most bytes a first frame may have, checked the same way (rule 12).
+pub const HELLO_MOST: u64 = 256;
 pub const INTENT_MOST: u64 = 4096;
 /// The most fallbacks an intent may rank (rule 6).
 pub const FALLBACKS_MOST: u64 = 4;
-/// This protocol's version (rule 10). A change to any frame after the first raises it.
+/// This protocol's version (rule 12). A change to any frame after the first raises it.
 pub const PROTOCOL: u64 = 1;
 
 /// The verbs that are the engine's own (rule 4): a move inside a joint activity, a cancel, and the orders.
@@ -68,17 +70,20 @@ pub enum Claim {
     Named(Name),
 }
 
-/// One ranked fallback (rule 6): another verb, target and parameters, tried in order when the one before is refused.
+/// One ranked fallback (rule 6): another act's verb, target, parameters and resources, `{2, 3, 4, 8}` as in the
+/// envelope, tried in order when the one before is refused at commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fallback {
     pub verb: Name,
     pub target: Option<Target>,
     pub parameters: BTreeMap<u64, Value>,
+    pub resources: Vec<Claim>,
 }
 
 /// An intent's envelope (rules 2 and 3): `{1: actor, 2: verb, 3: target, 4: parameters, 5: sequence, 6: basis,
-/// 7: expiry, 8: resources, 9: fallbacks, 10: replaces}`. 3, 4, 8, 9 and 10 are left out when empty. There is no field
-/// for a start time or a condition.
+/// 7: expiry, 8: resources, 9: fallbacks, 10: replaces, 11: body}`. 3, 4, 8, 9, 10 and 11 are left out when empty;
+/// 11, the world-owned body a creator drives, is there exactly when the actor is a creator (proposed for the owner's
+/// decision at the trunk stop, rule 3). There is no field for a start time or a condition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Intent {
     pub actor: Actor,
@@ -94,6 +99,8 @@ pub struct Intent {
     pub fallbacks: Vec<Fallback>,
     /// An earlier sequence of the same actor that this replaces (or, for a cancel, ends).
     pub replaces: Option<u64>,
+    /// The world-owned body a creator drives; none for a Soul, whose body is its own.
+    pub body: Option<Id>,
 }
 
 fn map(pairs: Vec<(u64, Value)>) -> Value {
@@ -211,13 +218,19 @@ fn read_fallback(v: &Value) -> R<Fallback> {
     let Value::Map(m) = v else {
         return not("a fallback");
     };
-    if m.keys().any(|k| ![2, 3, 4].contains(k)) {
-        return not("a fallback is {2: verb, 3: target, 4: parameters}");
+    if let Some(Value::Text(verb)) = m.get(&2)
+        && verb.as_str().starts_with("souls:")
+    {
+        return refuse("fallback-not-an-act", verb.as_str().to_owned());
+    }
+    if m.keys().any(|k| ![2, 3, 4, 8].contains(k)) {
+        return not("a fallback is {2: verb, 3: target, 4: parameters, 8: resources}");
     }
     Ok(Fallback {
         verb: read_name(m.get(&2), "a fallback's verb")?,
         target: m.get(&3).map(read_target).transpose()?,
         parameters: read_map(m.get(&4))?,
+        resources: read_claims(m.get(&8))?,
     })
 }
 
@@ -227,14 +240,40 @@ fn fallback(f: &Fallback) -> Value {
     if !f.parameters.is_empty() {
         m.push((4, Value::Map(f.parameters.clone())));
     }
+    if !f.resources.is_empty() {
+        m.push((8, Value::Array(f.resources.iter().map(claim).collect())));
+    }
     map(m)
 }
 
+fn read_claims(v: Option<&Value>) -> R<Vec<Claim>> {
+    match v {
+        None => Ok(Vec::new()),
+        Some(Value::Array(a)) if !a.is_empty() => a.iter().map(read_claim).collect(),
+        Some(_) => refuse("not-canonical", "empty resources are left out"),
+    }
+}
+
+/// Whether a basis is T3's version, `[lineage (16 bytes), zone id, epoch, sequence]`.
+fn is_version(v: &Value) -> bool {
+    match v {
+        Value::Array(a) if a.len() == 4 => {
+            matches!(&a[0], Value::Bytes(b) if b.len() == 16)
+                && read_id(&a[1]).is_ok()
+                && matches!(a[2], Value::Uint(_))
+                && matches!(a[3], Value::Uint(_))
+        }
+        _ => false,
+    }
+}
+
 impl Intent {
-    /// Reads an intent from its bytes (rules 2 to 9). The size is checked before anything is parsed
+    /// Reads an intent from its bytes (rules 2 to 11). The size is checked before anything is parsed
     /// (`intent-too-large`); then the record (`intent-not-a-record`, unknown fields included, `not-canonical`), the
-    /// verb (`order-unknown` for an engine verb outside the closed list), the fallbacks' bound (`fallbacks-too-many`)
-    /// and what a cancel needs (`cancel-without-replaces`).
+    /// verb (`order-unknown` for an engine verb outside the closed list), the fallbacks (`fallbacks-too-many`,
+    /// `fallback-not-an-act`, `fallbacks-not-on-an-act`), each kind's shape (`order-without-target`,
+    /// `cancel-without-replaces`, `cancel-not-bare`) and the driven body (`creator-without-body`,
+    /// `body-not-a-creators`).
     pub fn read(bytes: &[u8]) -> R<Intent> {
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if size > INTENT_MOST {
@@ -249,7 +288,7 @@ impl Intent {
         let Value::Map(m) = &v else {
             return not("an intent");
         };
-        if m.keys().any(|k| *k == 0 || *k > 10) {
+        if m.keys().any(|k| *k == 0 || *k > 11) {
             return not("an intent's fields are 1 to 10; none is a start time or a condition");
         }
         let fallbacks = match m.get(&9) {
@@ -280,7 +319,7 @@ impl Intent {
                 _ => return not("a sequence"),
             },
             basis: match m.get(&6) {
-                Some(b @ Value::Array(a)) if a.len() == 4 => b.clone(),
+                Some(b) if is_version(b) => b.clone(),
                 _ => return not("a basis is [lineage, zone, epoch, sequence]"),
             },
             expiry: read_int(m.get(&7).map_or(&Value::Bytes(Vec::new()), |x| x))?,
@@ -291,10 +330,37 @@ impl Intent {
                 Some(Value::Uint(s)) => Some(*s),
                 Some(_) => return not("replaces"),
             },
+            body: m.get(&11).map(read_id).transpose()?,
         };
         let kind = intent.kind()?;
-        if kind == Kind::Cancel && intent.replaces.is_none() {
-            return refuse("cancel-without-replaces", "a cancel names what it ends");
+        if kind != Kind::Act && !intent.fallbacks.is_empty() {
+            return refuse("fallbacks-not-on-an-act", intent.verb.as_str().to_owned());
+        }
+        if kind == Kind::Order && intent.verb.as_str() != "souls:hold" && intent.target.is_none() {
+            return refuse("order-without-target", intent.verb.as_str().to_owned());
+        }
+        if kind == Kind::Cancel {
+            if intent.replaces.is_none() {
+                return refuse("cancel-without-replaces", "a cancel names what it ends");
+            }
+            if intent.target.is_some()
+                || !intent.parameters.is_empty()
+                || !intent.resources.is_empty()
+            {
+                return refuse("cancel-not-bare", "a cancel carries only what it ends");
+            }
+        }
+        match (intent.actor, intent.body) {
+            (Actor::Creator(_), None) => {
+                return refuse(
+                    "creator-without-body",
+                    "a creator names the world's body it drives",
+                );
+            }
+            (Actor::Soul(_), Some(_)) => {
+                return refuse("body-not-a-creators", "a Soul acts with its own body");
+            }
+            _ => {}
         }
         if crate::encode::encode(&intent.to_value()).ok().as_deref() != Some(bytes) {
             return refuse("not-canonical", "an intent re-encodes to its own bytes");
@@ -341,24 +407,29 @@ impl Intent {
             ));
         }
         m.extend(self.replaces.map(|r| (10, Value::Uint(r))));
+        m.extend(self.body.map(|b| (11, b.to_value())));
         map(m)
     }
 }
 
 // --- Answers ------------------------------------------------------------------------------------------------------
 
-/// How an intent is answered (rule 7). A checked act gets a receipt, naming the log entry that carried it out, or a
-/// refusal naming its reason and what changed since its basis. A move inside a joint activity is accepted, then
-/// resolved: a miss is an outcome, not a refusal.
+/// How an intent is answered (rules 8 and 9). The zone's writer mints an id for each intent it reads (T3, from its
+/// own scope), which every effect it causes names as its cause (T6 rule 6). A checked act gets a receipt, naming that
+/// id and the entries that carried it out, or a refusal naming its reason and what changed since its basis. A move
+/// inside a joint activity is accepted, then resolved: a miss is an outcome, not a refusal. Bytes refused before an
+/// actor and a sequence are read get the unread answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
-    /// `{1: actor, 2: sequence, 3: 1, 4: log sequence}`.
+    /// `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log sequence, ...]}`.
     Receipt {
         actor: Actor,
         sequence: u64,
-        entry: u64,
+        intent: Id,
+        entries: Vec<u64>,
     },
-    /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis}`.
+    /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis}`, 6 left out
+    /// when empty.
     Refused {
         actor: Actor,
         sequence: u64,
@@ -366,68 +437,88 @@ pub enum Answer {
         now: Value,
         changed: Vec<Id>,
     },
-    /// `{1: actor, 2: sequence, 3: 3}`: a move accepted, to be resolved.
-    Accepted { actor: Actor, sequence: u64 },
+    /// `{1: actor, 2: sequence, 3: 3, 4: intent id}`: a move accepted, to be resolved.
+    Accepted {
+        actor: Actor,
+        sequence: u64,
+        intent: Id,
+    },
     /// `{1: actor, 2: sequence, 3: 4, 4: outcome}`: what became of an accepted move (a name: landed, missed...).
     Resolved {
         actor: Actor,
         sequence: u64,
         outcome: Name,
     },
+    /// `{3: 5, 4: reason}`: bytes refused before an actor and a sequence were read (too large, not a record).
+    Unread { reason: Name },
 }
 
 impl Answer {
     pub fn to_value(&self) -> Value {
+        let head = |a: &Actor, s: &u64, k: u64| {
+            vec![(1, actor(*a)), (2, Value::Uint(*s)), (3, Value::Uint(k))]
+        };
         match self {
             Answer::Receipt {
                 actor: a,
                 sequence,
-                entry,
-            } => map(vec![
-                (1, actor(*a)),
-                (2, Value::Uint(*sequence)),
-                (3, Value::Uint(1)),
-                (4, Value::Uint(*entry)),
-            ]),
+                intent,
+                entries,
+            } => {
+                let mut m = head(a, sequence, 1);
+                m.push((4, intent.to_value()));
+                m.push((
+                    5,
+                    Value::Array(entries.iter().map(|e| Value::Uint(*e)).collect()),
+                ));
+                map(m)
+            }
             Answer::Refused {
                 actor: a,
                 sequence,
                 reason,
                 now,
                 changed,
-            } => map(vec![
-                (1, actor(*a)),
-                (2, Value::Uint(*sequence)),
-                (3, Value::Uint(2)),
-                (4, Value::Text(reason.clone())),
-                (5, now.clone()),
-                (
-                    6,
-                    Value::Array(changed.iter().map(|i| i.to_value()).collect()),
-                ),
-            ]),
-            Answer::Accepted { actor: a, sequence } => map(vec![
-                (1, actor(*a)),
-                (2, Value::Uint(*sequence)),
-                (3, Value::Uint(3)),
-            ]),
+            } => {
+                let mut m = head(a, sequence, 2);
+                m.push((4, Value::Text(reason.clone())));
+                m.push((5, now.clone()));
+                if !changed.is_empty() {
+                    m.push((
+                        6,
+                        Value::Array(changed.iter().map(|i| i.to_value()).collect()),
+                    ));
+                }
+                map(m)
+            }
+            Answer::Accepted {
+                actor: a,
+                sequence,
+                intent,
+            } => {
+                let mut m = head(a, sequence, 3);
+                m.push((4, intent.to_value()));
+                map(m)
+            }
             Answer::Resolved {
                 actor: a,
                 sequence,
                 outcome,
-            } => map(vec![
-                (1, actor(*a)),
-                (2, Value::Uint(*sequence)),
-                (3, Value::Uint(4)),
-                (4, Value::Text(outcome.clone())),
-            ]),
+            } => {
+                let mut m = head(a, sequence, 4);
+                m.push((4, Value::Text(outcome.clone())));
+                map(m)
+            }
+            Answer::Unread { reason } => {
+                map(vec![(3, Value::Uint(5)), (4, Value::Text(reason.clone()))])
+            }
         }
     }
 }
 
 // --- The first frame and the checker ------------------------------------------------------------------------------
 
-/// The first frame each way (rule 10), which never changes: `{1: protocol version, 2: build hash}`, and, from a
+/// The first frame each way (rule 12), which never changes: `{1: protocol version, 2: build hash}`, and, from a
 /// world that cannot speak the client's version, `3: {1: "souls:protocol-version", 2: client's version, 3: world's
 /// version}`. Nothing else is ever in it, so a client of any version reads a refusal of any later one.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -456,8 +547,13 @@ impl Hello {
         encode(&map(m)).or_else(|e| refuse("encoding", e.to_string()))
     }
 
-    /// Reads a first frame: the same code in every version (rule 10).
+    /// Reads a first frame: the same code in every version (rule 12). Its size is checked before parsing
+    /// (`hello-too-large`). Field 3's name is read, and its two versions when they are there, so this reader reads any
+    /// refusal a later world puts in the frame.
     pub fn read(bytes: &[u8]) -> R<Hello> {
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > HELLO_MOST {
+            return refuse("hello-too-large", format!("at most {HELLO_MOST} bytes"));
+        }
         let v = decode(bytes)
             .or_else(|e| refuse("encoding", e.to_string()))?
             .value;
@@ -469,10 +565,17 @@ impl Hello {
         };
         let refused = match m.get(&3) {
             None => None,
-            Some(Value::Map(r)) => match (r.get(&2), r.get(&3)) {
-                (Some(Value::Uint(a)), Some(Value::Uint(b))) => Some((*a, *b)),
-                _ => return bad(),
-            },
+            Some(Value::Map(r)) => {
+                let Some(Value::Text(why)) = r.get(&1) else {
+                    return bad();
+                };
+                match (why.as_str(), r.get(&2), r.get(&3)) {
+                    ("souls:protocol-version", Some(Value::Uint(a)), Some(Value::Uint(b))) => {
+                        Some((*a, *b))
+                    }
+                    _ => Some((0, 0)),
+                }
+            }
             Some(_) => return bad(),
         };
         Ok(Hello {
@@ -498,14 +601,14 @@ pub fn answer_hello(client: &[u8], world_protocol: u64, world_build: &[u8]) -> R
     .to_bytes()
 }
 
-/// A build's hash (rule 11): the SHA-256 multihash of its file's bytes, `1220` and 64 hex digits, as `sha256sum` gives.
+/// A build's hash (rule 13): the SHA-256 multihash of its file's bytes, `1220` and 64 hex digits, as `sha256sum` gives.
 pub fn build_hash(bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![crate::ids::SHA2_256, 32];
     out.extend_from_slice(&sha256(bytes));
     out
 }
 
-/// A checker the client may run (rule 11): `replica` as WASM, loaded only when its bytes are the build asked for
+/// A checker the client may run (rule 13): `replica` as WASM, loaded only when its bytes are the build asked for
 /// (`checker-not-the-build`), a WASM module (`checker-not-wasm`) with no imports (`checker-has-imports`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Checker {
@@ -561,7 +664,7 @@ impl Checker {
 
 // --- The fixtures -------------------------------------------------------------------------------------------------
 
-/// The golden intents, as diagnostic notation (rule 12).
+/// The golden intents, as diagnostic notation (rule 14).
 pub const FIXTURES: [(&str, &str); 8] = [
     ("act", include_str!("../fixtures/intents/act.diag")),
     ("move", include_str!("../fixtures/intents/move.diag")),
@@ -587,6 +690,24 @@ pub fn intents_goldens() -> String {
             .and_then(|(i, b)| i.kind().map(|k| (k, b)));
         lines.push(match line {
             Ok((k, b)) => format!("{n} {k:?} {}", to_hex(&b)),
+            Err(r) => format!("{n} refused {r}"),
+        });
+    }
+    // The first frame never changes: a client's, and a world on the next version refusing it.
+    let build = build_hash(b"souls:build");
+    let hello = Hello {
+        protocol: PROTOCOL,
+        build: build.clone(),
+        refused: None,
+    }
+    .to_bytes();
+    let refusal = hello
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|h| answer_hello(h, PROTOCOL + 1, &build));
+    for (n, b) in [("hello", hello), ("hello-refused", refusal)] {
+        lines.push(match b {
+            Ok(b) => format!("{n} Frame {}", to_hex(&b)),
             Err(r) => format!("{n} refused {r}"),
         });
     }
