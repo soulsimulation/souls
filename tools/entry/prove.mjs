@@ -15,15 +15,14 @@
 // each form is met, a case where each need is unmet, and each form done in an effect case. A kind outside
 // content/kinds (a scratch folder) is proven over the published one of the same name.
 //
-// The look gate draws `looks.shape`. An entry cannot carry a shape until SA-D3 (#2855) says how (the format refuses
-// the floats a shape in metres has), so a kind with no shape waits for one rather than failing; every other look
-// error fails. Sheets go to --out (default .local/look/<time>); look at them, never commit them.
+// The look gate draws `looks.shape`. A kind with no shape (look.mjs's `defOf` finds nothing to draw) waits for one
+// rather than failing; every other look error fails. Sheets go to --out (default .local/look/<time>); look at them, never commit them.
 import {existsSync, readFileSync} from 'node:fs';
 import {join, relative, resolve} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {checkFiles, KINDS_DIR} from './check.mjs';
 import {loadDir} from './format.mjs';
-import {look} from './look.mjs';
+import {defOf, look} from './look.mjs';
 import {CASES, KIND_DIRS, loadCases, loadEffectCases, loadKinds, mismatches, same} from '../../packages/form-rules/src/load.ts';
 import {decide} from '../../packages/form-rules/src/rules.ts';
 import {apply, effects} from '../../packages/form-rules/src/effects.ts';
@@ -31,7 +30,6 @@ import {apply, effects} from '../../packages/form-rules/src/effects.ts';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 /** The gates that need a runner (Engine v2). The verdict names them as waiting. */
 export const RUNNER_GATES = Object.freeze(['run', 'body-look', 'find']);
-const NO_SHAPE = 'looks.shape.make is missing: there is nothing to draw';
 
 /** The files a target names: a file or folder on disk, else a family under content/kinds. */
 export function filesOf(target) {
@@ -92,12 +90,19 @@ export function provenCases(entries, {cases: casesDir = CASES} = {}) {
   return {ran: true, ok: !findings.length, rule_cases: rules.length, effect_cases: done.length, findings};
 }
 
-/** The look gate over the family: a sheet per kind. A kind with no shape waits for one (SA-D3, #2855). */
+/** A kind look.mjs could not draw because its entry has no shape, asked of look.mjs's own reading (`defOf`), never of
+ *  its message, which changes with the shape's format. */
+function shapeless(r) {
+  if (!r.kind || r.sheet) return false;
+  try { return defOf(JSON.parse(readFileSync(r.file, 'utf8'))) === null; } catch { return false; }
+}
+
+/** The look gate over the family: a sheet per kind. A kind with no shape waits for one. */
 export function provenLook(target, {out} = {}) {
   const {out: dir, results} = look(target, {out});
   const kinds = results.map(r => {
     const errors = r.errors ?? [];
-    if (errors.length === 1 && errors[0] === NO_SHAPE) return {kind: r.kind, waits: 'a shape: an entry cannot carry one until SA-D3 (#2855)', frames: r.frames};
+    if (shapeless(r)) return {kind: r.kind, waits: 'a shape: this entry has none in looks.shape yet', frames: r.frames};
     return {kind: r.kind ?? relative(ROOT, r.file), ok: !errors.length, sheet: r.sheet && relative(ROOT, r.sheet), frames: r.frames, distinct: r.distinct, errors};
   });
   const failed = kinds.some(k => k.ok === false), waiting = kinds.length > 0 && kinds.every(k => k.waits);
