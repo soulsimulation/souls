@@ -23,6 +23,7 @@ export const MODULES = [
   // SA-C3: the rules package as the world runs it (its TypeScript with the types taken out), then the client's own use of it
   ["../../../packages/form-rules/src/rules.ts", "formRules"],
   ["can-i.mjs", "soulCanI"],
+  ["how.mjs", "soulHow"],
   ["net.mjs", "soulNet"],
   ["dashboard.mjs", "soulDashboard"],
   ["render.mjs", "soulRender"],

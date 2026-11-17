@@ -55,6 +55,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
+A how-to is read by the agent's client from its copy of the entry (`how "<words>"`): the steps become acts on the nearest real
+thing of this kind, at most six, each checked with `can`. A form that starts a timer is a wait, and the client continues the
+chain with a wake entry of its own; the world never waits for a time or a condition.
+
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
