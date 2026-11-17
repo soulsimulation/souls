@@ -2,6 +2,8 @@
 //! Empty but for the load probe (K1, #2638).
 #![forbid(unsafe_code)]
 
+pub mod encode;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 

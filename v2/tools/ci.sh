@@ -38,3 +38,8 @@ native=$(cargo run -p wasm-load --locked --quiet -- "$input")
 echo "native: load_probe($input) = $native"
 step load-node node tools/wasm-load/node.mjs target/wasm-load/pkg "$input" "$native"
 step load-browser node tools/wasm-load/browser.mjs target/wasm-load/pkg "$input" "$native"
+
+# The encoding vectors (T0, #2639) through the same WASM build and the cborg library, in Node. The native build runs
+# them in `cargo test` (crates/replica/tests/encoding.rs).
+step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit --no-fund &&
+  node tools/encoding-vectors/run.mjs target/wasm-load/pkg crates/replica/fixtures/encoding'
