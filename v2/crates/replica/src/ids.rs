@@ -10,7 +10,7 @@ use crate::encode::{Name, Value, encode, parse_diagnostic, to_hex};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "vectors"))]
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// Counters stay below 2^53, the largest range a JavaScript number holds exactly (rule 2).
@@ -570,8 +570,9 @@ pub const FIXTURE_KETTLE: &str = include_str!("../fixtures/ids/kettle.diag");
 pub const FIXTURE_CUP: &str = include_str!("../fixtures/ids/cup.diag");
 
 /// Every golden line, `<case> <bytes as hex> <hash or name>`, as `fixtures/ids/goldens.txt` holds them. The native
-/// test and the WASM build in Node both compare this with that file (rule 20).
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+/// test and the WASM build in Node both compare this with that file (rule 20). WASM exports it only with the
+/// `vectors` feature, so the build the page loads does not carry it.
+#[cfg_attr(all(target_arch = "wasm32", feature = "vectors"), wasm_bindgen)]
 pub fn ids_goldens() -> String {
     let id = Id::new(FIXTURE_SCOPE_A, 7).expect("below 2^53");
     let version = Version {
