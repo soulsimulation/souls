@@ -19671,7 +19671,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-1",
@@ -19852,7 +19852,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-1-bedroom",
@@ -20033,7 +20033,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-2",
@@ -20303,7 +20303,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-2-bedroom",
@@ -20484,7 +20484,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-3",
@@ -20754,7 +20754,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-3-bedroom",
@@ -20935,7 +20935,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-4",
@@ -21205,7 +21205,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-courtyard-quarter-house-4-bedroom",
@@ -21386,7 +21386,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-abbey-cloister",
@@ -21656,7 +21656,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-abbey-cloister-bedroom",
@@ -22202,7 +22202,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "int-music-room",
@@ -22218,7 +22218,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "int-music-room",
@@ -22304,7 +22304,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "int-games-room",
@@ -22320,7 +22320,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "int-games-room",
@@ -22476,7 +22476,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "nave-lamp-l",
           "in": {
             "parent": "int-chapel",
@@ -22492,7 +22492,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "nave-lamp-r",
           "in": {
             "parent": "int-chapel",
@@ -22765,7 +22765,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "eden-observatory",
@@ -22876,7 +22876,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "eden-a-frame",
@@ -22987,7 +22987,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "eden-yurt",
@@ -23009,7 +23009,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "eden-tower-house",
@@ -23025,7 +23025,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "eden-tower-house",
@@ -23041,7 +23041,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-2-lamp",
           "in": {
             "parent": "eden-tower-house",
@@ -23057,7 +23057,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "eden-tower-house",
@@ -23191,7 +23191,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-old-town-domed-hall",
@@ -23207,7 +23207,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-old-town-domed-hall",
@@ -23351,7 +23351,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-1-lamp-1",
           "in": {
             "parent": "region-old-town-domed-hall",
@@ -23367,7 +23367,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-1-lamp-2",
           "in": {
             "parent": "region-old-town-domed-hall",
@@ -23405,7 +23405,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "region-old-town-bell-tower",
@@ -23421,7 +23421,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "region-old-town-bell-tower",
@@ -23437,7 +23437,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-2-lamp",
           "in": {
             "parent": "region-old-town-bell-tower",
@@ -23453,7 +23453,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-3-lamp",
           "in": {
             "parent": "region-old-town-bell-tower",
@@ -23469,7 +23469,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "region-old-town-bell-tower",
@@ -23603,7 +23603,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-sports-ground-clubhouse",
@@ -23619,7 +23619,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-sports-ground-clubhouse",
@@ -23721,7 +23721,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "loft-lamp",
           "in": {
             "parent": "region-farm-hamlet-barn",
@@ -23816,7 +23816,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-farm-hamlet-farmhouse",
@@ -23953,7 +23953,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "region-farm-hamlet-farmhouse",
@@ -24033,7 +24033,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-farm-hamlet-farmhouse",
@@ -24113,7 +24113,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "region-farm-hamlet-farmhouse",
@@ -24335,7 +24335,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-vineyard-villa",
@@ -24472,7 +24472,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "region-vineyard-villa",
@@ -24552,7 +24552,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-vineyard-villa",
@@ -24632,7 +24632,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "region-vineyard-villa",
@@ -24686,7 +24686,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "region-vineyard-villa-tower",
@@ -24702,7 +24702,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "region-vineyard-villa-tower",
@@ -24718,7 +24718,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-2-lamp",
           "in": {
             "parent": "region-vineyard-villa-tower",
@@ -24734,7 +24734,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "region-vineyard-villa-tower",
@@ -24922,7 +24922,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-artists-village-warehouse-studio",
@@ -24938,7 +24938,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-artists-village-warehouse-studio",
@@ -25065,7 +25065,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-west-lake-inn",
@@ -25186,7 +25186,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "region-west-lake-inn",
@@ -25266,7 +25266,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-west-lake-inn",
@@ -25346,7 +25346,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "region-west-lake-inn",
@@ -25489,7 +25489,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-campsite-lodge",
@@ -25610,7 +25610,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "region-campsite-lodge",
@@ -25690,7 +25690,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-campsite-lodge",
@@ -25770,7 +25770,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "region-campsite-lodge",
@@ -25936,7 +25936,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-railway-station-station-building",
@@ -25952,7 +25952,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-railway-station-station-building",
@@ -26096,7 +26096,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-1-lamp-1",
           "in": {
             "parent": "region-railway-station-station-building",
@@ -26112,7 +26112,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-1-lamp-2",
           "in": {
             "parent": "region-railway-station-station-building",
@@ -26150,7 +26150,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "region-botanic-garden-pagoda",
@@ -26166,7 +26166,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "region-botanic-garden-pagoda",
@@ -26182,7 +26182,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-2-lamp",
           "in": {
             "parent": "region-botanic-garden-pagoda",
@@ -26198,7 +26198,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-3-lamp",
           "in": {
             "parent": "region-botanic-garden-pagoda",
@@ -26214,7 +26214,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "region-botanic-garden-pagoda",
@@ -26252,7 +26252,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "region-observatory-dome",
@@ -26268,7 +26268,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "gallery-lamp",
           "in": {
             "parent": "region-observatory-dome",
@@ -26379,7 +26379,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "region-west-river-watermill",
@@ -26516,7 +26516,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "region-west-river-watermill",
@@ -26596,7 +26596,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "region-west-river-watermill",
@@ -26676,7 +26676,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "region-west-river-watermill",
@@ -26826,7 +26826,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "nave-lamp-l",
           "in": {
             "parent": "region-cliff-village-chapel",
@@ -26842,7 +26842,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "nave-lamp-r",
           "in": {
             "parent": "region-cliff-village-chapel",
@@ -27509,7 +27509,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-golf-course-clubhouse",
@@ -27525,7 +27525,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-golf-course-clubhouse",
@@ -27675,7 +27675,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-alpine-valley-station",
@@ -27691,7 +27691,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-alpine-valley-station",
@@ -27825,7 +27825,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-1",
           "in": {
             "parent": "region-alpine-mountain-station",
@@ -27841,7 +27841,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp-2",
           "in": {
             "parent": "region-alpine-mountain-station",
@@ -28080,7 +28080,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "reading-lamp",
           "in": {
             "parent": "region-campus-library-annex",
@@ -28435,7 +28435,7 @@
         {
           "op": "place",
           "tmp": "$f32",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "reading-1-lamp",
           "in": {
             "parent": "region-campus-library-annex",
@@ -29803,7 +29803,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "region-campus-clock-tower",
@@ -29819,7 +29819,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "region-campus-clock-tower",
@@ -29835,7 +29835,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-2-lamp",
           "in": {
             "parent": "region-campus-clock-tower",
@@ -29851,7 +29851,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-3-lamp",
           "in": {
             "parent": "region-campus-clock-tower",
@@ -29867,7 +29867,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "region-campus-clock-tower",
@@ -29978,7 +29978,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30115,7 +30115,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30195,7 +30195,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30275,7 +30275,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30291,7 +30291,7 @@
         {
           "op": "place",
           "tmp": "$f26",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30371,7 +30371,7 @@
         {
           "op": "place",
           "tmp": "$f31",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-3-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30451,7 +30451,7 @@
         {
           "op": "place",
           "tmp": "$f36",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "campus-residence-1",
@@ -30562,7 +30562,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -30699,7 +30699,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -30779,7 +30779,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -30859,7 +30859,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -30875,7 +30875,7 @@
         {
           "op": "place",
           "tmp": "$f26",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -30955,7 +30955,7 @@
         {
           "op": "place",
           "tmp": "$f31",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-3-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -31035,7 +31035,7 @@
         {
           "op": "place",
           "tmp": "$f36",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "campus-residence-2",
@@ -31073,7 +31073,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-1",
@@ -31210,7 +31210,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-1",
@@ -31274,7 +31274,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-1",
@@ -31322,7 +31322,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-1",
@@ -31386,7 +31386,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-1",
@@ -31472,7 +31472,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31609,7 +31609,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31673,7 +31673,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31721,7 +31721,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31785,7 +31785,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31849,7 +31849,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31913,7 +31913,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -31977,7 +31977,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-2",
@@ -32015,7 +32015,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32152,7 +32152,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32216,7 +32216,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32264,7 +32264,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32328,7 +32328,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32392,7 +32392,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32456,7 +32456,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32520,7 +32520,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-3",
@@ -32558,7 +32558,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -32695,7 +32695,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -32759,7 +32759,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -32807,7 +32807,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -32871,7 +32871,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -32935,7 +32935,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -32999,7 +32999,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -33063,7 +33063,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-4",
@@ -33101,7 +33101,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33238,7 +33238,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33302,7 +33302,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33350,7 +33350,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33414,7 +33414,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33478,7 +33478,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33542,7 +33542,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33606,7 +33606,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-5",
@@ -33644,7 +33644,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -33781,7 +33781,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -33845,7 +33845,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -33893,7 +33893,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -33957,7 +33957,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -34021,7 +34021,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -34085,7 +34085,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -34149,7 +34149,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-6",
@@ -34187,7 +34187,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34324,7 +34324,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34388,7 +34388,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34436,7 +34436,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34500,7 +34500,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34564,7 +34564,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34628,7 +34628,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34692,7 +34692,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-7",
@@ -34730,7 +34730,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-8",
@@ -34867,7 +34867,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-8",
@@ -34931,7 +34931,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-8",
@@ -34979,7 +34979,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-8",
@@ -35043,7 +35043,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-8",
@@ -35129,7 +35129,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35266,7 +35266,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35330,7 +35330,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35378,7 +35378,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35442,7 +35442,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35506,7 +35506,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35570,7 +35570,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35634,7 +35634,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-west-home-9",
@@ -35672,7 +35672,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-10",
@@ -35809,7 +35809,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-10",
@@ -35873,7 +35873,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-10",
@@ -35921,7 +35921,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-10",
@@ -35985,7 +35985,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-10",
@@ -36071,7 +36071,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-11",
@@ -36208,7 +36208,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-11",
@@ -36272,7 +36272,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-11",
@@ -36320,7 +36320,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-11",
@@ -36384,7 +36384,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-11",
@@ -36470,7 +36470,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-west-home-12",
@@ -36607,7 +36607,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-west-home-12",
@@ -36671,7 +36671,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-west-home-12",
@@ -36719,7 +36719,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-west-home-12",
@@ -36783,7 +36783,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-west-home-12",
@@ -36869,7 +36869,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37006,7 +37006,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37070,7 +37070,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37118,7 +37118,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37182,7 +37182,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37246,7 +37246,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37310,7 +37310,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37374,7 +37374,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-east-home-1",
@@ -37412,7 +37412,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-2",
@@ -37549,7 +37549,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-2",
@@ -37613,7 +37613,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-2",
@@ -37661,7 +37661,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-2",
@@ -37725,7 +37725,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-2",
@@ -37811,7 +37811,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-3",
@@ -37948,7 +37948,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-3",
@@ -38012,7 +38012,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-3",
@@ -38060,7 +38060,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-3",
@@ -38124,7 +38124,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-3",
@@ -38210,7 +38210,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-4",
@@ -38347,7 +38347,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-4",
@@ -38411,7 +38411,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-4",
@@ -38459,7 +38459,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-4",
@@ -38523,7 +38523,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-4",
@@ -38609,7 +38609,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-5",
@@ -38746,7 +38746,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-5",
@@ -38810,7 +38810,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-5",
@@ -38858,7 +38858,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-5",
@@ -38922,7 +38922,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-5",
@@ -39008,7 +39008,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39145,7 +39145,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39209,7 +39209,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39257,7 +39257,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39321,7 +39321,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39385,7 +39385,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39449,7 +39449,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39513,7 +39513,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-east-home-6",
@@ -39551,7 +39551,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -39688,7 +39688,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -39752,7 +39752,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -39800,7 +39800,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -39864,7 +39864,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -39928,7 +39928,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-3-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -39992,7 +39992,7 @@
         {
           "op": "place",
           "tmp": "$f29",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-4-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -40056,7 +40056,7 @@
         {
           "op": "place",
           "tmp": "$f33",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-5-lamp",
           "in": {
             "parent": "canal-east-home-7",
@@ -40094,7 +40094,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-8",
@@ -40231,7 +40231,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-8",
@@ -40295,7 +40295,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-8",
@@ -40343,7 +40343,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-8",
@@ -40407,7 +40407,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-8",
@@ -40493,7 +40493,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-9",
@@ -40630,7 +40630,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-9",
@@ -40694,7 +40694,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-9",
@@ -40742,7 +40742,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-9",
@@ -40806,7 +40806,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-9",
@@ -40892,7 +40892,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-10",
@@ -41029,7 +41029,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-10",
@@ -41093,7 +41093,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-10",
@@ -41141,7 +41141,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-10",
@@ -41205,7 +41205,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-10",
@@ -41291,7 +41291,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-11",
@@ -41428,7 +41428,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-11",
@@ -41492,7 +41492,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-11",
@@ -41540,7 +41540,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-11",
@@ -41604,7 +41604,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-11",
@@ -41690,7 +41690,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hall-lamp",
           "in": {
             "parent": "canal-east-home-12",
@@ -41827,7 +41827,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "canal-east-home-12",
@@ -41891,7 +41891,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "canal-east-home-12",
@@ -41939,7 +41939,7 @@
         {
           "op": "place",
           "tmp": "$f17",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "canal-east-home-12",
@@ -42003,7 +42003,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "canal-east-home-12",
@@ -42194,7 +42194,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-1",
@@ -42274,7 +42274,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-1",
@@ -42290,7 +42290,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "market-street-shop-1",
@@ -42370,7 +42370,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "market-street-shop-1",
@@ -42513,7 +42513,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-2",
@@ -42593,7 +42593,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-2",
@@ -42736,7 +42736,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-3",
@@ -42816,7 +42816,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-3",
@@ -42959,7 +42959,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-4",
@@ -43039,7 +43039,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-4",
@@ -43055,7 +43055,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "market-street-shop-4",
@@ -43135,7 +43135,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "market-street-shop-4",
@@ -43278,7 +43278,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-5",
@@ -43358,7 +43358,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-5",
@@ -43501,7 +43501,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-6",
@@ -43581,7 +43581,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-6",
@@ -43724,7 +43724,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-7",
@@ -43804,7 +43804,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-7",
@@ -43820,7 +43820,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-2-lamp",
           "in": {
             "parent": "market-street-shop-7",
@@ -43900,7 +43900,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "market-street-shop-7",
@@ -44043,7 +44043,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-8",
@@ -44123,7 +44123,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-8",
@@ -44266,7 +44266,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "market-street-shop-9",
@@ -44346,7 +44346,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "market-street-shop-9",
@@ -44505,7 +44505,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-north-arcade-1",
@@ -44585,7 +44585,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-north-arcade-1",
@@ -44690,7 +44690,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-north-arcade-1",
@@ -44849,7 +44849,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-north-arcade-2",
@@ -44929,7 +44929,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-north-arcade-2",
@@ -45034,7 +45034,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-north-arcade-2",
@@ -45193,7 +45193,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-north-arcade-3",
@@ -45273,7 +45273,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-north-arcade-3",
@@ -45378,7 +45378,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-north-arcade-3",
@@ -45537,7 +45537,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-north-arcade-4",
@@ -45617,7 +45617,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-north-arcade-4",
@@ -45722,7 +45722,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-north-arcade-4",
@@ -45881,7 +45881,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-south-arcade-1",
@@ -45961,7 +45961,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-south-arcade-1",
@@ -46066,7 +46066,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-south-arcade-1",
@@ -46225,7 +46225,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-south-arcade-2",
@@ -46305,7 +46305,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-south-arcade-2",
@@ -46410,7 +46410,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-south-arcade-2",
@@ -46569,7 +46569,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-south-arcade-3",
@@ -46649,7 +46649,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-south-arcade-3",
@@ -46754,7 +46754,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-south-arcade-3",
@@ -46913,7 +46913,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "old-town-south-arcade-4",
@@ -46993,7 +46993,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "old-town-south-arcade-4",
@@ -47098,7 +47098,7 @@
         {
           "op": "place",
           "tmp": "$f21",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "old-town-south-arcade-4",
@@ -47120,7 +47120,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "castle-keep",
@@ -47136,7 +47136,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "castle-keep",
@@ -47152,7 +47152,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-2-lamp",
           "in": {
             "parent": "castle-keep",
@@ -47168,7 +47168,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "castle-keep",
@@ -47190,7 +47190,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "castle-tower-1",
@@ -47206,7 +47206,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "castle-tower-1",
@@ -47222,7 +47222,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "castle-tower-1",
@@ -47244,7 +47244,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "castle-tower-2",
@@ -47260,7 +47260,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "castle-tower-2",
@@ -47276,7 +47276,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "castle-tower-2",
@@ -47298,7 +47298,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "castle-tower-3",
@@ -47314,7 +47314,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "room-lamp",
           "in": {
             "parent": "castle-tower-3",
@@ -47330,7 +47330,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "castle-tower-3",
@@ -47352,7 +47352,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "entrance-lamp",
           "in": {
             "parent": "castle-tower-4",
@@ -47368,7 +47368,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "top-lamp",
           "in": {
             "parent": "castle-tower-4",
@@ -47390,7 +47390,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-1",
@@ -47412,7 +47412,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-2",
@@ -47434,7 +47434,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-3",
@@ -47456,7 +47456,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-4",
@@ -47478,7 +47478,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-5",
@@ -47500,7 +47500,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-6",
@@ -47522,7 +47522,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-7",
@@ -47544,7 +47544,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-8",
@@ -47566,7 +47566,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-9",
@@ -47588,7 +47588,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-10",
@@ -47610,7 +47610,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-11",
@@ -47632,7 +47632,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-12",
@@ -47654,7 +47654,7 @@
         {
           "op": "place",
           "tmp": "$f0",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "shed-lamp",
           "in": {
             "parent": "beach-hut-13",
@@ -47765,7 +47765,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-1",
@@ -47886,7 +47886,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-1",
@@ -47966,7 +47966,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-1",
@@ -48046,7 +48046,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-1",
@@ -48157,7 +48157,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-2",
@@ -48278,7 +48278,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-2",
@@ -48358,7 +48358,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-2",
@@ -48438,7 +48438,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-2",
@@ -48549,7 +48549,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-3",
@@ -48670,7 +48670,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-3",
@@ -48750,7 +48750,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-3",
@@ -48830,7 +48830,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-3",
@@ -48941,7 +48941,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-4",
@@ -49062,7 +49062,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-4",
@@ -49142,7 +49142,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-4",
@@ -49222,7 +49222,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-4",
@@ -49333,7 +49333,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-5",
@@ -49454,7 +49454,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-5",
@@ -49534,7 +49534,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-5",
@@ -49614,7 +49614,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-5",
@@ -49725,7 +49725,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-6",
@@ -49846,7 +49846,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-6",
@@ -49926,7 +49926,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-6",
@@ -50006,7 +50006,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-6",
@@ -50117,7 +50117,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "alpine-chalet-7",
@@ -50238,7 +50238,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "alpine-chalet-7",
@@ -50318,7 +50318,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "alpine-chalet-7",
@@ -50398,7 +50398,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "alpine-chalet-7",
@@ -50493,7 +50493,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-1",
@@ -50630,7 +50630,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-1",
@@ -50709,7 +50709,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-2",
@@ -50846,7 +50846,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "artists-studio-2",
@@ -50926,7 +50926,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-2",
@@ -51021,7 +51021,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-3",
@@ -51158,7 +51158,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-3",
@@ -51237,7 +51237,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-4",
@@ -51374,7 +51374,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "artists-studio-4",
@@ -51454,7 +51454,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-4",
@@ -51549,7 +51549,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-5",
@@ -51686,7 +51686,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-5",
@@ -51765,7 +51765,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-8",
@@ -51902,7 +51902,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "artists-studio-8",
@@ -51982,7 +51982,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-8",
@@ -52077,7 +52077,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "artists-studio-9",
@@ -52214,7 +52214,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "artists-studio-9",
@@ -52293,7 +52293,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-2",
@@ -52461,7 +52461,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-3",
@@ -52573,7 +52573,7 @@
         {
           "op": "place",
           "tmp": "$f11",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-3",
@@ -52684,7 +52684,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-4",
@@ -52795,7 +52795,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-5",
@@ -52906,7 +52906,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-6",
@@ -52969,7 +52969,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-7",
@@ -52985,7 +52985,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-7",
@@ -53033,7 +53033,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-7",
@@ -53112,7 +53112,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-8",
@@ -53128,7 +53128,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-8",
@@ -53192,7 +53192,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-8",
@@ -53271,7 +53271,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-9",
@@ -53383,7 +53383,7 @@
         {
           "op": "place",
           "tmp": "$f11",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-9",
@@ -53462,7 +53462,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-11",
@@ -53478,7 +53478,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-11",
@@ -53542,7 +53542,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-11",
@@ -53653,7 +53653,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-12",
@@ -53691,7 +53691,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-13",
@@ -53803,7 +53803,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-13",
@@ -53867,7 +53867,7 @@
         {
           "op": "place",
           "tmp": "$f12",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-13",
@@ -53921,7 +53921,7 @@
         {
           "op": "place",
           "tmp": "$f2",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-14",
@@ -54048,7 +54048,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-15",
@@ -54153,7 +54153,7 @@
         {
           "op": "place",
           "tmp": "$f8",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-15",
@@ -54217,7 +54217,7 @@
         {
           "op": "place",
           "tmp": "$f12",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-15",
@@ -54296,7 +54296,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-17",
@@ -54464,7 +54464,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-18",
@@ -54632,7 +54632,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-19",
@@ -54648,7 +54648,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-19",
@@ -54712,7 +54712,7 @@
         {
           "op": "place",
           "tmp": "$f9",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-19",
@@ -54823,7 +54823,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-20",
@@ -54861,7 +54861,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-21",
@@ -54957,7 +54957,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-21",
@@ -55021,7 +55021,7 @@
         {
           "op": "place",
           "tmp": "$f11",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-21",
@@ -55084,7 +55084,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-23",
@@ -55100,7 +55100,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-23",
@@ -55148,7 +55148,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-23",
@@ -55211,7 +55211,7 @@
         {
           "op": "place",
           "tmp": "$f3",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-24",
@@ -55323,7 +55323,7 @@
         {
           "op": "place",
           "tmp": "$f10",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-24",
@@ -55387,7 +55387,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-24",
@@ -55425,7 +55425,7 @@
         {
           "op": "place",
           "tmp": "$f1",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-25",
@@ -55521,7 +55521,7 @@
         {
           "op": "place",
           "tmp": "$f7",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "cliff-house-25",
@@ -55585,7 +55585,7 @@
         {
           "op": "place",
           "tmp": "$f11",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "cliff-house-25",
@@ -55664,7 +55664,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "cliff-house-27",
@@ -55832,7 +55832,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-1",
@@ -55969,7 +55969,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-1",
@@ -56049,7 +56049,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-1",
@@ -56160,7 +56160,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-2",
@@ -56297,7 +56297,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-2",
@@ -56377,7 +56377,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-2",
@@ -56472,7 +56472,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-3",
@@ -56609,7 +56609,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-3",
@@ -56689,7 +56689,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-3",
@@ -56800,7 +56800,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-4",
@@ -56937,7 +56937,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-4",
@@ -57032,7 +57032,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-5",
@@ -57153,7 +57153,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-5",
@@ -57233,7 +57233,7 @@
         {
           "op": "place",
           "tmp": "$f18",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-5",
@@ -57313,7 +57313,7 @@
         {
           "op": "place",
           "tmp": "$f23",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "hillside-home-5",
@@ -57408,7 +57408,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-7",
@@ -57520,7 +57520,7 @@
         {
           "op": "place",
           "tmp": "$f12",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-7",
@@ -57615,7 +57615,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-8",
@@ -57752,7 +57752,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-8",
@@ -57832,7 +57832,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-8",
@@ -57912,7 +57912,7 @@
         {
           "op": "place",
           "tmp": "$f24",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "hillside-home-8",
@@ -58007,7 +58007,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-9",
@@ -58128,7 +58128,7 @@
         {
           "op": "place",
           "tmp": "$f13",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-9",
@@ -58223,7 +58223,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-10",
@@ -58360,7 +58360,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-10",
@@ -58455,7 +58455,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-11",
@@ -58592,7 +58592,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-11",
@@ -58671,7 +58671,7 @@
         {
           "op": "place",
           "tmp": "$f4",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-12",
@@ -58751,7 +58751,7 @@
         {
           "op": "place",
           "tmp": "$f11",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-12",
@@ -58831,7 +58831,7 @@
         {
           "op": "place",
           "tmp": "$f16",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-12",
@@ -58926,7 +58926,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-13",
@@ -59063,7 +59063,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-13",
@@ -59174,7 +59174,7 @@
         {
           "op": "place",
           "tmp": "$f6",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-14",
@@ -59311,7 +59311,7 @@
         {
           "op": "place",
           "tmp": "$f15",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-14",
@@ -59391,7 +59391,7 @@
         {
           "op": "place",
           "tmp": "$f20",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-14",
@@ -59471,7 +59471,7 @@
         {
           "op": "place",
           "tmp": "$f25",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-2-lamp",
           "in": {
             "parent": "hillside-home-14",
@@ -59566,7 +59566,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-15",
@@ -59703,7 +59703,7 @@
         {
           "op": "place",
           "tmp": "$f14",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "landing-lamp",
           "in": {
             "parent": "hillside-home-15",
@@ -59783,7 +59783,7 @@
         {
           "op": "place",
           "tmp": "$f19",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-15",
@@ -59878,7 +59878,7 @@
         {
           "op": "place",
           "tmp": "$f5",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "living-lamp",
           "in": {
             "parent": "hillside-home-16",
@@ -59990,7 +59990,7 @@
         {
           "op": "place",
           "tmp": "$f12",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "bedroom-lamp",
           "in": {
             "parent": "hillside-home-16",
@@ -60368,7 +60368,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "library-floor-lamp",
           "in": {
             "parent": "eden-library-1",
@@ -60605,7 +60605,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "library-corner-lamp",
           "in": {
             "parent": "eden-library-1",
@@ -62285,7 +62285,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "eden-house-3-floor-lamp",
           "in": {
             "parent": "eden-house-3",
@@ -62714,7 +62714,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "eden-house-4-floor-lamp",
           "in": {
             "parent": "eden-house-4",
@@ -63446,7 +63446,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "eden-house-1-floor-lamp",
           "in": {
             "parent": "eden-house-1",
@@ -63772,7 +63772,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "eden-house-2-floor-lamp",
           "in": {
             "parent": "eden-house-2",
@@ -64086,7 +64086,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hotel1-floor-lamp",
           "in": {
             "parent": "seafront-hotel-1",
@@ -64705,7 +64705,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hotel2-floor-lamp",
           "in": {
             "parent": "seafront-hotel-2",
@@ -65318,7 +65318,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hotel3-floor-lamp",
           "in": {
             "parent": "seafront-hotel-3",
@@ -65937,7 +65937,7 @@
         },
         {
           "op": "place",
-          "def": "core/floor-lamp@1",
+          "def": "core/floor-lamp@2",
           "name": "hotel4-floor-lamp",
           "in": {
             "parent": "seafront-hotel-4",
