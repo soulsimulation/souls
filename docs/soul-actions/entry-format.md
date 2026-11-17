@@ -62,13 +62,43 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
 | 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
+| 18 | `motion` | How a thing moves: `{"how"}`, one of `one_hand`, `two_hands`, `pushed_by_one`, `two_souls`, `wheeled`, `fixed` (below) |
+| 19 | `loose` | How long it lasts once nobody holds or owns it: `{"ever": true}` or `{"us": <microseconds>}` (below) |
 | 20 | `looks` | How it looks: `model` (a look id), `table`, the looks table, and `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
-Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
-(SA-F10), `hatch` (SA-F9).
+Not defined yet, and refused with the name of the task that adds it: `reactions` (SA-F15, section 12).
+
+**How it moves and how long it lasts loose** (sections 18 and 19, SA-F10, [#2882](https://github.com/soulsimulation/souls/issues/2882)).
+Every kind of thing states both. `motion.how` is one closed list, shared with Engine v2 E5
+([#2778](https://github.com/soulsimulation/souls/issues/2778)): `one_hand` and `two_hands` are carried (a cup; a chair),
+`pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
+by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
+moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+`loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
+([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
+owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
+**The six things any thing allows** (go to, look at, point at, touch, lean on, wait by) are forms of the body's own entry
+(`content/kinds/body/humanoid.json`, SA-G3) that take any thing; a kind writes none of them. A kind forbids one by name in an
+area's `forbids`: leaning is `lean`, the others are `go_to`, `look_at`, `point`, `touch`, `wait_by`
+(`content/kinds/street/railing.json` forbids leaning; `allowsBase(entry, form)` answers `forbidden` with the name and the area).
+Cases are data: `tools/entry/cases/motion.json` and `packages/form-rules/cases/base.json` (a lamp post with no forms).
+
+**Where to put it** (SA-F11, [#2883](https://github.com/soulsimulation/souls/issues/2883); one list with Engine v2 E2
+[#2709](https://github.com/soulsimulation/souls/issues/2709) and E4 [#2772](https://github.com/soulsimulation/souls/issues/2772)).
+A `put` step may carry `place` instead of a `slot`: `{"at": word, "anchor": {"arg": ...}, "facing": ...}`. The words are one closed
+list in `packages/form-rules/placements.json`, which the format reads and nothing else repeats: `on`, `in`, `here`, `next_to`,
+`in_front_of`, `behind`, `against`, `facing`, `middle` (of this room). The anchor is an argument of type thing, named or described
+by a selector (a `takes` entry with `select`). `facing` is `{"toward": argument}`, `as_it_was` or `to_wall`; the word `facing`
+turns a thing where it stands, so the position is not touched and no `facing` field is written beside it. A kind with no front
+(a round table) says `geometry.front: "none"`; the default is `"z"`, the front the frame names. `place(thing, placement,
+{anchor, facingAnchor})` decides only what plain data can: the thing may be moved (`fixed` is refused), the anchor is named, a
+front exists where the word needs one (`behind` and `in_front_of` need the anchor's, `facing` and `toward` need the thing's). A
+refusal has a `code` (`no_front`, `no_anchor`, `fixed`, `unsaid`, `self`, `unknown_word`, `unknown_facing`) and names the word and
+the kind. The spot is the engine's choice, recorded (E4); whether it is free and legal is the world's answer. Cases:
+`tools/entry/cases/placements.json`.
 
 **Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
 ([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
@@ -205,6 +235,26 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
 `tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
 `look.mjs` converts to metres only when it draws.
+
+**The code hatch** (SA-F9, [#2850](https://github.com/soulsimulation/souls/issues/2850); Engine v2 F8
+[#2823](https://github.com/soulsimulation/souls/issues/2823), T9 [#2663](https://github.com/soulsimulation/souls/issues/2663)).
+A form may carry one `hatch`, for the rare thing no declared form can say (whether a chess move is legal, which step of a
+lamp's pattern is lit). It is not a section: it is a key of the form, so the kind's hash covers it. It holds no code:
+
+```json
+"hatch": { "module": "prov-1220<64 hex>", "reads": [{"field": "pieces"}, {"field": "turn"}, {"arg": "from"}, {"arg": "to"}],
+           "steps_most": 20000, "answers": "verdict", "why": "why_chess" }
+```
+
+`module` is the hash of the function's WASM module; `reads` is every field (a bool, enum, int, duration, timed value or
+list) and every `count` or `duration` argument the function may see, and nothing else; `steps_most` is the meter, from 1 to
+1 000 000; `answers` is `"verdict"` (the form can be done only if the function says yes) or `{"field": <name>}` (its whole
+number answer is that field's new value); `why` names a text entry saying what no declared form could do. The function is
+pure: no I/O, no clock, no randomness, no float, the same bytes in Node, the browser and the new engine. The check gate
+(rule `hatch`) refuses a hatch that reads fewer than two things, or only bool fields with a verdict (a declared form's needs
+say those), and a kind with more than four. It prints the number of hatches in the kit, and marks an entry that names one
+`waiting_for_engine`: until Engine v2 runs hatches, such an entry is validated, hashed and checked, never run. Cases for the
+two known uses are data (`tools/entry/cases/hatch.json`). No function is written.
 
 ## A form
 
@@ -352,7 +402,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
-| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `moves` | a thing says neither how it moves nor how long it lasts loose | no |
 | `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
 | `no-labels` | a mood word in the card | no |
 | `refs` | a kind that is not loaded, or kinds in a circle | no |

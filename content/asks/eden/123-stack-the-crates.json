@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":123,"group":"two-things","words":"stack the crates","obvious":2,"things":{"crate1":"eden:crate","crate2":"eden:crate"},"chain":[{"this":"me","form":"pick_up","carry":"crate1","args":{"thing":"crate1"}},{"this":"me","form":"put","place":{"at":"on","thing":"crate1","anchor":"crate2"},"args":{"thing":"crate1"}}]}
