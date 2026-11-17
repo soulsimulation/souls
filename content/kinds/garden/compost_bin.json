@@ -1,0 +1,27 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:compost_bin",
+  "owner": "thing",
+  "state": {
+    "compost": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 900] }
+  },
+  "geometry": { "bounds_mm": [700, 560, 600] },
+  "forms": {},
+  "looks": {
+    "model": "look:compost_bin",
+    "table": [
+      { "part": "fill", "field": "compost", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fill", "field": "compost", "do": "scale", "axis": "y", "range": [0, 3], "to": [1, 1000] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[0,40,0],"size":[700,80,600],"tint":"wood"},{"kind":"box","at":[-320,300,0],"size":[60,520,600],"tint":"wood"},{"kind":"box","at":[320,300,0],"size":[60,520,600],"tint":"wood"},{"kind":"box","at":[0,300,-270],"size":[580,520,60],"tint":"wood"},{"kind":"box","at":[0,160,270],"size":[580,240,60],"tint":"wood"},{"kind":"box","at":[0,270,0],"size":[570,380,470],"round":30,"tint":"compost","role":"fill","pivot":[0,80,0]}],"palette":{"wood":"#89714e","compost":"#493723"},"tags":["garden","compost","bin","object"]}
+  },
+  "text": {
+    "card": "A compost bin of three portions, each to feed a growing planter once.",
+    "garden": "garden",
+    "compost": "compost"
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["compost"] }
+}
