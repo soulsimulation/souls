@@ -1,0 +1,11 @@
+# Motion: a sample of Soul 100's body walking, as T4's hand-off record; its own mover stays the owner (Engine v2 T6, #2645), applied to the base. Layout as in 0-base.diag.
+{
+  1: h'1220a695c8697d7f1068126cc5e5f70ba56308671ab34c5aa6f089dd6c00680ca1a0',
+  2: [
+    {1: 2, 2: 4000000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 7]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2],
+     7: [{1: 7, 2: {1: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2], 2: 4000000, 3: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2]}, 4: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 2]},
+                    5: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1]], 2: [3400000, 0, 1000000], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1], 3: 0}},
+                    6: [1400000, 0, 0], 7: [0, 0, 0]}}],
+     8: [{1: "souls:walked", 3: [0]}]}
+  ]
+}

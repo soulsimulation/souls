@@ -1,0 +1,9 @@
+# Unlink: Soul 100 gives up owning the cup; the cup's end owned the link (Engine v2 T6, #2645), applied to the base. Layout as in 0-base.diag.
+{
+  1: h'1220a695c8697d7f1068126cc5e5f70ba56308671ab34c5aa6f089dd6c00680ca1a0',
+  2: [
+    {1: 2, 2: 3500000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 7]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],
+     7: [{1: 6, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5]}],
+     8: [{1: "souls:gave-up", 3: [0]}]}
+  ]
+}

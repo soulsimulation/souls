@@ -1,0 +1,10 @@
+# Set: Soul 100 pours 250 g of water from the crate into the cup (Engine v2 T6, #2645), applied to the base. Layout as in 0-base.diag.
+{
+  1: h'1220a695c8697d7f1068126cc5e5f70ba56308671ab34c5aa6f089dd6c00680ca1a0',
+  2: [
+    {1: 2, 2: 2500000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 7]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7],
+     7: [{1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7], 3: 1, 4: 750, 5: -250},   # 250 g moved: two sets whose by sum to zero (SA-F2b)
+         {1: 4, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4], 3: 1, 4: 250, 5: 250}],
+     8: [{1: "souls:poured", 2: {1: 250}, 3: [0, 1]}]}
+  ]
+}
