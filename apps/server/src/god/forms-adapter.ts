@@ -82,34 +82,6 @@ const LET_GO: Step = { verb: 'mars:let_go_v1', params: {} };
 function jsonFiles(dir: string): string[] {
   try { return readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? jsonFiles(join(dir, e.name)) : e.name.endsWith('.json') ? [join(dir, e.name)] : []); } catch { return []; }
 }
-let kindsCache: Record<string, Entry> | null = null, movesCache: Record<string, { reach_mm: number; phases?: Record<string, number> }> | null = null;
-const missed = new Set<string>();
-/** The published entries by kind, read once (a kind not found is looked for again once, then not until a restart). */
-function kinds(kind?: string): Record<string, Entry> {
-  if (!kindsCache || (kind && !kindsCache[kind] && !missed.has(kind))) {
-    if (kindsCache && kind) missed.add(kind);
-    kindsCache = {};
-    for (const f of KINDS_DIRS.flatMap(jsonFiles)) { try { const e = JSON.parse(readFileSync(f, 'utf8')); if (e?.format === 'souls-entry/1' && !kindsCache[e.kind]) kindsCache[e.kind] = e; } catch { /* a broken file is check.mjs's to report */ } }
-  }
-  return kindsCache;
-}
-function moves(): Record<string, { reach_mm: number; phases?: Record<string, number> }> {
-  if (!movesCache) {
-    movesCache = {};
-    for (const f of jsonFiles(MOVES_DIR)) { try { const m = JSON.parse(readFileSync(f, 'utf8')); if (m?.format === 'souls-move/1') movesCache[m.move] = { reach_mm: m.reach_mm, phases: m.phases }; } catch { /* move.mjs reports it */ } }
-  }
-  return movesCache;
-}
-
-/** The entry a def was loaded from (load.mjs: tag `entry`, param `entry` = `<kind>@<hash>`), or null. */
-export function entryOf(def: StoredDef | undefined): Entry | null {
-  if (!def?.tags?.includes('entry')) return null;
-  const ref = (def.params as Record<string, { default?: unknown }> | undefined)?.entry?.default;
-  if (typeof ref !== 'string' || !ref.includes(':')) return null;
-  const kind = ref.split('@')[0];
-  return kinds(kind)[kind] ?? null;
-}
-
 /** Why this adapter cannot carry a form out on today's engine, or null when it can. `offered` names the argument the
  *  thing it is offered on fills (the body's forms, SA-F4b). */
 export function unmapped(form: Form & { takes?: unknown }, offered?: string): string | null {
@@ -158,27 +130,6 @@ export function unmapped(form: Form & { takes?: unknown }, offered?: string): st
   return null;
 }
 
-/** The body's forms that change the parent of a thing argument named `thing` (its `put`), mapped here (SA-F4b). */
-function bodyForms(): [string, FormRef['form']][] {
-  const body = kinds(BODY_KIND)[BODY_KIND]; if (!body) return [];
-  return (Object.entries(body.forms ?? {}) as [string, FormRef['form']][]).filter(([, f]) => f.takes?.thing?.type === 'thing' && (f.effects ?? []).some((e) => e.change === 'reparent' && argName(e.what) === 'thing') && !unmapped(f, 'thing'));
-}
-/** The form offered on an entry thing by this name: its own, else the body's with the thing as its argument. */
-export function formOf(entry: Entry, action: string): FormRef | null {
-  const own = entry.forms?.[action]; if (own) return unmapped(own) ? null : { form: own, body: null };
-  const b = bodyForms().find(([n]) => n === action);
-  return b ? { form: b[1], body: kinds(BODY_KIND)[BODY_KIND] } : null;
-}
-
-/** The actions an entry thing's def is offered (actuators.ts `actionsOf`): one per form this adapter can carry out. */
-export function formActions(def: StoredDef): Action[] {
-  const entry = entryOf(def); if (!entry) return [];
-  const names = [...Object.entries(entry.forms ?? {}).filter(([, f]) => !unmapped(f)).map(([n]) => n), ...bodyForms().map(([n]) => n).filter((n) => !entry.forms?.[n])];
-  return names.map((name) => (
-    { name, label: name.replace(/_/g, ' '), roles: 'anyone', reach: 'anywhere', params: {}, when: [], then: [] }
-  )) as unknown as Action[];
-}
-
 export type FormsHost = {
   model: WorldModel;
   engine: { world: { entities: Record<string, any>; tick: number }; standableNearV1?(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null; clearanceAtV1?(x: number, z: number, level?: number): number };
@@ -188,6 +139,53 @@ export type FormsHost = {
 };
 
 export function createFormsAdapter(h: FormsHost) {
+  // #2416 A1: the entries and moves this world has read are its own, on its adapter, never module state
+  let kindsCache: Record<string, Entry> | null = null, movesCache: Record<string, { reach_mm: number; phases?: Record<string, number> }> | null = null;
+  const missed = new Set<string>();
+  /** The published entries by kind, read once per world (a kind not found is looked for again once, then not until a restart). */
+  function kinds(kind?: string): Record<string, Entry> {
+    if (!kindsCache || (kind && !kindsCache[kind] && !missed.has(kind))) {
+      if (kindsCache && kind) missed.add(kind);
+      kindsCache = {};
+      for (const f of KINDS_DIRS.flatMap(jsonFiles)) { try { const e = JSON.parse(readFileSync(f, 'utf8')); if (e?.format === 'souls-entry/1' && !kindsCache[e.kind]) kindsCache[e.kind] = e; } catch { /* a broken file is check.mjs's to report */ } }
+    }
+    return kindsCache;
+  }
+  function moves(): Record<string, { reach_mm: number; phases?: Record<string, number> }> {
+    if (!movesCache) {
+      movesCache = {};
+      for (const f of jsonFiles(MOVES_DIR)) { try { const m = JSON.parse(readFileSync(f, 'utf8')); if (m?.format === 'souls-move/1') movesCache[m.move] = { reach_mm: m.reach_mm, phases: m.phases }; } catch { /* move.mjs reports it */ } }
+    }
+    return movesCache;
+  }
+  /** The entry a def was loaded from (load.mjs: tag `entry`, param `entry` = `<kind>@<hash>`), or null. */
+  function entryOf(def: StoredDef | undefined): Entry | null {
+    if (!def?.tags?.includes('entry')) return null;
+    const ref = (def.params as Record<string, { default?: unknown }> | undefined)?.entry?.default;
+    if (typeof ref !== 'string' || !ref.includes(':')) return null;
+    const kind = ref.split('@')[0];
+    return kinds(kind)[kind] ?? null;
+  }
+  /** The body's forms that change the parent of a thing argument named `thing` (its `put`), mapped here (SA-F4b). */
+  function bodyForms(): [string, FormRef['form']][] {
+    const body = kinds(BODY_KIND)[BODY_KIND]; if (!body) return [];
+    return (Object.entries(body.forms ?? {}) as [string, FormRef['form']][]).filter(([, f]) => f.takes?.thing?.type === 'thing' && (f.effects ?? []).some((e) => e.change === 'reparent' && argName(e.what) === 'thing') && !unmapped(f, 'thing'));
+  }
+  /** The form offered on an entry thing by this name: its own, else the body's with the thing as its argument. */
+  function formOf(entry: Entry, action: string): FormRef | null {
+    const own = entry.forms?.[action]; if (own) return unmapped(own) ? null : { form: own, body: null };
+    const b = bodyForms().find(([n]) => n === action);
+    return b ? { form: b[1], body: kinds(BODY_KIND)[BODY_KIND] } : null;
+  }
+  /** The actions an entry thing's def is offered (actuators.ts `actionsOf`, through the act host): one per form this
+   *  adapter can carry out. */
+  function actions(def: StoredDef): Action[] {
+    const entry = entryOf(def); if (!entry) return [];
+    const names = [...Object.entries(entry.forms ?? {}).filter(([, f]) => !unmapped(f)).map(([n]) => n), ...bodyForms().map(([n]) => n).filter((n) => !entry.forms?.[n])];
+    return names.map((name) => (
+      { name, label: name.replace(/_/g, ' '), roles: 'anyone', reach: 'anywhere', params: {}, when: [], then: [] }
+    )) as unknown as Action[];
+  }
   const M = () => h.model, all = () => h.engine.world.entities, world = () => h.engine.world as never;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
@@ -426,7 +424,7 @@ export function createFormsAdapter(h: FormsHost) {
   const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability), t = m && thing(m[1]); return !!t && (!!t.entry.forms?.[m![2]] || bodyForms().some(([n]) => n === m![2])); };
   /** The act has started (the ledger's expect, right after the plan wrapAct made for it): keep that plan's answer. */
   const begun = (body: string, capability: string) => { const l = latest.get(body); if (l?.capability === capability) planned.set(`${body}|${capability}`, l.answer); };
-  return { plan, outcome, owns, begun };
+  return { plan, outcome, owns, begun, actions };
 }
 export type FormsAdapter = ReturnType<typeof createFormsAdapter>;
 

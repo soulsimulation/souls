@@ -53,8 +53,10 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
-| 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
-| 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
+| 10 | (reserved) | Engine v2 T3's hashed table of referenced kinds ([#2640](https://github.com/soulsimulation/souls/issues/2640), rule 14); not used here |
+| 11 | `children` | Kinds it admits as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 12 | (reserved) | `reactions` (SA-F15) |
+| 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below). `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
@@ -67,9 +69,9 @@ Not defined yet, and refused with the name of the task that adds each: `reaction
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
 end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
-it is a child node, declared in `children` with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
-the sheet (`content/kinds/signup/`). Holding is a change of parent, not a link.
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
 
 A `list` field holds a short bounded list of small records: `most` (required, 1 to 100, so it stays in tens: it is set
 whole on every change, Engine v2 F11, [#2774](https://github.com/soulsimulation/souls/issues/2774)), `of` (one to eight
@@ -162,6 +164,28 @@ arithmetic only (easing in permille; a position is rounded to the nearest millim
 rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
 move the thing's frame into the world's: the caller passes world positions.
 
+## The looks table
+
+`looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
+the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`), `slide` (millimetres along an `axis`),
+`scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
+of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
+of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
+burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
+is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
+`range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
+`over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
+only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
+function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
+cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+```json
+"table": [
+  { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] },
+  { "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 } }
+]
+```
+
 ## The hash, provisional
 
 A kind's reference is `namespace:name@hash`. Until Engine v2's encoding (T0) exists, the hash is SHA-256 over a
@@ -173,3 +197,32 @@ picture or a fixed typo never renames a placed thing. Reordering keys changes ne
 
 **The provisional hash will change once**, when the real encoding lands. Nothing may store it as permanent, which
 is why entries name each other by `namespace:name` and the tool resolves the hash.
+
+## The check gate
+
+```sh
+node tools/entry/check.mjs kitchen        # one family (a folder of content/kinds); no argument checks them all
+pnpm entry check kitchen                  # the same
+node --test tools/entry/check.test.mjs    # one fixture per rule
+```
+
+One JSON line per file, then a summary; exit 1 if any entry has a finding. A finding is `{rule, form, field, path,
+reason, fix}`: the rule broken, where, and the smallest change that passes. The format's own refusals are reported
+under the rule they break; the rest are checked on top (`tools/entry/check.mjs`, `RULES`).
+
+| Rule | Broken by | Format already refuses |
+|---|---|---|
+| `exact` | a float or a count in ticks | yes |
+| `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
+| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
+| `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
+| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
+| `no-labels` | a mood word in the card | no |
+| `refs` | a kind that is not loaded, or kinds in a circle | no |
+
+A state field that no form of the kind sets to some declared value is taken as set from outside, so a need on it is not
+a dead end (the kettle's water is filled by something else).
