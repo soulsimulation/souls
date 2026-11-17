@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Op, WorldModel } from '@souls/world-compiler';
 import { ApiError } from '../souls.ts';
+import { refuseWhenDiskLow } from '../load/disk-headroom.ts';
 import { listDisplays, planHang, type Caller } from './art.ts';
 import { ART_TYPES, ArtRejected, validateUpload, type ArtFormat } from './validate.ts';
 
@@ -67,6 +68,7 @@ export function mountArtRoutes(app: Hono, d: ArtDeps) {
   });
   app.post('/v1/art/media', async (c) => {
     const who = caller(c);
+    refuseWhenDiskLow(c, (...a) => new ApiError(...a));   // #2538
     d.limitIp(c, 'art-media', 20, 60 * 60_000);
     const len = Number(c.req.header('content-length') ?? 0);
     if (len > 17 * 1024 * 1024) throw new ApiError(413, 'art.too-big', 'at most 16 MB');

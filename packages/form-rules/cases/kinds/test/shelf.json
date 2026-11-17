@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:shelf",
+  "owner": "thing",
+  "slots": {
+    "top": { "admits": "thing", "most": 3, "at_mm": [0, 1400, 0] },
+    "bottom": { "admits": "thing", "most": 3, "at_mm": [0, 700, 0] }
+  },
+  "geometry": { "bounds_mm": [900, 1600, 300] },
+  "forms": {},
+  "text": { "card": "A test shelf with two rows that hold things." },
+  "card": { "text": "card" }
+}
