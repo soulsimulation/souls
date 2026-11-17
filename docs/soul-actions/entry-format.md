@@ -57,13 +57,29 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 13 | `vehicle` | A thing a Soul sits in or on and steers (below) |
 | 14 | `ride` | A set trip between stops that nobody steers (below) |
 | 15 | `stock` | The things a container is known to hold, yielded when taken (below) |
+| 16 | `areas` | What a kind says about resting on it, or about a named part of its surroundings, where its shape cannot (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
-(SA-F10), `areas` (SA-D6), `hatch` (SA-F9).
+(SA-F10), `hatch` (SA-F9).
+
+**Areas** (section 16, SA-D6, [#2861](https://github.com/soulsimulation/souls/issues/2861)). Engine v2 E3
+([#2777](https://github.com/soulsimulation/souls/issues/2777)) finds where a body can sit, lie, stand or lean from a
+kind's surfaces and shape, and E4 ([#2772](https://github.com/soulsimulation/souls/issues/2772)) lets a thing be set
+down on any surface, so most kinds write no area. E3 reads a declared area first, then surfaces, then shape; the spot
+a body or thing gets is the engine's choice. An area is a name and any of: `allows` (a posture, `sit`, `lie`, `stand`
+or `lean`, to where: `on` the thing or on its `edge`), `forbids` (postures, by name), `takes` (kinds of thing that may
+be set down on it) and a place, `at_mm` and `radius_mm` (whole millimetres in the thing's own frame, within 20 000 mm),
+a named part of its surroundings: a tree's shade, a river's bank. A placed area is named by a `walk_to` step like a
+point, so a body can be sent to it. Names are one list with points and slots. Refused: an area that says nothing; a
+posture both allowed and forbidden; a forbidden posture the kind's own slot seats; and an area that only repeats what
+the kind's slots already say (the check gate reports it under `shape`). A bed (`content/kinds/rest/bed.json`) allows
+lying on it and sitting on its edge; a piano forbids sitting and lying; a tree declares its shade. A rug or a lawn needs
+no area (a body sits on the ground, SA-G3), and a thing that hangs uses a hang slot (SA-D3). Cases are data
+(`tools/entry/cases/areas.json`). Section 16 is meaning, so covered by the hash.
 
 **Vehicles and rides** (SA-F14, [#2884](https://github.com/soulsimulation/souls/issues/2884)). A kind says what a vehicle
 is, never how the engine moves it. `vehicle`: `drive` (a slot admitting one body, posture `sit`: the drive seat; every

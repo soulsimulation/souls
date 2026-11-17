@@ -15,11 +15,11 @@ export const FORMAT = 'souls-entry/1';
 
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640). */
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 10, vehicle: 13, ride: 14, stock: 15,
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 10, vehicle: 13, ride: 14, stock: 15, areas: 16,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
-export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', areas: 'SA-D6', hatch: 'SA-F9'});
+export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', loose: 'SA-F10', hatch: 'SA-F9'});
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
@@ -126,6 +126,7 @@ export function validateEntry(entry) {
   if (entry.closed !== undefined) closed(entry.closed, state, links, err);
   children(section(entry, 'children', err), err);
   stock(entry, err);
+  areas(entry, err);
   if (entry.vehicle !== undefined) vehicle(entry, err);
   if (entry.ride !== undefined) ride(entry, err);
   if (entry.vehicle !== undefined && entry.ride !== undefined) err('ride', 'a kind is a vehicle (steered) or a ride (a set trip), not both');
@@ -166,7 +167,7 @@ export function validateEntry(entry) {
     else { only(entry.geometry, ['bounds_mm'], 'geometry', err); vec(entry.geometry.bounds_mm, 'geometry.bounds_mm', err, true); }
   }
 
-  const ctx = {state, links, points, slots, forms};
+  const ctx = {state, links, points, slots, forms, areas: isObj(entry.areas) ? entry.areas : {}};
   for (const [name, f] of Object.entries(forms)) {
     if (!IDENT.test(name)) err(`forms.${name}`, 'a form name is lower_snake_case');
     form(f, `forms.${name}`, ctx, err);
@@ -348,6 +349,56 @@ export function takeStock(entry, {name, fields = {}, opened = false, receipt, ha
 export function refilled(entry, name, count, us) {
   const s = entry.stock[name], cap = entry.state[s.count].max;
   return s.refill ? Math.min(cap, count + Math.floor(us / s.refill.every_us)) : count;
+}
+
+/** Areas (SA-D6, #2861): what a kind says about resting on it, or about a part of its surroundings, where its shape cannot.
+ *  Engine v2 E3 (#2777) reads a declared area first, then surfaces, then shape, so a kind writes an area only where shape
+ *  gives the wrong answer or none: a bed is for lying and sitting on its edge, a piano is for neither, a tree has shade.
+ *  An area may carry `allows` (posture -> `on` the thing or on its `edge`), `forbids` (postures, by name), `takes` (kinds of
+ *  thing that may be set down on it, Engine v2 E4) and a place: `at_mm` and `radius_mm`, whole millimetres in the thing's
+ *  own frame, a named part of its surroundings a body can be sent to (`walk_to`). The spot a body or thing gets is the
+ *  engine's choice. An area that only repeats what the kind's slots already say is refused. */
+export const REST_POSTURES = Object.freeze(['sit', 'lie', 'stand', 'lean']);
+export const REST_WHERE = Object.freeze(['on', 'edge']);
+export const AREA_KEYS = ['allows', 'forbids', 'takes', 'at_mm', 'radius_mm'];
+export const AREA_REACH_MM = 20000;
+function areas(entry, err) {
+  const table = section(entry, 'areas', err), points = section(entry, 'points', err), slots = section(entry, 'slots', err);
+  const slotList = Object.values(slots).filter(isObj);
+  for (const [name, a] of Object.entries(table)) {
+    const p = `areas.${name}`;
+    if (name in points || name in slots) err(p, `"${name}" is already a ${name in points ? 'point' : 'slot'}; a part's name is used once`);
+    if (!isObj(a)) { err(p, 'an area is an object: {"allows", "forbids", "takes", "at_mm", "radius_mm"}'); continue; }
+    only(a, AREA_KEYS, p, err);
+    if (!(entry.owner === 'thing' || entry.owner === 'place')) err(p, 'a thing or a place declares areas');
+    const allows = isObj(a.allows) ? a.allows : {}, forbids = Array.isArray(a.forbids) ? a.forbids : [], takes = Array.isArray(a.takes) ? a.takes : [];
+    const placed = a.at_mm !== undefined || a.radius_mm !== undefined;
+    if (a.allows !== undefined) {
+      if (!isObj(a.allows) || !Object.keys(a.allows).length) err(`${p}.allows`, 'a table of posture to where, never empty');
+      else for (const [k, w] of Object.entries(a.allows)) {
+        if (!REST_POSTURES.includes(k)) err(`${p}.allows.${k}`, `a posture, one of ${REST_POSTURES.join(', ')}`);
+        else if (!REST_WHERE.includes(w)) err(`${p}.allows.${k}`, `where, one of ${REST_WHERE.join(', ')}`);
+      }
+    }
+    if (a.forbids !== undefined) {
+      if (!Array.isArray(a.forbids) || !a.forbids.length || !a.forbids.every(k => REST_POSTURES.includes(k)) || new Set(a.forbids).size !== a.forbids.length) err(`${p}.forbids`, `one or more different postures of ${REST_POSTURES.join(', ')}`);
+      else for (const k of forbids) {
+        if (k in allows) err(`${p}.forbids`, `"${k}" is both admitted and forbidden`);
+        if (slotList.some(s => s.admits === 'body' && s.posture === k)) err(`${p}.forbids`, `"${k}" is forbidden, but a slot of this kind seats a body in that posture`);
+      }
+    }
+    if (a.takes !== undefined && !(Array.isArray(a.takes) && a.takes.length && a.takes.every(k => typeof k === 'string' && KIND.test(k)))) err(`${p}.takes`, 'one or more kinds, "namespace:name": what may be set down on it');
+    if (placed) {
+      vec(a.at_mm, `${p}.at_mm`, err);
+      if (Array.isArray(a.at_mm) && a.at_mm.some(v => isInt(v) && Math.abs(v) > AREA_REACH_MM)) err(`${p}.at_mm`, `within ${AREA_REACH_MM} mm of the thing, in its own frame`);
+      if (!(isInt(a.radius_mm) && a.radius_mm > 0 && a.radius_mm <= AREA_REACH_MM)) err(`${p}.radius_mm`, `a place has a radius, whole millimetres from 1 to ${AREA_REACH_MM}`);
+    }
+    if (!placed && !Object.keys(allows).length && !forbids.length && !takes.length) { err(p, 'an area says something: allows, forbids, takes, or a place (at_mm and radius_mm)'); continue; }
+    // Repeating what the slots say adds nothing: no place, no forbid, and every posture and kind already a slot's.
+    const restRepeats = Object.entries(allows).every(([k, w]) => w === 'on' && slotList.some(s => s.admits === 'body' && s.posture === k));
+    const takesRepeat = takes.every(k => slotList.some(s => s.admits === 'thing' && (!s.kinds || s.kinds.includes(k))));
+    if (!placed && !forbids.length && restRepeats && takesRepeat) err(p, 'only repeats what the slots of this kind already say; leave the area out');
+  }
 }
 
 function speed(v, path, err) {
@@ -564,7 +615,7 @@ function form(f, path, ctx, err) {
   };
   const place = (v, p) => {
     if (isArg(v)) arg(v, p, ['slot', 'part', 'thing']);
-    else if (!(typeof v === 'string' && (v in ctx.points || v in ctx.slots))) err(p, 'names a point or slot of this kind, or an argument');
+    else if (!(typeof v === 'string' && (v in ctx.points || v in ctx.slots || isObj(ctx.areas[v]) && 'at_mm' in ctx.areas[v]))) err(p, 'names a point, slot or placed area of this kind, or an argument');
   };
   const slot = (v, p) => { if (isArg(v)) arg(v, p, ['slot']); else if (!(v in ctx.slots)) err(p, 'names a slot of this kind, or an argument'); };
   const fieldName = (v, p) => { if (!(typeof v === 'string' && v in ctx.state)) err(p, 'names a state field of this kind'); };

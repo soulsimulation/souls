@@ -1,0 +1,16 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bed",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1400, 500, 2000] },
+  "areas": {
+    "mattress": { "allows": { "lie": "on", "sit": "edge" } }
+  },
+  "looks": { "model": "look:bed" },
+  "text": {
+    "card": "A bed to lie on, or to sit on the edge of.",
+    "furniture": "furniture",
+    "sleep": "sleep"
+  },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["sleep"] }
+}
