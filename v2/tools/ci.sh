@@ -28,7 +28,8 @@ step tests cargo test --workspace --locked
 # The command's version is the wasm-bindgen crate's in Cargo.lock; it is installed under target/, which CI caches.
 bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
 step wasm-bindgen-cli cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
-step wasm-build cargo build -p replica --release --target wasm32-unknown-unknown --locked
+# `vectors` adds the test-only export the encoding-vectors step calls (T0, #2639).
+step wasm-build cargo build -p replica --release --target wasm32-unknown-unknown --locked --features vectors
 step wasm-bindgen target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg \
   target/wasm32-unknown-unknown/release/replica.wasm
 

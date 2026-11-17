@@ -27,7 +27,9 @@ The profile is CBOR ([RFC 8949](https://www.rfc-editor.org/rfc/rfc8949.html)) cu
 7. **Maps are keyed by field number:** unsigned integers in strictly ascending order, so no key twice. With keys in
    their shortest form, ascending by number is the same order as RFC 8949's bytewise order (section 4.2.1) and its
    older length-first order (section 4.2.3).
-8. **Nesting** is at most 32 arrays and maps deep.
+8. **Nesting** is at most 32 arrays and maps deep. The encoder refuses a deeper value with `too-deep` rather than
+   write bytes the decoder would refuse. Containment depth is unbounded (contract T2), so the node tree and
+   checkpoints are encoded flat, never nested: nodes keyed by id, each naming its parent by id.
 9. **Fields.** A required field is always written, even at its default. An optional field that is absent is left
    out; it is never written as a null or an empty value.
 10. **Stored bytes are what a hash covers.** The decoder keeps the bytes it read beside the value; a hash is taken
@@ -102,7 +104,7 @@ The decoder refuses every other input, each by name, with the offset of the byte
 | `map-key-not-uint` | 7 | A map key that is not an unsigned integer | `a12000`, `a1616100` |
 | `map-keys-out-of-order` | 7 | A key smaller than the one before | `a202000100` |
 | `map-key-duplicate` | 7 | A key equal to the one before | `a201000100` |
-| `too-deep` | 8 | 33 arrays or maps nested | `81` × 32 then `80` |
+| `too-deep` | 8 | 33 arrays or maps nested (the encoder refuses such a value too) | `81` × 32 then `80` |
 
 ## What would quietly break this
 
@@ -123,6 +125,8 @@ Each of these would give one value two byte forms, or one byte form two values, 
   text needs a normalisation rule first.
 - **Floats.** `-0.0`, NaN payloads and widths give one number several forms; the record uses fixed-point integers.
 - **Text map keys.** Bytewise and length-first order disagree on them; keys are field numbers (rule 7).
+- **Nesting the node tree by containment.** A tree more than 32 deep could not be written, and a lenient writer
+  would store bytes no reader accepts. The tree and checkpoints are flat (rule 8).
 - **Narrowing the profile later.** Fewer name characters or a lower nesting limit would refuse bytes already stored.
   Widening is safe: it changes no stored byte.
 - **Editing a vector to fit new code.** A vector changes only in its own commit, with the reason (rule 12).
