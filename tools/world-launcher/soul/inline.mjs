@@ -24,6 +24,7 @@ export const MODULES = [
   ["../../../packages/form-rules/src/rules.ts", "formRules"],
   ["can-i.mjs", "soulCanI"],
   ["how.mjs", "soulHow"],
+  ["room.mjs", "soulRoom"],
   ["net.mjs", "soulNet"],
   ["dashboard.mjs", "soulDashboard"],
   ["render.mjs", "soulRender"],
