@@ -18,7 +18,9 @@ in the repository.
 Each stage is one systemd unit, `sim-worlds@<stage>`, running as the unprivileged `simworlds` user. The unit runs the
 keeper (`tools/world-launcher/keeper.mjs`), which holds the stage's port and runs the world launcher from the release
 the stage link `/srv/sim-worlds/<stage>` points at. The launcher runs one Souls server process per world on a private
-loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand and letting idle ones sleep.
+loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds on demand. Idle worlds do not sleep:
+sleep is off by default (`SLEEP_MS = 0` in `tools/world-launcher/launcher.mjs`, #2235), because world time must never
+stop.
 
 | Stage | Public paths | Settings | Data |
 |---|---|---|---|
@@ -29,7 +31,10 @@ loopback port and proxies HTTP, SSE and WebSocket traffic to it, starting worlds
 Each settings file holds one line, `SIM_WORLDS_ARGS=...`: the port, the world port range, data directory, public
 origin, auth env file and caps (`--max-worlds`, `--max-running`, `--min-free-mb`, `--world-heap-mb`, `--create-limit`).
 `--unload-still 1` lets still worlds leave memory and come back on a request or their alarm
-([worlds](architecture/worlds.md), #2299); it stays off (`0`, the default) in production until its proof task has passed.
+([worlds](architecture/worlds.md), #2299). Off by default. Without the arg, the launcher takes the setting from
+`<data>/launcher-settings.json` (`{"unloadStill":1}`), which it reads once at its start, so a reload picks up a change.
+`install.sh unload-still <stage> <0|1>` writes or removes that file; a release sets it with
+[`unload_still`](release.md#the-release-workflow).
 Their recorded horizons are `<data>/horizons.json`.
 At most `--load-parallel` worlds load at once (default 4); the rest wait in order: a Soul's act or a god call, a
 visitor's connection, an alarm for a listening agent, a wind-down alarm, then anything else (keep-alive, monitors),
@@ -188,6 +193,17 @@ audit log, uploaded assets, old-world fork inputs and the stage's non-secret hos
 restic snapshot. Retention keeps 7 daily, 4 weekly and 6 monthly snapshots (`SIM_BACKUP_KEEP`), locally and
 off-site. Every release also takes its own compact pre-release copy. Commands are in the
 [runbook](operations/runbook.md#backups).
+
+**Hourly run (#2542).** `sim-worlds-backup-hourly@<stage>.timer` (minute 15 of each hour) runs
+`deploy/backup-restic.mjs backup-hourly <stage>`: it copies only the databases written since their last copy (online
+backup and `quick_check`), skips the rest, takes one snapshot tagged `<stage>,hourly` and copies it off-site. It runs no
+forget, prune or check; the nightly run keeps the newest 24 hourly snapshots (`SIM_BACKUP_KEEP_HOURLY`) beside its own
+rule, which never removes an hourly one. Each hourly snapshot holds every database, so it restores the whole stage. Once
+enabled, a dead disk loses at most about an hour (a day with the nightly run alone; the maintainer accepted the hour, with
+continuous replication as a later task). `install.sh` installs the timer on every release and never enables it:
+enabling it is the maintainer's step, `systemctl enable --now sim-worlds-backup-hourly@production.timer` on the host,
+then one restore drill from an hourly snapshot ([runbook](operations/runbook.md#hourly-run)). Each world itself keeps
+only its newest 2 in-process copies (`backup-YYYYMMDDHH.db`; it kept up to 15 before #2542).
 
 ### Off-site copy
 

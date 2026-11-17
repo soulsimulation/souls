@@ -86,3 +86,17 @@ test('the page says when the first record comes instead of "none"', () => {
   assert.doesNotMatch(page, /tonight\\'s/);
   new Function(page.split('<script>').at(-1).split('</script>')[0].replace(/^\s*import .*$/gm, ''));   // the inline script still parses
 });
+
+test('#2541: a failed hourly backup, a FAILED database or a timeout, is an alert on the page', async () => {
+  const f = setup();
+  writeFileSync(join(f.dataDir, 'backup-hourly-last.json'), JSON.stringify({ at: isoAgo(0.5), ok: false, dbsOk: 6, dbs: 7, failed: ['worlds/alpha/sim.db: database disk image is malformed'] }));
+  writeFileSync(join(f.root, 'legacy', 'backup-hourly-last.json'), JSON.stringify({ at: isoAgo(2), ok: true, dbsOk: 7, dbs: 7 }));
+  const saved = host.backupsHourly;
+  host.backupsHourly = { legacy: { enabled: true, result: 'timeout' }, stale: { enabled: false, result: 'timeout' } };
+  try {
+    const texts = (await dashFor(f).json()).alerts.map((a) => a.text);
+    assert.ok(texts.includes('production hourly backup failed: worlds/alpha/sim.db: database disk image is malformed'), texts.join(' | '));
+    assert.ok(texts.includes('legacy hourly backup failed: timeout'), texts.join(' | '));
+    assert.ok(!texts.some((t) => /^stale hourly/.test(t)), 'a disabled hourly timer is not judged');
+  } finally { host.backupsHourly = saved; }
+});

@@ -59,6 +59,20 @@ const NATIVES: { name: string; description: string }[] = [
   { name: 'Basil', description: 'a talkative kiosk regular who loves gossip and hates being alone' },
 ];
 
+/** #2542: the hourly in-process backup keeps only its newest 2 files (`backup-YYYYMMDDHH.db`; no dailies): the history is
+ *  the restic snapshots (deploy/backup-restic.mjs, nightly and hourly), and nothing reads more than the newest copy. */
+export const BACKUP_FILE_RE = /^backup-\d{10}\.db$/;
+export function pruneBackupFiles(dir: string, keep = 2): void {
+  const files = readdirSync(dir).filter((f) => BACKUP_FILE_RE.test(f)).sort().reverse();
+  for (const f of files.slice(keep)) { try { unlinkSync(join(dir, f)); } catch { /* already gone */ } }
+}
+/** #2303 A2: before this process's first backup, the newest backup file is at least as new as the database and its log. */
+export function newestBackupCoversDb(dir: string): boolean {
+  const mtime = (f: string) => { try { return statSync(join(dir, f)).mtimeMs; } catch { return 0; } };
+  const newest = readdirSync(dir).filter((f) => BACKUP_FILE_RE.test(f)).sort().at(-1);
+  return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
+}
+
 /** Shards (#2389): one world, booted from its own config. A world is a value, not the program: what it reads after boot
  *  comes from `config` (and `config.env`, its own environment), never from process.env or a module-level config.
  *  main.ts runs one: startWorld(loadConfig(process.env)). What is still one per program (signals, the watchdog, the fault
@@ -164,7 +178,7 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     onTicker: (lines) => hub?.broadcast({ t: 'ticker', lines }),
     onNarrative: (view) => hub?.broadcast({ t: 'narrative', view }),
     onTalk: (lines) => hub?.broadcast({ t: 'talk', lines }),
-    clients: () => hub?.clients.size ?? 0,
+    clients: () => host.viewerCount(),
   },edenCapabilities?{intentV2Choices:true}:undefined);
   const souls = new Souls(host, db, brain, config);
   if(edenCapabilities||accountLifecycle&&host.engine.rulesVersion.includes('+crew-removal/1'))souls.enableLifecycle();
@@ -177,7 +191,6 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   const stripWorldPath = (url: string | undefined) => stripWorldRequestPath(url, config.worldPath);
   server.on('upgrade', req => { req.url = stripWorldPath(req.url); host.wake(); });   // #2384: a viewer wakes a sleeping still world
   hub = new Hub(server, host, auth, db,edenCore?souls:undefined);
-  host.watched = () => hub.clients.size > 0;   // #2298 A4b
   host.listeners.push({ afterTick: () => { load.shared[S.still] = host.silent() ? 1 : 0; } });   // #2303: the watchdog writes live.json less often
   const faultInject = config.env.SIM_FAULT_INJECT === '1' ? installFaultInject(host, config.dataDir) : null;
   if (lastExit?.quarantine) host.quarantinedStep = lastExit.quarantine;   // #2378 A2: a step that ended two boots in a row
@@ -209,8 +222,9 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   type SnapshotRequest = (reason: string, o?: { now?: boolean }) => { tick: number; pending: boolean } | null;
   const plannedSnapshot = (reason: string) => { try { const req = (host as unknown as { requestSnapshot?: SnapshotRequest }).requestSnapshot; if (req) req.call(host, reason, { now: true }); else host.saveSnapshot(true); } catch (e) { console.error('[load] planned snapshot failed', e); } };
   // srv-load: the load sensor (load/monitor.ts) and in-world admission (load/admission.ts; SIM_ADMISSION=0 turns it off).
-  // Black for 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once, no backoff penalty).
-  const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission({ api: load.api, quietTickMs: () => load.shared[S.quietTickMs] });
+  // Black for 60 s with no tick completed in those 60 s → planned restart: snapshot, exit 75 (the launcher restarts at once,
+  // no backoff penalty). A busy world that still ticks stays up at black (#2622).
+  const admission = config.env.SIM_ADMISSION === '0' ? undefined : new Admission({ api: load.api, shared: load.shared });
   const drill = config.env.SIM_LOAD_DRILL_LEVEL as 'amber' | 'red' | 'black' | undefined;   // drill: hold a level (L1 tests 'planned' restarts with black)
   const monitor = new LoadMonitor({ host, shared: load.shared, api: load.api, drill: drill && ['amber', 'red', 'black'].includes(drill) ? drill : undefined, blackLimitMs: Number(config.env.SIM_LOAD_BLACK_MS) || 60_000, queue: () => admission?.queueStats() ?? { depth: 0, oldestMs: 0 }, shed: () => ({ reads: admission?.shed.reads ?? 0, acts: admission?.shed.acts ?? 0 }),
     requestMs: () => admission?.spentMs ?? 0, baselineMs: config.env.SIM_LOAD_BASELINE_MS !== undefined && config.env.SIM_LOAD_BASELINE_MS !== '' ? Number(config.env.SIM_LOAD_BASELINE_MS) : undefined,
@@ -399,7 +413,10 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
     host.owedTicks = 0;
     const ms = performance.now() - at;
     if (ran) console.log(`[clock] caught up ${ran} ticks (${Math.round(first / 20)} s away at boot) in ${Math.round(ms)} ms, ${Math.round(ran / Math.max(ms, 1) * 1000)} ticks/s: now tick ${host.engine.world.tick}`);
-    if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): not run`);
+    // still behind (a host slower than the wall at the tail): the clock's first frames run what is owed, never dropped
+    const behind = owed > 0 && !host.paused && host.clockAvailable;
+    if (behind) host.oweToClock(owed);
+    if (owed > 0) console.warn(`[clock] ${owed} ticks still owed when the catch-up stopped (${host.paused ? 'paused' : host.clockAvailable ? 'still behind after 32 rounds' : 'clock unavailable'}): ${behind ? 'the clock runs them first' : 'not run'}`);
   }
   // a Soul whose birth threw at boot replay or that a rewind left out is born again (WorldHost.unbornV1), once the clock runs
   const startClock = () => { wallClock.start(); host.start(); souls.rebirthUnborn(); };
@@ -529,27 +546,14 @@ export async function startWorld(config: Config, o: { exit?: (code: number) => v
   process.on('SIGINT', () => void shutdown('SIGINT').catch(()=>console.error('[world] shutdown is incomplete; retain database and inspect')));
   }
 
-  // Hourly on-box backup with retention: the last 6 hourly files plus one per day (the 00:00 UTC file) for 7 days.
-  function pruneBackups() {
-    const files = readdirSync(config.dataDir).filter((f) => /^backup-\d{10}\.db$/.test(f)).sort().reverse();
-    const keep = new Set(files.slice(0, 6));
-    const now = Date.now();
-    for (const f of files) {
-      const day = Date.UTC(Number(f.slice(7, 11)), Number(f.slice(11, 13)) - 1, Number(f.slice(13, 15)));
-      if (f.slice(15, 17) === '00' && now - day <= 8 * 86400_000) keep.add(f); // real date difference, correct across month boundaries
-    }
-    for (const f of files) if (!keep.has(f)) { try { unlinkSync(join(config.dataDir, f)); } catch { /* already gone */ } }
-  }
+  const pruneBackups = () => pruneBackupFiles(config.dataDir);
   // #2303 A2: no backup of a database nothing has written since the last one: this process has made no change since its last
   // backup (or, before its first, none at all and the newest backup file is newer than the database and its log).
   let backedChanges = 0, backedOnce = false;
   const dbChanges = () => (db.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
   function unchangedSinceBackup(): boolean {
     if (dbChanges() !== backedChanges) return false;
-    if (backedOnce) return true;
-    const mtime = (f: string) => { try { return statSync(join(config.dataDir, f)).mtimeMs; } catch { return 0; } };
-    const newest = readdirSync(config.dataDir).filter((f) => /^backup-\d{10}\.db$/.test(f)).sort().at(-1);
-    return !!newest && mtime(newest) >= Math.max(mtime('sim.db'), mtime('sim.db-wal'));
+    return backedOnce || newestBackupCoversDb(config.dataDir);
   }
   async function backupNow() {
     if (disk.low || unchangedSinceBackup()) return;   // #2378: no backup while the disk is under its headroom

@@ -10,6 +10,11 @@
 // with it; the client adds the response's `Age` to `now`. A `v` that is not current (or no `v`) is answered with the
 // current world and `no-store`, so a stale or invented key can never put anything in the edge cache.
 // Every other caller (resync, God UI, previews) keeps using the plain URL, which stays `no-store`.
+// E6: those three parts all live in sim.db, so a restored (earlier) database reuses old keys for new content. The key's
+// fourth part, the epoch, lives beside sim.db (never in it, never in a backup): a restored world boots with a new one.
+import { randomInt } from 'node:crypto';
+import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Hono } from 'hono';
 
 /** Shared caches may keep a keyed snapshot this long; browsers revalidate every time. */
@@ -18,13 +23,29 @@ export const SNAPSHOT_KEY_HEADER = 'x-snapshot-key';
 /** The window property the world page's HTML sets (apps/web/src/snapshot-prefetch.ts reads it). */
 export const SNAPSHOT_KEY_GLOBAL = '__simSnapshotKey';
 
-export type SnapshotKeyParts = { editSeq: number; buildsRev: number; moderation: string };
+/** `epoch`: the world's snapshot epoch (snapshotEpoch), absent only where no data dir exists (tests). */
+export type SnapshotKeyParts = { editSeq: number; buildsRev: number; moderation: string; epoch?: string };
 
-/** `<editSeq>.<buildsRev>.<moderation version>`: digits and dots only (safe in a URL and in an inline script). */
+/** `<editSeq>.<buildsRev>.<moderation version>[.<epoch>]`: digits and dots only (safe in a URL and in an inline script). */
 export function snapshotKey(p: SnapshotKeyParts): string {
-  const key = `${p.editSeq}.${p.buildsRev}.${p.moderation}`;
+  const key = `${p.editSeq}.${p.buildsRev}.${p.moderation}${p.epoch === undefined ? '' : `.${p.epoch}`}`;
   if (!/^[0-9]+(\.[0-9]+)*$/.test(key)) throw new Error(`snapshot key is not digits and dots: ${key}`);
   return key;
+}
+
+/** The file beside sim.db holding the epoch. restic backs up only sim.db; restore-world (worldops.mjs) removes it. */
+export const SNAPSHOT_EPOCH_FILE = 'snapshot-epoch';
+
+/** E6: the world's snapshot epoch, read once at boot: the digits in <dataDir>/snapshot-epoch, written with a new value when
+ *  absent or malformed (first boot, or a restored database). A restart keeps it. If it cannot be written, the new value
+ *  serves this boot only: the next boot's key differs, which costs an edge miss and never serves a stale picture. */
+export function snapshotEpoch(dataDir: string): string {
+  const file = join(dataDir, SNAPSHOT_EPOCH_FILE);
+  try { const v = readFileSync(file, 'utf8').trim(); if (/^[0-9]{1,16}$/.test(v)) return v; } catch { /* absent: a new one */ }
+  const v = String(randomInt(1e9, 1e10));
+  try { writeFileSync(`${file}.tmp`, v + '\n'); renameSync(`${file}.tmp`, file); }
+  catch (failure) { console.warn('[edge-snapshot] the snapshot epoch could not be kept; it is new each boot:', String(failure).slice(0, 200)); }
+  return v;
 }
 
 /** Wrap GET /v1/world/snapshot: cacheable only when `?v=` names the key both before and after the picture was made. */
