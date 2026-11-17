@@ -44,13 +44,13 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 0 | `format` | `souls-entry/1` |
 | 1 | `kind` | `namespace:name`. The hash is computed, never written in the file |
 | 2 | `owner` | `thing`, `family` (a body's family) or `place` (a kind of ground or place) (E21, [#2791](https://github.com/soulsimulation/souls/issues/2791)) |
-| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference), `default`, `audience` |
+| 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference), `default`, `audience` (a rule) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`), `most`, `audience` |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
 | 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm` |
 | 7 | `geometry` | `bounds_mm` |
 | 8 | `forms` | What can be done with it (below) |
-| 20 | `looks` | How it looks; its table is SA-D1a's |
+| 20 | `looks` | How it looks: `model` (a look id), and `table`, the looks table (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
@@ -58,8 +58,14 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `schedule` (SA-F16), `hatch` (SA-F9).
 
-**Audience** is a rule resolved to an audience id when a record is written: `public`, `holder`, `owner`, `members`
-(those linked to the node) or `creator`. Point and slot names share one namespace, so a form's argument of type
+**Audience** is a rule on every state field and link type, written out (there is no implied default), from one closed
+list (`AUDIENCE_RULES` in `tools/entry/format.mjs`): `{"rule": "everyone"}`, `{"rule": "owner"}` (the thing's owner),
+`{"rule": "linked", "link": "<link type>"}` (whoever is linked to this thing by that link of this kind: its members,
+the Soul whose turn it is) and `{"rule": "creator"}` (the world's creator). A rule names a link type, never a Soul.
+A kind may add a `closed` section (9), `{"audience": rule, "fields": ["stock"]}`: the fields it names, and its
+children, take the container's own audience until it is opened (Engine v2 E22,
+[#2792](https://github.com/soulsimulation/souls/issues/2792)); those fields declare no audience of their own.
+Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
 
 ## A form
@@ -91,6 +97,25 @@ Not defined yet, and refused with the name of the task that adds each: `reaction
   slot or in the hand), `remove`, `timer`. SA-F2b defines what each does.
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
+
+## The looks table
+
+`looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
+the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`), `slide` (millimetres along an `axis`),
+`scale` (permille, one axis or all), `show` (1 or 0), `glow` (permille), `tint` (a colour) or `pick` (no part: which
+of several parts a choice shows). The amount comes from `at` (field value to amount, for a bool or enum) or from
+`range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
+`over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
+only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
+function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
+cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
+
+```json
+"table": [
+  { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] },
+  { "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 } }
+]
+```
 
 ## The hash, provisional
 
