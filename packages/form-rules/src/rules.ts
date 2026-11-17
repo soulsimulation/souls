@@ -372,6 +372,65 @@ export function crossing(def: Bounds, stored: unknown, level: { at_least?: numbe
 }
 // timed:end
 
+// who:begin. Who may do a form (SA-F7a, #2848): one closed list, shared with Engine v2 F6 (#2771). A form's `who` is a
+// test on links, never on a field: `anyone` (the default: owning does not lock); `holder`, the thing is in one of the
+// actor's hands (holding is a parent); `world`, a form a timer starts, which no Soul's act may do; or
+// `{"link": <type>}`, the actor or the actor's Soul (the end of the body's `soul` link, T2) is an end of a link of that
+// type on the thing: its owner, a member, the Soul whose turn it is, a role in the activity, a relation its creator
+// set. The rule is the form's own data, so it is read before anyone tries; a refusal names it and, for a link, its ends.
+// The lint in who.test.ts refuses any read of a field between these markers.
+
+export const WHO = Object.freeze(['anyone', 'holder', 'world', 'link']);
+export type WhoVerdict =
+  | { verdict: 'yes'; who: unknown; read: Read[] }
+  | { verdict: 'no'; reason: 'not_permitted' | 'bad_input'; who: unknown; detail: Record<string, unknown>; read: Read[] }
+  | { verdict: 'unknown'; who: unknown; node: string; link: string; read: Read[] };
+
+/** Whether the actor may do `input.act` at all, before its needs: yes, no naming who may, or unknown. Never throws. */
+export function whoMay(input: Input): WhoVerdict {
+  const read: Read[] = [];
+  const bad = (what: string, extra: Record<string, unknown> = {}): WhoVerdict => ({ verdict: 'no', reason: 'bad_input', who: null, detail: { what, ...extra }, read });
+  if (!input || typeof input !== 'object' || !input.act || !input.state || !input.kinds || !input.asker) return bad('malformed');
+  const { act, state, kinds, asker } = input;
+  const nodes = state.nodes ?? {};
+  const self = has(nodes, act.this) ? nodes[act.this] : undefined;
+  if (!self) return bad('no_such_node', { node: act.this });
+  const entry = self.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
+  if (!entry) return bad('no_such_kind', { kind: self.kind ?? null });
+  const form = has(entry.forms, act.form) ? entry.forms![act.form] : undefined;
+  if (!form) return bad('no_such_form', { form: act.form });
+  const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
+  if (!actor) return bad('no_such_node', { node: state.actor });
+  const who = form.who ?? 'anyone';
+  const yes: WhoVerdict = { verdict: 'yes', who, read };
+  const refuse = (detail: Record<string, unknown>): WhoVerdict => ({ verdict: 'no', reason: 'not_permitted', who, detail, read });
+
+  if (who === 'anyone') return yes;
+  if (who === 'world') return refuse({});
+  if (who === 'holder') {
+    const h = actor.hands ?? {};
+    if (typeof h !== 'object' || Object.keys(h).length > MAX_HANDS) return bad('too_many_hands');
+    for (const name of sorted(h)) read.push([`${state.actor}/hand/${name}`, h[name] ?? null]);
+    return sorted(h).some((k) => h[k] === act.this) ? yes : refuse({});
+  }
+  const type = who && typeof who === 'object' && Object.keys(who).length === 1 ? (who as { link?: unknown }).link : undefined;
+  if (typeof type !== 'string') return bad('unknown_who', { who });
+  const def = has(entry.links, type) ? entry.links![type] : undefined;
+  if (!def) return bad('no_such_link', { link: type });
+  const sees = asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(def.audience));
+  if (!sees) return { verdict: 'unknown', who, node: act.this, link: type, read };
+  const list = self.links?.[type];
+  const ends = Array.isArray(list) ? list : [];
+  if (!whole(def.most) || ends.length > def.most) return bad('link_over_most', { link: type });
+  // The actor's Soul: a body is linked to its Soul (T2), at most one.
+  const souls = actor.links?.soul;
+  const soul = Array.isArray(souls) && souls.length === 1 && typeof souls[0] === 'string' ? souls[0] : null;
+  read.push([`${state.actor}/soul`, soul]);
+  read.push([`${act.this}/link/${def.n}/ends`, ends]);
+  return ends.some((e) => e === state.actor || (soul !== null && e === soul)) ? yes : refuse({ link: type, ends });
+}
+// who:end
+
 function resolve(ref: unknown, args: Record<string, unknown>): string | null {
   if (typeof ref === 'string') return ref;
   if (ref && typeof ref === 'object' && has(ref, 'arg')) {

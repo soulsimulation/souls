@@ -1,0 +1,21 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:lecture",
+  "owner": "thing",
+  "links": {
+    "owner": { "n": 1, "from": "soul", "most": 1, "audience": "public" },
+    "speaker": { "n": 2, "from": "soul", "most": 1, "audience": "public" },
+    "listener": { "n": 3, "from": "soul", "most": 120, "audience": "public" }
+  },
+  "forms": {
+    "speak": {
+      "who": { "link": "speaker" },
+      "starts": "act",
+      "needs": [],
+      "steps": [],
+      "effects": []
+    }
+  },
+  "text": { "card": "A test lecture for who may: only the Soul in the speaker's role may speak." },
+  "card": { "text": "card" }
+}
