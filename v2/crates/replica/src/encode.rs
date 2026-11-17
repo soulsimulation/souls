@@ -5,17 +5,23 @@
 //! tags, floats, null, booleans or other simple values, no duplicate keys, no trailing bytes, nesting at most
 //! [`MAX_DEPTH`] deep. The rules are numbered in `v2/docs/encoding.md`. Only this crate encodes or decodes.
 //!
-//! A [`Value`] can only hold what the profile allows ([`Name`] checks text, a map is ordered by its type), so
-//! [`encode`] cannot fail, and [`decode`] refuses every other form by name, so each value has exactly one byte form.
+//! A [`Value`] holds only what the profile allows ([`Name`] checks text, a map is ordered by its type), except that
+//! it may nest deeper than [`MAX_DEPTH`]: [`encode`] refuses that with `too-deep`, so it never writes bytes that
+//! [`decode`] would refuse. [`decode`] refuses every other form by name, so each value has exactly one byte form.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "vectors"))]
 use wasm_bindgen::prelude::wasm_bindgen;
 
-/// How deep arrays and maps may nest (rule 8). A deeper input is refused before it can exhaust the stack.
+/// How deep arrays and maps may nest (rule 8). A deeper input is refused before it can exhaust the stack, and a
+/// deeper value is refused before it is written.
 pub const MAX_DEPTH: usize = 32;
+
+/// The most items the decoder reserves room for up front, whatever length an array claims: a small input claiming a
+/// huge length must not reserve memory for it (in WASM, linear memory backs every reservation).
+pub const MAX_RESERVE: usize = 1024;
 
 /// A value the profile can hold.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,11 +141,12 @@ pub struct Decoded {
     pub bytes: Vec<u8>,
 }
 
-/// The value's one byte form.
-pub fn encode(value: &Value) -> Vec<u8> {
+/// The value's one byte form, or `too-deep` if arrays and maps in it nest more than [`MAX_DEPTH`] deep (the offset is
+/// where the first container too deep would have been written).
+pub fn encode(value: &Value) -> Result<Vec<u8>, Refusal> {
     let mut out = Vec::new();
-    write_value(&mut out, value);
-    out
+    write_value(&mut out, value, 0)?;
+    Ok(out)
 }
 
 fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
@@ -165,7 +172,13 @@ fn len(n: usize) -> u64 {
     n as u64
 }
 
-fn write_value(out: &mut Vec<u8>, value: &Value) {
+fn write_value(out: &mut Vec<u8>, value: &Value, depth: usize) -> Result<(), Refusal> {
+    if depth >= MAX_DEPTH && matches!(value, Value::Array(_) | Value::Map(_)) {
+        return Err(Refusal {
+            kind: RefusalKind::TooDeep,
+            offset: len(out.len()),
+        });
+    }
     match value {
         Value::Uint(n) => write_head(out, 0, *n),
         Value::Nint(n) => write_head(out, 1, *n),
@@ -179,16 +192,19 @@ fn write_value(out: &mut Vec<u8>, value: &Value) {
         }
         Value::Array(items) => {
             write_head(out, 4, len(items.len()));
-            items.iter().for_each(|v| write_value(out, v));
+            for v in items {
+                write_value(out, v, depth + 1)?;
+            }
         }
         Value::Map(entries) => {
             write_head(out, 5, len(entries.len()));
             for (k, v) in entries {
                 write_head(out, 0, *k);
-                write_value(out, v);
+                write_value(out, v, depth + 1)?;
             }
         }
     }
+    Ok(())
 }
 
 /// Reads exactly one value in the profile from `bytes`, or refuses the input by name.
@@ -306,7 +322,7 @@ impl<'a> Reader<'a> {
             }
             4 => {
                 let n = self.length(arg, 1)?;
-                let mut items = Vec::with_capacity(n);
+                let mut items = Vec::with_capacity(n.min(MAX_RESERVE));
                 for _ in 0..n {
                     items.push(self.value(depth + 1)?);
                 }
@@ -356,10 +372,11 @@ pub fn parse_diagnostic(text: &str) -> Result<Value, String> {
     Ok(v)
 }
 
-/// Encodes a value written in diagnostic notation. The vector check calls this in replica's WASM build.
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+/// Encodes a value written in diagnostic notation. The vector check calls this in replica's WASM build, which exports
+/// it only with the `vectors` feature, so the build the page loads does not carry it.
+#[cfg_attr(all(target_arch = "wasm32", feature = "vectors"), wasm_bindgen)]
 pub fn encode_diagnostic(text: &str) -> Result<Vec<u8>, String> {
-    parse_diagnostic(text).map(|v| encode(&v))
+    encode(&parse_diagnostic(text)?).map_err(|r| r.to_string())
 }
 
 struct Diag<'a> {

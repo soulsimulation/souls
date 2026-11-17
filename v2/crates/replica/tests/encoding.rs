@@ -2,9 +2,14 @@
 //! diagnostic notation (then ` # ` and words) and, on its second line, the value's one byte form as hex.
 //! `v2/tools/encoding-vectors` runs the same files through the WASM build and a JavaScript library.
 
-use replica::encode::{MAX_DEPTH, decode, encode, from_hex, parse_diagnostic, to_hex};
+use replica::encode::{
+    MAX_DEPTH, MAX_RESERVE, Value, decode, encode, from_hex, parse_diagnostic, to_hex,
+};
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn vectors() -> Vec<(String, String, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/encoding");
@@ -37,7 +42,7 @@ fn every_vector_encodes_to_its_bytes_and_decodes_back() {
     );
     for (name, diag, hex) in &vectors {
         let value = parse_diagnostic(diag).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let bytes = encode(&value);
+        let bytes = encode(&value).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(to_hex(&bytes), *hex, "{name}: {diag}");
         let decoded = decode(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(decoded.value, value, "{name}: decodes back");
@@ -124,4 +129,67 @@ fn each_form_outside_the_profile_is_refused_by_name() {
     let refusal = decode(&nested(MAX_DEPTH + 1)).unwrap_err();
     assert_eq!(refusal.kind.name(), "too-deep");
     println!("refused {} arrays nested: {refusal}", MAX_DEPTH + 1);
+}
+
+/// `encode` never writes a form `decode` refuses: MAX_DEPTH nested arrays encode, one more is refused by name.
+#[test]
+fn encode_refuses_a_value_nested_too_deep() {
+    let nested = |n: usize| (1..n).fold(Value::Array(vec![]), |inner, _| Value::Array(vec![inner]));
+    let bytes = encode(&nested(MAX_DEPTH)).unwrap();
+    assert_eq!(decode(&bytes).unwrap().bytes, bytes);
+    let refusal = encode(&nested(MAX_DEPTH + 1)).unwrap_err();
+    assert_eq!(refusal.kind.name(), "too-deep");
+    println!("encode refused {} arrays nested: {refusal}", MAX_DEPTH + 1);
+}
+
+/// Records the largest single allocation made on a thread while `WATCH` is set there.
+struct Watch;
+
+thread_local! {
+    static WATCH: Cell<bool> = const { Cell::new(false) };
+}
+static LARGEST: AtomicUsize = AtomicUsize::new(0);
+
+// SAFETY: every call is passed straight to the system allocator; the bookkeeping allocates nothing.
+unsafe impl GlobalAlloc for Watch {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if WATCH.with(Cell::get) {
+            LARGEST.fetch_max(layout.size(), Ordering::Relaxed);
+        }
+        // SAFETY: the caller's contract for `alloc` is the system allocator's.
+        unsafe { System.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: `ptr` came from `System.alloc` with this layout.
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Watch = Watch;
+
+/// A small input whose arrays each claim every remaining byte reserves room for at most MAX_RESERVE items per array.
+#[test]
+fn a_claimed_length_does_not_reserve_memory_up_front() {
+    // MAX_DEPTH arrays, each claiming 2^20 items, then a break byte where the innermost first item should be.
+    let mut input = Vec::new();
+    for _ in 0..MAX_DEPTH {
+        input.extend([0x9a, 0x00, 0x10, 0x00, 0x00]);
+    }
+    input.push(0xff);
+    input.resize(input.len() + (1 << 20), 0xff);
+    WATCH.with(|w| w.set(true));
+    let refusal = decode(&input).unwrap_err();
+    WATCH.with(|w| w.set(false));
+    assert_eq!(refusal.kind.name(), "break");
+    let largest = LARGEST.load(Ordering::Relaxed);
+    let cap = MAX_RESERVE * size_of::<Value>();
+    assert!(
+        largest <= cap,
+        "decode reserved {largest} bytes at once, more than {cap}"
+    );
+    println!(
+        "a {} byte input claiming 2^20 items per array: largest allocation {largest} bytes (cap {cap})",
+        input.len()
+    );
 }
