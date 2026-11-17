@@ -3187,7 +3187,11 @@ const MAX_HANDS = 8;
                    
                 
                     
+                                                                       
+                       
   
+/** One row of a draw table. `weight` is a whole number or `{field}`, one whole-number field of the thing (a practice count): nothing else. */
+                                                                                                                                 
                      
                
                                                                                                                                         
@@ -3208,6 +3212,16 @@ const MAX_HANDS = 8;
   
 /** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
                                                                                                               
+
+/** Whether an asker whose `sees` is `sees` belongs to `audience`: the one resolver every audience read uses. */
+function seesAudience(sees         , audience          )          {
+  if (sees === 'all') return true;
+  const list = Array.isArray(sees) ? sees : [];
+  if (typeof audience !== 'object' || audience === null) return typeof audience === 'string' && list.includes(audience); // a bare string keeps its old meaning; none declared is seen by no list
+  if (audience.rule === 'everyone') return true;
+  if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+  return list.includes(audience.rule);
+}
                      
                                
                                                                       
@@ -3257,14 +3271,7 @@ function decide(input       )          {
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
   // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
   // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
-  const sees = (audience          ) => {
-    if (asker.sees === 'all') return true;
-    const list = Array.isArray(asker.sees) ? asker.sees : [];
-    if (typeof audience === 'string') return list.includes(audience);
-    if (audience.rule === 'everyone') return true;
-    if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
-    return list.includes(audience.rule);
-  };
+  const sees = (audience          ) => seesAudience(asker.sees, audience);
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
   const formFix = (meets                        )             => {
@@ -3526,6 +3533,65 @@ function crossing(def        , stored         , level                           
 }
 // timed:end
 
+// who:begin. Who may do a form (SA-F7a, #2848): one closed list, shared with Engine v2 F6 (#2771). A form's `who` is a
+// test on links, never on a field: `anyone` (the default: owning does not lock); `holder`, the thing is in one of the
+// actor's hands (holding is a parent); `world`, a form a timer starts, which no Soul's act may do; or
+// `{"link": <type>}`, the actor or the actor's Soul (the end of the body's `soul` link, T2) is an end of a link of that
+// type on the thing: its owner, a member, the Soul whose turn it is, a role in the activity, a relation its creator
+// set. The rule is the form's own data, so it is read before anyone tries; a refusal names it and, for a link, its ends.
+// The lint in who.test.ts refuses any read of a field between these markers.
+
+const WHO = Object.freeze(['anyone', 'holder', 'world', 'link']);
+                        
+                                                  
+                                                                                                                         
+                                                                                   
+
+/** Whether the actor may do `input.act` at all, before its needs: yes, no naming who may, or unknown. Never throws. */
+function whoMay(input       )             {
+  const read         = [];
+  const bad = (what        , extra                          = {})             => ({ verdict: 'no', reason: 'bad_input', who: null, detail: { what, ...extra }, read });
+  if (!input || typeof input !== 'object' || !input.act || !input.state || !input.kinds || !input.asker) return bad('malformed');
+  const { act, state, kinds, asker } = input;
+  const nodes = state.nodes ?? {};
+  const self = has(nodes, act.this) ? nodes[act.this] : undefined;
+  if (!self) return bad('no_such_node', { node: act.this });
+  const entry = self.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
+  if (!entry) return bad('no_such_kind', { kind: self.kind ?? null });
+  const form = has(entry.forms, act.form) ? entry.forms [act.form] : undefined;
+  if (!form) return bad('no_such_form', { form: act.form });
+  const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
+  if (!actor) return bad('no_such_node', { node: state.actor });
+  const who = form.who ?? 'anyone';
+  const yes             = { verdict: 'yes', who, read };
+  const refuse = (detail                         )             => ({ verdict: 'no', reason: 'not_permitted', who, detail, read });
+
+  if (who === 'anyone') return yes;
+  if (who === 'world') return refuse({});
+  if (who === 'holder') {
+    const h = actor.hands ?? {};
+    if (typeof h !== 'object' || Object.keys(h).length > MAX_HANDS) return bad('too_many_hands');
+    for (const name of sorted(h)) read.push([`${state.actor}/hand/${name}`, h[name] ?? null]);
+    return sorted(h).some((k) => h[k] === act.this) ? yes : refuse({});
+  }
+  const type = who && typeof who === 'object' && Object.keys(who).length === 1 ? (who                      ).link : undefined;
+  if (typeof type !== 'string') return bad('unknown_who', { who });
+  const def = has(entry.links, type) ? entry.links [type] : undefined;
+  if (!def) return bad('no_such_link', { link: type });
+  const sees = seesAudience(asker.sees, def.audience);
+  if (!sees) return { verdict: 'unknown', who, node: act.this, link: type, read };
+  const list = self.links?.[type];
+  const ends = Array.isArray(list) ? list : [];
+  if (!whole(def.most) || ends.length > def.most) return bad('link_over_most', { link: type });
+  // The actor's Soul: a body is linked to its Soul (T2), at most one.
+  const souls = actor.links?.soul;
+  const soul = Array.isArray(souls) && souls.length === 1 && typeof souls[0] === 'string' ? souls[0] : null;
+  read.push([`${state.actor}/soul`, soul]);
+  read.push([`${act.this}/link/${def.n}/ends`, ends]);
+  return ends.some((e) => e === state.actor || (soul !== null && e === soul)) ? yes : refuse({ link: type, ends });
+}
+// who:end
+
 function resolve(ref         , args                         )                {
   if (typeof ref === 'string') return ref;
   if (ref && typeof ref === 'object' && has(ref, 'arg')) {
@@ -3589,7 +3655,7 @@ function measure(kinds                       , nodes                      , self
   if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
   return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)) };
 }
-return { NEEDS, REASONS, MAX_HANDS, decide, valueAt, crossing, measure };
+return { NEEDS, REASONS, MAX_HANDS, seesAudience, decide, valueAt, crossing, WHO, whoMay, measure };
 })();
 // </inline rules.ts>
 // <inline can-i.mjs> generated by inline.mjs: edit can-i.mjs, not this block
