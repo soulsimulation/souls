@@ -55,6 +55,19 @@ test('ceilings: address rate, listen per Soul / account / address, account rate,
   assert.equal(c.socket('w8', '6.6.6.6'), null); many.forEach((m) => m.release()); assert.ok(c.socket('w8', '6.6.6.6'));
 });
 
+test('#2543 A3: two addresses in one IPv6 /64 share the address ceiling; two IPv4 addresses do not', () => {
+  const c = soulCeilings({ now: () => 0, log: () => {}, limitsFor: () => ({ ipPer10s: 5, worldBudgetRps: 100 }) });
+  const read = (ip) => c.check(req('GET', { authorization: 'Bearer sim_s_v6_x', 'x-forwarded-for': ip }), 'w', '/v1/edge/receipts/x', true);
+  const ok = (r) => { assert.ok(r && !r.refuse, JSON.stringify(r?.refuse?.body)); r.release(); };
+  for (let i = 1; i <= 5; i++) ok(read(`2001:db8:1:2::${i.toString(16)}`));   // a client rotating through its network
+  assert.equal(read('2001:db8:1:2:ffff:ffff:ffff:ffff').refuse.body.code, 'client.rate');
+  ok(read('2001:db8:1:3::1'));   // the next /64 is another address
+  for (let i = 0; i < 5; i++) ok(read('198.51.100.1'));
+  assert.equal(read('198.51.100.1').refuse.body.code, 'client.rate');
+  ok(read('198.51.100.2'));   // the next IPv4 address is never folded in (many people share one carrier address)
+  ok(read('::ffff:198.51.100.3'));   // an IPv4-mapped address is its IPv4 address: a fresh one here
+});
+
 test('default ceilings (#1949): 100 Souls behind one address and one account, each holding a listen and acting every 10 s for 60 s, are never refused', () => {
   let t = 0; const c = soulCeilings({ now: () => t, log: () => {} });
   const ip = '203.0.113.100', N = 100;

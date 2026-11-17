@@ -6,6 +6,48 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.130 (2026-11-17)
+
+### Features
+
+- In new worlds, every doorway in every building now holds a real door, inside and upstairs too (existing worlds keep their doorways for now), and a Soul told to walk somewhere opens and closes each door on the way by hand, however many there are.
+- Signed in, the homepage lists your own Souls below the worlds; open one to see its body, age and worlds, and follow it into any of them.
+- A world's music and sound keep playing when you switch to another tab or app; only opening another Souls tab moves the sound there.
+- While soul.game restarts, a visitor sees "Back in a moment" and the page comes back to the world on its own, instead of an error page.
+- On the homepage, New world now sits above the world list, across from the count, instead of in the top bar.
+
+### Fixes
+
+- A Soul sent to a kitchen stool, or another seat with no room beside it, stands in its own room instead of outside the wall.
+- A world where a bug keeps breaking one object's numbers no longer grows its history by one entry every tick: after three repairs the object is held by one standing mark.
+- An agent asked to go to a Soul in another room is given the walk to that room first, instead of a go-near the world refuses; a plan step with its params written as text is told the right form.
+- A building whose only room was hidden by a thing named like it gets the room back when that thing is renamed.
+- A plan that replaces one whose running act is its own first step keeps that act instead of sending it again, so a Soul no longer refuses its own eat as `slot.none-free`. `plan` checks each step id against the local copy and answers an unknown one with the top `find` rows, sending nothing. The Soul eval gives the seat a turn on serve's `plan-stopped` and `plan-finished` wakes, and adds the `harder-v2` Eden battery (errand timeout 600 s, the 3600 s cap).
+- Per-address limits now count an IPv6 network as one address, so a client can no longer slip past them by rotating through its addresses.
+- A busy world with many people watching runs its Souls' acts again, instead of answering almost all of them "the world is busy" until it restarts.
+- A watched world no longer keeps every recording it has ever made, so its memory stays level under many viewers instead of growing until it restarts.
+- Two Souls who each wait for the other to move, around a crowded fire ring or face to face, sort it out within seconds: one steps aside and walks back after the other passes, instead of both standing still for a minute until one gives up (a logged rule every world adopts at boot).
+- A busy world no longer risks a crash from its own stall diagnostics: naming the stuck frame is now opt-in.
+- A world that is busy but still moving, such as during a burst of Souls joining, is no longer restarted; only a world whose clock has stopped is.
+- A Soul walking a long way past a building with an open door goes round it, instead of running in through the door and back out.
+- A world that restarts or moves to a new release on a busy server no longer loses the last moment of the time it was away.
+- A Soul whose walk through a door can't reach the handle, because a wall stands where she would hold it, stops with a reason instead of standing idle by the door for ever.
+- The homepage opens once, in its final layout: no jumping text while it loads, and no second load for signed-out visitors and the installed phone app.
+- A timed act asked for longer than the world allows is answered with the act at the most it takes and the exact `wake add at …` that lets the agent keep a promise of the rest.
+- When many set-aside worlds have reminders due at the same moment, they start loading early enough that every one that fits arrives on time, and the rest follow straight after.
+- A world set aside to make room for others comes back as soon as there is room, so its reminders still arrive, and its clock keeps moving while it is away.
+
+### Performance
+
+- Acting on one offered walk or seat costs the world less: it no longer ranks every named thing to find the one asked for.
+- A Soul acting while the world changes around it costs the world less: after each change, only the changed things are looked at again, not every named thing.
+- During a release, a world page you have open reconnects about a second sooner: Eden no longer holds its first answer until its whole god layer has been read in again.
+- A sudden crowd arriving at a world costs it one page build every two seconds, not one per visitor.
+- A world page opens in one load for visitors who are not signed in, without a detour through the sign-in service; Sign in is still one click.
+- A crowd of new visitors arriving at once costs a world far less: they share one picture of it instead of each having one made.
+- A Soul's walk to a named place costs the world less: the act reuses the offer its check already built instead of building it again.
+- A busy world no longer stalls for seconds each time a new Soul arrives, so a burst of joins doesn't restart it.
+
 ## 0.129 (2026-11-16)
 
 ### Features

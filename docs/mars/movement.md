@@ -64,11 +64,14 @@ hit, so the hard separation layer rarely fires.
   its child. The item's own record reads `running` while it walks, so wait-bound/1 never read that walk; a held approach
   (waiting, not named a deadlock) kept its receipt `started`. Now the bound stops only the approach walk, and the item step
   fails `route.blocked` with the walk's reason ("wait-bound/3: the walk made no headway for a minute: ...").
-- **cede-passage/1** (#2426, adopted at boot last, after wait-bound/3): a walker at the end of its walk leg does not take up a single-file
+- **cede-passage/1** (#2426, adopted at boot after wait-bound/3): a walker at the end of its walk leg does not take up a single-file
   passage it does not hold while the body standing there is yielding to it (W38's own test). Before it, two walkers whose
   legs ended in one passage, each waiting for such a body, took turns holding it: one let it go for the body to make way,
   and the other took it the same tick, so the bodies always found it held and never moved (a shared bay's joist crew
   stalled at 22 of 32 for good). A walker whose spot is held by a body yielding to anyone else enters as before.
+- **cycle-recover/1** (#2596, adopted at boot after cede-passage/1): a two-body wait cycle asks the deadlock recovery for its
+  attempt after 3 s unchanged instead of 10 s, and when routing round the other does not break it, one of the pair steps
+  aside and walks on once the other has passed (see "Persistent waits and bounded recovery").
 
 ## Speed limits and invariants
 
@@ -99,9 +102,17 @@ End-of-tick invariants (`runtime/invariants.ts`):
 to the load, rides alias the rider to the vehicle. A cycle with unchanged dependencies and poses for `DEADLOCK_TICKS`
 (200 ticks, 10 s) reports `deadlock.cycle`; a persistent acyclic wait reports `deadlock.stalled`. Each episode may request
 one extra validated planner attempt within existing budgets; unsupported phases report
-`deadlock.recovery-unavailable`. The detector never forces a release. `SequenceRunner` returns `blocked` early only when
-every live action certifies its movers exhausted and no future cue or timeout could change that; it does not settle the
-blocked actions, and `execute` refuses to commit the unsettled result.
+`deadlock.recovery-unavailable`. Under `cycle-recover/1` (#2596, a logged runtime policy adopted at boot after
+`cede-passage/1`; history before it replays without it), a cycle that has stood unchanged for `CYCLE_RECOVER_TICKS` (60
+ticks, 3 s) rarely clears by itself (in the 12-variant fire-ring jam, one did, at 70 ticks), so its members request that
+attempt then; the report still waits for `DEADLOCK_TICKS`. Every action's recovery hook (walks, carries, rides) and the
+`SequenceRunner`'s exhausted-wait timer move with it for cycles. For a walker in a
+two-body cycle (one waits at its walk's end for the other to leave its spot, the other for it to get out of the way, or
+two face to face) that routing round the other does not break, one of the pair steps aside to the nearest free spot clear
+of the other's way, as an entity world's face-off does, and walks on once the other has passed (`deadlock.stepped-aside`):
+the one at the end of its walk first, since it comes back to the same spot. The detector never forces a release.
+`SequenceRunner` returns `blocked` early only when every live action certifies its movers exhausted and no future cue or
+timeout could change that; it does not settle the blocked actions, and `execute` refuses to commit the unsettled result.
 
 ## Stall releases upstairs
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { serverTiming, quantile, tickWindows, windowFigures, reconnectDelayMs, seeded, stayMs, parseBurst, takesChunks, firstMotion } from './stats.mjs';
+import { serverTiming, quantile, tickWindows, windowFigures, reconnectDelayMs, seeded, stayMs, parseBurst, takesChunks, firstMotion, slowFigures, restartTable, limitProblems } from './stats.mjs';
 
 test('Server-Timing parts with a duration', () => {
   assert.deepEqual(serverTiming('world;dur=3.5, queue;dur=0.5, launcher;desc=cache'), { world: 3.5, queue: 0.5 });
@@ -45,7 +45,7 @@ test('one window: ticks, amber, acts, CPU, viewer bytes and world calls', () => 
   assert.equal(w.world.cpuShare, 0.5);
   assert.equal(w.world.rssMb, 520);
   assert.deepEqual(w.launcher, { cpuShare: 0.2, rssMb: 140 });
-  assert.deepEqual(w.driver, { cpuShare: 1 });
+  assert.deepEqual(w.driver, { cpuShare: 1, rssMb: null });
   assert.equal(w.viewersOut.bytesPerViewerPerS, 500);
   assert.equal(w.viewerCalls.worldCalls, 3);
   assert.deepEqual(w.viewerCalls.refusals, { 429: 1 });
@@ -107,4 +107,33 @@ test('#2511 one window: viewers held, churn, acts against intended, heap', () =>
   const again = windowFigures({ samples: samples.map((s, i) => ({ ...s, pid: i < 2 ? 10 : 11, cpuS: [50, 60, 1][i] })), acts: [], v0: c(0, 0, 0), v1: c(0, 0, 0), viewers: 200, calls: [], from: 1000, to: 21_000 });
   assert.deepEqual([again.world.cpuShare, again.world.restarted], [null, true]);
   assert.equal(w.world.restarted, false);
+  // #2512: bytes per viewer over the raw viewers when the full clients are held apart
+  const rawOnly = windowFigures({ samples: samples.map((s) => ({ ...s, viewersLive: 200, rawLive: 100 })), acts: [], v0: c(0, 0, 0), v1: { ...c(0, 0, 0), bytes: 1_000_000 }, viewers: 200, calls: [], from: 1000, to: 21_000 });
+  assert.equal(rawOnly.viewersOut.bytesPerViewerPerS, 500);
+});
+
+// #2512
+test('slow readers: the mean before they join against the peak after, per slow reader', () => {
+  const s = (at, rssMb, heap, launcherRssMb) => ({ at, rssMb, launcherRssMb, live: { heap: { usedMb: heap } } });
+  const f = slowFigures({ samples: [s(0, 500, 100, 100), s(10, 502, 102, 102), s(20, 540, 110, 120), s(30, 551, 121, 110), s(41, 900, 900, 900)], from: 0, mid: 20, to: 40, n: 50, cut: 3 });
+  assert.equal(f.stillOpen, 47);
+  assert.deepEqual(f.worldRss, { beforeMb: 501, peakMb: 551, riseMb: 50, perReaderKb: 1024 });
+  assert.deepEqual(f.worldHeap, { beforeMb: 101, peakMb: 121, riseMb: 20, perReaderKb: 410 });
+  assert.equal(f.launcherRss.peakMb, 120);
+});
+test('the reconnect table: back within 30 s, later or never, where they landed, the world through it', () => {
+  const rows = [{ dropped: 100, back: 5000, landed: 'world' }, { dropped: 100, back: 20_000, landed: 'viewer-thread', full: true }, { dropped: 200, back: 45_000 }, { dropped: 300, back: null }, { dropped: null, back: null }];
+  const health = [{ at: 900, ok: true, tick: 1000 }, { at: 1100, ok: false }, { at: 9100, ok: false }, { at: 12_100, ok: true, tick: 1004, clients: 3 }];
+  const samples = [{ at: 800, pid: 1, rssMb: 600 }, { at: 30_000, pid: 2, rssMb: 400, live: { heap: { usedMb: 80 } } }];
+  const t = restartTable({ rows, at: 1000, health, samples });
+  assert.deepEqual([t.viewers, t.full, t.heldThrough, t.dropped, t.backWithin, t.backLater, t.neverBack], [5, 1, 1, 4, 2, 1, 1]);
+  assert.deepEqual(t.backS, { p50: 20, p95: 'none' });
+  assert.deepEqual(t.landed, { world: 2, 'viewer-thread': 1 });
+  assert.deepEqual(t.world, { downS: 11, upAgain: true, tickBefore: 1000, tickAfter: 1004, clientsAfter: 3, newPid: true, rssBeforeMb: 600, rssEndMb: 400, heapBeforeMb: null, heapEndMb: 80 });
+});
+test('the descriptor limit and the port range are checked before any viewer', () => {
+  assert.deepEqual(limitProblems({ viewers: 10_000, drivers: 4, fdLimit: 1_048_576, portRange: [32768, 60999] }), []);
+  assert.match(limitProblems({ viewers: 10_000, drivers: 4, fdLimit: 4096, portRange: null })[0], /open-file limit 4096 is below the 21024/);
+  assert.equal(limitProblems({ viewers: 5000, drivers: 4, fdLimit: 8192, portRange: null, launcher: false }).length, 0);
+  assert.match(limitProblems({ viewers: 10_000, drivers: 4, fdLimit: NaN, portRange: [50000, 60000] })[0], /local port range 50000-60000 holds 10001 ports/);
 });

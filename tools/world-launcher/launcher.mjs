@@ -129,6 +129,7 @@ import { readLive, serveMetrics } from './metrics.mjs';   // lane L7
 import { readAlertProblems } from './telemetry/alerts.mjs';   // #2541
 import { defaultSiteLog } from '../../apps/server/src/moderation/store.ts';
 import { withWorldMeta } from '../../apps/server/src/inline-config.ts';
+import { addressKey, forwardedAddress } from '../../apps/server/src/address-key.ts';
 import { archiveWorld, archivedSlugs, audit, listArchive, readAudit, restoreWorld, tokenLabel } from './worldops.mjs';
 import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
@@ -1392,7 +1393,7 @@ export async function openLauncher(cfg = {}) {
         if (req.method === 'POST') {
           const chunks = []; let n = 0;
           for await (const c of req) { n += c.length; if (n > 8192) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
-          const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+          const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543
           const [st, out] = errors.ingest(who, req.headers['user-agent'], Buffer.concat(chunks));
           if (out) json(res, st, out); else res.writeHead(st, { 'cache-control': 'no-store' }).end(); return;
         }
@@ -1432,7 +1433,7 @@ export async function openLauncher(cfg = {}) {
         for await (const c of req) { n += c.length; if (n > 16_384) { json(res, 413, { ok: false, code: 'too-large' }); return; } chunks.push(c); }
         let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { json(res, 400, { ok: false, code: 'bad-json' }); return; }
         // per-client creation limit (production): the first x-forwarded-for hop is the visitor Caddy saw
-        const who = String(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress ?? '').split(',')[0].trim();
+        const who = addressKey(req.headers['x-forwarded-for'] ?? req.socket.remoteAddress) ?? '';   // #2543: an IPv6 network by its /64
         const recent = (made.get(who) ?? []).filter((t) => Date.now() - t < 10 * 60_000);
         if (recent.length >= createLimit) { json(res, 429, { ok: false, code: 'slow-down', message: `at most ${createLimit} new worlds per 10 minutes from one place` }, { 'retry-after': '120' }); return; }
         const run = creating.then(() => createWorld(body, req.headers.authorization)); creating = run.catch(() => {});
@@ -1584,7 +1585,7 @@ export async function openLauncher(cfg = {}) {
       // and the ceilings take it), else the TCP peer. Public, since it is the caller's own address; never a header
       // verbatim: anything that is not an address answers null. deploy/caddy/check-soul-game.mjs compares it from outside.
       if (path === '/__sim/whoami' && (req.method === 'GET' || req.method === 'HEAD')) {
-        const xff = behindProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '', a = xff || (req.socket.remoteAddress ?? '');
+        const a = (behindProxy ? forwardedAddress(req.headers['x-forwarded-for']) : null) || (req.socket.remoteAddress ?? '');   // #2543
         json(res, 200, { address: isIP(a) ? a : null }); return;
       }
       if ((path === '/__sim/healthz' || path === '/healthz') && (req.method === 'GET' || req.method === 'HEAD')) {
@@ -1687,7 +1688,7 @@ export async function openLauncher(cfg = {}) {
     const w = slug && !closing.has(slug) && registry.get(slug);
     if (!w) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n'); return; }
     // lane L1: WebSockets count toward the address's concurrent ceiling
-    const slot = ceilings.socket(slug, behindProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : null);
+    const slot = ceilings.socket(slug, behindProxy ? addressKey(req.headers['x-forwarded-for']) : null);   // #2543
     if (!slot) { socket.end('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 5\r\nConnection: close\r\n\r\n'); return; }
     socket.once('close', slot.release);
     const eyes = eyesAgent(req.headers['user-agent']);
