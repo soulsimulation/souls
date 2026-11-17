@@ -272,6 +272,7 @@ it to `idle`; a member who is present cannot part (`still_present`); and a stand
 member parting. `lapse(input)` is the end date: it runs the world form (the engine's timer, at the time its needs
 state) and puts a `released` event first, unlinking every member; it moves no body. Cases are in `cases/activity/standing/`
 (the same step format, with `join` and `world` running `lapse`); the example is a weekly class (`test:class`).
+
 ## Looks
 
 `looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's

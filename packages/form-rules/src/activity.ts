@@ -152,7 +152,7 @@ const namespace = (entry: Entry) => (entry.kind.includes(':') ? entry.kind.slice
 /** The stage field's value on a node, its default when never set. */
 const stageOf = (entry: Entry, node: { fields?: Record<string, unknown> }, field: string): unknown => (has(node.fields, field) ? node.fields![field] : entry.state![field].default);
 
-export type Joined = (Done & { role: string }) | Refused | Verdict | WhoVerdict | LeaveBad;
+export type Joined = (Done & { role: string }) | Refused | Verdict | WhoVerdict | LeaveBad | Unknown;
 /** Join a standing activity: the form that links the actor as a member, with no place (membership is not being there). */
 export function join(input: Input & { receipt: string }): Joined {
   const who = whoMay(input);
@@ -276,7 +276,7 @@ export function leave(input: Input & { receipt: string }): Left {
   return check.ok ? result : bad(check.reason, { change: check.change });
 }
 
-export type Lapsed = (Done & { released: number }) | Refused | Verdict | LeaveBad;
+export type Lapsed = (Done & { released: number }) | Refused | Verdict | LeaveBad | Unknown;
 /**
  * The end date of an activity, as the engine's timer runs its world form (`starts: "timer"`, whose need is the time and
  * nothing else, so members do not hold it): the form's own effects, with every member released first. Each is unlinked

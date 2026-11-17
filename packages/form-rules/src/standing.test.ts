@@ -83,7 +83,7 @@ test('A1: at its end date the class is removed, every member released first, and
   const yes = seen.find((s) => s.step.do === 'world' && s.result.verdict === 'yes')!;
   assert.equal(yes.step.now_us, stated);
   assert.ok(seen.some((s) => s.step.do === 'world' && s.step.now_us === stated - 1 && s.result.verdict === 'no'));
-  assert.deepEqual(events(yes), ['test:released', 'lapsed']);
+  assert.deepEqual(events(yes), ['test:released', 'test:lapsed']);
   const changes = yes.result.changes as { change: string; link?: string; end?: string }[];
   assert.equal(changes.filter((c) => c.change === 'unlink').length, 6);
   assert.equal(changes.at(-1)!.change, 'remove');
