@@ -138,3 +138,14 @@ the same cases.
 A file in `cases/timed/` is `{"format": "souls-timed-cases/1", "about": ..., "cases": [...]}`. A case names a kind
 and a field, a stored value, `values` as `[now_us, value]` and `crossings` as a level, `from_us` and the expected
 time (or `null`). The `timed` type is not in the entry format yet; its cases use `cases/kinds/test/timed_kettle.json`.
+
+## Looks
+
+`looks(input)` in `src/looks.ts` (SA-D1a, [#2885](https://github.com/soulsimulation/souls/issues/2885)) turns a kind's
+looks table, a state and the time since it changed into where each part of its model is: rotate and slide in whole
+millidegrees and millimetres, scale and glow in permille, show, tint, and pick by choice. The table is written in
+[the entry format](../../docs/soul-actions/entry-format.md#the-looks-table); `checkTable` names what is wrong with one.
+Its cases are `cases/looks/` (kinds in `cases/looks/kinds/`); `node --test packages/form-rules/src/looks.test.ts` runs
+them and `node packages/form-rules/bin/looks-browser-check.mjs` checks Node against a browser build. Today's page
+calls it for a def whose `make.args.looks_table` carries a table (`apps/web/src/gen-mesh/vocab-look.ts`); the wiring is
+thrown away when Engine v2 draws things (V17, V8), the table and the function carry over.
