@@ -1,0 +1,312 @@
+{
+  "format": "souls-react-cases/1",
+  "about": "Things react (SA-F15): the five examples. Each case is a state, one cause (a generic change, or a timer coming due) and what the rules do: the rules started, their changes and named events, and the state after the cause and the changes. The kinds are test kinds in cases/kinds/test/.",
+  "cases": [
+    {
+      "name": "switch_on_lights_its_three_lamps",
+      "state": {
+        "nodes": {
+          "sw": { "kind": "test:wall_switch", "fields": { "on": false }, "links": { "works": ["l1", "l2", "l3"] } },
+          "l1": { "kind": "test:lamp", "links": { "works": ["sw"] } },
+          "l2": { "kind": "test:lamp", "links": { "works": ["sw"] } },
+          "l3": { "kind": "test:lamp", "links": { "works": ["sw"] } }
+        }
+      },
+      "cause": { "change": "set", "node": "sw", "field": "on", "n": 1, "to": true },
+      "receipt": "r1",
+      "expect": {
+        "fired": [["sw", "lamps_follow"]],
+        "changes": [
+          { "change": "set", "node": "l1", "field": "lit", "n": 1, "to": true },
+          { "change": "set", "node": "l2", "field": "lit", "n": 1, "to": true },
+          { "change": "set", "node": "l3", "field": "lit", "n": 1, "to": true }
+        ],
+        "events": [
+          { "event": "lamp_switched", "node": "l1", "changes": [0] },
+          { "event": "lamp_switched", "node": "l2", "changes": [1] },
+          { "event": "lamp_switched", "node": "l3", "changes": [2] }
+        ]
+      },
+      "after": {
+        "sw": { "kind": "test:wall_switch", "fields": { "on": true }, "links": { "works": ["l1", "l2", "l3"] } },
+        "l1": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } },
+        "l2": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } },
+        "l3": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } }
+      }
+    },
+    {
+      "name": "switch_on_with_one_lamp_already_lit_sets_only_the_other_two",
+      "state": {
+        "nodes": {
+          "sw": { "kind": "test:wall_switch", "fields": { "on": false }, "links": { "works": ["l1", "l2", "l3"] } },
+          "l1": { "kind": "test:lamp", "links": { "works": ["sw"] } },
+          "l2": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } },
+          "l3": { "kind": "test:lamp", "links": { "works": ["sw"] } }
+        }
+      },
+      "cause": { "change": "set", "node": "sw", "field": "on", "n": 1, "to": true },
+      "receipt": "r2",
+      "expect": {
+        "fired": [["sw", "lamps_follow"]],
+        "changes": [
+          { "change": "set", "node": "l1", "field": "lit", "n": 1, "to": true },
+          { "change": "set", "node": "l3", "field": "lit", "n": 1, "to": true }
+        ]
+      }
+    },
+    {
+      "name": "switch_off_puts_out_its_three_lamps",
+      "state": {
+        "nodes": {
+          "sw": { "kind": "test:wall_switch", "fields": { "on": true }, "links": { "works": ["l1", "l2", "l3"] } },
+          "l1": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } },
+          "l2": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } },
+          "l3": { "kind": "test:lamp", "fields": { "lit": true }, "links": { "works": ["sw"] } }
+        }
+      },
+      "cause": { "change": "set", "node": "sw", "field": "on", "n": 1, "to": false },
+      "receipt": "r3",
+      "expect": {
+        "fired": [["sw", "lamps_follow"]],
+        "changes": [
+          { "change": "set", "node": "l1", "field": "lit", "n": 1, "to": false },
+          { "change": "set", "node": "l2", "field": "lit", "n": 1, "to": false },
+          { "change": "set", "node": "l3", "field": "lit", "n": 1, "to": false }
+        ]
+      }
+    },
+    {
+      "name": "switch_set_to_its_own_value_starts_nothing",
+      "state": {
+        "nodes": {
+          "sw": { "kind": "test:wall_switch", "fields": { "on": true }, "links": { "works": ["l1"] } },
+          "l1": { "kind": "test:lamp", "links": { "works": ["sw"] } }
+        }
+      },
+      "cause": { "change": "set", "node": "sw", "field": "on", "n": 1, "to": true },
+      "receipt": "r4",
+      "expect": { "verdict": "yes", "fired": [], "changes": [], "events": [] }
+    },
+    {
+      "name": "dusk_lights_the_street_lamp",
+      "state": {
+        "world": "w",
+        "nodes": {
+          "w": { "kind": "test:world", "fields": { "light": "day" }, "loose": ["s1"] },
+          "s1": { "kind": "test:street_lamp" }
+        }
+      },
+      "cause": { "change": "set", "node": "w", "field": "light", "n": 1, "to": "dusk" },
+      "receipt": "r5",
+      "expect": {
+        "actor": "world",
+        "fired": [["s1", "on_at_dusk"]],
+        "changes": [{ "change": "set", "node": "s1", "field": "lit", "n": 1, "to": true }],
+        "events": [{ "event": "lamp_lit", "node": "s1", "changes": [0] }]
+      },
+      "after": {
+        "w": { "kind": "test:world", "fields": { "light": "dusk" }, "loose": ["s1"] },
+        "s1": { "kind": "test:street_lamp", "fields": { "lit": true } }
+      }
+    },
+    {
+      "name": "night_after_dusk_leaves_the_lamp_lit",
+      "state": {
+        "world": "w",
+        "nodes": {
+          "w": { "kind": "test:world", "fields": { "light": "dusk" }, "loose": ["s1"] },
+          "s1": { "kind": "test:street_lamp", "fields": { "lit": true } }
+        }
+      },
+      "cause": { "change": "set", "node": "w", "field": "light", "n": 1, "to": "night" },
+      "receipt": "r6",
+      "expect": { "fired": [], "changes": [] }
+    },
+    {
+      "name": "dawn_puts_the_street_lamp_out",
+      "state": {
+        "world": "w",
+        "nodes": {
+          "w": { "kind": "test:world", "fields": { "light": "night" }, "loose": ["s1"] },
+          "s1": { "kind": "test:street_lamp", "fields": { "lit": true } }
+        }
+      },
+      "cause": { "change": "set", "node": "w", "field": "light", "n": 1, "to": "dawn" },
+      "receipt": "r7",
+      "expect": {
+        "fired": [["s1", "off_at_dawn"]],
+        "changes": [{ "change": "set", "node": "s1", "field": "lit", "n": 1, "to": false }]
+      }
+    },
+    {
+      "name": "rain_does_not_light_the_street_lamp",
+      "state": {
+        "world": "w",
+        "nodes": {
+          "w": { "kind": "test:world", "fields": { "light": "day" }, "loose": ["s1"] },
+          "s1": { "kind": "test:street_lamp" }
+        }
+      },
+      "cause": { "change": "set", "node": "w", "field": "weather", "n": 2, "to": "rain" },
+      "receipt": "r8",
+      "expect": { "fired": [], "changes": [] }
+    },
+    {
+      "name": "stove_lit_under_the_kettle_gives_it_a_rate",
+      "state": {
+        "now_us": 10000000,
+        "nodes": {
+          "st": { "kind": "test:stove", "slots": { "hob": ["k"] } },
+          "k": { "kind": "test:stove_kettle" }
+        }
+      },
+      "cause": { "change": "set", "node": "st", "field": "lit", "n": 1, "to": true },
+      "receipt": "r9",
+      "expect": {
+        "fired": [["k", "heats_on_a_lit_stove"]],
+        "changes": [{ "change": "set", "node": "k", "field": "heat", "n": 1, "to": { "value": 20000, "per_s": 800, "set_us": 10000000 } }],
+        "events": [{ "event": "heating", "node": "k", "changes": [0] }]
+      },
+      "after": {
+        "st": { "kind": "test:stove", "fields": { "lit": true }, "slots": { "hob": ["k"] } },
+        "k": { "kind": "test:stove_kettle", "fields": { "heat": { "value": 20000, "per_s": 800, "set_us": 10000000 } } }
+      }
+    },
+    {
+      "name": "kettle_put_on_a_lit_stove_gives_it_a_rate",
+      "state": {
+        "now_us": 5000000,
+        "nodes": {
+          "st": { "kind": "test:stove", "fields": { "lit": true }, "slots": { "hob": [] } },
+          "b1": { "kind": "test:walker", "hands": { "left": null, "right": "k" } },
+          "k": { "kind": "test:stove_kettle" }
+        }
+      },
+      "cause": { "change": "reparent", "node": "k", "to": { "node": "st", "slot": "hob" } },
+      "receipt": "r10",
+      "expect": {
+        "fired": [["k", "heats_on_a_lit_stove"]],
+        "changes": [{ "change": "set", "node": "k", "field": "heat", "n": 1, "to": { "value": 20000, "per_s": 800, "set_us": 5000000 } }]
+      },
+      "after": {
+        "st": { "kind": "test:stove", "fields": { "lit": true }, "slots": { "hob": ["k"] } },
+        "b1": { "kind": "test:walker", "hands": { "left": null, "right": null } },
+        "k": { "kind": "test:stove_kettle", "fields": { "heat": { "value": 20000, "per_s": 800, "set_us": 5000000 } } }
+      }
+    },
+    {
+      "name": "kettle_lifted_off_a_lit_stove_cools_from_its_heat_then",
+      "state": {
+        "now_us": 60000000,
+        "nodes": {
+          "st": { "kind": "test:stove", "fields": { "lit": true }, "slots": { "hob": ["k"] } },
+          "b1": { "kind": "test:walker", "hands": { "left": null, "right": null } },
+          "k": { "kind": "test:stove_kettle", "fields": { "heat": { "value": 20000, "per_s": 800, "set_us": 10000000 } } }
+        }
+      },
+      "cause": { "change": "reparent", "node": "k", "to": { "node": "b1", "hand": "right" } },
+      "receipt": "r11",
+      "expect": {
+        "fired": [["k", "cools_off_it"]],
+        "changes": [{ "change": "set", "node": "k", "field": "heat", "n": 1, "to": { "value": 60000, "per_s": -200, "set_us": 60000000 } }],
+        "events": [{ "event": "cooling", "node": "k", "changes": [0] }]
+      }
+    },
+    {
+      "name": "stove_put_out_under_a_boiling_kettle_cools_it",
+      "state": {
+        "now_us": 200000000,
+        "nodes": {
+          "st": { "kind": "test:stove", "fields": { "lit": true }, "slots": { "hob": ["k"] } },
+          "k": { "kind": "test:stove_kettle", "fields": { "heat": { "value": 20000, "per_s": 800, "set_us": 10000000 } } }
+        }
+      },
+      "cause": { "change": "set", "node": "st", "field": "lit", "n": 1, "to": false },
+      "receipt": "r12",
+      "expect": {
+        "fired": [["k", "cools_off_it"]],
+        "changes": [{ "change": "set", "node": "k", "field": "heat", "n": 1, "to": { "value": 100000, "per_s": -200, "set_us": 200000000 } }]
+      }
+    },
+    {
+      "name": "the_opening_timer_coming_due_opens_the_shop",
+      "state": {
+        "nodes": {
+          "sh": { "kind": "test:shop", "fields": { "open": false }, "links": { "owner": ["s1"] } }
+        }
+      },
+      "cause": { "due": "opening", "node": "sh" },
+      "receipt": "r13",
+      "expect": {
+        "fired": [["sh", "opens"]],
+        "changes": [{ "change": "set", "node": "sh", "field": "open", "n": 1, "to": true }],
+        "events": [{ "event": "opened", "node": "sh", "changes": [0] }]
+      },
+      "after": {
+        "sh": { "kind": "test:shop", "fields": { "open": true }, "links": { "owner": ["s1"] } }
+      }
+    },
+    {
+      "name": "another_timer_coming_due_does_not_open_the_shop",
+      "state": {
+        "nodes": {
+          "sh": { "kind": "test:shop", "fields": { "open": false } }
+        }
+      },
+      "cause": { "due": "delivery", "node": "sh" },
+      "receipt": "r14",
+      "expect": { "fired": [], "changes": [] }
+    },
+    {
+      "name": "a_body_walking_into_the_shop_chimes_the_door",
+      "state": {
+        "nodes": {
+          "street": { "kind": "test:street", "loose": ["b1"] },
+          "sh": { "kind": "test:shop", "loose": ["d1"] },
+          "d1": { "kind": "test:chime_door", "fields": { "chimes": 4 } },
+          "b1": { "kind": "test:walker", "hands": { "left": null, "right": null } }
+        }
+      },
+      "cause": { "change": "reparent", "node": "b1", "to": { "node": "sh" } },
+      "receipt": "r15",
+      "expect": {
+        "fired": [["d1", "chime"]],
+        "changes": [{ "change": "set", "node": "d1", "field": "chimes", "n": 1, "to": 5 }],
+        "events": [{ "event": "chimed", "node": "d1", "changes": [0] }]
+      },
+      "after": {
+        "street": { "kind": "test:street", "loose": [] },
+        "sh": { "kind": "test:shop", "loose": ["d1", "b1"] },
+        "d1": { "kind": "test:chime_door", "fields": { "chimes": 5 } }
+      }
+    },
+    {
+      "name": "a_kettle_carried_into_the_shop_does_not_chime",
+      "state": {
+        "nodes": {
+          "street": { "kind": "test:street", "loose": ["k"] },
+          "sh": { "kind": "test:shop", "loose": ["d1"] },
+          "d1": { "kind": "test:chime_door" },
+          "k": { "kind": "test:stove_kettle" }
+        }
+      },
+      "cause": { "change": "reparent", "node": "k", "to": { "node": "sh" } },
+      "receipt": "r16",
+      "expect": { "fired": [], "changes": [] }
+    },
+    {
+      "name": "a_body_walking_out_of_the_shop_does_not_chime",
+      "state": {
+        "nodes": {
+          "street": { "kind": "test:street", "loose": [] },
+          "sh": { "kind": "test:shop", "loose": ["d1", "b1"] },
+          "d1": { "kind": "test:chime_door", "fields": { "chimes": 5 } },
+          "b1": { "kind": "test:walker" }
+        }
+      },
+      "cause": { "change": "reparent", "node": "b1", "to": { "node": "street" } },
+      "receipt": "r17",
+      "expect": { "fired": [], "changes": [] }
+    }
+  ]
+}
