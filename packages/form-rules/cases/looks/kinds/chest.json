@@ -1,0 +1,33 @@
+{
+  "format": "souls-entry/1",
+  "kind": "looks:chest",
+  "owner": "thing",
+  "state": {
+    "open": { "n": 1, "type": "bool", "default": false, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [600, 500, 700] },
+  "looks": {
+    "model": "look:looks_chest",
+    "shape": {
+      "make": { "kind": "gen", "gen": "kit/2", "args": { "shapes": [
+        { "kind": "box", "at": [0, 0.25, -0.17], "size": [0.6, 0.5, 0.02], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [-0.29, 0.25, 0], "size": [0.02, 0.5, 0.36], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [0.29, 0.25, 0], "size": [0.02, 0.5, 0.36], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [0, 0.49, 0], "size": [0.6, 0.02, 0.36], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [0, 0.01, 0], "size": [0.6, 0.02, 0.36], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [0, 0.3, 0.18], "size": [0.56, 0.02, 0.36], "round": 0, "tint": "wood" },
+        { "kind": "box", "at": [0, 0.38, 0.19], "size": [0.54, 0.2, 0.02], "round": 0, "tint": "front", "role": "drawer" },
+        { "kind": "box", "at": [0, 0.38, 0.215], "size": [0.12, 0.02, 0.03], "round": 0, "tint": "brass", "role": "drawer" },
+        { "kind": "box", "at": [0, 0.32, 0.0], "size": [0.5, 0.02, 0.34], "round": 0, "tint": "wood", "role": "drawer" },
+        { "kind": "box", "at": [0, 0.15, 0.19], "size": [0.54, 0.26, 0.02], "round": 0, "tint": "front" }
+      ] } },
+      "palette": { "wood": "#8a6a45", "front": "#a98458", "brass": "#c9a24a" },
+      "tags": ["drawer"]
+    },
+    "table": [
+      { "part": "drawer", "field": "open", "do": "slide", "axis": "z", "at": { "true": 280, "false": 0 } }
+    ]
+  },
+  "text": { "card": "A cabinet whose drawer slides out when it is open." },
+  "card": { "text": "card" }
+}
