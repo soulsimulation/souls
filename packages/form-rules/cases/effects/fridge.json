@@ -1,0 +1,149 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:fridge (core/fridge@1, 5 placed): closed until opened; opening links the opener, who then sees its stock of pies (a closed field, SA-F8/F12); a pie is taken from it only while open, into a free hand, and the count falls by one with the take.",
+ "cases": [
+  {
+   "name": "fridge_open_take_close",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:fridge",
+      "fields": {}
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       270,
+       1000,
+       560
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    },
+    "now_us": 0
+   },
+   "do": [
+    {
+     "act": {
+      "this": "t1",
+      "form": "take"
+     },
+     "now_us": 0,
+     "receipt": "rtake0",
+     "expect": {
+      "verdict": "no",
+      "reason": "field_differs",
+      "need": 0
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "open"
+     },
+     "now_us": 1000000,
+     "receipt": "ropen1000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "open",
+        "n": 1,
+        "to": 1
+       },
+       {
+        "change": "link",
+        "node": "t1",
+        "link": "opener",
+        "n": 1,
+        "end": "b1"
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:opened",
+        "node": "t1",
+        "changes": [
+         0
+        ]
+       },
+       {
+        "event": "eden:looked_inside",
+        "node": "t1",
+        "changes": [
+         1
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "take"
+     },
+     "now_us": 2000000,
+     "receipt": "rtake2000000",
+     "expect": {
+      "verdict": "yes"
+     }
+    },
+    {
+     "act": {
+      "this": "t1",
+      "form": "close"
+     },
+     "now_us": 3000000,
+     "receipt": "rclose3000000",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "t1",
+        "field": "open",
+        "n": 1,
+        "to": 0
+       },
+       {
+        "change": "unlink",
+        "node": "t1",
+        "link": "opener",
+        "n": 1,
+        "end": "b1"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

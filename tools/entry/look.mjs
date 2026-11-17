@@ -12,8 +12,9 @@
 // What the picture is drawn from: `looks.shape` of the entry, the parts of a thing (round, shapes, palette, tags) written in whole millimetres
 // (the format has no floating-point number and names nothing of today's engine, #2855). look.mjs wraps it for today's studio
 // and converts it to metres when it is
-// drawn: a length (at, size, r, r2, h, round, the points of a profile or a path) is divided by 1000, an angle (roll, arc,
-// yaw, pitch) is whole millidegrees and becomes radians, a count (segments) stays. A number under any other key is refused
+// drawn: a length (at, size, r, r2, h, round, the points of a profile, a path or a polygon) is divided by 1000, an angle (roll, arc,
+// yaw, pitch) is whole millidegrees and becomes radians, a part's glow is permille and becomes a fraction, a count (segments)
+// stays. A number under any other key is refused
 // by name, so a unit is never guessed. A state value the entry holds as a whole number reaches the picture as the number
 // the viewer draws with (permille / 1000); the viewer, not the entry, uses fractions, and nothing here decides anything
 // from them. A kind whose shape is missing is reported, not drawn. SA-D1a owns the rest of the looks table.
@@ -52,9 +53,11 @@ export function framesOf(entry) {
 }
 
 const metres = v => v.map(x => x / 1000);
-const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
+const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth', 'polygon']);
 const ANGLE_KEYS = new Set(['roll', 'arc', 'yaw', 'pitch']);
 const COUNT_KEYS = new Set(['segments']);
+/** A part's own glow, in permille (1000 is full), as the fraction the viewer draws with. */
+const PERMILLE_KEYS = new Set(['glow']);
 
 /** A shape written in whole millimetres and millidegrees, as the metres and radians the viewer draws with. */
 export function shapeInMetres(node, key = '') {
@@ -64,7 +67,8 @@ export function shapeInMetres(node, key = '') {
   if (LENGTH_KEYS.has(key)) return node / 1000;
   if (ANGLE_KEYS.has(key)) return node * Math.PI / 180000;
   if (COUNT_KEYS.has(key)) return node;
-  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, counts)`);
+  if (PERMILLE_KEYS.has(key)) return node / 1000;
+  throw new Error(`looks.shape: a number under "${key}", and its unit is not known here (lengths in mm, angles in millidegrees, glow in permille, counts)`);
 }
 
 /** The def the gallery studio draws: the entry's shape, with its state fields as the def's state. */

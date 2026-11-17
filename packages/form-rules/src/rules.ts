@@ -93,6 +93,7 @@ export type Entry = {
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
   motion?: { how?: string };
+  closed?: { audience: Audience; fields?: string[] };
 };
 export type Node = {
   kind?: string;
@@ -187,7 +188,9 @@ export function decide(input: Input): Verdict {
       const field = n.field ?? '';
       const def = has(entry.state, field) ? entry.state![field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
-      if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+      // a closed kind's named fields (a fridge's stock) take the container's audience, and declare none of their own (SA-F8)
+      const audience = entry.closed?.fields?.includes(field) ? entry.closed.audience : def.audience;
+      if (!sees(audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
       let value = has(self.fields, field) ? self.fields![field] : def.default;
       if (def.type === 'timed') {
         const now = valueAt(def, value, state.now_us);
