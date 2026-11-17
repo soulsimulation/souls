@@ -13,7 +13,7 @@ import type { MeshCtx } from './registry.ts';
 import { DRAWER_TRAVEL } from '@souls/world-compiler';
 import { foldCanopy } from '../opening-motion.ts';
 import { variantOf } from './material-variants.ts';
-import { looks as tableLooks, type LookRow, type Placement } from '../../../../packages/form-rules/src/looks.ts';
+import { declaredState, looks as tableLooks, type LookRow, type Placement } from '../../../../packages/form-rules/src/looks.ts';
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const declared = (ctx: MeshCtx, k: string) => Object.hasOwn(ctx.def.params ?? {}, k);
@@ -33,12 +33,10 @@ export function lookOf(ctx: MeshCtx): Look | null {
 }
 /** SA-D1a: a kind's looks table rides in the def's make.args (`looks_table`); a def without one is drawn exactly as before. */
 const tableOf = (ctx: MeshCtx): LookRow[] => (Array.isArray(ctx.args?.looks_table) ? (ctx.args.looks_table as LookRow[]) : []);
-/** The table's parts placed by the plain function, in whole units. The page holds a number as a fraction; the function
- *  takes permille. Parts are found by role; the rest pose is kept so the same state gives the same picture every time. */
+/** The table's parts placed by the plain function, in whole units. The entry's whole numbers reach the function in their stated unit; the page holds a permille field as a fraction (`looks_units` names it), so only that is scaled back. Parts are found by role; the rest pose is kept so the same state gives the same picture every time. */
 function tableRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   const table = tableOf(ctx); if (!table.length) return;
-  const state: Record<string, boolean | number | string> = {};
-  for (const [k, v] of Object.entries(look.state)) if (typeof v === 'boolean' || typeof v === 'string') state[k] = v; else if (typeof v === 'number') state[k] = Math.round(v * 1000);
+  const state = declaredState(look.state, (ctx.args?.looks_units ?? {}) as Record<string, string>);
   const placed = tableLooks({ table, state }), tint = new THREE.Color();
   root.traverse((o) => {
     const p: Placement | undefined = placed[o.userData.role as string]; if (!p) return;

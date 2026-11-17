@@ -160,3 +160,14 @@ export function looks(input: LooksInput): Record<string, Placement> {
   }
   return out;
 }
+
+/** The state the page holds, as the entry declares it: a permille field is held as a fraction by today's viewer, so only
+ *  that is scaled back to whole thousandths; every other number passes as it is (rounded), in its stated unit. */
+export function declaredState(held: Record<string, unknown>, units: Record<string, string> = {}): Record<string, Value> {
+  const out: Record<string, Value> = {};
+  for (const [k, v] of Object.entries(held)) {
+    if (typeof v === 'boolean' || typeof v === 'string') out[k] = v;
+    else if (typeof v === 'number') out[k] = Math.round(v * (units[k] === 'permille' ? 1000 : 1));
+  }
+  return out;
+}

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkTable, looks, NAME, type LookRow } from './looks.ts';
+import { checkTable, declaredState, looks, NAME, type LookRow } from './looks.ts';
 
 const DIR = join(import.meta.dirname, '../cases/looks');
 type Kind = { kind: string; state: Record<string, { type: string; values?: string[] }>; looks: { model: string; table: LookRow[] } };
@@ -52,4 +52,11 @@ test('a table of 64 rows is answered in well under a millisecond', () => {
   const t0 = performance.now();
   for (let i = 0; i < 1000; i++) looks({ table, state: { n: i % 1000 } });
   assert.ok((performance.now() - t0) / 1000 < 1);
+});
+
+test('a field that is not in thousandths drives a look as declared; a permille field held as a fraction is scaled back', () => {
+  const table: LookRow[] = [{ part: 'bar', field: 'height_mm', do: 'slide', axis: 'y', range: [0, 400], to: [0, 400] }, { part: 'tea', field: 'fullness', do: 'scale', axis: 'y', range: [0, 1000], to: [1, 1000] }];
+  const state = declaredState({ height_mm: 300, fullness: 0.5 }, { fullness: 'permille' });
+  assert.deepEqual(state, { height_mm: 300, fullness: 500 });
+  assert.deepEqual(JSON.parse(JSON.stringify(looks({ table, state }))), { bar: { slide_mm: [0, 300, 0] }, tea: { scale_permille: [1000, 500, 1000] } });
 });
