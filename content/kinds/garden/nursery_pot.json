@@ -44,11 +44,11 @@
   "looks": {
     "model": "look:nursery_pot",
     "table": [
-      { "part": "blade", "field": "shoots", "do": "show", "range": [0, 1], "to": [0, 1] },
-      { "part": "blade", "field": "planted", "do": "rotate", "axis": "z", "at": { "true": 0, "false": -90000 } },
+      { "part": "shoot.1", "field": "shoots", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "shoot.1", "field": "planted", "do": "rotate", "axis": "z", "at": { "true": 0, "false": -90000 } },
       { "part": "fill", "field": "supplies", "do": "show", "range": [0, 1], "to": [0, 1] }
     ],
-    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,125,0],"size":[310,250,300],"tint":"pot"},{"kind":"box","at":[0,260,0],"size":[350,35,340],"tint":"pot"},{"kind":"box","at":[0,250,0],"size":[280,20,270],"tint":"soil"},{"kind":"box","at":[-120,320,-80],"size":[130,140,100],"tint":"soil","role":"fill"},{"kind":"box","at":[120,320,-80],"size":[90,140,90],"tint":"water","role":"fill"},{"kind":"box","at":[-120,392,50],"size":[25,260,25],"tint":"stem","role":"blade","pivot":[-120,262,50]},{"kind":"box","at":[-170,470,50],"size":[100,30,90],"tint":"leaf","role":"blade","pivot":[-120,262,50]},{"kind":"box","at":[-70,505,50],"size":[100,30,90],"tint":"leaf","role":"blade","pivot":[-120,262,50]}],"palette":{"pot":"#545d65","soil":"#503e29","water":"#69a5cb","stem":"#4e7845","leaf":"#8eb660"},"tags":["garden","pot","propagation","item","object"]}
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,125,0],"size":[310,250,300],"tint":"pot"},{"kind":"box","at":[0,260,0],"size":[350,35,340],"tint":"pot"},{"kind":"box","at":[0,250,0],"size":[280,20,270],"tint":"soil"},{"kind":"box","at":[-120,320,-80],"size":[130,140,100],"tint":"soil","role":"fill"},{"kind":"box","at":[120,320,-80],"size":[90,140,90],"tint":"water","role":"fill"},{"kind":"box","at":[-120,392,50],"size":[25,260,25],"tint":"stem","role":"shoot.1","pivot":[-120,262,50]},{"kind":"box","at":[-170,470,50],"size":[100,30,90],"tint":"leaf","role":"shoot.1","pivot":[-120,262,50]},{"kind":"box","at":[-70,505,50],"size":[100,30,90],"tint":"leaf","role":"shoot.1","pivot":[-120,262,50]}],"palette":{"pot":"#545d65","soil":"#503e29","water":"#69a5cb","stem":"#4e7845","leaf":"#8eb660"},"tags":["garden","pot","propagation","item","object"]}
   },
   "text": {
     "card": "A nursery pot with its own soil and water: receive a cutting, then plant it.",

@@ -63,7 +63,7 @@ export function generate(kinds: Record<string, Entry>, count: number, seed: numb
     const moves: Record<string, { reach_mm: number }> = {};
     for (const step of form.steps ?? []) if (step.move && g.chance(95)) moves[step.move] = { reach_mm: g.int(0, 2000) };
     const args: Record<string, unknown> = {};
-    for (const [name, def] of Object.entries((form as { takes?: Record<string, { type: string; select?: { in?: string } }> }).takes ?? {})) {
+    for (const [name, def] of Object.entries((form as { takes?: Record<string, { type: string; of?: string[]; select?: { in?: string } }> }).takes ?? {})) {
       if (g.chance(5)) continue;
       if (def.type === 'slot') {
         const inParent = def.select?.in === 'parent';
@@ -74,6 +74,7 @@ export function generate(kinds: Record<string, Entry>, count: number, seed: numb
       } else if (def.type === 'part') args[name] = g.pick([...Object.keys(entry.points ?? {}), 'nowhere']);
       else if (def.type === 'thing') args[name] = 'c1';
       else if (def.type === 'text') args[name] = 't_words';
+      else if (def.type === 'field' || def.type === 'value') args[name] = g.pick([...(def.of ?? []), 'nowhere']);
       else args[name] = g.int(0, 10);
     }
     const sees = g.chance(30) ? 'all' : AUDIENCES.filter((a) => a === 'public' || g.chance(30));

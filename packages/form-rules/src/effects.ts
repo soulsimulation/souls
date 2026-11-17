@@ -125,23 +125,26 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
     const out: Change[] = [];
     if (!e || typeof e.event !== 'string') return refuse(i, 'bad_input', { what: 'no_event' });
     if (e.change === 'set') {
-      const def = has(entry.state, e.field ?? '') ? entry.state![e.field!] : undefined;
-      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: e.field ?? null });
+      // A field argument names one of the form's own fields (the rules refused any other choice); the change names the field.
+      const named = arg(e.field, args);
+      const field = typeof named === 'string' ? named : '';
+      const def = has(entry.state, field) ? entry.state![field] : undefined;
+      if (!def) return refuse(i, 'bad_input', { what: 'no_such_field', field: (named ?? null) as unknown });
       if (def.type === 'timed') {
         // a timed value is settled at the act's time and given its new rate: the three stored numbers are rewritten
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const now = valueAt(def, held, state.now_us);
-        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
+        if (typeof now === 'object' || !Number.isSafeInteger(e.rate)) return refuse(i, 'bad_input', { what: typeof now === 'object' ? now.bad : 'malformed_rate', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to: { value: now, per_s: e.rate!, set_us: state.now_us! } });
       } else if (has(e, 'by')) {
         // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
-        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const held = has(work[self].fields, field) ? work[self].fields![field] : def.default;
         const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
-        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: e.field! });
-        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to });
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: field });
+        out.push({ change: 'set', node: self, field: field, n: def.n, to });
       } else {
       const to = stored(def, arg(e.to, args));
-      out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });
+      out.push({ change: 'set', node: self, field: field, n: def.n, ...(to === undefined ? {} : { to }) });
       }
     } else if (e.change === 'transfer') {
       const m = measure(kinds, work, self, args, e);

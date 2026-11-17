@@ -68,12 +68,16 @@ export const STAND_MARGIN_MM = 2000;
 export const POSTURES = Object.freeze(['sit', 'lie']);
 export const WHO = Object.freeze(['anyone', 'holder', 'world']);
 export const STARTS = Object.freeze(['act', 'timer']);
-export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'duration', 'count']);
+/** `field` and `value` are choices from a closed list the form declares (`of`): which of its own state fields a `set` or a
+ *  need names, and which value it writes or compares with. A form never writes a field it does not name. */
+export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'duration', 'count', 'field', 'value']);
+export const CHOICE_TYPES = Object.freeze(['field', 'value']);
 /** A described target: one closed list with Engine v2 E2 (#2709): a candidate set, an anchor, an order and a rank. */
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
-/** `sum`: the sum of two or more int fields of this kind, such as a well whose portions are kept in two fields. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'sum']);
+/** `sum`: the sum of two or more int fields of this kind, such as a well whose portions are kept in two fields. `any`: at
+ *  least one of two or more fields of this kind is `not` a value, such as sand that is not yet smooth everywhere. */
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'sum', 'any']);
 /** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
 /** `transfer` moves an amount between two int fields of one name (SA-F2b, #2844), or between two fields of one thing
@@ -665,26 +669,51 @@ function form(f, path, ctx, err) {
   for (const [name, a] of Object.entries(takes)) {
     const p = `${path}.takes.${name}`;
     if (!IDENT.test(name) || !isObj(a)) { err(p, 'an argument is a lower_snake_case name and an object'); continue; }
-    only(a, ['type', 'select'], p, err);
+    only(a, CHOICE_TYPES.includes(a.type) ? ['type', 'of'] : ['type', 'select'], p, err);
     if (!ARG_TYPES.includes(a.type)) err(`${p}.type`, `must be one of ${ARG_TYPES.join(', ')}`);
     if (a.select !== undefined) select(a.select, `${p}.select`, err);
+    if (CHOICE_TYPES.includes(a.type)) {
+      // A choice is from a closed list the form declares: two or more different names, each a field of this kind (or a value).
+      if (!(Array.isArray(a.of) && a.of.length >= 2 && a.of.every(x => typeof x === 'string' && IDENT.test(x)) && new Set(a.of).size === a.of.length)) err(`${p}.of`, `the choices, two or more different lower_snake_case ${a.type === 'field' ? 'state field names of this kind' : 'values'}`);
+      else if (a.type === 'field') {
+        a.of.forEach((x, i) => { if (!(x in ctx.state)) err(`${p}.of.${i}`, `"${x}" is not a state field of this kind`); });
+        const types = new Set(a.of.map(x => ctx.state[x]?.type));
+        if (types.size > 1) err(`${p}.of`, 'fields of one type, so one value or need fits every choice');
+        if (a.of.some(x => ['list', 'schedule', 'timed', 'text'].includes(ctx.state[x]?.type))) err(`${p}.of`, 'a choice of bool, enum, int or duration fields: a list, a schedule, a timed value or a text is set its own way');
+      }
+    }
   }
+  // The names a field reference stands for: the field itself, or every choice of a `field` argument.
+  const fieldsOf = v => isArg(v) ? (takes[v.arg]?.type === 'field' && Array.isArray(takes[v.arg].of) ? takes[v.arg].of : []) : [v];
   const arg = (v, p, types) => {
     if (!(v.arg in takes)) err(p, `argument "${v.arg}" is not in takes`);
     else if (types && !types.includes(takes[v.arg].type)) err(p, `argument "${v.arg}" must be of type ${types.join(' or ')}`);
   };
+  const placed = v => typeof v === 'string' && (v in ctx.points || v in ctx.slots || isObj(ctx.areas[v]) && 'at_mm' in ctx.areas[v]);
   const place = (v, p) => {
-    if (isArg(v)) arg(v, p, ['slot', 'part', 'thing']);
-    else if (!(typeof v === 'string' && (v in ctx.points || v in ctx.slots || isObj(ctx.areas[v]) && 'at_mm' in ctx.areas[v]))) err(p, 'names a point, slot or placed area of this kind, or an argument');
+    // A field argument used as a place: each choice also names a point, slot or placed area (a shoot and its tip).
+    if (isArg(v) && takes[v.arg]?.type === 'field') { fieldsOf(v).forEach(x => { if (!placed(x)) err(p, `choice "${x}" of argument "${v.arg}" names no point, slot or placed area of this kind`); }); }
+    else if (isArg(v)) arg(v, p, ['slot', 'part', 'thing']);
+    else if (!placed(v)) err(p, 'names a point, slot or placed area of this kind, or an argument');
   };
   const slot = (v, p) => { if (isArg(v)) arg(v, p, ['slot']); else if (!(v in ctx.slots)) err(p, 'names a slot of this kind, or an argument'); };
-  const fieldName = (v, p) => { if (!(typeof v === 'string' && v in ctx.state)) err(p, 'names a state field of this kind'); };
+  const fieldName = (v, p, choice = false) => {
+    if (choice && isArg(v)) arg(v, p, ['field']);
+    else if (!(typeof v === 'string' && v in ctx.state)) err(p, choice ? 'names a state field of this kind, or a field argument' : 'names a state field of this kind');
+  };
   const linkName = (v, p) => { if (!(typeof v === 'string' && v in ctx.links)) err(p, 'names a link type of this kind'); };
   const value = (fname, v, p) => {
+    if (isArg(fname)) { for (const x of fieldsOf(fname)) value(x, v, p); return; }
     const fd = ctx.state[fname];
     if (fd?.type === 'schedule') { err(p, 'a schedule is set whole by its owner and read by clients; a form does not write one'); return; }
+    if (isArg(v) && takes[v.arg]?.type === 'value') {
+      // every choice of a value argument is a value of the field (of every field a field argument may name)
+      if (Array.isArray(takes[v.arg].of)) for (const x of takes[v.arg].of) value(fname, x, p);
+      return;
+    }
     if (isArg(v)) {
       arg(v, p);
+      if (takes[v.arg]?.type === 'field') { err(p, `argument "${v.arg}" names a field; a value comes from a value argument`); return; }
       const at = takes[v.arg]?.type;
       // Words are kept by reference (contract T8, #2662): only a text argument reaches a text field, and nothing else does.
       if (fd && at && (fd.type === 'text') !== (at === 'text')) err(p, fd.type === 'text' ? `argument "${v.arg}" is ${at}; a text field is set from a text argument (a reference)` : `argument "${v.arg}" is text; field "${fname}" is ${fd.type}, and a text argument goes only to a text field`);
@@ -728,12 +757,11 @@ function form(f, path, ctx, err) {
       else { const v = exact ? n.is : n.not; if (!(typeof v === 'boolean' || isInt(v) || (typeof v === 'string' && IDENT.test(v)))) err(`${p}.${exact ? 'is' : 'not'}`, 'a flag, a whole number or an enum value'); }
     } else if (n.need === 'state') {
       only(n, ['need', 'field', 'is', 'not', 'at_least', 'at_most'], p, err);
-      fieldName(n.field, `${p}.field`);
+      fieldName(n.field, `${p}.field`, true);
       const ranged = 'at_least' in n || 'at_most' in n, exact = 'is' in n, negated = 'not' in n;
       if (ranged) {
         if (exact || negated) err(p, 'a range (at_least, at_most) or one of is, not; not both');
-        const fd = ctx.state[n.field];
-        if (fd && fd.type !== 'int' && fd.type !== 'duration' && fd.type !== 'timed') err(`${p}.field`, 'a range needs an int or duration field, or a timed value');
+        for (const x of fieldsOf(n.field)) { const fd = ctx.state[x]; if (fd && fd.type !== 'int' && fd.type !== 'duration' && fd.type !== 'timed') err(`${p}.field`, 'a range needs an int or duration field, or a timed value'); }
         for (const k of ['at_least', 'at_most']) if (k in n && !isInt(n[k])) err(`${p}.${k}`, 'a whole number');
         if (isInt(n.at_least) && isInt(n.at_most) && n.at_least > n.at_most) err(p, 'at_least is above at_most; nothing is in that range');
       } else if (exact === negated) err(p, 'exactly one of is, not, or a range (at_least, at_most)');
@@ -761,6 +789,15 @@ function form(f, path, ctx, err) {
       if (isInt(n.at_least) && isInt(n.at_most) && n.at_least > n.at_most) err(p, 'at_least is above at_most; nothing is in that range');
       if ('after_moves' in n && n.after_moves !== true) err(`${p}.after_moves`, 'true: the sum as this form\'s transfers leave it; leave it out for the sum now');
       if (n.after_moves === true && !(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer' && (e.from === 'this' || e.into === 'this')))) err(`${p}.after_moves`, 'this form has no transfer into or out of this thing');
+    } else if (n.need === 'any') {
+      // At least one of two or more fields of this kind is not a value: sand that is not smooth everywhere.
+      only(n, ['need', 'fields', 'not'], p, err);
+      const fs = Array.isArray(n.fields) ? n.fields : [];
+      if (fs.length < 2 || new Set(fs).size !== fs.length) err(`${p}.fields`, 'two or more different state fields of this kind');
+      fs.forEach((x, k) => fieldName(x, `${p}.fields.${k}`));
+      if (!('not' in n)) err(`${p}.not`, 'the value that at least one of the fields differs from');
+      else if (isArg(n.not)) err(`${p}.not`, 'a value written out, not an argument');
+      else for (const x of fs) if (x in ctx.state) value(x, n.not, `${p}.not`);
     } else if (n.need === 'room' || n.need === 'enough') {
       only(n, ['need'], p, err);
       if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, `${n.need} is about every amount the form's transfers move (room where it lands, enough at its source); this form has no transfer`);
@@ -787,7 +824,7 @@ function form(f, path, ctx, err) {
     if (e.change === 'set' && ctx.state[e.field]?.type === 'timed') { only(e, ['change', 'field', 'rate', 'event'], p, err); if (!isInt(e.rate)) err(`${p}.rate`, 'a whole number: the new rate, in the field\'s unit per second; its value is settled at the act\'s time'); }
     // `by` (signed, not zero) instead of `to` adds to an int field: a count, or an amount used up (a sip)
     else if (e.change === 'set' && 'by' in e) { only(e, ['change', 'field', 'by', 'event'], p, err); if (ctx.state[e.field]?.type !== 'int') err(`${p}.field`, 'names an int state field of this kind; by adds to it'); if (!(isInt(e.by) && e.by !== 0)) err(`${p}.by`, 'a whole number, not zero'); }
-    else if (e.change === 'set') { only(e, ['change', 'field', 'to', 'event'], p, err); fieldName(e.field, `${p}.field`); if (!('to' in e)) err(`${p}.to`, 'required'); else value(e.field, e.to, `${p}.to`); }
+    else if (e.change === 'set') { only(e, ['change', 'field', 'to', 'event'], p, err); fieldName(e.field, `${p}.field`, true); if (!('to' in e)) err(`${p}.to`, 'required'); else value(e.field, e.to, `${p}.to`); }
     else if (e.change === 'reparent') {
       only(e, ['change', 'what', 'into', 'event'], p, err);
       if (!SUBJECTS.includes(e.what)) err(`${p}.what`, `one of ${SUBJECTS.join(', ')}`);

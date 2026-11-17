@@ -36,11 +36,11 @@
   "looks": {
     "model": "look:cutting_donor",
     "table": [
-      { "part": "arm.l", "field": "shoots", "do": "show", "range": [0, 1], "to": [0, 1] },
-      { "part": "head", "field": "shoots", "do": "show", "range": [1, 2], "to": [0, 1] },
-      { "part": "arm.r", "field": "shoots", "do": "show", "range": [2, 3], "to": [0, 1] }
+      { "part": "shoot.1", "field": "shoots", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "shoot.2", "field": "shoots", "do": "show", "range": [1, 2], "to": [0, 1] },
+      { "part": "shoot.3", "field": "shoots", "do": "show", "range": [2, 3], "to": [0, 1] }
     ],
-    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,160,0],"size":[500,320,480],"tint":"pot"},{"kind":"box","at":[0,330,0],"size":[440,40,420],"tint":"soil"},{"kind":"box","at":[0,600,0],"size":[45,520,45],"tint":"stem"},{"kind":"box","at":[-170,740,0],"size":[35,360,35],"tint":"stem","role":"arm.l"},{"kind":"box","at":[-105,850,15],"size":[190,45,120],"tint":"leaf","role":"arm.l"},{"kind":"box","at":[-225,750,-15],"size":[180,45,120],"tint":"leaf","role":"arm.l"},{"kind":"box","at":[0,795,0],"size":[35,360,35],"tint":"stem","role":"head"},{"kind":"box","at":[65,905,15],"size":[190,45,120],"tint":"leaf","role":"head"},{"kind":"box","at":[-55,805,-15],"size":[180,45,120],"tint":"leaf","role":"head"},{"kind":"box","at":[170,850,0],"size":[35,360,35],"tint":"stem","role":"arm.r"},{"kind":"box","at":[235,960,15],"size":[190,45,120],"tint":"leaf","role":"arm.r"},{"kind":"box","at":[115,860,-15],"size":[180,45,120],"tint":"leaf","role":"arm.r"}],"palette":{"pot":"#955a3e","soil":"#4a3626","stem":"#507443","leaf":"#83ac57"},"tags":["garden","herb","propagation","object"]}
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,160,0],"size":[500,320,480],"tint":"pot"},{"kind":"box","at":[0,330,0],"size":[440,40,420],"tint":"soil"},{"kind":"box","at":[0,600,0],"size":[45,520,45],"tint":"stem"},{"kind":"box","at":[-170,740,0],"size":[35,360,35],"tint":"stem","role":"shoot.1"},{"kind":"box","at":[-105,850,15],"size":[190,45,120],"tint":"leaf","role":"shoot.1"},{"kind":"box","at":[-225,750,-15],"size":[180,45,120],"tint":"leaf","role":"shoot.1"},{"kind":"box","at":[0,795,0],"size":[35,360,35],"tint":"stem","role":"shoot.2"},{"kind":"box","at":[65,905,15],"size":[190,45,120],"tint":"leaf","role":"shoot.2"},{"kind":"box","at":[-55,805,-15],"size":[180,45,120],"tint":"leaf","role":"shoot.2"},{"kind":"box","at":[170,850,0],"size":[35,360,35],"tint":"stem","role":"shoot.3"},{"kind":"box","at":[235,960,15],"size":[190,45,120],"tint":"leaf","role":"shoot.3"},{"kind":"box","at":[115,860,-15],"size":[180,45,120],"tint":"leaf","role":"shoot.3"}],"palette":{"pot":"#955a3e","soil":"#4a3626","stem":"#507443","leaf":"#83ac57"},"tags":["garden","herb","propagation","object"]}
   },
   "text": {
     "card": "A herb with three shoots to spare: take one as a cutting into a nursery pot.",

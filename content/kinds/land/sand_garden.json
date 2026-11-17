@@ -114,14 +114,36 @@
     ]
   },
   "forms": {
-    "brush_back_left_along": {
+    "brush": {
       "who": "anyone",
       "starts": "act",
+      "takes": {
+        "cell": {
+          "type": "field",
+          "of": [
+            "back_left",
+            "back_right",
+            "front_left",
+            "front_right"
+          ]
+        },
+        "pattern": {
+          "type": "value",
+          "of": [
+            "along",
+            "across"
+          ]
+        }
+      },
       "needs": [
         {
           "need": "state",
-          "field": "back_left",
-          "not": "along"
+          "field": {
+            "arg": "cell"
+          },
+          "not": {
+            "arg": "pattern"
+          }
         },
         {
           "need": "hand",
@@ -136,7 +158,9 @@
         {
           "step": "move",
           "move": "slide",
-          "at": "back_left"
+          "at": {
+            "arg": "cell"
+          }
         },
         {
           "step": "wait",
@@ -146,274 +170,12 @@
       "effects": [
         {
           "change": "set",
-          "field": "back_left",
-          "to": "along",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_back_left_across": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "back_left",
-          "not": "across"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "back_left"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "back_left",
-          "to": "across",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_back_right_along": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "back_right",
-          "not": "along"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "back_right"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "back_right",
-          "to": "along",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_back_right_across": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "back_right",
-          "not": "across"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "back_right"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "back_right",
-          "to": "across",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_front_left_along": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "front_left",
-          "not": "along"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "front_left"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "front_left",
-          "to": "along",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_front_left_across": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "front_left",
-          "not": "across"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "front_left"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "front_left",
-          "to": "across",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_front_right_along": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "front_right",
-          "not": "along"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "front_right"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "front_right",
-          "to": "along",
-          "event": "brushed"
-        }
-      ]
-    },
-    "brush_front_right_across": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "front_right",
-          "not": "across"
-        },
-        {
-          "need": "hand",
-          "free": true
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "front_right"
-        },
-        {
-          "step": "wait",
-          "us": 10000000
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "front_right",
-          "to": "across",
+          "field": {
+            "arg": "cell"
+          },
+          "to": {
+            "arg": "pattern"
+          },
           "event": "brushed"
         }
       ]
@@ -425,6 +187,17 @@
         {
           "need": "hand",
           "free": true
+        },
+        {
+          "need": "any",
+          "fields": [
+            "back_left",
+            "back_right",
+            "front_left",
+            "front_right"
+          ],
+          "not": "smooth",
+          "says": "already_smooth"
         }
       ],
       "steps": [
@@ -474,7 +247,7 @@
     "model": "look:sand_garden",
     "table": [
       {
-        "part": "leg.bl",
+        "part": "furrow.1",
         "field": "back_left",
         "do": "show",
         "at": {
@@ -484,7 +257,7 @@
         }
       },
       {
-        "part": "leg.bl",
+        "part": "furrow.1",
         "field": "back_left",
         "do": "rotate",
         "axis": "y",
@@ -495,7 +268,7 @@
         }
       },
       {
-        "part": "leg.br",
+        "part": "furrow.2",
         "field": "back_right",
         "do": "show",
         "at": {
@@ -505,7 +278,7 @@
         }
       },
       {
-        "part": "leg.br",
+        "part": "furrow.2",
         "field": "back_right",
         "do": "rotate",
         "axis": "y",
@@ -516,7 +289,7 @@
         }
       },
       {
-        "part": "leg.fl",
+        "part": "furrow.3",
         "field": "front_left",
         "do": "show",
         "at": {
@@ -526,7 +299,7 @@
         }
       },
       {
-        "part": "leg.fl",
+        "part": "furrow.3",
         "field": "front_left",
         "do": "rotate",
         "axis": "y",
@@ -537,7 +310,7 @@
         }
       },
       {
-        "part": "leg.fr",
+        "part": "furrow.4",
         "field": "front_right",
         "do": "show",
         "at": {
@@ -547,7 +320,7 @@
         }
       },
       {
-        "part": "leg.fr",
+        "part": "furrow.4",
         "field": "front_right",
         "do": "rotate",
         "axis": "y",
@@ -714,7 +487,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.bl",
+          "role": "furrow.1",
           "pivot": [
             -140,
             1020,
@@ -734,7 +507,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.bl",
+          "role": "furrow.1",
           "pivot": [
             -140,
             1020,
@@ -754,7 +527,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.bl",
+          "role": "furrow.1",
           "pivot": [
             -140,
             1020,
@@ -774,7 +547,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.bl",
+          "role": "furrow.1",
           "pivot": [
             -140,
             1020,
@@ -794,7 +567,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.br",
+          "role": "furrow.2",
           "pivot": [
             140,
             1020,
@@ -814,7 +587,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.br",
+          "role": "furrow.2",
           "pivot": [
             140,
             1020,
@@ -834,7 +607,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.br",
+          "role": "furrow.2",
           "pivot": [
             140,
             1020,
@@ -854,7 +627,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.br",
+          "role": "furrow.2",
           "pivot": [
             140,
             1020,
@@ -874,7 +647,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fl",
+          "role": "furrow.3",
           "pivot": [
             -140,
             1020,
@@ -894,7 +667,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fl",
+          "role": "furrow.3",
           "pivot": [
             -140,
             1020,
@@ -914,7 +687,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fl",
+          "role": "furrow.3",
           "pivot": [
             -140,
             1020,
@@ -934,7 +707,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fl",
+          "role": "furrow.3",
           "pivot": [
             -140,
             1020,
@@ -954,7 +727,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fr",
+          "role": "furrow.4",
           "pivot": [
             140,
             1020,
@@ -974,7 +747,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fr",
+          "role": "furrow.4",
           "pivot": [
             140,
             1020,
@@ -994,7 +767,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fr",
+          "role": "furrow.4",
           "pivot": [
             140,
             1020,
@@ -1014,7 +787,7 @@
             150
           ],
           "tint": "ridge",
-          "role": "leg.fr",
+          "role": "furrow.4",
           "pivot": [
             140,
             1020,
@@ -1039,7 +812,8 @@
     "art": "art",
     "rake": "rake",
     "furrow": "furrow",
-    "howto_pattern": "With a hand free, brush the cells you choose along or across; the pattern stays until someone smooths the sand."
+    "howto_pattern": "With a hand free, brush the cells you choose along or across; the pattern stays until someone smooths the sand.",
+    "already_smooth": "The sand is already smooth."
   },
   "card": {
     "text": "card",
@@ -1054,10 +828,7 @@
       "text": "howto_pattern",
       "steps": [
         {
-          "form": "brush_back_left_along"
-        },
-        {
-          "form": "brush_front_right_across"
+          "form": "brush"
         }
       ]
     }

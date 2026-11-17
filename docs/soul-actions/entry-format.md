@@ -224,7 +224,16 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
-  Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
+  Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument. Two more types are a **choice from
+  the form's own closed list**, `of`: `field` (two or more of this kind's state fields, of one type) and `value` (two
+  or more values). A `set` or a `state` need may name a field argument as its `field`, and a value argument as its
+  `to`, `is` or `not`: every choice is checked against every field it may meet, and the rules refuse an act whose
+  choice is not in the list (`bad_input`, `not_a_choice`), so a form never writes a field it does not name. A field
+  argument used as a place (`walk_to`, a move's `at`) needs a point, slot or placed area of the same name for each
+  choice. A pruning shrub's one `prune` takes `{"shoot": {"type": "field", "of": ["left_low", ..., "right_high"]}}`
+  and sets `{"field": {"arg": "shoot"}, "to": false}`; a sand garden's `brush` takes a `cell` (field) and a `pattern`
+  (value, `along` or `across`). A refusal of a need compared with a value argument names as its fix the same act with
+  another choice of that value (brush the other way); another choice of a field is another act, never a fix.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
   (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
@@ -246,6 +255,10 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   "well_mint"], "at_most": 4}` (`at_least` and/or `at_most`, whole numbers). With `"after_moves": true` it adds them as
   the form's transfers would leave them, so a capacity shared by several fields is never overfilled: a tea caddy's well
   holds four portions across its green and mint.
+  An `any` need asks that at least one of two or more fields of this kind is `not` a value written out:
+  `{"need": "any", "fields": ["back_left", "back_right", "front_left", "front_right"], "not": "smooth"}`; a refusal is
+  `field_differs` with every field's value (`detail: {fields, found, wanted}`). A sand garden that is smooth everywhere
+  refuses to be smoothed ("The sand is already smooth.").
   Any need may name its refusal's words with `says`, a key of the `text` table (words by reference, SA-F6b), so a
   conversion keeps the original's wording: `{"need": "hand", "empty": true, "says": "put_down_first"}`.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
@@ -294,7 +307,10 @@ the model and what to do to it (`do`): `rotate` (millidegrees, about an `axis`),
 of several parts a choice shows). Three more kinds draw a thing's own moving picture from a field (SA-D2): `steam` (permille
 of a plume leaving the part, so a kettle steams only above the level its range states), `flame` (permille of a flame
 burning on the part, 0 is out) and `grow` (a plant's stage in permille of a stage, 0 seed to 4000 fruiting). The part
-is a role of the model (the closed list of roles of the shape language), not the thing's name. The amount comes from `at` (field value to amount, for a bool or enum) or from
+is a role of the model (the closed list of roles of the shape language, the one the look gate draws with), not the
+thing's name. A plant draws on plant roles (`stem`, `leaf`, `bloom`, `fruit`, `root`, and `shoot.1` to `shoot.6`
+for shoots that go one by one), raked sand or soil on `furrow.1` to `furrow.4`; never on a creature's limbs (`arm`,
+`wing`, `ear`, `leg`), which creature gaits move. The amount comes from `at` (field value to amount, for a bool or enum) or from
 `range` and `to` (a whole-number field, linear between its ends, clamped; a fractional field is carried in permille).
 `over_us` makes a part take that long to get there. Part names and look ids use letters, digits and `_ - . : / @`
 only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rules/src/looks.ts` is the one plain
@@ -382,4 +398,5 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `refs` | a kind that is not loaded, or kinds in a circle | no |
 
 A state field that no form of the kind sets to some declared value is taken as set from outside, so a need on it is not
-a dead end (the kettle's water is filled by something else).
+a dead end (the kettle's water is filled by something else). A field or value argument stands for each of its choices,
+so a `set` through one reaches each field it lists, with each value it lists.
