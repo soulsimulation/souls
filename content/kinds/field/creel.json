@@ -1,0 +1,26 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:creel",
+  "owner": "thing",
+  "state": {
+    "fish": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [0, 320, 0] }
+  },
+  "geometry": { "bounds_mm": [440, 330, 300] },
+  "forms": {},
+  "looks": {
+    "model": "look:creel",
+    "table": [
+      { "part": "fin", "field": "fish", "do": "show", "range": [0, 1], "to": [0, 1] }
+    ],
+    "shape": {"round":6,"shapes":[{"kind":"box","at":[0,110,0],"size":[440,220,300],"round":30,"tint":"wicker"},{"kind":"box","at":[0,226,0],"size":[420,12,280],"tint":"lid"},{"kind":"box","at":[0,250,0],"size":[300,40,90],"round":12,"tint":"fish","role":"fin"},{"kind":"sweep","at":[0,0,0],"path":[[-200,220,0],[0,320,0],[200,220,0]],"r":10,"segments":5,"tint":"lid"}],"palette":{"wicker":"#b98a4e","lid":"#8a6235","fish":"#d8a250"},"tags":["fishing","creel","basket","object"]}
+  },
+  "text": {
+    "card": "A fishing creel that holds one caught fish.",
+    "field": "field",
+    "fish": "fish"
+  },
+  "card": { "text": "card", "category": "field", "synonyms": ["fish"] }
+}

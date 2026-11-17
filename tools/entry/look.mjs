@@ -42,9 +42,12 @@ export function valuesOf(f) {
 /** The number the viewer draws a whole-number state value with. */
 const drawn = (f, v) => (f.type === 'int' && f.unit === 'permille' ? v / 1000 : v);
 
+/** The state fields a picture can follow: words (by reference), lists and schedules are drawn by nothing, so they are left out. */
+const drawable = entry => Object.entries(entry.state ?? {}).filter(([, f]) => !['text', 'list', 'schedule'].includes(f.type));
+
 /** The frames of an entry: its default state, then each field varied alone. The label names the field and its value. */
 export function framesOf(entry) {
-  const fields = Object.entries(entry.state ?? {}).sort((a, b) => a[1].n - b[1].n);
+  const fields = drawable(entry).sort((a, b) => a[1].n - b[1].n);
   const base = Object.fromEntries(fields.map(([k, f]) => [k, f.type === 'timed' ? f.default.value : f.default]));
   const frames = [{label: fields.length ? `${fields.map(([k]) => `${k}=${base[k]}`).join(' ')} (default)` : 'no state', values: base}];
   for (const [k, f] of fields) for (const v of valuesOf(f).slice(1)) frames.push({label: `${k}=${v}`, values: {...base, [k]: v}});
@@ -71,7 +74,7 @@ export function shapeInMetres(node, key = '') {
 export function defOf(entry) {
   const name = `core-${entry.kind.split(':')[1]}`, shape = entry.looks?.shape;
   if (!shape?.shapes) return null;
-  const state = Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k,
+  const state = Object.fromEntries(drawable(entry).map(([k, f]) => [k,
     f.type === 'bool' ? {type: 'bool', default: f.default}
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
         : {type: 'number', default: drawn(f, f.type === 'timed' ? f.default.value : f.default)}]));

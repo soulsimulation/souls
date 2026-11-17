@@ -1,0 +1,24 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_chair",
+  "owner": "thing",
+  "points": {
+    "front": { "role": "stand", "at_mm": [0, 0, 550] },
+    "grip": { "role": "grip", "at_mm": [0, 850, -220] }
+  },
+  "slots": {
+    "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 450, 0], "stand": "front" }
+  },
+  "geometry": { "bounds_mm": [520, 900, 520] },
+  "forms": {},
+  "looks": {
+    "model": "look:camp_chair",
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[-210,215,-210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[210,215,-210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[-210,215,210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[210,215,210],"size":[45,430,45],"tint":"wood"},{"kind":"box","at":[0,440,0],"size":[480,30,480],"tint":"panel"},{"kind":"box","at":[0,470,20],"size":[420,30,400],"round":10,"tint":"cushion"},{"kind":"box","at":[-210,660,-215],"size":[45,420,40],"tint":"wood"},{"kind":"box","at":[210,660,-215],"size":[45,420,40],"tint":"wood"},{"kind":"box","at":[0,720,-220],"size":[460,260,25],"tint":"panel"}],"palette":{"wood":"#af8150","panel":"#c49a64","cushion":"#c96f4a"},"tags":["camping","chair","seat","object"]}
+  },
+  "text": {
+    "card": "A wooden camp chair assembled at a camp bench: sit on it or carry it.",
+    "camp": "camp",
+    "chair": "chair"
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["chair"] }
+}

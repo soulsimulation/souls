@@ -1,0 +1,83 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_pillow",
+  "owner": "thing",
+  "state": {
+    "air": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "patches": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "valve": { "role": "contact", "at_mm": [220, 60, 0] }
+  },
+  "geometry": { "bounds_mm": [500, 230, 300] },
+  "forms": {
+    "patch": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "kit": { "type": "thing", "select": { "of": "things", "kind": "eden:pillow_repair_kit", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [
+        { "need": "state", "field": "patches", "at_most": 0, "says": "already_patched" },
+        { "need": "enough", "says": "no_patch" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "move", "move": "press", "at": "valve" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "transfer", "field": "patches", "from": { "arg": "kit" }, "into": "this", "amount": 1, "event": "patched" }]
+    },
+    "inflate": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "kit": { "type": "thing", "select": { "of": "things", "kind": "eden:pillow_repair_kit", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [
+        { "need": "state", "field": "patches", "at_least": 1, "says": "patch_first" },
+        { "need": "enough", "says": "no_air" },
+        { "need": "room", "says": "fully_inflated" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "move", "move": "press", "at": "valve" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "transfer", "field": "air", "from": { "arg": "kit" }, "into": "this", "amount": 1, "event": "inflated" }]
+    },
+    "vent": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "air", "at_least": 1, "says": "already_flat" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "move", "move": "press", "at": "valve" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "set", "field": "air", "to": 0, "event": "vented" }]
+    }
+  },
+  "looks": {
+    "model": "look:camp_pillow",
+    "table": [
+      { "part": "fill", "field": "air", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fill", "field": "air", "do": "scale", "axis": "y", "range": [0, 3], "to": [1, 1000] },
+      { "part": "lid", "field": "patches", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "blind", "field": "patches", "do": "show", "range": [0, 1], "to": [1, 0] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[0,25,0],"size":[500,50,300],"tint":"cloth"},{"kind":"box","at":[0,110,0],"size":[470,130,280],"round":60,"tint":"puff","role":"fill","pivot":[0,50,0]},{"kind":"box","at":[160,54,90],"size":[70,8,60],"tint":"hole","role":"blind"},{"kind":"box","at":[160,57,90],"size":[90,12,80],"tint":"patch","role":"lid"}],"palette":{"cloth":"#5e8797","puff":"#83a9b8","hole":"#493c40","patch":"#d2aa6e"},"tags":["camping","pillow","object"]}
+  },
+  "text": {
+    "card": "A punctured camp pillow: patch it, pump it up from a repair kit, or vent it.",
+    "camp": "camp",
+    "pillow": "pillow",
+    "inflate": "inflate",
+    "already_patched": "This pillow is already patched and sealed.",
+    "no_patch": "No supplied patch remains; choose a stocked repair kit.",
+    "patch_first": "Patch the punctured pillow before inflating it.",
+    "no_air": "No stored pump air remains; choose a stocked repair kit.",
+    "fully_inflated": "This pillow is fully inflated; vent it before adding air.",
+    "already_flat": "This pillow is already flat; inflate the sealed pillow before venting it.",
+    "empty_hands": "Empty your hands and set the pillow and repair kit side by side to work on them."
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["pillow", "inflate"] }
+}

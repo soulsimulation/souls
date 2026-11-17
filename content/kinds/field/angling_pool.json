@@ -1,0 +1,73 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:angling_pool",
+  "owner": "thing",
+  "state": {
+    "fish": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "bait": { "n": 2, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "bank": { "role": "stand", "at_mm": [0, 0, 1900] }
+  },
+  "geometry": { "bounds_mm": [3200, 460, 3200] },
+  "forms": {
+    "catch": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "creel": { "type": "thing", "select": { "of": "things", "kind": "eden:creel", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [
+        { "need": "state", "field": "bait", "at_least": 1, "says": "no_fish_or_bait" },
+        { "need": "enough", "says": "no_fish_or_bait" },
+        { "need": "room", "says": "creel_full" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "bank" },
+        { "step": "wait", "us": 5000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "fish", "from": "this", "into": { "arg": "creel" }, "amount": 1, "event": "caught" },
+        { "change": "set", "field": "bait", "by": -1, "event": "bait_used" }
+      ]
+    },
+    "release": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "creel": { "type": "thing", "select": { "of": "things", "kind": "eden:creel", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [
+        { "need": "enough", "says": "nothing_to_release" },
+        { "need": "room", "says": "stock_full" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "bank" },
+        { "step": "wait", "us": 2000000 }
+      ],
+      "effects": [
+        { "change": "transfer", "field": "fish", "from": { "arg": "creel" }, "into": "this", "amount": 1, "event": "released" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:angling_pool",
+    "table": [
+      { "part": "fin", "field": "fish", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fin", "field": "fish", "do": "scale", "axis": "x", "range": [0, 3], "to": [1, 1000] },
+      { "part": "lid", "field": "bait", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "lid", "field": "bait", "do": "scale", "axis": "x", "range": [0, 3], "to": [1, 1000] }
+    ],
+    "shape": {"round":20,"shapes":[{"kind":"cyl","at":[0,120,0],"r":1600,"h":240,"segments":16,"tint":"stone"},{"kind":"cyl","at":[0,200,0],"r":1450,"h":120,"segments":16,"tint":"water"},{"kind":"box","at":[0,250,0],"size":[1500,40,180],"round":20,"tint":"fish","role":"fin","pivot":[-750,250,0]},{"kind":"box","at":[0,270,1450],"size":[480,60,160],"round":8,"tint":"tin","role":"lid","pivot":[-240,270,1450]}],"palette":{"stone":"#8b8578","water":"#3f6f86","fish":"#d8a250","tin":"#a0a7ab"},"tags":["fishing","pool","water","object"]}
+  },
+  "text": {
+    "card": "A stocked fishing pool: three fish and three bait; catch into a creel.",
+    "field": "field",
+    "fish": "fish",
+    "angling": "angling",
+    "no_fish_or_bait": "This pool has no supplied fish or bait left; release a catch to return a fish, but spent bait is not restored.",
+    "creel_full": "This creel already holds one fish; release it before catching again.",
+    "nothing_to_release": "Release needs one caught fish in the creel.",
+    "stock_full": "The pool's fish stock is already full.",
+    "empty_hands": "Empty your hands and set the creel down beside the pool before angling."
+  },
+  "card": { "text": "card", "category": "field", "synonyms": ["fish", "angling"] }
+}

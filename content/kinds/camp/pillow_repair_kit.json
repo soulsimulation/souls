@@ -1,0 +1,29 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pillow_repair_kit",
+  "owner": "thing",
+  "state": {
+    "air": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "patches": { "n": 2, "type": "int", "unit": "count", "default": 1, "min": 0, "max": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-60, 300, 0] }
+  },
+  "geometry": { "bounds_mm": [300, 310, 240] },
+  "forms": {},
+  "looks": {
+    "model": "look:pillow_repair_kit",
+    "table": [
+      { "part": "lid", "field": "patches", "do": "show", "range": [0, 1], "to": [0, 1] },
+      { "part": "fill", "field": "air", "do": "scale", "axis": "y", "range": [0, 3], "to": [1, 1000] }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[0,25,0],"size":[300,50,240],"tint":"case"},{"kind":"box","at":[-60,160,0],"size":[110,220,110],"tint":"pump"},{"kind":"box","at":[-60,290,0],"size":[210,35,45],"tint":"handle"},{"kind":"cyl","at":[95,125,-70],"r":40,"h":150,"segments":10,"tint":"air","role":"fill","pivot":[95,50,-70]},{"kind":"box","at":[95,62,55],"size":[75,20,90],"tint":"patch","role":"lid"}],"palette":{"case":"#6b7049","pump":"#758b93","handle":"#463e32","air":"#a9cbd6","patch":"#d2aa6e"},"tags":["camping","tool","repair","object"]}
+  },
+  "text": {
+    "card": "A pillow repair kit: one patch and three portions of pump air.",
+    "camp": "camp",
+    "repair": "repair",
+    "pump": "pump"
+  },
+  "card": { "text": "card", "category": "camp", "synonyms": ["repair", "pump"] }
+}

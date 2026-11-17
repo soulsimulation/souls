@@ -1,0 +1,820 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stone_cairn",
+  "owner": "thing",
+  "state": {
+    "lower": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "loose",
+        "flat",
+        "upright"
+      ],
+      "default": "loose",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "middle": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "loose",
+        "flat",
+        "upright"
+      ],
+      "default": "loose",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "upper": {
+      "n": 3,
+      "type": "enum",
+      "values": [
+        "loose",
+        "flat",
+        "upright"
+      ],
+      "default": "loose",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1150
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1600,
+      850,
+      1250
+    ]
+  },
+  "forms": {
+    "lower_flat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lower",
+          "not": "flat",
+          "says": "already_arranged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lower",
+          "to": "flat",
+          "event": "lower_laid_flat"
+        }
+      ]
+    },
+    "lower_upright": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lower",
+          "not": "upright",
+          "says": "already_arranged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lower",
+          "to": "upright",
+          "event": "lower_stood_upright"
+        }
+      ]
+    },
+    "middle_flat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lower",
+          "not": "loose",
+          "says": "lower_first"
+        },
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "flat",
+          "says": "already_arranged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "flat",
+          "event": "middle_laid_flat"
+        }
+      ]
+    },
+    "middle_upright": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lower",
+          "not": "loose",
+          "says": "lower_first"
+        },
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "upright",
+          "says": "already_arranged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "upright",
+          "event": "middle_stood_upright"
+        }
+      ]
+    },
+    "upper_flat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "loose",
+          "says": "lower_first"
+        },
+        {
+          "need": "state",
+          "field": "upper",
+          "not": "flat",
+          "says": "already_arranged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "upper",
+          "to": "flat",
+          "event": "upper_laid_flat"
+        }
+      ]
+    },
+    "upper_upright": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "loose",
+          "says": "lower_first"
+        },
+        {
+          "need": "state",
+          "field": "upper",
+          "not": "upright",
+          "says": "already_arranged"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "upper",
+          "to": "upright",
+          "event": "upper_stood_upright"
+        }
+      ]
+    },
+    "undo_upper": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "upper",
+          "not": "loose",
+          "says": "nothing_there"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "upper",
+          "to": "loose",
+          "event": "upper_recovered"
+        }
+      ]
+    },
+    "undo_middle": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "upper",
+          "is": "loose",
+          "says": "take_top_first"
+        },
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "loose",
+          "says": "nothing_there"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "loose",
+          "event": "middle_recovered"
+        }
+      ]
+    },
+    "undo_lower": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "is": "loose",
+          "says": "take_top_first"
+        },
+        {
+          "need": "state",
+          "field": "lower",
+          "not": "loose",
+          "says": "all_recovered"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lower",
+          "to": "loose",
+          "event": "lower_recovered"
+        }
+      ]
+    },
+    "dismantle": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lower",
+          "not": "loose",
+          "says": "all_recovered"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "upper",
+          "to": "loose",
+          "event": "upper_recovered"
+        },
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "loose",
+          "event": "middle_recovered"
+        },
+        {
+          "change": "set",
+          "field": "lower",
+          "to": "loose",
+          "event": "lower_recovered"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:stone_cairn",
+    "table": [
+      {
+        "part": "body",
+        "field": "lower",
+        "do": "show",
+        "at": {
+          "loose": 0,
+          "flat": 1,
+          "upright": 1
+        }
+      },
+      {
+        "part": "body",
+        "field": "lower",
+        "do": "scale",
+        "axis": "x",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 500
+        }
+      },
+      {
+        "part": "body",
+        "field": "lower",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 2285
+        }
+      },
+      {
+        "part": "body",
+        "field": "lower",
+        "do": "scale",
+        "axis": "z",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 833
+        }
+      },
+      {
+        "part": "leg.fl",
+        "field": "lower",
+        "do": "show",
+        "at": {
+          "loose": 1,
+          "flat": 0,
+          "upright": 0
+        }
+      },
+      {
+        "part": "head",
+        "field": "middle",
+        "do": "show",
+        "at": {
+          "loose": 0,
+          "flat": 1,
+          "upright": 1
+        }
+      },
+      {
+        "part": "head",
+        "field": "middle",
+        "do": "scale",
+        "axis": "x",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 501
+        }
+      },
+      {
+        "part": "head",
+        "field": "middle",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 2278
+        }
+      },
+      {
+        "part": "head",
+        "field": "middle",
+        "do": "scale",
+        "axis": "z",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 833
+        }
+      },
+      {
+        "part": "head",
+        "field": "lower",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "loose": 0,
+          "flat": 0,
+          "upright": 180
+        }
+      },
+      {
+        "part": "leg.fr",
+        "field": "middle",
+        "do": "show",
+        "at": {
+          "loose": 1,
+          "flat": 0,
+          "upright": 0
+        }
+      },
+      {
+        "part": "neck",
+        "field": "upper",
+        "do": "show",
+        "at": {
+          "loose": 0,
+          "flat": 1,
+          "upright": 1
+        }
+      },
+      {
+        "part": "neck",
+        "field": "upper",
+        "do": "scale",
+        "axis": "x",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 500
+        }
+      },
+      {
+        "part": "neck",
+        "field": "upper",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 2277
+        }
+      },
+      {
+        "part": "neck",
+        "field": "upper",
+        "do": "scale",
+        "axis": "z",
+        "at": {
+          "loose": 1000,
+          "flat": 1000,
+          "upright": 833
+        }
+      },
+      {
+        "part": "neck",
+        "field": "lower",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "loose": 0,
+          "flat": 0,
+          "upright": 180
+        }
+      },
+      {
+        "part": "neck",
+        "field": "middle",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "loose": 0,
+          "flat": 0,
+          "upright": 147
+        }
+      },
+      {
+        "part": "leg.bl",
+        "field": "upper",
+        "do": "show",
+        "at": {
+          "loose": 1,
+          "flat": 0,
+          "upright": 0
+        }
+      }
+    ],
+    "shape": {
+      "round": 20,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            25,
+            0
+          ],
+          "size": [
+            1600,
+            50,
+            1250
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            120,
+            0
+          ],
+          "size": [
+            460,
+            140,
+            300
+          ],
+          "round": 20,
+          "tint": "stone",
+          "role": "body",
+          "pivot": [
+            0,
+            50,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -550,
+            120,
+            250
+          ],
+          "size": [
+            460,
+            140,
+            300
+          ],
+          "round": 20,
+          "tint": "stone",
+          "role": "leg.fl"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            247,
+            0
+          ],
+          "size": [
+            377,
+            115,
+            246
+          ],
+          "round": 20,
+          "tint": "stone",
+          "role": "head",
+          "pivot": [
+            0,
+            190,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            550,
+            107,
+            250
+          ],
+          "size": [
+            377,
+            115,
+            246
+          ],
+          "round": 20,
+          "tint": "stone",
+          "role": "leg.fr"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            350,
+            0
+          ],
+          "size": [
+            294,
+            90,
+            192
+          ],
+          "round": 20,
+          "tint": "stone",
+          "role": "neck",
+          "pivot": [
+            0,
+            305,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            95,
+            -430
+          ],
+          "size": [
+            294,
+            90,
+            192
+          ],
+          "round": 20,
+          "tint": "stone",
+          "role": "leg.bl"
+        }
+      ],
+      "palette": {
+        "base": "#716a51",
+        "stone": "#9a9990"
+      },
+      "tags": [
+        "land_art",
+        "cairn",
+        "stones",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A cairn of three supplied stones: stack them flat or upright, lower first.",
+    "field": "field",
+    "cairn": "cairn",
+    "stack": "stack",
+    "lower_first": "Build the lower tiers first.",
+    "already_arranged": "This tier already has that arrangement.",
+    "take_top_first": "Undo recovers only the top stone; recover the one above first.",
+    "nothing_there": "That tier holds no stone to recover.",
+    "all_recovered": "All three supplied stones are already recovered.",
+    "empty_hands": "Empty your hands before arranging the cairn."
+  },
+  "card": {
+    "text": "card",
+    "category": "field",
+    "synonyms": [
+      "cairn",
+      "stack"
+    ]
+  }
+}
