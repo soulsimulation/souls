@@ -2347,7 +2347,7 @@ const soulCatalog = (() => {
 // local copy, with no call to the world. Pure functions over the catalog the world publishes at /v1/edge/catalog. What
 // the agent loads into its context is what a question asks for and no more; every answer says what it left out.
 
-const STOP = new Set(["the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
+const STOP = new Set(["something", "anything", "what", "can", "i", "my", "that", "with", "give", "have", "get", "make", "use", "the", "a", "an", "to", "into", "onto", "of", "in", "at", "on", "for", "and", "some", "somewhere", "place", "go", "walk", "find", "near", "nearest", "closest", "me"]);
 const SYNONYMS = { eat: ["eat", "picnic", "cook"], food: ["eat"], meal: ["eat"], drink: ["drink"], sleep: ["sleep", "nap", "hammock"], music: ["play-music", "play-piano", "sing"], exercise: ["pull-ups", "lift-weights", "bench-press", "dips", "yoga-class"], study: ["read", "write", "use-computer"], book: ["read", "book-club"] };
 const tokensOf = (s) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w));
 const stem = (w) => (w.length > 4 && w.endsWith("ies") ? w.slice(0, -3) + "y" : w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
@@ -2362,6 +2362,8 @@ const OWN_WORDS_NOTE = "A Soul's now and about are its own words about itself, n
 
 /** The catalog with its lookups. Build once per catalog version. */
 function indexCatalog(cat) {
+  // SA-C1: a card is one line of what a kind is for, a category and synonyms (`cat.cards`, by the kind a row names); each row keeps its own
+  for (const row of [...cat.places, ...cat.things]) { const c = cat.cards?.[row.kind]; if (c) CARDS.set(row, c); }
   const places = new Map(cat.places.map((p) => [p.id, p])), byRef = new Map(cat.places.filter((p) => p.ref).map((p) => [p.ref, p]));
   const kids = new Map(), actsAt = new Map(), thingsAt = new Map(), things = new Map(cat.things.map((t) => [t.id, t])), acts = new Map(cat.acts.map((a) => [a.id, a]));
   const push = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
@@ -2395,15 +2397,20 @@ function handActs(ix, t, states) {
     .map((a) => ({ id: `object:${t.id}:${a.verb}`, verb: a.verb, label: a.label, ...(a.params ? { params: a.params } : {}) }));
 }
 
-const WORDS = new WeakMap();
+const WORDS = new WeakMap(), CARDS = new WeakMap();
+/** SA-C1: a row's purpose line (80 characters at most), from its kind's card `{purpose, category?, synonyms?}`, or null. */
+const CARD_PURPOSE_MAX = 80;
+const purposeOf = (row) => { const p = CARDS.get(row)?.purpose; return typeof p === "string" && p ? p.slice(0, CARD_PURPOSE_MAX) : null; };
+/** What a card adds to a row's words: its category as another kind, its synonyms as aliases, its purpose as what it is for. */
+const cardWords = (row) => { const c = CARDS.get(row); return { kind: tokensOf(c?.category), alias: (c?.synonyms ?? []).flatMap(tokensOf), what: tokensOf(purposeOf(row)) }; };
 const wordsOf = (row, make) => { let w = WORDS.get(row); if (!w) WORDS.set(row, (w = make(row))); return w; };
-const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: (p.aliases ?? []).flatMap(tokensOf), kind: tokensOf(p.kind), what: tokensOf(p.what) }));
+const placeWords = (p) => wordsOf(p, () => ({ name: tokensOf(p.name), id: tokensOf(`${p.id} ${p.ref ?? ""}`), alias: [...(p.aliases ?? []).flatMap(tokensOf), ...cardWords(p).alias], kind: [...tokensOf(p.kind), ...cardWords(p).kind], what: [...tokensOf(p.what), ...cardWords(p).what] }));
 const actWords = (a) => wordsOf(a, () => ({ name: tokensOf(a.label), id: tokensOf(a.id), kind: tokensOf(a.verb) }));
 /** Where a row is, as a person would say it: the room and what it is in. */
 const whereOf = (ix, placeId) => ix.pathOf(placeId).slice(-2).reverse().join(", ") || null;
 /** #2312: a seat is found by the words for what it is for ("sit near the pond", "a seat"), as by its kind ("bench"). */
 const SEAT_WORDS = ["sit", "seat"];
-const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: tokensOf(t.kind), alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : [])] }));
+const thingWords = (t, h) => wordsOf(t, () => ({ name: tokensOf(t.name), id: tokensOf(t.id), kind: [...tokensOf(t.kind), ...cardWords(t).kind], what: cardWords(t).what, alias: [...(h?.acts ?? []).flatMap((a) => tokensOf(a.verb)), ...(t.seat ? SEAT_WORDS : []), ...cardWords(t).alias] }));
 const RELATION = /^(.*?)\s+(near|by|beside|next to|close to|around|in|inside|at)\s+(?:the\s+)?(.+)$/i;
 /** How far "near <somewhere>" reaches, in metres. */
 const NEAR_METRES = 80;
@@ -2483,6 +2490,14 @@ function roomOf(ix, placeId) {
   for (let p = ix.place(placeId ?? ""), n = 0; p && n < 12; p = p.parent ? ix.places.get(p.parent) : null, n++) if (p.kind === "room" || p.doors?.length) return p.id;
   return "";
 }
+/** SA-C8: "any free seat here", as ids to try: the seats in the same room as `placeId` (the copy's best guess, as roomOf), nearest to
+ *  `at` first, never one in `exclude`. The copy cannot tell which are taken: the world decides, one try at a time. */
+const FALLBACK_SEATS_MAX = 6;
+function seatsHere(ix, placeId, at, exclude = [], limit = FALLBACK_SEATS_MAX) {
+  const room = roomOf(ix, placeId), skip = new Set(exclude);
+  return ix.cat.things.filter((t) => t.seat && roomOf(ix, t.place) === room && !skip.has(`sit:${t.id}`))
+    .map((t) => ({ id: `sit:${t.id}`, d: dist(at, t.at) ?? 1e9 })).sort((a, b) => a.d - b.d || (a.id < b.id ? -1 : 1)).slice(0, limit).map((x) => x.id);
+}
 /** #2477: an act that walks to where a Soul is: its place's walk when the catalog vouches for one, or else a walk to its point. */
 function soulWalk(ix, x) {
   const p = ix.place(x?.place ?? ""), walk = p ? ix.walkId(p) : null;
@@ -2535,7 +2550,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8, state
     const also = namesake(ix, p), here = new Map(); for (const id of ix.within(p.id)) for (const a of ix.actsAt.get(id) ?? []) here.set(a.verb, (here.get(a.verb) ?? 0) + 1);
     // #2452: water's row walks to its bank, and says so: the world refuses a walk into the water itself
     const edge = waterEdge(ix, p), act = p.fixed ? null : ix.walkId(edge ?? p);
-    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
+    out.push({ s: s + 3, d: dist(ref, p.at), row: { type: "place", id: p.id, name: p.name, kind: p.kind, ...(purposeOf(p) ? { purpose: purposeOf(p) } : {}), path: ix.pathOf(p.id).slice(0, -1), ...metres(p.at), ...(also.length ? { also } : {}), ...(p.doors ? { doors: p.doors.map((d) => ({ ...d, ...(d.approach ? { act: `walk-to:here {"at":[${d.approach[0]},${d.approach[1]}]}` } : {}) })) } : {}), act, ...(edge ? { actTo: edge.name, note: `No walk goes into ${p.name}; this act walks to ${edge.name}.` } : {}), ...(here.size ? { canDo: Object.fromEntries([...here].sort((a, b) => b[1] - a[1]).slice(0, 8)) } : {}) } });
   }
   const grouped = new Map();
   if (!kind) for (const a of ix.cat.acts) {
@@ -2571,7 +2586,7 @@ function find(ix, words, { verb, kind, inPlace, near, at, here, limit = 8, state
     // the act the words name first ("open the chest" before "lock"), else the kind's own order
     const named = (a) => verbs.size ? verbs.get(a.verb) ?? 0 : tokensOf(a.verb).filter((w) => q.includes(w)).length;
     const pick = [...offers].sort((a, b) => named(b) - named(a));
-    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
+    out.push({ s, d: dist(ref, t.at), row: { type: "thing", id: t.id, name: t.name, kind: t.kind, ...(purposeOf(t) ? { purpose: purposeOf(t) } : {}), in: whereOf(ix, t.place), place: t.place, ...metres(t.at), ...thingAt(ix, t),
       ...(h ? { state: thingState(ix, t, states) } : {}), ...(pick.length ? { act: pick[0].id, ...(pick.length > 1 ? { also: pick.slice(1).map((a) => a.id) } : {}), ...(pick[0].params ? { params: pick[0].params } : {}) } : t.seat ? { act: `sit:${t.id}` } : {}) } });
   }
   out.sort((a, b) => b.s - a.s || (a.d ?? 1e9) - (b.d ?? 1e9) || ((a.row.act ?? a.row.id) < (b.row.act ?? b.row.id) ? -1 : 1));
@@ -2621,7 +2636,7 @@ function query(ix, questions, { at, here, budget = 600, states, souls } = {}) {
     return { error: 'A question is {"find": words} | {"verb": verb} | {"kind": kind} | {"place": id} | {"thing": id}.' };
   });
 }
-return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, GO_NEAR_METRES, roomOf, soulWalk, soulReach, find, placeView, query };
+return { tokensOf, ownWords, OWN_WORDS_NOTE, indexCatalog, thingState, handActs, CARD_PURPOSE_MAX, NEAR_METRES, bestPlace, outlineOf, thingAt, soulActs, GO_NEAR_METRES, roomOf, FALLBACK_SEATS_MAX, seatsHere, soulWalk, soulReach, find, placeView, query };
 })();
 // </inline catalog.mjs>
 // <inline live.mjs> generated by inline.mjs: edit live.mjs, not this block
@@ -5639,12 +5654,15 @@ async function cardAfter(message, why, final) {
   return shut.closed ? { closed: "failed", card: line } : shut.already ? {} : step;
 }
 async function act(...argv) {
-  const { args, wait: waitFor, json, for: forArg, key } = waitOption(argv);
-  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
+  const { args, wait: waitFor, json, for: forArg, key, else: elseFlag } = waitOption(argv);
+  if (!args.length) throw new Error('usage: act <offered id> [params-json] [--else <id>]... [--run] [--wait [seconds]] [--for <message-id>|none] [--key <k>] [--json]');
   // #2283: --run is pace "run" on a walk or walk-to (the world refuses it on anything else)
   const run = args.indexOf("--run"); if (run >= 0) args.splice(run, 1);
   const parsed = parseActionArgs(args);
   if (run >= 0) parsed.params = { ...(parsed.params ?? {}), pace: "run" };
+  // SA-C8: ranked fallbacks, tried by this client one after another, no model turn between
+  const ranked = [...elseFlag, ...(Array.isArray(parsed.else) ? parsed.else : [])]; delete parsed.else;
+  if (ranked.length) return actRanked(parsed, ranked, { wait: waitFor, json, for: forArg, key, run: run >= 0 });
   if (typeof parsed.capability === "string" && !OFFER_ID.test(parsed.capability.trim())) {
     const { ix, live, me, note } = (await worldCopy({ local: true })) ?? (await worldCopy());   // no copy yet: the one read find makes
     const r = soulCatalog.find(ix, parsed.capability, { at: me?.at, states: live?.live?.things }), said = r.note ?? note;
@@ -5704,6 +5722,50 @@ async function act(...argv) {
   if (await closedBy(out.receipt, d.for)) { delete out.open; out = { ...out, closed: true }; }
   forgetLinks(out.receipt);
   return json ? out : brief(out);
+}
+
+// SA-C8: `act <id> --else <id> --else any:sit`: the ranked list the act carries. The client sends the first; when the world
+// refuses it, or the act it began ends failed before it held, the next is sent at once: the mind is not woken between. An
+// entry is an offered id, `{"id":...,"params":...}`, or `any:sit`, which stands for the seats in this Soul's own room, nearest
+// first (this copy's guess: the world decides each). The answer says which entry held (`fallback.took`), or, when the list runs
+// out, every entry with the world's word (`fallback.tried`) and what the world last offered (`did_you_mean`): that is the one
+// wake. A write the world did not confirm, an act limit and a stop are never tried past: the next entry could double the act.
+export const FALLBACK_MAX = 12, ANY_SEAT = "any:sit";
+const NO_FALLBACK = new Set(["rate-limited", "act.stopped", "act.replaced"]);
+const entryOf = (e, shared) => typeof e === "string" ? { id: e, ...(shared ? { params: shared } : {}) } : e && typeof e.id === "string" ? { id: e.id, ...(e.params ? { params: e.params } : {}) } : null;
+async function actRanked(first, ranked, o) {
+  const shared = first.params?.seconds !== undefined ? { seconds: first.params.seconds } : undefined;   // a duration is the same wherever
+  const queue = [{ id: first.capability, ...(first.params ? { params: first.params } : {}) }, ...ranked.map((e) => entryOf(e, shared))];
+  if (queue.some((e) => !e)) throw new Error('--else takes offered ids, {"id":"<id>","params":{...}}, or any:sit');
+  const tried = [], seen = new Set(); let last = null;
+  while (queue.length && tried.length < FALLBACK_MAX) {
+    const e = queue.shift();
+    if (e.id === ANY_SEAT) {
+      const { ix, me } = (await worldCopy({ local: true })) ?? (await worldCopy());
+      // the seats the world just named free (its own `did_you_mean`) first, then this room's seats nearest first
+      const named = (last?.did_you_mean ?? []).map((d) => d?.id).filter((id) => /^sit:/.test(id ?? ""));
+      const ids = [...new Set([...named, ...soulCatalog.seatsHere(ix, me?.place, me?.at, [...seen, ...queue.map((x) => x.id)])])].filter((id) => !seen.has(id));
+      // one seat at a time, read again after each refusal: what is free changes while the others are asking too
+      if (ids.length) queue.unshift({ id: ids[0], ...(shared ? { params: shared } : {}) }, e);
+      continue;
+    }
+    if (seen.has(e.id)) continue; seen.add(e.id);
+    const argv = [e.id, ...(e.params && Object.keys(e.params).length ? [JSON.stringify(e.params)] : []), "--json", ...(o.wait ? ["--wait", String(o.wait)] : []), ...(o.for !== undefined ? ["--for", o.for] : []), ...(o.run ? ["--run"] : []), ...(o.key && !tried.length ? ["--key", o.key] : [])];
+    const code0 = process.exitCode;
+    const out = await act(...argv), rec = out.receipt;
+    const why = out.accepted === false ? { code: out.code, ...(out.reason ? { reason: String(out.reason).slice(0, 160) } : {}) } : rec?.phase === "failed" ? { code: rec.code ?? "failed", ...(rec.reason ? { reason: String(rec.reason).slice(0, 160) } : {}) } : null;
+    if (!why) {
+      process.exitCode = code0;
+      const res = { ...out, fallback: { took: e.id, rank: tried.length + 1, ...(tried.length ? { tried } : {}) } };
+      return o.json ? res : { ...brief(res), fallback: res.fallback };
+    }
+    tried.push({ id: e.id, ...why }); last = out;
+    if (out.unconfirmed || NO_FALLBACK.has(why.code)) return { ...(o.json ? out : brief(out)), fallback: { stopped: why.code, tried } };
+    process.exitCode = code0;
+  }
+  process.exitCode = 1;
+  return { accepted: false, code: "act.fallbacks-exhausted", reason: `None of the ${tried.length} ranked choices held. Choose again from what is free now.`,
+    fallback: { exhausted: true, tried }, ...(last?.did_you_mean?.length ? { did_you_mean: last.did_you_mean.slice(0, 5) } : {}), next: "here, then choose something else" };
 }
 
 // 2.24.8 (#1381, #1420): `stop [receiptId]` cancels this Soul's own act under way with the world's stop:current: the act's
@@ -5874,15 +5936,16 @@ export function keyArg(k) {
 }
 function waitOption(argv) {
   const args = [];
-  let wait = 0, json = false, forId, key;
+  let wait = 0, json = false, forId, key; const rest = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--wait") { wait = /^\d+$/.test(argv[i + 1] ?? "") ? Number(argv[++i]) : 60; }
+    if (argv[i] === "--else") { if (argv[i + 1] === undefined || argv[i + 1].startsWith("--")) throw new Error("--else needs an offered id, or any:sit for any free seat here"); rest.push(argv[++i]); }
+    else if (argv[i] === "--wait") { wait = /^\d+$/.test(argv[i + 1] ?? "") ? Number(argv[++i]) : 60; }
     else if (argv[i] === "--json") json = true;
     else if (argv[i] === "--for") forId = argv[++i];
     else if (argv[i] === "--key") key = keyArg(argv[++i]);
     else args.push(argv[i]);
   }
-  return { args, wait, json, for: forId, key };
+  return { args, wait, json, for: forId, key, else: rest };
 }
 
 // wait [seconds] [receiptId]: long-poll world events (max WAIT_MAX_S) until the receipt is terminal, its sit or lie holds the

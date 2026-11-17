@@ -41,38 +41,6 @@ const r3 = (x: number) => Math.round(x * 1000) / 1000;
 function jsonFiles(dir: string): string[] {
   try { return readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? jsonFiles(join(dir, e.name)) : e.name.endsWith('.json') ? [join(dir, e.name)] : []); } catch { return []; }
 }
-let kindsCache: Record<string, Entry> | null = null, movesCache: Record<string, { reach_mm: number }> | null = null;
-const missed = new Set<string>();
-/** The published entries by kind, read once (a kind not found is looked for again once, then not until a restart). */
-function kinds(kind?: string): Record<string, Entry> {
-  if (!kindsCache || (kind && !kindsCache[kind] && !missed.has(kind))) {
-    if (kindsCache && kind) missed.add(kind);
-    kindsCache = {};
-    for (const f of jsonFiles(KINDS_DIR)) { try { const e = JSON.parse(readFileSync(f, 'utf8')); if (e?.format === 'souls-entry/1') kindsCache[e.kind] = e; } catch { /* a broken file is check.mjs's to report */ } }
-  }
-  return kindsCache;
-}
-function moves(): Record<string, { reach_mm: number }> {
-  if (!movesCache) {
-    movesCache = {};
-    for (const f of jsonFiles(MOVES_DIR)) { try { const m = JSON.parse(readFileSync(f, 'utf8')); if (m?.format === 'souls-move/1') movesCache[m.move] = { reach_mm: m.reach_mm }; } catch { /* move.mjs reports it */ } }
-  }
-  return movesCache;
-}
-
-/** The catalog's copy of an entry thing (SA-C3): its kind, from the def's `entry` param, and the entry itself; else null. */
-export function catalogEntry(def: StoredDef | undefined): { kind: string; body: Entry } | null {
-  const entry = entryOf(def); return entry ? { kind: entry.kind, body: entry } : null;
-}
-/** The entry a def was loaded from (load.mjs: tag `entry`, param `entry` = `<kind>@<hash>`), or null. */
-export function entryOf(def: StoredDef | undefined): Entry | null {
-  if (!def?.tags?.includes('entry')) return null;
-  const ref = (def.params as Record<string, { default?: unknown }> | undefined)?.entry?.default;
-  if (typeof ref !== 'string' || !ref.includes(':')) return null;
-  const kind = ref.split('@')[0];
-  return kinds(kind)[kind] ?? null;
-}
-
 /** Why this adapter cannot carry a form out on today's engine, or null when it can. */
 export function unmapped(form: Form & { takes?: unknown }): string | null {
   if (form.starts !== 'act' || (form.who !== 'anyone' && form.who !== undefined)) return 'not started by anyone\'s act';
@@ -90,14 +58,6 @@ export function unmapped(form: Form & { takes?: unknown }): string | null {
   return null;
 }
 
-/** The actions an entry thing's def is offered (actuators.ts `actionsOf`): one per form this adapter can carry out. */
-export function formActions(def: StoredDef): Action[] {
-  const entry = entryOf(def); if (!entry) return [];
-  return Object.entries(entry.forms ?? {}).filter(([, f]) => !unmapped(f)).map(([name]) => (
-    { name, label: name.replace(/_/g, ' '), roles: 'anyone', reach: 'anywhere', params: {}, when: [], then: [] }
-  )) as unknown as Action[];
-}
-
 export type FormsHost = {
   model: WorldModel;
   engine: { world: { entities: Record<string, any>; tick: number }; standableNearV1?(at: Vec2, level?: number, except?: string, minClear?: number, maxRing?: number): Vec2 | null; clearanceAtV1?(x: number, z: number, level?: number): number };
@@ -107,6 +67,45 @@ export type FormsHost = {
 };
 
 export function createFormsAdapter(h: FormsHost) {
+  // #2416 A1: the entries and moves this world has read are its own, on its adapter, never module state
+  let kindsCache: Record<string, Entry> | null = null, movesCache: Record<string, { reach_mm: number }> | null = null;
+  const missed = new Set<string>();
+  /** The published entries by kind, read once per world (a kind not found is looked for again once, then not until a restart). */
+  function kinds(kind?: string): Record<string, Entry> {
+    if (!kindsCache || (kind && !kindsCache[kind] && !missed.has(kind))) {
+      if (kindsCache && kind) missed.add(kind);
+      kindsCache = {};
+      for (const f of jsonFiles(KINDS_DIR)) { try { const e = JSON.parse(readFileSync(f, 'utf8')); if (e?.format === 'souls-entry/1') kindsCache[e.kind] = e; } catch { /* a broken file is check.mjs's to report */ } }
+    }
+    return kindsCache;
+  }
+  function moves(): Record<string, { reach_mm: number }> {
+    if (!movesCache) {
+      movesCache = {};
+      for (const f of jsonFiles(MOVES_DIR)) { try { const m = JSON.parse(readFileSync(f, 'utf8')); if (m?.format === 'souls-move/1') movesCache[m.move] = { reach_mm: m.reach_mm }; } catch { /* move.mjs reports it */ } }
+    }
+    return movesCache;
+  }
+  /** The entry a def was loaded from (load.mjs: tag `entry`, param `entry` = `<kind>@<hash>`), or null. */
+  function entryOf(def: StoredDef | undefined): Entry | null {
+    if (!def?.tags?.includes('entry')) return null;
+    const ref = (def.params as Record<string, { default?: unknown }> | undefined)?.entry?.default;
+    if (typeof ref !== 'string' || !ref.includes(':')) return null;
+    const kind = ref.split('@')[0];
+    return kinds(kind)[kind] ?? null;
+  }
+  /** The catalog's copy of an entry thing (SA-C3): its kind, from the def's `entry` param, and the entry itself; else null. */
+  function catalogEntry(def: StoredDef | undefined): { kind: string; body: Entry } | null {
+    const entry = entryOf(def); return entry ? { kind: entry.kind, body: entry } : null;
+  }
+  /** The actions an entry thing's def is offered (actuators.ts `actionsOf`, through the act host): one per form this
+   *  adapter can carry out. */
+  function actions(def: StoredDef): Action[] {
+    const entry = entryOf(def); if (!entry) return [];
+    return Object.entries(entry.forms ?? {}).filter(([, f]) => !unmapped(f)).map(([name]) => (
+      { name, label: name.replace(/_/g, ' '), roles: 'anyone', reach: 'anywhere', params: {}, when: [], then: [] }
+    )) as unknown as Action[];
+  }
   const M = () => h.model;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
@@ -183,7 +182,7 @@ export function createFormsAdapter(h: FormsHost) {
   }
   /** Is this capability a form of an entry thing (so tea.ts does not watch the body for it)? */
   const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability); return !!m && !!thing(m[1])?.entry.forms?.[m[2]]; };
-  return { plan, outcome, owns };
+  return { plan, outcome, owns, actions, catalogEntry };
 }
 export type FormsAdapter = ReturnType<typeof createFormsAdapter>;
 
