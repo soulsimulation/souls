@@ -30,7 +30,7 @@ test('A1: a field in a range is accepted; a malformed range is refused', () => {
   refused(withNeed({need: 'state', field: 'charge', at_most: 0.5}), `${P}.at_most`, 'whole number');
   refused(withNeed({need: 'state', field: 'charge', at_least: 9, at_most: 1}), P, 'nothing is in that range');
   refused(withNeed({need: 'state', field: 'charge', at_most: 9, is: 3}), P, 'not both');
-  refused(withNeed({need: 'state', field: 'water', at_most: 9}), `${P}.field`, 'int or duration');
+  refused(withNeed({need: 'state', field: 'heating', at_most: 9}), `${P}.field`, 'int or duration');
   refused(withNeed({need: 'state', field: 'charge', at_most: 9, extra: 1}), `${P}.extra`, 'unknown key');
   refused(withNeed({need: 'state', field: 'charge'}), P, 'exactly one');
 });
@@ -49,12 +49,12 @@ test('A2: the kettle fills from a tap (data: the nearest thing of kind eden:tap)
   assert.deepEqual(F.validateEntry(tap), []);
   assert.equal(tap.points.outlet.role, 'outlet');
   assert.ok(F.kindRefs(kettle).includes('eden:tap'));
-  assert.equal(kettle.state.water.default, 'empty');
+  assert.equal(kettle.state.water.default, 0);
   const fill = kettle.forms.fill;
-  assert.deepEqual(fill.needs.find(n => n.need === 'state'), {need: 'state', field: 'water', is: 'empty'});
+  assert.deepEqual(fill.needs.find(n => n.need === 'state'), {need: 'state', field: 'water', at_most: 0});
   assert.ok(fill.needs.some(n => n.need === 'held_by_actor'));
   assert.deepEqual(fill.steps, [{step: 'move', move: 'fill', toward: {arg: 'from'}}]);
-  assert.deepEqual(fill.effects.map(e => [e.field, e.to]), [['water', 'cold']]);
+  assert.deepEqual(fill.effects.map(e => [e.change, e.field, e.from, e.into, e.amount]), [['transfer', 'water', {arg: 'from'}, 'this', 'room']]);
   assert.deepEqual(kettle.howtos.tea.steps.map(s => s.form), ['fill', 'switch_on', 'pour']);
   // Without the tap in its selector the fill would be a magic refill: the selector names the kind.
   assert.equal(fill.takes.from.select.kind, 'eden:tap');

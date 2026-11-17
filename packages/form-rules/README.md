@@ -18,7 +18,9 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 - `{verdict: "no", reason, need, detail, fix, read}`: the first unmet need, by its index in the form. `reason` is one
   of `REASONS`; `detail` says what is missing (the field, what was found and wanted; the slot; the point and move;
   the link and how many there are). `fix` is one act that would meet the need, taken only from data: a form of the
-  same thing that anyone may start and whose `set`, `link` or `unlink` effect meets it; the same form with another
+  same thing that anyone, or its holder, may start and whose `set` (with `by`: the value it adds up to, within the field's bounds, so a crank that adds
+  charge fixes too little charge), `link` or `unlink` effect meets it, or whose
+  `transfer` into the thing would meet it at the field's `max` (out of it: at its `min`); the same form with another
   free slot; or a closed step (`walk_to` a point, `take`, `put`). Where the data offers none, `fix` is `null`.
 - `{verdict: "unknown", need, node, field | link, read}`: a need read a field or link outside the asker's audience
   and no need was definitely unmet. A definite "no" from another need wins over "unknown".
@@ -35,7 +37,8 @@ node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed 
 there, compared as squares in big integers), `hand` (`free: true` or `holds: <kind>`), `held_by_actor`, and `linked`
 / `unlinked` (whether the thing has any link of that type; whether the actor holds one is "who may", SA-F7a), and
 `room` (every amount the form's `transfer` effects move has room where it lands, else `no_room`: a pour never
-overflows). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
+overflows) and `enough` (every amount they ask is there to give at the source, else `not_enough`, with the source, what
+it can give and the amount asked). A need on a `timed` field reads its value at the state's `now_us` (below). The range, hand and room needs and the `transfer` effect are not in the entry format yet; their cases use
 the test kinds in `cases/kinds/test/`.
 
 ## A case
@@ -92,7 +95,7 @@ is left out, and a `set` without `to` clears the field to its default. `outsideP
 leaves the profile, with the profile's name for the refusal (`simple`, `null`, `float`, `text-not-name`, ...);
 `effects` refuses to write such a value and `apply` refuses to accept one.
 
-The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us`, or `to` when the effect gives one, with the new rate, `{value, per_s, set_us}` written whole); `transfer` moves an amount of one
+The entry's effects map to changes like this: `set` sets a field of the thing (on a timed value, `rate`: the value at the state's `now_us`, or `to` when the effect gives one, with the new rate, `{value, per_s, set_us}` written whole; with `by` instead of `to`, the int value plus `by`, refused as `out_of_range` outside the field's `min`, or 0, and `max`, and written as `to` alone, since nothing balances a sip); `transfer` moves an amount of one
 int field between two nodes (`from`, `into`: `"this"` or an argument; `amount`: a whole number, an argument, or
 `"room"`), the least of what it asks and what the source has above its field's `min`, as two `set`s whose `by`s sum
 to zero; `reparent` moves the actor or the thing into a slot or the actor's first free hand (holding is a parent);

@@ -129,6 +129,12 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
         // a set may also give the value from now on (a planter watered full), else the value settles where it is
         if (e.to !== undefined && !Number.isSafeInteger(e.to)) return refuse(i, 'bad_input', { what: 'malformed_value', field: e.field! });
         out.push({ change: 'set', node: self, field: e.field!, n: def.n, to: { value: e.to === undefined ? now : e.to as number, per_s: e.rate!, set_us: state.now_us! } });
+      } else if (has(e, 'by')) {
+        // a count or an amount used up (a sip): the field's value plus `by`, within its bounds; nothing balances it
+        const held = has(work[self].fields, e.field!) ? work[self].fields![e.field!] : def.default;
+        const to = Number.isSafeInteger(held) && Number.isSafeInteger(e.by) ? (held as number) + e.by! : null;
+        if (to === null || to < (def.min ?? 0) || (def.max !== undefined && to > def.max)) return refuse(i, 'bad_input', { what: 'out_of_range', field: e.field! });
+        out.push({ change: 'set', node: self, field: e.field!, n: def.n, to });
       } else {
       const to = stored(def, arg(e.to, args));
       out.push({ change: 'set', node: self, field: e.field!, n: def.n, ...(to === undefined ? {} : { to }) });

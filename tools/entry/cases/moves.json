@@ -7,6 +7,10 @@
     { "why": "a reach of a full arm and more", "edit": { "reach_mm": 900 }, "path": "reach_mm", "word": "arm" },
     { "why": "no recovery", "edit": { "phases": { "start_up_us": 250000 } }, "path": "phases.recovery_us", "word": "required" }
   ],
+  "pour": [
+    { "why": "a kettle's spout over a cup's rim (the spout's offset from the grip is read from the kettle entry)", "from_kind": "content/kinds/kitchen/kettle.json", "grip": "grip", "spout": "spout", "record": { "start_us": 2000000, "from_mm": [0, 900, 300], "contact_mm": [450, 780, 150] } },
+    { "why": "a watering can's rose over a planter's rim (no can entry yet: the offset is the case's)", "effector_mm": [380, -60, 0], "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [900, 520, -120] } }
+  ],
   "pose": [
     {
       "why": "a press on a button: rest, middle of start-up, contact, after recovery",
@@ -31,6 +35,18 @@
       "move": "press",
       "record": { "start_us": 0, "from_mm": [0, 0, 0], "contact_mm": [-3, 3, -1] },
       "at_us": [[125000, [-2, 2, -1]]]
+    }
+  ],
+  "consume": [
+    {
+      "why": "a cup's rim at the mouth, one sip (the rim is 90 mm above the grip, toward the face)",
+      "effector_mm": [0, 90, 60],
+      "record": { "start_us": 0, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 1 }
+    },
+    {
+      "why": "a bread roll's bitten edge at the mouth, three bites (no roll entry: the offset is the case's)",
+      "effector_mm": [0, 40, 70],
+      "record": { "start_us": 500000, "from_mm": [0, 900, 300], "contact_mm": [0, 1500, 200], "count": 3 }
     }
   ]
 }

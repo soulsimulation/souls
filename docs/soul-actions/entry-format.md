@@ -232,10 +232,14 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
-  `transfer`). A range need also takes a `timed` field.
+  `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
+  `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
+  `timed` field.
   SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
-  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
-  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
+  water comes from a thing in the world, never from a refill the kettle does by itself. Its effect is a `transfer` of
+  `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
+  as its fix. Reach to another thing's point is not a need the rules can read yet, so `fill` holds the kettle and needs
+  it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
@@ -246,7 +250,9 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   defines what each does. A `set` on a timed value gives its new `rate` (a whole number, in the field's unit per
   second) and, if it gives no `to`, its value is settled at the act's time; a `to` (a whole number) is the value from
   the act's time on (SA-V4b: watering soaks the planter's soil full). The kettle's switch gives its heat a rate and a
-  timer for the boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before.
+  timer for the boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
+  an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
+  count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
@@ -303,7 +309,10 @@ classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_o
 `effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
 `start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
 includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
-point and then to a second one.
+point and then to a second one. `pour` (SA-D5a, [#2858](https://github.com/soulsimulation/souls/issues/2858)) has the effector
+`held_point`: a named point of the thing in the hand (a spout), so the reach is measured from it. Its `pour_us` is a
+contact window after start-up (a move slides or pours, not both); the record adds `effector_mm`, the point's offset from
+the hand, and the hand is placed so the point stays on `contact_mm` (the target's rim) for the window. `effectorAt` gives that point. `consume` (SA-D5c, [#2860](https://github.com/soulsimulation/souls/issues/2860)) is a sip or a bite: the same effector, a window `consume_us` per `count` in the record at the body's mouth point (`contact_mm`), claiming the hand and the mouth (`voice`) and leaving the gaze free.
 
 ```sh
 node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference

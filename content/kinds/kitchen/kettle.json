@@ -3,7 +3,7 @@
   "kind": "eden:kettle",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "enum", "values": ["empty", "cold", "hot"], "default": "empty", "audience": { "rule": "everyone" } },
+    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1700, "audience": { "rule": "everyone" } },
     "heating": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
     "heat": { "n": 3, "type": "timed", "unit": "mC", "default": { "value": 25000, "per_s": 0, "set_us": 0 }, "min": 25000, "max": 100000, "audience": { "rule": "everyone" } }
   },
@@ -23,17 +23,17 @@
       },
       "needs": [
         { "need": "held_by_actor" },
-        { "need": "state", "field": "water", "is": "empty" }
+        { "need": "state", "field": "water", "at_most": 0 }
       ],
       "steps": [{ "step": "move", "move": "fill", "toward": { "arg": "from" } }],
-      "effects": [{ "change": "set", "field": "water", "to": "cold", "event": "filled" }]
+      "effects": [{ "change": "transfer", "field": "water", "from": { "arg": "from" }, "into": "this", "amount": "room", "event": "filled" }]
     },
     "switch_on": {
       "who": "anyone",
       "starts": "act",
       "needs": [
         { "need": "state", "field": "heating", "is": false },
-        { "need": "state", "field": "water", "not": "empty" },
+        { "need": "state", "field": "water", "at_least": 1 },
         { "need": "within_reach", "point": "button" }
       ],
       "steps": [{ "step": "move", "move": "press", "at": "button" }],
@@ -64,16 +64,16 @@
       },
       "needs": [
         { "need": "held_by_actor" },
-        { "need": "state", "field": "water", "not": "empty" }
+        { "need": "state", "field": "water", "at_least": 1 }
       ],
       "steps": [{ "step": "move", "move": "pour", "at": "spout", "toward": { "arg": "into" } }],
-      "effects": [{ "change": "set", "field": "water", "to": "empty", "event": "poured" }]
+      "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": "room", "event": "poured" }]
     }
   },
   "looks": {
     "model": "look:kettle",
     "table": [
-      { "part": "fill", "field": "water", "do": "show", "at": { "empty": 0, "cold": 1, "hot": 1 } },
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 1700], "to": [0, 1000] },
       { "part": "light", "field": "heating", "do": "tint", "at": { "true": "#ff3b14", "false": "#4a4542" } },
       { "part": "lid", "field": "heat", "do": "steam", "range": [80000, 100000], "to": [0, 1000] }
     ],

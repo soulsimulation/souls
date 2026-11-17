@@ -9,7 +9,7 @@
         "actor": "b1",
         "now_us": 210000000,
         "nodes": {
-          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 1, "heat": { "value": 25000, "per_s": 500, "set_us": 60000000 } } },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 1700, "heating": 1, "heat": { "value": 25000, "per_s": 500, "set_us": 60000000 } } },
           "b1": { "hands": {} }
         }
       },
@@ -23,7 +23,7 @@
         "actor": "b1",
         "now_us": 209999999,
         "nodes": {
-          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": 1, "heat": { "value": 25000, "per_s": 500, "set_us": 60000000 } } },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 1700, "heating": 1, "heat": { "value": 25000, "per_s": 500, "set_us": 60000000 } } },
           "b1": { "hands": {} }
         }
       },

@@ -1,0 +1,49 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The rain collector (from #1740): it starts with 3000 g that rain left in it (set from outside: collecting is not an entry yet). A Soul with empty hands uncovers it, takes a pitcher, draws from the tap until the pitcher is full (1000 g out of the barrel and into the pitcher, the two summing to zero) and, its other hand still free, covers it again.",
+  "cases": [
+    {
+      "name": "uncover_take_draw_cover",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "r1", "p1"] },
+          "r1": { "kind": "eden:rain_collector", "fields": { "water": 3000 } },
+          "p1": { "kind": "eden:pitcher" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "r1", "form": "uncover" }, "receipt": "rr1",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "covered", "n": 2, "to": 0 }], "events": [{ "event": "eden:uncovered", "node": "r1", "changes": [0] }], "timers": [] }
+        },
+        {
+          "act": { "this": "p1", "form": "take" }, "receipt": "rr2",
+          "expect": { "verdict": "yes", "changes": [{ "change": "reparent", "node": "p1", "to": { "node": "b1", "hand": "left" } }] }
+        },
+        {
+          "act": { "this": "r1", "form": "draw", "args": { "into": "p1" } }, "receipt": "rr3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "r1", "field": "water", "n": 1, "to": 2000, "by": -1000 },
+              { "change": "set", "node": "p1", "field": "water", "n": 1, "to": 1000, "by": 1000 }
+            ],
+            "events": [{ "event": "eden:drawn", "node": "r1", "changes": [0, 1] }],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "r1", "form": "cover" }, "receipt": "rr4",
+          "expect": { "verdict": "yes", "changes": [{ "change": "set", "node": "r1", "field": "covered", "n": 2, "to": 1 }], "events": [{ "event": "eden:covered", "node": "r1", "changes": [0] }], "timers": [] }
+        }
+      ],
+      "after": {
+        "r1": { "kind": "eden:rain_collector", "fields": { "water": 2000, "covered": 1 } },
+        "p1": { "kind": "eden:pitcher", "fields": { "water": 1000 } },
+        "b1": { "hands": { "left": "p1", "right": null } }
+      }
+    }
+  ]
+}

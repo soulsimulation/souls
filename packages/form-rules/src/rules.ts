@@ -16,7 +16,7 @@
 // What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
 // moves is measured here, so the `room` need and the effect agree on one number.
 
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough']);
 export const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -27,6 +27,7 @@ export const REASONS = Object.freeze([
   'not_linked',
   'already_linked',
   'no_room',
+  'not_enough',
   'link_full',
   'bad_input',
 ]);
@@ -70,6 +71,8 @@ export type Effect = {
   after_us?: number;
   /** A set on a timed value: its new rate per second, settled at the act's time. */
   rate?: number;
+  /** A set on an int field may add `by` (signed) to its value instead of naming `to`: a count, or an amount used up. */
+  by?: number;
 };
 export type Entry = {
   kind: string;
@@ -149,11 +152,12 @@ export function decide(input: Input): Verdict {
     return list.includes(audience.rule);
   };
 
-  // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
+  // A fix taken only from data: a form of this kind that anyone, or its holder, may start as an act and has an effect
+  // that meets the need. A holder's form refused for want of holding names its own fix (take).
   const formFix = (meets: (e: Effect) => boolean): Fix | null => {
     for (const name of sorted(entry.forms)) {
       const f = entry.forms![name];
-      if (name === act.form || f.who !== 'anyone' || f.starts !== 'act') continue;
+      if (name === act.form || (f.who !== 'anyone' && f.who !== 'holder') || f.starts !== 'act') continue;
       if ((f.effects ?? []).some(meets)) return { form: name };
     }
     return null;
@@ -189,7 +193,12 @@ export function decide(input: Input): Verdict {
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
-      const fix = formFix((e) => e.change === 'set' && e.field === field && (e.to === null || typeof e.to !== 'object') && meets(e.to));
+      // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
+      // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge)
+      const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
+      const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
+        (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
+        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
@@ -276,26 +285,34 @@ export function decide(input: Input): Verdict {
     linked: (n, i) => link(n, i, true),
     unlinked: (n, i) => link(n, i, false),
 
-    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows.
-    room(_n, i) {
-      const transfers = (form.effects ?? []).filter((e) => e && e.change === 'transfer');
-      if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
-      for (const e of transfers) {
-        const m = measure(kinds, nodes, act.this, args, e);
-        if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
-        for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
-          if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
-        }
-        read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
-        read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
-        if (m.room !== null && m.moved > m.room) {
-          const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
-          return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
-        }
-      }
-      return { ok: true };
-    },
+    // Every amount the form moves has room where it lands (SA-F2b): a pour never overflows. `enough`: every amount the
+    // form asks is there to give, so a pour of three units from a pitcher holding two is refused rather than made smaller.
+    room: (_n, i) => moves(i, 'room'),
+    enough: (_n, i) => moves(i, 'enough'),
   };
+
+  function moves(i: number, which: 'room' | 'enough'): Outcome {
+    const transfers = (form!.effects ?? []).filter((e) => e && e.change === 'transfer');
+    if (!transfers.length) return { ok: false, no: bad(i, 'no_transfer') };
+    for (const e of transfers) {
+      const m = measure(kinds, nodes, act.this, args, e);
+      if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
+      for (const [node, def] of [[m.from, m.fromDef], [m.into, m.intoDef]] as const) {
+        if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node, field: m.field, read } };
+      }
+      read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
+      read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
+      if (which === 'room' && m.room !== null && m.moved > m.room) {
+        const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
+        return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
+      }
+      if (which === 'enough' && m.moved < m.asked) {
+        const detail = { node: m.from, field: m.field, has: m.moved, amount: m.asked };
+        return { ok: false, no: { verdict: 'no', reason: 'not_enough', need: i, detail, fix: null, read } };
+      }
+    }
+    return { ok: true };
+  }
 
   function link(n: Need, i: number, wantLinked: boolean): Outcome {
     const type = n.link ?? '';
@@ -430,6 +447,8 @@ export type Measure = {
   has: number;
   room: number | null;
   moved: number;
+  /** The amount asked, before the source's limit. */
+  asked: number;
 };
 
 /**
@@ -470,5 +489,5 @@ export function measure(kinds: Record<string, Entry>, nodes: Record<string, Node
     want = room;
   } else if (e.amount && typeof e.amount === 'object' && has(e.amount, 'arg')) want = args[(e.amount as { arg: string }).arg];
   if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
-  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)) };
+  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)), asked: want };
 }
