@@ -1,0 +1,55 @@
+{
+  "about": "Where a carried thing is put down (SA-F11, #2883): a chair in a room with a table, a window wall and a sofa, in the one closed list of packages/form-rules/placements.json. The rules answer from plain data (the thing may be moved, the anchor is named, a front exists where the word needs one); whether the spot is free and legal is the world's answer.",
+  "kinds": {
+    "chair": "content/kinds/seating/chair.json",
+    "sofa": "content/kinds/seating/sofa.json",
+    "table": "content/kinds/furniture/table.json",
+    "round_table": "content/kinds/furniture/round_table.json",
+    "window": "content/kinds/furniture/window.json",
+    "lamp_post": "content/kinds/street/lamp_post.json"
+  },
+  "placements": [
+    { "say": "put the chair by the table, facing it", "thing": "chair", "place": { "at": "next_to", "anchor": "table", "facing": { "toward": "table" } }, "ok": true, "anchor": "eden:table", "facing": { "kind": "toward", "anchor": "eden:table" }, "moves": true },
+    { "say": "move the chair to the window", "thing": "chair", "place": { "at": "in_front_of", "anchor": "window", "facing": { "toward": "window" } }, "ok": true, "anchor": "eden:window", "facing": { "kind": "toward", "anchor": "eden:window" }, "moves": true },
+    { "say": "put the chair against the window wall", "thing": "chair", "place": { "at": "against", "anchor": "window", "facing": "to_wall" }, "ok": true, "anchor": "eden:window", "facing": { "kind": "to_wall" }, "moves": true },
+    { "say": "put the chair behind the sofa", "thing": "chair", "place": { "at": "behind", "anchor": "sofa" }, "ok": true, "anchor": "eden:sofa", "facing": { "kind": "as_it_was" }, "moves": true },
+    { "say": "put the chair on the sofa", "thing": "chair", "place": { "at": "on", "anchor": "sofa" }, "ok": true, "anchor": "eden:sofa", "facing": { "kind": "as_it_was" }, "moves": true },
+    { "say": "put the chair in the middle of the room", "thing": "chair", "place": { "at": "middle" }, "ok": true, "anchor": null, "facing": { "kind": "as_it_was" }, "moves": true },
+    { "say": "put the chair here", "thing": "chair", "place": { "at": "here" }, "ok": true, "anchor": null, "facing": { "kind": "as_it_was" }, "moves": true },
+    { "say": "turn the sofa to face the window", "thing": "sofa", "place": { "at": "facing", "anchor": "window" }, "ok": true, "anchor": "eden:window", "facing": { "kind": "toward", "anchor": "eden:window" }, "moves": false },
+    { "say": "turn the chair to face the table", "thing": "chair", "place": { "at": "facing", "anchor": "table" }, "ok": true, "anchor": "eden:table", "facing": { "kind": "toward", "anchor": "eden:table" }, "moves": false }
+  ],
+  "refused": [
+    { "say": "put the chair behind the round table", "thing": "chair", "place": { "at": "behind", "anchor": "round_table" }, "code": "no_front", "reason_has": "\"behind\" needs a front; eden:round_table has none" },
+    { "say": "put the chair in front of the round table", "thing": "chair", "place": { "at": "in_front_of", "anchor": "round_table" }, "code": "no_front", "reason_has": "\"in_front_of\" needs a front" },
+    { "say": "turn the round table to face the window", "thing": "round_table", "place": { "at": "facing", "anchor": "window" }, "code": "no_front", "reason_has": "eden:round_table has none" },
+    { "say": "put the chair next to a table, no table named", "thing": "chair", "place": { "at": "next_to" }, "code": "no_anchor", "reason_has": "name its anchor" },
+    { "say": "move the window", "thing": "window", "place": { "at": "here" }, "code": "fixed", "reason_has": "eden:window is fixed" },
+    { "say": "a word nobody listed", "thing": "chair", "place": { "at": "beside", "anchor": "table" }, "code": "unknown_word", "reason_has": "one of on, in, here" },
+    { "say": "put the chair on itself", "thing": "chair", "place": { "at": "on", "anchor": "chair" }, "code": "self", "reason_has": "itself" },
+    { "say": "a facing nobody listed", "thing": "chair", "place": { "at": "here", "facing": "sideways" }, "code": "unknown_facing", "reason_has": "one of toward, as_it_was, to_wall" }
+  ],
+  "forms": {
+    "accepted": [
+      { "say": "put it by a thing, facing it", "place": { "at": "next_to", "anchor": { "arg": "target" }, "facing": { "toward": { "arg": "target" } } } },
+      { "say": "put it in the middle", "place": { "at": "middle" } },
+      { "say": "turn it to face a thing", "place": { "at": "facing", "anchor": { "arg": "target" } } },
+      { "say": "put it behind the first thing nearest to me, described by a selector", "place": { "at": "behind", "anchor": { "arg": "chosen" } } }
+    ],
+    "refused": [
+      { "say": "a word not on the list", "place": { "at": "beside", "anchor": { "arg": "target" } }, "path": "place.at", "reason_has": "not a placement word" },
+      { "say": "no anchor", "place": { "at": "on" }, "path": "place.anchor", "reason_has": "name its anchor" },
+      { "say": "an anchor where there is none", "place": { "at": "here", "anchor": { "arg": "target" } }, "path": "place.anchor", "reason_has": "by nothing" },
+      { "say": "an anchor that is not an argument", "place": { "at": "on", "anchor": "table" }, "path": "place.anchor", "reason_has": "an argument of type thing" },
+      { "say": "an argument that is not in takes", "place": { "at": "on", "anchor": { "arg": "nothing" } }, "path": "place.anchor", "reason_has": "not in takes" },
+      { "say": "facing beside a turn", "place": { "at": "facing", "anchor": { "arg": "target" }, "facing": "as_it_was" }, "path": "place.facing", "reason_has": "already says which way" },
+      { "say": "a facing not on the list", "place": { "at": "here", "facing": "sideways" }, "path": "place.facing", "reason_has": "one of toward" },
+      { "say": "toward with no thing", "place": { "at": "here", "facing": "toward" }, "path": "place.facing", "reason_has": "is by something" },
+      { "say": "a slot and a place", "slot_too": true, "place": { "at": "here" }, "path": "", "reason_has": "a slot or a place, not both" }
+    ]
+  },
+  "front": {
+    "accepted": ["z", "none"],
+    "refused": [{ "set": "back", "reason_has": "one of z, none" }]
+  }
+}

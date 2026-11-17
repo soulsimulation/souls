@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":132,"group":"two-things","words":"put the flower pot by the door","obvious":3,"things":{"pot":"eden:flower_pot","door":"eden:door"},"chain":[{"this":"me","form":"pick_up","carry":"pot","args":{"thing":"pot"}},{"this":"me","form":"put","place":{"at":"next_to","thing":"pot","anchor":"door"},"args":{"thing":"pot"}}]}

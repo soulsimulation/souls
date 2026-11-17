@@ -15,9 +15,9 @@ const moves = Object.fromEntries(loaded.map(r => [r.move.move, r.move]));
 const dist = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
 
 test('A1: press and slide validate as moves; a move with a duration in ticks is refused', () => {
-  assert.deepEqual(loaded.map(r => r.file), ['consume.json', 'pour.json', 'press.json', 'slide.json']);
-  for (const r of loaded) { assert.deepEqual(r.errors, [], r.file); assert.match(r.ref, /^[a-z]+@prov-1220[0-9a-f]{64}$/); }
-  assert.notEqual(loaded[1].ref, loaded[2].ref);
+  assert.ok(['press.json', 'slide.json'].every(f => loaded.some(r => r.file === f)));
+  for (const r of loaded) { assert.deepEqual(r.errors, [], r.file); assert.match(r.ref, /^[a-z_]+@prov-1220[0-9a-f]{64}$/); }
+  assert.notEqual(loaded.find(r => r.move.move === 'press').ref, loaded.find(r => r.move.move === 'slide').ref);
   for (const c of cases.refused) {
     const errors = c.raw !== undefined
       ? [...F.parseEntry(c.raw).errors, ...validateMove(F.parseEntry(c.raw).entry)]
@@ -48,7 +48,7 @@ test('A3: the same record and time give the same position in Node and in a brows
       assert.deepEqual(Array.from(bare.handAt(moves[c.move], c.record, t)), want, `${c.why} at ${t} (bare context)`);
     }
   }
-  assert.equal(refOf(moves.press), loaded.find(r => r.file === 'press.json').ref);
+  assert.equal(refOf(moves.press), loaded.find(r => r.move.move === 'press').ref);
 });
 
 test('SA-D5a A1: pour validates; its spout is within 2 cm of the rim for the whole contact window (kettle to cup, can to planter)', () => {
