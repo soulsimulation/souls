@@ -135,7 +135,8 @@ impl Fraction {
 }
 
 /// A rising line: `y = y0 + (x − x0) · p / q`, read either way with one rounding rule (rule 4). Ticks, beats and the
-/// mapping are lines; a later task that needs a quantity rising with world time (T4's tracks) uses this one too.
+/// mapping are lines; any later use that rises with world time and rounds down may use this one. A use that falls,
+/// curves or rounds otherwise (T4's tracks) states its own rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Line {
     x0: i64,

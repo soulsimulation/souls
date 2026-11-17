@@ -3,8 +3,8 @@
 //! step of `v2/tools/ci.sh`).
 
 use replica::pose::{
-    FIXTURES, Frame, Motion, Owner, STANDARD_GRAVITY, Support, Track, Vec3, fixture, fixture_value,
-    hand_offs, pose_goldens, scene_from_fixture,
+    FIXTURES, Frame, Motion, Owner, Quat, STANDARD_GRAVITY, Support, Track, Vec3, fixture,
+    fixture_value, hand_offs, pose_goldens, scene_from_fixture,
 };
 
 fn goldens_file() -> String {
@@ -27,12 +27,11 @@ fn apart(a: &Motion, b: &Motion) -> (i128, i128, i128) {
 fn step0_thrown_ball_after_ten_seconds_in_integers() {
     let ball = Track::Thrown {
         t0: 0,
-        from: Vec3::new(0, 1_500_000, 0),
         velocity: Vec3::new(8_000_000, 6_000_000, 0),
         gravity: Vec3::new(0, -STANDARD_GRAVITY, 0),
         spin: Vec3::ZERO,
     };
-    let (p, v) = ball.at(Vec3::ZERO, 10_000_000).unwrap();
+    let (p, v) = ball.at(Vec3::new(0, 1_500_000, 0), 10_000_000).unwrap();
     let gt2 = i128::from(STANDARD_GRAVITY) * 10_000_000i128 * 10_000_000i128;
     println!(
         "Step 0: g * t^2 = {gt2} um*us^2/s^2 at 10 s, {} 2^63 = {}: 128-bit intermediates",
@@ -110,6 +109,14 @@ fn a1_three_fixtures_load_and_check() {
             "{1: [1, 2], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 0}}",
             "support-not-slot",
         ),
+        (
+            "{1: [1], 2: [0, 0, 0], 3: [1073741825, 0, 0, 0], 4: {1: 0}}",
+            "orientation-not-canonical",
+        ),
+        (
+            "{1: [1], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {1: 4}}",
+            "support-not-track",
+        ),
     ] {
         let text = format!("{{1: 1, 2: [{{1: 2, 2: {bad}, 3: {{1: 3, 2: {{1: 1}}}}}}]}}");
         let got = scene_from_fixture(&fixture_value(&text).unwrap()).unwrap_err();
@@ -129,7 +136,6 @@ fn a2_hand_offs_keep_world_motion_within_one_unit_per_frame() {
     let (before, _) = scene.motion(ball, t).unwrap();
     let thrown = Owner::Track(Track::Thrown {
         t0: 0,
-        from: Vec3::ZERO,
         velocity: Vec3::ZERO,
         gravity: Vec3::new(0, -9_806_650, 0),
         spin: Vec3::ZERO,
@@ -176,7 +182,7 @@ fn a2_hand_offs_keep_world_motion_within_one_unit_per_frame() {
                 surface: dock,
                 height: 0,
             },
-            Owner::Mover { driver: body },
+            Owner::Mover,
             Vec3::ZERO,
         )
         .unwrap();
@@ -217,4 +223,116 @@ fn a4_goldens_equal_in_two_runs_and_the_file() {
         "native goldens equal fixtures/pose/goldens.txt"
     );
     println!("A4: native goldens equal the committed file");
+}
+
+#[test]
+fn rule4_one_byte_form_a_reader_can_check() {
+    // Twins of a normalizer's output are refused: 90 degrees about y one short, 120 degrees about the diagonal one
+    // short, and the identity one long.
+    for twin in [
+        [759_250_124, 0, 759_250_124, 0],
+        [536_870_911; 4],
+        [1_073_741_825, 0, 0, 0],
+    ] {
+        let got = Quat::new(twin[0], twin[1], twin[2], twin[3]).unwrap_err();
+        assert_eq!(got.name(), "orientation-not-canonical", "{twin:?}");
+        println!("rule 4: {twin:?} refused {}", got.name());
+    }
+    // Authored yaws come from one integer function.
+    let a = 759_250_125;
+    for (mdeg, want) in [
+        (0, [1 << 30, 0, 0, 0]),
+        (90_000, [a, 0, a, 0]),
+        (180_000, [0, 0, 1 << 30, 0]),
+        (-90_000, [a, 0, -a, 0]),
+        (360_000, [1 << 30, 0, 0, 0]),
+    ] {
+        assert_eq!(
+            Quat::from_yaw_mdeg(mdeg).unwrap().parts(),
+            want,
+            "{mdeg} mdeg"
+        );
+    }
+    // Every product is its own form: a turn by the identity changes nothing, and a reader takes it back unchanged.
+    let x90 = Quat::new(a, a, 0, 0).unwrap();
+    let mut seen = 0;
+    for i in 0..20_000i64 {
+        let q = Quat::from_yaw_mdeg(i * 17)
+            .and_then(|q| q.then(x90))
+            .and_then(|q| q.then(Quat::from_yaw_mdeg(i * 29 + 5)?))
+            .unwrap();
+        let [w, x, y, z] = q.parts();
+        assert_eq!(Quat::new(w, x, y, z), Ok(q));
+        assert_eq!(Quat::IDENTITY.then(q), Ok(q));
+        assert_eq!(q.then(Quat::IDENTITY), Ok(q));
+        seen += 1;
+    }
+    println!(
+        "rule 4: {seen} composed turns: each read back unchanged and unchanged by the identity, either side"
+    );
+}
+
+#[test]
+fn rules_6_10_a_catch_records_the_motion_the_slot_has() {
+    let (mut scene, _) = scene_from_fixture(&fixture_value(FIXTURES[0].1).unwrap()).unwrap();
+    let (body, ball) = (fixture(3), fixture(5));
+    let root = Frame {
+        node: scene.root,
+        slot: None,
+    };
+    let straight = Owner::Track(Track::Straight {
+        t0: 0,
+        velocity: Vec3::ZERO,
+    });
+    scene
+        .hand_off(
+            ball,
+            1_000_000,
+            root,
+            Support::None,
+            straight,
+            Vec3::new(5_000_000, 0, 0),
+        )
+        .unwrap();
+    let hand = Frame {
+        node: body,
+        slot: Some(2),
+    };
+    let (h, _) = scene
+        .hand_off(
+            ball,
+            1_100_000,
+            hand,
+            Support::Slot,
+            Owner::Slot,
+            Vec3::ZERO,
+        )
+        .unwrap();
+    assert_eq!((h.linear, h.angular), (Vec3::ZERO, Vec3::ZERO));
+    assert_eq!(scene.get(ball).unwrap().linear, Vec3::ZERO);
+    let (caught, _) = scene.motion(ball, 1_100_000).unwrap();
+    println!(
+        "rule 10: caught in the hand: record velocity {} {}, world velocity {} (the boat's)",
+        h.linear, h.angular, caught.linear
+    );
+    assert_eq!(caught.linear, Vec3::new(3_000_000, 0, 1_200_000));
+}
+
+#[test]
+fn rule9_depth_is_t2s() {
+    let chain = |n: u64| {
+        let items: Vec<String> = (2..2 + n)
+            .map(|c| {
+                format!(
+                    "{{1: {c}, 2: {{1: [{}], 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {{1: 0}}}}, 3: {{1: 3, 2: {{1: 1}}}}}}",
+                    c - 1
+                )
+            })
+            .collect();
+        scene_from_fixture(&fixture_value(&format!("{{1: 1, 2: [{}]}}", items.join(", "))).unwrap())
+    };
+    let (scene, _) = chain(32).unwrap();
+    assert_eq!(scene.motion(fixture(33), 0).unwrap().1, 32);
+    assert_eq!(chain(33).unwrap_err().name(), "depth-over-limit");
+    println!("rule 9: 32 ancestors walk; 33 are refused as depth-over-limit");
 }
