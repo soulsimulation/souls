@@ -1,0 +1,64 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cup",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 250, "audience": { "rule": "everyone" } },
+    "sips": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [62, 48, 0] },
+    "rim": { "role": "contact", "at_mm": [-40, 90, 0] },
+    "stand": { "role": "stand", "at_mm": [0, 0, 400] }
+  },
+  "geometry": { "bounds_mm": [90, 90, 84] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "sip": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "water", "at_least": 50 }
+      ],
+      "steps": [{ "step": "move", "move": "consume", "at": "rim" }],
+      "effects": [
+        { "change": "set", "field": "water", "by": -50, "event": "sipped" },
+        { "change": "set", "field": "sips", "by": 1, "event": "sip_counted" }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:cup",
+    "table": [
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 250], "to": [0, 1000] }
+    ],
+    "shape": {
+      "round": 4,
+      "shapes": [
+        { "kind": "lathe", "at": [0, 0, 0], "profile": [[0, 0], [30, 0], [34, 6], [42, 90], [38, 90], [31, 10], [0, 10]], "segments": 20, "tint": "shell" },
+        { "kind": "sweep", "at": [0, 0, 0], "path": [[40, 72, 0], [60, 70, 0], [66, 50, 0], [58, 30, 0], [38, 26, 0]], "r": 6, "segments": 6, "tint": "shell" },
+        { "kind": "cyl", "at": [0, 48, 0], "r": 31, "h": 76, "segments": 20, "tint": "tea", "role": "fill", "pivot": [0, 10, 0] }
+      ],
+      "palette": { "shell": "#f2ede4", "tea": "#8a5a2b" },
+      "tags": ["kitchen", "item", "cup", "tea", "object"]
+    }
+  },
+  "text": {
+    "card": "A cup: take it, have tea poured into it, and sip, five sips to a cupful.",
+    "kitchen": "kitchen",
+    "drink": "drink",
+    "mug": "mug",
+    "howto_tea": "Take a cup, have a boiled kettle poured into it, then sip it, five sips to a cupful."
+  },
+  "card": { "text": "card", "category": "kitchen", "synonyms": ["drink", "mug"] },
+  "howtos": {
+    "tea": { "text": "howto_tea", "steps": [{ "form": "take" }, { "form": "sip" }] }
+  }
+}

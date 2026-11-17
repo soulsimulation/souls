@@ -743,6 +743,8 @@ function form(f, path, ctx, err) {
     if (typeof e.event !== 'string' || !IDENT.test(e.event)) err(`${p}.event`, 'every effect names its event, lower_snake_case');
     // A timed value is never set to a value: a set gives its new `rate` (per second) and the rules settle it at the act's time.
     if (e.change === 'set' && ctx.state[e.field]?.type === 'timed') { only(e, ['change', 'field', 'rate', 'event'], p, err); if (!isInt(e.rate)) err(`${p}.rate`, 'a whole number: the new rate, in the field\'s unit per second; its value is settled at the act\'s time'); }
+    // `by` (signed, not zero) instead of `to` adds to an int field: a count, or an amount used up (a sip)
+    else if (e.change === 'set' && 'by' in e) { only(e, ['change', 'field', 'by', 'event'], p, err); if (ctx.state[e.field]?.type !== 'int') err(`${p}.field`, 'names an int state field of this kind; by adds to it'); if (!(isInt(e.by) && e.by !== 0)) err(`${p}.by`, 'a whole number, not zero'); }
     else if (e.change === 'set') { only(e, ['change', 'field', 'to', 'event'], p, err); fieldName(e.field, `${p}.field`); if (!('to' in e)) err(`${p}.to`, 'required'); else value(e.field, e.to, `${p}.to`); }
     else if (e.change === 'reparent') {
       only(e, ['change', 'what', 'into', 'event'], p, err);

@@ -70,6 +70,8 @@ export type Effect = {
   after_us?: number;
   /** A set on a timed value: its new rate per second, settled at the act's time. */
   rate?: number;
+  /** A set on an int field may add `by` (signed) to its value instead of naming `to`: a count, or an amount used up. */
+  by?: number;
 };
 export type Entry = {
   kind: string;

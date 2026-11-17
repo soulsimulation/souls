@@ -67,7 +67,7 @@
         { "need": "state", "field": "water", "at_least": 1 }
       ],
       "steps": [{ "step": "move", "move": "pour", "at": "spout", "toward": { "arg": "into" } }],
-      "effects": [{ "change": "set", "field": "water", "to": 0, "event": "poured" }]
+      "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": "room", "event": "poured" }]
     }
   },
   "looks": {

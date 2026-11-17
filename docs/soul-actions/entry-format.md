@@ -244,7 +244,9 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
   defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
   per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
-  boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before.
+  boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
+  an `int` field may give `by` (signed, never 0) instead of `to`: it adds to the value, within the field's bounds, for a
+  count or an amount used up that nothing balances. A cup's `sip` lowers its `water` by 50 and raises its `sips` by 1.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
