@@ -79,6 +79,9 @@ run yet. When `check` fails, `cases` and `look` are skipped: fix the check findi
 plays the same cases on a running local world, from outside: the creator's god CLI sets each scene, the Soul in
 `SOULS_HOME` sends the act and reads the receipt. A row passes, fails or is skipped with its cause (a form the world
 does not offer, one started by a timer, a start that needs a take); a skip is never a pass.
+Then each form a Soul starts is disturbed: the Soul leaves as each step begins and mid-step, a creator removes the
+thing, the world restarts (a world under a launcher). Each passes when the form ends with a named reason, the Soul is
+free and holds what it held, and the thing, as it stands, can be used again.
 
 **The look gate and shapes.** It draws `looks.shape`. Until SA-D3 (#2855) settles how an entry carries a shape,
 the format cannot hold one, so a kind with no shape shows `"waits": "a shape: ..."` instead of a sheet. That is

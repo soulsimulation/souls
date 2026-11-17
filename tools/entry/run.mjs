@@ -21,11 +21,19 @@
 // A case the world cannot set up or start is skipped, never passed: the row names the cause (the form is not offered;
 // the form is started by the world's timer; the start needs a Soul holding something; a change cannot be read here).
 //
+// Then the disturbances (part 2, SA-P3b #2933), per form a Soul starts: the Soul leaves as each step begins and in the
+// middle of each step, a creator removes the thing, the world restarts (see "the disturbances" below). Each is a row
+// named `<form>: <what happened when>`, with the stage the act was at when it was sent and how the form ended. A world
+// under a launcher (…/w/<slug>; --launcher <origin> when the launcher is elsewhere) is restarted as a crash restarts
+// it; a world that is not is skipped for that row, with the cause.
+//
 // Prints one JSON verdict: per repeat, a row per case (pass, fail, skip, why), the table per form, failures by name, and
 // the wall time. Exits 0 when no case failed, 1 when one did, 2 on a bad argument or a world that could not be reached.
 //
 // A transport is a module whose default export makes `{name, timers, events, start(), place(kind, entry), set(id,
-// fields), remove(id), offers(id), fields(id), act(id, form, args)}` from `{world, ...flags}`. `act` answers `{verdict:
+// fields), remove(id), offers(id), fields(id), act(id, form, args)}` from `{world, ...flags}`; for the disturbances also
+// `begin(id, form, args)` → `{verdict: "started", rid, progress}`, `progress(rid)` → `{phase, step, moving}` (step null
+// when the world does not say), `wait(rid)`, `leave(rid)`, `body()` → `{posture, activity, holding}` and `restart()`. `act` answers `{verdict:
 // "yes"|"no", reason, code, receipt}`: `reason` is the rules' reason when the world names one. The built-in one,
 // `today`, drives today's local world through its adapters (tools/entry/load.mjs, SA-F3a's forms adapter): the god CLI
 // (tools/god-skill/cli.mjs) from the creator's folder (--god <dir>, default here) and the Soul CLI
@@ -178,6 +186,103 @@ async function effectCase(t, row, kinds, placed) {
   }
   return {result: 'pass', steps};
 }
+// ---------------------------------------------------------------- the disturbances (part 2, SA-P3b #2933)
+//
+// Per form a Soul starts by an act, from that form's case where every need is met: the Soul leaves as each step begins
+// and in the middle of each step; a creator removes the thing in the middle of the first step; the world restarts in the
+// middle of the first step. After each, read from outside: the form has ended, with a named reason when it did not
+// complete; the Soul is not busy and holds what it held before; the thing (unless removed) reads as before and its form
+// completes again as it stands, never set up again (so a thing left stuck fails); after a removal a fresh thing's form
+// completes. A disturbance that lands after the form completed did not test anything: it is skipped, never passed.
+
+/** The disturbances of one family, after its cases: per kind, per form started by an act. Pure: no world. */
+export function disturbancesFor(kinds, rows) {
+  const out = [];
+  for (const [kind, entry] of kinds) for (const [form, f] of Object.entries(entry.forms ?? {})) {
+    if (f.starts !== 'act') continue;
+    const met = rows.find(r => r.type === 'rule' && r.kind === kind && r.form === form && r.case.expect.verdict === 'yes');
+    const n = Math.max(1, (f.steps ?? []).length), first = (f.steps ?? []).length ? {step: 0, at: 'mid'} : {step: 0, at: 'start'};
+    const stages = [];
+    for (let k = 0; k < n; k++) stages.push({step: k, at: 'start'}, ...((f.steps ?? []).length ? [{step: k, at: 'mid'}] : []));
+    const all = [...stages.map(s => ({how: 'leave', stage: s})), {how: 'remove', stage: first}, {how: 'restart', stage: first}];
+    for (const d of all) out.push({type: 'disturb', name: `${form}: ${disturbName(d)}`, kind, form, ...d, steps: (f.steps ?? []).length, case: met?.case ?? null, file: met?.file});
+  }
+  return out;
+}
+const stageName = s => `${s.at === 'start' ? 'as step' : 'in the middle of step'} ${s.step + 1}${s.at === 'start' ? ' begins' : ''}`;
+function disturbName({how, stage}) {
+  return {leave: 'the Soul leaves', remove: 'a creator removes the thing', restart: 'the world restarts'}[how] + ' ' + stageName(stage);
+}
+
+/** Read the receipt until the act is at the stage. `{at}` the progress there, `{ended}` if the form ended first, `{gap}`
+ *  when this world's receipt cannot show the stage. */
+async function reach(t, rid, first, stage, steps) {
+  if (stage.step > 0 && steps > 1 && first.step == null) return {gap: 'this world\'s receipt does not say which step is under way'};
+  const atStage = p => (p.step ?? 0) === stage.step && (stage.at === 'start' ? !p.moving : p.moving);
+  const passed = p => (p.step ?? 0) > stage.step || (stage.at === 'start' && p.moving);
+  let p = first;
+  for (const end = Date.now() + 20000; Date.now() < end; p = await t.progress(rid)) {
+    if (!['accepted', 'started'].includes(p.phase)) return {ended: p};
+    if (atStage(p)) return {at: p};
+    if (passed(p)) return {passed: p};
+    await sleep(150);
+  }
+  return {passed: p};
+}
+
+async function disturbCase(t, row, kinds, placed) {
+  const c = row.case, entry = kinds.get(row.kind);
+  if (!c) return {result: 'skip', why: `${row.form} has no case where every need is met to start from`};
+  if (!t.begin || !t.progress || !t.wait || !t.leave || !t.body) return {result: 'skip', why: `the ${t.name} transport cannot follow an act under way`};
+  if (row.how === 'restart' && !t.restart) return {result: 'skip', why: t.noRestart ?? 'this world cannot be restarted from here'};
+  const scene = async () => {
+    const id = await placed(row.kind, {far: true}), want = startFields(entry, c.state.nodes[c.act.this]);
+    await t.set(id, want);
+    const got = await readUntil(t, id, want);
+    if (!sameFields(got, want)) throw new Error(`the scene could not be set: the fields read ${JSON.stringify(got)}, not ${JSON.stringify(want)}`);
+    return {id, fields: got};
+  };
+  const {id, fields: before} = await scene();
+  if (!(await t.offers(id)).includes(row.form)) return {result: 'skip', why: `${row.form} is not offered by this world`};
+  const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
+  const body0 = await t.body();
+  const b = await t.begin(id, row.form, c.act.args);
+  if (b.verdict !== 'started') return {result: 'fail', why: `the act was not accepted (${b.code ?? b.reason ?? b.verdict}), though every need is met`};
+  const r = await reach(t, b.rid, b.progress, row.stage, row.steps);
+  if (r.gap) { await t.leave(b.rid).catch(() => {}); await t.wait(b.rid).catch(() => {}); return {result: 'skip', why: r.gap}; }
+  if (r.ended) return {result: 'skip', why: `the form ended (${r.ended.phase}) before ${stageName(row.stage)}: the disturbance did not land`};
+  const sent = r.at ?? r.passed;
+  if (row.how === 'leave') await t.leave(b.rid);
+  else if (row.how === 'remove') await t.remove(id);
+  else await t.restart();
+  const landed = ['accepted', 'started'].includes((await t.progress(b.rid)).phase);   // still under way once it was done
+  const end = await t.wait(b.rid);
+  const off = [], ended = {phase: end.receipt ?? end.verdict, ...(end.code ? {code: end.code} : {}), ...(end.text ? {reason: end.text} : {})};
+  const sentAt = {step: (sent.step ?? 0) + 1, moving: sent.moving, ...(r.passed ? {late: true} : {})};
+  if (end.verdict === 'yes' && !landed) return {result: 'skip', why: `the form completed before the disturbance landed: it did not test a stop`, ended, sent_at: sentAt};
+  if (end.verdict === 'yes') off.push(`the receipt says completed, though the disturbance (${disturbName(row)}) landed while the form was under way: it ended with no named reason`);
+  else if (end.verdict !== 'no') off.push(`the form had not ended after the disturbance (receipt ${end.receipt ?? 'none'})`);
+  else if (!end.code) off.push('the form ended with no named reason');
+  const body1 = await t.body();
+  if (body1.posture === 'busy') off.push(`the Soul is still busy (${body1.activity})`);
+  if (!same(body1.holding, body0.holding)) off.push(`the Soul holds ${JSON.stringify(body1.holding)}, not ${JSON.stringify(body0.holding)} as before`);
+  let again;
+  if (row.how === 'remove') {
+    const fresh = await scene();
+    again = await t.act(fresh.id, row.form, c.act.args);
+    if (again.verdict !== 'yes') off.push(`afterwards the Soul could not do ${row.form} on a fresh thing (${again.code ?? again.reason ?? again.verdict})`);
+  } else {
+    const after = await settled(t, id);
+    if (!sameFields(after, before)) off.push(`stopped, yet the thing's fields changed: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+    if (!(await t.offers(id)).includes(row.form)) off.push(`afterwards the thing no longer offers ${row.form}`);
+    else {
+      again = await t.act(id, row.form, c.act.args);
+      if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
+    }
+  }
+  return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), sent_at: sentAt, ended, ...(again ? {again: brief(again)} : {})};
+}
+
 const timerAfter = (c, step) => c.do.flatMap(s => s.expect?.timers ?? []).find(x => x.form === step.act.form)?.after_us;
 /** The `set` changes a step expects, as fields per world id. */
 function setsOf(expect, ids) {
@@ -192,10 +297,10 @@ export async function runOnce(t, kinds, rows) {
   const out = [];
   for (const row of rows) {
     const mine = [];
-    const placed = async kind => { const id = await t.place(kind, kinds.get(kind)); mine.push(id); return id; };
+    const placed = async (kind, how) => { const id = await t.place(kind, kinds.get(kind), how); mine.push(id); return id; };
     const t0 = Date.now();
     let r;
-    try { r = row.type === 'rule' ? await ruleCase(t, row, kinds, placed) : await effectCase(t, row, kinds, placed); }
+    try { r = await {rule: ruleCase, effect: effectCase, disturb: disturbCase}[row.type](t, row, kinds, placed); }
     catch (e) { r = {result: 'fail', why: `the run broke: ${String(e.message ?? e).split(ROOT).join('')}`}; }
     for (const id of mine) await t.remove(id).catch(() => {});
     out.push({case: row.name, type: row.type, kind: row.kind, form: row.form, file: row.file, ...r, ms: Date.now() - t0});
@@ -206,7 +311,7 @@ export async function runOnce(t, kinds, rows) {
 /** The table per form: cases, passed, failed, skipped. */
 function table(rows) {
   const t = {};
-  for (const r of rows) { const k = `${r.kind} ${r.type === 'effect' ? '(outcomes)' : r.form}`; const x = (t[k] ??= {cases: 0, passed: 0, failed: 0, skipped: 0}); x.cases++; x[{pass: 'passed', fail: 'failed', skip: 'skipped'}[r.result]]++; }
+  for (const r of rows) { const k = `${r.kind} ${r.type === 'effect' ? '(outcomes)' : r.type === 'disturb' ? `${r.form} (disturbed)` : r.form}`; const x = (t[k] ??= {cases: 0, passed: 0, failed: 0, skipped: 0}); x.cases++; x[{pass: 'passed', fail: 'failed', skip: 'skipped'}[r.result]]++; }
   return t;
 }
 
@@ -215,7 +320,8 @@ export async function run(target, {world, repeats = 2, transport, cases, ...flag
   const loaded = await entriesOf(target);
   if (!loaded) return {error: `no such family, folder or file: ${target}`};
   const kinds = new Map(loaded.filter(k => k.entry.forms && Object.keys(k.entry.forms).length).map(k => [k.kind, k.entry]));
-  const rows = casesFor([...kinds].map(([kind, entry]) => ({kind, entry})), {cases: cases && resolve(cases)});
+  const played = casesFor([...kinds].map(([kind, entry]) => ({kind, entry})), {cases: cases && resolve(cases)});
+  const rows = [...played, ...disturbancesFor(kinds, played)];
   const make = transport ? (await import(pathToFileURL(resolve(transport)).href)).default : todayTransport;
   const t = await make({world, ...flags});
   await t.start?.(loaded);
@@ -234,7 +340,7 @@ export async function run(target, {world, repeats = 2, transport, cases, ...flag
 // ---------------------------------------------------------------- today's world, through its adapters
 
 /** Today's local world: the creator's god CLI sets the scene, the Soul CLI plays the case. */
-export function todayTransport({world, god = process.cwd(), soul} = {}) {
+export function todayTransport({world, god = process.cwd(), soul, launcher: launcherAt} = {}) {
   if (!world) throw new Error('--world <url> names the world');
   const cli = (file, args, opts) => {
     const r = spawnSync(process.execPath, [file, ...args], {encoding: 'utf8', env: process.env, maxBuffer: 64 << 20, ...opts});
@@ -261,11 +367,12 @@ export function todayTransport({world, god = process.cwd(), soul} = {}) {
         }
       } finally { rmSync(dir, {recursive: true, force: true}); }
     },
-    async place(kind) {
+    async place(kind, entry, {far = false} = {}) {
       const def = defs.get(kind); if (!def) throw new Error(`${kind} could not be loaded into this world`);
       const me = soulCli(['here']).me?.pos ?? [0, 0];
       // beside the Soul, out of reach of any point on it: the Soul walks there as the form asks
-      for (const [dx, dz] of [[3, 0], [0, 3], [-3, 0], [0, -3], [4, 4]]) {
+      // `far`: a disturbance lands while the Soul walks, so it walks longer (a creator's call takes about a second)
+      for (const [dx, dz] of [[3, 0], [0, 3], [-3, 0], [0, -3], [4, 4]].map(([x, z]) => far ? [x * 3, z * 3] : [x, z])) {
         const r = cli(GOD, ['place', def, '--at', `${(me[0] + dx).toFixed(2)},${(me[1] + dz).toFixed(2)}`, '--name', `run-${kind.split(':')[1]}-${++n}`, '--json'], {cwd: resolve(god)});
         let j = null; try { j = JSON.parse(r.out); } catch { /* refused in words */ }
         if (j?.accepted && j.ids) return Object.values(j.ids)[0];
@@ -276,17 +383,58 @@ export function todayTransport({world, god = process.cwd(), soul} = {}) {
     async remove(id) { godCli(['remove', id]); },
     async offers(id) { return (thing(id).acts ?? []).map(a => a.split(':').at(-1)); },
     async fields(id) { return thing(id).state ?? null; },
-    async act(id, form, args) {
-      const j = soulCli(['act', `object:${id}:${form}`, ...(args && Object.keys(args).length ? [JSON.stringify(args)] : []), '--wait', '--json']);
-      const rc = j.receipt;
-      if (!j.accepted) return {verdict: 'no', code: j.code, reason: reasonOf(j.code)};
-      if (rc?.phase === 'completed') return {verdict: 'yes', receipt: rc.phase};
-      if (['failed', 'cancelled', 'refused'].includes(rc?.phase)) return {verdict: 'no', code: rc.code, reason: reasonOf(rc.code), receipt: rc.phase};
-      return {verdict: 'open', receipt: rc?.phase ?? 'none'};
+    async act(id, form, args) { return answer(soulCli(['act', `object:${id}:${form}`, ...argsOf(args), '--wait', '--json'])); },
+    // following an act under way (part 2): today's receipt shows motion, not which of the entry's steps is under way
+    async begin(id, form, args) {
+      const j = soulCli(['act', `object:${id}:${form}`, ...argsOf(args), '--json']);
+      return j.accepted && j.receipt?.id ? {verdict: 'started', rid: j.receipt.id, progress: progressOf(j.receipt)} : answer(j);
     },
+    async progress(rid) { return progressOf(soulCli(['receipt', rid])); },
+    async leave(rid) { soulCli(['stop', rid]); },
+    async wait(rid) {
+      let rc;
+      for (const end = Date.now() + 60000; Date.now() < end; await sleep(500)) { rc = soulCli(['receipt', rid]); if (!['accepted', 'started'].includes(rc.phase)) break; }
+      return {...answer({accepted: true, receipt: rc}), ...(rc?.reason ? {text: rc.reason} : {})};
+    },
+    async body() { const me = soulCli(['here']).me ?? {}; return {posture: me.posture, activity: me.activity?.kind ?? null, holding: me.holding ?? []}; },
+    async restart() {
+      const before = await launcherChild();
+      process.kill(before.pid, 'SIGKILL');
+      for (const end = Date.now() + 120000; Date.now() < end; await sleep(1000)) {
+        const k = await launcherChild().catch(() => null);
+        if (k?.held) throw new Error(`the launcher holds ${slug} after too many restarts: resume it there`);
+        if (k?.status === 'running' && k.pid && k.pid !== before.pid) { try { soulCli(['here']); return; } catch { /* still waking */ } }
+      }
+      throw new Error(`${slug} did not come back within 2 minutes of its restart`);
+    },
+  };
+  // A world under a launcher (…/w/<slug>) is restarted the way a crash restarts it: its process ends and the launcher
+  // starts it again from its store. The launcher's own diagnostics name the process; they answer local requests only.
+  const url = new URL(world), slug = /\/w\/([^/]+)/.exec(url.pathname)?.[1], launcher = launcherAt ?? url.origin;
+  const launcherChild = async () => {
+    const j = await (await fetch(`${launcher}/__sim/launcher`)).json();
+    const k = j.children?.find(c => c.slug === slug);
+    if (!k?.pid) throw new Error(`the launcher runs no ${slug}`);
+    return k;
+  };
+  const start = t.start;
+  t.start = async loaded => {
+    await start(loaded);
+    if (!slug) { t.restart = null; t.noRestart = 'this world is not under a launcher (…/w/<slug>), so it cannot be restarted from here'; return; }
+    try { await launcherChild(); } catch (e) { t.restart = null; t.noRestart = `this world cannot be restarted from here: ${e.message}`; }
   };
   return t;
 }
+const argsOf = args => args && Object.keys(args).length ? [JSON.stringify(args)] : [];
+/** An act's answer in the rules' terms, from the Soul CLI's act or receipt. */
+function answer(j) {
+  const rc = j.receipt;
+  if (!j.accepted) return {verdict: 'no', code: j.code, reason: reasonOf(j.code)};
+  if (rc?.phase === 'completed') return {verdict: 'yes', receipt: rc.phase};
+  if (['failed', 'cancelled', 'refused'].includes(rc?.phase)) return {verdict: 'no', code: rc.code, reason: reasonOf(rc.code), receipt: rc.phase};
+  return {verdict: 'open', receipt: rc?.phase ?? 'none'};
+}
+const progressOf = rc => ({phase: rc?.phase ?? 'none', step: null, moving: rc?.firstMotionTick != null});
 /** The rules' reason in today's codes: the forms adapter names it `form.<reason>`; an act the world does not offer is bad input. */
 function reasonOf(code) {
   if (typeof code !== 'string') return null;
@@ -301,12 +449,12 @@ export async function main(argv) {
   const args = argv[0] === 'run' ? argv.slice(1) : argv;
   const flag = k => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : undefined; };
   const target = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--')));
-  const usage = 'usage: node tools/entry/run.mjs <family|folder|file> --world <address> [--repeats 2] [--transport <module>] [--cases <dir>] [--god <dir>] [--soul <name>]';
+  const usage = 'usage: node tools/entry/run.mjs <family|folder|file> --world <address> [--repeats 2] [--transport <module>] [--cases <dir>] [--god <dir>] [--soul <name>] [--launcher <origin>]';
   if (!target || !flag('world')) { console.log(JSON.stringify({error: usage})); return 2; }
   const repeats = Number(flag('repeats') ?? 2);
   if (!Number.isInteger(repeats) || repeats < 1) { console.log(JSON.stringify({error: '--repeats takes a whole number of at least 1'})); return 2; }
   let v;
-  try { v = await run(target, {world: flag('world'), repeats, transport: flag('transport'), cases: flag('cases'), god: flag('god'), soul: flag('soul')}); }
+  try { v = await run(target, {world: flag('world'), repeats, transport: flag('transport'), cases: flag('cases'), god: flag('god'), soul: flag('soul'), launcher: flag('launcher')}); }
   catch (e) { console.log(JSON.stringify({error: String(e.message ?? e).split(ROOT).join('')})); return 2; }
   console.log(JSON.stringify(v, null, 1));
   return v.error ? 2 : v.ok ? 0 : 1;
