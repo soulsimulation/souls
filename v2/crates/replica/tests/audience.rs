@@ -5,7 +5,8 @@
 use std::collections::BTreeSet;
 
 use replica::audience::{
-    Rule, TextStore, audiences_of, deliver, fork, members, references, remove, resolve, sees,
+    Rule, TextStore, audiences_of, deliver, fork, members, references, remove, resolve, same_line,
+    sees,
 };
 use replica::effects::{FIXTURE_HEADER, FIXTURES, Header, Part, State, fixture_bytes, texts};
 use replica::encode::{Name, Value, decode, encode};
@@ -127,7 +128,9 @@ fn a1_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged() {
     let keys = keys();
     let parts = std::slice::from_ref(&l.part);
     let views = build(&l.start, &l.header, parts, &keys, &before).expect("views");
-    let delivered = |v, list: &Redactions, w: &TextStore| deliver(v, w, list).expect("delivered");
+    let end = l.states.last().expect("a state");
+    let delivered =
+        |v, list: &Redactions, w: &TextStore| deliver(v, w, list, end).expect("delivered");
     let shown = views
         .iter()
         .filter(|v| holds(&delivered(v, &before, &words), BOARD))
@@ -191,7 +194,7 @@ fn a1_a_removed_sentence_is_absent_from_every_view_and_the_log_is_unchanged() {
     );
     // A list older than the view's never undoes a removal.
     assert_eq!(
-        deliver(&views[0], &words, &before).map_err(|r| r.name),
+        deliver(&views[0], &words, &before, end).map_err(|r| r.name),
         Err("redactions-differ")
     );
 }
@@ -315,6 +318,8 @@ fn a4_a_principal_added_later_does_not_see_what_was_written_before() {
         "101 joined at seq 9 and must not see the first deal"
     );
     assert!(seqs.contains(&11) && seqs.contains(&12));
+    // The two players' audiences are one line: a reference written for ee:8 is delivered to ee:13's members too.
+    assert!(same_line(old, new, end) && !same_line(old, Audience::Everyone, end));
     // The whisper's audience is one: 101 reads it back, 100 does not.
     let whisper = Audience::Of(b);
     assert!(sees(b, whisper, &l.states[8]) && !sees(a, whisper, &l.states[8]));

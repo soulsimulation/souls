@@ -151,10 +151,16 @@ pub fn remove(reference: Id, store: &mut TextStore, redactions: &Redactions) -> 
 }
 
 /// A view as delivered (rule 8): its records, with the words beside each reference that the store holds for the
-/// view's own audience and the redaction list does not name, `{21: id, 23: words}`. A reference whose words belong to
-/// another audience, or are not at hand, is sent bare; one on the list is marked removed. The list must be the one the
-/// view was built with (`redactions-differ`), so a removal is never undone by an older list.
-pub fn deliver(view: &Output, store: &TextStore, redactions: &Redactions) -> R<Vec<u8>> {
+/// view's own audience, or one of its line (rule 7, as the log stands in `state`), and that the redaction list does not
+/// name, `{21: id, 23: words}`. A reference whose words belong to another audience, or are not at hand, is sent bare;
+/// one on the list is marked removed. The list must be the one the view was built with (`redactions-differ`), so a
+/// removal is never undone by an older list.
+pub fn deliver(
+    view: &Output,
+    store: &TextStore,
+    redactions: &Redactions,
+    state: &State,
+) -> R<Vec<u8>> {
     if view.redactions != redactions.hash() {
         return refuse("redactions-differ", "the view was built with another list");
     }
@@ -163,7 +169,7 @@ pub fn deliver(view: &Output, store: &TextStore, redactions: &Redactions) -> R<V
         if redactions.contains(r) {
             m.insert(REMOVED, Value::Uint(1));
         } else if let Some((a, w)) = store.words(r)
-            && a == view.key.audience
+            && same_line(a, view.key.audience, state)
         {
             m.insert(WORDS, Value::Bytes(w.to_vec()));
         }
@@ -209,6 +215,18 @@ fn group(state: &State, audience: Id) -> Option<(Id, u64, String)> {
     Some((n.parent?, rule, ty))
 }
 
+/// Whether two audiences are one line (rule 7): the same audience, or audience nodes of one thing and one rule, each
+/// superseding the last as members join and leave.
+pub fn same_line(a: Audience, b: Audience, state: &State) -> bool {
+    match (a, b) {
+        _ if a == b => true,
+        (Audience::Of(x), Audience::Of(y)) => {
+            group(state, x).is_some_and(|g| group(state, y).is_some_and(|h| g == h))
+        }
+        _ => false,
+    }
+}
+
 /// The principals a rule names at a thing as the log stands (rule 2): the far ends of that type's links at the thing,
 /// each body counted as its Soul (by `souls:body-of`), and any other node end left out.
 fn wanted(state: &State, anchor: Id, ty: &str) -> BTreeSet<Id> {
@@ -219,8 +237,8 @@ fn wanted(state: &State, anchor: Id, ty: &str) -> BTreeSet<Id> {
         state
             .links
             .values()
-            .find(|l| plain(&l.ty) == "souls:body-of" && l.ends[0] == e)
-            .map(|l| l.ends[1])
+            .find(|l| plain(&l.ty) == "souls:body-of" && l.ends.contains(&e))
+            .and_then(|l| l.ends.into_iter().find(|x| *x != e))
     };
     state
         .links
