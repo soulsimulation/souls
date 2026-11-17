@@ -3,14 +3,14 @@
   "kind": "eden:lecture",
   "owner": "thing",
   "state": {
-    "running": { "n": 1, "type": "bool", "default": false, "audience": "public" },
-    "topic": { "n": 2, "type": "text", "default": null, "audience": "public" },
-    "planned": { "n": 3, "type": "duration", "default": 2700000000, "audience": "public" },
-    "notes": { "n": 4, "type": "text", "default": null, "audience": "members" }
+    "running": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "topic": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "planned": { "n": 3, "type": "duration", "default": 2700000000, "audience": { "rule": "everyone" } },
+    "notes": { "n": 4, "type": "text", "default": null, "audience": { "rule": "linked", "link": "listener" } }
   },
   "links": {
-    "speaker": { "n": 1, "from": "soul", "most": 1, "audience": "public" },
-    "listener": { "n": 2, "from": "soul", "most": 120, "audience": "public" }
+    "speaker": { "n": 1, "from": "soul", "most": 1, "audience": { "rule": "everyone" } },
+    "listener": { "n": 2, "from": "soul", "most": 120, "audience": { "rule": "everyone" } }
   },
   "points": {
     "lectern": { "role": "stand", "at_mm": [0, 0, -2000] }
