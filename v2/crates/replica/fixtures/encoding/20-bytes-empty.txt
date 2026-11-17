@@ -1,0 +1,2 @@
+h'' # an empty byte string
+40
