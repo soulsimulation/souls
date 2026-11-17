@@ -5,8 +5,10 @@
 #![deny(clippy::float_arithmetic)]
 
 pub mod audience;
+pub mod bodies;
 pub mod effects;
 pub mod encode;
+pub mod host;
 pub mod ids;
 pub mod pose;
 pub mod time;
