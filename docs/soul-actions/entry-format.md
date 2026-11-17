@@ -144,9 +144,12 @@ stairs or ladders; `deep_water`: water deep enough to swim in). Its size is `geo
 Getting on and off is only while it stands still, and only where the rider could stand (`level`, `shallow`) or swim
 (`deep_water`): `dismount(entry, {moving, spot})` answers with the code `moving` or `no_footing` and a reason naming the
 spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/vehicle.json`.
-`ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
-of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
-`speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
+`ride` is for a boat that is not rowed, a sail, and for a ride on a track (a big wheel, a carousel, a balloon, a cable car):
+`seats` (body slots), `stops` (two or more `stand` points in the order of the trip; a round trip names its one stop twice),
+`returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
+`speed_mm_s` and `ground`, which for a ride may also be `air` (a cable or a flight: a rider gets on and off only at its
+stops). A kind is a vehicle or a ride, not both. Eden's own are in `content/kinds/vehicles/` and `content/kinds/rides/`
+(SA-X33, [#2923](https://github.com/soulsimulation/souls/issues/2923)). Sections 13 and 14 are meaning, so covered by the hash.
 
 **Stock** (section 15, SA-F12, [#2851](https://github.com/soulsimulation/souls/issues/2851)). What a bookshelf, a
 wardrobe, a fridge or a stall is known to hold, made real when someone reaches for it. A stock is
