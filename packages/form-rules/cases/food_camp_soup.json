@@ -4,697 +4,115 @@
   "cases": [
     {
       "name": "camp_soup_pot_cook_every_need_met",
-      "act": {
-        "this": "p1",
-        "form": "cook"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "p1", "form": "cook"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_soup_pot_cook_already_cooked",
-      "act": {
-        "this": "p1",
-        "form": "cook"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "cooked": true
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "cooked",
-          "found": true,
-          "wanted": {
-            "is": false
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "p1", "form": "cook"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"cooked": true}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "cooked", "found": true, "wanted": {"is": false}}, "fix": null}
     },
     {
       "name": "camp_soup_pot_cook_vegetables_missing",
-      "act": {
-        "this": "p1",
-        "form": "cook"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "vegetables": 2
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "vegetables",
-          "found": 2,
-          "wanted": {
-            "at_least": 3
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "p1", "form": "cook"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"vegetables": 2}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "vegetables", "found": 2, "wanted": {"at_least": 3}}, "fix": null}
     },
     {
       "name": "camp_soup_pot_cook_water_short",
-      "act": {
-        "this": "p1",
-        "form": "cook"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "water": 1000
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 2,
-        "detail": {
-          "field": "water",
-          "found": 1000,
-          "wanted": {
-            "at_least": 1500
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "p1", "form": "cook"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"water": 1000}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"field": "water", "found": 1000, "wanted": {"at_least": 1500}}, "fix": null}
     },
     {
       "name": "camp_soup_pot_cook_no_fuel",
-      "act": {
-        "this": "p1",
-        "form": "cook"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "fuel": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 3,
-        "detail": {
-          "field": "fuel",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "p1", "form": "cook"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"fuel": 0}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "detail": {"field": "fuel", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "camp_soup_pot_cook_hands_full",
-      "act": {
-        "this": "p1",
-        "form": "cook"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 4,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "p1", "form": "cook"},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 4, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "camp_soup_pot_ladle_every_need_met",
-      "act": {
-        "this": "p1",
-        "form": "ladle",
-        "args": {
-          "bowl": "sb1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "vegetables": 0,
-              "water": 0,
-              "fuel": 0,
-              "cooked": true,
-              "soup": 6
-            },
-            "slots": {
-              "shelf": [
-                "sb1"
-              ]
-            }
-          },
-          "sb1": {
-            "kind": "eden:soup_bowl"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "p1", "form": "ladle", "args": {"bowl": "sb1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"vegetables": 0, "water": 0, "fuel": 0, "cooked": true, "soup": 6}, "slots": {"shelf": ["sb1"]}}, "sb1": {"kind": "eden:soup_bowl"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_soup_pot_ladle_not_cooked",
-      "act": {
-        "this": "p1",
-        "form": "ladle",
-        "args": {
-          "bowl": "sb1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "slots": {
-              "shelf": [
-                "sb1"
-              ]
-            }
-          },
-          "sb1": {
-            "kind": "eden:soup_bowl"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "cooked",
-          "found": false,
-          "wanted": {
-            "is": true
-          }
-        },
-        "fix": {
-          "form": "cook"
-        }
-      }
+      "act": {"this": "p1", "form": "ladle", "args": {"bowl": "sb1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "slots": {"shelf": ["sb1"]}}, "sb1": {"kind": "eden:soup_bowl"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "cooked", "found": false, "wanted": {"is": true}}, "fix": {"form": "cook"}}
     },
     {
       "name": "camp_soup_pot_ladle_hands_full",
-      "act": {
-        "this": "p1",
-        "form": "ladle",
-        "args": {
-          "bowl": "sb1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "vegetables": 0,
-              "water": 0,
-              "fuel": 0,
-              "cooked": true,
-              "soup": 6
-            },
-            "slots": {
-              "shelf": [
-                "sb1"
-              ]
-            }
-          },
-          "sb1": {
-            "kind": "eden:soup_bowl"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 1,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "p1", "form": "ladle", "args": {"bowl": "sb1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"vegetables": 0, "water": 0, "fuel": 0, "cooked": true, "soup": 6}, "slots": {"shelf": ["sb1"]}}, "sb1": {"kind": "eden:soup_bowl"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "camp_soup_pot_ladle_less_than_a_serving",
-      "act": {
-        "this": "p1",
-        "form": "ladle",
-        "args": {
-          "bowl": "sb1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "vegetables": 0,
-              "water": 0,
-              "fuel": 0,
-              "cooked": true,
-              "soup": 1
-            },
-            "slots": {
-              "shelf": [
-                "sb1"
-              ]
-            }
-          },
-          "sb1": {
-            "kind": "eden:soup_bowl"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_enough",
-        "need": 2,
-        "detail": {
-          "node": "p1",
-          "field": "soup",
-          "has": 1,
-          "amount": 2
-        },
-        "fix": null
-      }
+      "act": {"this": "p1", "form": "ladle", "args": {"bowl": "sb1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"vegetables": 0, "water": 0, "fuel": 0, "cooked": true, "soup": 1}, "slots": {"shelf": ["sb1"]}}, "sb1": {"kind": "eden:soup_bowl"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_enough", "need": 2, "detail": {"node": "p1", "field": "soup", "has": 1, "amount": 2}, "fix": null}
     },
     {
       "name": "camp_soup_pot_ladle_bowl_not_empty",
-      "act": {
-        "this": "p1",
-        "form": "ladle",
-        "args": {
-          "bowl": "sb1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "p1": {
-            "kind": "eden:camp_soup_pot",
-            "fields": {
-              "vegetables": 0,
-              "water": 0,
-              "fuel": 0,
-              "cooked": true,
-              "soup": 6
-            },
-            "slots": {
-              "shelf": [
-                "sb1"
-              ]
-            }
-          },
-          "sb1": {
-            "kind": "eden:soup_bowl",
-            "fields": {
-              "soup": 1
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_room",
-        "need": 3,
-        "detail": {
-          "node": "sb1",
-          "field": "soup",
-          "room": 1,
-          "amount": 2
-        },
-        "fix": null
-      }
+      "act": {"this": "p1", "form": "ladle", "args": {"bowl": "sb1"}},
+      "state": {"actor": "b1", "nodes": {"p1": {"kind": "eden:camp_soup_pot", "fields": {"vegetables": 0, "water": 0, "fuel": 0, "cooked": true, "soup": 6}, "slots": {"shelf": ["sb1"]}}, "sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_room", "need": 3, "detail": {"node": "sb1", "field": "soup", "room": 1, "amount": 2}, "fix": null}
     },
     {
       "name": "soup_bowl_take_every_need_met",
-      "act": {
-        "this": "sb1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "sb1": {
-            "kind": "eden:soup_bowl"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "sb1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"sb1": {"kind": "eden:soup_bowl"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "soup_bowl_take_hands_full",
-      "act": {
-        "this": "sb1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "sb1": {
-            "kind": "eden:soup_bowl"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "sb1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"sb1": {"kind": "eden:soup_bowl"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "soup_bowl_bite_every_need_met",
-      "act": {
-        "this": "sb1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "sb1": {
-            "kind": "eden:soup_bowl",
-            "fields": {
-              "soup": 2
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "sb1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "sb1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 2}}, "b1": {"hands": {"left": "sb1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "soup_bowl_bite_not_held",
-      "act": {
-        "this": "sb1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "sb1": {
-            "kind": "eden:soup_bowl",
-            "fields": {
-              "soup": 2
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_held",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "take",
-          "thing": "sb1"
-        }
-      }
+      "act": {"this": "sb1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 2}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "sb1"}}
     },
     {
       "name": "soup_bowl_bite_nothing_left",
-      "act": {
-        "this": "sb1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "sb1": {
-            "kind": "eden:soup_bowl",
-            "fields": {
-              "soup": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "sb1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "soup",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "sb1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"sb1": {"kind": "eden:soup_bowl", "fields": {"soup": 0}}, "b1": {"hands": {"left": "sb1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "soup", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     }
   ]
 }

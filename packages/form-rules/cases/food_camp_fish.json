@@ -4,675 +4,115 @@
   "cases": [
     {
       "name": "camp_grill_light_every_need_met",
-      "act": {
-        "this": "g1",
-        "form": "light"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "g1", "form": "light"},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_grill_light_already_lit",
-      "act": {
-        "this": "g1",
-        "form": "light"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "lit": true
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "lit",
-          "found": true,
-          "wanted": {
-            "is": false
-          }
-        },
-        "fix": {
-          "form": "cook"
-        }
-      }
+      "act": {"this": "g1", "form": "light"},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"lit": true}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "lit", "found": true, "wanted": {"is": false}}, "fix": {"form": "cook"}}
     },
     {
       "name": "camp_grill_light_charge_spent",
-      "act": {
-        "this": "g1",
-        "form": "light"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "heat": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "heat",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "g1", "form": "light"},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"heat": 0}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "heat", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "camp_grill_put_out_every_need_met",
-      "act": {
-        "this": "g1",
-        "form": "put_out"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "lit": true
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "g1", "form": "put_out"},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"lit": true}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_grill_put_out_not_lit",
-      "act": {
-        "this": "g1",
-        "form": "put_out"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "lit",
-          "found": false,
-          "wanted": {
-            "is": true
-          }
-        },
-        "fix": {
-          "form": "light"
-        }
-      }
+      "act": {"this": "g1", "form": "put_out"},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "lit", "found": false, "wanted": {"is": true}}, "fix": {"form": "light"}}
     },
     {
       "name": "camp_grill_cook_every_need_met",
-      "act": {
-        "this": "g1",
-        "form": "cook",
-        "args": {
-          "fish": "f1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "lit": true
-            },
-            "slots": {
-              "grate": [
-                "f1"
-              ]
-            }
-          },
-          "f1": {
-            "kind": "eden:camp_fish"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "g1", "form": "cook", "args": {"fish": "f1"}},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"lit": true}, "slots": {"grate": ["f1"]}}, "f1": {"kind": "eden:camp_fish"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_grill_cook_not_lit",
-      "act": {
-        "this": "g1",
-        "form": "cook",
-        "args": {
-          "fish": "f1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "slots": {
-              "grate": [
-                "f1"
-              ]
-            }
-          },
-          "f1": {
-            "kind": "eden:camp_fish"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "lit",
-          "found": false,
-          "wanted": {
-            "is": true
-          }
-        },
-        "fix": {
-          "form": "light"
-        }
-      }
+      "act": {"this": "g1", "form": "cook", "args": {"fish": "f1"}},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "slots": {"grate": ["f1"]}}, "f1": {"kind": "eden:camp_fish"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "lit", "found": false, "wanted": {"is": true}}, "fix": {"form": "light"}}
     },
     {
       "name": "camp_grill_cook_hands_full",
-      "act": {
-        "this": "g1",
-        "form": "cook",
-        "args": {
-          "fish": "f1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "lit": true
-            },
-            "slots": {
-              "grate": [
-                "f1"
-              ]
-            }
-          },
-          "f1": {
-            "kind": "eden:camp_fish"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 1,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "g1", "form": "cook", "args": {"fish": "f1"}},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"lit": true}, "slots": {"grate": ["f1"]}}, "f1": {"kind": "eden:camp_fish"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "camp_grill_cook_charge_spent",
-      "act": {
-        "this": "g1",
-        "form": "cook",
-        "args": {
-          "fish": "f1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "lit": true,
-              "heat": 0
-            },
-            "slots": {
-              "grate": [
-                "f1"
-              ]
-            }
-          },
-          "f1": {
-            "kind": "eden:camp_fish"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_enough",
-        "need": 2,
-        "detail": {
-          "node": "g1",
-          "field": "heat",
-          "has": 0,
-          "amount": 1
-        },
-        "fix": null
-      }
+      "act": {"this": "g1", "form": "cook", "args": {"fish": "f1"}},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"lit": true, "heat": 0}, "slots": {"grate": ["f1"]}}, "f1": {"kind": "eden:camp_fish"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_enough", "need": 2, "detail": {"node": "g1", "field": "heat", "has": 0, "amount": 1}, "fix": null}
     },
     {
       "name": "camp_grill_cook_fish_already_cooked",
-      "act": {
-        "this": "g1",
-        "form": "cook",
-        "args": {
-          "fish": "f1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "g1": {
-            "kind": "eden:camp_grill",
-            "fields": {
-              "lit": true
-            },
-            "slots": {
-              "grate": [
-                "f1"
-              ]
-            }
-          },
-          "f1": {
-            "kind": "eden:camp_fish",
-            "fields": {
-              "heat": 1
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_room",
-        "need": 3,
-        "detail": {
-          "node": "f1",
-          "field": "heat",
-          "room": 0,
-          "amount": 1
-        },
-        "fix": null
-      }
+      "act": {"this": "g1", "form": "cook", "args": {"fish": "f1"}},
+      "state": {"actor": "b1", "nodes": {"g1": {"kind": "eden:camp_grill", "fields": {"lit": true}, "slots": {"grate": ["f1"]}}, "f1": {"kind": "eden:camp_fish", "fields": {"heat": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_room", "need": 3, "detail": {"node": "f1", "field": "heat", "room": 0, "amount": 1}, "fix": null}
     },
     {
       "name": "camp_fish_take_every_need_met",
-      "act": {
-        "this": "f1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "f1": {
-            "kind": "eden:camp_fish"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "f1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"f1": {"kind": "eden:camp_fish"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_fish_take_hands_full",
-      "act": {
-        "this": "f1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "f1": {
-            "kind": "eden:camp_fish"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "f1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"f1": {"kind": "eden:camp_fish"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "camp_fish_bite_every_need_met",
-      "act": {
-        "this": "f1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "f1": {
-            "kind": "eden:camp_fish",
-            "fields": {
-              "heat": 1
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "f1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "f1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"f1": {"kind": "eden:camp_fish", "fields": {"heat": 1}}, "b1": {"hands": {"left": "f1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "camp_fish_bite_not_held",
-      "act": {
-        "this": "f1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "f1": {
-            "kind": "eden:camp_fish",
-            "fields": {
-              "heat": 1
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_held",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "take",
-          "thing": "f1"
-        }
-      }
+      "act": {"this": "f1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"f1": {"kind": "eden:camp_fish", "fields": {"heat": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "f1"}}
     },
     {
       "name": "camp_fish_bite_raw",
-      "act": {
-        "this": "f1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "f1": {
-            "kind": "eden:camp_fish",
-            "fields": {
-              "heat": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "f1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "heat",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "f1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"f1": {"kind": "eden:camp_fish", "fields": {"heat": 0}}, "b1": {"hands": {"left": "f1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "heat", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "camp_fish_bite_nothing_left",
-      "act": {
-        "this": "f1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "f1": {
-            "kind": "eden:camp_fish",
-            "fields": {
-              "heat": 1,
-              "bites": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "f1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 2,
-        "detail": {
-          "field": "bites",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "f1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"f1": {"kind": "eden:camp_fish", "fields": {"heat": 1, "bites": 0}}, "b1": {"hands": {"left": "f1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 2, "detail": {"field": "bites", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     }
   ]
 }

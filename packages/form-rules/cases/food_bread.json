@@ -4,336 +4,66 @@
   "cases": [
     {
       "name": "bread_board_prepare_every_need_met",
-      "act": {
-        "this": "bb1",
-        "form": "prepare"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "bb1": {
-            "kind": "eden:bread_board"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "bb1", "form": "prepare"},
+      "state": {"actor": "b1", "nodes": {"bb1": {"kind": "eden:bread_board"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "bread_board_prepare_no_dough_left",
-      "act": {
-        "this": "bb1",
-        "form": "prepare"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "bb1": {
-            "kind": "eden:bread_board",
-            "fields": {
-              "dough": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "dough",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "bb1", "form": "prepare"},
+      "state": {"actor": "b1", "nodes": {"bb1": {"kind": "eden:bread_board", "fields": {"dough": 0}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "dough", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "bread_board_prepare_rack_taken",
-      "act": {
-        "this": "bb1",
-        "form": "prepare"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "bb1": {
-            "kind": "eden:bread_board",
-            "slots": {
-              "out": [
-                "r1"
-              ]
-            }
-          },
-          "r1": {
-            "kind": "eden:bread_roll"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "slot_taken",
-        "need": 1,
-        "detail": {
-          "node": "bb1",
-          "slot": "out"
-        },
-        "fix": null
-      }
+      "act": {"this": "bb1", "form": "prepare"},
+      "state": {"actor": "b1", "nodes": {"bb1": {"kind": "eden:bread_board", "slots": {"out": ["r1"]}}, "r1": {"kind": "eden:bread_roll"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "slot_taken", "need": 1, "detail": {"node": "bb1", "slot": "out"}, "fix": null}
     },
     {
       "name": "bread_board_prepare_hands_full",
-      "act": {
-        "this": "bb1",
-        "form": "prepare"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "bb1": {
-            "kind": "eden:bread_board"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 2,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "bb1", "form": "prepare"},
+      "state": {"actor": "b1", "nodes": {"bb1": {"kind": "eden:bread_board"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 2, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "bread_roll_take_every_need_met",
-      "act": {
-        "this": "r1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "r1": {
-            "kind": "eden:bread_roll"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "r1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"r1": {"kind": "eden:bread_roll"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "bread_roll_take_hands_full",
-      "act": {
-        "this": "r1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "r1": {
-            "kind": "eden:bread_roll"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "r1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"r1": {"kind": "eden:bread_roll"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "bread_roll_bite_every_need_met",
-      "act": {
-        "this": "r1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "r1": {
-            "kind": "eden:bread_roll"
-          },
-          "b1": {
-            "hands": {
-              "left": "r1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "r1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"r1": {"kind": "eden:bread_roll"}, "b1": {"hands": {"left": "r1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "bread_roll_bite_not_held",
-      "act": {
-        "this": "r1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "r1": {
-            "kind": "eden:bread_roll"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_held",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "take",
-          "thing": "r1"
-        }
-      }
+      "act": {"this": "r1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"r1": {"kind": "eden:bread_roll"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "r1"}}
     },
     {
       "name": "bread_roll_bite_nothing_left",
-      "act": {
-        "this": "r1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "r1": {
-            "kind": "eden:bread_roll",
-            "fields": {
-              "bites": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "r1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "bites",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "r1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"r1": {"kind": "eden:bread_roll", "fields": {"bites": 0}}, "b1": {"hands": {"left": "r1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "bites", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     }
   ]
 }

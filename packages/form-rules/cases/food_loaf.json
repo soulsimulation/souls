@@ -4,758 +4,150 @@
   "cases": [
     {
       "name": "loaf_halve_every_need_met",
-      "act": {
-        "this": "l1",
-        "form": "halve"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "l1", "form": "halve"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_halve_partly_eaten",
-      "act": {
-        "this": "l1",
-        "form": "halve"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf",
-            "fields": {
-              "bites": 3
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "bites",
-          "found": 3,
-          "wanted": {
-            "at_least": 4
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "l1", "form": "halve"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf", "fields": {"bites": 3}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "bites", "found": 3, "wanted": {"at_least": 4}}, "fix": null}
     },
     {
       "name": "loaf_halve_hands_full",
-      "act": {
-        "this": "l1",
-        "form": "halve"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 1,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "l1", "form": "halve"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "loaf_quarter_every_need_met",
-      "act": {
-        "this": "l1",
-        "form": "quarter"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "l1", "form": "quarter"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_quarter_partly_eaten",
-      "act": {
-        "this": "l1",
-        "form": "quarter"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf",
-            "fields": {
-              "bites": 3
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "bites",
-          "found": 3,
-          "wanted": {
-            "at_least": 4
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "l1", "form": "quarter"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf", "fields": {"bites": 3}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "bites", "found": 3, "wanted": {"at_least": 4}}, "fix": null}
     },
     {
       "name": "loaf_quarter_hands_full",
-      "act": {
-        "this": "l1",
-        "form": "quarter"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 1,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "l1", "form": "quarter"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "loaf_take_every_need_met",
-      "act": {
-        "this": "l1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "l1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_take_hands_full",
-      "act": {
-        "this": "l1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "l1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "loaf_bite_every_need_met",
-      "act": {
-        "this": "l1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": "l1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "l1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": "l1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_bite_not_held",
-      "act": {
-        "this": "l1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_held",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "take",
-          "thing": "l1"
-        }
-      }
+      "act": {"this": "l1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "l1"}}
     },
     {
       "name": "loaf_bite_nothing_left",
-      "act": {
-        "this": "l1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "l1": {
-            "kind": "eden:loaf",
-            "fields": {
-              "bites": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "l1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "bites",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "l1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"l1": {"kind": "eden:loaf", "fields": {"bites": 0}}, "b1": {"hands": {"left": "l1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "bites", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "loaf_half_take_every_need_met",
-      "act": {
-        "this": "lh1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lh1": {
-            "kind": "eden:loaf_half"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "lh1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"lh1": {"kind": "eden:loaf_half"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_half_take_hands_full",
-      "act": {
-        "this": "lh1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lh1": {
-            "kind": "eden:loaf_half"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "lh1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"lh1": {"kind": "eden:loaf_half"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "loaf_half_bite_every_need_met",
-      "act": {
-        "this": "lh1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lh1": {
-            "kind": "eden:loaf_half"
-          },
-          "b1": {
-            "hands": {
-              "left": "lh1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "lh1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"lh1": {"kind": "eden:loaf_half"}, "b1": {"hands": {"left": "lh1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_half_bite_not_held",
-      "act": {
-        "this": "lh1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lh1": {
-            "kind": "eden:loaf_half"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_held",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "take",
-          "thing": "lh1"
-        }
-      }
+      "act": {"this": "lh1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"lh1": {"kind": "eden:loaf_half"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "lh1"}}
     },
     {
       "name": "loaf_half_bite_nothing_left",
-      "act": {
-        "this": "lh1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lh1": {
-            "kind": "eden:loaf_half",
-            "fields": {
-              "bites": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "lh1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "bites",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "lh1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"lh1": {"kind": "eden:loaf_half", "fields": {"bites": 0}}, "b1": {"hands": {"left": "lh1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "bites", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "loaf_quarter_take_every_need_met",
-      "act": {
-        "this": "lq1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lq1": {
-            "kind": "eden:loaf_quarter"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "lq1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"lq1": {"kind": "eden:loaf_quarter"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_quarter_take_hands_full",
-      "act": {
-        "this": "lq1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lq1": {
-            "kind": "eden:loaf_quarter"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "lq1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"lq1": {"kind": "eden:loaf_quarter"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "loaf_quarter_bite_every_need_met",
-      "act": {
-        "this": "lq1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lq1": {
-            "kind": "eden:loaf_quarter"
-          },
-          "b1": {
-            "hands": {
-              "left": "lq1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "lq1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"lq1": {"kind": "eden:loaf_quarter"}, "b1": {"hands": {"left": "lq1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "loaf_quarter_bite_not_held",
-      "act": {
-        "this": "lq1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lq1": {
-            "kind": "eden:loaf_quarter"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_held",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "take",
-          "thing": "lq1"
-        }
-      }
+      "act": {"this": "lq1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"lq1": {"kind": "eden:loaf_quarter"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_held", "need": 0, "detail": {}, "fix": {"step": "take", "thing": "lq1"}}
     },
     {
       "name": "loaf_quarter_bite_nothing_left",
-      "act": {
-        "this": "lq1",
-        "form": "bite"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "lq1": {
-            "kind": "eden:loaf_quarter",
-            "fields": {
-              "bites": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": "lq1",
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 1,
-        "detail": {
-          "field": "bites",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "lq1", "form": "bite"},
+      "state": {"actor": "b1", "nodes": {"lq1": {"kind": "eden:loaf_quarter", "fields": {"bites": 0}}, "b1": {"hands": {"left": "lq1", "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 1, "detail": {"field": "bites", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     }
   ]
 }

@@ -4,323 +4,52 @@
   "cases": [
     {
       "name": "wash_station_wash_every_need_met",
-      "act": {
-        "this": "ws1",
-        "form": "wash",
-        "args": {
-          "bowl": "mk1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "ws1": {
-            "kind": "eden:wash_station",
-            "slots": {
-              "board": [
-                "mk1"
-              ]
-            }
-          },
-          "mk1": {
-            "kind": "eden:mess_kit"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}},
+      "state": {"actor": "b1", "nodes": {"ws1": {"kind": "eden:wash_station", "slots": {"board": ["mk1"]}}, "mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "wash_station_wash_water_used",
-      "act": {
-        "this": "ws1",
-        "form": "wash",
-        "args": {
-          "bowl": "mk1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "ws1": {
-            "kind": "eden:wash_station",
-            "fields": {
-              "clean_water": 0,
-              "dirt": 1
-            },
-            "slots": {
-              "board": [
-                "mk1"
-              ]
-            }
-          },
-          "mk1": {
-            "kind": "eden:mess_kit"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "field_differs",
-        "need": 0,
-        "detail": {
-          "field": "clean_water",
-          "found": 0,
-          "wanted": {
-            "at_least": 1
-          }
-        },
-        "fix": null
-      }
+      "act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}},
+      "state": {"actor": "b1", "nodes": {"ws1": {"kind": "eden:wash_station", "fields": {"clean_water": 0, "dirt": 1}, "slots": {"board": ["mk1"]}}, "mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 0, "detail": {"field": "clean_water", "found": 0, "wanted": {"at_least": 1}}, "fix": null}
     },
     {
       "name": "wash_station_wash_hands_full",
-      "act": {
-        "this": "ws1",
-        "form": "wash",
-        "args": {
-          "bowl": "mk1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "ws1": {
-            "kind": "eden:wash_station",
-            "slots": {
-              "board": [
-                "mk1"
-              ]
-            }
-          },
-          "mk1": {
-            "kind": "eden:mess_kit"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 1,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}},
+      "state": {"actor": "b1", "nodes": {"ws1": {"kind": "eden:wash_station", "slots": {"board": ["mk1"]}}, "mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": {"step": "put"}}
     },
     {
       "name": "wash_station_wash_bowl_already_clean",
-      "act": {
-        "this": "ws1",
-        "form": "wash",
-        "args": {
-          "bowl": "mk1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "ws1": {
-            "kind": "eden:wash_station",
-            "slots": {
-              "board": [
-                "mk1"
-              ]
-            }
-          },
-          "mk1": {
-            "kind": "eden:mess_kit",
-            "fields": {
-              "dirt": 0
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "not_enough",
-        "need": 2,
-        "detail": {
-          "node": "mk1",
-          "field": "dirt",
-          "has": 0,
-          "amount": 1
-        },
-        "fix": null
-      }
+      "act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}},
+      "state": {"actor": "b1", "nodes": {"ws1": {"kind": "eden:wash_station", "slots": {"board": ["mk1"]}}, "mk1": {"kind": "eden:mess_kit", "fields": {"dirt": 0}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "not_enough", "need": 2, "detail": {"node": "mk1", "field": "dirt", "has": 0, "amount": 1}, "fix": null}
     },
     {
       "name": "wash_station_wash_water_dirty",
-      "act": {
-        "this": "ws1",
-        "form": "wash",
-        "args": {
-          "bowl": "mk1"
-        }
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "ws1": {
-            "kind": "eden:wash_station",
-            "fields": {
-              "dirt": 1
-            },
-            "slots": {
-              "board": [
-                "mk1"
-              ]
-            }
-          },
-          "mk1": {
-            "kind": "eden:mess_kit"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_room",
-        "need": 3,
-        "detail": {
-          "node": "ws1",
-          "field": "dirt",
-          "room": 0,
-          "amount": 1
-        },
-        "fix": null
-      }
+      "act": {"this": "ws1", "form": "wash", "args": {"bowl": "mk1"}},
+      "state": {"actor": "b1", "nodes": {"ws1": {"kind": "eden:wash_station", "fields": {"dirt": 1}, "slots": {"board": ["mk1"]}}, "mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_room", "need": 3, "detail": {"node": "ws1", "field": "dirt", "room": 0, "amount": 1}, "fix": null}
     },
     {
       "name": "mess_kit_take_every_need_met",
-      "act": {
-        "this": "mk1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "mk1": {
-            "kind": "eden:mess_kit"
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "yes"
-      }
+      "act": {"this": "mk1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "yes"}
     },
     {
       "name": "mess_kit_take_hands_full",
-      "act": {
-        "this": "mk1",
-        "form": "take"
-      },
-      "state": {
-        "actor": "b1",
-        "nodes": {
-          "mk1": {
-            "kind": "eden:mess_kit"
-          },
-          "b1": {
-            "hands": {
-              "left": "x1",
-              "right": "x2"
-            }
-          },
-          "x1": {
-            "kind": "eden:bread_roll"
-          },
-          "x2": {
-            "kind": "eden:bread_roll"
-          }
-        }
-      },
-      "asker": {
-        "sees": [
-          "public"
-        ]
-      },
-      "expect": {
-        "verdict": "no",
-        "reason": "no_free_hand",
-        "need": 0,
-        "detail": {},
-        "fix": {
-          "step": "put"
-        }
-      }
+      "act": {"this": "mk1", "form": "take"},
+      "state": {"actor": "b1", "nodes": {"mk1": {"kind": "eden:mess_kit"}, "b1": {"hands": {"left": "x1", "right": "x2"}}, "x1": {"kind": "eden:bread_roll"}, "x2": {"kind": "eden:bread_roll"}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "no_free_hand", "need": 0, "detail": {}, "fix": {"step": "put"}}
     }
   ]
 }
