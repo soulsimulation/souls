@@ -28,7 +28,7 @@
 //   down, whose crossing of 0 is when it ends. An activity nobody entered is removed at that time by its own world form
 //   (`who: "world"`, `starts: "timer"`), whose needs are that time and no member; the engine's timer runs it.
 
-import { apply, effects, parentOf, type Change, type Done, type Event, type Refused } from './effects.ts';
+import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type Unknown } from './effects.ts';
 import { crossing, whoMay, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
@@ -121,7 +121,8 @@ export function place(input: Input): PlaceVerdict {
   return { verdict: 'no', reason: 'no_free_place', role: enters.role, detail: { places: candidates.length }, read };
 }
 
-export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as effects gives it. */
+export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict | Unknown;
 
 /** Enter the role a form enters: who may (SA-F7a), then the place, then the form's needs and effects (SA-F2b). */
 export function enter(input: Input & { receipt: string }): Entered {

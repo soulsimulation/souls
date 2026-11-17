@@ -1,0 +1,22 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:signup_sheet",
+  "owner": "thing",
+  "state": {
+    "open": { "n": 1, "type": "bool", "default": true, "audience": { "rule": "everyone" } },
+    "title": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "notes": {
+      "n": 3, "type": "list", "most": 12, "key": "id", "default": [],
+      "of": { "id": { "type": "int", "unit": "count" }, "kind": { "type": "enum", "values": ["note", "question"] } },
+      "audience": { "rule": "linked", "link": "organizer" }
+    }
+  },
+  "links": {
+    "organizer": { "n": 1, "from": "soul", "most": 2, "audience": { "rule": "everyone" } }
+  },
+  "children": {
+    "slot": { "kind": "eden:signup_slot", "most": 20 }
+  },
+  "text": { "card": "A sheet with a fixed number of slots; a Soul signs a slot." },
+  "card": { "text": "card" }
+}
