@@ -38,7 +38,7 @@ export function loadKinds(dirs: string[] = KIND_DIRS): Record<string, Entry> {
 export function loadCases(dir: string = CASES): [string, Case][] {
   const out: [string, Case][] = [];
   for (const file of jsonFiles(dir, false)) {
-    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    const doc = parse(readFileSync(file, 'utf8'));
     if (doc.format !== 'souls-form-cases/1') throw new Error(`${file}: format is not souls-form-cases/1`);
     for (const c of doc.cases) out.push([file, c]);
   }
@@ -52,7 +52,7 @@ export type EffectCase = { name: string; state: Input['state']; do: EffectStep[]
 export function loadEffectCases(dir: string = join(CASES, 'effects')): [string, EffectCase][] {
   const out: [string, EffectCase][] = [];
   for (const file of jsonFiles(dir, false)) {
-    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    const doc = parse(readFileSync(file, 'utf8'));
     if (doc.format !== 'souls-effect-cases/1') throw new Error(`${file}: format is not souls-effect-cases/1`);
     for (const c of doc.cases) out.push([file, c]);
   }
@@ -78,15 +78,22 @@ export type TimedCase = {
   kind: string;
   field: string;
   stored: unknown;
-  values: [number, unknown][];
-  crossings: { at_least?: number; at_most?: number; from_us: number; expect: unknown }[];
+  values: [number | bigint, unknown][];
+  crossings: { at_least?: number | bigint; at_most?: number | bigint; from_us: number | bigint; expect: unknown }[];
 };
+
+/** JSON with every whole number beyond a safe integer read as a big integer, as T0's encoding reads it (SA-F5a). */
+export function parse(text: string): any {
+  const big = (_key: string, value: unknown, context?: { source?: string }) =>
+    typeof value === 'number' && !Number.isSafeInteger(value) && /^-?\d+$/.test(context?.source ?? '') ? BigInt(context!.source!) : value;
+  return JSON.parse(text, big as (key: string, value: unknown) => unknown);
+}
 
 /** Every timed-value case in `dir` (souls-timed-cases/1), as [file, case]. */
 export function loadTimedCases(dir: string = join(CASES, 'timed')): [string, TimedCase][] {
   const out: [string, TimedCase][] = [];
   for (const file of jsonFiles(dir, false)) {
-    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    const doc = parse(readFileSync(file, 'utf8'));
     if (doc.format !== 'souls-timed-cases/1') throw new Error(`${file}: format is not souls-timed-cases/1`);
     for (const c of doc.cases) out.push([file, c]);
   }
