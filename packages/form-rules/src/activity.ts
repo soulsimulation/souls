@@ -278,7 +278,8 @@ export type Lapsed = (Done & { released: number }) | Refused | Verdict | LeaveBa
 /**
  * The end date of an activity, as the engine's timer runs its world form (`starts: "timer"`, whose need is the time and
  * nothing else, so members do not hold it): the form's own effects, with every member released first. Each is unlinked
- * from its role (event `released`); no body is moved, so a body seated in another thing's slot stays seated.
+ * from its role (event `released`); a body seated in another thing's slot stays seated, and one in the activity's own
+ * slots is moved out to its place, so removing the activity removes no body.
  */
 export function lapse(input: Omit<Input, 'asker'> & { receipt: string }): Lapsed {
   const done = effects(input);
@@ -289,15 +290,19 @@ export function lapse(input: Omit<Input, 'asker'> & { receipt: string }): Lapsed
   const members: [string, string][] = [];
   for (const role of Object.keys(entry.roles ?? {})) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
   if (!members.length) return { ...done, released: 0 };
-  const k = members.length;
-  const unlinks: Change[] = members.map(([role, end]) => ({ change: 'unlink', node: act.this, link: role, n: entry.links![role].n, end }));
-  const released: Event = { event: `${namespace(entry)}:released`, node: act.this, changes: unlinks.map((_, i) => i) };
+  const releases: Change[] = members.map(([role, end]) => ({ change: 'unlink', node: act.this, link: role, n: entry.links![role].n, end }));
+  // A body standing in the activity's own slots is moved out to the place the activity is in, as `leave`'s ending does,
+  // so removing the activity removes no body (SA-G4: a lapsed offer's asker stands in its own place).
+  const at = parentOf(state.nodes, act.this);
+  for (const slot of Object.keys(self.slots ?? {}).sort()) for (const body of (self.slots![slot] ?? []) as string[]) if (at && !has(at, 'slot') && !has(at, 'hand')) releases.push({ change: 'reparent', node: body, to: { node: at.node } });
+  const k = releases.length;
+  const released: Event = { event: `${namespace(entry)}:released`, node: act.this, changes: releases.map((_, i) => i) };
   const result: Done & { released: number } = {
     ...done,
-    changes: [...unlinks, ...done.changes],
+    changes: [...releases, ...done.changes],
     events: [released, ...done.events.map((e) => ({ ...e, changes: e.changes.map((c) => c + k) }))],
     timers: done.timers.map((t) => ({ ...t, event: t.event + 1 })),
-    released: k,
+    released: members.length,
   };
   const check = apply(state, result);
   return check.ok ? result : { verdict: 'no', reason: 'bad_input', detail: { what: check.reason, change: check.change } };

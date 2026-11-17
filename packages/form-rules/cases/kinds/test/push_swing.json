@@ -1,0 +1,102 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:push_swing",
+  "owner": "thing",
+  "state": {
+    "phase": {"n": 1, "type": "enum", "values": ["offered", "joined"], "default": "offered", "audience": "public"},
+    "left_us": {
+      "n": 2,
+      "type": "timed",
+      "unit": "us",
+      "default": {"value": 60000000, "per_s": -1000000, "set_us": 0},
+      "min": 0,
+      "audience": "public"
+    }
+  },
+  "links": {
+    "invited": {"n": 1, "from": "body", "most": 1, "audience": "public"},
+    "proposer": {"n": 2, "from": "body", "most": 1, "audience": "public"},
+    "rider": {"n": 3, "from": "body", "most": 1, "audience": "public"},
+    "pusher": {"n": 4, "from": "body", "most": 1, "audience": "public"}
+  },
+  "slots": {"pusher": {"admits": "body", "most": 1, "at_mm": [0, 0, -900]}},
+  "roles": {
+    "rider": {"need": "required", "places": {"in": "here", "posture": "sit", "within_mm": 1500}},
+    "pusher": {"need": "required", "places": {"in": "this", "slots": ["pusher"]}}
+  },
+  "now": {"stage": "phase", "ends": "left_us"},
+  "pair": {
+    "invited": "invited",
+    "accept": "accept",
+    "expires": "lapse",
+    "beat_us": 1000000,
+    "contact": [
+      {"role": "pusher", "move": "press", "contact_mm": [0, 900, -250], "beat": 1},
+      {"role": "pusher", "move": "press", "contact_mm": [0, 900, -250], "beat": 3},
+      {"role": "pusher", "move": "press", "contact_mm": [0, 900, -250], "beat": 5}
+    ]
+  },
+  "forms": {
+    "offer": {
+      "who": {"link": "proposer"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "unlinked", "link": "rider"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}, {"step": "sit", "slot": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "rider", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"}
+      ]
+    },
+    "accept": {
+      "who": {"link": "invited"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "linked", "link": "rider"},
+        {"need": "unlinked", "link": "pusher"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "pusher", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"},
+        {"change": "set", "field": "phase", "to": "joined", "event": "test:began"}
+      ]
+    },
+    "let_go": {
+      "who": {"link": "rider"},
+      "starts": "act",
+      "steps": [{"step": "rise"}],
+      "effects": [
+        {"change": "unlink", "link": "rider", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "step_away": {
+      "who": {"link": "pusher"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "pusher", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{"need": "state", "field": "left_us", "at_most": 0}, {"need": "unlinked", "link": "pusher"}],
+      "steps": [],
+      "effects": [{"change": "remove", "what": "this", "event": "test:offer_lapsed"}]
+    }
+  },
+  "text": {
+    "card": "Push the swing: a Soul on the swing asks to be pushed, another accepts in time and stands behind it; the pusher's hands meet the seat's back on every other beat. Only the swing is pushed; the rider is never touched."
+  },
+  "card": {"text": "card"}
+}

@@ -1,0 +1,107 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:give",
+  "owner": "thing",
+  "state": {
+    "phase": {"n": 1, "type": "enum", "values": ["offered", "joined"], "default": "offered", "audience": "public"},
+    "left_us": {
+      "n": 2,
+      "type": "timed",
+      "unit": "us",
+      "default": {"value": 30000000, "per_s": -1000000, "set_us": 0},
+      "min": 0,
+      "audience": "public"
+    }
+  },
+  "links": {
+    "invited": {"n": 1, "from": "body", "most": 1, "audience": "public"},
+    "proposer": {"n": 2, "from": "body", "most": 1, "audience": "public"},
+    "giver": {"n": 3, "from": "body", "most": 1, "audience": "public"},
+    "taker": {"n": 4, "from": "body", "most": 1, "audience": "public"},
+    "offered": {"n": 5, "from": "thing", "most": 1, "audience": "public"}
+  },
+  "slots": {
+    "giver": {"admits": "body", "most": 1, "at_mm": [-400, 0, 0]},
+    "taker": {"admits": "body", "most": 1, "at_mm": [400, 0, 0]}
+  },
+  "roles": {
+    "giver": {"need": "required", "places": {"in": "this", "slots": ["giver"]}},
+    "taker": {"need": "required", "places": {"in": "this", "slots": ["taker"]}}
+  },
+  "now": {"stage": "phase", "ends": "left_us"},
+  "pair": {
+    "invited": "invited",
+    "accept": "accept",
+    "expires": "lapse",
+    "gives": "offered",
+    "beat_us": 500000,
+    "contact": [
+      {"role": "giver", "move": "press", "contact_mm": [-30, 1100, 0], "beat": 1},
+      {"role": "taker", "move": "press", "contact_mm": [30, 1100, 0], "beat": 1}
+    ]
+  },
+  "forms": {
+    "offer": {
+      "who": {"link": "proposer"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "unlinked", "link": "giver"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "giver", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"}
+      ]
+    },
+    "accept": {
+      "who": {"link": "invited"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "linked", "link": "giver"},
+        {"need": "unlinked", "link": "taker"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "taker", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"},
+        {"change": "reparent", "what": {"link": "offered"}, "into": "actor_hand", "event": "test:handed_over"},
+        {"change": "set", "field": "phase", "to": "joined", "event": "test:began"}
+      ]
+    },
+    "let_go": {
+      "who": {"link": "giver"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "giver", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "step_away": {
+      "who": {"link": "taker"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "taker", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{"need": "state", "field": "left_us", "at_most": 0}, {"need": "unlinked", "link": "taker"}],
+      "steps": [],
+      "effects": [{"change": "remove", "what": "this", "event": "test:offer_lapsed"}]
+    }
+  },
+  "text": {
+    "card": "A give between two Souls: the giver offers what it holds to one Soul, who has a stated time to accept; on accepting, the thing passes from the giver's hand to the taker's at the contact instant, both sides or neither. Unaccepted, it stays with the giver and the offer lapses."
+  },
+  "card": {"text": "card"}
+}

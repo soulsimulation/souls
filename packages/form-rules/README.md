@@ -248,5 +248,20 @@ actor as a member, with no place. `enter` and `leave` then also keep the stage: 
 arrives, a `sitting_began` event sets the stage to `sitting`; when the last one present rises, `sitting_ended` returns
 it to `idle`; a member who is present cannot part (`still_present`); and a standing activity is not ended by its last
 member parting. `lapse(input)` is the end date: it runs the world form (the engine's timer, at the time its needs
-state) and puts a `released` event first, unlinking every member; it moves no body. Cases are in `cases/activity/standing/`
+state) and puts a `released` event first, unlinking every member; a body standing in the activity's own slots is moved
+out to its place, so removing the activity removes no body. Cases are in `cases/activity/standing/`
 (the same step format, with `join` and `world` running `lapse`); the example is a weekly class (`test:class`).
+
+### Between two Souls
+
+A pair (SA-G4, [#2876](https://github.com/soulsimulation/souls/issues/2876)) is an activity of two required roles with
+a `pair` section (see the format page): give, hug, handshake, high five, dance and push the swing. `pairOf(entry,
+moves)` answers whether a kind is one, or `{bad, detail}` naming the first thing wrong: the accepting form is allowed
+only to the invited Soul and needs the asker's role linked and the countdown above 0; the asker offers by a form
+allowed to one link; each role has a leaving form; the expiry is a world timer form at the countdown's end that needs
+the other role unlinked and removes the offer; no form moves anything by a link except a give's thing into the
+accepter's hand; contact points name a move from `content/moves/`. `accept(input)` asks who may, then, for a give,
+that the asker still holds the thing in a hand (`not_held`), then `enter`s. An effect's `what` may be `{"link":
+<type>}`, the one thing at the end of that link of this node, never a body. Cases are in `cases/activity/pairs/` (the
+same step format, with `offer`, `accept`, `leave`, `world` running `lapse` and `now`); the test checks that no change
+names a body that is neither the actor nor a member.

@@ -1,0 +1,104 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:hug",
+  "owner": "thing",
+  "state": {
+    "phase": {"n": 1, "type": "enum", "values": ["offered", "joined"], "default": "offered", "audience": "public"},
+    "left_us": {
+      "n": 2,
+      "type": "timed",
+      "unit": "us",
+      "default": {"value": 30000000, "per_s": -1000000, "set_us": 0},
+      "min": 0,
+      "audience": "public"
+    }
+  },
+  "links": {
+    "invited": {"n": 1, "from": "body", "most": 1, "audience": "public"},
+    "proposer": {"n": 2, "from": "body", "most": 1, "audience": "public"},
+    "asker": {"n": 3, "from": "body", "most": 1, "audience": "public"},
+    "partner": {"n": 4, "from": "body", "most": 1, "audience": "public"}
+  },
+  "slots": {
+    "asker": {"admits": "body", "most": 1, "at_mm": [-200, 0, 0]},
+    "partner": {"admits": "body", "most": 1, "at_mm": [200, 0, 0]}
+  },
+  "roles": {
+    "asker": {"need": "required", "places": {"in": "this", "slots": ["asker"]}},
+    "partner": {"need": "required", "places": {"in": "this", "slots": ["partner"]}}
+  },
+  "now": {"stage": "phase", "ends": "left_us"},
+  "pair": {
+    "invited": "invited",
+    "accept": "accept",
+    "expires": "lapse",
+    "beat_us": 500000,
+    "contact": [
+      {"role": "asker", "move": "press", "contact_mm": [230, 1300, 0], "beat": 1},
+      {"role": "partner", "move": "press", "contact_mm": [-230, 1300, 0], "beat": 1}
+    ]
+  },
+  "forms": {
+    "offer": {
+      "who": {"link": "proposer"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "unlinked", "link": "asker"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "asker", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"}
+      ]
+    },
+    "accept": {
+      "who": {"link": "invited"},
+      "starts": "act",
+      "takes": {"place": {"type": "slot"}},
+      "needs": [
+        {"need": "linked", "link": "asker"},
+        {"need": "unlinked", "link": "partner"},
+        {"need": "state", "field": "left_us", "at_least": 1},
+        {"need": "slot_free", "slot": {"arg": "place"}}
+      ],
+      "steps": [{"step": "walk_to", "point": {"arg": "place"}}],
+      "effects": [
+        {"change": "link", "link": "partner", "from": "actor", "event": "test:joined"},
+        {"change": "reparent", "what": "actor", "into": {"arg": "place"}, "event": "test:took_place"},
+        {"change": "set", "field": "phase", "to": "joined", "event": "test:began"}
+      ]
+    },
+    "let_go": {
+      "who": {"link": "asker"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "asker", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "step_away": {
+      "who": {"link": "partner"},
+      "starts": "act",
+      "steps": [],
+      "effects": [
+        {"change": "unlink", "link": "partner", "from": "actor", "event": "test:let_go"},
+        {"change": "reparent", "what": "actor", "into": "here", "event": "test:stepped_back"}
+      ]
+    },
+    "lapse": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{"need": "state", "field": "left_us", "at_most": 0}, {"need": "unlinked", "link": "partner"}],
+      "steps": [],
+      "effects": [{"change": "remove", "what": "this", "event": "test:offer_lapsed"}]
+    }
+  },
+  "text": {
+    "card": "A hug between two Souls: one offers, the other accepts in time; each puts its arms round the other's back on the first beat. Either can let go."
+  },
+  "card": {"text": "card"}
+}

@@ -107,7 +107,13 @@ export function effects(input: Omit<Input, 'asker'> & { receipt: string }): Done
     }
     return slotPlace(into);
   };
-  const subject = (what: unknown) => (what === 'actor' ? actor : what === 'this' ? self : null);
+  // `{link}`: the one thing at the end of that link of this node (what a give hands over, SA-G4); never a body.
+  const subject = (what: unknown): string | null => {
+    if (what === 'actor' || what === 'this') return what === 'actor' ? actor : self;
+    const link = what && typeof what === 'object' ? (what as { link?: unknown }).link : undefined;
+    const ends = typeof link === 'string' ? ((work[self].links?.[link] ?? []) as string[]) : [];
+    return ends.length === 1 && has(work, ends[0]) && !has(work[ends[0]], 'hands') ? ends[0] : null;
+  };
 
   const effectList = entry.forms![act.form].effects ?? [];
   for (let i = 0; i < effectList.length; i++) {
