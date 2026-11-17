@@ -15,6 +15,8 @@
 //           show    1 shown, 0 hidden              glow   permille of the part's own glow
 //           tint    a colour "#rrggbb" (named by at)
 //           pick    no `part`: at maps a field value to the part shown; every other part named in at is hidden
+//           steam   permille of a plume leaving the part (0 none, 1000 full)       flame  permille of a flame burning on the part
+//           grow    a plant's stage in permille of a stage, from the part up (0 seed, 1000 sprout, 2000 leafy, 3000 flowering, 4000 fruiting)
 //   at      a table of field value (as text: "true", "hot", "3") to the amount; for bool and enum fields
 //   range   [min, max] whole numbers of a number field, with `to` [amount at min, amount at max]: linear between,
 //           clamped outside. A fractional field is carried in permille, so a half-full cup is 500.
@@ -22,7 +24,7 @@
 //
 // Names (parts, picks) keep to letters, digits and _ - . : / @ so Engine v2's encoding accepts them.
 
-export const DOS = Object.freeze(['rotate', 'slide', 'scale', 'show', 'glow', 'tint', 'pick']);
+export const DOS = Object.freeze(['rotate', 'slide', 'scale', 'show', 'glow', 'tint', 'pick', 'steam', 'flame', 'grow']);
 export const AXES = Object.freeze(['x', 'y', 'z']);
 /** What Engine v2's encoding accepts in a name. */
 export const NAME = /^[A-Za-z0-9_\-.:/@]+$/;
@@ -45,6 +47,9 @@ export type Placement = {
   slide_mm?: [number, number, number];
   scale_permille?: [number, number, number];
   glow_permille?: number;
+  steam_permille?: number;
+  flame_permille?: number;
+  growth_permille?: number;
   tint?: string;
 };
 export type LooksInput = {
@@ -151,6 +156,9 @@ export function looks(input: LooksInput): Record<string, Placement> {
     if (row.do === 'show') p.show = (p.show ?? true) && amount !== 0;
     else if (row.do === 'glow' && typeof amount === 'number') p.glow_permille = amount;
     else if (row.do === 'tint' && typeof amount === 'string') p.tint = amount;
+    else if (row.do === 'steam' && typeof amount === 'number') p.steam_permille = clamp(amount, 0, 1000);
+    else if (row.do === 'flame' && typeof amount === 'number') p.flame_permille = clamp(amount, 0, 1000);
+    else if (row.do === 'grow' && typeof amount === 'number') p.growth_permille = clamp(amount, 0, 4000);
     else if (row.do === 'rotate' && typeof amount === 'number' && k >= 0) (p.rotate_mdeg ??= [0, 0, 0])[k] += amount;
     else if (row.do === 'slide' && typeof amount === 'number' && k >= 0) (p.slide_mm ??= [0, 0, 0])[k] += amount;
     else if (row.do === 'scale' && typeof amount === 'number') {
