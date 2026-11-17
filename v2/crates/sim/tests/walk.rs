@@ -5,6 +5,9 @@
 //! walkers, 100 from each side (the even arm, held to the bars), then the uneven arm declared here before the run, 160
 //! from the west, 120 from the east, 80 from the north and 40 from the south (reported, no bar); two repeats each.
 
+// Times its own runs: the wall-clock rule (K7) binds the engine, not this test.
+#![allow(clippy::disallowed_methods)]
+
 use import_eden::{F_DOORWAY, Import};
 use replica::effects::{Actor, Body as EffectBody, Cause, Header, Refusal, schema_hash};
 use replica::encode::{Value, encode};

@@ -153,6 +153,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "stall-test"
+version = "0.0.0"
+
+[[package]]
 name = "syn"
 version = "3.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -231,3 +235,7 @@ dependencies = [
 [[package]]
 name = "worldd"
 version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]
