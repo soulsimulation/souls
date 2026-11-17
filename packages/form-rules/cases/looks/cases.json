@@ -12,6 +12,13 @@
     { "name": "chest_open", "kind": "looks:chest", "state": { "open": true }, "expect": { "drawer": { "slide_mm": [0, 0, 280] } } },
     { "name": "lamp_unlit", "kind": "looks:tablelamp", "state": { "lit": false }, "expect": { "light": { "glow_permille": 0, "tint": "#5d5a50" } } },
     { "name": "lamp_lit", "kind": "looks:tablelamp", "state": { "lit": true }, "expect": { "light": { "glow_permille": 1000, "tint": "#fff2b0" } } },
+    { "name": "piano_not_playing_is_silent", "kind": "looks:piano", "state": { "playing": false }, "expect": {} },
+    { "name": "piano_playing_plays_its_tune", "kind": "looks:piano", "state": { "playing": true }, "t_us": 4500000,
+      "expect": { "@self": { "sounds": [{ "sound": "tune", "loop": true, "volume_permille": 700, "reach_mm": 18000, "mood": "calm", "since_us": 4500000 }] } } },
+    { "name": "radio_dial_down_is_silent", "kind": "looks:radio", "state": { "volume": 0 }, "expect": {} },
+    { "name": "radio_dial_half_plays_at_half_of_its_loudest", "kind": "looks:radio", "state": { "volume": 500 },
+      "expect": { "speaker": { "sounds": [{ "sound": "tune", "loop": true, "volume_permille": 450, "reach_mm": 9000, "tune": "tune:sunday_stroll", "link": "link:broadcast" }] } } },
+    { "name": "an_event_sound_is_not_a_state_sound", "kind": "looks:gong", "state": { "swing": 0 }, "expect": { "disc": { "rotate_mdeg": [0, 0, 0] } } },
     { "name": "a_field_the_table_does_not_mention_moves_nothing", "kind": "looks:chest", "state": { "open": true, "colour": "red" }, "expect": { "drawer": { "slide_mm": [0, 0, 280] } } },
     { "name": "a_missing_field_moves_nothing", "kind": "looks:chest", "state": {}, "expect": {} },
     {

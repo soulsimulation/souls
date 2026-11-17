@@ -107,6 +107,16 @@ only, so Engine v2's encoding accepts them. `looks(input)` in `packages/form-rul
 function that turns a table, a state and the time since it changed into each part's placement, in whole numbers; its
 cases are `packages/form-rules/cases/looks/`. Collision shapes never follow looks.
 
+A `sound` row says what is heard (SA-D7). `sound` is one of the page's own synthesised set (`sound-plan.ts`: water, bell, hum,
+chime, kettle and the rest) or `tune`; there are no audio files. `mode` is `loop` (default) or `once`. `reach_mm`, how far it
+carries, is required on every sound row. It is driven by a `field` (`at` or `range` + `to` give the loudness in permille, 0 is
+silent, so the sound stops when the field says so) or by a named `event` (with `level`, permille; played once from the record).
+A `tune` row names a tune by id (`tune`) or a mood tag (`mood`, which picks one from `content/tunes/tunes.json` by hashing the
+thing's id). A thing that carries sound to another place names the `link`. The function answers with what is heard
+(`sounds` on the part, or on `@self` when the row has no part): which sound, loud how, reaching how far, and the microseconds
+since the state began. A tune is notes, `[midi, start step, steps long]` over steps of `step_us`, repeating; which notes sound in
+a window of world time is `tuneNotes`, a pure function of time, so every viewer, live or in replay, is at the same point of it.
+
 ```json
 "table": [
   { "part": "fill", "field": "fullness", "do": "scale", "axis": "y", "range": [0, 1000], "to": [1, 1000] },
