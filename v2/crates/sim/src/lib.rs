@@ -3,6 +3,7 @@
 
 pub mod ground;
 pub mod links;
+pub mod routes;
 
 #[cfg(test)]
 mod tests {
