@@ -240,7 +240,9 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
   into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
   slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
-  defines what each does.
+  defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
+  per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
+  boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
   "from", "into", "amount", "event"}`. `field` is an `int` field of this kind, and of the same name and unit at the other
   end; `from` and `into` are each `"this"` or a `thing` argument; `amount` is a whole number above zero, a `count`
