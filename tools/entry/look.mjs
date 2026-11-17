@@ -38,14 +38,16 @@ export function valuesOf(f) {
   return [d, ...more.filter((v, i) => v !== d && more.indexOf(v) === i)];
 }
 
+/** A timed value (SA-F5a) is drawn and labelled at the value it was set to. */
+const shown = (f, v) => (f.type === 'timed' && v !== null && typeof v === 'object' ? v.value : v);
 /** The number the viewer draws a whole-number state value with. */
-const drawn = (f, v) => (f.type === 'int' && f.unit === 'permille' ? v / 1000 : v);
+const drawn = (f, v) => (f.type === 'int' && f.unit === 'permille' ? v / 1000 : shown(f, v));
 
 /** The frames of an entry: its default state, then each field varied alone. The label names the field and its value. */
 export function framesOf(entry) {
   const fields = Object.entries(entry.state ?? {}).sort((a, b) => a[1].n - b[1].n);
   const base = Object.fromEntries(fields.map(([k, f]) => [k, f.default]));
-  const frames = [{label: fields.length ? `${fields.map(([k]) => `${k}=${base[k]}`).join(' ')} (default)` : 'no state', values: base}];
+  const frames = [{label: fields.length ? `${fields.map(([k, f]) => `${k}=${shown(f, base[k])}`).join(' ')} (default)` : 'no state', values: base}];
   for (const [k, f] of fields) for (const v of valuesOf(f).slice(1)) frames.push({label: `${k}=${v}`, values: {...base, [k]: v}});
   return frames.map(fr => ({label: fr.label, values: fr.values, state: Object.fromEntries(fields.map(([k, f]) => [k, drawn(f, fr.values[k])]))}));
 }

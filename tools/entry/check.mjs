@@ -154,6 +154,8 @@ function wayOut(entry, add) {
   }
   const linked = new Set(Object.keys(links).filter(l => !linkers[l]));
   const armed = new Set(), on = new Set();
+  // A timer form whose need is a timed field's crossing (SA-F5a) is armed by that crossing: the engine's timer runs it then (SA-G1b).
+  for (const [fn, f] of Object.entries(forms)) if (f.starts === 'timer' && (f.needs ?? []).some(n => n.need === 'state' && state[n.field]?.type === 'timed' && ('at_most' in n || 'at_least' in n))) armed.add(fn);
   const ok = n => {
     if (n.need === 'state') {
       if (open.has(n.field) || !reach[n.field]) return true;

@@ -65,6 +65,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
+| 24 | `now` | An activity's "now" line: `floor` (a role), `stage` (an enum field), `ends` (a timed field counting down) (below) |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
 (SA-F10), `hatch` (SA-F9).
@@ -145,7 +146,7 @@ body's family declares it.
 
 **Bounds and timed values.** `min` / `max`: whole bounds of an `int` field (or a timed value); an amount moved never
 takes it past them. A `transfer` fills to `max` and draws down to `min`. A `timed` field is a value that changes with
-time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit), and a default
+time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)): `unit` (a whole-number unit, or `us` for a countdown), and a default
 of three whole numbers, `{"value", "per_s", "set_us"}`: the value in that unit, its rate in that unit per second, and the
 world time it was set, in microseconds. A range need reads it at the state's time; the arithmetic is
 `packages/form-rules/README.md` ("A timed value").
@@ -237,7 +238,7 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
-  into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
+  into a slot, the actor's hand, or `here`, the place it is in: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
   slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
   defines what each does.
 - **transfer** (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)): `{"change": "transfer", "field",
@@ -289,7 +290,7 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   seated. A body still in the activity's own slots is moved out to the place the activity is in, so removing the
   activity removes no body. Then the activity is removed. The rules name the two events `released` and `ended`.
   Nothing removes a member for being quiet.
-- **The "now" line** (proposed: a `now` section) names the parts of the activity's state that say what is happening
+- **The "now" line** (section 24, beside the meaning: it changes no verdict) names the parts of the activity's state that say what is happening
   now. Souls read it as a fact and schedule themselves by it; the engine never waits on their behalf.
 
   ```json
@@ -298,11 +299,13 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
 
   `floor` is the link type whose ends have the floor. `stage` is an enum field. `ends` is a timed field (SA-F5a)
   counting down in microseconds; the activity ends at the first microsecond it reaches 0. A part the asker may not
-  see is left out and named as unseen.
-- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`),
+  see is left out and named as unseen. The check gate takes a role for `floor`, an enum field for `stage` and a
+  timed field for `ends`.
+- **Unattended**, an activity is removed at that time by its own world form (`who: "world"`, `starts: "timer"`; the
+  check gate counts the crossing as what arms it),
   whose needs are the time (`ends` at most 0) and that no role is linked. The engine's timer runs it then. While
   anyone is in it, the form is refused and nothing changes.
-  The example is `packages/form-rules/cases/kinds/test/talk.json`.
+  The examples are `packages/form-rules/cases/kinds/test/talk.json` and the lecture, `content/kinds/hall/lecture.json`.
 
 - **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
   outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
