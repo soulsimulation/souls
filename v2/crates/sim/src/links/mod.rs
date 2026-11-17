@@ -12,8 +12,10 @@
 //! - **Doors.** A door is a node standing in its doorway (N1's door thing); open or shut is a field on it
 //!   ([`F_OPEN`]), never on the link, and its frame and leaf belong to the link, not to the room's solids (N3 cuts no
 //!   obstacle for it). Crossing a shut door is stand, open, cross: the opening is part of the walk order the agent
-//!   wrote ([`Leg::Cross`]), and it is an effect in the stream, a set of the door's field with the named event
-//!   [`DOOR_OPENED`]. Opening needs hands: a body without them is refused at a shut door as `door-needs-hands`, and
+//!   wrote ([`Leg::Cross`]), and it is an effect in the stream, a set of the door's field with the event its kind
+//!   declares ([`opened_event`]: `eden:door_opened` for Eden's door). The room end owns the doorway link and the door
+//!   names it (its field 7); the door node owns its own `open` ([`F_OPEN`]) and `locked` ([`F_LOCKED`]) fields.
+//!   Opening needs hands: a body without them is refused at a shut door as `door-needs-hands`, and
 //!   the door stays shut. No kind says "close behind" yet, so a door crossed stays open.
 //! - **What a link that cannot be crossed is.** A doorway with no width left for the centre (N3's four hall back
 //!   doors blocked by content) is `link-too-narrow`. A doorway whose far side has no ground at its height (an upper
@@ -31,7 +33,7 @@
 //!   thing has no floor) is a link of the open ground itself ([`Building::of_ground`]), in the ground's frame.
 //!
 //! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
-//! locked door (no stored field says a door is locked yet), the durable log (K4).
+//! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
 pub mod turns;
 
@@ -54,8 +56,21 @@ pub const F_OPEN: u64 = 6;
 pub const F_STAIRS: u64 = 21;
 /// A floor's level (N1's `F_LEVEL`).
 pub const F_LEVEL: u64 = 5;
-/// The named event an opening carries; its field 1 is the doorway link.
-pub const DOOR_OPENED: &str = "souls:door-opened";
+/// The event an opening of Eden's door carries, and the name any door falls back to ([`opened_event`]); its field 1
+/// is the doorway link.
+pub const DOOR_OPENED: &str = "eden:door_opened";
+/// A door's field: 1 locked, 0 not (the door entry's `locked`). The door node holds it, as it holds [`F_OPEN`].
+pub const F_LOCKED: u64 = 24;
+
+/// The event an opening of a door of kind `kind` emits: the one its kind declares. Eden's door (`eden:door`) declares
+/// `door_opened`, so `eden:door_opened`. Until K3 loads kinds' entries the tree holds no kind's events (Eden's doors
+/// are imported as `core:door`), so any other kind falls back to that name.
+pub fn opened_event(kind: &str) -> &'static str {
+    match plain(kind) {
+        "eden:door" => "eden:door_opened",
+        _ => DOOR_OPENED,
+    }
+}
 
 /// A link's kind: its T2 type, and the move that crosses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -695,7 +710,7 @@ impl Doors {
                     rest: Rest::new(),
                 }]),
                 events: Some(vec![Event {
-                    name: Name::new(DOOR_OPENED).expect("a name"),
+                    name: Name::new(opened_event(n.kind().as_str())).expect("a name"),
                     fields: BTreeMap::from([(1, link.to_value())]),
                     changes: vec![0],
                     rest: Rest::new(),

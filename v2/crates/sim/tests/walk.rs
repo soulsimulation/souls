@@ -385,7 +385,7 @@ fn walk_one(t: &mut Town, c: &mut Crowd) -> i64 {
 
 /// One walker from `from` on the open ground to `goal` on `floor`, and back out to where it started. The way in
 /// first crosses `entry`, a doorway between the building and the open ground, and the way out last; each shut door
-/// on the way in opens once, by the walker's order, in the order crossed (`souls:door-opened` in the stream), and the
+/// on the way in opens once, by the walker's order, in the order crossed (`eden:door_opened` in the stream), and the
 /// way out opens none. No tick moves the body further in the world's frame than its speed allows.
 fn in_and_out(t: &mut Town, from: Vec3, floor: Id, goal: Vec3, entry: Id) {
     let ground = t.ground;
