@@ -41,6 +41,7 @@ import { opSchema, type Op, type StoredDef, type WorldModel } from '@souls/world
 import { HUMAN_RADIUS } from '../../../../mars/viewer/engine/world/catalog.ts';
 import { apply, effects, type Change } from '../../../../packages/form-rules/src/effects.ts';
 import { surfaceSlotsOf, slotOccupant } from '../../../../mars/viewer/engine/items/model.ts';
+import { canPoint, TILT, TILT_MORE } from '../../../../mars/viewer/engine/items/watering.ts';
 import type { Entry, Form } from '../../../../packages/form-rules/src/rules.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -56,6 +57,9 @@ const KINDS_DIRS = [join(ROOT, 'content/kinds'), join(ROOT, 'packages/form-rules
 const HAND_MOVES = new Set(['press', 'slide']);
 /** Moves of a held thing that today's verbs make by parameters (SA-F4d). */
 const HELD_MOVES = new Set(['pour', 'consume']);
+/** A pour (tea.ts's numbers): the pouring hand this far right of the body's axis; the outlet this far over the target's
+ *  top (m). */
+const POUR_HAND_RIGHT = 0.17, OUTLET_DROP = 0.07;
 /** Effects that become changes today's store holds (a reparent is made by today's take and put, SA-F4b). */
 const KEPT = new Set(['set', 'transfer', 'reparent']);
 /** The body's kind (lane A's entry, SA-G3): its forms that move a thing argument are offered on that thing. */
@@ -313,7 +317,7 @@ export function createFormsAdapter(h: FormsHost) {
         // SA-F4d: today's pour and sip, by parameters: the entry's points, the move's time, the rules' amounts
         const e = all()[id], ph = moves()[String(s.move)]?.phases ?? {};
         if (e?.support?.kind !== 'in-hand' || e.support.by !== soul.entityId) return { code: 'form.not_held', reason: `${nameOf(id)}: not held.` };
-        const amount = (now.changes as Change[]).find((c) => c.change === 'set' && c.node === id && typeof t.entry.state?.[c.field]?.max === 'number') as Extract<Change, { change: 'set' }> | undefined;
+        const amount = (now.changes as Change[]).find((c) => c.change === 'set' && c.node === id && typeof c.to === 'number' && typeof t.entry.state?.[c.field]?.max === 'number') as Extract<Change, { change: 'set' }> | undefined;
         const max = amount ? t.entry.state![amount.field].max! : 0, had = amount ? Number(fieldsOf(t)[amount.field] ?? 0) : 0, left = amount ? Number(amount.to) : 0;
         if (s.move === 'consume') {
           const from = max > 0 ? Math.min(1, Math.max(0, had / max)) : 1, sip = max > 0 ? Math.min(1, Math.max(0.01, (had - left) / max)) : 0.2;
@@ -323,19 +327,28 @@ export function createFormsAdapter(h: FormsHost) {
         if (e.support.hand !== 'right') return { code: 'form.wrong_hand', reason: `Today's pour is made with the right hand; ${nameOf(id)} is in your left.` };
         const into = now.input.act.args?.[toward!], te = typeof into === 'string' ? all()[into] : null;
         if (!te?.pose?.p) return { code: 'form.argument_missing', reason: `There is nothing near to ${action.replace(/_/g, ' ')} into.` };
+        if (te.support?.kind === 'in-hand') return { code: 'form.target_held', reason: `Put ${nameOf(into)} down first; today's pour is into a thing that stands somewhere.` };
+        const outPoint = points[s.at as string]; if (!outPoint) return { code: 'form.no-point', reason: `${nameOf(id)} has no point ${s.at}.` };
         const tp = te.pose.p as Vec3;
         if (!standBy(into, tp)) {
           const by = h.engine.standableNearV1?.([tp[0], tp[2]], level, soul.entityId, 0.4, 16) ?? null;
           if (!by) return { code: 'form.no-room', reason: `There is no room to stand by ${nameOf(into)}.` };
           walk(by, tp);
         }
-        // the grip placed so the outlet point is over the target's top, the thing's outlet toward the target
-        const fx = tp[0] - at[0], fz = tp[2] - at[1], fl = Math.hypot(fx, fz) || 1, f: Vec2 = [fx / fl, fz / fl];
-        const grip = Object.values(points).find((q) => (q as { role?: string }).role === 'grip')?.at_mm ?? [0, 0, 0], out = points[s.at as string].at_mm;
-        const reach = Math.hypot(out[0] - grip[0], out[2] - grip[2]) / 1000, top = (thing(into)?.entry as { geometry?: { bounds_mm?: number[] } } | undefined)?.geometry?.bounds_mm?.[1] ?? 100;
-        const hold: Vec3 = [tp[0] - f[0] * reach, tp[1] + top / 1000 + 0.08 - (out[1] - grip[1]) / 1000, tp[2] - f[1] * reach];
+        // tea.ts's placement with the entry's points: the pouring hand POUR_HAND_RIGHT right of the body's axis, the grip
+        // where the outlet, tipped by today's pour at the middle of its tilt, stands OUTLET_DROP over the target's top;
+        // the thing turned about the grip toward the target
+        const fx = tp[0] - at[0], fz = tp[2] - at[1], fl = Math.hypot(fx, fz) || 1, f: Vec2 = [fx / fl, fz / fl], r: Vec2 = [-f[1], f[0]];
+        const mm = (v: number[]): Vec3 => [v[0] / 1000, v[1] / 1000, v[2] / 1000];
+        const grip = mm(Object.values(points).find((q) => (q as { role?: string }).role === 'grip')?.at_mm ?? [0, 0, 0]), out = mm(outPoint.at_mm);
+        const tip = canPoint([0, 0, 0], grip, 0, TILT + TILT_MORE / 2, out), L = Math.hypot(tip[0], tip[2]);
+        const top = ((thing(into)?.entry as { geometry?: { bounds_mm?: number[] } } | undefined)?.geometry?.bounds_mm?.[1] ?? 100) / 1000;
+        const cf = fl, lat = -POUR_HAND_RIGHT;   // the target straight ahead; the hand to the right of it
+        if (Math.abs(lat) >= L) return { code: 'form.no-room', reason: `${nameOf(id)} is too short to pour from beside you.` };
+        const gf = cf - Math.sqrt(L * L - lat * lat), turn = Math.atan2(lat, cf - gf);
+        const hold: Vec3 = [at[0] + f[0] * gf + r[0] * POUR_HAND_RIGHT, tp[1] + top + OUTLET_DROP - tip[1], at[1] + f[1] * gf + r[1] * POUR_HAND_RIGHT];
         const moved = had - left, unit = amount ? t.entry.state![amount.field].unit : undefined;
-        steps.push({ verb: 'mars:watering_can_v1', params: { item: id, target: into, stage: 'pour', face: r3(Math.atan2(f[1], f[0])), hold: hold.map(r3), seconds: Math.min(20, Math.max(0.5, Number(ph.pour_us ?? 2500000) / 1e6)), levelAfter: r3(max > 0 ? Math.min(1, Math.max(0, left / max)) : 0), ...(unit === 'g' && moved > 0 ? { litres: r3(moved / 1000) } : {}) } });
+        steps.push({ verb: 'mars:watering_can_v1', params: { item: id, target: into, stage: 'pour', face: r3(Math.atan2(f[1], f[0])), hold: hold.map(r3), spoutYaw: r3(turn), seconds: Math.min(20, Math.max(0.5, Number(ph.pour_us ?? 2500000) / 1e6)), levelAfter: r3(max > 0 ? Math.min(1, Math.max(0, left / max)) : 0), ...(unit === 'g' && moved > 0 ? { litres: r3(moved / 1000) } : {}) } });
         continue;
       }
       if (s.step === 'wait') { steps.push({ verb: 'mars:pose_v1', params: { activity: 'listen', seconds: Math.min(3600, Math.max(0.5, Number((s as { us?: number }).us ?? 0) / 1e6)) } }); continue; }
