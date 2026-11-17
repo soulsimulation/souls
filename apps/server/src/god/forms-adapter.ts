@@ -118,6 +118,7 @@ export function unmapped(form: Form & { takes?: unknown }, offered?: string): st
       // SA-F4b: the item and where it goes come from the form's reparent; today's slots are not named as the entry's
       if ((s as { slot?: unknown }).slot !== undefined) return `a ${s.step} at a named slot: a later task`;
       const into = s.step === 'take' ? 'actor_hand' : 'here', at = (s as { place?: { at?: unknown } }).place?.at;
+      if (s.step === 'put' && !argName((s as { place?: { anchor?: unknown } }).place?.anchor)) return 'a put with no anchor named: new engine only (E4)';
       if (!parents.some((e) => e.into === into)) return `a ${s.step} that does not move a thing ${s.step === 'take' ? 'into a hand' : 'down here'}: a later task`;
       if (at !== undefined && at !== 'on' && !(argName(at) && (form.takes as Takes | undefined)?.[argName(at)!]?.type === 'placement')) return `the placement ${JSON.stringify(at)}: new engine only (E4)`;
       continue;
@@ -168,17 +169,19 @@ export function createFormsAdapter(h: FormsHost) {
   const M = () => h.model, all = () => h.engine.world.entities, world = () => h.engine.world as never;
   const thing = (id: string) => { const e = M().entities.get(id), def = e && M().resolvedDef(e.def), entry = entryOf(def); return e && def && entry ? { e, def, entry } : null; };
   const nameOf = (id: string) => { const e = M().entities.get(id); return e?.name ? M().pathOf(id) : 'it'; };
-  /** The rules' answer for a form that changes a parent, as it was when the act was planned (SA-F4b): by body|capability. */
-  const planned = new Map<string, any>();
+  /** SA-F4b: the rules' answer for a form that changes a parent. `latest`, by body: its last plan (menus plan too);
+   *  `planned`, by body|capability: the plan its act started with (`begun`), checked and dropped at the end. */
+  const latest = new Map<string, { capability: string; answer: any }>(), planned = new Map<string, any>();
   /** god local → world (mending.ts, the contact actuator's convention); entry points are whole millimetres. */
   const toWorld = (wp: { x: number; y: number; z: number; yaw: number; s: number }, mm: number[]): Vec3 => {
     const l = [mm[0] / 1000, mm[1] / 1000, mm[2] / 1000], c = Math.cos(wp.yaw), s = Math.sin(wp.yaw);
     return [wp.x + (l[0] * c + l[2] * s) * wp.s, wp.y + l[1] * wp.s, wp.z + (-l[0] * s + l[2] * c) * wp.s];
   };
-  /** The god things in a body's hands, by today's support (it names the hand); a gripped thing counts as the right. */
+  /** What a body's hands hold, by today's support (it names the hand): a god thing or one of today's own items, so a hand
+   *  holding either is not free; a gripped thing counts as the right. */
   const handsOf = (body: string) => {
     const out: Record<string, string | null> = { left: null, right: null };
-    for (const x of Object.values(all())) if (x?.tags?.includes('entity-world') && x.support?.kind === 'in-hand' && x.support.by === body && (x.support.hand === 'left' || x.support.hand === 'right')) out[x.support.hand] = x.id;
+    for (const x of Object.values(all())) if (x?.support?.kind === 'in-hand' && x.support.by === body && (x.support.hand === 'left' || x.support.hand === 'right')) out[x.support.hand] = x.id;
     const gripped = all()[body]?.human?.grip?.entity;
     if (!out.right && typeof gripped === 'string' && out.left !== gripped) out.right = gripped;
     return out;
@@ -213,12 +216,15 @@ export function createFormsAdapter(h: FormsHost) {
     return Object.assign(effects({ ...input, receipt }), { input });
   }
   const fieldsOf = (x: NonNullable<ReturnType<typeof thing>>) => { const f: Record<string, unknown> = {}; for (const [k, d] of Object.entries(x.entry.state ?? {})) f[k] = x.e.state?.[k] ?? d.default; return f; };
+  /** Today's free places on top of a thing (not inside it, not hooks). */
+  const freeTops = (eid: string) => { const w = world(); return surfaceSlotsOf(w, eid).filter((x) => !x.inside && !x.hang && !slotOccupant(w, x.owner, x.slot)); };
   /** A form's arguments: the thing it is offered on (the body's forms), `on` for a placement (today's one word), and each
-   *  other the thing nearest the actor that its select admits: of its kind; with no kind, an entry thing or a thing with
-   *  places on top today. */
+   *  other the thing nearest the actor that its select admits: of its kind, or with no kind an entry thing; a put's
+   *  anchor is the nearest thing, not in a hand, with a free place on top today (the word is `on`). */
   function argsOf(t: NonNullable<ReturnType<typeof thing>>, id: string, f: FormRef, bodyId: string): Record<string, string> {
     const out: Record<string, string> = f.body ? { thing: id } : {};
     const p = all()[bodyId]?.pose?.p as Vec3 | undefined;
+    const anchors = new Set((f.form.steps ?? []).filter((s) => s.step === 'put').map((s) => argName((s as { place?: { anchor?: unknown } }).place?.anchor)));
     for (const [name, a] of Object.entries(f.form.takes ?? {})) {
       if (name in out) continue;
       if (a.type === 'placement') { out[name] = 'on'; continue; }
@@ -226,7 +232,7 @@ export function createFormsAdapter(h: FormsHost) {
       for (const [eid, e] of M().entities) {
         if (eid === id || Object.values(out).includes(eid)) continue;
         const x = thing(eid);
-        if (a.select?.kind ? x?.entry.kind !== a.select.kind : !x && !surfaceSlotsOf(world(), eid).length) continue;
+        if (anchors.has(name) ? all()[eid]?.support?.kind === 'in-hand' || !freeTops(eid).length : a.select?.kind ? x?.entry.kind !== a.select.kind : !x) continue;
         const wp = M().worldPose(e), d = p ? Math.hypot(wp.x - p[0], wp.z - p[2]) : 0;
         if (d < best) { best = d; out[name] = eid; }
       }
@@ -263,14 +269,14 @@ export function createFormsAdapter(h: FormsHost) {
         const e = c && all()[c.node];
         if (!c || !e?.pose?.p) return { code: 'form.bad_input', reason: `${nameOf(id)}: nothing to ${s.step} in today's world.` };
         if (s.step === 'take') {
-          if (e.support?.kind === 'in-hand' && e.support.by === soul.entityId) return { code: 'form.already_held', reason: `You already hold ${nameOf(c.node)}.` };
+          if (e.support?.kind === 'in-hand') return e.support.by === soul.entityId ? { code: 'form.already_held', reason: `You already hold ${nameOf(c.node)}.` } : { code: 'form.held_by_other', reason: `${nameOf(c.node)} is in someone else's hand.` };
           standBy(c.node, e.pose.p as Vec3);
           steps.push(LET_GO, { verb: 'mars:take_item', params: { item: c.node, hand: (c.to as { hand: string }).hand } });
           continue;
         }
         const anchor = now.input.act.args?.[argName((s as { place?: { anchor?: unknown } }).place?.anchor) ?? ''];
         if (typeof anchor !== 'string') return { code: 'form.argument_missing', reason: `There is nothing near to put ${nameOf(c.node)} on.` };
-        const w = world(), free = surfaceSlotsOf(w, anchor).filter((x) => !x.inside && !x.hang && !slotOccupant(w, x.owner, x.slot)).sort((a, b) => Math.hypot(a.p[0] - at[0], a.p[2] - at[1]) - Math.hypot(b.p[0] - at[0], b.p[2] - at[1]))[0];
+        const free = freeTops(anchor).sort((a, b) => Math.hypot(a.p[0] - at[0], a.p[2] - at[1]) - Math.hypot(b.p[0] - at[0], b.p[2] - at[1]))[0];
         if (!free) return { code: 'form.no-room', reason: `There is no free place on ${nameOf(anchor)} to put ${nameOf(c.node)}.` };
         standBy(anchor, free.p);
         steps.push({ verb: 'mars:put_item', params: { item: c.node, surfaceSlot: free.id } });
@@ -298,8 +304,10 @@ export function createFormsAdapter(h: FormsHost) {
       walk(stand, hand);
       steps.push(LET_GO, { verb: 'mars:hand_actuator_v1', params: { target: id, at: hand.map(r3) } });
     }
-    // a change of parent is made by today's motion: keep the rules' answer as it was now, to check against at the end
-    if ((now.changes as Change[]).some((c) => c.change === 'reparent')) planned.set(`${soul.entityId}|object:${id}:${action}`, now);
+    // a change of parent is made by today's motion: keep the rules' answer as it was now; the plan made when the act starts
+    // (wrapAct, just before `begun`) is the one checked at the end, never a later menu's
+    if ((now.changes as Change[]).some((c) => c.change === 'reparent')) latest.set(soul.entityId, { capability: `object:${id}:${action}`, answer: now });
+    else latest.delete(soul.entityId);
     return { steps, summary: `${action.replace(/_/g, ' ')} ${nameOf(id)}` };
   }
   /** The ledger's actOutcome: when a form's programme ends, ask its needs again and apply its changes once. Null for
@@ -314,9 +322,8 @@ export function createFormsAdapter(h: FormsHost) {
     if ((form.effects ?? []).some((e) => e.change === 'reparent')) {
       // SA-F4b: today's take or put made the change; the rules' answer when it started says where the thing must be now
       if (!before) return { code: 'form.unplanned', reason: `${nameOf(id)}: this act was not planned by the forms adapter.` };
-      const checked = apply(before.input.state, before);
-      if (!checked.ok) return { code: `form.${checked.reason}`, reason: `${nameOf(id)}: the change could not be applied (${checked.reason.replace(/_/g, ' ')}).` };
-      const anchor = before.input.act.args?.anchor;
+      const put = (form.steps ?? []).find((s) => s.step === 'put') as { place?: { anchor?: unknown } } | undefined;
+      const anchor = put && before.input.act.args?.[argName(put.place?.anchor) ?? ''];
       for (const c of before.changes as Change[]) {
         if (c.change !== 'reparent') continue;
         const s = all()[c.node]?.support, inHand = 'hand' in c.to;
@@ -356,7 +363,9 @@ export function createFormsAdapter(h: FormsHost) {
   }
   /** Is this capability a form of an entry thing, its own or the body's (so tea.ts does not watch the body for it)? */
   const owns = (capability: string) => { const m = /^object:(.+):([a-z][a-z0-9_]*)$/.exec(capability), t = m && thing(m[1]); return !!t && (!!t.entry.forms?.[m![2]] || bodyForms().some(([n]) => n === m![2])); };
-  return { plan, outcome, owns };
+  /** The act has started (the ledger's expect, right after the plan wrapAct made for it): keep that plan's answer. */
+  const begun = (body: string, capability: string) => { const l = latest.get(body); if (l?.capability === capability) planned.set(`${body}|${capability}`, l.answer); };
+  return { plan, outcome, owns, begun };
 }
 export type FormsAdapter = ReturnType<typeof createFormsAdapter>;
 
