@@ -7,7 +7,9 @@
 // other value of each state field, one field varied at a time, the rest left at their defaults, with the kind's points
 // (and slots) marked over it. A kind with no state fields is one frame. It runs headless (the library gallery's studio page
 // in headless Chrome, tools/god-skill/scripts/gallery.mjs) and prints one JSON line per kind: its sheet, frames and errors.
-// With --plan it prints the frames it would draw and renders nothing. Sheets are attached to a pull request, never committed.
+// A kind the gallery captured no picture of fails, with the cause: a tag the gallery skips, or a gallery run that stopped
+// before it captured anything. With --plan it prints the frames it would draw and renders nothing. Sheets are attached to
+// a pull request, never committed.
 //
 // What the picture is drawn from: `looks.shape` of the entry, today's generated-shape data carried as it is
 // ({make, params?, palette?, tags?}). SA-D1a owns the rest of the looks table. A state value the entry holds as a whole
@@ -16,7 +18,7 @@
 // Open point for the format (lane A): format.mjs refuses any float, and a shape in metres has them; look.mjs checks an
 // entry without its `looks.shape` until SA-D1a says how a shape is carried.
 import {createHash} from 'node:crypto';
-import {mkdirSync, readFileSync, statSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -26,6 +28,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const MARK_ROLES = ['stand', 'grip', 'contact', 'outlet', 'slot'];
 const LEGEND = 'points: stand blue, grip orange, contact red, outlet green, slot purple';
 const MAX_COLS = 6;
+// The tags the library gallery leaves out of a sheet (tools/god-skill/scripts/gallery.mjs, its `defs` filter): a kind
+// shaped with one of them is never drawn.
+const GALLERY_SKIPS = ['body', 'marker', 'landform'];
 
 /** The values one state field takes in a sheet, its default first. A field with nothing to vary is its default alone. */
 export function valuesOf(f) {
@@ -73,6 +78,16 @@ export function marksOf(entry) {
   return marks;
 }
 
+/** Why a gallery run gave a kind no picture, or null when it captured one. A sheet with no frame on it is a failure,
+ *  never a pass: the def carries a tag the gallery leaves out, or the gallery stopped before it captured anything. */
+export function noCaptures(def, {status, gallery, tail = ''}) {
+  if (gallery?.captures?.length) return null;
+  const tag = GALLERY_SKIPS.find(t => def.tags?.includes(t));
+  if (tag) return `nothing drawn: the gallery skips a def tagged "${tag}" (looks.shape.tags)`;
+  if (!gallery || status !== 0) return `nothing drawn: the gallery exited (exit ${status}) before capturing anything${tail ? `: ${tail}` : ''}`;
+  return `nothing drawn: the gallery left the def out of its sheet (make ${JSON.stringify(def.make?.kind ?? def.make?.gen ?? null)} is one it does not draw)`;
+}
+
 export function loadEntries(target, rootDir) {
   const asPath = resolve(target);
   const path = (() => { try { statSync(asPath); return asPath; } catch { return join(resolve(root, rootDir), target); } })();
@@ -93,7 +108,7 @@ export function loadEntries(target, rootDir) {
   return rows;
 }
 
-export function look(target, {root: rootDir = 'content/kinds', out, kind, plan = false} = {}) {
+export function look(target, {root: rootDir = 'content/kinds', out, kind, plan = false, gallery = join(root, 'tools/god-skill/scripts/gallery.mjs')} = {}) {
   const outDir = resolve(out ?? join(root, '.local/look', new Date().toISOString().replace(/[:.]/g, '-')));
   const results = [];
   for (const {file, entry, errors} of loadEntries(target, rootDir)) {
@@ -109,7 +124,8 @@ export function look(target, {root: rootDir = 'content/kinds', out, kind, plan =
     writeFileSync(defs, JSON.stringify([def]));
     writeFileSync(states, JSON.stringify({[def.name]: {frames: frames.map(f => ({label: f.label, state: f.state})), marks: marksOf(entry), sub: Object.keys(entry.points ?? {}).join(' · ')}}));
     const cols = Math.min(MAX_COLS, frames.length), gdir = join(dir, 'gallery');
-    const r = spawnSync(process.execPath, [join(root, 'tools/god-skill/scripts/gallery.mjs'), '--local', '--defs', defs, '--states', states, '--cols', String(cols),
+    rmSync(gdir, {recursive: true, force: true}); // an old run's gallery.json must not stand in for this one
+    const r = spawnSync(process.execPath, [gallery, '--local', '--defs', defs, '--states', states, '--cols', String(cols),
       '--title', `${entry.kind} — ${frames.length} frame${frames.length === 1 ? '' : 's'} — ${LEGEND}`, '--out', gdir], {cwd: root, encoding: 'utf8'});
     const gj = (() => { try { return JSON.parse(readFileSync(join(gdir, 'gallery.json'), 'utf8')); } catch { return null; } })();
     result.sheet = join(dir, 'sheet.png');
@@ -120,7 +136,10 @@ export function look(target, {root: rootDir = 'content/kinds', out, kind, plan =
     // how many of the frames came out as different pictures (a state the picture ignores gives the same frame twice)
     result.distinct = new Set((gj?.captures ?? []).map(c => createHash('sha256').update(readFileSync(join(gdir, c.file))).digest('hex'))).size;
     result.errors = [...(gj?.errors ?? [])];
-    if (r.status !== 0 || !gj) result.errors.push(`the gallery run failed (exit ${r.status}): ${(r.stderr || r.stdout || '').trim().split('\n').slice(-3).join(' | ')}`);
+    const tail = (r.stderr || r.stdout || r.error?.message || '').trim().split('\n').slice(-3).join(' | ');
+    const none = noCaptures(def, {status: r.status, gallery: gj, tail});
+    if (none) result.errors.push(none);
+    else if (r.status !== 0) result.errors.push(`the gallery run failed (exit ${r.status}): ${tail}`);
   }
   return {out: outDir, results};
 }
