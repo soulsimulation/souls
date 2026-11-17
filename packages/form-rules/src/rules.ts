@@ -220,12 +220,13 @@ export function decide(input: Input): Verdict {
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
       // a transfer in fills toward the field's max and one out empties toward its min: it meets the need if that end does;
       // a set with `by` meets it if the value it adds up to does, within the field's bounds (a crank that adds charge);
-      // the fix's own needs on this field must hold now, or it would be refused in turn
+      // the fix's own needs on this field of this thing (not an argument's or the place's) must hold now, or it would be
+      // refused in turn
       const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
       const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
         (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
         (e.change === 'transfer' && ((e.into === 'this' && (e.into_field ?? e.field) === field && whole(def.max) && meets(def.max)) || (e.from === 'this' && e.field === field && meets(def.min ?? 0)))),
-        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || has(m, 'of') || has(m, 'link') || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
