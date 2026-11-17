@@ -120,7 +120,8 @@ function runChain(chain, ctx, state) {
       else if (s.field === 'stock' ? !e.stock : s.field !== undefined && !e.state?.[s.field]) missing.push(`${s.field === 'stock' ? 'stock' : 'field ' + s.field} of ${e.kind}`);
       continue;
     }
-    const self = s.this ?? 'me', kind = kindOf(self), args = s.args ?? {}, entry = kinds[kind];
+    const self = s.this ?? 'me', kind = kindOf(self), entry = kinds[kind];
+    let args = s.args ?? {};
     const named = [...Object.values(args).map(v => isObj(v) ? v.node : v), s.carry, s.push, s.place?.thing, s.place?.anchor]
       .filter(v => typeof v === 'string' && v in things).map(kindOf);
     const absent = [kind, ...named].filter(k => !kinds[k]);
@@ -146,6 +147,12 @@ function runChain(chain, ctx, state) {
       if (!r.ok) { refuse(i, `${r.code}: ${r.reason}`); continue; }
     }
     if (!form) continue;
+    // A slot the request does not name, described by a selector of this thing's free slots, is chosen as the engine
+    // chooses it (E2): everyone stands in one place, so the first free slot in the order the kind lists them.
+    for (const [name, a] of Object.entries(form.takes ?? {})) if (!(name in args) && a.select?.of === 'free_slots' && a.select.in === 'this') {
+      const pick = Object.keys(entry.slots ?? {}).find(k => (state.nodes[self]?.slots?.[k]?.length ?? 0) < entry.slots[k].most);
+      if (pick) args = {...args, [name]: pick};
+    }
     // The walk to the thing is taken as done: the hand starts at the point the form reaches for.
     const nodes = structuredClone(state.nodes);
     for (const n of form.needs ?? []) {
