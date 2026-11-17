@@ -1,0 +1,16 @@
+# The kinds the world-model fixtures use (Engine v2 T2, #2641, v2/docs/world-model.md). Only what a kind admits is
+# here, in the entry format's section numbers (SA-F1, #2842): 1 the name, 6 its slots (slot number: the kinds that
+# slot admits), 10 the kinds it admits as children. A kind lists nothing it does not admit.
+[
+  {1: "souls:place", 10: ["souls:room", "souls:boat", "souls:body", "souls:carry", "souls:group", "souls:key"]},
+  {1: "souls:room", 10: ["souls:door", "souls:body", "souls:crate", "souls:key"]},
+  {1: "souls:boat", 10: ["souls:room", "souls:body"]},
+  {1: "souls:door"},
+  {1: "souls:body", 6: {1: ["souls:cup", "souls:key"], 2: ["souls:cup", "souls:key"]}},  # 1 left hand, 2 right
+  {1: "souls:carry", 10: ["souls:sofa", "souls:crate"]},  # a joint activity is a node (contract T1)
+  {1: "souls:group"},
+  {1: "souls:cup"},
+  {1: "souls:key"},
+  {1: "souls:crate"},
+  {1: "souls:sofa"}
+]

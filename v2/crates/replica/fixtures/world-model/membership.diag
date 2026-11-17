@@ -1,0 +1,15 @@
+# Membership (Engine v2 T2, #2641). A choir is a public node; Souls 100 and 101 are its members. Who is a member is
+# shown only to the members (audience 1), so each link is narrower than the choir, which is allowed; a link wider
+# than one of its ends is not. Soul 102 is not in the choir. Layout as in door.diag.
+{
+  1: [100, 101, 102],
+  2: {1: [100, 101]},
+  3: [
+    {1: 1, 2: "souls:place"},
+    {1: 2, 2: "souls:group", 3: 1, 6: {1: "choir"}}
+  ],
+  4: [
+    {1: 3, 2: "member", 3: [100, 2], 4: 1, 5: 1},
+    {1: 4, 2: "member", 3: [101, 2], 4: 1, 5: 1}
+  ]
+}
