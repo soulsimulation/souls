@@ -7,6 +7,7 @@
   },
   "geometry": { "bounds_mm": [80, 200, 200] },
   "forms": {},
+  "looks": { "model": "look:test_tap", "shape": {"round":4,"shapes":[{"kind":"box","at":[0,20,0],"size":[80,40,80],"round":6,"tint":"steel"},{"kind":"cyl","at":[0,40,0],"r":14,"h":140,"segments":10,"tint":"steel"},{"kind":"box","at":[0,180,50],"size":[24,24,120],"round":6,"tint":"steel"}],"palette":{"steel":"#b9bfc3"},"tags":["test","tap"]} },
   "text": { "card": "A test tap: the water a kettle is filled from, a large amount and no capacity." },
   "card": { "text": "card" }
 }
