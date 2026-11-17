@@ -146,6 +146,28 @@ back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are 
 
 A form owned by a body's family or a kind of ground is written the same way (`owner: "family"` or `"place"`).
 
+## A move
+
+A form's `move` step names a move and a point; moves are their own data in `content/moves/<name>.json`
+(SA-D4, [#2856](https://github.com/soulsimulation/souls/issues/2856); feeds Engine v2 B2, [#2681](https://github.com/soulsimulation/souls/issues/2681),
+and T9, [#2663](https://github.com/soulsimulation/souls/issues/2663)). `souls-move/1`: `claims` and `blocks` (resource
+classes `locomotion`, `manipulator`, `gaze`, `voice`, never anatomy), `cancels_on` (`claim_taken`, `out_of_reach`),
+`effector` (`hand`), `reach_mm` (whole millimetres, at most 700, under a full arm) and `phases` in whole microseconds:
+`start_up_us`, `recovery_us` and for a slide `slide_us`. Contact is the one instant at the end of start-up; a phase
+includes its start and excludes its end. A key or unit in ticks is refused. `press` goes to a point; `slide` goes to a
+point and then to a second one.
+
+```sh
+node tools/entry/move.mjs content/moves    # validate every move; prints each one's provisional reference
+node --test tools/entry/move.test.mjs      # acceptance, with cases in tools/entry/cases/moves.json
+```
+
+`tools/entry/pose.mjs` gives the hand's position in whole millimetres at any time from a move, a record
+(`start_us`, `from_mm`, `contact_mm`, and `to_mm` for a slide) and a time. It has no imports and uses whole-number
+arithmetic only (easing in permille; a position is rounded to the nearest millimetre, halves away from zero, Engine v2's
+rule for positions, T4 [#2971](https://github.com/soulsimulation/souls/issues/2971); progress, a count, rounds down), so Node and a browser build give the same position. It does not check reach or
+move the thing's frame into the world's: the caller passes world positions.
+
 ## The looks table
 
 `looks.table` is a list of rows that say how a thing looks in each state, with no code: a state `field`, a `part` of
