@@ -189,14 +189,12 @@ function section(entry, key, err) {
   return v;
 }
 
-// A card is the line a search ranks a kind on: its purpose (at most CARD_PURPOSE_MAX characters), one category word and
+// A card is the line a search ranks a kind on: its purpose (its length is the check's rule), one category word and
 // synonyms. All are words, so all are named by reference to the text table.
-const CARD_PURPOSE_MAX = 80;
 function card(c, text, err) {
   if (!isObj(c)) { err('card', 'an object'); return; }
   only(c, ['text', 'category', 'synonyms'], 'card', err);
   if (!(typeof c.text === 'string' && c.text in text)) err('card.text', 'names an entry of the text table');
-  else if ([...text[c.text]].length > CARD_PURPOSE_MAX) err('card.text', `the purpose line is at most ${CARD_PURPOSE_MAX} characters`);
   if (c.category !== undefined) {
     if (!(typeof c.category === 'string' && c.category in text)) err('card.category', 'names an entry of the text table (one word)');
     else if (/\s/.test(text[c.category].trim())) err('card.category', 'one word: its text entry has more than one');
