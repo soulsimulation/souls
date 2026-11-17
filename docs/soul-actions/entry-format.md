@@ -143,6 +143,25 @@ Its kind is an ordinary entry plus a `roles` section, which the validator does n
   anyone is in it, the form is refused and nothing changes.
   The example is `packages/form-rules/cases/kinds/test/talk.json`.
 
+- **A standing activity** (proposed: a `standing` section; SA-G2, [#2874](https://github.com/soulsimulation/souls/issues/2874))
+  outlasts a sitting: a course or a job. It names `members`, a link type for those who belong across days; `present`,
+  a link type (a role with places) for those at the sitting now; `enough`, how many present start a sitting; and
+  `stage`, an enum field with the values `sitting` and `idle`. The list is closed: `members`, `present`, `enough`,
+  `stage`, `sitting`, `idle`.
+
+  ```json
+  "standing": { "members": "member", "present": "present", "enough": 3, "stage": "phase", "sitting": "sitting", "idle": "idle" }
+  ```
+
+  Joining and parting are forms that link and unlink `members`, with no place. A standing activity does not end when
+  its last member parts, or when no one is present; it keeps its members, state and end date while empty. Whether a
+  sitting starts is checked when a member arrives (a role entered as above): once `enough` are present the rules set
+  the stage to `sitting` (event `sitting_began`), once. When the last one present rises the stage returns to `idle`
+  (event `sitting_ended`). Present is a subset of members: only a member may arrive (the form's `who`), and a member
+  who is present cannot part (`still_present`). At its end date (its `ends` field, as above) its world form removes it,
+  members or not: each member is unlinked first (event `released`) and no body moves. Nothing waits for a time: hours
+  are a schedule (SA-F16). The example is `packages/form-rules/cases/kinds/test/class.json`.
+
 ## The hash, provisional
 
 A kind's reference is `namespace:name@hash`. Until Engine v2's encoding (T0) exists, the hash is SHA-256 over a

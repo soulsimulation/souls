@@ -234,3 +234,13 @@ has a state, the `activity` node and `steps` in order. A step does `enter`, `lea
 (the world's form at `now_us`), with what it should return (`expect`). The test checks that no step removes a body.
 Then it compares the nodes `after` and checks that the nodes in `gone` are removed. The example is a one-off talk
 (`test:talk`).
+
+### A standing activity
+
+A kind with a `standing` section (see the format page) outlasts a sitting. `join(input)` runs a form that links the
+actor as a member, with no place. `enter` and `leave` then also keep the stage: once `enough` are present as one
+arrives, a `sitting_began` event sets the stage to `sitting`; when the last one present rises, `sitting_ended` returns
+it to `idle`; a member who is present cannot part (`still_present`); and a standing activity is not ended by its last
+member parting. `lapse(input)` is the end date: it runs the world form (the engine's timer, at the time its needs
+state) and puts a `released` event first, unlinking every member; it moves no body. Cases are in `cases/activity/standing/`
+(the same step format, with `join` and `world` running `lapse`); the example is a weekly class (`test:class`).

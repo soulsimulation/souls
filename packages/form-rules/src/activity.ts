@@ -28,16 +28,28 @@
 //   down, whose crossing of 0 is when it ends. An activity nobody entered is removed at that time by its own world form
 //   (`who: "world"`, `starts: "timer"`), whose needs are that time and no member; the engine's timer runs it.
 
-import { apply, effects, parentOf, type Change, type Done, type Event, type Refused } from './effects.ts';
+// A standing activity (a course, a job; SA-G2, #2874) outlasts a sitting. Its `standing` section names `members`, the
+// link type of those who belong across days (joining and parting are forms that link and unlink; the activity is not
+// ended by its last member parting, nor by nobody being present), `present`, the link type of those at the sitting now
+// (a role entered by `enter`, so places are chosen by its rule), `enough`, how many present start a sitting, and the
+// enum field `stage` with its values `sitting` and `idle`. The check is made when a member arrives: once `enough` are
+// present the rules set the stage to `sitting` (event `sitting_began`); when the last one rises it returns to `idle`
+// (event `sitting_ended`). Present is a subset of members: only a member may arrive (the arriving form's `who`), and a
+// member cannot part while present (refused `still_present`). The end date is its `ends` field: its own world form
+// removes it at that time, members or not; `lapse` then releases every member first. Nothing waits for a time.
+
+import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type State } from './effects.ts';
 import { crossing, whoMay, type Entry, type Input, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
 export type Places = { in: string; slots?: string[]; within_mm?: number; posture?: string };
-export type Role = { need: string; places: Places };
+export type Role = { need: string; places?: Places };
 export const NOW_PARTS = Object.freeze(['floor', 'stage', 'ends']);
 export type Now = { floor?: string; stage?: string; ends?: string };
-export type Activity = Entry & { roles?: Record<string, Role>; now?: Now };
+export const STANDING_PARTS = Object.freeze(['members', 'present', 'enough', 'stage', 'sitting', 'idle']);
+export type Standing = { members: string; present: string; enough: number; stage: string; sitting: string; idle: string };
+export type Activity = Entry & { roles?: Record<string, Role>; now?: Now; standing?: Standing };
 export type SlotPlace = { node: string; slot: string };
 export type PlaceVerdict =
   | { verdict: 'yes'; role: string; place: SlotPlace; args: Record<string, unknown>; read: Read[] }
@@ -121,6 +133,54 @@ export function place(input: Input): PlaceVerdict {
   return { verdict: 'no', reason: 'no_free_place', role: enters.role, detail: { places: candidates.length }, read };
 }
 
+
+/** The `standing` section if the kind has one and it is whole; `{bad}` if it is malformed; null if it is a one-off. */
+export function standingOf(entry: Activity): Standing | { bad: string } | null {
+  const s = entry.standing;
+  if (s === undefined) return null;
+  if (!s || typeof s !== 'object' || Object.keys(s).some((k) => !STANDING_PARTS.includes(k))) return { bad: 'malformed_standing' };
+  if (![s.members, s.present].every((l) => typeof l === 'string' && has(entry.links, l) && has(entry.roles, l)) || s.members === s.present) return { bad: 'malformed_standing' };
+  const most = entry.links![s.present].most;
+  if (!whole(s.enough) || s.enough < 1 || s.enough > most) return { bad: 'malformed_standing' };
+  const def = has(entry.state, s.stage) ? entry.state![s.stage] : undefined;
+  const values = (def as { values?: unknown } | undefined)?.values;
+  if (!def || def.type !== 'enum' || !Array.isArray(values) || !values.includes(s.sitting) || !values.includes(s.idle) || s.sitting === s.idle) return { bad: 'malformed_standing' };
+  return s;
+}
+
+const namespace = (entry: Entry) => (entry.kind.includes(':') ? entry.kind.slice(0, entry.kind.indexOf(':')) : entry.kind);
+/** The stage field's value on a node, its default when never set. */
+const stageOf = (entry: Entry, node: { fields?: Record<string, unknown> }, field: string): unknown => (has(node.fields, field) ? node.fields![field] : entry.state![field].default);
+
+export type Joined = (Done & { role: string }) | Refused | Verdict | WhoVerdict | LeaveBad;
+/** Join a standing activity: the form that links the actor as a member, with no place (membership is not being there). */
+export function join(input: Input & { receipt: string }): Joined {
+  const who = whoMay(input);
+  if (who.verdict !== 'yes') return who;
+  const { kinds, act, state } = input;
+  const entry = kinds[state.nodes[act.this].kind!] as Activity;
+  const standing = standingOf(entry);
+  if (!standing || 'bad' in standing) return { verdict: 'no', reason: 'bad_input', detail: { what: standing ? standing.bad : 'not_standing' } };
+  const f = has(entry.forms, act.form) ? entry.forms![act.form] : undefined;
+  const links = (f?.effects ?? []).filter((e) => e && e.change === 'link' && (e.from ?? 'actor') === 'actor');
+  if (!f || links.length !== 1 || links[0].link !== standing.members) return { verdict: 'no', reason: 'bad_input', detail: { what: 'not_a_joining_form', form: act.form } };
+  const done = effects({ kinds, state, act, receipt: input.receipt });
+  return done.verdict === 'yes' && 'changes' in done ? { ...done, role: standing.members } : done;
+}
+
+/** A set of the stage, as its own event. */
+function setStage(entry: Activity, standing: Standing, id: string, to: string, name: string, done: Done): Done {
+  const changes = [...done.changes, { change: 'set' as const, node: id, field: standing.stage, n: entry.state![standing.stage].n, to }];
+  return { ...done, changes, events: [...done.events, { event: `${namespace(entry)}:${name}`, node: id, changes: [changes.length - 1] }] };
+}
+
+/** When the sitting starts: once `enough` are present and the stage is not yet `sitting`, set it; else add nothing. */
+function sittingBegins(entry: Activity, standing: Standing, nodes: State['nodes'], id: string, done: Done): Done {
+  const present = (nodes[id].links?.[standing.present] ?? []).length;
+  if (present < standing.enough || stageOf(entry, nodes[id], standing.stage) === standing.sitting) return done;
+  return setStage(entry, standing, id, standing.sitting, 'sitting_began', done);
+}
+
 export type Entered = (Done & { role: string; place: SlotPlace }) | Refused | Verdict | WhoVerdict | PlaceVerdict;
 
 /** Enter the role a form enters: who may (SA-F7a), then the place, then the form's needs and effects (SA-F2b). */
@@ -130,7 +190,14 @@ export function enter(input: Input & { receipt: string }): Entered {
   const at = place(input);
   if (at.verdict !== 'yes') return at;
   const done = effects({ kinds: input.kinds, state: input.state, act: { ...input.act, args: at.args }, receipt: input.receipt });
-  return done.verdict === 'yes' && 'changes' in done ? { ...done, role: at.role, place: at.place } : done;
+  if (done.verdict !== 'yes' || !('changes' in done)) return done;
+  const entry = input.kinds[input.state.nodes[input.act.this].kind!] as Activity;
+  const standing = standingOf(entry);
+  if (!standing || 'bad' in standing || at.role !== standing.present) return { ...done, role: at.role, place: at.place };
+  // The sitting is checked as a member arrives: on the state with the arrival done.
+  const after = apply(input.state, done);
+  if (!after.ok) return { ...done, role: at.role, place: at.place };
+  return { ...sittingBegins(entry, standing, after.state.nodes, input.act.this, done), role: at.role, place: at.place };
 }
 
 /** The role a form leaves: the form that unlinks exactly one role from the actor. */
@@ -141,7 +208,7 @@ export function leaving(entry: Activity, form: string): { role: string } | { bad
   return roles.length === 1 ? { role: roles[0].link! } : { bad: 'not_a_leaving_form' };
 }
 
-export type LeaveBad = { verdict: 'no'; reason: 'bad_input'; detail: Record<string, unknown> };
+export type LeaveBad = { verdict: 'no'; reason: 'bad_input' | 'still_present'; detail: Record<string, unknown> };
 /** `ended` is 1 when this leave ended the activity, which is then removed; else 0. */
 export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad;
 
@@ -160,6 +227,12 @@ export function leave(input: Input & { receipt: string }): Left {
   if ('bad' in leaves) return bad(leaves.bad, { form: act.form });
   const need = entry.roles![leaves.role]?.need;
   if (!ROLE_NEEDS.includes(need)) return bad('malformed_role', { role: leaves.role });
+  const standing = standingOf(entry);
+  if (standing && 'bad' in standing) return bad(standing.bad);
+  // A member cannot part while present: the sitting has to be left first.
+  if (standing && leaves.role === standing.members && (state.nodes[act.this].links?.[standing.present] ?? []).includes(state.actor)) {
+    return { verdict: 'no', reason: 'still_present', detail: { link: standing.present } };
+  }
   const done = effects({ kinds, state, act, receipt: input.receipt });
   if (done.verdict !== 'yes' || !('changes' in done)) return done;
   const after = apply(state, done);
@@ -168,7 +241,13 @@ export function leave(input: Input & { receipt: string }): Left {
   const self = nodes[act.this];
   const members: [string, string][] = [];
   for (const role of Object.keys(entry.roles!)) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
-  if (need !== 'required' && members.length > 0) return { ...done, role: leaves.role, ended: 0 };
+  if (standing) {
+    // A standing activity outlasts its members: it ends only by its required roles or its end date. The last one
+    // present rising ends the sitting.
+    const back = leaves.role === standing.present && (self.links?.[standing.present] ?? []).length === 0 && stageOf(entry, self, standing.stage) === standing.sitting;
+    if (need !== 'required') return { ...(back ? setStage(entry, standing, act.this, standing.idle, 'sitting_ended', done) : done), role: leaves.role, ended: 0 };
+  }
+  else if (need !== 'required' && members.length > 0) return { ...done, role: leaves.role, ended: 0 };
 
   // The activity ends: release every member, then remove it.
   const at = parentOf(nodes, act.this);
@@ -193,6 +272,35 @@ export function leave(input: Input & { receipt: string }): Left {
   const result: Done & { role: string; ended: 1 } = { ...done, changes, events, role: leaves.role, ended: 1 };
   const check = apply(state, result);
   return check.ok ? result : bad(check.reason, { change: check.change });
+}
+
+export type Lapsed = (Done & { released: number }) | Refused | Verdict | LeaveBad;
+/**
+ * The end date of an activity, as the engine's timer runs its world form (`starts: "timer"`, whose need is the time and
+ * nothing else, so members do not hold it): the form's own effects, with every member released first. Each is unlinked
+ * from its role (event `released`); no body is moved, so a body seated in another thing's slot stays seated.
+ */
+export function lapse(input: Omit<Input, 'asker'> & { receipt: string }): Lapsed {
+  const done = effects(input);
+  if (done.verdict !== 'yes' || !('changes' in done)) return done;
+  const { kinds, state, act } = input;
+  const self = state.nodes[act.this];
+  const entry = kinds[self.kind!] as Activity;
+  const members: [string, string][] = [];
+  for (const role of Object.keys(entry.roles ?? {})) for (const end of (self.links?.[role] ?? []) as string[]) members.push([role, end]);
+  if (!members.length) return { ...done, released: 0 };
+  const k = members.length;
+  const unlinks: Change[] = members.map(([role, end]) => ({ change: 'unlink', node: act.this, link: role, n: entry.links![role].n, end }));
+  const released: Event = { event: `${namespace(entry)}:released`, node: act.this, changes: unlinks.map((_, i) => i) };
+  const result: Done & { released: number } = {
+    ...done,
+    changes: [...unlinks, ...done.changes],
+    events: [released, ...done.events.map((e) => ({ ...e, changes: e.changes.map((c) => c + k) }))],
+    timers: done.timers.map((t) => ({ ...t, event: t.event + 1 })),
+    released: k,
+  };
+  const check = apply(state, result);
+  return check.ok ? result : { verdict: 'no', reason: 'bad_input', detail: { what: check.reason, change: check.change } };
 }
 
 export type NowLine = { floor?: string[]; stage?: unknown; ends_us?: number };
