@@ -1,0 +1,8 @@
+[package]
+name = "sim"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The world: tree, clock, controllers, movers, log; native only (Engine v2, #2635). Empty (K1, #2638)."
+
+[dependencies]

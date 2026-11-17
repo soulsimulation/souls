@@ -1,9 +1,21 @@
-# Engine v2 (#2635): the Rust workspace. K15 (#2637) seeds it with one crate so CI's `v2` job has something to build
-# and test; K1 (#2638) replaces the seed with the core's crates.
+# Engine v2 (#2635): the Rust workspace (K1, #2638). Every folder under crates/ and tools/ with a Cargo.toml is a
+# member, so a crate added later edits no shared file. CI's `v2` job runs v2/tools/ci.sh on it.
 [workspace]
-members = ["crates/seed"]
+members = ["crates/*", "tools/*"]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
 publish = false
+
+[workspace.dependencies]
+# The `wasm-bindgen` command v2/tools/ci.sh installs takes its version from Cargo.lock, so the two always match.
+wasm-bindgen = "=0.2.130"
+
+# Native builds unwind on a panic (K11 catches them per controller). WASM aborts on a panic whatever this says, so
+# `replica` never relies on catching one.
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
