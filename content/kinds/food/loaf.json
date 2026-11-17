@@ -1,0 +1,218 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:loaf",
+  "owner": "thing",
+  "state": {
+    "bites": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 70, 0]
+    },
+    "bite": {
+      "role": "contact",
+      "at_mm": [170, 70, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 600]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [340, 140, 200]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "bite": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "bites",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "bite"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "bites",
+          "by": -1,
+          "event": "bitten"
+        }
+      ]
+    },
+    "halve": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "bites",
+          "at_least": 4
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": "this",
+          "event": "portioned"
+        },
+        {
+          "change": "create",
+          "kind": "eden:loaf_half",
+          "into": "here",
+          "event": "piece_made"
+        },
+        {
+          "change": "create",
+          "kind": "eden:loaf_half",
+          "into": "here",
+          "event": "piece_made"
+        }
+      ]
+    },
+    "quarter": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "bites",
+          "at_least": 4
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "remove",
+          "what": "this",
+          "event": "portioned"
+        },
+        {
+          "change": "create",
+          "kind": "eden:loaf_quarter",
+          "into": "here",
+          "event": "piece_made"
+        },
+        {
+          "change": "create",
+          "kind": "eden:loaf_quarter",
+          "into": "here",
+          "event": "piece_made"
+        },
+        {
+          "change": "create",
+          "kind": "eden:loaf_quarter",
+          "into": "here",
+          "event": "piece_made"
+        },
+        {
+          "change": "create",
+          "kind": "eden:loaf_quarter",
+          "into": "here",
+          "event": "piece_made"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:loaf",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,3,0],"size":[45,6,25],"tint":"crumb"},{"kind":"box","at":[-85,70,-50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=1"},{"kind":"box","at":[85,70,-50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=2"},{"kind":"box","at":[-85,70,50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=3"},{"kind":"box","at":[85,70,50],"size":[170,140,100],"tint":"crust","round":20,"when":"@bites>=4"}],"palette":{"crust":"#be843e","crumb":"#d9b970"},"tags":["camping","item","food","bread","object"]}
+  },
+  "text": {
+    "card": "A whole loaf: share it in halves or quarters, or eat it in four bites.",
+    "food": "food",
+    "bread": "bread",
+    "loaf": "loaf",
+    "howto_share": "While it is whole, halve or quarter the loaf for three seconds; each piece is taken and eaten on its own."
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "bread",
+      "loaf"
+    ]
+  },
+  "howtos": {
+    "share": {
+      "text": "howto_share",
+      "steps": [
+        {
+          "form": "quarter"
+        }
+      ]
+    }
+  }
+}

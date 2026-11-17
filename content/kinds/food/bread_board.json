@@ -1,0 +1,112 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bread_board",
+  "owner": "thing",
+  "state": {
+    "dough": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 1100]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:bread_roll"
+      ],
+      "most": 1,
+      "at_mm": [300, 1000, 0],
+      "fits_mm": [300, 250, 300]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [1200, 1060, 600]
+  },
+  "forms": {
+    "prepare": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "dough",
+          "at_least": 1
+        },
+        {
+          "need": "slot_free",
+          "slot": "out"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 10000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "dough",
+          "by": -1,
+          "event": "dough_used"
+        },
+        {
+          "change": "create",
+          "kind": "eden:bread_roll",
+          "into": "out",
+          "event": "prepared"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:bread_board",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1200,30,600],"tint":"wood"},{"kind":"box","at":[-500,475,-200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[-500,475,200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,-200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[300,990,0],"size":[350,20,400],"tint":"rack"},{"kind":"cyl","at":[-450,1015,0],"r":45,"h":50,"segments":8,"tint":"dough","when":"@dough>=1"},{"kind":"cyl","at":[-320,1015,0],"r":45,"h":50,"segments":8,"tint":"dough","when":"@dough>=2"},{"kind":"cyl","at":[-190,1015,0],"r":45,"h":50,"segments":8,"tint":"dough","when":"@dough>=3"}],"palette":{"wood":"#b68d60","rack":"#37332e","dough":"#eee0bf"},"tags":["kitchen","table","bread","object"]}
+  },
+  "text": {
+    "card": "A bread board with three dough portions: prepare each into a bread roll.",
+    "kitchen": "kitchen",
+    "bread": "bread",
+    "baking": "baking",
+    "howto_roll": "With a hand free, prepare a dough portion for ten seconds; take the roll off the rack before the next."
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "bread",
+      "baking"
+    ]
+  },
+  "howtos": {
+    "roll": {
+      "text": "howto_roll",
+      "steps": [
+        {
+          "form": "prepare"
+        }
+      ]
+    }
+  }
+}

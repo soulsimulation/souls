@@ -1,0 +1,129 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:coffee_grinder",
+  "owner": "thing",
+  "state": {
+    "beans": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 6,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "grounds": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [160, 400, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 700]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [360, 440, 440]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "grind": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "beans",
+          "at_least": 1
+        },
+        {
+          "need": "state",
+          "field": "grounds",
+          "at_most": 2
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "beans",
+          "by": -1,
+          "event": "beans_ground"
+        },
+        {
+          "change": "set",
+          "field": "grounds",
+          "by": 1,
+          "event": "grounds_made"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:coffee_grinder",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,100,0],"size":[300,200,270],"tint":"wood"},{"kind":"box","at":[0,220,0],"size":[340,40,310],"tint":"metal"},{"kind":"box","at":[0,60,160],"size":[250,40,120],"tint":"metal"},{"kind":"box","at":[0,310,0],"size":[25,140,25],"tint":"metal"},{"kind":"box","at":[80,375,0],"size":[180,25,25],"tint":"metal"},{"kind":"box","at":[160,400,0],"size":[40,60,40],"tint":"wood"},{"kind":"box","at":[-90,265,-55],"size":[65,45,45],"tint":"beans","when":"@beans>=1"},{"kind":"box","at":[0,265,-55],"size":[65,45,45],"tint":"beans","when":"@beans>=2"},{"kind":"box","at":[90,265,-55],"size":[65,45,45],"tint":"beans","when":"@beans>=3"},{"kind":"box","at":[-90,265,35],"size":[65,45,45],"tint":"beans","when":"@beans>=4"},{"kind":"box","at":[0,265,35],"size":[65,45,45],"tint":"beans","when":"@beans>=5"},{"kind":"box","at":[90,265,35],"size":[65,45,45],"tint":"beans","when":"@beans>=6"},{"kind":"box","at":[-75,90,160],"size":[65,40,90],"tint":"grounds","when":"@grounds>=1"},{"kind":"box","at":[0,90,160],"size":[65,40,90],"tint":"grounds","when":"@grounds>=2"},{"kind":"box","at":[75,90,160],"size":[65,40,90],"tint":"grounds","when":"@grounds>=3"}],"palette":{"wood":"#996a3e","metal":"#4a5557","beans":"#704630","grounds":"#3c2417"},"tags":["kitchen","tool","coffee","object"]}
+  },
+  "text": {
+    "card": "A hand coffee grinder with six bean portions; its drawer holds three ground.",
+    "kitchen": "kitchen",
+    "coffee": "coffee",
+    "grinder": "grinder"
+  },
+  "card": {
+    "text": "card",
+    "category": "kitchen",
+    "synonyms": [
+      "coffee",
+      "grinder"
+    ]
+  }
+}

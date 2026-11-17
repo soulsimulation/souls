@@ -1,0 +1,136 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:cold_wrap",
+  "owner": "thing",
+  "state": {
+    "greens": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tomato": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "beans": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "portions": {
+      "n": 4,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 9,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 45, 0]
+    },
+    "bite": {
+      "role": "contact",
+      "at_mm": [40, 45, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [90, 90, 90]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
+    "bite": {
+      "who": "holder",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "held_by_actor"
+        },
+        {
+          "need": "state",
+          "field": "portions",
+          "at_least": 1
+        }
+      ],
+      "steps": [
+        {
+          "step": "move",
+          "move": "consume",
+          "at": "bite"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "portions",
+          "by": -1,
+          "event": "bitten"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:cold_wrap",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,10,0],"size":[75,20,75],"tint":"bread"},{"kind":"box","at":[-34,38,0],"size":[12,55,75],"tint":"bread","when":"@portions>=1"},{"kind":"box","at":[34,38,0],"size":[12,55,75],"tint":"bread","when":"@portions>=1"},{"kind":"box","at":[-22,45,5],"size":[18,30,60],"tint":"greens","when":"@greens>=1"},{"kind":"box","at":[0,45,5],"size":[18,30,60],"tint":"tomato","when":"@tomato>=1"},{"kind":"box","at":[22,45,5],"size":[18,30,60],"tint":"beans","when":"@beans>=1"}],"palette":{"bread":"#d8bd7c","greens":"#4f8839","tomato":"#c84837","beans":"#a47f47"},"tags":["kitchen","item","food","object"]}
+  },
+  "text": {
+    "card": "A flatbread wrap: fill it at a meal bench, then eat it a portion at a time.",
+    "food": "food",
+    "wrap": "wrap",
+    "sandwich": "sandwich"
+  },
+  "card": {
+    "text": "card",
+    "category": "food",
+    "synonyms": [
+      "wrap",
+      "sandwich"
+    ]
+  }
+}
