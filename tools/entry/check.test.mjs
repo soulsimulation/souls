@@ -12,9 +12,8 @@ import * as F from './format.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const CHECK = fileURLToPath(new URL('./check.mjs', import.meta.url));
 const EXAMPLES = ['kitchen/kettle', 'seating/bench', 'gathering/lecture'].map(p => `${root}content/kinds/${p}.json`);
-// One fixture per rule the data can break. `moves` is not here: its sections are SA-F10's, and until the format
-// defines them no entry can break it (deferred: see the PR).
-const RULES = Object.keys(C.RULES).filter(r => r !== 'moves' && r !== 'shape');
+// One fixture per rule the data can break (`shape` is the format's own, tested in format.test.mjs).
+const RULES = Object.keys(C.RULES).filter(r => r !== 'shape');
 // The fixtures are the examples with one fault each, built here so they follow the examples as the format grows.
 const ex = i => JSON.parse(readFileSync(EXAMPLES[i], 'utf8'));
 const mk = (i, name, fn) => { const e = ex(i); e.kind = `fixture:${name.replace(/-/g, '_')}`; fn(e); return JSON.stringify(e, null, 2); };
@@ -25,9 +24,11 @@ const FIX = {
   'engine-names': () => mk(0, 'engine-names', e => { e.state.server_flag = {...e.state.heating, n: 9}; }),
   'no-waiting': () => mk(0, 'no-waiting', e => { e.forms.boiled.effects.push({change: 'timer', form: 'boiled', after_us: 1000000, event: 'checked_again'}); }),
   bounded: () => mk(2, 'bounded', e => { delete e.links.listener.most; }),
-  'way-out': () => mk(0, 'way-out', e => { e.state.water.values = ['empty', 'hot']; }),
+  'way-out': () => mk(0, 'way-out', e => { e.forms.fill.needs.find(n => n.field === 'water').is = 'hot'; }),
+  moves: () => mk(0, 'moves', e => { delete e.motion; }),
   card: () => mk(0, 'card', e => { delete e.card; }),
   'no-labels': () => mk(0, 'no-labels', e => { e.text.card = 'A cosy kettle for quiet afternoons.'; }),
+  hatch: () => mk(0, 'hatch', e => { e.text.why_hatch = 'a function'; e.forms.judge = {who: 'anyone', starts: 'act', needs: [], steps: [], effects: [], hatch: {module: `prov-1220${'ab'.repeat(32)}`, reads: [{field: 'water'}], steps_most: 10, answers: 'verdict', why: 'why_hatch'}}; }),
   refs: () => mk(0, 'refs', e => { e.forms.pour.effects.push({change: 'remove', what: 'this', event: 'used_up'}, {change: 'create', kind: 'fixture:missing', into: 'actor_hand', event: 'made'}); }),
 };
 const dir = mkdtempSync(join(tmpdir(), 'entry-fixtures-'));
