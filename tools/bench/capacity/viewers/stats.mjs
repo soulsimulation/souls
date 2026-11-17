@@ -48,6 +48,8 @@ export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to,
   const restarted = new Set(inW.map((s) => s.pid).filter(Number.isInteger)).size > 1;
   // #2511: viewers actually held over the window (sampled), and per-viewer rates over that mean, not over the target
   const live = inW.map((s) => s.viewersLive).filter(Number.isFinite), held = live.length ? live.reduce((x, y) => x + y, 0) / live.length : viewers;
+  // #2512: bytes per viewer over the raw viewers (`rawLive`), whose bytes are counted as sent; the full clients' apart
+  const raw = inW.map((s) => s.rawLive).filter(Number.isFinite), rawHeld = raw.length ? raw.reduce((x, y) => x + y, 0) / raw.length : held;
   const heaps = inW.map((s) => s.live?.heap?.usedMb).filter(Number.isFinite), intended = actSec && souls ? (souls * secs) / actSec : null;
   const d = (k) => (v1[k] ?? 0) - (v0[k] ?? 0);
   return {
@@ -65,8 +67,8 @@ export function windowFigures({ samples, acts, v0, v1, viewers, calls, from, to,
       handlerMs: { p50: r1(quantile(handler, 0.5)), p99: r1(quantile(handler, 0.99)) }, waitMs: { p50: r1(quantile(ok.map((x) => x.waitMs), 0.5)), p99: r1(quantile(ok.map((x) => x.waitMs), 0.99)) }, clientMs: { p50: r1(quantile(ok.map((x) => x.clientMs), 0.5)), p99: r1(quantile(ok.map((x) => x.clientMs), 0.99)) }, refused: refusedActs },
     world: { cpuShare: restarted ? null : share('cpuS'), restarted, rssMb: r1(last?.rssMb ?? null), heapUsedMb: last?.live?.heap?.usedMb ?? null },
     launcher: { cpuShare: share('launcherCpuS'), rssMb: r1(last?.launcherRssMb ?? null) },
-    driver: { cpuShare: share('driverCpuS') },
-    viewersOut: { bytesPerViewerPerS: held ? Math.round(bytes / held / secs) : null, messagesPerViewerPerS: held ? r1((v1.messages - v0.messages) / held / secs) : null,
+    driver: { cpuShare: share('driverCpuS'), rssMb: r1(last?.driverRssMb ?? null) }, bench: { cpuShare: share('benchCpuS') },
+    viewersOut: { bytesPerViewerPerS: rawHeld ? Math.round(bytes / rawHeld / secs) : null, messagesPerViewerPerS: rawHeld ? r1((v1.messages - v0.messages) / rawHeld / secs) : null,
       wsOpens: v1.opens - v0.opens, wsCloses: v1.closes - v0.closes, wsRefused: v1.refused - v0.refused },
     viewerCalls: { http: calls.length, worldCalls, refusals: viewerRefusals },
   };
@@ -120,4 +122,48 @@ export function firstMotion(motion, waiting, from, to) {
   const missed = inW.length - seen.length + waiting.filter((w) => w.at >= from && w.at <= to - 5000).length, all = seen.length + missed;
   const q = (p) => { if (!all) return null; const i = Math.min(all - 1, Math.max(0, Math.ceil(p * all) - 1)); return i < seen.length ? Math.round(seen[i] / 10) / 100 : 'none'; };
   return { n: seen.length, missed, p50S: q(0.5), p95S: q(0.95) };
+}
+
+// ------------------------------------------------------------------ #2512: slow readers and a mass reconnect
+const mean = (xs) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : null);
+const max = (xs) => (xs.length ? Math.max(...xs) : null);
+/** Slow readers that joined at `mid` of the window [from, to] and stopped reading: the world's resident memory and
+ *  main-thread heap, and the launcher's memory (every viewer's socket passes through it), as the mean before `mid`
+ *  against the peak after it, and the rise per slow reader (kB). `cut`: how many the server closed before `to`. */
+export function slowFigures({ samples, from, mid, to, n, cut = 0 }) {
+  const before = samples.filter((s) => s.at >= from && s.at < mid), after = samples.filter((s) => s.at >= mid && s.at <= to);
+  const fig = (pick) => {
+    const b = mean(before.map(pick).filter(Number.isFinite)), p = max(after.map(pick).filter(Number.isFinite)), rise = b == null || p == null ? null : p - b;
+    return { beforeMb: r1(b), peakMb: r1(p), riseMb: r1(rise), perReaderKb: rise == null || !n ? null : Math.round((rise * 1024) / n) };
+  };
+  return { n, cut, stillOpen: n - cut, joinedAtS: r1((mid - from) / 1000), worldRss: fig((s) => s.rssMb), worldHeap: fig((s) => s.live?.heap?.usedMb), launcherRss: fig((s) => s.launcherRssMb) };
+}
+/** The reconnect table of a world restarted at `at`. `rows`: per viewer present then, ms after `at` when its socket
+ *  dropped and when a new socket received its first message (null: never), where the upgrade landed, full or raw.
+ *  `health`: [{at, ok, tick, clients}] read from the world's healthz through it; `samples`: the bench's samples (pid,
+ *  rssMb, live.heap). Back within `withinMs` of the restart; the seconds to back at p50 / p95 over those that dropped
+ *  ('none' when the quantile falls on one never back); how long the world did not answer; its tick before and after
+ *  (the clock goes on from its snapshot, or starts again); its memory before and at the end. */
+export function restartTable({ rows, at, health = [], samples = [], withinMs = 30_000 }) {
+  const dropped = rows.filter((r) => r.dropped != null), back = dropped.filter((r) => r.back != null).map((r) => r.back).sort((a, b) => a - b);
+  const q = (p) => { if (!dropped.length) return null; const i = Math.min(dropped.length - 1, Math.max(0, Math.ceil(p * dropped.length) - 1)); return i < back.length ? r1(back[i] / 1000) : 'none'; };
+  const landed = {}; for (const r of dropped) if (r.back != null) landed[r.landed ?? 'world'] = (landed[r.landed ?? 'world'] ?? 0) + 1;
+  const hb = health.filter((h) => h.at < at && h.ok).at(-1), down = health.find((h) => h.at >= at && !h.ok), up = down ? health.find((h) => h.at > down.at && h.ok) : null;
+  const pre = samples.filter((s) => s.at < at && s.pid).at(-1), end = samples.filter((s) => s.at >= at && s.pid).at(-1);
+  return {
+    viewers: rows.length, full: rows.filter((r) => r.full).length, heldThrough: rows.length - dropped.length, dropped: dropped.length,
+    backWithin: back.filter((b) => b <= withinMs).length, withinS: withinMs / 1000, backLater: back.filter((b) => b > withinMs).length, neverBack: dropped.length - back.length,
+    backS: { p50: q(0.5), p95: q(0.95) }, landed,
+    world: { downS: down ? r1(((up?.at ?? health.at(-1)?.at ?? down.at) - down.at) / 1000) : 0, upAgain: !down || !!up, tickBefore: hb?.tick ?? null, tickAfter: up?.tick ?? null,
+      clientsAfter: health.at(-1)?.clients ?? null, newPid: !!(pre && end && pre.pid !== end.pid), rssBeforeMb: r1(pre?.rssMb ?? null), rssEndMb: r1(end?.rssMb ?? null),
+      heapBeforeMb: pre?.live?.heap?.usedMb ?? null, heapEndMb: end?.live?.heap?.usedMb ?? null },
+  };
+}
+/** The bench's own limits, checked before any viewer: the launcher holds two descriptors per viewer and a driver two per
+ *  viewer of its share, and the local port range must hold every socket to one port. Problems, said plainly. */
+export function limitProblems({ viewers, drivers, fdLimit, portRange, launcher = true }) {
+  const out = [], need = Math.max(launcher ? 2 * viewers + 1024 : viewers + 1024, 2 * Math.ceil(viewers / drivers) + 256);
+  if (Number.isFinite(fdLimit) && fdLimit < need) out.push(`open-file limit ${fdLimit} is below the ${need} that ${viewers} viewers need (the launcher holds two per viewer); raise it (ulimit -n) or run fewer`);
+  if (portRange && portRange[1] - portRange[0] + 1 < viewers + 1024) out.push(`local port range ${portRange.join('-')} holds ${portRange[1] - portRange[0] + 1} ports, below the ${viewers + 1024} that ${viewers} viewers to one port need`);
+  return out;
 }

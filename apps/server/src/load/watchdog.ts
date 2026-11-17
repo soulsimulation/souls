@@ -12,9 +12,11 @@ export function writeLiveNow(dataDir: string, a: Float64Array = sharedLoad, api:
   try { const now = Date.now(); writeFileSync(file + '.main.tmp', JSON.stringify({...liveOf(a, process.pid, now), api: apiOf(api, now)}) + '\n'); renameSync(file + '.main.tmp', file); } catch { /* best effort */ }
 }
 
-/** #457: name the stalled frame (stall-stack.ts) unless SIM_STALL_STACK=0; after SIM_STALL_STACK_MS (default 2000) stuck. */
+/** #457: name the stalled frame (stall-stack.ts) only with SIM_STALL_STACK=1; after SIM_STALL_STACK_MS (default 2000) stuck.
+ *  Off by default (#2607): the debugger session and its `Debugger.pause` can abort the process in a concurrent TurboFan
+ *  compile on every Node before 26 (V8 crbug 446113737). Off, no inspector session is opened at all. */
 export function stallConfig(dataDir: string, env: NodeJS.ProcessEnv = process.env) {
-  if (env.SIM_STALL_STACK === '0') return undefined;
+  if (env.SIM_STALL_STACK !== '1') return undefined;
   return {dataDir, root: fileURLToPath(new URL('../../../../', import.meta.url)), stallMs: Number(env.SIM_STALL_STACK_MS) > 0 ? Number(env.SIM_STALL_STACK_MS) : 2000};
 }
 /** #2366 A2/A3: when the watchdog thread ends a stuck world. `hangMs`: the main thread has not turned for this long while

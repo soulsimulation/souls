@@ -34,7 +34,7 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REF_ALLOWED, checkoutRef, scrub } from './capacity-qualify.mjs';
 
-export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip'];
+export const COMMANDS = ['walk', 'eval-scripted', 'eval-load', 'bench-client', 'meetup', 'slopes-profile', 'load', 'settled', 'hundred', 'colocate', 'viewers', 'counted', 'clip', 'page'];
 /** Proof clip kits live here in the workflow's commit; each holds kit.json ({template, eden?, viewport?, localStorage?}) and steps.mjs. */
 export const CLIP_KITS = 'tools/proof/clips';
 /** Counted scenarios: name → kit directory (repository-relative) and its files. Each kit runs one cell with
@@ -45,7 +45,7 @@ export const COUNTED = { 'stair-foot': { dir: 'tools/playtest/counted/stair-foot
  *  `souls-wide` (D5, #2505), one instance on the cores of four souls-timed ones, for the gates' wide runs. */
 export const RUNNERS = ['souls-timed', 'hosted', 'souls-wide'];
 /** #1970: the commands whose world runs on two of the runner's physical cores and whose load generator on the other two. */
-export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers'];
+export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers', 'page'];
 /** D5: what may run on `souls-wide`: the split commands (with a core plan) and settled. */
 export const WIDE = [...SPLIT, 'settled'];
 /** D5: viewer arms above this run on `souls-wide` only (the driver needs about 0.18 cores per 1,000 viewers, #2512). */
@@ -74,10 +74,14 @@ export const ARG_ALLOW = {
   hundred: { '--small': int(1, 100), '--eden': (v) => /^[0-4]$/.test(v), '--short': FLAG, '--fixture-only': FLAG, '--active-min': int(1, 60), '--gap-min': int(1, 60), '--settle-min': int(1, 90), '--build-parallel': int(1, 6) },
   colocate: { '--forms': (v) => { const xs = v.split(','); return xs.length <= 4 && xs.every((x) => ['baseline', 'threads', 'one-thread', 'shard'].includes(x)) && new Set(xs).size === xs.length; }, '--settle-s': int(20, 600), '--walk-s': int(20, 600), '--busy': int(2, 20), '--small': int(1, 60), '--shard-size': int(2, 8), '--callback-slot': FLAG, '--short': FLAG },
   // #2511: 0 is the zero-viewer arm; arrivals, a burst (<n>@<s>), stays and the Souls' pacing
-  viewers: { '--viewers': list(/^(10000|5000|2000|1\d{3}|[1-9]\d{0,2}|0)$/, 4), '--window-sec': int(10, 600), '--souls': int(1, 100), '--act-sec': int(1, 600), '--arrive-per-sec': int(1, 200),
-    '--arrive-burst': (v) => /^[1-9]\d{0,3}@[1-9]\d{0,2}$/.test(v) && Number(v.split('@')[0]) <= 2000, '--dwell-sec': int(1, 3600), '--short': FLAG },
+  // #2512: up to 10,000 viewers on --drivers processes, slow readers, a world restart mid-window, the drivers against a stub
+  viewers: { '--viewers': list(/^(10000|[1-9]\d{0,3}|0)$/, 4), '--window-sec': int(10, 600), '--souls': int(1, 100), '--act-sec': int(1, 600), '--arrive-per-sec': int(1, 200),
+    '--arrive-burst': (v) => /^[1-9]\d{0,3}@[1-9]\d{0,2}$/.test(v) && Number(v.split('@')[0]) <= 2000, '--dwell-sec': int(1, 3600), '--short': FLAG,
+    '--drivers': int(1, 16), '--slow-readers': int(1, 500), '--restart-at': int(5, 570), '--stub': FLAG, '--stub-kb': int(1, 500) },
   counted: { '--scenario': (v) => Object.hasOwn(COUNTED, v), '--loop-sec': int(60, 1800) },
   clip: { '--kit': (v) => /^[a-z0-9][a-z0-9-]{0,40}$/.test(v), '--viewport': (v) => v === 'desktop' || v === 'phone' },
+  // #2554: the page with many Souls, in a real browser on the runner's GPU (tools/test-harness/page-souls.mjs)
+  page: { '--souls': list(/^(500|[1-4]\d\d|[1-9]\d?)$/, 4), '--shape': (v) => v === 'event' || v === 'uniform', '--warm-sec': int(1, 120), '--measure-sec': int(5, 300), '--settle-sec': int(1, 600), '--profile-sec': int(1, 60), '--short': FLAG },
 };
 
 /** `args` → a checked argument list for `command`: whitespace-separated `--flag value` pairs (or bare flags) from its
@@ -130,7 +134,7 @@ export function parseInputs(env) {
 export const target = (inp) => checkoutRef(inp.arm === 'base' ? inp.base : inp.ref);
 
 /** Consecutive ports each command uses from its base port (slopes: quiet worlds +1..+9, join proxy +40, inspector +50). */
-export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, load: 2, settled: 2, hundred: 220, colocate: 71, viewers: 3, counted: 1, clip: 1 };
+export const PORT_SPAN = { walk: 1, 'eval-scripted': 1, 'eval-load': 1, 'bench-client': 3, meetup: 31, 'slopes-profile': 51, load: 2, settled: 2, hundred: 220, colocate: 71, viewers: 3, counted: 1, clip: 1, page: 1 };
 /** The process to run for one repeat (cwd: the ref). Every command but walk does all its repeats in one invocation. The
  *  eval's load mode keeps its Soul folders (--keep-data) in the per-run directory, so the token refusal can read them. */
 export function commandLine(inp, { out, port }) {
@@ -147,6 +151,7 @@ export function commandLine(inp, { out, port }) {
     case 'hundred': return ['tools/bench/capacity/hundred/hundred.mjs', '--out', join(out, 'hundred'), '--port', p, ...inp.args];   // #2301: launcher +0, control +1, worlds +2…
     case 'colocate': return ['tools/bench/capacity/colocate/colocate.mjs', '--out', join(out, 'colocate'), '--port', p, ...inp.args];   // #2300: no repeats
     case 'viewers': return ['tools/bench/capacity/viewers/viewers.mjs', ...r, '--out', join(out, 'viewers'), '--port', p, ...inp.args];   // #2308
+    case 'page': return ['tools/test-harness/page-souls.mjs', ...r, '--out', join(out, 'page'), '--port', p, ...inp.args];   // #2554
     case 'counted': throw new Error('counted runs its kit\'s steps: countedSteps');
     case 'clip': throw new Error('clip runs its kit: runClip');
   }
@@ -205,7 +210,7 @@ export function descendants(table, root) {
   return out;
 }
 /** A world server process (a direct boot, or a child of the launcher), by its NUL-separated command line. */
-export const isWorld = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('apps/server/src/main.ts'));
+export const isWorld = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('apps/server/src/main.ts') || a.endsWith('tools/bench/capacity/viewers/stub.mjs'));   // #2512: the stub stands in for it
 /** #2507: the world launcher process (it carries every viewer byte and every act), by its NUL-separated command line. */
 export const isLauncher = (cmdline) => cmdline.split('\0').some((a) => a.endsWith('tools/world-launcher/launcher.mjs'));
 
@@ -267,6 +272,7 @@ export const PUBLISH = {
   counted: ['counted/*/run.json', 'counted/*.log', 'counted/*.scores.json', 'counted/*.class.json', 'counted/*.class.err', 'counted/*/probe.log'],
   // the clip, its sidecar (scrubbed) and a still of a page that never arrived; the world's data and the Soul folders stay
   clip: ['clip/*.mp4', 'clip/*.webm', 'clip/*.json', 'clip/*.open-failed.png', 'clip.log'],
+  page: ['page/results.json', 'page/REPORT.md', 'page/*.png', 'page/world.log', 'page.log'],
 };
 /** Media a timed run publishes byte for byte (never scrubbed as text). */
 export const BINARY = /\.(mp4|webm|png)$/;

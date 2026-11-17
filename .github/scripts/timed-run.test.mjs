@@ -30,7 +30,8 @@ test('args: only each command\'s own allowlisted flags, with checked values, onc
   assert.throws(() => parseInputs({ ...ENV, INPUT_ARGS: '--seat x' }), /not allowed for walk/);
   assert.deepEqual(checkArgs('viewers', '--viewers 200,500,1000,2000'), ['--viewers', '200,500,1000,2000']);
   assert.deepEqual(checkArgs('viewers', '--viewers 0,50,200 --souls 24 --act-sec 10 --arrive-per-sec 20 --arrive-burst 300@40 --dwell-sec 60').length, 12);   // #2511
-  for (const a of ['--viewers 2001', '--viewers 00', '--viewers 0,0', '--viewers 1,2,3,4,5', '--viewers 05', '--souls 101', '--arrive-burst 300', '--arrive-burst 3000@10', '--arrive-per-sec 0']) assert.throws(() => checkArgs('viewers', a), /input args/, a);
+  assert.deepEqual(checkArgs('viewers', '--viewers 2000,5000,10000 --drivers 4 --slow-readers 50 --restart-at 40 --stub --stub-kb 50').length, 11);   // #2512
+  for (const a of ['--viewers 10001', '--drivers 17', '--drivers 0', '--slow-readers 501', '--restart-at 4', '--stub yes', '--viewers 00', '--viewers 0,0', '--viewers 1,2,3,4,5', '--viewers 05', '--souls 101', '--arrive-burst 300', '--arrive-burst 3000@10', '--arrive-per-sec 0']) assert.throws(() => checkArgs('viewers', a), /input args/, a);
 });
 
 test('command line: walk once per repeat; the eval runs its own repeats with a scripted seat, on the given port', () => {
@@ -139,7 +140,7 @@ test('command lines: each bench with its repeats, its own output dir under out a
   assert.deepEqual(commandLine(cap('bench-client', '--arms n6 --short'), o), ['tools/bench/capacity/bench.mjs', '--load', 'client', '--via-launcher', '--repeats', '2', '--out', join('o', 'bench'), '--port', '30000', '--child-range', '30001-30002', '--arms', 'n6', '--short']);
   assert.deepEqual(commandLine(cap('meetup', '--profile even'), o), ['tools/bench/capacity/meetup/meetup.mjs', '--repeats', '2', '--out', join('o', 'meetup'), '--port', '30000', '--range', '30001-30030', '--profile', 'even']);
   assert.deepEqual(commandLine(cap('slopes-profile'), o), ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', '--repeats', '2', '--out', join('o', 'slopes'), '--port', '30000']);
-  assert.deepEqual(SPLIT, ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers']);
+  assert.deepEqual(SPLIT, ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers', 'page']);
 });
 
 test('stage, each capacity command: its own files only, scrubbed; a Soul token anywhere under out refuses the upload', () => {
@@ -186,7 +187,7 @@ test('core plan (#2507): cores is accepted for the split commands, validated, re
   assert.ok(!('cores' in parseInputs({ ...V, INPUT_CORES: '' })), 'no plan: the inputs are as before');
   for (const v of ['world=0', 'world=2,launcher=0', 'launcher=1', 'world=2,launcher=1,load=1', 'world=65', 'world=2 launcher=1', 'world=x', 'world=2;id'])
     assert.throws(() => parseInputs({ ...V, INPUT_CORES: v }), /input cores=.*world=N or world=N,launcher=M/, v);
-  assert.throws(() => parseInputs({ ...ENV, INPUT_CORES: 'world=2' }), /input cores=.*for eval-load, .*viewers only/, 'walk takes no plan');
+  assert.throws(() => parseInputs({ ...ENV, INPUT_CORES: 'world=2' }), /input cores=.*for eval-load, .*viewers, page only/, 'walk takes no plan');
   assert.equal(parseCorePlan('world=2,launcher=1').launcher, 1);
   const smt = (c) => [c % 8, (c % 8) + 8], three = [5, 6, 7, 13, 14, 15];
   assert.deepEqual(splitCores(three, smt, { world: 1, launcher: 1 }), { physicalCores: 3, plan: 'world=1,launcher=1', layout: '1+1+1', world: '5,13', launcher: '6,14', load: '7,15' });
@@ -244,6 +245,7 @@ test('world pinning: only world servers under the run\'s own process tree', () =
   assert.deepEqual(descendants([[10, 1]], 99), []);
   assert.ok(isWorld(['/usr/bin/node', '--max-old-space-size=2048', '/w/src/apps/server/src/main.ts', ''].join('\0')));
   assert.ok(isWorld(['node', 'apps/server/src/main.ts'].join('\0')));
+  assert.ok(isWorld(['node', '/w/src/tools/bench/capacity/viewers/stub.mjs', '--port', '1'].join('\0')));   // #2512
   for (const c of ['node\0tools/world-launcher/launcher.mjs', 'node\0tools/bench/capacity/bench.mjs', 'grep\0apps/server/src/main.ts.bak'])
     assert.ok(!isWorld(c), c);
 });

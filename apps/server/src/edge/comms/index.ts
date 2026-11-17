@@ -23,6 +23,7 @@ import {ensureCommsSchema,tx,afterCommit} from './store.ts';
 import {EventStreams, parseCursor} from './stream.ts';
 import {Webhooks, type Fetch} from './webhook.ts';
 import {TokenBuckets} from '../../flood.ts';
+import {addressKey} from '../../address-key.ts';
 import {clockAt} from '@souls/brain';
 import type {CalendarState} from './objects/calendar.ts';
 
@@ -218,7 +219,7 @@ export function registerEdgeComms(app: Hono, deps: EdgeDeps, options: CommsOptio
     for (const o of objects.ofKind('calendar-item')) { const s = o.state as CalendarState; if (s.proposedById && s.phase === 'over' && s.endsAtTick <= before) objects.remove(o.id); }
   };
   app.get('/v1/edge/calendar', c => {
-    const xff = c.req.header('x-forwarded-for'), wait = xff ? calendarReads.take(xff.split(',')[0].trim()) : 0;
+    const ip = addressKey(c.req.header('x-forwarded-for')), wait = ip ? calendarReads.take(ip) : 0;   // #2543: an IPv6 network by its /64
     if (wait) { c.header('Retry-After', String(Math.ceil(wait / 1000))); return failure(c, new EdgeError(429, 'rate-limited', 'More than 60 calendar reads a minute from your address; wait a moment.')); }
     // #1917: `withinMinutes` (real minutes) and/or `limit` ask for a window: items overlapping it, soonest first. Every item's
     // words are a Soul's or the steward's, so each row is marked untrusted.
