@@ -1,0 +1,63 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:kettle",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "enum", "values": ["empty", "cold", "hot"], "default": "empty", "audience": "public" },
+    "heating": { "n": 2, "type": "bool", "default": false, "audience": "public" }
+  },
+  "points": {
+    "handle": { "role": "grip", "at_mm": [0, 220, 0] },
+    "switch": { "role": "contact", "at_mm": [-60, 40, 0] },
+    "spout": { "role": "outlet", "at_mm": [150, 150, 0] }
+  },
+  "geometry": { "bounds_mm": [310, 300, 240] },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "heating", "is": false },
+        { "need": "state", "field": "water", "not": "empty" },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [
+        { "change": "set", "field": "heating", "to": true, "event": "switched_on" },
+        { "change": "timer", "form": "boiled", "after_us": 150000000, "event": "boil_started" }
+      ]
+    },
+    "boiled": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "heating", "is": true }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "water", "to": "hot", "event": "boiled" },
+        { "change": "set", "field": "heating", "to": false, "event": "switched_off" }
+      ]
+    },
+    "pour": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "into": { "type": "thing", "select": { "of": "things", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "water", "not": "empty" }
+      ],
+      "steps": [{ "step": "move", "move": "pour", "at": "spout", "toward": { "arg": "into" } }],
+      "effects": [{ "change": "set", "field": "water", "to": "empty", "event": "poured" }]
+    }
+  },
+  "looks": { "model": "look:kettle" },
+  "text": {
+    "card": "A kettle: fill it, switch it on, and it boils water for tea.",
+    "howto_tea": "Switch the kettle on, wait for it to boil, then pour it into a cup."
+  },
+  "card": { "text": "card" },
+  "howtos": {
+    "tea": { "text": "howto_tea", "steps": [{ "form": "switch_on" }, { "form": "pour" }] }
+  }
+}
