@@ -401,11 +401,10 @@ impl Map {
         for (b, base) in &buildings {
             for l in &b.links {
                 let mut ends = [Vec::new(), Vec::new()];
-                if l.blocked.is_none() {
-                    for (k, e) in l.ends.iter().enumerate() {
-                        if let Some(e) = e {
-                            ends[k] = m.end_portals(l, e, k as u8, base, b);
-                        }
+                // A blocked link's ends are portals too, so a search that comes to it can name it.
+                for (k, e) in l.ends.iter().enumerate() {
+                    if let Some(e) = e {
+                        ends[k] = m.end_portals(l, e, k as u8, base, b);
                     }
                 }
                 let run: i64 = l
