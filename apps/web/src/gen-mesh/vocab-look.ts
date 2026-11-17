@@ -13,7 +13,7 @@ import type { MeshCtx } from './registry.ts';
 import { DRAWER_TRAVEL } from '@souls/world-compiler';
 import { foldCanopy } from '../opening-motion.ts';
 import { variantOf } from './material-variants.ts';
-import { declaredState, looks as tableLooks, type LookRow, type Placement } from '../../../../packages/form-rules/src/looks.ts';
+import { declaredState, isTimed, looks as tableLooks, type LookRow, type Placement } from '../../../../packages/form-rules/src/looks.ts';
 
 const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 const declared = (ctx: MeshCtx, k: string) => Object.hasOwn(ctx.def.params ?? {}, k);
@@ -34,10 +34,30 @@ export function lookOf(ctx: MeshCtx): Look | null {
 /** SA-D1a: a kind's looks table rides in the def's make.args (`looks_table`); a def without one is drawn exactly as before. */
 const tableOf = (ctx: MeshCtx): LookRow[] => (Array.isArray(ctx.args?.looks_table) ? (ctx.args.looks_table as LookRow[]) : []);
 /** The table's parts placed by the plain function, in whole units. The entry's whole numbers reach the function in their stated unit; the page holds a permille field as a fraction (`looks_units` names it), so only that is scaled back. Parts are found by role; the rest pose is kept so the same state gives the same picture every time. */
+/** SA-D1b: world time on this viewer in whole microseconds (null: not known yet). A timed field is drawn at it, worked
+ *  out here from its three stored numbers each frame, with nothing sent by the world; the page that knows world time sets it. */
+let looksClock: () => number | bigint | null = () => null;
+export function setLooksClock(clock: () => number | bigint | null) { looksClock = clock; }
 function tableRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
   const table = tableOf(ctx); if (!table.length) return;
   const state = declaredState(look.state, (ctx.args?.looks_units ?? {}) as Record<string, string>);
-  const placed = tableLooks({ table, state }), tint = new THREE.Color();
+  const fields = (ctx.def.state ?? {}) as Record<string, { min?: number; max?: number }>;
+  const place = () => tableLooks({ table, state, now_us: looksClock() ?? undefined, fields });
+  // a timed field: placed again each frame the picture is drawn, from the one record, when its placement has changed; the
+  // hook rides on a mesh no row moves or hides (a hidden mesh is not drawn, so it would never show again)
+  if (Object.values(state).some(isTimed) && !root.userData.looksTimed) {
+    const moved = new Set(table.flatMap((r) => [r.part, ...Object.values(r.at ?? {})]).filter((x): x is string => typeof x === 'string'));
+    const inPart = (o: THREE.Object3D | null): boolean => !!o && o !== root && (moved.has(o.userData.role as string) || inPart(o.parent));
+    let mesh: THREE.Object3D | undefined; root.traverse((o) => { if ((o as THREE.Mesh).isMesh && !inPart(o)) mesh ??= o; });
+    if (mesh) {
+      root.userData.looksTimed = true; let last = ''; const before = mesh.onBeforeRender;
+      mesh.onBeforeRender = function (...a) { before.apply(this, a); const placed = place(), key = JSON.stringify(placed); if (key !== last) { last = key; placeParts(root, placed); } };
+    }
+  }
+  placeParts(root, place());
+}
+function placeParts(root: THREE.Object3D, placed: Record<string, Placement>) {
+  const tint = new THREE.Color();
   root.traverse((o) => {
     const p: Placement | undefined = placed[o.userData.role as string]; if (!p) return;
     const rest = (o.userData.looksRest ??= { rot: [o.rotation.x, o.rotation.y, o.rotation.z], pos: o.position.toArray(), scale: o.scale.toArray(), visible: o.visible }) as { rot: number[]; pos: number[]; scale: number[]; visible: boolean };
@@ -50,7 +70,7 @@ function tableRoles(root: THREE.Object3D, look: Look, ctx: MeshCtx) {
     o.scale.set(rest.scale[0] * (p.scale_permille?.[0] ?? 1000) / 1000, rest.scale[1] * (p.scale_permille?.[1] ?? 1000) / 1000, rest.scale[2] * (p.scale_permille?.[2] ?? 1000) / 1000);
     o.visible = p.show === undefined ? rest.visible : p.show;
     if (p.flame_permille !== undefined) { const f = p.flame_permille / 1000; o.visible = f > 0; o.scale.set(rest.scale[0] * f, rest.scale[1] * f, rest.scale[2] * f); }
-    if (p.glow_permille !== undefined || p.tint) o.traverse((c) => { const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (!m) return;
+    if (p.glow_permille !== undefined || p.tint) o.traverse((c) => { const m = ((c.userData.looksBase ??= (c as THREE.Mesh).material) as THREE.MeshStandardMaterial | undefined); if (!m) return;
       (c as THREE.Mesh).material = lookMaterial(m, `table:${p.glow_permille ?? ''}:${p.tint ?? ''}`, (x) => { if (p.glow_permille !== undefined && x.emissive) x.emissiveIntensity *= p.glow_permille / 1000; if (p.tint) x.color.copy(tint.set(p.tint)); }); });
   });
 }
