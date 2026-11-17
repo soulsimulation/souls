@@ -32,10 +32,10 @@ test('A1: the kettle, the bench and the lecture validate; three malformed entrie
 test('A2: a float, a duration in ticks, a field without a number or an audience, and a Soul id in a field are refused', () => {
   const kettle = load(ENTRIES[0]);
   // A float, as written in the file (1.0 is a float literal even though JSON.parse reads it as 1) and as a value.
-  const text = read(ENTRIES[0]).replace('"at_mm": [0, 220, 0]', '"at_mm": [0, 220.0, 0]');
+  const text = read(ENTRIES[0]).replace('"at_mm": [-135, 150, 0]', '"at_mm": [-135, 150.0, 0]');
   assert.ok(F.parseEntry(text).errors.some(e => e.reason.includes('floating-point')));
-  const f = copy(kettle); f.points.handle.at_mm = [0, 0.22, 0];
-  refused(f, 'points.handle.at_mm.1', 'floating-point');
+  const f = copy(kettle); f.points.grip.at_mm = [-135, 0.15, 0];
+  refused(f, 'points.grip.at_mm.1', 'floating-point');
   // A duration in ticks, as a key and as a unit.
   const t = copy(kettle); t.forms.switch_on.effects[1] = {change: 'timer', form: 'boiled', after_ticks: 3000, event: 'boil_started'};
   refused(t, 'forms.switch_on.effects.1.after_ticks', 'ticks');

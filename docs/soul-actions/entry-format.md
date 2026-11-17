@@ -50,11 +50,11 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`), `default`, `audience` (a rule) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing` or a kind), `most`, `most_per`, `audience` (below) |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm` |
-| 7 | `geometry` | `bounds_mm` |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
 | 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
-| 20 | `looks` | How it looks; its table is SA-D1a's |
+| 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `{"text": <key>}`: one line of purpose |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
@@ -88,14 +88,36 @@ children, take the container's own audience until it is opened (Engine v2 E22,
 Delivering to viewers is the new engine's view tier. Point and slot names share one namespace, so a form's argument of type
 `part` or `slot` can name "the top drawer" or "the left seat" and one form serves every part.
 
+**Points, slots and the thing's own frame** (SA-D3, [#2855](https://github.com/soulsimulation/souls/issues/2855);
+feeds Engine v2 K3, E2, E3 and B3). Every place is whole millimetres in the thing's own frame: the origin at the centre
+of its footprint on the ground, x to its right, y up, z to its front. `bounds_mm` is [width, height, depth], so x runs
+from -width/2 to width/2, y from 0 to height, z from -depth/2 to depth/2. A point is a name, a `role` (`grip`, `contact`
+for a button or switch, `outlet` for a spout, `stand` for where a body stands), a position and an optional `yaw_mdeg`.
+A point or slot more than 100 mm outside the bounds is refused (a handle may stand proud of the box); a `stand` point
+may lie up to 2000 mm outside, within a body's reach of the thing. A kind with any point (other than a stand) or slot
+declares its bounds.
+
+A thing slot may list `kinds` it admits (`"kinds": ["eden:cup"]`); a slot that lists none admits any thing, and a body's
+slot lists none. Today's slot kinds and heights (seat, bed, surface, stand, hang, shelf) are carried as they are. Engine
+v2 E3 (#2777) reads surfaces and shapes to find where a body can rest, so an entry need not declare a seat for every
+place a body might perch.
+
+A row of places names the slots in it with `row` and `place` (1 at the first end, counting up), and the two ends with
+`end`: the lowest place says `"end": "first"` and the highest `"end": "last"`, so that "the stool on the end" and "the
+back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
+
+`looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
+`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
+`look.mjs` converts to metres only when it draws.
+
 ## A form
 
 ```json
 "switch_on": {
   "who": "anyone",
   "starts": "act",
-  "needs": [{ "need": "state", "field": "water", "not": "empty" }, { "need": "within_reach", "point": "switch" }],
-  "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+  "needs": [{ "need": "state", "field": "water", "not": "empty" }, { "need": "within_reach", "point": "button" }],
+  "steps": [{ "step": "move", "move": "press", "at": "button" }],
   "effects": [{ "change": "timer", "form": "boiled", "after_us": 150000000, "event": "boil_started" }]
 }
 ```
