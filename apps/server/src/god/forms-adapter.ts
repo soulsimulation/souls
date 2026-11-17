@@ -245,6 +245,7 @@ export function createFormsAdapter(h: FormsHost) {
   /** The steps of a form for this body, or a refusal; null when this is not an entry thing's form. */
   function plan(soul: { entityId: string }, id: string, action: string): { steps: Step[]; summary: string } | Refusal | null {
     const t = thing(id), f = t && formOf(t.entry, action); if (!t || !f) return null;
+    latest.delete(soul.entityId);   // a refusal leaves no earlier yes for `begun` to keep
     const form = f.form, body = all()[soul.entityId]; if (!body?.pose?.p) return null;
     // the needs as they stand now, with the hand where the form's move puts it (its walk meets within_reach)
     const mv = (form.steps ?? []).find((s) => s.step === 'move'), now = ask(t, id, f, action, soul.entityId, (mv && t.entry.points?.[mv.at as string]?.at_mm) ?? [0, 0, 0], 'plan');
@@ -307,7 +308,6 @@ export function createFormsAdapter(h: FormsHost) {
     // a change of parent is made by today's motion: keep the rules' answer as it was now; the plan made when the act starts
     // (wrapAct, just before `begun`) is the one checked at the end, never a later menu's
     if ((now.changes as Change[]).some((c) => c.change === 'reparent')) latest.set(soul.entityId, { capability: `object:${id}:${action}`, answer: now });
-    else latest.delete(soul.entityId);
     return { steps, summary: `${action.replace(/_/g, ' ')} ${nameOf(id)}` };
   }
   /** The ledger's actOutcome: when a form's programme ends, ask its needs again and apply its changes once. Null for
