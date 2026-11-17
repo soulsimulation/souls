@@ -1,0 +1,65 @@
+{
+  "format": "souls-timed-cases/1",
+  "about": "test:timed_kettle (cases/kinds/test/timed_kettle.json): heat in mC (thousandths of a degree), held between 20000 and 100000. A case is a stored timed value {value, per_s, set_us} of one field of a kind; `values` are [now_us, the value then]; `crossings` are a level (at_least or at_most), the time to look from, and the first whole microsecond at or after it at which the value meets the level, or null if it never does. The value at t is the stored value plus rate x (t - set_us) / 1000000 truncated toward zero, held within min and max; a crossing is that time rounded up. A refusal is {bad: <what>}.",
+  "cases": [
+    {
+      "name": "switched_on_at_seven_seconds_heats_and_boils",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 7000000 },
+      "values": [
+        [7000000, 20000],
+        [7000001, 20000],
+        [7001876, 20000],
+        [7001877, 20001],
+        [8000000, 20533],
+        [157093808, 99999],
+        [157093809, 100000],
+        [3600000000, 100000]
+      ],
+      "crossings": [
+        { "at_least": 100000, "from_us": 7000000, "expect": 157093809 },
+        { "at_least": 100000, "from_us": 157093808, "expect": 157093809 },
+        { "at_least": 100000, "from_us": 200000000, "expect": 200000000 },
+        { "at_least": 100001, "from_us": 7000000, "expect": null },
+        { "at_most": 20000, "from_us": 7000000, "expect": 7000000 },
+        { "at_most": 19999, "from_us": 7000000, "expect": null }
+      ]
+    },
+    {
+      "name": "switched_off_at_boiling_cools_to_room_heat",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 100000, "per_s": -50, "set_us": 200000000 },
+      "values": [
+        [200019999, 100000],
+        [200020000, 99999],
+        [201000000, 99950],
+        [1800000000, 20000],
+        [90000000000, 20000]
+      ],
+      "crossings": [
+        { "at_most": 99999, "from_us": 200000000, "expect": 200020000 },
+        { "at_most": 20000, "from_us": 200000000, "expect": 1800000000 },
+        { "at_most": 19999, "from_us": 200000000, "expect": null },
+        { "at_least": 100000, "from_us": 200020000, "expect": null }
+      ]
+    },
+    {
+      "name": "cold_and_off_never_boils",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 0, "set_us": 0 },
+      "values": [[0, 20000], [86400000000, 20000]],
+      "crossings": [{ "at_least": 100000, "from_us": 0, "expect": null }]
+    },
+    {
+      "name": "a_time_before_it_was_set_is_refused",
+      "kind": "test:timed_kettle",
+      "field": "heat",
+      "stored": { "value": 20000, "per_s": 533, "set_us": 7000000 },
+      "values": [[6999999, { "bad": "time_before_set" }]],
+      "crossings": [{ "at_least": 100000, "from_us": 6999999, "expect": { "bad": "time_before_set" } }]
+    }
+  ]
+}

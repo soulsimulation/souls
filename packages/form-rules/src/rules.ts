@@ -90,7 +90,8 @@ export type Node = {
 export type Input = {
   kinds: Record<string, Entry>;
   act: { this: string; form: string; args?: Record<string, unknown> };
-  state: { actor: string; nodes: Record<string, Node>; moves?: Record<string, { reach_mm: number }> };
+  /** `now_us`: world time in whole microseconds, needed only to read a `timed` field. */
+  state: { actor: string; nodes: Record<string, Node>; moves?: Record<string, { reach_mm: number }>; now_us?: number };
   asker: { sees: string[] | 'all' };
 };
 export type Read = [string, unknown];
@@ -154,7 +155,12 @@ export function decide(input: Input): Verdict {
       const def = has(entry.state, field) ? entry.state![field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
       if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
-      const value = has(self.fields, field) ? self.fields![field] : def.default;
+      let value = has(self.fields, field) ? self.fields![field] : def.default;
+      if (def.type === 'timed') {
+        const now = valueAt(def, value, state.now_us);
+        if (typeof now !== 'number') return { ok: false, no: bad(i, now.bad, { field }) };
+        value = now;
+      }
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !whole(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
@@ -300,6 +306,71 @@ export function decide(input: Input): Verdict {
   }
   return unknown ?? { verdict: 'yes', read };
 }
+
+// timed:begin. A value that changes with time (SA-F5a, #2845), shared with Engine v2 F5 (#2770).
+// It is stored as three whole numbers, `{value, per_s, set_us}`: the value when it was set, its rate per second
+// (in the field's unit) and the world time it was set, in microseconds. Nothing is written between events.
+// Every number here is a big integer; the lint in timed.test.ts refuses any number literal that is not.
+
+export type Timed = { value: number; per_s: number; set_us: number };
+type Bounds = { min?: number; max?: number };
+type Exact = { v0: bigint; rate: bigint; set: bigint; lo: bigint | null; hi: bigint | null };
+
+function exact(def: Bounds, stored: unknown, at: unknown): Exact | { bad: string } {
+  if (!stored || typeof stored !== 'object') return { bad: 'not_timed' };
+  const { value, per_s, set_us } = stored as Partial<Timed>;
+  if (![value, per_s, set_us].every(whole)) return { bad: 'not_whole_number' };
+  if (!whole(at)) return { bad: 'no_time' };
+  if (at < (set_us as number)) return { bad: 'time_before_set' };
+  for (const b of [def.min, def.max]) if (b !== undefined && !whole(b)) return { bad: 'not_whole_number' };
+  const lo = def.min === undefined ? null : BigInt(def.min);
+  const hi = def.max === undefined ? null : BigInt(def.max);
+  if (lo !== null && hi !== null && lo > hi) return { bad: 'bounds_crossed' };
+  return { v0: clamp(BigInt(value as number), lo, hi), rate: BigInt(per_s as number), set: BigInt(set_us as number), lo, hi };
+}
+
+function clamp(v: bigint, lo: bigint | null, hi: bigint | null): bigint {
+  if (lo !== null && v < lo) return lo;
+  if (hi !== null && v > hi) return hi;
+  return v;
+}
+
+/** A big integer back to a number, if it is a safe integer. */
+function safe(v: bigint): number | { bad: string } {
+  return v >= BigInt(Number.MIN_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : { bad: 'out_of_range' };
+}
+
+/**
+ * The value of a timed field at `now_us`: the whole units accrued since it was set (rate x elapsed / 1,000,000,
+ * truncated toward zero, so rising and falling behave alike) added to its value, held within the field's `min` and `max`.
+ */
+export function valueAt(def: Bounds, stored: unknown, now_us: unknown): number | { bad: string } {
+  const x = exact(def, stored, now_us);
+  if ('bad' in x) return x;
+  return safe(clamp(x.v0 + (x.rate * (BigInt(now_us as number) - x.set)) / 1000000n, x.lo, x.hi));
+}
+
+/**
+ * The first whole microsecond, at or after `from_us`, at which the value is `at_least` (or `at_most`) the level: the
+ * time it crosses, rounded up, so a need on the field turns from no to yes at exactly that time. `null` when it never
+ * does: the rate is zero or points away, or a bound stops the value short of the level.
+ */
+export function crossing(def: Bounds, stored: unknown, level: { at_least?: number; at_most?: number }, from_us: unknown): number | null | { bad: string } {
+  const x = exact(def, stored, from_us);
+  if ('bad' in x) return x;
+  const rising = level && has(level, 'at_least') && !has(level, 'at_most');
+  const falling = level && has(level, 'at_most') && !has(level, 'at_least');
+  const l = rising ? level.at_least : falling ? level.at_most : undefined;
+  if (!whole(l)) return { bad: 'malformed_level' };
+  const now = valueAt(def, stored, from_us) as number;
+  if (rising ? now >= l : now <= l) return from_us as number;
+  const L = BigInt(l);
+  if (rising ? x.rate <= 0n || (x.hi !== null && x.hi < L) : x.rate >= 0n || (x.lo !== null && x.lo > L)) return null;
+  const gap = rising ? L - x.v0 : x.v0 - L;
+  const speed = rising ? x.rate : -x.rate;
+  return safe(x.set + (gap * 1000000n + speed - 1n) / speed);
+}
+// timed:end
 
 function resolve(ref: unknown, args: Record<string, unknown>): string | null {
   if (typeof ref === 'string') return ref;

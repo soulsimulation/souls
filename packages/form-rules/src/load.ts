@@ -72,3 +72,23 @@ export function same(a: unknown, b: unknown): boolean {
 export function mismatches(expect: Record<string, unknown>, verdict: Verdict | Record<string, unknown>): string[] {
   return Object.keys(expect).filter((k) => !same(expect[k], (verdict as Record<string, unknown>)[k]));
 }
+
+export type TimedCase = {
+  name: string;
+  kind: string;
+  field: string;
+  stored: unknown;
+  values: [number, unknown][];
+  crossings: { at_least?: number; at_most?: number; from_us: number; expect: unknown }[];
+};
+
+/** Every timed-value case in `dir` (souls-timed-cases/1), as [file, case]. */
+export function loadTimedCases(dir: string = join(CASES, 'timed')): [string, TimedCase][] {
+  const out: [string, TimedCase][] = [];
+  for (const file of jsonFiles(dir, false)) {
+    const doc = JSON.parse(readFileSync(file, 'utf8'));
+    if (doc.format !== 'souls-timed-cases/1') throw new Error(`${file}: format is not souls-timed-cases/1`);
+    for (const c of doc.cases) out.push([file, c]);
+  }
+  return out;
+}

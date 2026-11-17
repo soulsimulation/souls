@@ -1,0 +1,20 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:timed_kettle",
+  "owner": "thing",
+  "state": {
+    "heat": { "n": 1, "type": "timed", "unit": "mC", "default": { "value": 20000, "per_s": 0, "set_us": 0 }, "min": 20000, "max": 100000, "audience": "public" }
+  },
+  "geometry": { "bounds_mm": [310, 300, 240] },
+  "forms": {
+    "pour_boiling": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "heat", "at_least": 100000 }],
+      "steps": [],
+      "effects": []
+    }
+  },
+  "text": { "card": "A test kettle whose heat changes with time, for the timed value's cases: it heats or cools at a rate, between room heat and boiling." },
+  "card": { "text": "card" }
+}
