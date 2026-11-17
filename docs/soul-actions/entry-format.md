@@ -63,7 +63,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 17 | `roles` | An activity's roles: how much each is needed and where its members may be (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
-| 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
+| 22 | `card` | `text` (one line of purpose; `check` refuses one over 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
 | 23 | `howtos` | A short chain of this kind's forms, with its words by key |
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15, section 12), `motion` and `loose`
@@ -134,9 +134,9 @@ or a stall is always open). The cases are `packages/form-rules/cases/stock/stock
 the kind at one end: `from` says what may be at the other end (`soul`, `body`, `thing` or a kind), `most` how many
 `from` ends one of these takes (a slot has one signer; a lecture one speaker), `most_per` how many of these one `from`
 end may be linked to (a Soul signs up to three slots). A record that points at a Soul or a thing is never a list item:
-it is a child node, declared in `children` with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
+it is a child node, declared in `children` (section 11) with a bound, and the Soul is a link on it. A sign-up sheet has up to 20
 `eden:signup_slot` children; who signed a slot is its `signed` link, found from the Soul and, through its children, from
-the sheet (`content/kinds/signup/`). Holding is a change of parent, not a link.
+the sheet (`content/kinds/signup/`). What a thing admits is a check at commit by plain kind name (or category), never a hashed reference: the parent's hash covers its own `children` list but does not follow into the child kind. Holding is a change of parent, not a link.
 
 A body's family declares the link type `soul` (`from: "soul"`, `most` 1): a body's link to its Soul (contract T2). A
 link declared `from: "soul"` on a thing (an owner, a speaker) has a Soul at its end while the actor is a body, so who-may
@@ -249,8 +249,9 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`). A range need also takes a `timed` field.
-  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` and needs it within reach: the water comes from
-  a thing in the world, never from a refill the kettle does by itself.
+  SA-F2 evaluates them. A kettle's `fill` takes the nearest `eden:tap` (a selector on a kind) and moves toward it: the
+  water comes from a thing in the world, never from a refill the kettle does by itself. Reach to another thing's point
+  is not a need the rules can read yet, so `fill` holds the kettle and needs it empty.
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
@@ -283,3 +284,32 @@ picture or a fixed typo never renames a placed thing. Reordering keys changes ne
 
 **The provisional hash will change once**, when the real encoding lands. Nothing may store it as permanent, which
 is why entries name each other by `namespace:name` and the tool resolves the hash.
+
+## The check gate
+
+```sh
+node tools/entry/check.mjs kitchen        # one family (a folder of content/kinds); no argument checks them all
+pnpm entry check kitchen                  # the same
+node --test tools/entry/check.test.mjs    # one fixture per rule
+```
+
+One JSON line per file, then a summary; exit 1 if any entry has a finding. A finding is `{rule, form, field, path,
+reason, fix}`: the rule broken, where, and the smallest change that passes. The format's own refusals are reported
+under the rule they break; the rest are checked on top (`tools/entry/check.mjs`, `RULES`).
+
+| Rule | Broken by | Format already refuses |
+|---|---|---|
+| `exact` | a float or a count in ticks | yes |
+| `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
+| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
+| `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
+| `moves` | no `motion`/`loose` on a carried thing | not checked until SA-F10 defines them |
+| `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |
+| `no-labels` | a mood word in the card | no |
+| `refs` | a kind that is not loaded, or kinds in a circle | no |
+
+A state field that no form of the kind sets to some declared value is taken as set from outside, so a need on it is not
+a dead end (the kettle's water is filled by something else).

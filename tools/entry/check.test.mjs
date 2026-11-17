@@ -25,7 +25,7 @@ const FIX = {
   'engine-names': () => mk(0, 'engine-names', e => { e.state.server_flag = {...e.state.heating, n: 9}; }),
   'no-waiting': () => mk(0, 'no-waiting', e => { e.forms.boiled.effects.push({change: 'timer', form: 'boiled', after_us: 1000000, event: 'checked_again'}); }),
   bounded: () => mk(2, 'bounded', e => { delete e.links.listener.most; }),
-  'way-out': () => mk(0, 'way-out', e => { e.state.water.values = ['empty', 'hot']; }),
+  'way-out': () => mk(0, 'way-out', e => { e.forms.fill.needs.find(n => n.field === 'water').is = 'hot'; }),
   card: () => mk(0, 'card', e => { delete e.card; }),
   'no-labels': () => mk(0, 'no-labels', e => { e.text.card = 'A cosy kettle for quiet afternoons.'; }),
   hatch: () => mk(0, 'hatch', e => { e.text.why_hatch = 'a function'; e.forms.judge = {who: 'anyone', starts: 'act', needs: [], steps: [], effects: [], hatch: {module: `prov-1220${'ab'.repeat(32)}`, reads: [{field: 'water'}], steps_most: 10, answers: 'verdict', why: 'why_hatch'}}; }),

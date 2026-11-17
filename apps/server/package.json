@@ -19,7 +19,7 @@
     "@souls/protocol": "workspace:*",
     "hono": "^4.13.16",
     "jose": "^6.2.14",
-    "ws": "^8.22.0",
+    "ws": "8.22.0",
     "zod": "^4.6.7",
     "@souls/kernel": "workspace:*",
     "@souls/world-compiler": "workspace:*",

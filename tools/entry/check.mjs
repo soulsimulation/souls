@@ -65,7 +65,9 @@ function classify({path, reason: r}) {
 }
 
 function finding(e) {
-  return {rule: classify(e), ...where(e.path), path: e.path, reason: e.reason, fix: e.reason.includes("; ") ? e.reason.split("; ")[1] : `make it ${e.reason}`};
+  const not = /^not a value of field "([^"]+)"/.exec(e.reason);
+  const fix = e.reason.includes("; ") ? e.reason.split("; ")[1] : not ? `use a value that field "${not[1]}" declares, or add it to the field's values` : `make it ${e.reason}`;
+  return {rule: classify(e), ...where(e.path), path: e.path, reason: e.reason, fix};
 }
 
 /** Findings of rules the format cannot see, from a parsed and format-valid entry. */
