@@ -15,7 +15,10 @@ export const FORMAT = 'souls-entry/1';
 
 /** Every section has a number, so a section can be added without moving the others. Sections 1 to 19 are the kind's
  *  meaning and are covered by its hash; sections 20 and up sit beside it under their own hash (contract T3, #2640). */
-export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9,
+// Section 10 is reserved for Engine v2 T3's hashed table of referenced kinds (T3, #2640, rule 14); it is not implemented
+// here. Section 11 is `children`, the kinds a thing admits as children: a check at commit by plain kind name, never a
+// hashed reference, so `kindRefs` does not follow it. Section 12 is `reactions` (SA-F15), numbered when that task lands.
+export const SECTIONS = Object.freeze({format: 0, kind: 1, owner: 2, state: 3, links: 4, points: 5, slots: 6, geometry: 7, forms: 8, closed: 9, children: 11,
   looks: 20, text: 21, card: 22, howtos: 23});
 export const BESIDE_FROM = 20;
 /** Sections a later task defines. Until it lands, an entry that carries one is refused with that task's name. */
@@ -23,7 +26,12 @@ export const RESERVED = Object.freeze({reactions: 'SA-F15', motion: 'SA-F10', lo
 
 /** What a kind is the kind of: a thing, a body's family, or a kind of ground or place (Engine v2 E21, #2791). */
 export const OWNERS = Object.freeze(['thing', 'family', 'place']);
-export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text']);
+export const FIELD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration', 'text', 'list']);
+/** A list's record holds small values only: no text and no id, so a Soul cannot be inside one (SA-F6a, #2846). */
+export const RECORD_TYPES = Object.freeze(['bool', 'enum', 'int', 'duration']);
+/** The largest bound a list may declare: it is set whole on every change, so it stays in tens (Engine v2 F11, #2774). */
+export const LIST_MOST = 100;
+export const RECORD_FIELDS_MOST = 8;
 /** Whole-number units for an `int` field; a rate is `<unit>/s`. Durations are their own type, in microseconds. */
 export const UNITS = Object.freeze(['count', 'mm', 'g', 'mC', 'permille']);
 /** The audience rules a field may declare: the one closed list (SA-F8, #2849). A rule names a link type, never a Soul;
@@ -31,6 +39,8 @@ export const UNITS = Object.freeze(['count', 'mm', 'g', 'mC', 'permille']);
  *  thing's owner); `linked` (whoever is linked to this thing by the named link of this kind: its members, the Soul
  *  whose turn it is); `creator` (the world's creator). Written `{"rule": "everyone"}` or `{"rule": "linked", "link": "<name>"}`. */
 export const AUDIENCE_RULES = Object.freeze(['everyone', 'owner', 'linked', 'creator']);
+/** What may be at a link's `from` end: a Soul, a body, a thing, or a kind named `namespace:name`. The other end is the
+ *  kind that declares the link; links are found from either end (contract T2, #2641). */
 export const LINK_ENDS = Object.freeze(['soul', 'body', 'thing']);
 export const POINT_ROLES = Object.freeze(['stand', 'grip', 'contact', 'outlet']);
 export const SLOT_ADMITS = Object.freeze(['body', 'thing']);
@@ -91,12 +101,14 @@ export function validateEntry(entry) {
   const closedNames = isObj(entry.closed) && Array.isArray(entry.closed.fields) ? entry.closed.fields : [];
   for (const [name, f] of Object.entries(state)) field(f, `state.${name}`, links, err, closedNames.includes(name));
   if (entry.closed !== undefined) closed(entry.closed, state, links, err);
+  children(section(entry, 'children', err), err);
   for (const [name, l] of Object.entries(links)) {
     const p = `links.${name}`;
     if (!isObj(l)) { err(p, 'a link type is an object'); continue; }
-    only(l, ['n', 'from', 'most', 'audience'], p, err);
-    if (!LINK_ENDS.includes(l.from)) err(`${p}.from`, `must be one of ${LINK_ENDS.join(', ')}`);
-    if (l.most !== undefined && !(isInt(l.most) && l.most > 0)) err(`${p}.most`, 'a whole number above zero');
+    only(l, ['n', 'from', 'most', 'most_per', 'audience'], p, err);
+    if (!(LINK_ENDS.includes(l.from) || (typeof l.from === 'string' && KIND.test(l.from)))) err(`${p}.from`, `must be one of ${LINK_ENDS.join(', ')}, or a kind "namespace:name"`);
+    if (l.most !== undefined && !(isInt(l.most) && l.most > 0)) err(`${p}.most`, 'how many may be linked at the from end to one of these, a whole number above zero');
+    if (l.most_per !== undefined && !(isInt(l.most_per) && l.most_per > 0)) err(`${p}.most_per`, 'how many of these one from end may be linked to, a whole number above zero');
     audience(l, p, links, err);
   }
   for (const [name, pt] of Object.entries(points)) {
@@ -212,17 +224,65 @@ function closed(c, state, links, err) {
   c.fields.forEach((n, i) => { if (!(n in state)) err(`closed.fields.${i}`, `"${n}" is not a state field of this kind`); });
 }
 
+/** The kinds this thing holds as child nodes (a sign-up sheet's slots, a board's squares): a record that points at a
+ *  Soul or a thing is a child with a link, not a list item (Engine v2 F11, #2774). */
+function children(table, err) {
+  for (const [name, c] of Object.entries(table)) {
+    const p = `children.${name}`;
+    if (!isObj(c)) { err(p, 'a child is an object: {"kind": "namespace:name", "most": a whole number}'); continue; }
+    only(c, ['kind', 'most'], p, err);
+    if (!(typeof c.kind === 'string' && KIND.test(c.kind))) err(`${p}.kind`, 'a kind, "namespace:name"');
+    if (!(isInt(c.most) && c.most > 0)) err(`${p}.most`, 'how many children at most, a whole number above zero');
+  }
+}
+
+/** A list: one field, a declared bound, records of small values. Changed by setting the whole list again. */
+function listField(f, path, err) {
+  only(f, ['n', 'type', 'default', 'audience', 'of', 'most', 'key'], path, err);
+  if (!(isInt(f.most) && f.most > 0 && f.most <= LIST_MOST)) err(`${path}.most`, `the most items it ever holds, a whole number from 1 to ${LIST_MOST}`);
+  if (!Array.isArray(f.default) || f.default.length) err(`${path}.default`, 'an empty list');
+  const of = f.of;
+  if (!isObj(of) || !Object.keys(of).length || Object.keys(of).length > RECORD_FIELDS_MOST) { err(`${path}.of`, `a record: one to ${RECORD_FIELDS_MOST} named small fields`); return; }
+  for (const [name, r] of Object.entries(of)) {
+    const p = `${path}.of.${name}`;
+    if (!IDENT.test(name)) { err(p, 'a name is lower_snake_case'); continue; }
+    if (!isObj(r)) { err(p, 'a record field is an object'); continue; }
+    only(r, ['type', 'values', 'unit'], p, err);
+    if (ID_TYPES.has(r.type)) err(`${p}.type`, `"${r.type}" would put an id inside a record; a Soul or a thing is a child node with a link, not a list item`);
+    else if (!RECORD_TYPES.includes(r.type)) err(`${p}.type`, `must be one of ${RECORD_TYPES.join(', ')} (a record holds small values only)`);
+    else {
+      if (r.type === 'enum' && !(Array.isArray(r.values) && r.values.length >= 2 && r.values.every(x => typeof x === 'string' && IDENT.test(x)))) err(`${p}.values`, 'two or more lower_snake_case values');
+      if (r.type === 'int' && !UNITS.includes(r.unit)) err(`${p}.unit`, `a whole-number unit (${UNITS.join(', ')})`);
+      if (r.type !== 'enum' && r.values !== undefined) err(`${p}.values`, 'only an enum has values');
+      if (r.type !== 'int' && r.unit !== undefined) err(`${p}.unit`, 'only an int has a unit');
+    }
+  }
+  if (f.key !== undefined && !(typeof f.key === 'string' && f.key in of)) err(`${path}.key`, 'names a field of the record; items are added, removed and set by it');
+}
+
+/** What a kind's state costs at its declared bounds: whole values counted with every list at its maximum. The check
+ *  gate measures a kind here, never at the empty default (SA-F6a, #2846). */
+export function stateAtMax(entry) {
+  let values = 0, listValues = 0;
+  for (const f of Object.values(entry.state ?? {})) {
+    if (f.type === 'list') { const n = f.most * Object.keys(f.of ?? {}).length; values += n; listValues += n; }
+    else values += 1;
+  }
+  return {values, listValues, children: Object.values(entry.children ?? {}).reduce((a, c) => a + c.most, 0)};
+}
+
 function vec(v, path, err, positive = false) {
   if (!Array.isArray(v) || v.length !== 3 || !v.every(x => isInt(x) && (!positive || x > 0))) err(path, `three whole numbers of millimetres${positive ? ' above zero' : ''}`);
 }
 
 function field(f, path, links, err, taken = false) {
   if (!isObj(f)) { err(path, 'a field is an object'); return; }
-  only(f, ['n', 'type', 'default', 'audience', 'values', 'unit', 'min', 'max'], path, err);
+  if (f.type !== 'list') only(f, ['n', 'type', 'default', 'audience', 'values', 'unit', 'min', 'max'], path, err);
   if (taken) { if (f.audience !== undefined) err(`${path}.audience`, 'this field takes the container\'s audience (closed); it declares none of its own'); }
   else audience(f, path, links, err);
   if (ID_TYPES.has(f.type)) { err(`${path}.type`, `"${f.type}" would put an id inside a field; a relation is a link (links section)`); return; }
   if (!FIELD_TYPES.includes(f.type)) { err(`${path}.type`, `must be one of ${FIELD_TYPES.join(', ')}`); return; }
+  if (f.type === 'list') { listField(f, path, err); return; }
   if (!('default' in f)) err(`${path}.default`, 'every field has a default');
   const d = f.default;
   if (f.type === 'bool' && typeof d !== 'boolean') err(`${path}.default`, 'true or false');
