@@ -13,6 +13,9 @@
 // workflow's own commit, like the counted kits) names a template and steps; the ref boots a fake-mind dev world of it, and
 // the proof recorder, also from the workflow's commit, records the kit's steps (SIM_PROOF_GPU=hardware). The clip, its
 // sidecar and its frame timing are the artifact; nothing is uploaded with a token.
+// `runner=souls-wide` (D5) is one instance on the cores of four souls-timed ones, 12 or more physical cores, for the gates'
+// wide runs: the split commands with a core plan, and settled; viewer arms above 2,000 run there only. It and the narrow
+// instances share CPUs, so the start gate is the soft mutex between them (docs/testing.md, "Wide runner").
 //
 //   node timed-run.mjs inputs                                        validate INPUT_* env; write step outputs (`target`)
 //   node timed-run.mjs load   --record <file>                        starting load; refuse to start above the gate
@@ -38,11 +41,19 @@ export const CLIP_KITS = 'tools/proof/clips';
  *  `run.mjs <arm> <tree> <port> <outDir>`, scores it with `score-frozen.mjs <run.json>`, and classifies it with
  *  `classify-frozen.mjs <outDir> <tree> <port>`. The files are the kit as declared on #1367 (sha256s recorded per run). */
 export const COUNTED = { 'stair-foot': { dir: 'tools/playtest/counted/stair-foot', files: ['run.mjs', 'score-frozen.mjs', 'classify-frozen.mjs', 'replay.mjs', 'probe.mjs'] } };
-/** The runner sets: `souls-timed` for everything; the GitHub-hosted runners only for what scores pass/fail per item. */
-export const RUNNERS = ['souls-timed', 'hosted'];
+/** The runner sets: `souls-timed` for everything; the GitHub-hosted runners only for what scores pass/fail per item;
+ *  `souls-wide` (D5, #2505), one instance on the cores of four souls-timed ones, for the gates' wide runs. */
+export const RUNNERS = ['souls-timed', 'hosted', 'souls-wide'];
 /** #1970: the commands whose world runs on two of the runner's physical cores and whose load generator on the other two. */
 export const SPLIT = ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers', 'page'];
+/** D5: what may run on `souls-wide`: the split commands (with a core plan) and settled. */
+export const WIDE = [...SPLIT, 'settled'];
+/** D5: viewer arms above this run on `souls-wide` only (the driver needs about 0.18 cores per 1,000 viewers, #2512). */
+export const NARROW_VIEWERS_MAX = 2000;
 export const LOAD_GATE = 0.25;      // mean busy fraction of the runner's own cores above which a run does not start
+// D5: souls-wide also refuses while any one of its CPUs is busier than this. It shares its CPUs with four souls-timed
+// instances, and one narrow job busy on its six CPUs barely moves the mean of twenty-four.
+export const WIDE_MAX_GATE = 0.5;
 export const SETTLE_WAIT_S = 300;
 export const SAMPLE_S = 5;
 const WALK_WORLDS = ['eden-2026', 'bench-eden', 'eden-2026-genesis', 'bench-hamlet', 'fuzz'];
@@ -101,10 +112,14 @@ export function parseInputs(env) {
   const runner = String(env.INPUT_RUNNER || 'souls-timed');
   if (!RUNNERS.includes(runner)) bad('runner', runner, RUNNERS.join(' or '));
   if (runner === 'hosted' && command !== 'counted') bad('runner', runner, `${command} is a timing run and runs on souls-timed only`);
+  if (runner === 'souls-wide' && !WIDE.includes(command)) bad('runner', runner, `souls-wide runs ${WIDE.join(', ')} only`);
   const args = checkArgs(command, env.INPUT_ARGS), inp = { ref, command, repeats: Number(repeats), args };
   const cores = String(env.INPUT_CORES ?? '').trim();   // #2507: a core plan, for the split commands only
   if (cores && !SPLIT.includes(command)) bad('cores', cores, `a core plan is for ${SPLIT.join(', ')} only`);
   if (cores) inp.cores = parseCorePlan(cores) ?? bad('cores', cores, 'world=N or world=N,launcher=M (physical cores, 1 to 64); the load drivers get the rest');
+  if (runner === 'souls-wide' && SPLIT.includes(command) && !cores) bad('cores', cores, 'souls-wide needs a core plan, such as world=6,launcher=1');
+  const arms = command === 'viewers' && args.includes('--viewers') ? args[args.indexOf('--viewers') + 1].split(',').map(Number) : [];
+  if (runner !== 'souls-wide' && arms.some((n) => n > NARROW_VIEWERS_MAX)) bad('runner', runner, `viewer arms above ${NARROW_VIEWERS_MAX} run on souls-wide only`);
   if (command === 'clip' && !args.includes('--kit')) bad('args', env.INPUT_ARGS, 'clip needs --kit <name> (a folder of tools/proof/clips)');
   if (command !== 'counted') return { ...inp, runner };
   // counted: a base ref, a scenario, and the one cell this job runs (base-k or cand-k, k up to repeats)
@@ -214,12 +229,14 @@ export function parseProcStat(text) {
   return o;
 }
 /** Busy fraction per core between two /proc/stat samples; the runner's own cores and the whole machine. */
-export function loadFacts(a, b, own, gate = LOAD_GATE) {
+export function loadFacts(a, b, own, gate = LOAD_GATE, maxGate = null) {
   const busy = (c) => { const d = b[c][1] - a[c][1]; return d > 0 ? (b[c][0] - a[c][0]) / d : 0; };
   const all = Object.keys(b).filter((c) => a[c]).map(Number), r3 = (x) => +x.toFixed(3), mean = (cs) => (cs.length ? r3(cs.reduce((s, c) => s + busy(c), 0) / cs.length) : null);
   const mine = own.filter((c) => all.includes(c));
   const ownMean = mean(mine);
-  return { ownCores: mine.length, ownBusy: ownMean, ownBusyMax: mine.length ? r3(Math.max(...mine.map(busy))) : null, machineCores: all.length, machineBusy: mean(all), gate, overGate: ownMean == null || ownMean > gate };
+  const ownMax = mine.length ? r3(Math.max(...mine.map(busy))) : null;
+  return { ownCores: mine.length, ownBusy: ownMean, ownBusyMax: ownMax, machineCores: all.length, machineBusy: mean(all), gate, ...(maxGate != null ? { maxGate } : {}),
+    overGate: ownMean == null || ownMean > gate || (maxGate != null && ownMax > maxGate) };
 }
 
 /** Soul tokens anywhere under out (each `.eden-agent.json`, and every `token` in a Soul home's `credentials.json`); none
@@ -466,14 +483,14 @@ async function main(cmd) {
     if (inp.cores) console.log(`cores: plan ${JSON.stringify(splitCores(own, siblingsOf, inp.cores))}`);   // #2507: throws if it does not fit
     let f;
     for (let t = 0; ; t += 15) {
-      const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own);
+      const a = stat(); await sleep(SAMPLE_S * 1000); f = loadFacts(a, stat(), own, LOAD_GATE, inp.runner === 'souls-wide' ? WIDE_MAX_GATE : null);
       if (!gated || !f.overGate || t >= SETTLE_WAIT_S) break;
-      console.log(`own cores busy ${f.ownBusy} above the gate ${LOAD_GATE}; waiting`); await sleep(15_000);
+      console.log(`own cores busy ${f.ownBusy} (max ${f.ownBusyMax}) above the gate ${LOAD_GATE}${f.maxGate ? ` (any one CPU ${f.maxGate})` : ''}; waiting`); await sleep(15_000);
     }
     const startLoad = { ...f, gated, sampleS: SAMPLE_S, machineLoad1PerCore: +(loadavg()[0] / f.machineCores).toFixed(3) };
     writeFileSync(rf, JSON.stringify({ schema: 'timed-run/1', workflowRun: process.env.GITHUB_RUN_ID, ref: inp.ref, commit: process.env.REF_COMMIT ?? null, inputs: inp, startLoad }, null, 1));
     console.log(`start load: own ${f.ownCores} cores busy ${f.ownBusy} (max ${f.ownBusyMax}), machine ${f.machineCores} cores busy ${f.machineBusy}, 1-min load per core ${startLoad.machineLoad1PerCore}`);
-    if (gated && f.overGate) throw new Error(`the runner's own cores stayed above the gate (${f.ownBusy} > ${LOAD_GATE}) for ${SETTLE_WAIT_S} s; the run does not start`);
+    if (gated && f.overGate) throw new Error(`the runner's own cores stayed above the gate (mean ${f.ownBusy}, max ${f.ownBusyMax}; gate ${LOAD_GATE}${f.maxGate ? `, any one CPU ${f.maxGate}` : ''}) for ${SETTLE_WAIT_S} s; the run does not start`);
     return;
   }
   if (cmd === 'run') {   // fake minds, no GitHub token
