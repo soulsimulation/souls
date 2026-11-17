@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":58,"group":"object","words":"put your feet up on the sofa","obvious":2,"things":{"sofa":"eden:sofa"},"chain":[{"this":"me","form":"sit_down","args":{"spot":"sofa"}},{"this":"me","form":"feet_up"}]}

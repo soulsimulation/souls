@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":57,"group":"object","words":"lie down on the couch","obvious":3,"things":{"sofa":"eden:sofa"},"chain":[{"this":"me","form":"lie_down","args":{"spot":"sofa"}}]}

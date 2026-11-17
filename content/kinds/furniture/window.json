@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:window",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1200, 1200, 100] },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:window" },
+  "text": {
+    "card": "A window in a wall, which stays where it is."
+  },
+  "card": { "text": "card" }
+}

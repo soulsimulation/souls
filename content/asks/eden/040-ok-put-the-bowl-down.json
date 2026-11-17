@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":40,"group":"object","words":"ok put the bowl down","obvious":3,"things":{"bowl":"eden:bowl"},"chain":[{"this":"me","form":"pick_up","carry":"bowl","args":{"thing":"bowl"}},{"this":"me","form":"put","place":{"at":"here","thing":"bowl"},"args":{"thing":"bowl"}}]}
