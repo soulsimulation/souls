@@ -108,6 +108,8 @@ type Outcome = { ok: true } | { ok: false; no: Verdict } | { ok: 'unknown'; unkn
 const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
+/** A whole number as a safe integer or a big integer (a timed value beyond 2^53, SA-F5a). */
+const int = (v: unknown): v is number | bigint => whole(v) || typeof v === 'bigint';
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 export function decide(input: Input): Verdict {
@@ -160,17 +162,17 @@ export function decide(input: Input): Verdict {
       let value = has(self.fields, field) ? self.fields![field] : def.default;
       if (def.type === 'timed') {
         const now = valueAt(def, value, state.now_us);
-        if (typeof now !== 'number') return { ok: false, no: bad(i, now.bad, { field }) };
+        if (typeof now === 'object') return { ok: false, no: bad(i, now.bad, { field }) };
         value = now;
       }
       read.push([`${act.this}/field/${def.n}`, value]);
       const ranged = has(n, 'at_least') || has(n, 'at_most');
-      if (ranged && !whole(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
+      if (ranged && !int(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
       const meets = (v: unknown) =>
         (!has(n, 'is') || v === n.is) &&
         (!has(n, 'not') || v !== n.not) &&
-        (!has(n, 'at_least') || (whole(v) && v >= (n.at_least as number))) &&
-        (!has(n, 'at_most') || (whole(v) && v <= (n.at_most as number)));
+        (!has(n, 'at_least') || (int(v) && v >= (n.at_least as number))) &&
+        (!has(n, 'at_most') || (int(v) && v <= (n.at_most as number)));
       if (meets(value)) return { ok: true };
       const wanted: Record<string, unknown> = {};
       for (const k of ['is', 'not', 'at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
@@ -312,23 +314,38 @@ export function decide(input: Input): Verdict {
 // timed:begin. A value that changes with time (SA-F5a, #2845), shared with Engine v2 F5 (#2770).
 // It is stored as three whole numbers, `{value, per_s, set_us}`: the value when it was set, its rate per second
 // (in the field's unit) and the world time it was set, in microseconds. Nothing is written between events.
+// World time is a signed 64-bit count that never stops, so every number may arrive as a safe integer or a big
+// integer (as T0's encoding reads one beyond 2^53), is worked as a big integer, and is refused (`beyond_i64`) only
+// outside the signed 64-bit range. A result is a number when it is a safe integer, else a big integer.
 // Every number here is a big integer; the lint in timed.test.ts refuses any number literal that is not.
 
-export type Timed = { value: number; per_s: number; set_us: number };
-type Bounds = { min?: number; max?: number };
-type Exact = { v0: bigint; rate: bigint; set: bigint; lo: bigint | null; hi: bigint | null };
+export type Int = number | bigint;
+export type Timed = { value: Int; per_s: Int; set_us: Int };
+type Bounds = { min?: Int; max?: Int };
+type Exact = { v0: bigint; rate: bigint; set: bigint; at: bigint; lo: bigint | null; hi: bigint | null };
+const I64_MIN = -(1n << 63n), I64_MAX = (1n << 63n) - 1n;
+
+/** A whole number as a big integer; `null` if it is not one; `beyond` if it lies outside the signed 64-bit range. */
+function big(v: unknown): bigint | null | 'beyond' {
+  const b = typeof v === 'bigint' ? v : whole(v) ? BigInt(v) : null;
+  return b === null ? null : b < I64_MIN || b > I64_MAX ? 'beyond' : b;
+}
 
 function exact(def: Bounds, stored: unknown, at: unknown): Exact | { bad: string } {
   if (!stored || typeof stored !== 'object') return { bad: 'not_timed' };
   const { value, per_s, set_us } = stored as Partial<Timed>;
-  if (![value, per_s, set_us].every(whole)) return { bad: 'not_whole_number' };
-  if (!whole(at)) return { bad: 'no_time' };
-  if (at < (set_us as number)) return { bad: 'time_before_set' };
-  for (const b of [def.min, def.max]) if (b !== undefined && !whole(b)) return { bad: 'not_whole_number' };
-  const lo = def.min === undefined ? null : BigInt(def.min);
-  const hi = def.max === undefined ? null : BigInt(def.max);
+  const three = [value, per_s, set_us].map(big);
+  if (three.includes(null)) return { bad: 'not_whole_number' };
+  const now = big(at);
+  if (now === null) return { bad: 'no_time' };
+  const bounds = [def.min, def.max].map((b) => (b === undefined ? undefined : big(b)));
+  if (bounds.includes(null)) return { bad: 'not_whole_number' };
+  if ([...three, now, ...bounds].includes('beyond')) return { bad: 'beyond_i64' };
+  const [v0, rate, set] = three as bigint[];
+  const [lo, hi] = bounds.map((b) => (b === undefined ? null : (b as bigint)));
+  if ((now as bigint) < set) return { bad: 'time_before_set' };
   if (lo !== null && hi !== null && lo > hi) return { bad: 'bounds_crossed' };
-  return { v0: clamp(BigInt(value as number), lo, hi), rate: BigInt(per_s as number), set: BigInt(set_us as number), lo, hi };
+  return { v0: clamp(v0, lo, hi), rate, set, at: now as bigint, lo, hi };
 }
 
 function clamp(v: bigint, lo: bigint | null, hi: bigint | null): bigint {
@@ -337,19 +354,24 @@ function clamp(v: bigint, lo: bigint | null, hi: bigint | null): bigint {
   return v;
 }
 
-/** A big integer back to a number, if it is a safe integer. */
-function safe(v: bigint): number | { bad: string } {
-  return v >= BigInt(Number.MIN_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : { bad: 'out_of_range' };
+/** A result: a number if it is a safe integer, a big integer beyond that, refused outside the signed 64-bit range. */
+function out(v: bigint): Int | { bad: string } {
+  if (v < I64_MIN || v > I64_MAX) return { bad: 'beyond_i64' };
+  return v >= BigInt(Number.MIN_SAFE_INTEGER) && v <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(v) : v;
+}
+
+function at(x: Exact, t: bigint): bigint {
+  return clamp(x.v0 + (x.rate * (t - x.set)) / 1000000n, x.lo, x.hi);
 }
 
 /**
  * The value of a timed field at `now_us`: the whole units accrued since it was set (rate x elapsed / 1,000,000,
- * truncated toward zero, so rising and falling behave alike) added to its value, held within the field's `min` and `max`.
+ * truncated toward zero) added to its value, held within the field's `min` and `max`.
  */
-export function valueAt(def: Bounds, stored: unknown, now_us: unknown): number | { bad: string } {
+export function valueAt(def: Bounds, stored: unknown, now_us: unknown): Int | { bad: string } {
   const x = exact(def, stored, now_us);
   if ('bad' in x) return x;
-  return safe(clamp(x.v0 + (x.rate * (BigInt(now_us as number) - x.set)) / 1000000n, x.lo, x.hi));
+  return out(at(x, x.at));
 }
 
 /**
@@ -357,20 +379,20 @@ export function valueAt(def: Bounds, stored: unknown, now_us: unknown): number |
  * time it crosses, rounded up, so a need on the field turns from no to yes at exactly that time. `null` when it never
  * does: the rate is zero or points away, or a bound stops the value short of the level.
  */
-export function crossing(def: Bounds, stored: unknown, level: { at_least?: number; at_most?: number }, from_us: unknown): number | null | { bad: string } {
+export function crossing(def: Bounds, stored: unknown, level: { at_least?: Int; at_most?: Int }, from_us: unknown): Int | null | { bad: string } {
   const x = exact(def, stored, from_us);
   if ('bad' in x) return x;
   const rising = level && has(level, 'at_least') && !has(level, 'at_most');
   const falling = level && has(level, 'at_most') && !has(level, 'at_least');
-  const l = rising ? level.at_least : falling ? level.at_most : undefined;
-  if (!whole(l)) return { bad: 'malformed_level' };
-  const now = valueAt(def, stored, from_us) as number;
-  if (rising ? now >= l : now <= l) return from_us as number;
-  const L = BigInt(l);
+  const L = big(rising ? level.at_least : falling ? level.at_most : undefined);
+  if (L === null) return { bad: 'malformed_level' };
+  if (L === 'beyond') return { bad: 'beyond_i64' };
+  const now = at(x, x.at);
+  if (rising ? now >= L : now <= L) return out(x.at);
   if (rising ? x.rate <= 0n || (x.hi !== null && x.hi < L) : x.rate >= 0n || (x.lo !== null && x.lo > L)) return null;
   const gap = rising ? L - x.v0 : x.v0 - L;
   const speed = rising ? x.rate : -x.rate;
-  return safe(x.set + (gap * 1000000n + speed - 1n) / speed);
+  return out(x.set + (gap * 1000000n + speed - 1n) / speed);
 }
 // timed:end
 

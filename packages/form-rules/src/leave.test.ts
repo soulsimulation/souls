@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { enter, leave, NOW_PARTS, nowLine, ROLE_NEEDS, type Activity } from './activity.ts';
 import { apply, effects, parentOf, type State } from './effects.ts';
 import { CASES, loadKinds, mismatches, same } from './load.ts';
-import type { Input } from './rules.ts';
+import type { Input, Int } from './rules.ts';
 
 type Step = { do: 'enter' | 'leave' | 'world' | 'now'; actor?: string; form?: string; receipt?: string; now_us?: number; expect: Record<string, unknown> };
 type StepCase = { name: string; activity: string; state: { nodes: Input['state']['nodes'] }; steps: Step[]; after?: Record<string, unknown>; gone?: string[] };
@@ -82,10 +82,11 @@ test('A2: an activity nobody entered is removed at its stated time, and not a mi
   const lapsed = [...runs.values()].filter((seen) => seen.some((s) => s.step.do === 'world' && s.result.verdict === 'yes'));
   assert.ok(lapsed.length >= 1);
   for (const seen of lapsed) {
-    const stated = seen.find((s) => s.step.do === 'now')!.result as { now: { ends_us: number } };
+    // Times compared by value as big integers: `ends_us` is SA-F5a's Int (a number when safe, else a BigInt).
+    const ends = BigInt((seen.find((s) => s.step.do === 'now')!.result as { now: { ends_us: Int } }).now.ends_us);
     const yes = seen.find((s) => s.step.do === 'world' && s.result.verdict === 'yes')!;
-    assert.equal(yes.step.now_us, stated.now.ends_us, 'removed at the time the now line states');
-    assert.ok(seen.some((s) => s.step.do === 'world' && s.step.now_us === stated.now.ends_us - 1 && s.result.verdict === 'no'), 'not one microsecond before');
+    assert.equal(BigInt(yes.step.now_us!), ends, 'removed at the time the now line states');
+    assert.ok(seen.some((s) => s.step.do === 'world' && BigInt(s.step.now_us!) === ends - 1n && s.result.verdict === 'no'), 'not one microsecond before');
     assert.ok(seen.every((s) => s.step.do !== 'enter'), 'nobody entered');
   }
 });
