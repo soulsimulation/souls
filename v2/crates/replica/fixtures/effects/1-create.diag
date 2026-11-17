@@ -1,6 +1,6 @@
 # Create: a creator places a sofa in the room (Engine v2 T6, #2645), applied to the base. Layout as in 0-base.diag.
 {
-  1: h'1220a695c8697d7f1068126cc5e5f70ba56308671ab34c5aa6f089dd6c00680ca1a0',
+  1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
   2: [
     {1: 2, 2: 1000000, 3: {1: 1, 2: [h'77777777777777777777777777777777', 3]}, 4: {1: 2, 2: [h'77777777777777777777777777777777', 1]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 1],
      7: [{1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 8], 3: "souls:sofa@1220ba382da5d5adb16814e51e585054b3b854edeb6a7bea85896209ed8a32ac0127",

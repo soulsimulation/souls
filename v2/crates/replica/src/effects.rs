@@ -13,8 +13,8 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::encode::{Name, Value, decode, encode, to_hex};
 use crate::ids::{Hash, Id, Purpose, Scope};
-use crate::pose::{Frame, Pose, Quat, Support, Vec3};
-use crate::time::Micros;
+use crate::pose::{Frame, HandOff, Pose, Vec3};
+use crate::time::{Micros, TimeEffect};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
 
 /// The fields of a record that this build does not know, kept so that the record re-encodes to its stored bytes.
@@ -210,17 +210,6 @@ pub fn read_id(v: &Value) -> R<Id> {
     }
 }
 
-fn read_vec3(v: &Value, what: &str) -> R<Vec3> {
-    match v {
-        Value::Array(a) if a.len() == 3 => Ok(Vec3::new(
-            read_int(&a[0], what)?,
-            read_int(&a[1], what)?,
-            read_int(&a[2], what)?,
-        )),
-        _ => not_record(&format!("{what} is not [x, y, z]")),
-    }
-}
-
 fn vec3(v: Vec3) -> Value {
     Value::Array(vec![int(v.x), int(v.y), int(v.z)])
 }
@@ -228,68 +217,24 @@ fn vec3(v: Vec3) -> Value {
 fn pose_refusal(r: crate::pose::PoseRefusal) -> Refusal {
     Refusal {
         name: r.name(),
-        detail: "a pose (v2/docs/pose.md)".into(),
+        detail: "a pose or hand-off (v2/docs/pose.md)".into(),
     }
 }
 
-/// A pose as T4 writes it, `{1: frame, 2: position, 3: orientation, 4: support}`, checked as T4 checks it, and in
-/// its one byte form (a quaternion that breaks the sign rule, say, is refused).
+/// A pose as T4 writes it, read by T4's own reader (rule 3): checked, and in its one byte form.
 pub fn read_pose(v: &Value) -> R<Pose> {
-    let Value::Map(m) = v else {
-        return not_record("a pose is not a map");
-    };
-    if m.keys().copied().ne(1..=4) {
-        return not_record("a pose has fields 1 to 4");
+    Pose::from_value(v).map_err(pose_refusal)
+}
+
+/// Every integer in a value that this layer does not type itself (a set's value, a create's and an event's fields)
+/// is a signed 64-bit integer (rule 9). Map keys are field numbers and stay unsigned.
+fn check_ints(v: &Value, what: &str) -> R<()> {
+    match v {
+        Value::Uint(_) | Value::Nint(_) => read_int(v, what).map(|_| ()),
+        Value::Array(a) => a.iter().try_for_each(|x| check_ints(x, what)),
+        Value::Map(m) => m.values().try_for_each(|x| check_ints(x, what)),
+        _ => Ok(()),
     }
-    let frame = match &m[&1] {
-        Value::Array(a) if a.len() == 1 || a.len() == 2 => Frame {
-            node: read_id(&a[0])?,
-            slot: a.get(1).map(|s| read_uint(s, "a slot")).transpose()?,
-        },
-        _ => return not_record("a frame is not [node] or [node, slot]"),
-    };
-    let q = match &m[&3] {
-        Value::Array(a) if a.len() == 4 => Quat::new(
-            read_int(&a[0], "an orientation")?,
-            read_int(&a[1], "an orientation")?,
-            read_int(&a[2], "an orientation")?,
-            read_int(&a[3], "an orientation")?,
-        )
-        .map_err(pose_refusal)?,
-        _ => return not_record("an orientation is not [w, x, y, z]"),
-    };
-    let Value::Map(s) = &m[&4] else {
-        return not_record("a support is not a map");
-    };
-    let node = |k| {
-        s.get(&k)
-            .map_or_else(|| not_record("a support lacks its node"), read_id)
-    };
-    let support = match s.get(&1).map(|w| read_uint(w, "a support")).transpose()? {
-        Some(0) => Support::None,
-        Some(1) => Support::Surface {
-            surface: node(2)?,
-            height: s.get(&3).map_or_else(
-                || not_record("a surface lacks its height"),
-                |h| read_int(h, "a height"),
-            )?,
-        },
-        Some(2) => Support::Slot,
-        Some(3) => Support::Volume { volume: node(2)? },
-        Some(4) => Support::Track,
-        _ => return not_record("a support's kind is 0 to 4"),
-    };
-    let pose = Pose {
-        frame,
-        position: read_vec3(&m[&2], "a position")?,
-        orientation: q,
-        support,
-    };
-    pose.check().map_err(pose_refusal)?;
-    if pose.to_value() != *v {
-        return not_record("a pose not in its one byte form");
-    }
-    Ok(pose)
 }
 
 fn read_audience(v: Value) -> R<Audience> {
@@ -405,7 +350,8 @@ pub enum Change {
     },
     /// 2. A node, its subtree and every link with an end in them (T2 rule 3).
     Remove { node: Id },
-    /// 3. A node moves from one parent and slot (`from`) into the frame of `pose`: the new parent and slot.
+    /// 3. A node moves from one slot (`from`) to another of the same parent, the frame of `pose`. A new parent is a
+    ///    crossing: T1's leave and arrive ([`TransferRec`], rule 14).
     Reparent { node: Id, from: Frame, pose: Pose },
     /// 4. A field's value. `by`, when the value is an amount moved, is the signed amount (SA-F2b): kept, never needed
     ///    to apply.
@@ -426,58 +372,9 @@ pub enum Change {
     /// 6. A link ends.
     Unlink { link: Id },
     /// 7. A motion sample: T4's hand-off record as T4 writes it (pose.md rule 13), `{1: node, 2: at, 3: from,
-    ///    4: to, 5: pose, 6: linear, 7: angular}`, where `from` and `to` are T4's owner records (equal when the owner
-    ///    does not change) and the pose is in the node's frame, which is its parent and slot.
-    Motion(Sample),
-}
-
-/// T4's hand-off record, read by this layer (the owners are kept as T4 wrote them).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sample {
-    pub node: Id,
-    pub at: Micros,
-    pub from: Value,
-    pub to: Value,
-    pub pose: Pose,
-    pub linear: Vec3,
-    pub angular: Vec3,
-}
-
-impl Sample {
-    /// A hand-off record, `{1: node, 2: at, 3: from, 4: to, 5: pose, 6: linear, 7: angular}`, in its one byte form.
-    pub fn read(v: Value) -> R<Sample> {
-        let mut r = Rec::of(v, "a motion sample")?;
-        let owner = |o: Value| match o {
-            Value::Map(_) => Ok(o),
-            _ => not_record("a motion owner is T4's owner record"),
-        };
-        let s = Sample {
-            node: read_id(&r.take(1, "a motion sample")?)?,
-            at: read_int(&r.take(2, "a motion sample")?, "a sample's time")?,
-            from: owner(r.take(3, "a motion sample")?)?,
-            to: owner(r.take(4, "a motion sample")?)?,
-            pose: read_pose(&r.take(5, "a motion sample")?)?,
-            linear: read_vec3(&r.take(6, "a motion sample")?, "a linear velocity")?,
-            angular: read_vec3(&r.take(7, "a motion sample")?, "an angular velocity")?,
-        };
-        r.closed("a motion sample")?;
-        Ok(s)
-    }
-
-    pub fn to_value(&self) -> Value {
-        record(
-            vec![
-                (1, self.node.to_value()),
-                (2, int(self.at)),
-                (3, self.from.clone()),
-                (4, self.to.clone()),
-                (5, self.pose.to_value()),
-                (6, vec3(self.linear)),
-                (7, vec3(self.angular)),
-            ],
-            &Rest::new(),
-        )
-    }
+    ///    4: to, 5: pose, 6: linear, 7: angular}`, read by T4's own reader (an island owner is refused), with the pose
+    ///    in the node's frame, which is its parent and slot.
+    Motion(HandOff),
 }
 
 /// A change and the fields of it this build does not know.
@@ -493,6 +390,20 @@ impl ChangeRec {
         let which = read_uint(&r.take(1, "a change")?, "a change's kind")?;
         let id = |r: &mut Rec, k| read_id(&r.take(k, "a change")?);
         let change = match which {
+            1 if r
+                .0
+                .get(&6)
+                .is_some_and(|f| check_ints(f, "a create's fields").is_err()) =>
+            {
+                return refuse("int-out-of-range", "a create's fields");
+            }
+            4 if r
+                .0
+                .get(&4)
+                .is_some_and(|v| check_ints(v, "a set's value").is_err()) =>
+            {
+                return refuse("int-out-of-range", "a set's value");
+            }
             1 => Change::Create {
                 node: id(&mut r, 2)?,
                 kind: read_pinned(r.take(3, "a create")?, "a create's kind")?,
@@ -543,7 +454,9 @@ impl ChangeRec {
             6 => Change::Unlink {
                 link: id(&mut r, 2)?,
             },
-            7 => Change::Motion(Sample::read(r.take(2, "a motion change")?)?),
+            7 => Change::Motion(
+                HandOff::from_value(&r.take(2, "a motion change")?).map_err(pose_refusal)?,
+            ),
             n => return refuse("change-unknown", format!("change {n}")),
         };
         Ok(ChangeRec { change, rest: r.0 })
@@ -610,15 +523,15 @@ impl ChangeRec {
                 (6, audience(*a)),
             ],
             Change::Unlink { link } => vec![(1, u(6)), (2, link.to_value())],
-            Change::Motion(sample) => vec![(1, u(7)), (2, sample.to_value())],
+            Change::Motion(h) => vec![(1, u(7)), (2, h.to_value())],
         };
         record(pairs, &self.rest)
     }
 }
 
-// --- Named events, effects, parts and the header ------------------------------------------------------------------
+// --- Named events, log entries, parts and the header --------------------------------------------------------------
 
-/// A named event (rule 4): a name and numbered fields saying what the changes meant, and which of the effect's
+/// A named event (rule 4): a name and numbered fields saying what the changes meant, and which of the entry's
 /// changes it explains. It adds no state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Event {
@@ -632,20 +545,33 @@ impl Event {
     fn read(v: Value) -> R<Event> {
         let mut r = Rec::of(v, "an event")?;
         let name = read_name(r.take(1, "an event")?, "an event's name")?;
-        let fields = r
-            .opt(2)
-            .map(|f| read_map(f, "an event's fields"))
-            .transpose()?;
+        let fields = match r.opt(2) {
+            Some(f) => {
+                check_ints(&f, "an event's fields")?;
+                let f = read_map(f, "an event's fields")?;
+                if f.is_empty() {
+                    return refuse("not-canonical", "an event's empty fields are left out");
+                }
+                f
+            }
+            None => BTreeMap::new(),
+        };
         let changes = match r.opt(3) {
-            Some(c) => read_array(c, "an event's changes")?
-                .iter()
-                .map(|i| read_uint(i, "a change's index"))
-                .collect::<R<Vec<_>>>()?,
+            Some(c) => {
+                let c = read_array(c, "an event's changes")?
+                    .iter()
+                    .map(|i| read_uint(i, "a change's index"))
+                    .collect::<R<Vec<_>>>()?;
+                if c.is_empty() {
+                    return refuse("not-canonical", "an event's empty changes are left out");
+                }
+                c
+            }
             None => Vec::new(),
         };
         Ok(Event {
             name,
-            fields: fields.unwrap_or_default(),
+            fields,
             changes,
             rest: r.0,
         })
@@ -666,12 +592,196 @@ impl Event {
     }
 }
 
-/// An effect (rules 1 and 2): its envelope, its generic changes, applied in order and all or none, and its named
-/// events, which may be stripped without changing any state.
+/// T1's transfer records (rule 14), keyed by the transfer's id, each written by one node's system.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransferRec {
+    /// `{1: 1, 2: transfer, 3: node, 4: lineage, 5: zone, 6: pose}`: `node` and its subtree leave for `zone` of the
+    /// world `lineage`, to arrive at `pose`, whose frame is the new parent and slot.
+    Leave {
+        transfer: Id,
+        node: Id,
+        lineage: Scope,
+        zone: Id,
+        pose: Pose,
+    },
+    /// `{1: 2, 2: transfer, 3: [create or link, ...]}`: the subtree arrives. Inside one zone it comes from this log's
+    /// leave and carries nothing; from another zone it carries the subtree, root first, as creates and links.
+    Arrive {
+        transfer: Id,
+        carried: Vec<ChangeRec>,
+    },
+    /// `{1: 3, 2: transfer}`: the other zone's arrive is durable; the subtree is gone from here.
+    Settle { transfer: Id },
+    /// `{1: 4, 2: transfer, 3: reason}`: the arrive was refused, for a named reason; the subtree is back.
+    Return { transfer: Id, reason: Name },
+}
+
+impl TransferRec {
+    fn read(v: Value) -> R<TransferRec> {
+        let mut r = Rec::of(v, "a transfer record")?;
+        let which = read_uint(&r.take(1, "a transfer record")?, "a transfer record's kind")?;
+        let transfer = read_id(&r.take(2, "a transfer record")?)?;
+        let t = match which {
+            1 => TransferRec::Leave {
+                transfer,
+                node: read_id(&r.take(3, "a leave")?)?,
+                lineage: Scope(
+                    read_bytes(r.take(4, "a leave")?, "a lineage")?
+                        .as_slice()
+                        .try_into()
+                        .or_else(|_| not_record("a lineage is 16 bytes"))?,
+                ),
+                zone: read_id(&r.take(5, "a leave")?)?,
+                pose: read_pose(&r.take(6, "a leave")?)?,
+            },
+            2 => TransferRec::Arrive {
+                transfer,
+                carried: match r.opt(3) {
+                    Some(c) => {
+                        let c = read_array(c, "an arrive's subtree")?
+                            .into_iter()
+                            .map(ChangeRec::read)
+                            .collect::<R<Vec<_>>>()?;
+                        if c.is_empty() {
+                            return refuse(
+                                "not-canonical",
+                                "an arrive's empty subtree is left out",
+                            );
+                        }
+                        if c.iter().any(|c| {
+                            !matches!(c.change, Change::Create { .. } | Change::Link { .. })
+                        }) {
+                            return not_record("an arrive carries creates and links only");
+                        }
+                        c
+                    }
+                    None => Vec::new(),
+                },
+            },
+            3 => TransferRec::Settle { transfer },
+            4 => TransferRec::Return {
+                transfer,
+                reason: read_name(r.take(3, "a return")?, "a return's reason")?,
+            },
+            n => return refuse("record-unknown", format!("transfer record {n}")),
+        };
+        r.closed("a transfer record")?;
+        Ok(t)
+    }
+
+    pub fn transfer(&self) -> Id {
+        match self {
+            TransferRec::Leave { transfer, .. }
+            | TransferRec::Arrive { transfer, .. }
+            | TransferRec::Settle { transfer }
+            | TransferRec::Return { transfer, .. } => *transfer,
+        }
+    }
+
+    pub fn to_value(&self) -> Value {
+        let u = Value::Uint;
+        let t = self.transfer().to_value();
+        let pairs = match self {
+            TransferRec::Leave {
+                node,
+                lineage,
+                zone,
+                pose,
+                ..
+            } => vec![
+                (1, u(1)),
+                (2, t),
+                (3, node.to_value()),
+                (4, Value::Bytes(lineage.0.to_vec())),
+                (5, zone.to_value()),
+                (6, pose.to_value()),
+            ],
+            TransferRec::Arrive { carried, .. } => {
+                let mut p = vec![(1, u(2)), (2, t)];
+                if !carried.is_empty() {
+                    p.push((
+                        3,
+                        Value::Array(carried.iter().map(ChangeRec::to_value).collect()),
+                    ));
+                }
+                p
+            }
+            TransferRec::Settle { .. } => vec![(1, u(3)), (2, t)],
+            TransferRec::Return { reason, .. } => {
+                vec![(1, u(4)), (2, t), (3, Value::Text(reason.clone()))]
+            }
+        };
+        record(pairs, &Rest::new())
+    }
+}
+
+/// A timer (rule 15): pending state of the node that set it, never only an event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimerRec {
+    /// `{1: 1, 2: timer, 3: due, 4: name}`: due at a world time, in T5's microseconds; the name says what it is for.
+    Set { timer: Id, due: Micros, name: Name },
+    /// `{1: 2, 2: timer}`: fired or cancelled.
+    Clear { timer: Id },
+}
+
+impl TimerRec {
+    fn read(v: Value) -> R<TimerRec> {
+        let mut r = Rec::of(v, "a timer")?;
+        let which = read_uint(&r.take(1, "a timer")?, "a timer's kind")?;
+        let timer = read_id(&r.take(2, "a timer")?)?;
+        let t = match which {
+            1 => TimerRec::Set {
+                timer,
+                due: read_int(&r.take(3, "a timer")?, "a timer's due time")?,
+                name: read_name(r.take(4, "a timer")?, "a timer's name")?,
+            },
+            2 => TimerRec::Clear { timer },
+            n => return refuse("record-unknown", format!("timer record {n}")),
+        };
+        r.closed("a timer")?;
+        Ok(t)
+    }
+
+    pub fn to_value(&self) -> Value {
+        let pairs = match self {
+            TimerRec::Set { timer, due, name } => vec![
+                (1, Value::Uint(1)),
+                (2, timer.to_value()),
+                (3, int(*due)),
+                (4, Value::Text(name.clone())),
+            ],
+            TimerRec::Clear { timer } => vec![(1, Value::Uint(2)), (2, timer.to_value())],
+        };
+        record(pairs, &Rest::new())
+    }
+}
+
+fn time_refusal(r: crate::time::TimeRefusal) -> Refusal {
+    Refusal {
+        name: r.name(),
+        detail: "a time effect (v2/docs/time.md)".into(),
+    }
+}
+
+/// What a log entry records: exactly one of its body fields (rules 1, 14, 15, 16).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Body {
+    /// 7: the generic changes, applied in order, all or none.
+    Changes(Vec<ChangeRec>),
+    /// 9: one of T1's transfer records.
+    Transfer(TransferRec),
+    /// 10: T5's time effects, as T5 writes them (time.md rule 8).
+    Time(Vec<TimeEffect>),
+    /// 11: timers set or cleared.
+    Timers(Vec<TimerRec>),
+}
+
+/// A log entry (rules 1 and 2): its envelope, one body, and named events, which may be stripped without changing
+/// any state. An entry whose body is changes is an effect.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Effect {
     pub envelope: Envelope,
-    pub changes: Vec<ChangeRec>,
+    pub body: Body,
     pub events: Option<Vec<Event>>,
     pub rest: Rest,
 }
@@ -687,34 +797,83 @@ impl Effect {
             audience: read_audience(r.take(5, "an effect")?)?,
             node: read_id(&r.take(6, "an effect")?)?,
         };
-        let changes = read_array(r.take(7, "an effect")?, "an effect's changes")?
-            .into_iter()
-            .map(ChangeRec::read)
-            .collect::<R<Vec<_>>>()?;
+        let mut bodies = Vec::new();
+        if let Some(c) = r.opt(7) {
+            bodies.push(Body::Changes(
+                read_array(c, "an effect's changes")?
+                    .into_iter()
+                    .map(ChangeRec::read)
+                    .collect::<R<Vec<_>>>()?,
+            ));
+        }
+        if let Some(t) = r.opt(9) {
+            bodies.push(Body::Transfer(TransferRec::read(t)?));
+        }
+        if let Some(t) = r.opt(10) {
+            bodies.push(Body::Time(
+                read_array(t, "an entry's time effects")?
+                    .iter()
+                    .map(|e| {
+                        let t = TimeEffect::from_value(e).map_err(time_refusal)?;
+                        if t.to_value() != *e {
+                            return not_record("a time effect not in its one byte form");
+                        }
+                        Ok(t)
+                    })
+                    .collect::<R<Vec<_>>>()?,
+            ));
+        }
+        if let Some(t) = r.opt(11) {
+            bodies.push(Body::Timers(
+                read_array(t, "an entry's timers")?
+                    .into_iter()
+                    .map(TimerRec::read)
+                    .collect::<R<Vec<_>>>()?,
+            ));
+        }
+        let body = match <[Body; 1]>::try_from(bodies) {
+            Ok([b]) => b,
+            Err(_) => return not_record("an entry has exactly one of fields 7, 9, 10 and 11"),
+        };
         let events = match r.opt(8) {
-            Some(e) => Some(
-                read_array(e, "an effect's events")?
+            Some(e) => {
+                let e = read_array(e, "an effect's events")?
                     .into_iter()
                     .map(Event::read)
-                    .collect::<R<Vec<_>>>()?,
-            ),
+                    .collect::<R<Vec<_>>>()?;
+                if e.is_empty() {
+                    return refuse("not-canonical", "an entry's empty events are left out");
+                }
+                Some(e)
+            }
             None => None,
         };
+        let count = match &body {
+            Body::Changes(c) => c.len() as u64,
+            _ => 0,
+        };
         for ev in events.iter().flatten() {
-            if let Some(i) = ev.changes.iter().find(|i| **i >= changes.len() as u64) {
+            if let Some(i) = ev.changes.iter().find(|i| **i >= count) {
                 return not_record(&format!(
-                    "event {} names change {i} of {}",
-                    ev.name.as_str(),
-                    changes.len()
+                    "event {} names change {i} of {count}",
+                    ev.name.as_str()
                 ));
             }
         }
         Ok(Effect {
             envelope,
-            changes,
+            body,
             events,
             rest: r.0,
         })
+    }
+
+    /// The generic changes, if this entry is an effect.
+    pub fn changes(&self) -> &[ChangeRec] {
+        match &self.body {
+            Body::Changes(c) => c,
+            _ => &[],
+        }
     }
 
     pub fn to_value(&self) -> Value {
@@ -726,11 +885,13 @@ impl Effect {
             (4, actor(e.actor)),
             (5, audience(e.audience)),
             (6, e.node.to_value()),
-            (
-                7,
-                Value::Array(self.changes.iter().map(ChangeRec::to_value).collect()),
-            ),
         ];
+        p.push(match &self.body {
+            Body::Changes(c) => (7, Value::Array(c.iter().map(ChangeRec::to_value).collect())),
+            Body::Transfer(t) => (9, t.to_value()),
+            Body::Time(t) => (10, Value::Array(t.iter().map(|t| t.to_value()).collect())),
+            Body::Timers(t) => (11, Value::Array(t.iter().map(TimerRec::to_value).collect())),
+        });
         if let Some(events) = &self.events {
             p.push((
                 8,
@@ -741,8 +902,9 @@ impl Effect {
     }
 }
 
-/// A bundle's header (rule 7): the build, the schema by hash, the zone's lineage, zone and epoch, and the kinds and
-/// move revisions its effects rest on, pinned by hash. Written once per bundle; each part names it by hash.
+/// A bundle's header (rule 7): the build, the schema by hash, the world's or fork's lineage (ids.md rule 8), the
+/// zone and the writer's epoch, and the kinds and move revisions its effects rest on, pinned by hash. Written once
+/// per bundle; each part names it by hash.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     pub build: Vec<u8>,
@@ -773,9 +935,16 @@ impl Header {
             .as_slice()
             .try_into()
             .or_else(|_| not_record("a lineage is 16 bytes"))?;
+        let schema = read_hash(r.take(2, "a header")?, "a schema")?;
+        if schema != schema_hash().to_bytes() {
+            return refuse(
+                "schema-unknown",
+                "the header names a schema this build does not apply",
+            );
+        }
         Ok(Header {
             build: read_hash(r.take(1, "a header")?, "a build")?,
-            schema: read_hash(r.take(2, "a header")?, "a schema")?,
+            schema,
             lineage: Scope(lineage),
             zone: read_id(&r.take(4, "a header")?)?,
             epoch: read_uint(&r.take(5, "a header")?, "an epoch")?,
@@ -887,29 +1056,40 @@ pub fn texts(v: &Value) -> Vec<String> {
     out
 }
 
-/// The layout this page fixes, as a value: each change's number, name and field numbers, then the envelope's,
-/// an event's, a part's and a header's field numbers. Its `souls/schema/1` hash is what a header names.
+/// What this page fixes, as a value (rule 7): for each generic change and each record, its number, its name, its
+/// required field numbers and its apply revision. The revision is raised whenever what applying it does changes
+/// (rule 8); a field that a later build adds to a known change never changes how it applies, so it needs no row.
+/// Its `souls/schema/1` hash is what a header names, and a header naming another is refused.
 pub fn schema() -> Value {
-    let row = |n: u64, name: &str, fields: &[u64]| {
+    let row = |n: u64, name: &str, fields: &[u64], rev: u64| {
         Value::Array(vec![
             Value::Uint(n),
             Value::Text(Name::new(name).unwrap_or_else(|| unreachable!("a plain name"))),
             Value::Array(fields.iter().map(|f| Value::Uint(*f)).collect()),
+            Value::Uint(rev),
         ])
     };
     Value::Array(vec![
-        row(1, "create", &[2, 3, 4, 5, 6]),
-        row(2, "remove", &[2]),
-        row(3, "reparent", &[2, 3, 4]),
-        row(4, "set", &[2, 3, 4, 5]),
-        row(5, "link", &[2, 3, 4, 5, 6]),
-        row(6, "unlink", &[2]),
-        row(7, "motion", &[2]),
-        row(0, "motion-sample", &[1, 2, 3, 4, 5, 6, 7]),
-        row(0, "effect", &[1, 2, 3, 4, 5, 6, 7, 8]),
-        row(0, "event", &[1, 2, 3]),
-        row(0, "part", &[1, 2]),
-        row(0, "header", &[1, 2, 3, 4, 5, 6, 7]),
+        // The generic changes (rule 3), applied to their entry's own node (rule 6).
+        row(1, "create", &[2, 3, 4, 5, 6], 1),
+        row(2, "remove", &[2], 1),
+        row(3, "reparent", &[2, 3, 4], 1),
+        row(4, "set", &[2, 3, 4], 1),
+        row(5, "link", &[2, 3, 4, 5, 6], 1),
+        row(6, "unlink", &[2], 1),
+        row(7, "motion", &[2], 1),
+        // T1's transfer records (rule 14) and the timers (rule 15).
+        row(1, "leave", &[2, 3, 4, 5, 6], 1),
+        row(2, "arrive", &[2], 1),
+        row(3, "settle", &[2], 1),
+        row(4, "return", &[2, 3], 1),
+        row(1, "timer-set", &[2, 3, 4], 1),
+        row(2, "timer-clear", &[2], 1),
+        // The records around them: an entry has 1 to 6 and one of 7, 9, 10 and 11.
+        row(0, "entry", &[1, 2, 3, 4, 5, 6], 1),
+        row(0, "event", &[1], 1),
+        row(0, "part", &[1, 2], 1),
+        row(0, "header", &[1, 2, 3, 4, 5, 6, 7], 1),
     ])
 }
 
@@ -921,10 +1101,10 @@ pub fn schema_hash() -> Hash {
     )
 }
 
-// --- State and applying -------------------------------------------------------------------------------------------
+// --- State and applying: the fixtures' harness --------------------------------------------------------------------
 
-/// A node as the generic changes leave it. Its pose is kept without its frame, which is its parent and slot (T4
-/// rule 1), as `{2: position, 3: orientation, 4: support}`; its motion as `{1: at, 2: linear, 3: angular, 4: owner}`.
+/// A node as the log leaves it. Its pose is kept without its frame, which is its parent and slot (T4 rule 1), as
+/// `{2: position, 3: orientation, 4: support}`; its motion as `{1: at, 2: linear, 3: angular, 4: owner}`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeState {
     pub kind: Name,
@@ -936,7 +1116,7 @@ pub struct NodeState {
     pub motion: Option<Value>,
 }
 
-/// A link as the generic changes leave it.
+/// A link as the log leaves it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkState {
     pub ty: Name,
@@ -945,12 +1125,37 @@ pub struct LinkState {
     pub audience: Audience,
 }
 
-/// One zone's state, from its start and the parts applied since: no kinds are needed to apply a part (rule 5).
+/// A subtree in flight (rule 14): its root, where it goes, and its nodes and the links they own, as they stood.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Flight {
+    pub root: Id,
+    pub lineage: Scope,
+    pub zone: Id,
+    pub pose: Pose,
+    pub nodes: BTreeMap<Id, NodeState>,
+    pub links: BTreeMap<Id, LinkState>,
+}
+
+/// A pending timer (rule 15): the node that set it, when it is due and what it is for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimerState {
+    pub node: Id,
+    pub due: Micros,
+    pub name: Name,
+}
+
+/// One zone's state, from its start and the parts applied since. It is the fixtures' reference apply, a test harness
+/// and nothing else (rule 11): K2 (#2646) owns the one in-memory tree. No kinds are needed to apply (rule 5).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State {
+    pub root: Id,
     pub next: u64,
     pub nodes: BTreeMap<Id, NodeState>,
     pub links: BTreeMap<Id, LinkState>,
+    pub in_flight: BTreeMap<Id, Flight>,
+    pub arrived: BTreeSet<Id>,
+    pub timers: BTreeMap<Id, TimerState>,
+    pub time: Vec<TimeEffect>,
 }
 
 fn place(pose: &Pose) -> Value {
@@ -960,6 +1165,69 @@ fn place(pose: &Pose) -> Value {
             Value::Map(m)
         }
         _ => unreachable!("a pose is a map"),
+    }
+}
+
+fn node_value(n: &NodeState) -> Value {
+    let mut m = BTreeMap::from([
+        (1, Value::Text(n.kind.clone())),
+        (4, audience(n.audience)),
+        (5, Value::Map(n.fields.clone())),
+    ]);
+    m.extend(n.parent.map(|p| (2, p.to_value())));
+    m.extend(n.slot.map(|s| (3, Value::Uint(s))));
+    m.extend(n.place.clone().map(|p| (6, p)));
+    m.extend(n.motion.clone().map(|p| (7, p)));
+    Value::Map(m)
+}
+
+fn link_value(l: &LinkState) -> Value {
+    Value::Map(BTreeMap::from([
+        (1, Value::Text(l.ty.clone())),
+        (
+            2,
+            Value::Array(vec![l.ends[0].to_value(), l.ends[1].to_value()]),
+        ),
+        (3, Value::Uint(u64::from(l.owner == End::Second))),
+        (4, audience(l.audience)),
+    ]))
+}
+
+fn pairs<T>(m: &BTreeMap<Id, T>, f: impl Fn(&T) -> Value) -> Value {
+    Value::Array(
+        m.iter()
+            .map(|(id, x)| Value::Array(vec![id.to_value(), f(x)]))
+            .collect(),
+    )
+}
+
+/// The nodes an entry may write (rule 6): its own node, and the nodes it creates under it.
+struct Own {
+    env: Envelope,
+    created: BTreeSet<Id>,
+}
+
+impl Own {
+    fn check(&self, id: Id) -> R<()> {
+        if id == self.env.node || self.created.contains(&id) {
+            Ok(())
+        } else {
+            refuse(
+                "not-own-node",
+                format!("{} written by {}'s entry", show(id), show(self.env.node)),
+            )
+        }
+    }
+
+    fn audience(&self, a: Audience, what: Id) -> R<()> {
+        if a == self.env.audience {
+            Ok(())
+        } else {
+            refuse(
+                "audience-mismatch",
+                format!("{} is outside the entry's audience", show(what)),
+            )
+        }
     }
 }
 
@@ -976,35 +1244,86 @@ impl State {
             motion: None,
         };
         State {
+            root,
             next: 0,
             nodes: [(root, node)].into(),
             links: BTreeMap::new(),
+            in_flight: BTreeMap::new(),
+            arrived: BTreeSet::new(),
+            timers: BTreeMap::new(),
+            time: Vec::new(),
         }
     }
 
-    /// Applies a part: all of it or none. It must name `header` by hash, and its effects must follow the state's
-    /// last sequence, one by one.
+    /// Applies a part: all of it or none. It must name `header` by hash, and its entries must follow the state's
+    /// last sequence, one by one: the log is ordered by sequence alone (rule 6).
     pub fn apply(&mut self, header: &Header, part: &Part) -> R<()> {
         if part.header != header.hash().to_bytes() {
             return refuse("header-mismatch", "the part names another header");
         }
         let mut s = self.clone();
         for e in &part.effects {
-            s.apply_effect(header, e)?;
+            s.apply_entry(header, e)?;
         }
         *self = s;
         Ok(())
     }
 
-    fn apply_effect(&mut self, header: &Header, e: &Effect) -> R<()> {
+    fn apply_entry(&mut self, header: &Header, e: &Effect) -> R<()> {
         if e.envelope.sequence != self.next {
             return refuse(
                 "sequence-gap",
                 format!("effect {} after {}", e.envelope.sequence, self.next),
             );
         }
-        for c in &e.changes {
-            self.apply_change(header, &c.change)?;
+        self.node(e.envelope.node)?;
+        let mut own = Own {
+            env: e.envelope,
+            created: BTreeSet::new(),
+        };
+        match &e.body {
+            Body::Changes(changes) => {
+                for c in changes {
+                    self.apply_change(header, &mut own, &c.change)?;
+                }
+            }
+            Body::Transfer(t) => self.apply_transfer(header, &mut own, t)?,
+            Body::Time(t) => {
+                if e.envelope.node != self.root || e.envelope.audience != Audience::Everyone {
+                    return refuse(
+                        "not-own-node",
+                        "time effects are the zone root's, for everyone",
+                    );
+                }
+                self.time.extend(t.iter().copied());
+            }
+            Body::Timers(t) => {
+                own.audience(self.node(e.envelope.node)?.audience, e.envelope.node)?;
+                for r in t {
+                    match r {
+                        TimerRec::Set { timer, due, name } => {
+                            if self.timers.contains_key(timer) {
+                                return refuse("id-duplicate", show(*timer));
+                            }
+                            self.timers.insert(
+                                *timer,
+                                TimerState {
+                                    node: e.envelope.node,
+                                    due: *due,
+                                    name: name.clone(),
+                                },
+                            );
+                        }
+                        TimerRec::Clear { timer } => match self.timers.get(timer) {
+                            Some(t) if t.node == e.envelope.node => {
+                                self.timers.remove(timer);
+                            }
+                            Some(_) => return refuse("not-own-node", show(*timer)),
+                            None => return refuse("timer-missing", show(*timer)),
+                        },
+                    }
+                }
+            }
         }
         self.next += 1;
         Ok(())
@@ -1061,7 +1380,125 @@ impl State {
         Ok(out)
     }
 
-    fn apply_change(&mut self, header: &Header, c: &Change) -> R<()> {
+    fn apply_transfer(&mut self, header: &Header, own: &mut Own, t: &TransferRec) -> R<()> {
+        let id = t.transfer();
+        match t {
+            TransferRec::Leave {
+                node,
+                lineage,
+                zone,
+                pose,
+                ..
+            } => {
+                own.check(*node)?;
+                own.audience(self.node(*node)?.audience, *node)?;
+                if *node == self.root {
+                    return refuse("remove-root", show(*node));
+                }
+                if self.in_flight.contains_key(&id) || self.arrived.contains(&id) {
+                    return refuse("id-duplicate", show(id));
+                }
+                let gone = self.subtree(*node)?;
+                let nodes = gone
+                    .iter()
+                    .filter_map(|n| self.nodes.remove(n).map(|s| (*n, s)))
+                    .collect();
+                let carried: Vec<Id> = self
+                    .links
+                    .iter()
+                    .filter(|(_, l)| gone.contains(&l.ends[usize::from(l.owner == End::Second)]))
+                    .map(|(k, _)| *k)
+                    .collect();
+                let links = carried
+                    .iter()
+                    .filter_map(|k| self.links.remove(k).map(|l| (*k, l)))
+                    .collect();
+                self.in_flight.insert(
+                    id,
+                    Flight {
+                        root: *node,
+                        lineage: *lineage,
+                        zone: *zone,
+                        pose: *pose,
+                        nodes,
+                        links,
+                    },
+                );
+            }
+            TransferRec::Arrive { carried, .. } => {
+                if self.arrived.contains(&id) {
+                    return Ok(()); // T1 rule 6: a second arrive changes nothing.
+                }
+                match self.in_flight.get(&id) {
+                    Some(f) if carried.is_empty() => {
+                        if (f.lineage, f.zone) != (header.lineage, header.zone) {
+                            return refuse("arrive-not-here", show(id));
+                        }
+                        own.check(f.pose.frame.node)?;
+                        own.audience(
+                            f.nodes
+                                .get(&f.root)
+                                .map_or(Audience::Everyone, |n| n.audience),
+                            f.root,
+                        )?;
+                        self.node(f.pose.frame.node).or_else(|_| {
+                            refuse("arrive-parent-missing", show(f.pose.frame.node))
+                        })?;
+                        let f = self
+                            .in_flight
+                            .remove(&id)
+                            .unwrap_or_else(|| unreachable!("read above"));
+                        let ids: Vec<Id> = f.nodes.keys().copied().collect();
+                        self.nodes.extend(f.nodes);
+                        self.links.extend(f.links);
+                        let root = self
+                            .nodes
+                            .get_mut(&f.root)
+                            .unwrap_or_else(|| unreachable!("carried"));
+                        root.parent = Some(f.pose.frame.node);
+                        root.slot = f.pose.frame.slot;
+                        root.place = Some(place(&f.pose));
+                        root.motion = None;
+                        for n in ids {
+                            self.depth(n)?;
+                        }
+                    }
+                    Some(_) => return not_record("an arrive in its leave's zone carries nothing"),
+                    None if carried.is_empty() => return refuse("transfer-missing", show(id)),
+                    None => {
+                        for c in carried {
+                            self.apply_change(header, own, &c.change)?;
+                        }
+                    }
+                }
+                self.arrived.insert(id);
+            }
+            TransferRec::Settle { .. } | TransferRec::Return { .. } => {
+                let f = self
+                    .in_flight
+                    .get(&id)
+                    .map_or_else(|| refuse("transfer-missing", show(id)), Ok)?;
+                // Written by the node the subtree left: its old parent.
+                let from = f
+                    .nodes
+                    .get(&f.root)
+                    .and_then(|n| n.parent)
+                    .unwrap_or(self.root);
+                own.check(from)?;
+                let f = self
+                    .in_flight
+                    .remove(&id)
+                    .unwrap_or_else(|| unreachable!("read above"));
+                if let TransferRec::Return { .. } = t {
+                    self.nodes.extend(f.nodes);
+                    self.links.extend(f.links);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_change(&mut self, header: &Header, own: &mut Own, c: &Change) -> R<()> {
         match c {
             Change::Create {
                 node,
@@ -1070,6 +1507,8 @@ impl State {
                 audience,
                 fields,
             } => {
+                own.check(pose.frame.node)?;
+                own.audience(*audience, *node)?;
                 self.fresh(*node)?;
                 if !header.kinds.contains(kind) {
                     return refuse("kind-not-in-header", kind.as_str());
@@ -1089,44 +1528,48 @@ impl State {
                     },
                 );
                 self.depth(*node)?;
+                own.created.insert(*node);
             }
             Change::Remove { node } => {
-                self.node(*node)?;
+                own.check(*node)?;
+                own.audience(self.node(*node)?.audience, *node)?;
+                if *node == self.root {
+                    return refuse("remove-root", show(*node));
+                }
                 let gone = self.subtree(*node)?;
                 self.nodes.retain(|id, _| !gone.contains(id));
                 self.links
                     .retain(|_, l| !gone.contains(&l.ends[0]) && !gone.contains(&l.ends[1]));
             }
             Change::Reparent { node, from, pose } => {
+                own.check(*node)?;
                 let n = self.node(*node)?;
+                own.audience(n.audience, *node)?;
                 if n.parent != Some(from.node) || n.slot != from.slot {
                     return refuse(
                         "frame-mismatch",
                         format!("{} is not where the reparent says", show(*node)),
                     );
                 }
-                self.node(pose.frame.node)
-                    .or_else(|_| refuse("parent-missing", show(pose.frame.node)))?;
-                let moved = self.subtree(*node)?;
-                if moved.contains(&pose.frame.node) {
-                    return refuse("tree-cycle", show(*node));
+                if pose.frame.node != from.node {
+                    return refuse(
+                        "crosses-nodes",
+                        format!("{}: a new parent is a leave and an arrive", show(*node)),
+                    );
                 }
                 let n = self
                     .nodes
                     .get_mut(node)
                     .unwrap_or_else(|| unreachable!("read above"));
-                n.parent = Some(pose.frame.node);
                 n.slot = pose.frame.slot;
                 n.place = Some(place(pose));
                 n.motion = None;
-                for m in moved {
-                    self.depth(m)?;
-                }
             }
             Change::Set {
                 node, field, to, ..
             } => {
-                self.node(*node)?;
+                own.check(*node)?;
+                own.audience(self.node(*node)?.audience, *node)?;
                 if let Some(n) = self.nodes.get_mut(node) {
                     n.fields.insert(*field, to.clone());
                 }
@@ -1138,8 +1581,10 @@ impl State {
                 owner,
                 audience,
             } => {
-                self.fresh(*link)?;
                 let owning = ends[usize::from(*owner == End::Second)];
+                own.check(owning)?;
+                own.audience(*audience, *link)?;
+                self.fresh(*link)?;
                 if !self.nodes.contains_key(&owning) {
                     return refuse("link-owner-not-node", show(owning));
                 }
@@ -1154,17 +1599,23 @@ impl State {
                 );
             }
             Change::Unlink { link } => {
-                if self.links.remove(link).is_none() {
-                    return refuse("link-missing", show(*link));
-                }
+                let l = self
+                    .links
+                    .get(link)
+                    .map_or_else(|| refuse("link-missing", show(*link)), Ok)?;
+                own.check(l.ends[usize::from(l.owner == End::Second)])?;
+                own.audience(l.audience, *link)?;
+                self.links.remove(link);
             }
             Change::Motion(m) => {
+                own.check(m.node)?;
                 let n = self.node(m.node)?;
+                own.audience(n.audience, m.node)?;
                 if n.parent != Some(m.pose.frame.node) || n.slot != m.pose.frame.slot {
                     return refuse(
                         "frame-mismatch",
                         format!(
-                            "{}: a motion sample's frame is its parent; a new frame is a reparent",
+                            "{}: a motion sample's frame is its parent; a new frame is a transfer",
                             show(m.node)
                         ),
                     );
@@ -1173,7 +1624,7 @@ impl State {
                     (1, int(m.at)),
                     (2, vec3(m.linear)),
                     (3, vec3(m.angular)),
-                    (4, m.to.clone()),
+                    (4, m.to.to_value()),
                 ]);
                 if let Some(n) = self.nodes.get_mut(&m.node) {
                     n.place = Some(place(&m.pose));
@@ -1184,41 +1635,58 @@ impl State {
         Ok(())
     }
 
-    /// The state as one profile value, flat (T0 rule 8): `{1: next, 2: [[id, node], ...], 3: [[id, link], ...]}` in
-    /// id order, a node `{1: kind, 2: parent, 3: slot, 4: audience, 5: fields, 6: place, 7: motion}` (2, 3, 6 and 7
-    /// when present) and a link `{1: type, 2: [end, end], 3: owning end, 4: audience}`.
+    /// The state as one profile value, flat (T0 rule 8): `{1: next, 2: [[id, node], ...], 3: [[id, link], ...],
+    /// 4: [[transfer, flight], ...], 5: [arrived transfer, ...], 6: [[timer, timer state], ...], 7: [time effect,
+    /// ...]}` in id order, 4 to 7 when not empty. A node is `{1: kind, 2: parent, 3: slot, 4: audience, 5: fields,
+    /// 6: place, 7: motion}` (2, 3, 6 and 7 when present), a link `{1: type, 2: [end, end], 3: owning end,
+    /// 4: audience}`, a flight `{1: root, 2: lineage, 3: zone, 4: pose, 5: nodes, 6: links}` and a timer
+    /// `{1: node, 2: due, 3: name}`.
     pub fn to_value(&self) -> Value {
-        let nodes = self.nodes.iter().map(|(id, n)| {
-            let mut m = BTreeMap::from([
-                (1, Value::Text(n.kind.clone())),
-                (4, audience(n.audience)),
-                (5, Value::Map(n.fields.clone())),
-            ]);
-            m.extend(n.parent.map(|p| (2, p.to_value())));
-            m.extend(n.slot.map(|s| (3, Value::Uint(s))));
-            m.extend(n.place.clone().map(|p| (6, p)));
-            m.extend(n.motion.clone().map(|p| (7, p)));
-            Value::Array(vec![id.to_value(), Value::Map(m)])
-        });
-        let links = self.links.iter().map(|(id, l)| {
-            Value::Array(vec![
-                id.to_value(),
-                Value::Map(BTreeMap::from([
-                    (1, Value::Text(l.ty.clone())),
-                    (
-                        2,
-                        Value::Array(vec![l.ends[0].to_value(), l.ends[1].to_value()]),
-                    ),
-                    (3, Value::Uint(u64::from(l.owner == End::Second))),
-                    (4, audience(l.audience)),
-                ])),
-            ])
-        });
-        Value::Map(BTreeMap::from([
+        let mut m = BTreeMap::from([
             (1, Value::Uint(self.next)),
-            (2, Value::Array(nodes.collect())),
-            (3, Value::Array(links.collect())),
-        ]))
+            (2, pairs(&self.nodes, node_value)),
+            (3, pairs(&self.links, link_value)),
+        ]);
+        if !self.in_flight.is_empty() {
+            m.insert(
+                4,
+                pairs(&self.in_flight, |f| {
+                    Value::Map(BTreeMap::from([
+                        (1, f.root.to_value()),
+                        (2, Value::Bytes(f.lineage.0.to_vec())),
+                        (3, f.zone.to_value()),
+                        (4, f.pose.to_value()),
+                        (5, pairs(&f.nodes, node_value)),
+                        (6, pairs(&f.links, link_value)),
+                    ]))
+                }),
+            );
+        }
+        if !self.arrived.is_empty() {
+            m.insert(
+                5,
+                Value::Array(self.arrived.iter().map(|i| i.to_value()).collect()),
+            );
+        }
+        if !self.timers.is_empty() {
+            m.insert(
+                6,
+                pairs(&self.timers, |t| {
+                    Value::Map(BTreeMap::from([
+                        (1, t.node.to_value()),
+                        (2, int(t.due)),
+                        (3, Value::Text(t.name.clone())),
+                    ]))
+                }),
+            );
+        }
+        if !self.time.is_empty() {
+            m.insert(
+                7,
+                Value::Array(self.time.iter().map(|t| t.to_value()).collect()),
+            );
+        }
+        Value::Map(m)
     }
 
     /// The fixtures' state hash: `souls/fixture/1` over the state's bytes. A world's public and private state
@@ -1234,8 +1702,8 @@ impl State {
 /// The bundle's header, in diagnostic notation.
 pub const FIXTURE_HEADER: &str = include_str!("../fixtures/effects/header.diag");
 
-/// The base part (a small world built by generic changes) and then each fixture, applied to the base alone.
-pub const FIXTURES: [(&str, &str); 9] = [
+/// The base part (a small world) and then each fixture, applied to the base alone.
+pub const FIXTURES: [(&str, &str); 12] = [
     ("0-base", include_str!("../fixtures/effects/0-base.diag")),
     (
         "1-create",
@@ -1263,6 +1731,15 @@ pub const FIXTURES: [(&str, &str); 9] = [
         "8-future",
         include_str!("../fixtures/effects/8-future.diag"),
     ),
+    (
+        "9-transfer",
+        include_str!("../fixtures/effects/9-transfer.diag"),
+    ),
+    (
+        "10-timer",
+        include_str!("../fixtures/effects/10-timer.diag"),
+    ),
+    ("11-away", include_str!("../fixtures/effects/11-away.diag")),
 ];
 
 /// A fixture's bytes: its diagnostic notation, `#` comments left out, in T0's profile.
@@ -1320,7 +1797,7 @@ pub fn run_fixtures() -> R<(Header, Vec<Outcome>)> {
 }
 
 /// Step 0: T4's hand-off record (pose.md rule 13) decoded and encoded again by T0's profile, and read as a motion
-/// sample by this layer and written back to the same bytes.
+/// sample by T4's own reader and written back to the same bytes.
 pub fn step0() -> R<(String, bool)> {
     let h = crate::pose::hand_offs(1).map_err(pose_refusal)?.last;
     let bytes = crate::encode::from_hex(&h).or_else(|e| refuse("encoding", e))?;
@@ -1328,7 +1805,7 @@ pub fn step0() -> R<(String, bool)> {
         .or_else(|e| refuse("encoding", e.to_string()))?
         .value;
     let same = encode(&v).is_ok_and(|b| b == bytes);
-    let sample = Sample::read(v)?;
+    let sample = HandOff::from_value(&v).map_err(pose_refusal)?;
     let read_back = encode(&sample.to_value()).is_ok_and(|b| b == bytes);
     Ok((h, same && read_back))
 }

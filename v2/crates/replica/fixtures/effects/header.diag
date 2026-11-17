@@ -2,8 +2,8 @@
 # it by its souls/header/1 hash. Ids are [scope, counter]: the world's scope is ee..ee.
 {
   1: h'1220d5e599e4dfceeb1264d9d84cc4fa8a43ee032142d51baf93ea7fe9606cd26da8',   # the build: a stand-in (K14 names the real one)
-  2: h'12207f0897571270509fbef0811d8413aa0bc2728dded085904616f5853e0f364c36', # the schema: effects.rs schema(), by hash
-  3: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',                                         # the lineage: the world's scope
+  2: h'12203b42be7ff1ce584936f5e3ae7b989d444eb16c66bdcaa214ee3b42776bca6b83', # the schema: effects.rs schema(), by hash
+  3: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',                                         # the lineage: the world's (ids.md rule 8)
   4: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],                                    # the zone: its root node's id
   5: 1,                                                                            # the writer's epoch
   6: [                                                                             # the kinds, pinned (T2's fixture kinds)

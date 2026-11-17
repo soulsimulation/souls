@@ -2,8 +2,8 @@
 //! `effects-goldens` step of `v2/tools/ci.sh`.
 
 use replica::effects::{
-    Change, FIXTURE_HEADER, FIXTURES, Part, State, effects_goldens, fixture_bytes, run_fixtures,
-    step0, texts,
+    Body, Change, FIXTURE_HEADER, FIXTURES, Header, Part, State, TransferRec, effects_goldens,
+    fixture_bytes, run_fixtures, step0, texts,
 };
 use replica::encode::{Value, decode, encode};
 
@@ -44,20 +44,43 @@ fn a1_each_generic_change_has_golden_bytes_and_one_state_hash() {
     for o in &outcomes {
         assert!(o.same_bytes, "{} does not re-encode to its bytes", o.name);
         let p = part(o.name);
-        let names: Vec<&str> = p.effects[0]
-            .changes
+        let names: Vec<&str> = p
+            .effects
             .iter()
-            .map(|c| match c.change {
-                Change::Create { .. } => "create",
-                Change::Remove { .. } => "remove",
-                Change::Reparent { .. } => "reparent",
-                Change::Set { .. } => "set",
-                Change::Link { .. } => "link",
-                Change::Unlink { .. } => "unlink",
-                Change::Motion(_) => "motion",
+            .flat_map(|e| match &e.body {
+                Body::Changes(c) => c
+                    .iter()
+                    .map(|c| match c.change {
+                        Change::Create { .. } => "create",
+                        Change::Remove { .. } => "remove",
+                        Change::Reparent { .. } => "reparent",
+                        Change::Set { .. } => "set",
+                        Change::Link { .. } => "link",
+                        Change::Unlink { .. } => "unlink",
+                        Change::Motion(_) => "motion",
+                    })
+                    .collect(),
+                Body::Transfer(t) => vec![match t {
+                    TransferRec::Leave { .. } => "leave",
+                    TransferRec::Arrive { carried, .. } if carried.is_empty() => "arrive",
+                    TransferRec::Arrive { .. } => "arrive-carrying",
+                    TransferRec::Settle { .. } => "settle",
+                    TransferRec::Return { .. } => "return",
+                }],
+                Body::Time(_) => vec!["time"],
+                Body::Timers(_) => vec!["timers"],
             })
             .collect();
-        if o.name != "0-base" && o.name != "8-future" {
+        let seven = [
+            "1-create",
+            "2-remove",
+            "3-reparent",
+            "4-set",
+            "5-link",
+            "6-unlink",
+            "7-motion",
+        ];
+        if seven.contains(&o.name) {
             kinds.push(names[0]);
         }
         println!(
@@ -83,7 +106,7 @@ fn a2_stripping_named_events_leaves_the_state_hash() {
         let p = part(o.name);
         let stripped = p.strip_events().expect("stripped");
         assert!(
-            p.effects.iter().all(|e| e.events.is_some()),
+            p.effects.iter().any(|e| e.events.is_some()),
             "{} has no event to strip",
             o.name
         );
@@ -114,11 +137,11 @@ fn a3_a_fixture_from_the_future_is_applied_kept_whole_and_hashes_the_same() {
     println!(
         "A3: unknown fields kept: effect {:?}, first change {:?}, event {:?}; event name {}",
         e.rest.keys().collect::<Vec<_>>(),
-        e.changes[0].rest.keys().collect::<Vec<_>>(),
+        e.changes()[0].rest.keys().collect::<Vec<_>>(),
         ev.rest.keys().collect::<Vec<_>>(),
         ev.name.as_str()
     );
-    assert!(!e.rest.is_empty() && !e.changes[0].rest.is_empty() && !ev.rest.is_empty());
+    assert!(!e.rest.is_empty() && !e.changes()[0].rest.is_empty() && !ev.rest.is_empty());
     assert!(
         future.same_bytes,
         "the future part does not re-encode to its own bytes"
@@ -182,7 +205,7 @@ fn a4_no_fixture_holds_free_text_or_a_float_and_each_part_names_its_header() {
     );
     println!("A4: every part names header {}", header.hash());
     // A word is refused; so is a part naming another header.
-    let words = r#"{1: h'1220a695c8697d7f1068126cc5e5f70ba56308671ab34c5aa6f089dd6c00680ca1a0', 2: [], 3: "hello"}"#;
+    let words = r#"{1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5', 2: [], 3: "hello"}"#;
     let refused = Part::read(&fixture_bytes(words).expect("bytes")).expect_err("refused");
     println!("A4: {refused}");
     assert_eq!(refused.name, "text-not-a-name");
@@ -195,4 +218,121 @@ fn a4_no_fixture_holds_free_text_or_a_float_and_each_part_names_its_header() {
         .expect_err("refused");
     println!("A4: {refused}");
     assert_eq!(refused.name, "header-mismatch");
+}
+
+/// The base's state, and a probe part of one entry (sequence 2) applied to it: what it is refused as, if anything.
+fn probe(entry: &str) -> Result<(), String> {
+    let (header, _) = run_fixtures().expect("the fixtures apply");
+    let mut state = State::start(header.zone, header.kinds[0].clone());
+    state.apply(&header, &part("0-base")).expect("the base");
+    let text = format!(
+        "{{1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5', 2: [{entry}]}}"
+    );
+    let p = Part::read(&fixture_bytes(&text).map_err(|r| r.name.to_owned())?)
+        .map_err(|r| r.name.to_owned())?;
+    state.apply(&header, &p).map_err(|r| r.name.to_owned())
+}
+
+const E: &str = "h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'";
+
+#[test]
+fn review_each_entry_writes_its_own_node_and_every_refusal_is_named() {
+    let env = |node: u64, audience: &str| {
+        format!("1: 2, 2: 1, 3: {{1: 3}}, 4: {{1: 3}}, 5: {audience}, 6: [{E}, {node}]")
+    };
+    let public = "{1: 1}";
+    let pose = |frame: &str| {
+        format!("{{1: {frame}, 2: [0, 0, 0], 3: [1073741824, 0, 0, 0], 4: {{1: 2}}}}")
+    };
+    let key = "\"souls:key@1220781d89e0ae5ff74f79e61f020201f2128268af10ffa77355868f6c8497442ae1\"";
+    let cases = [
+        (
+            "the crate's entry sets the cup's field",
+            format!(
+                "{{{}, 7: [{{1: 4, 2: [{E}, 4], 3: 1, 4: 5}}]}}",
+                env(7, public)
+            ),
+            "not-own-node",
+        ),
+        (
+            "an entry of a node that does not exist",
+            format!(
+                "{{{}, 7: [{{1: 4, 2: [{E}, 4], 3: 1, 4: 5}}]}}",
+                env(999, public)
+            ),
+            "node-missing",
+        ),
+        (
+            "the cup reparented from the hand onto the crate",
+            format!(
+                "{{{}, 7: [{{1: 3, 2: [{E}, 4], 3: [[{E}, 2], 2], 4: {}}}]}}",
+                env(4, public),
+                pose(&format!("[[{E}, 7], 1]"))
+            ),
+            "crosses-nodes",
+        ),
+        (
+            "a public entry creates a private node",
+            format!(
+                "{{{}, 7: [{{1: 1, 2: [{E}, 30], 3: {key}, 4: {}, 5: {{1: 2, 2: [{E}, 20]}}, 6: {{}}}}]}}",
+                env(1, public),
+                pose(&format!("[[{E}, 1], 1]"))
+            ),
+            "audience-mismatch",
+        ),
+        (
+            "a set to 2^64 - 1",
+            format!(
+                "{{{}, 7: [{{1: 4, 2: [{E}, 7], 3: 1, 4: 18446744073709551615}}]}}",
+                env(7, public)
+            ),
+            "int-out-of-range",
+        ),
+        (
+            "an event's empty fields",
+            format!(
+                "{{{}, 7: [{{1: 4, 2: [{E}, 7], 3: 1, 4: 5}}], 8: [{{1: \"souls:x\", 2: {{}}}}]}}",
+                env(7, public)
+            ),
+            "not-canonical",
+        ),
+        (
+            "a motion sample handing off to an island",
+            format!(
+                "{{{}, 7: [{{1: 7, 2: {{1: [{E}, 2], 2: 1, 3: {{1: 2}}, 4: {{1: 4}}, 5: {}, 6: [0, 0, 0], 7: [0, 0, 0]}}}}]}}",
+                env(2, public),
+                pose(&format!("[[{E}, 1]]"))
+            ),
+            "island-reserved",
+        ),
+        (
+            "the root removed",
+            format!("{{{}, 7: [{{1: 2, 2: [{E}, 0]}}]}}", env(0, public)),
+            "remove-root",
+        ),
+        (
+            "a return whose reason is not a name",
+            format!(
+                "{{{}, 9: {{1: 4, 2: [{E}, 13], 3: \"noroom\"}}}}",
+                env(1, public)
+            ),
+            "text-not-a-name",
+        ),
+    ];
+    for (what, entry, want) in cases {
+        let got = probe(&entry).expect_err(what);
+        println!("Review: {what}: refused as {got}");
+        assert_eq!(got, want, "{what}");
+    }
+    // A header naming a schema this build does not apply is refused by name.
+    let other = FIXTURE_HEADER.replace(
+        "12203b42be7ff1ce584936f5e3ae7b989d444eb16c66bdcaa214ee3b42776bca6b83",
+        "12200000000000000000000000000000000000000000000000000000000000000000",
+    );
+    let got = Header::read(&fixture_bytes(&other).expect("bytes")).expect_err("refused");
+    println!(
+        "Review: a header naming an unknown schema: refused as {}",
+        got.name
+    );
+    assert_eq!(got.name, "schema-unknown");
 }

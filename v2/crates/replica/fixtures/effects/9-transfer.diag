@@ -1,0 +1,16 @@
+# Transfer: Soul 100 puts the cup down on the crate, a new parent, so T1's leave and arrive under one transfer id
+# (zones.md rule 5) (Engine v2 T6, #2645), applied to the base. The cup's entry writes the leave in one tick; the
+# crate's entry writes the arrive in the next. The link by which Soul 100 owns the cup, owned by the cup's end, goes
+# with it. Layout as in 0-base.diag.
+{
+  1: h'12201b6152bdcb78adacbc5eb70d3aff3ee1fff947060db15527395c3c0706158db5',
+  2: [
+    {1: 2, 2: 4500000, 3: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 7]}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],
+     9: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10], 3: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 4],      # leave: transfer 10, the cup
+         4: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 5: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],                       # for this world and zone
+         6: {1: [[h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7]], 2: [0, 600000, 0], 3: [1073741824, 0, 0, 0], 4: {1: 1, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7], 3: 0}}},
+     8: [{1: "souls:put-down"}]},
+    {1: 3, 2: 4550000, 3: {1: 2, 2: 2}, 4: {1: 1, 2: [h'dddddddddddddddddddddddddddddddd', 100]}, 5: {1: 1}, 6: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 7],
+     9: {1: 2, 2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 10]}}                                                    # arrive: on the crate
+  ]
+}
