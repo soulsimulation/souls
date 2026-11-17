@@ -1,0 +1,111 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bicycle",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "left_side": {
+      "role": "stand",
+      "at_mm": [
+        -600,
+        0,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "saddle": {
+      "admits": "body",
+      "posture": "sit",
+      "most": 1,
+      "at_mm": [
+        0,
+        950,
+        0
+      ],
+      "stand": "left_side"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      550,
+      1100,
+      1800
+    ]
+  },
+  "vehicle": {
+    "drive": "saddle",
+    "steer": "steer",
+    "speed_mm_s": 5000,
+    "ground": "level"
+  },
+  "forms": {
+    "ride": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "slot_free",
+          "slot": "saddle"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "left_side"
+        },
+        {
+          "step": "sit",
+          "slot": "saddle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "actor",
+          "into": "saddle",
+          "event": "mounted"
+        }
+      ]
+    },
+    "steer": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "toward": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "in": "here",
+            "anchor": "me",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [],
+      "steps": [
+        {
+          "step": "move",
+          "move": "steer",
+          "toward": {
+            "arg": "toward"
+          }
+        }
+      ],
+      "effects": []
+    }
+  },
+  "text": {
+    "card": "A bicycle: sit on the saddle and steer it along level ground.",
+    "getting_around": "transport",
+    "bike": "bike"
+  },
+  "card": {
+    "text": "card",
+    "category": "getting_around",
+    "synonyms": [
+      "bike"
+    ]
+  }
+}

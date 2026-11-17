@@ -54,6 +54,8 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
 | 10 | `children` | Kinds it holds as child nodes, `{kind, most}`: a sign-up sheet's slots, a board's squares (below) |
+| 13 | `vehicle` | A thing a Soul sits in or on and steers (below) |
+| 14 | `ride` | A set trip between stops that nobody steers (below) |
 | 20 | `looks` | How it looks; its table is SA-D1a's. `shape`: the parts of the thing, whole millimetres and millidegrees (below) |
 | 21 | `text` | The words, by key |
 | 22 | `card` | `text` (one line of purpose, at most 80 characters), optional `category` (one word) and `synonyms` (a list of words), each a key of the text table, never the words |
@@ -61,6 +63,18 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 
 Not defined yet, and refused with the name of the task that adds each: `reactions` (SA-F15), `motion` and `loose`
 (SA-F10), `stock` (SA-F12), `areas` (SA-D6), `hatch` (SA-F9).
+
+**Vehicles and rides** (SA-F14, [#2884](https://github.com/soulsimulation/souls/issues/2884)). A kind says what a vehicle
+is, never how the engine moves it. `vehicle`: `drive` (a slot admitting one body, posture `sit`: the drive seat; every
+other body slot is a passenger seat), `steer` (a form of this kind, `who` is `holder`, with a `move` step: whoever holds
+the drive seat steers), `speed_mm_s` (whole millimetres per second above zero), `ground` (`level`: ground without doors,
+stairs or ladders; `deep_water`: water deep enough to swim in). Its size is `geometry.bounds_mm`, which is required.
+Getting on and off is only while it stands still, and only where the rider could stand (`level`, `shallow`) or swim
+(`deep_water`): `dismount(entry, {moving, spot})` answers with the code `moving` or `no_footing` and a reason naming the
+spot (`door`, `stairs`, `ladder`, `blocked`). The cases are `tools/entry/cases/vehicle.json`.
+`ride` is for a boat that is not rowed, a sail: `seats` (body slots), `stops` (two or more `stand` points in the order
+of the trip), `returns` (across and back, or ending at the last stop), `start` (the form an actor starts the trip with),
+`speed_mm_s` and `ground`. A kind is a vehicle or a ride, not both. Sections 13 and 14 are meaning, so covered by the hash.
 
 **Links, children and lists.** Who belongs, who owns and whose turn it is are links (contract T2,
 [#2641](https://github.com/soulsimulation/souls/issues/2641)), each found from either end. A link type is declared on
