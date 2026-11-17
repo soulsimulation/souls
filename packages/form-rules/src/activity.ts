@@ -29,7 +29,7 @@
 //   (`who: "world"`, `starts: "timer"`), whose needs are that time and no member; the engine's timer runs it.
 
 import { apply, effects, parentOf, type Change, type Done, type Event, type Refused, type Unknown } from './effects.ts';
-import { crossing, whoMay, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
+import { crossing, seesAudience, whoMay, type Audience, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
@@ -144,7 +144,8 @@ export function leaving(entry: Activity, form: string): { role: string } | { bad
 
 export type LeaveBad = { verdict: 'no'; reason: 'bad_input'; detail: Record<string, unknown> };
 /** `ended` is 1 when this leave ended the activity, which is then removed; else 0. */
-export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad;
+/** `Unknown` is effects' answer for a draw the world has not made yet: passed through unchanged, as `enter` does. */
+export type Left = (Done & { role: string; ended: 0 | 1 }) | Refused | Verdict | WhoVerdict | LeaveBad | Unknown;
 
 /**
  * Leave the role a form leaves: who may (SA-F7a), the form's own needs and effects (SA-F2b), then the role's rule for
@@ -219,7 +220,7 @@ export function nowLine(input: { kinds: Record<string, Entry>; state: { nodes: I
   if (!parts || typeof parts !== 'object') return bad('no_now');
   const extra = Object.keys(parts).filter((k) => !NOW_PARTS.includes(k));
   if (extra.length) return bad('malformed_now', { parts: extra });
-  const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
+  const sees = (audience: Audience) => seesAudience(asker.sees, audience);
   const now: NowLine = {};
   const unseen: string[] = [];
   if (parts.floor !== undefined) {
