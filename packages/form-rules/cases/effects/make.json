@@ -19,7 +19,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [{ "change": "create", "node": "rc1.0", "kind": "test:slip", "to": { "node": "b1", "hand": "left" } }],
-            "events": [{ "event": "tore_off", "node": "h1", "changes": [0] }]
+            "events": [{ "event": "test:tore_off", "node": "h1", "changes": [0] }]
           }
         },
         {
@@ -28,7 +28,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [{ "change": "remove", "node": "rc1.0" }],
-            "events": [{ "event": "discarded", "node": "rc1.0", "changes": [0] }]
+            "events": [{ "event": "test:discarded", "node": "rc1.0", "changes": [0] }]
           }
         },
         {
@@ -37,7 +37,7 @@
           "expect": {
             "verdict": "yes",
             "changes": [{ "change": "create", "node": "rc3.0", "kind": "test:slip", "to": { "node": "room" } }],
-            "events": [{ "event": "posted", "node": "h1", "changes": [0] }]
+            "events": [{ "event": "test:posted", "node": "h1", "changes": [0] }]
           }
         }
       ],

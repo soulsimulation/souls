@@ -224,7 +224,10 @@ export function checkFiles(files, all = files) {
   return rows;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// `entry prove <family>` runs every gate that needs no engine (prove.mjs, SA-P8).
+if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
+else if (isMain) {
   const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === 'check'));
   const all = F.loadDir(KINDS_DIR);
   const resolve = a => existsSync(a) ? F.loadDir(a) : existsSync(join(KINDS_DIR, a)) ? F.loadDir(join(KINDS_DIR, a)) : null;
