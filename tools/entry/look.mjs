@@ -75,8 +75,11 @@ export function defOf(entry) {
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
         : {type: 'number', default: drawn(f, f.default)}]));
   const b = entry.geometry?.bounds_mm;
+  // SA-D1a: the looks table rides in the def's make.args, where the page's one drawing function reads it
+  const kit = {kind: 'gen', gen: 'kit/2', args: shapeInMetres({round: shape.round, shapes: shape.shapes})};
+  const make = entry.looks?.table ? {...kit, args: {...kit.args, looks_table: entry.looks.table, looks_units: Object.fromEntries(Object.entries(entry.state ?? {}).filter(([, f]) => f.unit).map(([k, f]) => [k, f.unit]))}} : kit;
   return {schema: 'def/1', name, version: 1, description: entry.text?.[entry.card?.text] ?? entry.kind, tags: shape.tags ?? [], form: 'point',
-    make: {kind: 'gen', gen: 'kit/2', args: shapeInMetres({round: shape.round, shapes: shape.shapes})}, params: {}, palette: shape.palette ?? {}, state, size: {box: b ? metres(b) : [1, 1, 1]}};
+    make, params: {}, palette: shape.palette ?? {}, state, size: {box: b ? metres(b) : [1, 1, 1]}};
 }
 
 /** The named places to mark: points by role, slots as slots. */
