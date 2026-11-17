@@ -1,0 +1,172 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "The published entries' outcomes, step after step: the kettle's tea, two Souls on a bench, a lecture begun, attended and finished. A timer's form is done by the world as its own step. The lecture's seat is a bench beside it, as in ../lecture.json.",
+  "cases": [
+    {
+      "name": "kettle_switch_on_boil_pour",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": "cold", "heating": false } },
+          "b1": { "hands": { "left": null, "right": "k1" }, "effector_mm": [-60, 40, 400] }
+        },
+        "moves": { "press": { "reach_mm": 600 } }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "switch_on" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "k1", "field": "heating", "n": 2, "to": true }],
+            "events": [
+              { "event": "switched_on", "node": "k1", "changes": [0] },
+              { "event": "boil_started", "node": "k1", "changes": [] }
+            ],
+            "timers": [{ "node": "k1", "form": "boiled", "after_us": 150000000, "event": 1 }]
+          }
+        },
+        {
+          "act": { "this": "k1", "form": "boiled" },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "k1", "field": "water", "n": 1, "to": "hot" },
+              { "change": "set", "node": "k1", "field": "heating", "n": 2, "to": false }
+            ],
+            "events": [
+              { "event": "boiled", "node": "k1", "changes": [0] },
+              { "event": "switched_off", "node": "k1", "changes": [1] }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": { "this": "k1", "form": "pour", "args": { "into": "c1" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "set", "node": "k1", "field": "water", "n": 1, "to": "empty" }],
+            "events": [{ "event": "poured", "node": "k1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": {
+        "k1": { "kind": "eden:kettle", "fields": { "water": "empty", "heating": false } }
+      }
+    },
+    {
+      "name": "bench_two_souls_sit",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "e1"] },
+          "e1": { "kind": "eden:bench" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "e1", "form": "sit", "args": { "seat": "left" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b1", "to": { "node": "e1", "slot": "left" } }],
+            "events": [{ "event": "sat_down", "node": "e1", "changes": [0] }]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "e1", "form": "sit", "args": { "seat": "left" } },
+          "receipt": "rc2",
+          "expect": { "verdict": "no", "reason": "slot_taken", "need": 0, "fix": { "form": "sit", "args": { "seat": "right" } } }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "e1", "form": "sit", "args": { "seat": "right" } },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "b2", "to": { "node": "e1", "slot": "right" } }],
+            "events": [{ "event": "sat_down", "node": "e1", "changes": [0] }]
+          }
+        }
+      ],
+      "after": {
+        "room": { "loose": ["e1"] },
+        "e1": { "kind": "eden:bench", "slots": { "left": ["b1"], "right": ["b2"] } }
+      }
+    },
+    {
+      "name": "lecture_begin_attend_finish",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "e1", "l1"] },
+          "l1": { "kind": "eden:lecture" },
+          "e1": { "kind": "eden:bench" },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "l1", "form": "begin", "args": { "topic": "t_ethics" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "link", "node": "l1", "link": "speaker", "n": 1, "end": "b1" },
+              { "change": "set", "node": "l1", "field": "topic", "n": 2, "to": "t_ethics" },
+              { "change": "set", "node": "l1", "field": "running", "n": 1, "to": true }
+            ],
+            "events": [
+              { "event": "speaker_took_the_lectern", "node": "l1", "changes": [0] },
+              { "event": "topic_named", "node": "l1", "changes": [1] },
+              { "event": "lecture_began", "node": "l1", "changes": [2] }
+            ]
+          }
+        },
+        {
+          "actor": "b2",
+          "act": { "this": "l1", "form": "attend", "args": { "seat": { "node": "e1", "slot": "left" } } },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "link", "node": "l1", "link": "listener", "n": 2, "end": "b2" },
+              { "change": "reparent", "node": "b2", "to": { "node": "e1", "slot": "left" } }
+            ],
+            "events": [
+              { "event": "joined_the_audience", "node": "l1", "changes": [0] },
+              { "event": "sat_down", "node": "l1", "changes": [1] }
+            ]
+          }
+        },
+        {
+          "act": { "this": "l1", "form": "finish" },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "l1", "field": "running", "n": 1, "to": false },
+              { "change": "unlink", "node": "l1", "link": "speaker", "n": 1, "end": "b1" }
+            ],
+            "events": [
+              { "event": "lecture_ended", "node": "l1", "changes": [0] },
+              { "event": "speaker_stepped_down", "node": "l1", "changes": [1] }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "l1": { "kind": "eden:lecture", "fields": { "topic": "t_ethics", "running": false }, "links": { "speaker": [], "listener": ["b2"] } },
+        "e1": { "kind": "eden:bench", "slots": { "left": ["b2"] } },
+        "room": { "loose": ["b1", "e1", "l1"] }
+      }
+    }
+  ]
+}

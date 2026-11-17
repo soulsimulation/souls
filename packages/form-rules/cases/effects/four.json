@@ -1,0 +1,153 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "SA-F2b's four examples (fill a kettle, pour into a cup, take a cup from a shelf, sign up on a sheet) and a pour that would overflow. The test kinds are in ../kinds/test/: the entry format has no amount yet.",
+  "cases": [
+    {
+      "name": "fill_kettle_at_tap",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "t1"] },
+          "t1": { "kind": "test:tap" },
+          "k1": { "kind": "test:kettle", "fields": { "water_g": 200 } },
+          "b1": { "hands": { "left": null, "right": "k1" } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "fill", "args": { "from": "t1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "t1", "field": "water_g", "n": 1, "to": 999998500, "by": -1500 },
+              { "change": "set", "node": "k1", "field": "water_g", "n": 1, "to": 1700, "by": 1500 }
+            ],
+            "events": [{ "event": "filled", "node": "k1", "changes": [0, 1] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": { "kind": "test:tap", "fields": { "water_g": 999998500 } },
+        "k1": { "kind": "test:kettle", "fields": { "water_g": 1700 } }
+      }
+    },
+    {
+      "name": "pour_into_cup",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "c1"] },
+          "k1": { "kind": "test:kettle", "fields": { "water_g": 1700 } },
+          "c1": { "kind": "test:cup" },
+          "b1": { "hands": { "left": null, "right": "k1" } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "pour", "args": { "into": "c1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              { "change": "set", "node": "k1", "field": "water_g", "n": 1, "to": 1450, "by": -250 },
+              { "change": "set", "node": "c1", "field": "water_g", "n": 1, "to": 250, "by": 250 }
+            ],
+            "events": [{ "event": "poured", "node": "k1", "changes": [0, 1] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "k1": { "kind": "test:kettle", "fields": { "water_g": 1450 } },
+        "c1": { "kind": "test:cup", "fields": { "water_g": 250 } }
+      }
+    },
+    {
+      "name": "pour_that_would_overflow_is_refused",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "c1"] },
+          "k1": { "kind": "test:kettle", "fields": { "water_g": 1700 } },
+          "c1": { "kind": "test:cup", "fields": { "water_g": 100 } },
+          "b1": { "hands": { "left": null, "right": "k1" } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "pour", "args": { "into": "c1" } },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "no",
+            "reason": "no_room",
+            "need": 2,
+            "detail": { "node": "c1", "field": "water_g", "room": 200, "amount": 250 },
+            "fix": null
+          }
+        }
+      ],
+      "after": {
+        "k1": { "kind": "test:kettle", "fields": { "water_g": 1700 } },
+        "c1": { "kind": "test:cup", "fields": { "water_g": 100 } }
+      }
+    },
+    {
+      "name": "take_cup_from_shelf",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "s1"] },
+          "s1": { "kind": "test:shelf", "slots": { "top": ["c1", "c2"] } },
+          "c1": { "kind": "test:cup" },
+          "c2": { "kind": "test:cup" },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "c1", "form": "take" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "reparent", "node": "c1", "to": { "node": "b1", "hand": "left" } }],
+            "events": [{ "event": "taken", "node": "c1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "s1": { "kind": "test:shelf", "slots": { "top": ["c2"] } },
+        "b1": { "hands": { "left": "c1", "right": null } }
+      }
+    },
+    {
+      "name": "sign_up_on_sheet",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "b2", "h1"] },
+          "h1": { "kind": "test:sheet", "links": { "signed": ["b2"] } },
+          "b1": { "hands": { "left": null, "right": null } },
+          "b2": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "h1", "form": "sign_up" },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [{ "change": "link", "node": "h1", "link": "signed", "n": 1, "end": "b1" }],
+            "events": [{ "event": "signed_up", "node": "h1", "changes": [0] }],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "h1": { "kind": "test:sheet", "links": { "signed": ["b2", "b1"] } }
+      }
+    }
+  ]
+}
