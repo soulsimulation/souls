@@ -32,6 +32,10 @@
 //!   `link-end-off-ground`. A doorway the open ground holds both ends of (a gate in a garden wall or a fence, whose
 //!   thing has no floor) is a link of the open ground itself ([`Building::of_ground`]), in the ground's frame.
 //!
+//! - **Steps.** A low floor's open edge (a porch's front, N3's steps) is a [`Kind::Step`] read with the open ground:
+//!   one end on the floor's patch, the other where its passage meets the ground's squares, walked. It is no link of
+//!   the tree (its id is derived, `ground::scene::step_id`), and an edge with nothing to step down to is no link.
+//!
 //! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
@@ -79,6 +83,8 @@ pub enum Kind {
     Stairs,
     Ramp,
     Ladder,
+    /// A low floor's open edge stepped down to the open ground (N3's steps): no link of the tree, walked.
+    Step,
 }
 
 impl Kind {
@@ -95,7 +101,7 @@ impl Kind {
     /// The move that crosses it (contract T4).
     pub fn move_name(self) -> &'static str {
         match self {
-            Kind::Doorway | Kind::Ramp => "souls:walk",
+            Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
         }
@@ -397,8 +403,20 @@ impl Building {
                 if !seen.insert(id) {
                     continue;
                 }
-                let (ty, nodes, owning, _) = tree.link(id).ok_or("a doorway that is gone")?;
-                let owner = nodes[usize::from(owning == replica::world_model::End::Second)];
+                // A step (N3's steps) is no link of the tree: it joins its floor to the open ground, owned by the floor.
+                // Read alone it joins nothing, so it is not a link.
+                let step = ms.iter().any(|m| m.step);
+                let (kind, nodes, owner) = match open {
+                    Some(o) if step => (Kind::Step, [floor, o.ground], floor),
+                    None if step => continue,
+                    _ => {
+                        let (ty, nodes, owning, _) =
+                            tree.link(id).ok_or("a doorway that is gone")?;
+                        let kind = Kind::of(ty.as_str()).unwrap_or(Kind::Doorway);
+                        let owner = nodes[usize::from(owning == replica::world_model::End::Second)];
+                        (kind, nodes, owner)
+                    }
+                };
                 // N3 gives a side's segment to every piece its passage overlaps; the end is one whose middle lies on
                 // the patch (within the grid's rounding), else the first.
                 let side = |s: i8| {
@@ -445,6 +463,12 @@ impl Building {
                     Some(o) if e.floor == o.ground => back(&o.place, e.middle()),
                     _ => Ok(e.middle()),
                 };
+                // A step that cannot be crossed is an edge with nothing to step down to (a wall, a rail, water): no
+                // link at all.
+                let ground = to_ground.map(|o| o.ground);
+                if step && (blocked.is_some() || ends[1].is_none_or(|e| Some(e.floor) != ground)) {
+                    continue;
+                }
                 let line = match (blocked, ends) {
                     (None, [Some(a), Some(b)]) => vec![local(a)?, local(b)?],
                     _ => Vec::new(),
@@ -452,7 +476,7 @@ impl Building {
                 let width = widths.get(&id).copied().unwrap_or(0);
                 links.push(Link {
                     id,
-                    kind: Kind::of(ty.as_str()).unwrap_or(Kind::Doorway),
+                    kind,
                     nodes,
                     owner,
                     width,
@@ -585,7 +609,8 @@ impl Building {
     pub fn of_ground(tree: &Tree, open: Open, known: &BTreeSet<Id>) -> Result<Building, String> {
         let mut by_link: BTreeMap<Id, Vec<&SquareMeet>> = BTreeMap::new();
         for sm in open.meets {
-            if !known.contains(&sm.1.link) {
+            // A step is a building's floor's, never the ground's own.
+            if !sm.1.step && !known.contains(&sm.1.link) {
                 by_link.entry(sm.1.link).or_default().push(sm);
             }
         }

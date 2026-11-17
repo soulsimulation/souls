@@ -437,6 +437,17 @@ fn main() {
             }
             if let Some((t, def)) = floor_thing(q) {
                 let (outs, off) = out_doors.get(&t).copied().unwrap_or_default();
+                if outs > off && !part_ground[parts[q as usize] as usize] && high {
+                    // N3's steps join a porch within STEP of the flat ground; this one stands on today's terrain.
+                    return (
+                        Class::ImportGap,
+                        format!(
+                            "terrain: {def} stands where today's ground is {} mm, so its porch steps down to today's ground but lies more than a step from the flat open ground; its {} crossable doorway(s) to the ground open onto that porch (terrain heights are N11's, #2735)",
+                            l.ground,
+                            outs - off
+                        ),
+                    );
+                }
                 if outs > off && !part_ground[parts[q as usize] as usize] {
                     return (
                         Class::NewEngineFault,

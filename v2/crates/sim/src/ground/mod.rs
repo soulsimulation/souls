@@ -13,6 +13,10 @@
 //!   support, at the ground's height, T4 rule 6), crossing its edge is no hop and no transfer, and a named place
 //!   holds nobody (T2). Its thing's boxes (a pier's rails, a court's posts) are cut like any other. Its floor node
 //!   has no ground of its own (`ground-cover`).
+//! - **Steps.** A floor of a building on the open ground, whose outline's edge bounds a surface within [`STEP`] of the
+//!   ground (a shop's porch, 100 mm up), steps down there: each such edge is a doorway of no depth (`Doorway::step`),
+//!   taken from neither side, whose passage is cut like any doorway's. N4 makes it a link from the floor to the
+//!   ground where its passage meets both ([`crate::links::Kind::Step`]).
 //!   Boxes overlap and cross the floor's edge, so they are a union taken away, never a list of holes; a floor may
 //!   fall into several pieces, and each piece is cut into triangles that keep its edges (`i_triangle`, then
 //!   Delaunay flips).
@@ -105,6 +109,8 @@ pub struct Meet {
     pub width_left: i64,
     /// The passage through the doorway is one piece, wider than nothing, reaching a piece of this patch on both sides.
     pub through: bool,
+    /// The doorway is a step off a low floor (`scene::Doorway::step`): a link of no tree.
+    pub step: bool,
 }
 
 /// The walkable ground of one node (or one square of the open ground) for one radius.
@@ -349,6 +355,7 @@ struct Door {
     /// Through the wall: from `n0` to `n1` mm along `across`.
     n0: i64,
     n1: i64,
+    step: bool,
 }
 
 impl Door {
@@ -450,7 +457,14 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             y: dw.y,
             n0: -DOOR_HALF_DEPTH,
             n1: DOOR_HALF_DEPTH,
+            step: dw.step,
         };
+        if dw.step {
+            // A step has no depth and is floor on one side and ground on the other: nothing is taken from either.
+            (door.n0, door.n1) = (0, 0);
+            doors.push(door);
+            continue;
+        }
         // Its depth is the wall's: the boxes either side of the opening, just past its edges.
         let flank = [
             door.point(-door.half - 50, 0),
@@ -638,6 +652,7 @@ fn meets(
                     b: [pb.x, ym, pb.y],
                     width_left,
                     through: false,
+                    step: door.step,
                 });
             }
         }

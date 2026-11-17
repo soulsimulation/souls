@@ -664,6 +664,171 @@ fn entry_eden_a_walker_goes_from_the_open_ground_through_a_shut_door_into_a_room
     }
 }
 
+/// Walks the crowd's one walker until it arrives, checking each tick: off a link, the body stands on its node's patch
+/// (within 2 mm, the grid's rounding); on one, within 2 mm of the link's line in the world's frame. Returns the
+/// largest step it took in the world's frame, µm.
+fn walk_on_ground(t: &mut Town, c: &mut Crowd) -> i64 {
+    let mut largest = 0;
+    let mut was = world_at(t, &c.walkers[0].body);
+    for _ in 0..4_000 {
+        if c.done() {
+            break;
+        }
+        c.step(t)
+            .unwrap_or_else(|e| panic!("refused: {}: {}", e.name, e.detail));
+        let w = &c.walkers[0];
+        let now = world_at(t, &w.body);
+        if let Some(link) = w
+            .legs
+            .get(w.leg)
+            .and_then(|l| l.link)
+            .filter(|_| w.crossing)
+        {
+            let b = t.buildings.iter().find(|b| b.link(link).is_some()).unwrap();
+            let line: Vec<Vec3> = b
+                .link(link)
+                .unwrap()
+                .line
+                .iter()
+                .map(|p| b.place.point(*p).unwrap())
+                .collect();
+            let off = line
+                .windows(2)
+                .map(|s| {
+                    let (a, e) = (s[0], s[1]);
+                    let l2 = i128::from(dist(a, e)).pow(2).max(1);
+                    let k = (i128::from(now.x - a.x) * i128::from(e.x - a.x)
+                        + i128::from(now.y - a.y) * i128::from(e.y - a.y)
+                        + i128::from(now.z - a.z) * i128::from(e.z - a.z))
+                    .clamp(0, l2);
+                    let at = |u: i64, v: i64| u + (i128::from(v - u) * k / l2) as i64;
+                    dist(now, Vec3::new(at(a.x, e.x), at(a.y, e.y), at(a.z, e.z)))
+                })
+                .min()
+                .unwrap();
+            assert!(
+                off <= 2_000,
+                "on link {}: {off} um off its line",
+                show(link)
+            );
+        } else {
+            let node = sim::walk::node_of(&w.body);
+            assert!(
+                t.map.spot_near(node, w.body.pose.position, 2).is_some(),
+                "off {}'s patch at {:?}",
+                show(node),
+                w.body.pose.position
+            );
+        }
+        largest = largest.max(dist(now, was));
+        was = now;
+    }
+    largest
+}
+
+/// The kind of the link `k` among the town's buildings.
+fn link_kind(t: &Town, k: Id) -> sim::links::Kind {
+    t.buildings.iter().find_map(|b| b.link(k)).unwrap().kind
+}
+
+/// Porch steps in Eden (N18's follow-up): a shop's crossable doorway to the open ground opens onto its porch, 100 mm
+/// up, whose open edge is a step to the ground. A walker from 2 m outside a step goes in across it to a room of the
+/// shop and back out across a step; every tick stands on a patch or on a link's line, and no tick is longer than its
+/// speed allows.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn steps_eden_a_walker_steps_up_onto_a_porch_into_a_shop_and_back() {
+    let (mut t, _) = town_of(eden());
+    let ground = t.ground;
+    let steps: Vec<(Id, Id)> = t
+        .buildings
+        .iter()
+        .flat_map(|b| b.links.iter().map(move |l| (l, b.thing)))
+        .filter(|(l, _)| l.kind == sim::links::Kind::Step)
+        .map(|(l, th)| (l.id, th))
+        .collect();
+    let shops = steps
+        .iter()
+        .filter(|(_, th)| def_of(&t, *th) == "core-shop")
+        .count();
+    println!(
+        "steps, Eden: {} crossable steps, {shops} of them off a core-shop's floor",
+        steps.len()
+    );
+    let (step, thing) = *steps
+        .iter()
+        .find(|(_, th)| def_of(&t, *th) == "core-shop")
+        .expect("a shop's step");
+    let (from, ..) = either_side(&t, step, 2_000_000);
+    let (_, floor, goal) = rooms_of(&t, thing)
+        .into_iter()
+        .find(|(_, f, _)| {
+            t.buildings.iter().any(|b| {
+                b.link(step)
+                    .is_some_and(|l| l.ends[0].is_some_and(|e| e.floor == *f))
+            })
+        })
+        .expect("a room on the step's floor");
+    let me = stand(&t, id(1), ground, from);
+    let mut c = Crowd::new(TICK);
+    c.add(&mut t, me, SPEED, id(2001), floor, goal)
+        .unwrap_or_else(|e| panic!("no plan in: {}: {}", e.name, e.detail));
+    let links: Vec<Id> = c.walkers[0].legs.iter().filter_map(|l| l.link).collect();
+    println!(
+        "  {} (core-shop): in across {}",
+        show(thing),
+        links
+            .iter()
+            .map(|k| format!("{:?} {}", link_kind(&t, *k), show(*k)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    assert_eq!(
+        link_kind(&t, links[0]),
+        sim::links::Kind::Step,
+        "in: a step first"
+    );
+    let reach = SPEED * TICK / 1_000_000;
+    let mut largest = walk_on_ground(&mut t, &mut c);
+    let w = &c.walkers[0];
+    let arrived_in = w.arrived.expect("the walker arrives in the shop");
+    assert_eq!(
+        sim::walk::node_of(&w.body),
+        floor,
+        "in: on the shop's floor"
+    );
+    let body = w.body;
+    let mut c = Crowd::new(TICK);
+    c.now = arrived_in;
+    c.add(&mut t, body, SPEED, id(2002), ground, from)
+        .unwrap_or_else(|e| panic!("no plan out: {}: {}", e.name, e.detail));
+    let out: Vec<Id> = c.walkers[0].legs.iter().filter_map(|l| l.link).collect();
+    assert_eq!(
+        link_kind(&t, *out.last().unwrap()),
+        sim::links::Kind::Step,
+        "out: a step last"
+    );
+    largest = largest.max(walk_on_ground(&mut t, &mut c));
+    let w = &c.walkers[0];
+    let arrived_out = w
+        .arrived
+        .expect("the walker arrives back on the open ground");
+    assert_eq!(
+        sim::walk::node_of(&w.body),
+        ground,
+        "out: on the open ground"
+    );
+    println!(
+        "  in at {} ms, out at {} ms; largest step in the world's frame {largest} um, bar {reach} um",
+        arrived_in / 1000,
+        arrived_out / 1000
+    );
+    assert!(
+        largest <= reach + 10,
+        "no tick longer than speed times the tick"
+    );
+}
+
 const EVEN: [usize; 4] = [100, 100, 100, 100];
 const UNEVEN: [usize; 4] = [160, 120, 80, 40];
 
