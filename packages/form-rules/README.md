@@ -2,13 +2,14 @@
 
 What a form needs, decided from plain data (Soul Actions SA-F2, [#2843](https://github.com/soulsimulation/souls/issues/2843)),
 what it does, as generic changes plus named events (SA-F2b, [#2844](https://github.com/soulsimulation/souls/issues/2844)),
-and the value of a field that changes with time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)).
+the value of a field that changes with time (SA-F5a, [#2845](https://github.com/soulsimulation/souls/issues/2845)),
+and who may do a form, as a test on links (SA-F7a, [#2848](https://github.com/soulsimulation/souls/issues/2848)).
 `decide(input)` answers whether a form of a kind written in the [entry format](../../docs/soul-actions/entry-format.md)
 can be done now. Nothing in today's server or client calls it yet; Engine v2's shared rules (R2,
 [#2685](https://github.com/soulsimulation/souls/issues/2685)) write it again and run the same cases.
 
 ```sh
-node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/ and cases/timed/, plus the library's own checks
+node --test packages/form-rules/src/*.test.ts        # every case in cases/, cases/effects/, cases/timed/ and cases/who/, plus the library's own checks
 node packages/form-rules/bin/browser-check.mjs       # the same verdicts, timed values and crossings in Node and in a browser build
 ```
 
@@ -105,6 +106,19 @@ done refuses the whole form with `{verdict: "no", reason, effect, detail}`.
 already in `state.applied` changes nothing and says `again: true`; an event whose `by`s do not sum to zero, or a
 change that cannot apply or a value outside the profile, refuses the batch with its index.
 
+## Chance (SA-F13)
+
+An effect `{"change": "draw", "outcomes": [{"name", "weight", "event", "set": [{"field", "to"}]}]}` has one of its rows
+happen, by weight. A weight is a whole number or `{"field": <an int field of the thing>}` (a practice count), and nothing
+else (Engine v2 E14 runs the draw by the same rule). The draw is the world's: `effects` takes `draw`, one whole number
+below the table's total per draw effect, in order, as data, so a case is fixed and nothing here is random. The row
+drawn is the first whose running total passes it. The result's event is the row's `event` and carries `outcome`, the
+row's name, so the record says which was drawn. With no `draw` the answer is `{verdict: "unknown", reason: "draw",
+effect, total, could_be: [{outcome, weight, event}]}`, the whole table with its weights now, and no changes. A draw
+outside `0..total-1`, an empty table, or a weight that is not whole is refused as `bad_input`. A reaction rule never
+draws (SA-F15). Only `set` changes are in a row for now; the entry format does not have `draw` yet, so cases use the
+test kinds `test:dartboard` and `test:die`.
+
 ## An effect case
 
 A file in `cases/effects/` is `{"format": "souls-effect-cases/1", "about": ..., "cases": [...]}`. A case is a state
@@ -138,6 +152,29 @@ the same cases.
 A file in `cases/timed/` is `{"format": "souls-timed-cases/1", "about": ..., "cases": [...]}`. A case names a kind
 and a field, a stored value, `values` as `[now_us, value]` and `crossings` as a level, `from_us` and the expected
 time (or `null`). The `timed` type is not in the entry format yet; its cases use `cases/kinds/test/timed_kettle.json`.
+
+## Who may
+
+`whoMay(input)` takes the same input as `decide` and answers whether the actor may do the form at all; a commit asks
+it before the needs. A form's `who` is one of a closed list (`WHO`), shared with Engine v2 F6
+([#2771](https://github.com/soulsimulation/souls/issues/2771)), and every test is on links or holding, never on a field:
+
+- `anyone`, the default. Owning does not lock: only a form whose `who` names the owner link does.
+- `holder`: the thing is in one of the actor's hands (holding is a parent).
+- `world`: a form a timer starts; no Soul's act may do it.
+- `{"link": <type>}`: the actor, or the actor's Soul (the end of the body's `soul` link), is an end of a link of that
+  type on the thing. Its owner, a member, the Soul whose turn it is, a Soul in a named role of the activity and a
+  relation its creator set are all this one test, with the link type the kind declares.
+
+The rule is the form's own data, so anyone can read it before trying. The answer is `{verdict: "yes", who, read}`;
+`{verdict: "no", reason: "not_permitted", who, detail, read}`, where `who` is the rule and, for a link, `detail` is
+`{link, ends}`, the ends that may ("its owner, s1"); `{verdict: "unknown", who, node, link, read}` when the link is
+outside the asker's audience, so a hidden members list is never read or named; or `bad_input`. `read` holds
+`<body>/soul`, `<node>/link/<n>/ends` and, for `holder`, the hands.
+
+A file in `cases/who/` is `{"format": "souls-who-cases/1", "about": ..., "cases": [...]}`, each case shaped like a rule
+case. Its three examples, a private workbench, a chess move and a lecture speech, use the test kinds in
+`cases/kinds/test/`.
 
 ## Looks
 
