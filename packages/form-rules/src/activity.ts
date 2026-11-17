@@ -29,7 +29,7 @@
 //   (`who: "world"`, `starts: "timer"`), whose needs are that time and no member; the engine's timer runs it.
 
 import { apply, effects, parentOf, type Change, type Done, type Event, type Refused } from './effects.ts';
-import { crossing, whoMay, type Entry, type Input, type Read, type Verdict, type WhoVerdict } from './rules.ts';
+import { crossing, whoMay, type Entry, type Input, type Int, type Read, type Verdict, type WhoVerdict } from './rules.ts';
 
 export const ROLE_NEEDS = Object.freeze(['required', 'replaceable', 'optional']);
 export const PLACES_IN = Object.freeze(['this', 'here']);
@@ -195,7 +195,8 @@ export function leave(input: Input & { receipt: string }): Left {
   return check.ok ? result : bad(check.reason, { change: check.change });
 }
 
-export type NowLine = { floor?: string[]; stage?: unknown; ends_us?: number };
+/** `ends_us` is SA-F5a's `Int`: a number when safe, a BigInt beyond 2^53. */
+export type NowLine = { floor?: string[]; stage?: unknown; ends_us?: Int };
 export type NowVerdict =
   | { verdict: 'yes'; now: NowLine; unseen: string[]; read: Read[] }
   | { verdict: 'no'; reason: 'bad_input'; detail: Record<string, unknown>; read: Read[] };
