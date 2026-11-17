@@ -3,7 +3,9 @@
 
 use replica::encode::Value;
 use replica::ids::{FIXTURE_SCOPE_A, Held, Id, Minter, Scope};
-use replica::world_model::{FIXTURE_KINDS, Link, Node, check, parse_kinds, parse_world, show};
+use replica::world_model::{
+    Audience, FIXTURE_KINDS, Link, Node, check, parse_kinds, parse_world, show,
+};
 use replica::zones::{
     FIXTURE_SCOPE_ZONE_B, FIXTURE_ZONE_A, FIXTURE_ZONE_B, Fields, Frame, Own, Place, Prev, Record,
     System, Systems, Transfer, Write, Zone, minter_past, run_in_order, tick,
@@ -80,7 +82,7 @@ fn world(scope: Scope, levels: u64) -> (Zone, Vec<Id>) {
             kind: if k == 0 { "souls:place" } else { "souls:room" }.into(),
             parent: nodes.last().map(|n| n.id),
             slot: None,
-            audience: 0,
+            audience: Audience::Everyone,
             fields: BTreeMap::new(),
         });
     }
@@ -397,9 +399,9 @@ fn a_leave_keeps_or_ends_links_to_nodes_that_stay() {
     // link the crate owns). Both join the leaving body to a node that stays.
     let text = edit(
         FIXTURE_ZONE_A,
-        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}",
-        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}, {1: 8, 2: \"leans-on\", 3: [3, 5], 4: 0, 5: 0}, \
-         {1: 9, 2: \"rests-against\", 3: [5, 3], 4: 0, 5: 0}",
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: \"everyone\"}",
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: \"everyone\"}, {1: 8, 2: \"leans-on\", 3: [3, 5], 4: 0, 5: \"everyone\"}, \
+         {1: 9, 2: \"rests-against\", 3: [5, 3], 4: 0, 5: \"everyone\"}",
     );
     let ids = |ls: &[Link]| ls.iter().map(|l| show(l.id)).collect::<Vec<_>>().join(",");
     // Within one world: each stays with its owning end; nothing is ended.
@@ -557,8 +559,8 @@ fn a4_a_body_leaves_only_with_what_its_soul_owns() {
     // Owned, the key goes with it.
     let owned = edit(
         &text,
-        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}",
-        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}, {1: 9, 2: \"owns\", 3: [100, 8], 4: 1, 5: 0}",
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: \"everyone\"}",
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: \"everyone\"}, {1: 9, 2: \"owns\", 3: [100, 8], 4: 1, 5: \"everyone\"}",
     );
     let mut a = zone(&owned, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A);
     let t = a.leave(node(3), to_garden(&b)).unwrap();
@@ -606,7 +608,7 @@ fn two_arrivals_of_one_id_in_one_tick_get_two_ids() {
         assert_eq!(w.arrive_all(&delivered).unwrap(), 2);
         let crates: Vec<(Id, Option<Id>)> = w
             .nodes()
-            .filter(|n| n.kind == "souls:crate")
+            .filter(|n| n.kind.starts_with("souls:crate@"))
             .map(|n| (n.id, w.origin(n.id)))
             .collect();
         println!(
