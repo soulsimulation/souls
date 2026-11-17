@@ -1,0 +1,467 @@
+//! Zones against their fixtures (Engine v2 T1, #2642; rules in `v2/docs/zones.md`). Each test is one acceptance box,
+//! or the case the trunk review asked for; each prints what it saw.
+
+use replica::encode::Value;
+use replica::ids::{FIXTURE_SCOPE_A, Held, Id, Minter, Scope};
+use replica::world_model::{FIXTURE_KINDS, Link, Node, check, parse_kinds, parse_world, show};
+use replica::zones::{
+    FIXTURE_SCOPE_ZONE_B, FIXTURE_ZONE_A, FIXTURE_ZONE_B, Fields, Frame, Own, Place, Prev, Record,
+    System, Systems, Transfer, Write, Zone, minter_past, run_in_order, tick,
+};
+use std::cell::Cell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
+fn node(n: u64) -> Id {
+    Id::new(FIXTURE_SCOPE_A, n).unwrap()
+}
+
+/// `text` with `from` replaced by `to`, where `from` occurs exactly once.
+fn edit(text: &str, from: &str, to: &str) -> String {
+    assert_eq!(text.matches(from).count(), 1, "{from:?} occurs once");
+    text.replacen(from, to, 1)
+}
+
+/// The zone a fixture describes, after T2's check. Its writer mints from `scope`; `lineage` is its world's.
+fn zone(text: &str, root: u64, lineage: Scope, scope: Scope) -> Zone {
+    let draft = parse_world(&parse_kinds(FIXTURE_KINDS).unwrap(), text).unwrap();
+    check(&draft).unwrap();
+    let ids = draft
+        .nodes
+        .iter()
+        .map(|n| n.id)
+        .chain(draft.links.iter().map(|l| l.id));
+    let (minter, held) = minter_past(scope, ids).unwrap();
+    Zone::start(node(root), lineage, minter, held, draft.nodes, draft.links).unwrap()
+}
+
+/// Zone A, the world's first: it mints from the world's scope.
+fn zone_a() -> Zone {
+    zone(FIXTURE_ZONE_A, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A)
+}
+
+/// Zone B, a second zone of the same world: same lineage, its own scope.
+fn zone_b() -> Zone {
+    zone(FIXTURE_ZONE_B, 20, FIXTURE_SCOPE_A, FIXTURE_SCOPE_ZONE_B)
+}
+
+fn to_garden(b: &Zone) -> Place {
+    Place {
+        zone: b.id(),
+        parent: node(21),
+        slot: None,
+    }
+}
+
+fn state(z: &Zone) -> (Vec<Node>, Vec<Link>) {
+    (z.nodes().cloned().collect(), z.links().cloned().collect())
+}
+
+/// How many copies of the body (node 3) and its cup (node 4) exist in the zones, in place or in flight.
+fn copies(zones: &[&Zone]) -> (u64, u64) {
+    let mut placed = 0;
+    let mut in_flight = 0;
+    for z in zones {
+        placed += z
+            .nodes()
+            .filter(|n| n.id == node(3) || n.id == node(4))
+            .count() as u64;
+        for t in z.in_flight() {
+            in_flight += t
+                .nodes
+                .iter()
+                .filter(|n| n.id == node(3) || n.id == node(4))
+                .count() as u64;
+        }
+    }
+    (placed, in_flight)
+}
+
+fn uint(f: Option<&Fields>, field: u64) -> u64 {
+    match f.and_then(|f| f.get(&field)) {
+        Some(Value::Uint(n)) => *n,
+        _ => 0,
+    }
+}
+
+// ---- Systems ------------------------------------------------------------------------------------------------------
+
+/// The cup is poured from: a thousandth less each tick.
+struct Pour(Rc<Cell<Option<u64>>>);
+impl System for Pour {
+    fn name(&self) -> &str {
+        "pour"
+    }
+    fn step(&self, prev: Prev<'_>, own: Own) -> Vec<Write> {
+        let left = uint(prev.fields(own.node()), 1).saturating_sub(1000);
+        // A cache of what was written this tick: harmless unless another system reads it (the planted fault).
+        self.0.set(Some(left));
+        vec![own.set(1, Value::Uint(left))]
+    }
+}
+
+/// The body sees how full the cup was: another node, as of the previous tick.
+struct Watch;
+impl System for Watch {
+    fn name(&self) -> &str {
+        "watch"
+    }
+    fn step(&self, prev: Prev<'_>, own: Own) -> Vec<Write> {
+        let seen = uint(prev.fields(node(4)), 1);
+        vec![own.set(2, Value::Uint(seen))]
+    }
+}
+
+/// The hall counts ticks and names what it last saw the body see.
+struct Tally;
+impl System for Tally {
+    fn name(&self) -> &str {
+        "tally"
+    }
+    fn step(&self, prev: Prev<'_>, own: Own) -> Vec<Write> {
+        let seen = uint(prev.fields(node(3)), 2);
+        vec![
+            own.set(2, Value::Uint(prev.tick())),
+            own.set(3, Value::Uint(seen)),
+            own.clear(1),
+        ]
+    }
+}
+
+/// Planted: the body reads the cup's level from the pour's cache, that is, as this tick wrote it.
+struct Peek(Rc<Cell<Option<u64>>>);
+impl System for Peek {
+    fn name(&self) -> &str {
+        "peek"
+    }
+    fn step(&self, _prev: Prev<'_>, own: Own) -> Vec<Write> {
+        vec![own.set(2, Value::Uint(self.0.get().unwrap_or(0)))]
+    }
+}
+
+/// Planted: the hall writes the cup's level, a node not its own.
+struct Meddle;
+impl System for Meddle {
+    fn name(&self) -> &str {
+        "meddle"
+    }
+    fn step(&self, _prev: Prev<'_>, own: Own) -> Vec<Write> {
+        vec![
+            own.set(2, Value::Uint(0)),
+            Write {
+                node: node(4),
+                field: 1,
+                value: Some(Value::Uint(0)),
+            },
+        ]
+    }
+}
+
+fn frame() -> Frame {
+    let a = zone_a();
+    Frame {
+        tick: 0,
+        nodes: a.nodes().map(|n| (n.id, n.fields.clone())).collect(),
+    }
+}
+
+fn systems(body: Box<dyn System>, hall: Box<dyn System>, cache: Rc<Cell<Option<u64>>>) -> Systems {
+    BTreeMap::from([
+        (node(2), hall),
+        (node(3), body),
+        (node(4), Box::new(Pour(cache)) as Box<dyn System>),
+    ])
+}
+
+#[test]
+fn a1_one_ticks_systems_in_two_orders_give_one_result() {
+    let s = systems(Box::new(Watch), Box::new(Tally), Rc::new(Cell::new(None)));
+    let mut prev = frame();
+    for _ in 0..3 {
+        let forward: Vec<Id> = s.keys().copied().collect();
+        let reverse: Vec<Id> = forward.iter().rev().copied().collect();
+        let a = run_in_order(&prev, &s, &forward).unwrap();
+        let b = run_in_order(&prev, &s, &reverse).unwrap();
+        let next = tick(&prev, &s).unwrap();
+        println!(
+            "A1 tick {}: order {} gives {}, order {} gives {}",
+            next.tick,
+            forward
+                .iter()
+                .map(|i| show(*i))
+                .collect::<Vec<_>>()
+                .join(","),
+            a.hash().unwrap(),
+            reverse
+                .iter()
+                .map(|i| show(*i))
+                .collect::<Vec<_>>()
+                .join(","),
+            b.hash().unwrap(),
+        );
+        assert_eq!(a, b);
+        assert_eq!(a, next);
+        prev = next;
+    }
+    // After three ticks the cup holds 17000; the body saw 18000 (one tick behind); the hall saw what the body saw a
+    // tick before that, 19000.
+    assert_eq!(uint(prev.nodes.get(&node(4)), 1), 17000);
+    assert_eq!(uint(prev.nodes.get(&node(3)), 2), 18000);
+    assert_eq!(uint(prev.nodes.get(&node(2)), 3), 19000);
+    println!(
+        "A1 after 3 ticks: cup 17000, body saw 18000, hall saw 19000 (each read is one tick behind)"
+    );
+}
+
+#[test]
+fn a2_each_planted_bad_system_fails_by_name() {
+    let cache = Rc::new(Cell::new(None));
+    let peek = systems(Box::new(Peek(cache.clone())), Box::new(Tally), cache);
+    let r = tick(&frame(), &peek).unwrap_err();
+    println!("A2 a same-tick read of another node: {r}");
+    assert_eq!(r.name(), "read-same-tick");
+    assert_eq!(
+        r.to_string(),
+        "read-same-tick: system peek at aa:3 wrote differently in another order"
+    );
+
+    let meddle = systems(Box::new(Watch), Box::new(Meddle), Rc::new(Cell::new(None)));
+    let r = tick(&frame(), &meddle).unwrap_err();
+    println!("A2 a write outside its own node: {r}");
+    assert_eq!(r.name(), "write-outside-own");
+    assert_eq!(
+        r.to_string(),
+        "write-outside-own: system meddle at aa:2 wrote aa:4"
+    );
+}
+
+// ---- Transfers ----------------------------------------------------------------------------------------------------
+
+#[test]
+fn a3_there_and_back_unchanged() {
+    let (mut a, mut b) = (zone_a(), zone_b());
+    let before = state(&a);
+    let there = a.leave(node(3), to_garden(&b)).unwrap();
+    println!(
+        "A3 there: transfer {} leaves {} with {} nodes and {} links",
+        show(there.id),
+        show(a.id()),
+        there.nodes.len(),
+        there.links.len()
+    );
+    assert_eq!(b.arrive_all(std::slice::from_ref(&there)).unwrap(), 1);
+    a.settle(there.id).unwrap();
+    assert_eq!(copies(&[&a]), (0, 0));
+    assert_eq!(copies(&[&b]), (2, 0));
+    assert_eq!(
+        b.node(node(4)).unwrap().parent,
+        Some(node(3)),
+        "the cup is still in the hand"
+    );
+    let back = b
+        .leave(
+            node(3),
+            Place {
+                zone: a.id(),
+                parent: node(2),
+                slot: None,
+            },
+        )
+        .unwrap();
+    println!(
+        "A3 back: transfer {} (zone B's own scope) returns it",
+        show(back.id)
+    );
+    assert_eq!(back.id.scope(), FIXTURE_SCOPE_ZONE_B);
+    a.arrive_all(std::slice::from_ref(&back)).unwrap();
+    b.settle(back.id).unwrap();
+    let after = state(&a);
+    println!(
+        "A3 zone A before and after: {} nodes, {} links each, equal: {}",
+        after.0.len(),
+        after.1.len(),
+        before == after
+    );
+    assert_eq!(before, after);
+    assert_eq!((a.in_flight().count(), b.in_flight().count()), (0, 0));
+}
+
+#[test]
+fn a3_an_arrive_applied_twice_leaves_one_copy() {
+    let (mut a, mut b) = (zone_a(), zone_b());
+    let t = a.leave(node(3), to_garden(&b)).unwrap();
+    let first = b.arrive_all(std::slice::from_ref(&t)).unwrap();
+    // Delivered again, twice in one batch: nothing more arrives and nothing more is logged.
+    let again = b.arrive_all(&[t.clone(), t.clone()]).unwrap();
+    // A stop before zone A settles: after a restart A sends it once more.
+    let (log_a, log_b) = (a.log().to_vec(), b.log().to_vec());
+    drop((a, b));
+    let (mut a, mut b) = (Zone::replay(&log_a).unwrap(), Zone::replay(&log_b).unwrap());
+    let resent: Vec<Transfer> = a.in_flight().cloned().collect();
+    let third = b.arrive_all(&resent).unwrap();
+    a.settle(t.id).unwrap();
+    // And a log holding the arrive twice replays to one copy too.
+    let mut doubled = b.log().to_vec();
+    doubled.push(Record::Arrive(t.clone()));
+    let replayed = Zone::replay(&doubled).unwrap();
+    let arrives = b
+        .log()
+        .iter()
+        .filter(|r| matches!(r, Record::Arrive(_)))
+        .count();
+    println!(
+        "A3 arrive twice: arrived {first}, then {again}, then {third} after a restart; zone B logs {arrives} arrive; \
+         copies (placed, in flight) {:?}; a log with the arrive twice replays to {:?}",
+        copies(&[&a, &b]),
+        copies(&[&replayed])
+    );
+    assert_eq!((first, again, third, arrives), (1, 0, 0, 1));
+    assert_eq!(copies(&[&a, &b]), (2, 0));
+    assert_eq!(copies(&[&replayed]), (2, 0));
+    assert_eq!(state(&replayed), state(&b));
+}
+
+#[test]
+fn a3_a_stop_between_leave_and_arrive_neither_loses_nor_doubles() {
+    let (mut a, b) = (zone_a(), zone_b());
+    let t = a.leave(node(3), to_garden(&b)).unwrap();
+    // The stop: the leave is in A's log, no arrive is in B's. Both writers restart from their logs.
+    let (log_a, log_b) = (a.log().to_vec(), b.log().to_vec());
+    drop((a, b));
+    let (mut a, mut b) = (Zone::replay(&log_a).unwrap(), Zone::replay(&log_b).unwrap());
+    let at_restart = copies(&[&a, &b]);
+    println!("A3 stop: after the restart, copies (placed, in flight) {at_restart:?}");
+    assert_eq!(
+        at_restart,
+        (0, 2),
+        "the body and its cup are in flight, in zone A's log"
+    );
+    let resent: Vec<Transfer> = a.in_flight().cloned().collect();
+    assert_eq!(resent, vec![t.clone()]);
+    b.arrive_all(&resent).unwrap();
+    a.settle(t.id).unwrap();
+    let done = copies(&[&a, &b]);
+    println!("A3 stop: sent again and settled, copies (placed, in flight) {done:?}");
+    assert_eq!(done, (2, 0));
+}
+
+#[test]
+fn a4_a_body_leaves_only_with_what_its_soul_owns() {
+    // The body also holds, in its left hand, a key its Soul does not own.
+    let text = edit(
+        FIXTURE_ZONE_A,
+        "    {1: 5, 2: \"souls:crate\", 3: 2}\n",
+        "    {1: 5, 2: \"souls:crate\", 3: 2},\n    {1: 8, 2: \"souls:key\", 3: 3, 4: 1}\n",
+    );
+    let (mut a, b) = (zone(&text, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A), zone_b());
+    let before = a.log().len();
+    let r = a.leave(node(3), to_garden(&b)).unwrap_err();
+    println!("A4 {r}");
+    assert_eq!(r.name(), "leave-holds-unowned");
+    assert_eq!(
+        r.to_string(),
+        "leave-holds-unowned: body aa:3 holds aa:8, which its Soul does not own"
+    );
+    assert_eq!(a.log().len(), before, "a refused leave writes nothing");
+    assert!(a.node(node(3)).is_some());
+    // Owned, the key goes with it.
+    let owned = edit(
+        &text,
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}",
+        "{1: 7, 2: \"owns\", 3: [100, 4], 4: 1, 5: 0}, {1: 9, 2: \"owns\", 3: [100, 8], 4: 1, 5: 0}",
+    );
+    let mut a = zone(&owned, 1, FIXTURE_SCOPE_A, FIXTURE_SCOPE_A);
+    let t = a.leave(node(3), to_garden(&b)).unwrap();
+    println!(
+        "A4 the key owned too: the leave carries {} nodes",
+        t.nodes.len()
+    );
+    assert_eq!(t.nodes.len(), 3);
+}
+
+/// Trunk review of #2967: two arrivals of one id in one tick are applied one at a time, and "held" includes the
+/// arrival before, so they never keep one id. Here world A and its fork C each send their crate `aa:5` to world W.
+#[test]
+fn two_arrivals_of_one_id_in_one_tick_get_two_ids() {
+    const SCOPE_C: Scope = Scope([0xcc; 16]);
+    const SCOPE_W: Scope = Scope([0xee; 16]);
+    let world_w = || {
+        let mut m = Minter::new(SCOPE_W);
+        let (place, room) = (m.mint().unwrap(), m.mint().unwrap());
+        let mut held = Held::default();
+        held.minted(place);
+        held.minted(room);
+        let node = |id, kind: &str, parent| Node {
+            id,
+            kind: kind.into(),
+            parent,
+            slot: None,
+            audience: 0,
+            fields: BTreeMap::new(),
+        };
+        let nodes = vec![
+            node(place, "souls:place", None),
+            node(room, "souls:room", Some(place)),
+        ];
+        (
+            Zone::start(place, SCOPE_W, m, held, nodes, vec![]).unwrap(),
+            room,
+        )
+    };
+    let (_, room) = world_w();
+    let mut a = zone_a();
+    // The fork keeps the ids it carries and carries no bodies; its writer mints from its own scope.
+    let fork: Vec<Node> = zone_a()
+        .nodes()
+        .filter(|n| n.id != node(3) && n.id != node(4))
+        .cloned()
+        .collect();
+    let (_, held_c) = minter_past(FIXTURE_SCOPE_A, fork.iter().map(|n| n.id)).unwrap();
+    let mut c = Zone::start(node(1), SCOPE_C, Minter::new(SCOPE_C), held_c, fork, vec![]).unwrap();
+    let to = |w: &Zone| Place {
+        zone: w.id(),
+        parent: room,
+        slot: None,
+    };
+    let (w0, _) = world_w();
+    let from_a = a.leave(node(5), to(&w0)).unwrap();
+    let from_c = c.leave(node(5), to(&w0)).unwrap();
+    let mut results = Vec::new();
+    for delivered in [
+        [from_a.clone(), from_c.clone()],
+        [from_c.clone(), from_a.clone()],
+    ] {
+        let (mut w, _) = world_w();
+        assert_eq!(w.arrive_all(&delivered).unwrap(), 2);
+        let crates: Vec<(Id, Option<Id>)> = w
+            .nodes()
+            .filter(|n| n.kind == "souls:crate")
+            .map(|n| (n.id, w.origin(n.id)))
+            .collect();
+        println!(
+            "two arrivals of aa:5 in one tick, delivered {} first: crates {}",
+            show(delivered[0].id),
+            crates
+                .iter()
+                .map(|(id, o)| match o {
+                    Some(o) => format!("{} (origin {})", show(*id), show(*o)),
+                    None => show(*id),
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        results.push(state(&w));
+        assert_eq!(crates.len(), 2);
+        assert_ne!(crates[0].0, crates[1].0);
+        assert!(crates.contains(&(node(5), None)));
+        assert!(
+            crates
+                .iter()
+                .any(|(id, o)| id.scope() == SCOPE_W && *o == Some(node(5)))
+        );
+    }
+    assert_eq!(
+        results[0], results[1],
+        "the delivery order does not change the result"
+    );
+}
