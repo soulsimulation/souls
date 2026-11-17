@@ -1,0 +1,438 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "Stock (SA-F12, #2851; its cases A1 to A3 in this package's format): a take from a container yields a thing and counts the stock down in one event; an empty stock or a closed container refuses by name; a container lists what it holds only once opened.",
+ "cases": [
+  {
+   "name": "a_shelf_of_40_gives_a_titled_book_and_reads_39",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:bookshelf",
+      "fields": {
+       "books": 40
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "take_book"
+     },
+     "receipt": "r1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "create",
+        "node": "r1.0",
+        "kind": "test:book",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        },
+        "stock": "books",
+        "carries": [
+         "title",
+         "first_page"
+        ]
+       },
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "books",
+        "n": 1,
+        "to": 39,
+        "by": -1
+       }
+      ],
+      "events": [
+       {
+        "event": "taken",
+        "node": "s1",
+        "changes": [
+         0,
+         1
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "s1": {
+     "kind": "test:bookshelf",
+     "fields": {
+      "books": 39
+     }
+    },
+    "b1": {
+     "hands": {
+      "left": "r1.0",
+      "right": null
+     }
+    },
+    "r1.0": {
+     "kind": "test:book"
+    }
+   }
+  },
+  {
+   "name": "a_default_shelf_is_forty",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:bookshelf"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "take_book"
+     },
+     "receipt": "r2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "create",
+        "node": "r2.0",
+        "kind": "test:book",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        },
+        "stock": "books",
+        "carries": [
+         "title",
+         "first_page"
+        ]
+       },
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "books",
+        "n": 1,
+        "to": 39,
+        "by": -1
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "an_empty_shelf_refuses_saying_so",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:bookshelf",
+      "fields": {
+       "books": 0
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "take_book"
+     },
+     "receipt": "r3",
+     "expect": {
+      "verdict": "no",
+      "reason": "empty"
+     }
+    }
+   ],
+   "after": {
+    "s1": {
+     "kind": "test:bookshelf",
+     "fields": {
+      "books": 0
+     }
+    },
+    "b1": {
+     "hands": {
+      "left": null,
+      "right": null
+     }
+    }
+   }
+  },
+  {
+   "name": "a_shelf_lists_at_once",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:bookshelf",
+      "fields": {
+       "books": 39
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [],
+   "lists": [
+    {
+     "node": "s1",
+     "expect": [
+      {
+       "stock": "books",
+       "kind": "test:book",
+       "count": 39,
+       "carries": [
+        "title",
+        "first_page"
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a_fridge_lists_nothing_before_it_is_opened",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:fridge",
+      "fields": {
+       "milk": 4
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [],
+   "lists": [
+    {
+     "node": "s1",
+     "expect": null
+    }
+   ]
+  },
+  {
+   "name": "a_fridge_lists_once_opened",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:fridge",
+      "fields": {
+       "milk": 4
+      },
+      "links": {
+       "opener": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [],
+   "lists": [
+    {
+     "node": "s1",
+     "expect": [
+      {
+       "stock": "milk",
+       "kind": "test:milk",
+       "count": 4,
+       "carries": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "a_closed_wardrobe_refuses_a_take_until_opened",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:wardrobe",
+      "fields": {
+       "coats": 6
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "take_coat"
+     },
+     "receipt": "r4",
+     "expect": {
+      "verdict": "no",
+      "reason": "closed"
+     }
+    }
+   ],
+   "after": {
+    "s1": {
+     "kind": "test:wardrobe",
+     "fields": {
+      "coats": 6
+     }
+    }
+   }
+  },
+  {
+   "name": "an_opened_wardrobe_gives_a_coat",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "s1"
+      ]
+     },
+     "s1": {
+      "kind": "test:wardrobe",
+      "fields": {
+       "coats": 6
+      },
+      "links": {
+       "opener": [
+        "b1"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "s1",
+      "form": "take_coat"
+     },
+     "receipt": "r5",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "create",
+        "node": "r5.0",
+        "kind": "test:coat",
+        "to": {
+         "node": "b1",
+         "hand": "left"
+        },
+        "stock": "coats"
+       },
+       {
+        "change": "set",
+        "node": "s1",
+        "field": "coats",
+        "n": 1,
+        "to": 5,
+        "by": -1
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}
