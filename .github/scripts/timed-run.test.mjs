@@ -140,7 +140,7 @@ test('command lines: each bench with its repeats, its own output dir under out a
   assert.deepEqual(commandLine(cap('bench-client', '--arms n6 --short'), o), ['tools/bench/capacity/bench.mjs', '--load', 'client', '--via-launcher', '--repeats', '2', '--out', join('o', 'bench'), '--port', '30000', '--child-range', '30001-30002', '--arms', 'n6', '--short']);
   assert.deepEqual(commandLine(cap('meetup', '--profile even'), o), ['tools/bench/capacity/meetup/meetup.mjs', '--repeats', '2', '--out', join('o', 'meetup'), '--port', '30000', '--range', '30001-30030', '--profile', 'even']);
   assert.deepEqual(commandLine(cap('slopes-profile'), o), ['tools/bench/capacity/slopes/slopes.mjs', '--axis', 'walkers', '--cpu-prof', '--repeats', '2', '--out', join('o', 'slopes'), '--port', '30000']);
-  assert.deepEqual(SPLIT, ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers']);
+  assert.deepEqual(SPLIT, ['eval-load', 'bench-client', 'meetup', 'slopes-profile', 'viewers', 'page']);
 });
 
 test('stage, each capacity command: its own files only, scrubbed; a Soul token anywhere under out refuses the upload', () => {
@@ -187,7 +187,7 @@ test('core plan (#2507): cores is accepted for the split commands, validated, re
   assert.ok(!('cores' in parseInputs({ ...V, INPUT_CORES: '' })), 'no plan: the inputs are as before');
   for (const v of ['world=0', 'world=2,launcher=0', 'launcher=1', 'world=2,launcher=1,load=1', 'world=65', 'world=2 launcher=1', 'world=x', 'world=2;id'])
     assert.throws(() => parseInputs({ ...V, INPUT_CORES: v }), /input cores=.*world=N or world=N,launcher=M/, v);
-  assert.throws(() => parseInputs({ ...ENV, INPUT_CORES: 'world=2' }), /input cores=.*for eval-load, .*viewers only/, 'walk takes no plan');
+  assert.throws(() => parseInputs({ ...ENV, INPUT_CORES: 'world=2' }), /input cores=.*for eval-load, .*viewers, page only/, 'walk takes no plan');
   assert.equal(parseCorePlan('world=2,launcher=1').launcher, 1);
   const smt = (c) => [c % 8, (c % 8) + 8], three = [5, 6, 7, 13, 14, 15];
   assert.deepEqual(splitCores(three, smt, { world: 1, launcher: 1 }), { physicalCores: 3, plan: 'world=1,launcher=1', layout: '1+1+1', world: '5,13', launcher: '6,14', load: '7,15' });
