@@ -71,8 +71,8 @@ export type Effect = {
 };
 export type Entry = {
   kind: string;
-  state?: Record<string, { n: number; default: unknown; audience: string; type?: string; unit?: string; min?: number; max?: number }>;
-  links?: Record<string, { n: number; most: number; audience: string }>;
+  state?: Record<string, { n: number; default: unknown; audience: Audience; type?: string; unit?: string; min?: number; max?: number }>;
+  links?: Record<string, { n: number; most: number; audience: Audience }>;
   points?: Record<string, { at_mm: number[] }>;
   slots?: Record<string, { admits: string; most: number; at_mm?: number[] }>;
   forms?: Record<string, Form>;
@@ -87,6 +87,8 @@ export type Node = {
   /** Things resting loose in this node (on its ground or a surface), not in a slot or a hand. */
   loose?: string[];
 };
+/** A field's audience: a rule object of the entry format (SA-F8), or a bare string left in old data. */
+export type Audience = string | { rule: 'everyone' | 'owner' | 'creator' } | { rule: 'linked'; link: string };
 export type Input = {
   kinds: Record<string, Entry>;
   act: { this: string; form: string; args?: Record<string, unknown> };
@@ -105,6 +107,8 @@ type Outcome = { ok: true } | { ok: false; no: Verdict } | { ok: 'unknown'; unkn
 const has = (o: unknown, k: string): boolean => o !== null && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 const sorted = (o: object | undefined): string[] => (o ? Object.keys(o).sort() : []);
 const whole = (v: unknown): v is number => Number.isSafeInteger(v);
+/** A flag is stored as 0 or 1 (Engine v2's encoding has no booleans); an entry may still write true or false. */
+const flag = (def: { type?: string }, v: unknown): unknown => (def.type === 'bool' && typeof v === 'boolean' ? Number(v) : v);
 
 /** Decide whether `input.act` can be done now. Never throws on bad data: it answers `bad_input`. */
 export function decide(input: Input): Verdict {
@@ -129,7 +133,16 @@ export function decide(input: Input): Verdict {
   if (!form) return bad(-1, 'no_such_form', { form: act.form });
   const actor = has(nodes, state.actor) ? nodes[state.actor] : undefined;
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
-  const sees = (audience: string) => asker.sees === 'all' || (Array.isArray(asker.sees) && asker.sees.includes(audience));
+  // The asker's `sees` lists the audiences it belongs to: `owner`, `creator`, and `linked:<link type>` for each link
+  // it holds to the thing. `everyone` is seen by any asker; a bare string keeps its old meaning.
+  const sees = (audience: Audience) => {
+    if (asker.sees === 'all') return true;
+    const list = Array.isArray(asker.sees) ? asker.sees : [];
+    if (typeof audience === 'string') return list.includes(audience);
+    if (audience.rule === 'everyone') return true;
+    if (audience.rule === 'linked') return list.includes(`linked:${audience.link}`);
+    return list.includes(audience.rule);
+  };
 
   // A fix taken only from data: a form of this kind that anyone may start as an act and has an effect that meets the need.
   const formFix = (meets: (e: Effect) => boolean): Fix | null => {
@@ -159,8 +172,8 @@ export function decide(input: Input): Verdict {
       const ranged = has(n, 'at_least') || has(n, 'at_most');
       if (ranged && !whole(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
       const meets = (v: unknown) =>
-        (!has(n, 'is') || v === n.is) &&
-        (!has(n, 'not') || v !== n.not) &&
+        (!has(n, 'is') || flag(def, v) === flag(def, n.is)) &&
+        (!has(n, 'not') || flag(def, v) !== flag(def, n.not)) &&
         (!has(n, 'at_least') || (whole(v) && v >= (n.at_least as number))) &&
         (!has(n, 'at_most') || (whole(v) && v <= (n.at_most as number)));
       if (meets(value)) return { ok: true };

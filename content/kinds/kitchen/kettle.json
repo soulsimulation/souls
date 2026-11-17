@@ -3,8 +3,8 @@
   "kind": "eden:kettle",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "enum", "values": ["empty", "cold", "hot"], "default": "empty", "audience": "public" },
-    "heating": { "n": 2, "type": "bool", "default": false, "audience": "public" }
+    "water": { "n": 1, "type": "enum", "values": ["empty", "cold", "hot"], "default": "empty", "audience": { "rule": "everyone" } },
+    "heating": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "points": {
     "handle": { "role": "grip", "at_mm": [0, 220, 0] },
