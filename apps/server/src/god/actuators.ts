@@ -10,6 +10,7 @@ import { isContactActuator, CONTACT_REACH } from './contact-actuator.ts';
 import { isPosterAction, isWantedAction, posterProblem, posterPatch, wantedProblem, wantedPatch } from './poster-boards.ts';
 import { afterCommit } from '../edge/comms/store.ts';
 import { repairActions } from './mending.ts';
+import { formActions } from './forms-adapter.ts';
 import { SOURCE_NEAR_VESSEL, asPlant, asTank, drawWater, isWaterAction, waterActions, waterFields, waterPlant, waterRole, type Transfer } from './water.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -23,7 +24,8 @@ export const ACT_SIGHT = 30;
 export const ACT_REACH = 1.6;
 
 /** W5 (water.ts): a def's own actions plus those its water role gives it (draw-water at a tank, water a planter). */
-export const actionsOf = (def: StoredDef): Action[] => { const w = waterActions(def), r = repairActions(def); return w.length || r.length ? [...def.actions, ...w, ...r] : def.actions; };
+/** SA-F3a (forms-adapter.ts): an entry thing's forms are offered as its actions. */
+export const actionsOf = (def: StoredDef): Action[] => { const w = waterActions(def), r = repairActions(def), f = formActions(def); return w.length || r.length || f.length ? [...def.actions, ...w, ...r, ...f] : def.actions; };
 
 /** The fields of an entity's state the def's actions read or write, with defaults filled (public: Souls see them). */
 /** Soul Actions entry 42: a thing kept inside a container that is shut (a bowl in a closed drawer): nobody sees it, walks to
