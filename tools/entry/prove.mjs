@@ -31,7 +31,7 @@ import {apply, effects} from '../../packages/form-rules/src/effects.ts';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 /** The gates that need a runner (Engine v2). The verdict names them as waiting. */
 export const RUNNER_GATES = Object.freeze(['run', 'body-look', 'find']);
-const NO_SHAPE = 'looks.shape.make is missing: there is nothing to draw';
+const NO_SHAPE = 'looks.shape.shapes is missing: there is nothing to draw';
 
 /** The files a target names: a file or folder on disk, else a family under content/kinds. */
 export function filesOf(target) {
