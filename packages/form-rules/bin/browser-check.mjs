@@ -77,7 +77,7 @@ for (const v of inNode.slice(handWritten.length)) {
   const key = v.verdict === 'no' ? `no:${v.reason}` : v.verdict;
   tally[key] = (tally[key] ?? 0) + 1;
 }
-const digest = (list) => createHash('sha256').update(JSON.stringify(list)).digest('hex');
+const digest = (list) => createHash('sha256').update(JSON.stringify(list, (_k, v) => (typeof v === 'bigint' ? `${v}n` : v))).digest('hex');
 const report = {
   handWritten: handWritten.length,
   generated: generated.length,
