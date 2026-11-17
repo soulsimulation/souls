@@ -289,7 +289,7 @@ impl Intent {
             return not("an intent");
         };
         if m.keys().any(|k| *k == 0 || *k > 11) {
-            return not("an intent's fields are 1 to 10; none is a start time or a condition");
+            return not("an intent's fields are 1 to 11; none is a start time or a condition");
         }
         let fallbacks = match m.get(&9) {
             None => Vec::new(),
@@ -525,7 +525,10 @@ impl Answer {
 pub struct Hello {
     pub protocol: u64,
     pub build: Vec<u8>,
+    /// A version refusal: the client's version and the world's.
     pub refused: Option<(u64, u64)>,
+    /// Any other refusal a later world puts in field 3, by its name, so an old client still learns what it was.
+    pub other: Option<Name>,
 }
 
 impl Hello {
@@ -543,6 +546,8 @@ impl Hello {
                     (3, Value::Uint(ours)),
                 ]),
             ));
+        } else if let Some(why) = &self.other {
+            m.push((3, map(vec![(1, Value::Text(why.clone()))])));
         }
         encode(&map(m)).or_else(|e| refuse("encoding", e.to_string()))
     }
@@ -563,17 +568,17 @@ impl Hello {
         else {
             return bad();
         };
-        let refused = match m.get(&3) {
-            None => None,
+        let (refused, other) = match m.get(&3) {
+            None => (None, None),
             Some(Value::Map(r)) => {
                 let Some(Value::Text(why)) = r.get(&1) else {
                     return bad();
                 };
                 match (why.as_str(), r.get(&2), r.get(&3)) {
                     ("souls:protocol-version", Some(Value::Uint(a)), Some(Value::Uint(b))) => {
-                        Some((*a, *b))
+                        (Some((*a, *b)), None)
                     }
-                    _ => Some((0, 0)),
+                    _ => (None, Some(why.clone())),
                 }
             }
             Some(_) => return bad(),
@@ -582,6 +587,7 @@ impl Hello {
             protocol: *protocol,
             build: build.clone(),
             refused,
+            other,
         })
     }
 }
@@ -597,6 +603,7 @@ pub fn answer_hello(client: &[u8], world_protocol: u64, world_build: &[u8]) -> R
         protocol: world_protocol,
         build: world_build.to_vec(),
         refused: (c.protocol != world_protocol).then_some((c.protocol, world_protocol)),
+        other: None,
     }
     .to_bytes()
 }
@@ -699,6 +706,7 @@ pub fn intents_goldens() -> String {
         protocol: PROTOCOL,
         build: build.clone(),
         refused: None,
+        other: None,
     }
     .to_bytes();
     let refusal = hello

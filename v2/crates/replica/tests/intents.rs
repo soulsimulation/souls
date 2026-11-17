@@ -66,6 +66,7 @@ fn a2_an_old_client_reads_a_version_refusal_naming_both_versions() {
         protocol: PROTOCOL,
         build: build.clone(),
         refused: None,
+        other: None,
     }
     .to_bytes()
     .expect("bytes");
@@ -83,6 +84,20 @@ fn a2_an_old_client_reads_a_version_refusal_naming_both_versions() {
     let same =
         Hello::read(&answer_hello(&old, PROTOCOL, &build).expect("an answer")).expect("decodes");
     assert_eq!(same.refused, None);
+    // A refusal of another kind, from a later world, is read by its name.
+    let later = Hello {
+        protocol: PROTOCOL + 1,
+        build: build.clone(),
+        refused: None,
+        other: Some(replica::encode::Name::new("souls:world-asleep").expect("a name")),
+    }
+    .to_bytes()
+    .expect("bytes");
+    let read = Hello::read(&later).expect("decodes");
+    assert_eq!(
+        read.other.as_ref().map(|n| n.as_str()),
+        Some("souls:world-asleep")
+    );
 }
 
 #[test]
