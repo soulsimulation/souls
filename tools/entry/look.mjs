@@ -12,7 +12,7 @@
 // What the picture is drawn from: `looks.shape` of the entry, the parts of a thing (round, shapes, palette, tags) written in whole millimetres
 // (the format has no floating-point number and names nothing of today's engine, #2855). look.mjs wraps it for today's studio
 // and converts it to metres when it is
-// drawn: a length (at, size, r, r2, h, round, the points of a profile or a path) is divided by 1000, an angle (roll, arc,
+// drawn: a length (at, size, r, r2, h, round, the points of a profile, a path or a polygon) is divided by 1000, an angle (roll, arc,
 // yaw, pitch) is whole millidegrees and becomes radians, a count (segments) stays. A number under any other key is refused
 // by name, so a unit is never guessed. A state value the entry holds as a whole number reaches the picture as the number
 // the viewer draws with (permille / 1000); the viewer, not the entry, uses fractions, and nothing here decides anything
@@ -42,9 +42,12 @@ export function valuesOf(f) {
 /** The number the viewer draws a whole-number state value with. */
 const drawn = (f, v) => (f.type === 'int' && f.unit === 'permille' ? v / 1000 : v);
 
+/** The state fields a picture can show: a schedule, a list or words by reference change no part, so they are not drawn. */
+const pictured = entry => Object.entries(entry.state ?? {}).filter(([, f]) => !['schedule', 'list', 'text'].includes(f.type));
+
 /** The frames of an entry: its default state, then each field varied alone. The label names the field and its value. */
 export function framesOf(entry) {
-  const fields = Object.entries(entry.state ?? {}).sort((a, b) => a[1].n - b[1].n);
+  const fields = pictured(entry).sort((a, b) => a[1].n - b[1].n);
   const base = Object.fromEntries(fields.map(([k, f]) => [k, f.type === 'timed' ? f.default.value : f.default]));
   const frames = [{label: fields.length ? `${fields.map(([k]) => `${k}=${base[k]}`).join(' ')} (default)` : 'no state', values: base}];
   for (const [k, f] of fields) for (const v of valuesOf(f).slice(1)) frames.push({label: `${k}=${v}`, values: {...base, [k]: v}});
@@ -52,7 +55,7 @@ export function framesOf(entry) {
 }
 
 const metres = v => v.map(x => x / 1000);
-const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'p', 'pivot', 'width', 'height', 'depth']);
+const LENGTH_KEYS = new Set(['at', 'size', 'r', 'r2', 'h', 'round', 'profile', 'path', 'polygon', 'p', 'pivot', 'width', 'height', 'depth']);
 const ANGLE_KEYS = new Set(['roll', 'arc', 'yaw', 'pitch']);
 const COUNT_KEYS = new Set(['segments']);
 
@@ -71,7 +74,7 @@ export function shapeInMetres(node, key = '') {
 export function defOf(entry) {
   const name = `core-${entry.kind.split(':')[1]}`, shape = entry.looks?.shape;
   if (!shape?.shapes) return null;
-  const state = Object.fromEntries(Object.entries(entry.state ?? {}).map(([k, f]) => [k,
+  const state = Object.fromEntries(pictured(entry).map(([k, f]) => [k,
     f.type === 'bool' ? {type: 'bool', default: f.default}
       : f.type === 'enum' ? {type: 'enum', values: f.values, default: f.default}
         : {type: 'number', default: drawn(f, f.type === 'timed' ? f.default.value : f.default)}]));

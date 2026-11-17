@@ -1,0 +1,14 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:apple",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [90, 100, 90] },
+  "motion": { "how": "one_hand" },
+  "loose": { "us": 86400000000 },
+  "looks": {
+    "model": "look:apple",
+    "shape": {"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,2],[26,0],[41,24],[40,60],[22,84],[0,78]],"segments":9,"tint":"skin"},{"kind":"cyl","at":[0,92,0],"r":2,"h":20,"segments":5,"tint":"stem"},{"kind":"box","at":[12,94,0],"size":[22,2,12],"round":0,"tint":"leaf"}],"palette":{"skin":"#b5322a","flesh":"#efe4c0","stem":"#5a3d22","leaf":"#4f7a32"},"tags":["kitchen","item","food","edible","recorded-item"],"round":4}
+  },
+  "text": { "card": "A red apple, carried in one hand.", "food": "food", "fruit": "fruit" },
+  "card": { "text": "card", "category": "food", "synonyms": ["fruit"] }
+}

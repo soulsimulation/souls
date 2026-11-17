@@ -95,10 +95,13 @@ function rules(entry) {
       if (a.select && wantOf && a.select.of !== wantOf) add('targets', `${p}.takes.${an}.select.of`, `argument "${an}" is a ${a.type} but its selector picks ${a.select.of}`, `set select.of to "${wantOf}"`);
       if (!used.has(an)) add('targets', `${p}.takes.${an}`, `argument "${an}" is taken but nothing in the form uses it`, `use {"arg": "${an}"} in a need, step or effect, or remove it`);
     }
-    // makes: a create is paid for in its own form (something is removed, or a field the form needed is spent).
+    // makes: a create is paid for in its own form (something is removed, or a field the form needed is spent). A stock's
+    // take form is paid by its count, which the engine lowers by one in the same batch (SA-F12): the format forbids it
+    // setting the count itself.
+    const stockTake = Object.values(entry.stock ?? {}).some(s => s?.take === fn);
     (f.effects ?? []).forEach((e, i) => {
       if (e.change !== 'create') return;
-      const spent = f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && n.field === x.field));
+      const spent = stockTake || f.effects.some(x => x.change === 'remove') || f.effects.some(x => x.change === 'set' && (f.needs ?? []).some(n => n.need === 'state' && n.field === x.field));
       if (!spent) add('makes', `${p}.effects.${i}`, `creates ${e.kind} and pays for nothing`, 'add a remove effect for what it is made from, or a set of a field the form needs (spending it)');
     });
     // no-waiting: a timer that arms its own form again waits on a condition by polling; a name that counts a time of day.

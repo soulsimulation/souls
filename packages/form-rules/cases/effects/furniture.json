@@ -1,0 +1,1323 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Eden's tables and counters (SA-X27, #2917): wiping a spill, sitting at a table's own seat, a workbench's shavings, a desk's pages, an office computer, a kiosk's shutter and lock, and apples taken from a stall and a shop counter.",
+  "cases": [
+    {
+      "name": "round_table_wiped_clean",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:round_table",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rf1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "clean",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:round_table",
+          "fields": {
+            "clean": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "table_wiped_clean",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:table",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rf2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "clean",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:table",
+          "fields": {
+            "clean": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "long_table_wiped_clean",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:long_table",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rf3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "clean",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:long_table",
+          "fields": {
+            "clean": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "counter_wiped_clean",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:counter",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rf4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "clean",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:counter",
+          "fields": {
+            "clean": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "picnic_table_wiped_then_sat_at",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:picnic_table",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rf5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "clean",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "sit",
+            "args": {
+              "seat": "seat_2"
+            }
+          },
+          "receipt": "rf6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "seat_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:picnic_table",
+          "fields": {
+            "clean": 1
+          },
+          "slots": {
+            "seat_2": [
+              "b1"
+            ]
+          }
+        },
+        "room": {
+          "loose": [
+            "t1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "parasol_table_wiped_then_sat_at",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:parasol_table",
+            "fields": {
+              "clean": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "wipe"
+          },
+          "receipt": "rf7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "clean",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:wiped",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "sit",
+            "args": {
+              "seat": "seat_2"
+            }
+          },
+          "receipt": "rf8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "seat_2"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sat_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:parasol_table",
+          "fields": {
+            "clean": 1
+          },
+          "slots": {
+            "seat_2": [
+              "b1"
+            ]
+          }
+        },
+        "room": {
+          "loose": [
+            "t1"
+          ]
+        }
+      }
+    },
+    {
+      "name": "workbench_build_repair_work_tidy_tidy_again",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:workbench"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "build"
+          },
+          "receipt": "rf9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shavings",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:built",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "repair"
+          },
+          "receipt": "rf10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shavings",
+                "n": 1,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:repaired",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "work"
+          },
+          "receipt": "rf11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shavings",
+                "n": 1,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:worked",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "tidy"
+          },
+          "receipt": "rf12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shavings",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tidied",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "tidy"
+          },
+          "receipt": "rf13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shavings",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tidied",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:workbench",
+          "fields": {
+            "shavings": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "desk_two_pages_written",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "write"
+          },
+          "receipt": "rf14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pages",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:page_written",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "write"
+          },
+          "receipt": "rf15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pages",
+                "n": 1,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:page_written",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:desk",
+          "fields": {
+            "pages": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "office_desk_switched_off_and_on",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:office_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_off"
+          },
+          "receipt": "rf16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "computer_on",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:computer_switched_off",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "switch_on"
+          },
+          "receipt": "rf17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "computer_on",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:computer_switched_on",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:office_desk",
+          "fields": {
+            "computer_on": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "kiosk_open_close_lock_refused_unlock_open",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:kiosk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "open"
+          },
+          "receipt": "rf18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shutter_opened",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "close"
+          },
+          "receipt": "rf19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shutter_closed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "lock"
+          },
+          "receipt": "rf20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "locked",
+                "n": 2,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:locked",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "open"
+          },
+          "receipt": "rf21",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1,
+            "fix": {
+              "form": "unlock"
+            }
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "unlock"
+          },
+          "receipt": "rf22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "locked",
+                "n": 2,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:unlocked",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "open"
+          },
+          "receipt": "rf23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shutter_opened",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:kiosk",
+          "fields": {
+            "open": 1,
+            "locked": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "market_stall_queue_take_an_apple_leave_then_mind",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:market_stall"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "queue"
+          },
+          "receipt": "rf24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "queue",
+                "n": 1,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:joined_the_queue",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apple"
+          },
+          "receipt": "rf25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rf25.0",
+                "kind": "eden:apple",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:apple_taken",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "leave_queue"
+          },
+          "receipt": "rf26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "queue",
+                "n": 1,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:left_the_queue",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "mind"
+          },
+          "receipt": "rf27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "minder",
+                "n": 2,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:stall_minded",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "stop_minding"
+          },
+          "receipt": "rf28",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "minder",
+                "n": 2,
+                "end": "b1"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:stall_left",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "b1": {
+          "hands": {
+            "left": "rf25.0",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "shop_counter_two_apples_then_hands_full",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:shop_counter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apple"
+          },
+          "receipt": "rf29",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rf29.0",
+                "kind": "eden:apple",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:apple_taken",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apple"
+          },
+          "receipt": "rf30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "create",
+                "node": "rf30.0",
+                "kind": "eden:apple",
+                "to": {
+                  "node": "b1",
+                  "hand": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:apple_taken",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "take_apple"
+          },
+          "receipt": "rf31",
+          "expect": {
+            "verdict": "no",
+            "reason": "no_free_hand",
+            "need": 1
+          }
+        }
+      ],
+      "after": {
+        "b1": {
+          "hands": {
+            "left": "rf29.0",
+            "right": "rf30.0"
+          }
+        }
+      }
+    }
+  ]
+}

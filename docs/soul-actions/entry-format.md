@@ -234,8 +234,9 @@ A row of places names the slots in it with `row` and `place` (1 at the first end
 back row" resolve (Engine v2 E2, #2709). A middle place names no end. Cases are data (`tools/entry/cases/slots.json`).
 
 `looks.shape` is the parts of the thing the look gate draws (`node tools/entry/look.mjs`): `shapes`, `round`, `palette`,
-`tags`, in whole millimetres, with an angle in whole millidegrees. The format has no floating-point number and
-`look.mjs` converts to metres only when it draws.
+`tags`, in whole millimetres (a polygon's points too), with an angle in whole millidegrees. The format has no floating-point
+number and `look.mjs` converts to metres only when it draws; a schedule, a list or a text field changes no part, so a sheet
+does not vary it.
 
 **The code hatch** (SA-F9, [#2850](https://github.com/soulsimulation/souls/issues/2850); Engine v2 F8
 [#2823](https://github.com/soulsimulation/souls/issues/2823), T9 [#2663](https://github.com/soulsimulation/souls/issues/2663)).
@@ -407,7 +408,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 |---|---|---|
 | `exact` | a float or a count in ticks | yes |
 | `targets` | an argument whose selector picks the wrong list, or that nothing uses | partly (closed selector lists) |
-| `makes` | a `create` that pays for nothing in its own form | where it appears (`into`) |
+| `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
 | `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
