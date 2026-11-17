@@ -300,9 +300,10 @@ pub fn load(text: &str) -> R<Import> {
         forms.insert(r.to_owned(), s(k, "form")?.to_owned());
     }
 
-    // --- Ids: one scope for this world's one zone writer. ------------------------------------------------------------
+    // --- Ids: one scope for this world's one zone writer (T3: a new scope for every world; `world` names it). ----------
+    let world = f.get("world").and_then(Json::str).unwrap_or("eden-2026");
     let mut scope = [0u8; 16];
-    scope.copy_from_slice(&sha256(b"souls/import-eden/eden-2026")[..16]);
+    scope.copy_from_slice(&sha256(format!("souls/import-eden/{world}").as_bytes())[..16]);
     let mut b = Build {
         mint: Minter::new(Scope(scope)),
         nodes: BTreeMap::new(),
