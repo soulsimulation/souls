@@ -130,33 +130,21 @@
     "model": "look:firewood",
     "table": [
       {
-        "part": "row_top",
+        "part": "fill",
         "field": "logs",
-        "do": "show",
+        "do": "scale",
+        "axis": "y",
         "range": [
-          8,
-          9
+          0,
+          12
         ],
         "to": [
           0,
-          1
+          1000
         ]
       },
       {
-        "part": "row_middle",
-        "field": "logs",
-        "do": "show",
-        "range": [
-          4,
-          5
-        ],
-        "to": [
-          0,
-          1
-        ]
-      },
-      {
-        "part": "row_bottom",
+        "part": "fill",
         "field": "logs",
         "do": "show",
         "range": [
@@ -169,7 +157,7 @@
         ]
       }
     ],
-    "shape": {"round":15,"shapes":[{"kind":"cyl","at":[-380,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_bottom"},{"kind":"cyl","at":[-190,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"row_bottom"},{"kind":"cyl","at":[0,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_bottom"},{"kind":"cyl","at":[190,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"row_bottom"},{"kind":"cyl","at":[380,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_bottom"},{"kind":"cyl","at":[-285,255,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_middle"},{"kind":"cyl","at":[-95,255,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"row_middle"},{"kind":"cyl","at":[95,255,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_middle"},{"kind":"cyl","at":[285,255,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"row_middle"},{"kind":"cyl","at":[-190,420,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_top"},{"kind":"cyl","at":[0,420,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"row_top"},{"kind":"cyl","at":[190,420,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"row_top"},{"kind":"extrude","at":[-620,15,0],"polygon":[[-15,-15],[15,-15],[15,15],[-15,15]],"h":590,"tint":"post"},{"kind":"extrude","at":[620,15,0],"polygon":[[-15,-15],[15,-15],[15,15],[-15,15]],"h":590,"tint":"post"},{"kind":"box","at":[0,680,0],"size":[1400,40,700],"round":0,"tint":"roof","pitch":4584}],"palette":{"log":"#8c6a48","log2":"#9c7a52","post":"#5e4630","roof":"#4a4f4d"},"tags":["prop","street","firewood","wood","farm"]}
+    "shape": {"round":15,"shapes":[{"kind":"cyl","at":[-380,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-190,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[0,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[190,90,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[380,90,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-285,255,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-95,255,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[95,255,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[285,255,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[-190,420,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"cyl","at":[0,420,0],"r":90,"h":600,"segments":6,"tint":"log","pitch":90000,"role":"fill"},{"kind":"cyl","at":[190,420,0],"r":90,"h":600,"segments":6,"tint":"log2","pitch":90000,"role":"fill"},{"kind":"extrude","at":[-620,15,0],"polygon":[[-15,-15],[15,-15],[15,15],[-15,15]],"h":590,"tint":"post"},{"kind":"extrude","at":[620,15,0],"polygon":[[-15,-15],[15,-15],[15,15],[-15,15]],"h":590,"tint":"post"},{"kind":"box","at":[0,680,0],"size":[1400,40,700],"round":0,"tint":"roof","pitch":4584}],"palette":{"log":"#8c6a48","log2":"#9c7a52","post":"#5e4630","roof":"#4a4f4d"},"tags":["prop","street","firewood","wood","farm"]}
   },
   "text": {
     "card": "A covered stack of split firewood: take a log for the fire.",

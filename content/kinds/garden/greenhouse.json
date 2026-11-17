@@ -131,7 +131,7 @@
     "model": "look:greenhouse",
     "table": [
       {
-        "part": "vent",
+        "part": "lid",
         "field": "vent_open",
         "do": "rotate",
         "axis": "x",
@@ -142,7 +142,7 @@
         "over_us": 2000000
       }
     ],
-    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,50,0],"size":[6000,100,4000],"round":0,"tint":"pad"},{"kind":"box","at":[0,1300,-1990],"size":[6000,2400,20],"round":0,"tint":"glass"},{"kind":"box","at":[0,1300,1990],"size":[6000,2400,20],"round":0,"tint":"glass"},{"kind":"box","at":[-2990,1300,0],"size":[20,2400,4000],"round":0,"tint":"glass"},{"kind":"box","at":[2990,1300,0],"size":[20,2400,4000],"round":0,"tint":"glass"},{"kind":"box","at":[0,3050,-1000],"size":[6000,20,2300],"round":0,"tint":"glass","pitch":-30000},{"kind":"box","at":[0,3050,1000],"size":[6000,20,2300],"round":0,"tint":"glass","pitch":30000},{"kind":"box","at":[0,3620,0],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,2500,-2000],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,2500,2000],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,1200,2010],"size":[1000,2200,40],"round":0,"tint":"frame"},{"kind":"box","at":[1500,3300,-500],"size":[1200,30,800],"round":0,"tint":"vent","pitch":-30000,"role":"vent","pivot":[1500,3600,0]},{"kind":"box","at":[-1500,600,0],"size":[1000,900,3000],"round":0,"tint":"bench"},{"kind":"sphere","at":[-1500,1200,-800],"r":300,"segments":7,"tint":"leaf"},{"kind":"sphere","at":[-1500,1200,800],"r":300,"segments":7,"tint":"leaf"}],"palette":{"pad":"#9a9488","glass":"#cfe6ea","frame":"#e9eee9","vent":"#bcd8de","bench":"#7a5a3a","leaf":"#4f8a3a"},"tags":["building","greenhouse","garden","glass"]}
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,50,0],"size":[6000,100,4000],"round":0,"tint":"pad"},{"kind":"box","at":[0,1300,-1990],"size":[6000,2400,20],"round":0,"tint":"glass"},{"kind":"box","at":[0,1300,1990],"size":[6000,2400,20],"round":0,"tint":"glass"},{"kind":"box","at":[-2990,1300,0],"size":[20,2400,4000],"round":0,"tint":"glass"},{"kind":"box","at":[2990,1300,0],"size":[20,2400,4000],"round":0,"tint":"glass"},{"kind":"box","at":[0,3050,-1000],"size":[6000,20,2300],"round":0,"tint":"glass","pitch":-30000},{"kind":"box","at":[0,3050,1000],"size":[6000,20,2300],"round":0,"tint":"glass","pitch":30000},{"kind":"box","at":[0,3620,0],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,2500,-2000],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,2500,2000],"size":[6000,80,80],"round":0,"tint":"frame"},{"kind":"box","at":[0,1200,2010],"size":[1000,2200,40],"round":0,"tint":"frame"},{"kind":"box","at":[1500,3300,-500],"size":[1200,30,800],"round":0,"tint":"vent","pitch":-30000,"role":"lid","pivot":[1500,3600,0]},{"kind":"box","at":[-1500,600,0],"size":[1000,900,3000],"round":0,"tint":"bench"},{"kind":"sphere","at":[-1500,1200,-800],"r":300,"segments":7,"tint":"leaf"},{"kind":"sphere","at":[-1500,1200,800],"r":300,"segments":7,"tint":"leaf"}],"palette":{"pad":"#9a9488","glass":"#cfe6ea","frame":"#e9eee9","vent":"#bcd8de","bench":"#7a5a3a","leaf":"#4f8a3a"},"tags":["building","greenhouse","garden","glass"]}
   },
   "text": {
     "card": "A glasshouse for plants: walk in, open the roof vent on a hot day.",
