@@ -1,0 +1,44 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:checked_cloth",
+  "owner": "thing",
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 25, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [280, 50, 240]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:checked_cloth",
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,8,0],"size":[280,16,240],"tint":"cream"},{"kind":"box","at":[-100,17,-80],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-60,17,-80],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-20,17,-80],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[20,17,-80],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[60,17,-80],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[100,17,-80],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-100,17,-40],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-60,17,-40],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-20,17,-40],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[20,17,-40],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[60,17,-40],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[100,17,-40],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-100,17,0],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-60,17,0],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-20,17,0],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[20,17,0],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[60,17,0],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[100,17,0],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-100,17,40],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-60,17,40],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-20,17,40],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[20,17,40],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[60,17,40],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[100,17,40],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-100,17,80],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[-60,17,80],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[-20,17,80],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[20,17,80],"size":[38,2,38],"tint":"blue"},{"kind":"box","at":[60,17,80],"size":[38,2,38],"tint":"cream"},{"kind":"box","at":[100,17,80],"size":[38,2,38],"tint":"blue"}],"palette":{"cream":"#e8ce85","blue":"#457e9a"},"tags":["art","textile","cloth","item"]}
+  },
+  "text": {
+    "card": "A small checked woven cloth, made on a table loom: take it.",
+    "art": "art",
+    "cloth": "cloth",
+    "textile": "textile"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": ["cloth", "textile"]
+  }
+}

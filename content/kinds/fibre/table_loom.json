@@ -1,0 +1,115 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:table_loom",
+  "owner": "thing",
+  "state": {
+    "thread": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 1100]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": ["eden:striped_cloth", "eden:checked_cloth"],
+      "most": 1,
+      "at_mm": [350, 1000, 0],
+      "fits_mm": [320, 80, 320]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [1200, 1420, 600]
+  },
+  "forms": {
+    "weave_stripes": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "thread", "at_least": 1, "says": "no_thread"},
+        {"need": "slot_free", "slot": "out", "says": "take_cloth_first"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "thread", "by": -1, "event": "thread_used"},
+        {"change": "create", "kind": "eden:striped_cloth", "into": "out", "event": "woven_stripes"}
+      ]
+    },
+    "weave_checks": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "thread", "at_least": 1, "says": "no_thread"},
+        {"need": "slot_free", "slot": "out", "says": "take_cloth_first"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "thread", "by": -1, "event": "thread_used"},
+        {"change": "create", "kind": "eden:checked_cloth", "into": "out", "event": "woven_checks"}
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:table_loom",
+    "table": [
+      {
+        "part": "fill",
+        "field": "thread",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "knob",
+        "field": "thread",
+        "do": "show",
+        "range": [1, 2],
+        "to": [0, 1]
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,965,0],"size":[1200,30,600],"tint":"wood"},{"kind":"box","at":[-500,475,-200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[-500,475,200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,-200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[500,475,200],"size":[60,950,60],"tint":"wood"},{"kind":"box","at":[-480,1200,-100],"size":[40,440,40],"tint":"wood"},{"kind":"box","at":[20,1200,-100],"size":[40,440,40],"tint":"wood"},{"kind":"box","at":[-230,1000,-100],"size":[540,40,40],"tint":"wood"},{"kind":"box","at":[-230,1400,-100],"size":[540,40,40],"tint":"wood"},{"kind":"box","at":[-430,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[-365,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[-300,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[-235,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[-170,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[-105,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[-40,1200,-75],"size":[8,360,8],"tint":"thread"},{"kind":"box","at":[350,990,0],"size":[360,20,400],"tint":"tray"},{"kind":"cyl","at":[-300,1020,180],"r":50,"h":80,"segments":8,"tint":"blue","role":"fill"},{"kind":"cyl","at":[-100,1020,180],"r":50,"h":80,"segments":8,"tint":"cream","role":"knob"}],"palette":{"wood":"#986b42","tray":"#343e41","thread":"#cbbbaa","blue":"#457e9a","cream":"#e8ce85"},"tags":["art","weaving","loom","object"]}
+  },
+  "text": {
+    "card": "A small table loom with two portions of thread: weave striped or checked cloth.",
+    "no_thread": "This loom has no supplied thread portion left.",
+    "take_cloth_first": "Take the item off the output surface before weaving cloth.",
+    "put_down_first": "Put down what you are holding before weaving cloth.",
+    "art": "art",
+    "loom": "loom",
+    "weave": "weave",
+    "cloth": "cloth",
+    "howto_weave": "With empty hands, weave stripes or checks for ten seconds; take the cloth off the tray before weaving again."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": ["loom", "weave", "cloth"]
+  },
+  "howtos": {
+    "weave": {
+      "text": "howto_weave",
+      "steps": [
+        {"form": "weave_stripes"},
+        {"form": "weave_checks"}
+      ]
+    }
+  }
+}

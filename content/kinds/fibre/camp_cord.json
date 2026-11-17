@@ -1,0 +1,206 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_cord",
+  "owner": "thing",
+  "state": {
+    "prepared": {
+      "n": 1,
+      "type": "enum",
+      "values": ["loose", "loop", "guyline"],
+      "default": "loose",
+      "audience": {"rule": "everyone"}
+    },
+    "binding": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [0, 30, 0]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [400, 60, 300]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    },
+    "tie_loop": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "board": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cordage_board",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "state", "field": "prepared", "is": "loose", "says": "needs_loose"},
+        {"need": "enough", "says": "needs_loose"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "board"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "binding",
+          "from": {"arg": "board"},
+          "into": "this",
+          "amount": 1,
+          "event": "binding_taken"
+        },
+        {"change": "set", "field": "prepared", "to": "loop", "event": "tied_loop"}
+      ]
+    },
+    "tie_guyline": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "board": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cordage_board",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "state", "field": "prepared", "is": "loose", "says": "needs_loose"},
+        {"need": "enough", "says": "needs_loose"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "board"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "binding",
+          "from": {"arg": "board"},
+          "into": "this",
+          "amount": 1,
+          "event": "binding_taken"
+        },
+        {"change": "set", "field": "prepared", "to": "guyline", "event": "tied_guyline"}
+      ]
+    },
+    "untie": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "board": {
+          "type": "thing",
+          "select": {
+            "of": "things",
+            "kind": "eden:cordage_board",
+            "in": "here",
+            "anchor": "this",
+            "order": "nearest",
+            "rank": 1
+          }
+        }
+      },
+      "needs": [
+        {"need": "state", "field": "prepared", "not": "loose", "says": "return_first"},
+        {"need": "room", "says": "return_first"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": {"arg": "board"}
+        },
+        {"step": "wait", "us": 10000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "binding",
+          "from": "this",
+          "into": {"arg": "board"},
+          "amount": 1,
+          "event": "binding_returned"
+        },
+        {"change": "set", "field": "prepared", "to": "loose", "event": "untied"}
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:camp_cord",
+    "table": [
+      {
+        "part": "rope",
+        "field": "prepared",
+        "do": "show",
+        "at": {"loose": 1, "loop": 0, "guyline": 0}
+      },
+      {
+        "part": "arm.l",
+        "field": "prepared",
+        "do": "show",
+        "at": {"loose": 0, "loop": 1, "guyline": 0}
+      },
+      {
+        "part": "arm.r",
+        "field": "prepared",
+        "do": "show",
+        "at": {"loose": 0, "loop": 0, "guyline": 1}
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,12,-100],"size":[360,24,18],"tint":"cord","role":"rope"},{"kind":"box","at":[0,12,20],"size":[360,24,18],"tint":"cord","role":"rope"},{"kind":"box","at":[0,12,140],"size":[360,24,18],"tint":"cord","role":"rope"},{"kind":"box","at":[-170,12,-40],"size":[18,24,120],"tint":"cord","role":"rope"},{"kind":"box","at":[170,12,80],"size":[18,24,120],"tint":"cord","role":"rope"},{"kind":"box","at":[-150,12,0],"size":[24,24,260],"tint":"cord","role":"arm.l"},{"kind":"box","at":[150,12,0],"size":[24,24,260],"tint":"cord","role":"arm.l"},{"kind":"box","at":[0,12,-120],"size":[300,24,24],"tint":"cord","role":"arm.l"},{"kind":"box","at":[0,12,120],"size":[300,24,24],"tint":"cord","role":"arm.l"},{"kind":"box","at":[0,30,-120],"size":[70,24,50],"tint":"binding","role":"arm.l"},{"kind":"box","at":[0,12,-80],"size":[360,24,18],"tint":"cord","role":"arm.r"},{"kind":"box","at":[0,12,-40],"size":[360,24,18],"tint":"cord","role":"arm.r"},{"kind":"box","at":[0,12,0],"size":[360,24,18],"tint":"cord","role":"arm.r"},{"kind":"box","at":[0,12,40],"size":[360,24,18],"tint":"cord","role":"arm.r"},{"kind":"box","at":[0,12,80],"size":[360,24,18],"tint":"cord","role":"arm.r"},{"kind":"box","at":[-170,12,0],"size":[18,24,160],"tint":"cord","role":"arm.r"},{"kind":"box","at":[170,12,0],"size":[18,24,160],"tint":"cord","role":"arm.r"},{"kind":"box","at":[0,30,0],"size":[60,24,200],"tint":"binding","role":"arm.r"}],"palette":{"cord":"#dbab48","binding":"#42696e"},"tags":["camping","cord","item"]}
+  },
+  "text": {
+    "card": "A camp cord: at a cordage board, tie it as a loop or a guyline, or untie it.",
+    "needs_loose": "This operation needs loose cord and the available reusable binding; untie a prepared cord first.",
+    "return_first": "Return one prepared cord with its binding to this board before untying.",
+    "put_down_first": "Put down what you are holding before preparing cord.",
+    "camp": "camp",
+    "cord": "cord",
+    "rope": "rope",
+    "guyline": "guyline"
+  },
+  "card": {
+    "text": "card",
+    "category": "camp",
+    "synonyms": ["cord", "rope", "guyline"]
+  }
+}

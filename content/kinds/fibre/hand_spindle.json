@@ -1,0 +1,234 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hand_spindle",
+  "owner": "thing",
+  "state": {
+    "fibre": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 6,
+      "min": 0,
+      "max": 6,
+      "audience": {"rule": "everyone"}
+    },
+    "yarn": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "audience": {"rule": "everyone"}
+    },
+    "twist": {
+      "n": 3,
+      "type": "enum",
+      "values": ["none", "soft", "firm", "hard"],
+      "default": "none",
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [110, 230, 0]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 1100]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [480, 380, 340]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "hand", "free": true}
+      ],
+      "steps": [
+        {"step": "take"}
+      ],
+      "effects": [
+        {"change": "reparent", "what": "this", "into": "actor_hand", "event": "taken"}
+      ]
+    },
+    "spin_soft": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "amount": {"type": "count"}
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "not_enough_fibre"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "fibre",
+          "from": "this",
+          "into": "this",
+          "into_field": "yarn",
+          "amount": {"arg": "amount"},
+          "event": "spun"
+        },
+        {"change": "set", "field": "twist", "to": "soft", "event": "twist_set"}
+      ]
+    },
+    "spin_firm": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "amount": {"type": "count"}
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "not_enough_fibre"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "fibre",
+          "from": "this",
+          "into": "this",
+          "into_field": "yarn",
+          "amount": {"arg": "amount"},
+          "event": "spun"
+        },
+        {"change": "set", "field": "twist", "to": "firm", "event": "twist_set"}
+      ]
+    },
+    "spin_hard": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "amount": {"type": "count"}
+      },
+      "needs": [
+        {"need": "hand", "empty": true, "says": "put_down_first"},
+        {"need": "enough", "says": "not_enough_fibre"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "fibre",
+          "from": "this",
+          "into": "this",
+          "into_field": "yarn",
+          "amount": {"arg": "amount"},
+          "event": "spun"
+        },
+        {"change": "set", "field": "twist", "to": "hard", "event": "twist_set"}
+      ]
+    },
+    "unspin": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "amount": {"type": "count"}
+      },
+      "needs": [
+        {"need": "state", "field": "yarn", "at_least": 1, "says": "no_winding"},
+        {"need": "enough", "says": "no_winding"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "yarn",
+          "from": "this",
+          "into": "this",
+          "into_field": "fibre",
+          "amount": {"arg": "amount"},
+          "event": "unspun"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:hand_spindle",
+    "table": [
+      {
+        "part": "fill",
+        "field": "fibre",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "fill",
+        "field": "fibre",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 6],
+        "to": [0, 1000]
+      },
+      {
+        "part": "rope",
+        "field": "yarn",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "rope",
+        "field": "yarn",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 6],
+        "to": [0, 1000]
+      },
+      {
+        "part": "knob",
+        "field": "twist",
+        "do": "tint",
+        "at": {"none": "#ab9a86", "soft": "#c9a3b9", "firm": "#a16d8c", "hard": "#6e3a5a"}
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,15,0],"size":[480,30,340],"tint":"wood"},{"kind":"cyl","at":[110,190,0],"r":12,"h":340,"segments":6,"tint":"wood"},{"kind":"cyl","at":[110,70,0],"r":65,"h":25,"segments":8,"tint":"wood"},{"kind":"sphere","at":[-120,75,-70],"r":55,"segments":6,"tint":"fibre","role":"fill","pivot":[-85,30,0]},{"kind":"sphere","at":[-50,80,-50],"r":50,"segments":6,"tint":"fibre","role":"fill","pivot":[-85,30,0]},{"kind":"sphere","at":[-110,80,30],"r":52,"segments":6,"tint":"fibre","role":"fill","pivot":[-85,30,0]},{"kind":"sphere","at":[-45,70,60],"r":48,"segments":6,"tint":"fibre","role":"fill","pivot":[-85,30,0]},{"kind":"sphere","at":[-90,115,-5],"r":45,"segments":6,"tint":"fibre","role":"fill","pivot":[-85,30,0]},{"kind":"cyl","at":[110,175,0],"r":45,"h":156,"segments":6,"tint":"yarn","pivot":[110,97,0],"role":"rope"},{"kind":"cyl","at":[110,335,0],"r":40,"h":22,"segments":8,"tint":"marker","role":"knob"}],"palette":{"wood":"#805a3e","fibre":"#ead7a4","yarn":"#d8c08a","marker":"#ab9a86"},"tags":["tool","textile","spindle","item"]}
+  },
+  "text": {
+    "card": "A hand spindle with six portions of fibre: spin them into yarn, or unspin.",
+    "not_enough_fibre": "Not enough loose fibre remains on this spindle; unspin a retained winding first.",
+    "no_winding": "This spindle has no yarn winding to recover; spin some supplied fibre first.",
+    "put_down_first": "Put down held objects before spinning or recovering fibre.",
+    "textile": "textile",
+    "spindle": "spindle",
+    "spin": "spin",
+    "yarn": "yarn",
+    "howto_spin": "Set the spindle on a table, empty your hands, and spin one or two portions soft, firm or hard."
+  },
+  "card": {
+    "text": "card",
+    "category": "textile",
+    "synonyms": ["spindle", "spin", "yarn"]
+  },
+  "howtos": {
+    "spin": {
+      "text": "howto_spin",
+      "steps": [
+        {"form": "spin_soft"}
+      ]
+    }
+  }
+}

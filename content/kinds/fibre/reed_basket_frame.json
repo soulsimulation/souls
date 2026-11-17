@@ -1,0 +1,213 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:reed_basket_frame",
+  "owner": "thing",
+  "state": {
+    "reeds": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 8,
+      "min": 0,
+      "max": 8,
+      "audience": {"rule": "everyone"}
+    },
+    "natural": {
+      "n": 2,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 8,
+      "audience": {"rule": "everyone"}
+    },
+    "rust": {
+      "n": 3,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 8,
+      "audience": {"rule": "everyone"}
+    },
+    "open": {
+      "n": 4,
+      "type": "bool",
+      "default": false,
+      "audience": {"rule": "everyone"}
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [0, 0, 1150]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [0, 1035, 0],
+      "fits_mm": [180, 230, 180]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [800, 1380, 800]
+  },
+  "forms": {
+    "weave_natural": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "courses": {"type": "count"}
+      },
+      "needs": [
+        {"need": "state", "field": "open", "is": false, "says": "finished_in_use"},
+        {"need": "enough", "says": "not_enough_reeds"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "reeds",
+          "from": "this",
+          "into": "this",
+          "into_field": "natural",
+          "amount": {"arg": "courses"},
+          "event": "woven_natural"
+        }
+      ]
+    },
+    "weave_rust": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "courses": {"type": "count"}
+      },
+      "needs": [
+        {"need": "state", "field": "open", "is": false, "says": "finished_in_use"},
+        {"need": "enough", "says": "not_enough_reeds"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 4000000}
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "reeds",
+          "from": "this",
+          "into": "this",
+          "into_field": "rust",
+          "amount": {"arg": "courses"},
+          "event": "woven_rust"
+        }
+      ]
+    },
+    "finish": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {"need": "state", "field": "reeds", "at_most": 0, "says": "weave_all_first"},
+        {"need": "state", "field": "open", "is": false, "says": "already_open"},
+        {"need": "hand", "empty": true, "says": "put_down_first"}
+      ],
+      "steps": [
+        {"step": "walk_to", "point": "stand"},
+        {"step": "wait", "us": 2000000}
+      ],
+      "effects": [
+        {"change": "set", "field": "open", "to": true, "event": "opened"}
+      ]
+    }
+  },
+  "looks": {
+    "model": "look:reed_basket_frame",
+    "table": [
+      {
+        "part": "fill",
+        "field": "reeds",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "fill",
+        "field": "reeds",
+        "do": "scale",
+        "axis": "x",
+        "range": [0, 8],
+        "to": [0, 1000]
+      },
+      {
+        "part": "leg.l",
+        "field": "natural",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "leg.l",
+        "field": "natural",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 8],
+        "to": [0, 1000]
+      },
+      {
+        "part": "leg.r",
+        "field": "rust",
+        "do": "show",
+        "range": [0, 1],
+        "to": [0, 1]
+      },
+      {
+        "part": "leg.r",
+        "field": "rust",
+        "do": "scale",
+        "axis": "y",
+        "range": [0, 8],
+        "to": [0, 1000]
+      },
+      {
+        "part": "screen",
+        "field": "open",
+        "do": "show",
+        "at": {"true": 1, "false": 0}
+      }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,1000,0],"size":[740,40,740],"tint":"wood"},{"kind":"box","at":[-280,490,0],"size":[60,980,650],"tint":"wood"},{"kind":"box","at":[280,490,0],"size":[60,980,650],"tint":"wood"},{"kind":"box","at":[0,1040,-330],"size":[640,30,60],"tint":"natural","pivot":[-320,1040,-330],"role":"fill"},{"kind":"cyl","at":[0,1020,0],"r":240,"h":10,"segments":16,"tint":"wood"},{"kind":"cyl","at":[0,1160,0],"r":300,"h":280,"segments":16,"tint":"natural","pivot":[0,1020,0],"role":"leg.l"},{"kind":"cyl","at":[0,1160,0],"r":302,"h":280,"segments":16,"tint":"rust","pivot":[0,1300,0],"role":"leg.r"},{"kind":"cyl","at":[296,1165,0],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[209,1165,209],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[0,1165,296],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[-209,1165,209],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[-296,1165,0],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[-209,1165,-209],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[0,1165,-296],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[209,1165,-209],"r":9,"h":290,"segments":6,"tint":"stake"},{"kind":"cyl","at":[0,1316,0],"r":318,"h":30,"segments":16,"tint":"natural","role":"screen"}],"palette":{"wood":"#75604a","stake":"#9c8155","natural":"#d5b879","rust":"#a84e38"},"tags":["tool","craft","basket","object"]}
+  },
+  "text": {
+    "card": "A basket stand with eight reeds: weave natural or rust courses, then finish.",
+    "finished_in_use": "This basket is finished and in use; its woven reeds are not a refillable supply.",
+    "not_enough_reeds": "Not enough supplied reeds remain; choose fewer courses, or open the completed eight-course basket.",
+    "weave_all_first": "Weave all eight supplied reed courses before opening this basket for real storage.",
+    "already_open": "The finished basket is already open; put a compatible small object inside.",
+    "put_down_first": "Put down held objects before weaving or opening this fixed basket.",
+    "craft": "craft",
+    "basket": "basket",
+    "reed": "reed",
+    "weave": "weave",
+    "howto_basket": "With empty hands, weave all eight reeds as natural or rust courses, then finish the rim to store a small thing inside."
+  },
+  "card": {
+    "text": "card",
+    "category": "craft",
+    "synonyms": ["basket", "reed", "weave"]
+  },
+  "howtos": {
+    "basket": {
+      "text": "howto_basket",
+      "steps": [
+        {"form": "weave_natural"},
+        {"form": "finish"}
+      ]
+    }
+  }
+}
