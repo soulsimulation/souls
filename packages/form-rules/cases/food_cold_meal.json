@@ -1,6 +1,6 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:cold_meal_bench and eden:cold_wrap (from #1690). The bench holds three portions each of greens, tomato and beans. With a wrap on its board and a free hand, a Soul adds one chosen portion in ten seconds: the portion and one mouthful (portions) move from the bench into that wrap, two transfers in one act. Refused as the original refused: no free hand ('Put down what you are holding before preparing food'), none of that ingredient left (not_enough: 'No supplied greens portion remains'), and a wrap that has no room for it (no_room: 'The wrap is full'). The wrap is taken and eaten a portion at a time.",
+  "about": "eden:cold_meal_bench and eden:cold_wrap (from #1690). The bench holds three portions each of greens, tomato and beans. With a wrap on its board and a free hand, a Soul adds one chosen portion in ten seconds: the portion and one mouthful (portions) move from the bench into that wrap, two transfers in one act. Refused as the original refused: no free hand ('Put down what you are holding before preparing food'), none of that ingredient left (not_enough: 'No supplied greens portion remains'), and a wrap that has no room for it (no_room: 'The wrap is full'). The wrap is taken and eaten a portion at a time. A wrap that has been eaten into is not topped up: the bench reads the wrap's `bitten` through the wrap's own kind ('Finish the partly eaten meal before preparing another').",
   "cases": [
     {
       "name": "cold_meal_bench_add_greens_every_need_met",
@@ -31,6 +31,13 @@
       "expect": {"verdict": "no", "reason": "no_room", "need": 2, "detail": {"node": "w1", "field": "greens", "room": 0, "amount": 1}, "fix": null}
     },
     {
+      "name": "cold_meal_bench_add_greens_wrap_partly_eaten",
+      "act": {"this": "m1", "form": "add_greens", "args": {"wrap": "w1"}},
+      "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap", "fields": {"greens": 1, "portions": 1, "bitten": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "detail": {"node": "w1", "field": "bitten", "found": 1, "wanted": {"is": false}}, "fix": null, "says": "finish_first"}
+    },
+    {
       "name": "cold_meal_bench_add_tomato_every_need_met",
       "act": {"this": "m1", "form": "add_tomato", "args": {"wrap": "w1"}},
       "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap"}, "b1": {"hands": {"left": null, "right": null}}}},
@@ -59,6 +66,13 @@
       "expect": {"verdict": "no", "reason": "no_room", "need": 2, "detail": {"node": "w1", "field": "tomato", "room": 0, "amount": 1}, "fix": null}
     },
     {
+      "name": "cold_meal_bench_add_tomato_wrap_partly_eaten",
+      "act": {"this": "m1", "form": "add_tomato", "args": {"wrap": "w1"}},
+      "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap", "fields": {"tomato": 1, "portions": 1, "bitten": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "detail": {"node": "w1", "field": "bitten", "found": 1, "wanted": {"is": false}}, "fix": null, "says": "finish_first"}
+    },
+    {
       "name": "cold_meal_bench_add_beans_every_need_met",
       "act": {"this": "m1", "form": "add_beans", "args": {"wrap": "w1"}},
       "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap"}, "b1": {"hands": {"left": null, "right": null}}}},
@@ -85,6 +99,13 @@
       "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap", "fields": {"beans": 3, "portions": 3}}, "b1": {"hands": {"left": null, "right": null}}}},
       "asker": {"sees": ["public"]},
       "expect": {"verdict": "no", "reason": "no_room", "need": 2, "detail": {"node": "w1", "field": "beans", "room": 0, "amount": 1}, "fix": null}
+    },
+    {
+      "name": "cold_meal_bench_add_beans_wrap_partly_eaten",
+      "act": {"this": "m1", "form": "add_beans", "args": {"wrap": "w1"}},
+      "state": {"actor": "b1", "nodes": {"m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap", "fields": {"beans": 1, "portions": 1, "bitten": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "asker": {"sees": ["public"]},
+      "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "detail": {"node": "w1", "field": "bitten", "found": 1, "wanted": {"is": false}}, "fix": null, "says": "finish_first"}
     },
     {
       "name": "cold_wrap_take_every_need_met",
