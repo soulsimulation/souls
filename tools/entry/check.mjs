@@ -274,6 +274,8 @@ export function checkFiles(files, all = files) {
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 // `entry prove <family>` runs every gate that needs no engine (prove.mjs, SA-P8).
 if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
+// `entry run <family> --world <address>` drives a world from outside through the family's cases (run.mjs, SA-P3a).
+else if (isMain && process.argv[2] === 'run') import('./run.mjs').then(async m => { process.exitCode = await m.main(process.argv.slice(3)); });
 else if (isMain) {
   const args = process.argv.slice(2).filter((a, i) => !(i === 0 && a === 'check'));
   const all = F.loadDir(KINDS_DIR);

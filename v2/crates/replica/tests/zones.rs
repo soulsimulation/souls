@@ -316,7 +316,7 @@ fn a2_each_planted_bad_system_fails_by_name() {
     assert_eq!(r.name(), "read-same-tick");
     assert_eq!(
         r.to_string(),
-        "read-same-tick: system peek at aa:3 wrote differently in another order"
+        "read-same-tick: system peek at aa:3 wrote differently in another order [TRUNK T1, v2/docs/zones.md rules 2 and 3] fix: read other nodes only through Prev; drop the shared state, or put both sides in one activity node"
     );
 
     // The writer first in id order: the hall (aa:2) counts and caches, the body (aa:3) reads the cache. Whichever
@@ -349,7 +349,7 @@ fn a2_each_planted_bad_system_fails_by_name() {
     assert_eq!(r.name(), "write-outside-own");
     assert_eq!(
         r.to_string(),
-        "write-outside-own: system meddle at aa:2 wrote aa:4"
+        "write-outside-own: system meddle at aa:2 wrote aa:4 [TRUNK T1, v2/docs/zones.md rules 2 and 3] fix: write only your own node (Own); change another by a transfer, or let its own system read yours next tick"
     );
 }
 

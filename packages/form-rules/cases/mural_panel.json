@@ -1,0 +1,84 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:mural_panel (from #1493). A fixed wall panel. Painting it, with a hand free, sets its picture and title (both by reference) only when the work completes, and credits the painter by a link. Painting again replaces the picture and title; every painter's link stays, as the original kept the earlier provenance. Who may paint a panel someone owns (the original's 'art.not-yours') is the world's ownership rule, which the original's own review found was bypassed when the recipe was left out; here no argument skips a need.",
+ "cases": [
+  {
+   "name": "paint_every_need_met",
+   "act": {
+    "this": "m1",
+    "form": "paint",
+    "args": {
+     "picture": "t_mural_1",
+     "title": "t_title_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "m1": {
+      "kind": "eden:mural_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "paint_hands_full",
+   "act": {
+    "this": "m1",
+    "form": "paint",
+    "args": {
+     "picture": "t_mural_1",
+     "title": "t_title_1"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "m1": {
+      "kind": "eden:mural_panel"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "x2": {
+      "kind": "eden:cup"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 0,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

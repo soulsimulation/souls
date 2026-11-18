@@ -1,0 +1,65 @@
+{
+  "format": "souls-entry/1",
+  "kind": "r2:lamp",
+  "owner": "thing",
+  "about": "K3's lamp for R2's cases (#2685): a switch within reach, wiring only its owner reads, a dimmer, a plug and a shared link only its sharers read.",
+  "state": {
+    "lit": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "wired": { "n": 2, "type": "bool", "default": true, "audience": { "rule": "owner" } },
+    "level": { "n": 3, "type": "int", "unit": "permille", "min": 0, "max": 1000, "default": 0, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "plugged": { "n": 1, "most": 1, "audience": { "rule": "everyone" } },
+    "shared": { "n": 2, "most": 4, "audience": { "rule": "linked", "link": "shared" } }
+  },
+  "points": {
+    "switch": { "role": "press", "at_mm": [0, 0, 300] }
+  },
+  "forms": {
+    "switch_on": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": false },
+        { "need": "state", "field": "wired", "is": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "lit", "to": true, "event": "lit" }]
+    },
+    "switch_off": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "lit", "is": true },
+        { "need": "within_reach", "point": "switch" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "switch" }],
+      "effects": [{ "change": "set", "field": "lit", "to": false, "event": "unlit" }]
+    },
+    "dim": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "level", "at_least": 1, "at_most": 900 }],
+      "effects": [{ "change": "set", "field": "level", "to": 1000, "event": "brightened" }]
+    },
+    "plug_in": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "unlinked", "link": "plugged" }],
+      "effects": [{ "change": "link", "link": "plugged", "event": "plugged_in" }]
+    },
+    "unplug": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "plugged" }],
+      "effects": [{ "change": "unlink", "link": "plugged", "event": "unplugged" }]
+    },
+    "unshare": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "shared" }],
+      "effects": [{ "change": "unlink", "link": "shared", "event": "unshared" }]
+    }
+  }
+}

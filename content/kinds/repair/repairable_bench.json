@@ -1,0 +1,76 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:repairable_bench",
+  "owner": "thing",
+  "state": {
+    "condition": { "n": 1, "type": "enum", "values": ["whole", "cracked"], "default": "whole", "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "front_left": { "role": "stand", "at_mm": [-400, 0, 600] },
+    "front_right": { "role": "stand", "at_mm": [400, 0, 600] },
+    "work": { "role": "stand", "at_mm": [0, 0, 800], "yaw_mdeg": 180000 },
+    "crack": { "role": "contact", "at_mm": [0, 440, 160] }
+  },
+  "slots": {
+    "left": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [-400, 465, 20], "stand": "front_left" },
+    "right": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [400, 465, 20], "stand": "front_right" }
+  },
+  "geometry": { "bounds_mm": [1600, 871, 549] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": { "type": "slot", "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [
+        { "step": "walk_to", "point": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "repair": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "condition", "is": "cracked" },
+        { "need": "hand", "holds": "eden:hammer" },
+        { "need": "slot_free", "slot": "left" },
+        { "need": "slot_free", "slot": "right" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "work" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" },
+        { "step": "move", "move": "strike", "at": "crack" }
+      ],
+      "effects": [{ "change": "set", "field": "condition", "to": "whole", "event": "repaired" }]
+    }
+  },
+  "motion": { "how": "two_souls" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:repairable_bench",
+    "table": [
+      { "part": "fill", "field": "condition", "do": "show", "at": { "whole": 1, "cracked": 0 } },
+      { "part": "flip", "field": "condition", "do": "show", "at": { "whole": 0, "cracked": 1 } }
+    ],
+    "shape": {"round":15,"shapes":[{"kind":"extrude","at":[-720,15,0],"polygon":[[-20,-235],[20,-235],[20,235],[-20,235]],"h":410,"tint":"iron"},{"kind":"extrude","at":[720,15,0],"polygon":[[-20,-235],[20,-235],[20,235],[-20,235]],"h":410,"tint":"iron"},{"kind":"box","at":[-720,620,-240],"size":[60,500,60],"round":0,"tint":"iron","pitch":-10313},{"kind":"box","at":[720,620,-240],"size":[60,500,60],"round":0,"tint":"iron","pitch":-10313},{"kind":"extrude","at":[0,433,160],"polygon":[[-785,-50],[785,-50],[785,50],[-785,50]],"h":15,"tint":"wood","role":"fill"},{"kind":"box","at":[-400,440,160],"size":[770,15,100],"round":0,"tint":"wood","role":"flip"},{"kind":"box","at":[380,385,160],"size":[800,15,100],"round":0,"tint":"wood","roll":-8021,"role":"flip"},{"kind":"extrude","at":[0,433,0],"polygon":[[-785,-50],[785,-50],[785,50],[-785,50]],"h":15,"tint":"wood"},{"kind":"extrude","at":[0,433,-160],"polygon":[[-785,-50],[785,-50],[785,50],[-785,50]],"h":15,"tint":"wood"},{"kind":"box","at":[0,620,-250],"size":[1600,110,30],"round":0,"tint":"wood","pitch":-10313},{"kind":"box","at":[0,790,-280],"size":[1600,110,30],"round":0,"tint":"wood","pitch":-10313},{"kind":"capsule","at":[-740,640,-20],"r":25,"h":380,"segments":5,"tint":"iron","pitch":90000},{"kind":"capsule","at":[740,640,-20],"r":25,"h":380,"segments":5,"tint":"iron","pitch":90000}],"palette":{"iron":"#2f3633","wood":"#9a6b46"},"tags":["street","seat","bench","furniture","park"]}
+  },
+  "text": {
+    "card": "A park bench for two; a cracked slat is repaired with a hammer in hand.",
+    "seating": "seating",
+    "repair": "repair",
+    "fix": "fix",
+    "mend": "mend",
+    "howto_repair": "Holding a hammer, with nobody sitting on it, repair the cracked slat: six strikes at the crack. The hammer stays in your hand."
+  },
+  "card": { "text": "card", "category": "seating", "synonyms": ["repair", "fix", "mend"] },
+  "howtos": {
+    "repair": { "text": "howto_repair", "steps": [{ "form": "repair" }] }
+  }
+}

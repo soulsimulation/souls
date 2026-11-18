@@ -1,0 +1,116 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:stool",
+  "owner": "thing",
+  "state": { "spinning": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } } },
+  "points": { "front": { "role": "stand", "at_mm": [0, 0, 480], "yaw_mdeg": 180000 } },
+  "slots": { "seat": { "admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 670, 0], "stand": "front" } },
+  "geometry": { "bounds_mm": [360, 675, 360] },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "seat": {
+          "type": "slot",
+          "select": { "of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 }
+        }
+      },
+      "needs": [{ "need": "slot_free", "slot": { "arg": "seat" } }],
+      "steps": [{ "step": "walk_to", "point": { "arg": "seat" } }, { "step": "sit", "slot": { "arg": "seat" } }],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "spin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "spinning", "is": false }],
+      "steps": [],
+      "effects": [
+        { "change": "set", "field": "spinning", "to": true, "event": "spun" },
+        { "change": "timer", "form": "stop", "after_us": 3000000, "event": "slowing" }
+      ]
+    },
+    "stop": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "spinning", "to": false, "event": "stopped" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:stool",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [0, 640, 0],
+          "r": 180,
+          "h": 50,
+          "segments": 10,
+          "tint": "seat",
+          "role": "body",
+          "pivot": [0, 640, 0]
+        },
+        {
+          "kind": "cyl",
+          "at": [100, 310, 100],
+          "r": 18,
+          "h": 640,
+          "segments": 5,
+          "tint": "wood",
+          "pitch": 5730,
+          "roll": -5730
+        },
+        {
+          "kind": "cyl",
+          "at": [-100, 310, 100],
+          "r": 18,
+          "h": 640,
+          "segments": 5,
+          "tint": "wood",
+          "pitch": 5730,
+          "roll": 5730
+        },
+        {
+          "kind": "cyl",
+          "at": [100, 310, -100],
+          "r": 18,
+          "h": 640,
+          "segments": 5,
+          "tint": "wood",
+          "pitch": -5730,
+          "roll": -5730
+        },
+        {
+          "kind": "cyl",
+          "at": [-100, 310, -100],
+          "r": 18,
+          "h": 640,
+          "segments": 5,
+          "tint": "wood",
+          "pitch": -5730,
+          "roll": 5730
+        },
+        { "kind": "torus", "at": [0, 250, 0], "r": 130, "r2": 12, "segments": 8, "tint": "wood", "pitch": 90000 }
+      ],
+      "round": 15,
+      "palette": { "seat": "#5e3d27", "wood": "#9a6b43" },
+      "tags": ["furniture", "seat", "stool"]
+    },
+    "table": [
+      {
+        "part": "body",
+        "field": "spinning",
+        "do": "rotate",
+        "axis": "y",
+        "at": { "true": 120000, "false": 0 },
+        "over_us": 3000000
+      }
+    ]
+  },
+  "text": { "card": "A round bar stool on four legs with one seat that spins.", "furniture": "furniture", "seat": "seat" },
+  "card": { "text": "card", "category": "furniture", "synonyms": ["seat"] }
+}
