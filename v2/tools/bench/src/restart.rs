@@ -1,7 +1,8 @@
 //! The `restart` bench (Engine v2 K5, #2669): a world of 10,000 things and 1,000 bodies (`world`, the tranche's
 //! target counts, larger than N1's import) is built and then kept busy, its parts appended to a real log and a
 //! checkpoint taken at each interval of log; the process is killed (SIGKILL) with one interval of log after its last
-//! checkpoint; a new process restores, replays and runs its first tick. Timed from the spawn to the first tick, after
+//! checkpoint; a new process restores, opens the log from the checkpoint's place (K4b, #3136), replays and runs its
+//! first tick. Timed from the spawn to the first tick, after
 //! one interval and after ten, two repeats each (A1); the state hashes before the kill and after the restart (A4);
 //! the longest tick while checkpointing (A5). Run from `v2/`: `cargo run -p bench --release --bin restart`; it works
 //! under `target/restart-bench`. Declared on #2669.
@@ -110,7 +111,9 @@ fn run(dir: &Path, intervals: u64) {
             records += 1;
             if c.due() {
                 let v = version(&w.header, w.tree.next());
-                c.take(&mut w.tree, v, records, &[0x5e; 32]).expect("takes");
+                let at = log.durable_at();
+                c.take_at(&mut w.tree, v, records, Some((at, &w.mint)), &[0x5e; 32])
+                    .expect("takes");
                 took = true;
             }
         }
@@ -187,10 +190,15 @@ fn restart(dir: &Path) {
         .expect("a checkpoint");
     let mut tree = r.tree;
     let t1 = Instant::now();
-    let (mut log, found) =
-        Log::open(FileStore::open(&dir.join("log")).expect("log"), 1).expect("opens");
+    // From the checkpoint's place in the log (K4b): the bytes before it are not read.
+    let (mut log, found) = Log::open_at(
+        FileStore::open(&dir.join("log")).expect("log"),
+        1,
+        r.root.log,
+    )
+    .expect("opens");
     let t2 = Instant::now();
-    let replayed = replay(&mut tree, &header, &found.records, r.root.record).expect("replays");
+    let replayed = replay(&mut tree, &header, found.after(r.root.record), 0).expect("replays");
     let t3 = Instant::now();
     let h = hashes(&mut tree);
     let _c = Checkpoints::open(&dir.join("ckpt"), EVERY, r.blobs).expect("checkpoints");
@@ -201,9 +209,10 @@ fn restart(dir: &Path) {
     log.append(next).expect("appends");
     let t5 = Instant::now();
     println!(
-        "tick hashes={h} rejected={} replayed={replayed} restore_ms={:.1} log_open_ms={:.1} replay_ms={:.1} \
-         hash_ms={:.1} tick_ms={:.2}",
+        "tick hashes={h} rejected={} replayed={replayed} read_mb={:.1} restore_ms={:.1} log_open_ms={:.1} \
+         replay_ms={:.1} hash_ms={:.1} tick_ms={:.2}",
         r.rejected.len(),
+        (found.end - found.start) as f64 / 1e6,
         ms(t1 - t0),
         ms(t2 - t1),
         ms(t3 - t2),
@@ -245,8 +254,8 @@ fn main() {
     );
     println!();
     println!(
-        "| intervals | repeat | log MB | checkpoint MB | spawn to first tick | restore | log open | replay (records) \
-         | hash | first tick | hashes before kill = after restart |"
+        "| intervals | repeat | log MB | checkpoint MB | spawn to first tick | restore | log open (MB read) \
+         | replay (records) | hash | first tick | hashes before kill = after restart |"
     );
     println!("|---|---|---|---|---|---|---|---|---|---|---|");
     let mut a5 = Vec::new();
@@ -274,12 +283,13 @@ fn main() {
             child.wait().expect("ended");
             let same = field(&ready, "hashes") == field(&tick, "hashes");
             println!(
-                "| {intervals} | {repeat} | {} | {} | **{:.0} ms** | {} ms | {} ms | {} ms ({}) | {} ms | {} ms | {} |",
+                "| {intervals} | {repeat} | {} | {} | **{:.0} ms** | {} ms | {} ms ({}) | {} ms ({}) | {} ms | {} ms | {} |",
                 field(&ready, "log_mb"),
                 field(&ready, "ckpt_mb"),
                 ms(took),
                 field(&tick, "restore_ms"),
                 field(&tick, "log_open_ms"),
+                field(&tick, "read_mb"),
                 field(&tick, "replay_ms"),
                 field(&tick, "replayed"),
                 field(&tick, "hash_ms"),
