@@ -1,0 +1,69 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:rain_collector (from #1740). It holds up to 4000 g of rainwater behind a cover. With empty hands, four seconds at its stand uncover or cover the inlet ('The inlet is already uncovered'; 'The inlet is already covered'; 'Put down what you hold before working on the rain inlet'). Holding a pitcher, a Soul draws from the tap: what the barrel has, up to what the pitcher holds, out of the barrel and into the pitcher. Collecting rain is not here: it needs it to be raining where the barrel stands, which no need can read yet (see the pull request).",
+  "cases": [
+    {
+      "name": "uncover_every_need_met",
+      "act": { "this": "r1", "form": "uncover" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "uncover_already_uncovered",
+      "act": { "this": "r1", "form": "uncover" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector", "fields": { "covered": false } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "covered", "found": false, "wanted": { "is": true } }, "fix": { "form": "cover" } }
+    },
+    {
+      "name": "uncover_hands_full",
+      "act": { "this": "r1", "form": "uncover" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector" }, "p1": { "kind": "eden:pitcher" }, "p2": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": "p2" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": { "step": "put" } }
+    },
+    {
+      "name": "cover_every_need_met",
+      "act": { "this": "r1", "form": "cover" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector", "fields": { "covered": false } }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "cover_already_covered",
+      "act": { "this": "r1", "form": "cover" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "covered", "found": true, "wanted": { "is": false } }, "fix": { "form": "uncover" } }
+    },
+    {
+      "name": "cover_hands_full",
+      "act": { "this": "r1", "form": "cover" },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector", "fields": { "covered": false } }, "p1": { "kind": "eden:pitcher" }, "p2": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": "p2" } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 1, "detail": {}, "fix": { "step": "put" } }
+    },
+    {
+      "name": "draw_every_need_met",
+      "act": { "this": "r1", "form": "draw", "args": { "into": "p1" } },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector", "fields": { "water": 2000 } }, "p1": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "draw_not_holding_a_pitcher",
+      "act": { "this": "r1", "form": "draw", "args": { "into": "p1" } },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector", "fields": { "water": 2000 } }, "p1": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": null, "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 0, "detail": { "kind": "eden:pitcher" }, "fix": { "step": "take", "kind": "eden:pitcher" } }
+    },
+    {
+      "name": "draw_empty",
+      "act": { "this": "r1", "form": "draw", "args": { "into": "p1" } },
+      "state": { "actor": "b1", "nodes": { "r1": { "kind": "eden:rain_collector" }, "p1": { "kind": "eden:pitcher" }, "b1": { "hands": { "left": "p1", "right": null } } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 1, "detail": { "field": "water", "found": 0, "wanted": { "at_least": 1 } }, "fix": null }
+    }
+  ]
+}

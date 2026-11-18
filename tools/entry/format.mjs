@@ -72,7 +72,7 @@ export const ARG_TYPES = Object.freeze(['slot', 'part', 'thing', 'text', 'durati
 export const SELECT = Object.freeze({of: ['things', 'free_slots'], in: ['this', 'here', 'parent'], anchor: ['me', 'this'], order: ['nearest', 'furthest']});
 /** The closed lists. Each grows only with the task that first needs a new member. */
 /** `moves`: the thing argument moves the way the form moves it (`carry` or `push`), by its kind's section 18. */
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'moves']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'held_by_actor', 'hand', 'linked', 'unlinked', 'room', 'enough', 'moves']);
 export const MOVED_BY = Object.freeze(['carry', 'push']);
 /** `settle`: a body takes a ground posture where it stands, with no slot (SA-G3, #2875). */
 export const STEPS = Object.freeze(['walk_to', 'sit', 'rise', 'move', 'take', 'put', 'use_held', 'wait', 'settle']);
@@ -796,9 +796,9 @@ function form(f, path, ctx, err) {
       if (('free' in n) === ('holds' in n)) err(p, 'exactly one of free, holds');
       else if ('free' in n) { if (n.free !== true) err(`${p}.free`, 'true (a hand that must hold something is "holds")'); }
       else if (!(typeof n.holds === 'string' && KIND.test(n.holds))) err(`${p}.holds`, 'a kind, "namespace:name"');
-    } else if (n.need === 'room') {
+    } else if (n.need === 'room' || n.need === 'enough') {
       only(n, ['need'], p, err);
-      if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, 'room is that every amount the form\'s transfers move has room where it lands; this form has no transfer');
+      if (!(Array.isArray(f.effects) && f.effects.some(e => e?.change === 'transfer'))) err(p, `${n.need} is about every amount the form's transfers move (room where it lands, enough at its source); this form has no transfer`);
     } else { only(n, ['need', 'link'], p, err); linkName(n.link, `${p}.link`); }
   });
   list(f.steps, `${path}.steps`, 'step', STEPS, err, (s, p) => {
