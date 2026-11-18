@@ -9,10 +9,13 @@
 //! `.log`).
 //!
 //! `worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] [--bodies <n>]
-//! [--items <n>] [--arrivals <file>] [--roots <file>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for
-//! every intent it takes, in the order taken, so a bench can check each actor's order across restarts. With
-//! `--roots`, it appends `<version> <place hash hex>` after each tick that changed the world, so a test can check a
-//! client's copy against the place.
+//! [--items <n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] [--stall-after <s>
+//! --stall-for <s>]`. With `--arrivals`, it appends `<actor hex> <sequence>` for every intent it takes, in the order
+//! taken, so a bench can check each actor's order across restarts. With `--roots`, it appends `<version> <place hash
+//! hex>` after each tick that changed the world, so a test can check a client's copy against the place. Measures
+//! (O4, #2694) are on unless `--no-measures`; `health.json` goes to `--health` (default: the log's path with
+//! `.health.json`). `--stall-after` holds the clock thread `--stall-for` seconds, once, that many seconds after
+//! start: the stuck-thread run.
 //!
 //! The same socket carries R5's sync requests (R5b, #3164; `replica::sync::wire`), which the world answers for every
 //! actor over the place (`worldd::answers`).
@@ -21,16 +24,17 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::channel;
+use std::time::Duration;
 
 use replica::encode::from_hex;
 use replica::ids::Scope;
 use replica::intents::INTENT_MOST;
 use sim::log::FileStore;
-use worldd::answers::{self, Config, Event};
+use worldd::answers::{self, Config, Door, Event};
 use worldd::checkers::toggles;
 
-fn serve(world: Sender<Event>, mut stream: UnixStream) {
+fn serve(world: Door, mut stream: UnixStream) {
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
@@ -56,8 +60,7 @@ fn serve(world: Sender<Event>, mut stream: UnixStream) {
         if stream.read_exact(&mut bytes).is_err() {
             return;
         }
-        let reply = reply.clone();
-        if world.send(Event::Arrival { bytes, reply }).is_err() {
+        if !world.arrive(bytes, reply.clone()) {
             return;
         }
     }
@@ -73,7 +76,8 @@ pub fn run(args: &[String]) -> i32 {
     let usage = || {
         eprintln!(
             "usage: worldd gateway-link --socket <path> --lineage <32 hex> --epoch <n> [--log <file>] [--rooms <n>] \
-             [--bodies <n>] [--items <n>] [--arrivals <file>] [--roots <file>]"
+             [--bodies <n>] [--items <n>] [--arrivals <file>] [--roots <file>] [--health <file>] [--no-measures] \
+             [--stall-after <s> --stall-for <s>]"
         );
         2
     };
@@ -90,6 +94,12 @@ pub fn run(args: &[String]) -> i32 {
     };
     let log = arg("--log").map_or_else(|| path.with_extension("log"), PathBuf::from);
     let mut cfg = Config::new(Scope(lineage), epoch);
+    cfg.measures = !args.iter().any(|a| a == "--no-measures");
+    cfg.health =
+        Some(arg("--health").map_or_else(|| log.with_extension("health.json"), PathBuf::from));
+    let stall = arg("--stall-after")
+        .and_then(|a| a.parse::<f64>().ok())
+        .zip(arg("--stall-for").and_then(|f| f.parse::<f64>().ok()));
     for (flag, to) in [
         ("--arrivals", &mut cfg.arrivals),
         ("--roots", &mut cfg.roots),
@@ -127,9 +137,16 @@ pub fn run(args: &[String]) -> i32 {
             return 1;
         }
     };
-    for stream in listener.incoming().flatten() {
+    if let Some((after, hold)) = stall {
         let events = world.events.clone();
-        std::thread::spawn(move || serve(events, stream));
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs_f64(after));
+            let _ = events.send(Event::Stall(Duration::from_secs_f64(hold)));
+        });
+    }
+    for stream in listener.incoming().flatten() {
+        let door = world.door();
+        std::thread::spawn(move || serve(door, stream));
     }
     0
 }
