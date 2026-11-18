@@ -160,13 +160,21 @@ therefore **windowed**:
 
 **Low-risk paths.** When every file a PR or a merge group changes sits under `tools/entry/`, `content/kinds/`,
 `content/asks/`, `content/moves/`, `packages/form-rules/`, `docs/`, `changes/`, or is a root `*.md` other than
-`AGENTS.md` and `CLAUDE.md`, CI skips the server shards, `latency`, the smoke, `packages` (the walk) and `types-web` (the
-bundle). It runs `repo`, `soul-tools` (the entry tests, the form-rules tests and the one launcher test that reads
-`content/kinds`) and, for `docs/site` reference pages, `docs-reference`. A change under `packages/form-rules/src/` also
-keeps `types-web` and `web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff,
-and the usual path map decides; a changelog fragment beside any other file still selects every job. The list is
-`LOW_RISK` in `.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the
-group did not run every `qualify` job.
+`AGENTS.md` and `CLAUDE.md`, CI skips `latency`, the smoke, `packages` (the walk) and `types-web` (the bundle), and the
+server shards that do not read those paths. It runs `repo`, `soul-tools` (the entry tests, the form-rules tests, the
+inline check of `eden.mjs` and the launcher tests that read `content/kinds` or form-rules) and, for `docs/site` reference
+pages, `docs-reference`. A change under `tools/entry/`, `content/` or `packages/form-rules/` also runs the server shard(s)
+holding a server test that reads them (the forms adapter's tests; `serverReaders` finds them in the tree at scope time,
+so a new reader or a rebalanced shard needs no edit). A change under `packages/form-rules/src/` also keeps `types-web` and
+`web`, because `apps/web` imports it. One file outside the list, or an empty or unreadable diff, and the usual path map
+decides; a changelog fragment beside any other file still selects every job. The list is `LOW_RISK` in
+`.github/scripts/ci-scope.mjs`. The push to main after a low-risk merge group runs in full, since the group did not run
+every `qualify` job.
+
+**Content PRs.** A PR whose files are all under `content/kinds/<family>/`, `packages/form-rules/cases/` or `changes/` (the
+shape of the content batches) runs the content lane, written out as `CONTENT_JOBS` in `ci-scope.mjs`: `soul-tools` and
+the server shard(s) that read content or cases. No web or bundle job: `apps/web` reads neither. Content PRs are low-risk
+for the merge train, so they fill a queue group up to its limit rather than waiting behind `MIXED_CAP`.
 
 Steward procedure: give `ci:run` to the PRs entering the window, normally the next two in merge order. Add
 `merge:ready` once a head's `ci-ok` is green, and remove `ci:run` from PRs that leave the window. A PR labelled

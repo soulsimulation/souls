@@ -233,9 +233,9 @@ jobs:
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
               # the entry format and its gates (check, look, prove); picked by tools/entry, content and packages/form-rules
               node --test --test-concurrency=4 tools/entry/*.test.mjs
-              # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
-              # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
-              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
+              # form-rules' own tests and the launcher tests that read content/kinds or form-rules: a change confined to
+              # the low-risk paths (ci-scope.mjs LOW_RISK, CONTENT) runs this job and no packages or launcher job
+              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs tools/world-launcher/soul/can-i.test.mjs tools/world-launcher/soul/how.test.mjs
               # eden.mjs inlines packages/form-rules/src/rules.ts and the CLI's modules: a stale block fails here, since a
               # low-risk run has no launcher job (the launcher's soul-home test checks the same)
               node tools/world-launcher/soul/inline.mjs --check

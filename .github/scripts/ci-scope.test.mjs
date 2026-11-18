@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, WINDOW_LABELS, changedFiles, greenAtHead, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { CONTENT_JOBS, CONTENT_WEB, FULL_EVENTS, GOD_SKILL_TESTS, JOBS, LOW_RISK, SERVER_READER, WINDOW_LABELS, changedFiles, contentOnly, greenAtHead, jobsFor, lowRisk, runnerFor, serverReaders, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -278,12 +278,12 @@ const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 
 const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
 
 test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {
-  const plan = jobsFor(LOW);
+  // with no server test reading these paths (the server readers are tested below)
+  const plan = jobsFor(LOW, undefined, { readers: () => [] });
   assert.equal(plan.scope, 'low-risk');
   assert.deepEqual(plan.include.map(j => j.name), ['soul-tools']);
-  for (const n of SKIPPED) assert.ok(!names(LOW).includes(n), n);
   assert.equal(smokeFor(LOW), false);
-  for (const f of LOW) assert.deepEqual(names([f]).filter(n => SKIPPED.includes(n)), [], f);
+  for (const f of LOW) assert.deepEqual(jobsFor([f], undefined, { readers: () => [] }).include.map(j => j.name).filter(n => SKIPPED.includes(n)), [], f);
   assert.deepEqual(names(['changes/a.md']), [], 'a fragment alone runs no job');
   assert.deepEqual(names(['docs/site/api.md']), ['docs-reference'], 'the reference pages still run their generator');
   // the soul-tools job runs the entry tests, the form-rules tests and the launcher test that reads content/kinds
@@ -336,8 +336,97 @@ test('low-risk: an empty, missing or unreadable diff runs the full battery', () 
 test('low-risk: a merge group of two allowlist PRs is scoped; one with a server PR in it runs everything', () => {
   const a = ['tools/entry/format.mjs', 'changes/sa-f6c.md'], b = ['content/kinds/kitchen/kettle.json', 'packages/form-rules/cases/kettle.json', 'changes/sa-d3.md'];
   const group = run('--files', [...a, ...b].join(','), '--event', 'merge_group');
-  assert.deepEqual([group.scope, group.matrix, group.smoke, group.deferred, group.any], ['low-risk', ['soul-tools'], 'false', 'false', 'true']);
+  assert.deepEqual([group.scope, group.matrix, group.smoke, group.deferred, group.any], ['low-risk', names([...a, ...b]), 'false', 'false', 'true']);
+  assert.deepEqual(group.matrix.filter(n => n !== 'soul-tools'), serverReaders(), 'beside soul-tools, only the server readers');
   const mixed = run('--files', [...a, ...b, 'apps/server/src/world.ts', 'changes/server.md'].join(','), '--event', 'merge_group');
   assert.deepEqual([mixed.scope, mixed.matrix, mixed.smoke], ['full', JOBS.map(j => j.name), 'true']);
+});
+
+// The gap #3061 left (Gene, 18 Nov): the server's forms adapter reads content/kinds, content/moves and
+// packages/form-rules/cases/kinds, and imports packages/form-rules/src; its tests load kinds with tools/entry. A low-risk
+// change there runs the server shard(s) holding a test that reads them. The content fast lane is a fixed list.
+const repo = p => fileURLToPath(new URL(`../../${p}`, import.meta.url));
+const soulToolsBranch = () => { const w = readFileSync(repo('.github/workflows/ci.yml'), 'utf8'); return w.slice(w.indexOf('            soul-tools)'), w.indexOf('            server)')); };
+const fakeReaders = () => ['server-3'];
+const lane = (files, readers = fakeReaders) => jobsFor(files, undefined, { readers }).include.map(j => j.name).sort();
+const BATTERY = JOBS.map(j => j.name).sort();
+const CONTENT_DIFF = ['content/kinds/kitchen/kettle.json', 'content/kinds/kitchen/teapot.json', 'packages/form-rules/cases/kettle.json', 'changes/sa-kitchen.md'];
+
+test('serverReaders: the shards holding a server test that reads content, cases, form-rules or tools/entry, found in the tree', () => {
+  const all = ['a.test.ts', 'b.test.ts', 'god/forms-adapter.test.ts', 'owner-response-milestones.test.ts', 'c.test.ts', 'd.test.ts', 'e.test.ts', 'f.test.ts'];
+  const src = { 'god/forms-adapter.test.ts': "import {loadEntries} from '../../../../tools/entry/look.mjs'; loadEntries(resolve(ROOT, 'content/kinds'))", 'owner-response-milestones.test.ts': "tags: ['entry']" };
+  const got = serverReaders({ files: all, read: f => src[f] ?? 'nothing here' });
+  assert.ok(got.includes('latency'), 'the latency file is its own job');
+  assert.equal(got.length, 2);
+  assert.match(got.find(n => n !== 'latency'), /^server-\d$/);
+  assert.deepEqual(serverReaders({ files: all, read: () => 'nothing here' }), []);
+  for (const marker of ['content/kinds', 'content/moves', 'packages/form-rules/cases/kinds', '@souls/form-rules', 'tools/entry/load.mjs', "from './forms-adapter.ts'", "tags: ['entry']"]) assert.match(marker, SERVER_READER, marker);
+  for (const other of ['edge/content/eden-library-catalogue', "mood: 'content'", "room('entry'"]) assert.doesNotMatch(other, SERVER_READER, other);
+  // the real tree: every reader found is a server job that exists
+  for (const n of serverReaders()) assert.ok(JOBS.some(j => j.name === n), n);
+});
+
+test('content lane: a content-only diff runs soul-tools and the server readers, nothing else, and the list is written out', () => {
+  assert.equal(contentOnly(CONTENT_DIFF), true);
+  assert.equal(jobsFor(CONTENT_DIFF, undefined, { readers: fakeReaders }).scope, 'content');
+  assert.deepEqual(lane(CONTENT_DIFF), ['server-3', 'soul-tools']);
+  assert.deepEqual(CONTENT_JOBS, ['soul-tools']);
+  assert.deepEqual(CONTENT_WEB, [], 'apps/web reads neither content/kinds nor form-rules cases');
+  assert.equal(smokeFor(CONTENT_DIFF), false);
+  assert.deepEqual(lane(CONTENT_DIFF, () => []), ['soul-tools'], 'with no server reader in the tree, soul-tools alone');
+  // never less than the low-risk rule picks for the same files
+  for (const f of CONTENT_DIFF) {
+    assert.ok(lowRisk([f]), f);
+    for (const n of jobsFor(['docs/x.md', f], undefined, { readers: fakeReaders }).include.map(j => j.name)) assert.ok(lane(CONTENT_DIFF).includes(n), `${f}: ${n}`);
+  }
+  // the soul-tools job holds what the lane promises: entry tests, form-rules tests, the inline check
+  const tools = soulToolsBranch();
+  for (const t of ['tools/entry/*.test.mjs', 'packages/form-rules/src/*.test.ts', 'inline.mjs --check']) assert.ok(tools.includes(t), t);
+  // not a content PR: a kind outside a family folder, form-rules source, the entry tools, moves, docs
+  for (const f of ['content/kinds/chair.json', 'packages/form-rules/src/rules.ts', 'tools/entry/check.mjs', 'content/moves/sit.json', 'docs/a.md'])
+    assert.equal(contentOnly([...CONTENT_DIFF, f]), false, f);
+  assert.equal(contentOnly(['changes/a.md']), false, 'a fragment alone is not content, and runs no job');
+  assert.deepEqual(lane(['changes/a.md']), []);
+});
+
+test('content lane: every launcher test that reads content/kinds, form-rules or tools/entry runs in soul-tools', async () => {
+  const { readdirSync } = await import('node:fs');
+  const dir = repo('tools/world-launcher/');
+  const readers = readdirSync(dir, { recursive: true }).filter(f => /\.test\.mjs$/.test(f) && !f.includes('node_modules'))
+    .filter(f => /content\/kinds|form-rules|tools\/entry\//.test(readFileSync(dir + f, 'utf8'))).map(f => `tools/world-launcher/${f}`);
+  assert.ok(readers.includes('tools/world-launcher/soul/can-i.test.mjs') && readers.includes('tools/world-launcher/soul/how.test.mjs'), readers.join());
+  const tools = soulToolsBranch();
+  for (const f of readers) assert.ok(tools.includes(f), `${f} reads a low-risk path but only the launcher job runs it`);
+});
+
+test('content lane: a cases-only diff is a content PR', () => {
+  const cases = ['packages/form-rules/cases/kinds/tap.json', 'packages/form-rules/cases/kettle.json'];
+  assert.equal(jobsFor(cases, undefined, { readers: fakeReaders }).scope, 'content');
+  assert.deepEqual(lane(cases), ['server-3', 'soul-tools']);
+  assert.deepEqual(lane([...cases, 'changes/cases.md']), ['server-3', 'soul-tools']);
+});
+
+test('form-rules source: soul-tools, the server readers, and the web jobs (apps/web imports it)', () => {
+  const src = ['packages/form-rules/src/effects.ts', 'changes/effects.md'];
+  assert.equal(jobsFor(src, undefined, { readers: fakeReaders }).scope, 'low-risk');
+  assert.deepEqual(lane(src), ['server-3', 'soul-tools', 'types-web', 'web']);
+  for (const f of ['tools/entry/look.mjs', 'content/moves/sit.json', 'content/asks/a.json']) assert.deepEqual(lane([f]), ['server-3', 'soul-tools'], f);
+  for (const f of ['docs/testing.md', 'changes/a.md', 'README.md']) assert.ok(!lane([f]).includes('server-3'), f);
+});
+
+test('a mixed diff (content beside any other file) runs the full battery', () => {
+  for (const f of ['apps/server/src/god/forms-adapter.ts', 'apps/web/src/gen-mesh/vocab-look.ts', 'tools/world-launcher/soul/can-i.mjs', 'content/tunes/tunes.json', '.github/scripts/ci-scope.mjs']) {
+    assert.deepEqual(lane([...CONTENT_DIFF, f]), BATTERY, f);
+    assert.equal(jobsFor([...CONTENT_DIFF, f]).scope, 'full', f);
+  }
+  assert.equal(smokeFor([...CONTENT_DIFF, 'apps/server/src/god/forms-adapter.ts']), true);
+});
+
+test('merge train: content PRs count as low-risk, so they never wait on MIXED_CAP', () => {
+  const train = readFileSync(repo('.github/scripts/merge-train.mjs'), 'utf8');
+  assert.match(train, /import \{[^}]*\blowRisk\b[^}]*\} from '\.\/ci-scope\.mjs'/);
+  assert.match(train, /if \(!lowRisk\(files\)\) \{\s*mixedQueued/);
+  for (const f of CONTENT_DIFF) assert.ok(LOW_RISK.test(f), f);
+  assert.equal(lowRisk(CONTENT_DIFF), true);
 });
 
