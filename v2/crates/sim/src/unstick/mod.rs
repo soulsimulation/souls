@@ -6,7 +6,8 @@
 //!   nearer its leg's end than it has ever been is progress and takes the second off its time without progress (to
 //!   no less than none); any other second adds itself. A new leg starts the clock again, and so does, while it waits for a link taken in turns
 //!   (N8), that link's owner letting someone in or turning it (the queue moves). The rungs go by this time, so a
-//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them.
+//!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them. A new route
+//!   to the same leg's end (the reroute rung) keeps its least distance to it, so one going to and fro climbs too.
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
 //!   again once from where it stands; at 6 s a `make-way` is sent to the agent of each still body in its way (within
 //!   [`NEAR`] of it, or within [`ROOM`] of the far end of the link it waits for) that has no order to stay
@@ -410,10 +411,15 @@ impl Ladder {
                 c.rung = 1;
                 self.record(now, who, order, Rung::Reroute);
                 self.reroute(runner, town, who);
+                // A new route to the same leg's end keeps the least distance to it: measured again from where the
+                // walker stands, a walker going to and fro would count each swing back as progress, and be routed
+                // again every few seconds without ever climbing further (#3168).
                 if let (Some(c), Some(w)) = (self.clocks.get_mut(&who), self.walkers.get(&who)) {
                     c.leg = 0;
-                    c.best = len(body.pose.position, w.legs[0].to);
-                    c.mark = c.best;
+                    if w.legs[0].to != leg.to {
+                        c.best = len(body.pose.position, w.legs[0].to);
+                        c.mark = c.best;
+                    }
                 }
             }
         }

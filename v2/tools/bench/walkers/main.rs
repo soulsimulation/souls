@@ -503,10 +503,15 @@ fn main() {
                     g.at,
                 ) {
                     Ok(()) => break 'start,
-                    Err(_) if tries < 5 => tries += 1,
-                    Err(_) => {
-                        restarts += 1;
-                        continue 'start;
+                    Err(e) => {
+                        *refused_at
+                            .entry(format!("{} (a start): {}", piece_of(&town, &body), e.name))
+                            .or_default() += 1;
+                        if tries >= 5 {
+                            restarts += 1;
+                            continue 'start;
+                        }
+                        tries += 1;
                     }
                 }
                 refused_orders += 1;
