@@ -13,7 +13,8 @@ not here. The controller (B1) is summarised under [The controller](#the-controll
    2 manipulator, 3 gaze, 4 voice (a class added later takes the next number; another is `class-unknown`), and for a
    manipulator the body's slot that holds what it holds. There is no fixed body plan: four legs and no hands, two of
    each, a beak. A family is authored as a kind whose owner is `family` (SA-F1, E21), with its resources in a
-   meaning section of its entry, below 20 and outside the register's 9 to 12 and 17 (B2 picks the number);
+   meaning section of its entry: section 13, `{1: resources, 2: actions, 3: full model, 4: simple model}` (B13,
+   `kinds/body.rs`; `v2/tools/import-body` writes it for a body from the authoring kit);
    `replica` holds it decoded as `{1: name, 2: [{1: name, 2: class, 3: slot}, ...]}`, never an authored or stored
    form. Unknown fields, and two resources of one name, are refused (`not-a-family`, `resource-duplicate`).
 2. **A skill claims classes or names, never anatomy:** every resource of a class (a walk takes all the legs), any
