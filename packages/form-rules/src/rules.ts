@@ -16,7 +16,7 @@
 // What a form does once it may be done is effects.ts (SA-F2b, #2844); the amount a transfer
 // moves is measured here, so the `room` need and the effect agree on one number.
 
-export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'moves']);
+export const NEEDS = Object.freeze(['state', 'slot_free', 'within_reach', 'hand', 'held_by_actor', 'linked', 'unlinked', 'room', 'enough', 'sum', 'moves']);
 export const REASONS = Object.freeze([
   'field_differs',
   'slot_taken',
@@ -52,9 +52,13 @@ export type Need = {
   at_most?: number;
   slot?: Ref;
   point?: Ref;
-  /** `within_reach`: the thing whose point it is, given as a form argument; omitted means this thing. */
-  of?: { arg: string };
   link?: string;
+  /** The thing a need reads, given as a form argument; omitted means this thing. `within_reach`: the thing whose point
+   *  it is. `state`: the field is read through that thing's kind. */
+  of?: Ref;
+  /** A `sum` need: int fields of this kind added up; with `after_moves`, as this form's transfers leave them. */
+  fields?: string[];
+  after_moves?: boolean;
   free?: boolean;
   /** A `hand` need: every hand holds nothing. */
   empty?: boolean;
@@ -85,6 +89,8 @@ export type Effect = {
   kind?: string;
   from?: unknown;
   amount?: unknown;
+  /** A transfer between two fields of one thing: the field it lands in (`field` is the one it leaves). */
+  into_field?: string;
   form?: string;
   after_us?: number;
   /** A `draw`: the table the world draws one outcome from (SA-F13). */
@@ -211,6 +217,7 @@ export function decide(input: Input): Verdict {
   const checks: Record<string, (n: Need, i: number) => Outcome> = {
     state(n, i) {
       if (has(n, 'link')) return placeState(n, i);
+      if (has(n, 'of')) return argState(n, i);
       const field = n.field ?? '';
       const def = has(entry.state, field) ? entry.state![field] : undefined;
       if (!def) return { ok: false, no: bad(i, 'no_such_field', { field }) };
@@ -238,9 +245,10 @@ export function decide(input: Input): Verdict {
       const after = (by: unknown) => (whole(by) && whole(value) ? value + by : null);
       const fix = formFix((e) => (e.change === 'set' && e.field === field && !has(e, 'by') && (e.to === null || typeof e.to !== 'object') && meets(e.to)) ||
         (e.change === 'set' && e.field === field && after(e.by) !== null && after(e.by)! >= (def.min ?? 0) && (!whole(def.max) || after(e.by)! <= def.max) && meets(after(e.by))) ||
-        (e.change === 'transfer' && e.field === field && ((e.into === 'this' && whole(def.max) && meets(def.max)) || (e.from === 'this' && meets(def.min ?? 0)))),
-        // the fix's own needs on this field must hold now, or it would be refused in turn
-        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || m.field !== field || holds(m, value)));
+        (e.change === 'transfer' && ((e.into === 'this' && (e.into_field ?? e.field) === field && whole(def.max) && meets(def.max)) || (e.from === 'this' && e.field === field && meets(def.min ?? 0)))),
+        // the fix's own needs on this field of this thing (not an argument's or the place's) must hold now, or it would be
+        // refused in turn
+        (f) => (f.needs ?? []).every((m) => m.need !== 'state' || has(m, 'of') || has(m, 'link') || m.field !== field || holds(m, value)));
       return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail: { field, found: value, wanted }, fix, read } };
     },
 
@@ -392,6 +400,38 @@ export function decide(input: Input): Verdict {
     // form asks is there to give, so a pour of three units from a pitcher holding two is refused rather than made smaller.
     room: (_n, i) => moves(i, 'room'),
     enough: (_n, i) => moves(i, 'enough'),
+
+    // The sum of int fields of this kind (a well whose portions are kept in two fields). With `after_moves`, each
+    // field as this form's transfers would leave it, measured as the `room` need measures them: a capacity shared
+    // by several fields is never overfilled.
+    sum(n, i) {
+      const fields = Array.isArray(n.fields) ? n.fields : [];
+      if (fields.length < 2) return { ok: false, no: bad(i, 'malformed_need') };
+      let total = 0;
+      for (const field of fields) {
+        const def = has(entry.state, field) ? entry.state![field] : undefined;
+        if (!def || def.type !== 'int') return { ok: false, no: bad(i, 'no_such_field', { field }) };
+        if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: act.this, field, read } };
+        const value = has(self.fields, field) ? self.fields![field] : def.default;
+        if (!whole(value)) return { ok: false, no: bad(i, 'not_whole_number', { field }) };
+        read.push([`${act.this}/field/${def.n}`, value]);
+        total += value;
+      }
+      if (n.after_moves === true) {
+        for (const e of (form.effects ?? []).filter((x) => x && x.change === 'transfer')) {
+          const m = measure(kinds, nodes, act.this, args, e);
+          if ('bad' in m) return { ok: false, no: bad(i, m.bad, m.detail) };
+          if (m.from === act.this && fields.includes(m.field)) total -= m.moved;
+          if (m.into === act.this && fields.includes(m.intoField)) total += m.moved;
+        }
+      }
+      const wanted: Record<string, unknown> = {};
+      for (const k of ['at_least', 'at_most']) if (has(n, k)) wanted[k] = (n as Record<string, unknown>)[k];
+      if (!Object.keys(wanted).length || !Object.values(wanted).every(whole)) return { ok: false, no: bad(i, 'malformed_need') };
+      if ((!has(n, 'at_least') || total >= n.at_least!) && (!has(n, 'at_most') || total <= n.at_most!)) return { ok: true };
+      const detail = { fields, found: total, wanted, ...(n.after_moves === true ? { after_moves: true } : {}) };
+      return { ok: false, no: { verdict: 'no', reason: 'field_differs', need: i, detail, fix: null, read } };
+    },
   };
 
   // A field of the place this thing stands in, read through its link to the place (from "place", most 1), never from
@@ -406,14 +446,29 @@ export function decide(input: Input): Verdict {
     const count = Array.isArray(ends) ? ends.length : 0;
     read.push([`${act.this}/link/${ldef.n}`, count]);
     if (!count) return { ok: false, no: { verdict: 'no', reason: 'not_linked', need: i, detail: { link: type, count }, fix: null, read } };
-    const id = String(ends![0]);
-    const place = has(nodes, id) ? nodes[id] : undefined;
-    const kind = place?.kind && has(kinds, place.kind) ? kinds[place.kind] : undefined;
+    return otherField(n, i, String(ends![0]));
+  }
+
+  // A field of the thing a `thing` argument names: the dose's mug, the toast's skewer. It is read through that thing's
+  // own kind, by its number and only by its audience; a refusal names no fix (this kind's forms do not change it).
+  function argState(n: Need, i: number): Outcome {
+    const ref = n.of as { arg?: unknown } | undefined;
+    if (!ref || typeof ref !== 'object' || typeof ref.arg !== 'string') return { ok: false, no: bad(i, 'malformed_need') };
+    if (!has(args, ref.arg)) return { ok: false, no: bad(i, 'argument_missing', { arg: ref.arg }) };
+    const id = args[ref.arg];
+    if (typeof id !== 'string' || !has(nodes, id)) return { ok: false, no: bad(i, 'no_such_node', { node: typeof id === 'string' ? id : null }) };
+    return otherField(n, i, id);
+  }
+
+  // The field `n.field` of another node, read through that node's kind and compared as a state need compares.
+  function otherField(n: Need, i: number, id: string): Outcome {
+    const other = has(nodes, id) ? nodes[id] : undefined;
+    const kind = other?.kind && has(kinds, other.kind) ? kinds[other.kind] : undefined;
     const field = n.field ?? '';
     const def = kind && has(kind.state, field) ? kind.state![field] : undefined;
     if (!def) return { ok: false, no: bad(i, 'no_such_field', { node: id, field }) };
     if (!sees(def.audience)) return { ok: 'unknown', unknown: { verdict: 'unknown', need: i, node: id, field, read } };
-    let value = has(place!.fields, field) ? place!.fields![field] : def.default;
+    let value = has(other!.fields, field) ? other!.fields![field] : def.default;
     if (def.type === 'timed') {
       const now = valueAt(def, value, state.now_us);
       if (typeof now === 'object') return { ok: false, no: bad(i, now.bad, { node: id, field }) };
@@ -443,7 +498,7 @@ export function decide(input: Input): Verdict {
       read.push([`${m.from}/field/${m.fromDef.n}`, m.there]);
       read.push([`${m.into}/field/${m.intoDef.n}`, m.has]);
       if (which === 'room' && m.room !== null && m.moved > m.room) {
-        const detail = { node: m.into, field: m.field, room: m.room, amount: m.moved };
+        const detail = { node: m.into, field: m.intoField, room: m.room, amount: m.moved };
         return { ok: false, no: { verdict: 'no', reason: 'no_room', need: i, detail, fix: null, read } };
       }
       if (which === 'enough' && m.moved < m.asked) {
@@ -659,7 +714,9 @@ function resolve(ref: unknown, args: Record<string, unknown>): string | null {
 
 type FieldDef = NonNullable<Entry['state']>[string];
 export type Measure = {
+  /** The field it leaves, and the field it lands in: the same but for a transfer between two fields of one thing. */
   field: string;
+  intoField: string;
   from: string;
   into: string;
   fromDef: FieldDef;
@@ -681,16 +738,18 @@ export type Measure = {
 export function measure(kinds: Record<string, Entry>, nodes: Record<string, Node>, self: string, args: Record<string, unknown>, e: Effect): Measure | { bad: string; detail: Record<string, unknown> } {
   const end = (ref: unknown) => (ref === 'this' ? self : resolve(ref, args));
   const from = end(e.from), into = end(e.into), field = typeof e.field === 'string' ? e.field : '';
-  if (!from || !into || from === into) return { bad: 'malformed_transfer', detail: { from, into } };
+  const intoField = typeof e.into_field === 'string' ? e.into_field : field;
+  // One node gives and takes only between two of its fields; two nodes move one field.
+  if (!from || !into || (from === into) === (intoField === field)) return { bad: 'malformed_transfer', detail: { from, into } };
   const defs: FieldDef[] = [];
   const values: number[] = [];
-  for (const id of [from, into]) {
+  for (const [id, name] of [[from, field], [into, intoField]]) {
     const node = has(nodes, id) ? nodes[id] : undefined;
     const entry = node?.kind && has(kinds, node.kind) ? kinds[node.kind] : undefined;
-    const def = entry && has(entry.state, field) ? entry.state![field] : undefined;
-    if (!node || !def || def.type !== 'int') return { bad: 'no_such_field', detail: { node: id, field } };
-    const value = has(node.fields, field) ? node.fields![field] : def.default;
-    if (!whole(value) || value < 0) return { bad: 'not_whole_number', detail: { node: id, field } };
+    const def = entry && has(entry.state, name) ? entry.state![name] : undefined;
+    if (!node || !def || def.type !== 'int') return { bad: 'no_such_field', detail: { node: id, field: name } };
+    const value = has(node.fields, name) ? node.fields![name] : def.default;
+    if (!whole(value) || value < 0) return { bad: 'not_whole_number', detail: { node: id, field: name } };
     defs.push(def);
     values.push(value);
   }
@@ -700,16 +759,16 @@ export function measure(kinds: Record<string, Entry>, nodes: Record<string, Node
   // The target's room is up to its field's `max`; the source gives down to its `min` (0 if none).
   let room: number | null = null;
   if (has(intoDef, 'max')) {
-    if (!whole(intoDef.max) || intoDef.max < held) return { bad: 'over_capacity', detail: { node: into, field } };
+    if (!whole(intoDef.max) || intoDef.max < held) return { bad: 'over_capacity', detail: { node: into, field: intoField } };
     room = intoDef.max - held;
   }
   const floor = has(fromDef, 'min') ? fromDef.min : 0;
   if (!whole(floor) || floor < 0) return { bad: 'not_whole_number', detail: { node: from, field } };
   let want: unknown = e.amount;
   if (e.amount === 'room') {
-    if (room === null) return { bad: 'no_capacity', detail: { node: into, field } };
+    if (room === null) return { bad: 'no_capacity', detail: { node: into, field: intoField } };
     want = room;
   } else if (e.amount && typeof e.amount === 'object' && has(e.amount, 'arg')) want = args[(e.amount as { arg: string }).arg];
   if (!whole(want) || want < 0) return { bad: 'not_whole_number', detail: { amount: e.amount ?? null } };
-  return { field, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)), asked: want };
+  return { field, intoField, from, into, fromDef, intoDef, there, has: held, room, moved: Math.min(want, Math.max(0, there - floor)), asked: want };
 }

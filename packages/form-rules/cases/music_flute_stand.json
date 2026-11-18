@@ -1,0 +1,225 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:flute_stand (from core-flute-stand@1, solo flute, 2026-11-09). Anyone plays a sixteen-second flute phrase at the stand ('Play a solo flute melody (16 seconds; stop anytime)'); the world ends it at its timer, or it is stopped sooner. One phrase at a time: playing again while it plays is refused and names stop. The flute is the body's prop: the stand holds no instrument anyone can take.",
+ "cases": [
+  {
+   "name": "play_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "play"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:flute_stand"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "play_while_playing_names_stop",
+   "act": {
+    "this": "f1",
+    "form": "play"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:flute_stand",
+      "fields": {
+       "playing": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "playing",
+     "found": true,
+     "wanted": {
+      "is": false
+     }
+    },
+    "fix": {
+     "form": "stop"
+    }
+   }
+  },
+  {
+   "name": "stop_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "stop"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:flute_stand",
+      "fields": {
+       "playing": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "stop_when_silent_names_play",
+   "act": {
+    "this": "f1",
+    "form": "stop"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:flute_stand"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "playing",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "play"
+    }
+   }
+  },
+  {
+   "name": "phrase_ends_every_need_met",
+   "act": {
+    "this": "f1",
+    "form": "phrase_ends"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:flute_stand",
+      "fields": {
+       "playing": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "phrase_ends_after_a_stop",
+   "act": {
+    "this": "f1",
+    "form": "phrase_ends"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "f1": {
+      "kind": "eden:flute_stand"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "playing",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "play"
+    }
+   }
+  }
+ ]
+}

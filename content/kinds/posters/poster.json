@@ -1,0 +1,76 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:poster",
+  "owner": "thing",
+  "state": {
+    "title": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "detail": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "out_of_date": { "n": 3, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "author": { "n": 1, "from": "soul", "most": 1, "most_per": 2, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "sheet": { "role": "contact", "at_mm": [0, 300, 6] }
+  },
+  "geometry": { "bounds_mm": [420, 600, 12] },
+  "forms": {
+    "put_up": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "title": { "type": "text" }, "detail": { "type": "text" } },
+      "needs": [
+        { "need": "unlinked", "link": "author" },
+        { "need": "within_reach", "point": "sheet" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "sheet" }],
+      "effects": [
+        { "change": "link", "link": "author", "from": "actor", "event": "poster_put_up" },
+        { "change": "set", "field": "title", "to": { "arg": "title" }, "event": "title_written" },
+        { "change": "set", "field": "detail", "to": { "arg": "detail" }, "event": "detail_written" },
+        { "change": "set", "field": "out_of_date", "to": false, "event": "poster_fresh" },
+        { "change": "timer", "form": "goes_out_of_date", "after_us": 259200000000, "event": "will_go_out_of_date" }
+      ]
+    },
+    "take_down": {
+      "who": { "link": "author" },
+      "starts": "act",
+      "needs": [
+        { "need": "linked", "link": "author" },
+        { "need": "within_reach", "point": "sheet" }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "sheet" }],
+      "effects": [
+        { "change": "unlink", "link": "author", "from": "actor", "event": "poster_taken_down" },
+        { "change": "set", "field": "title", "to": null, "event": "title_cleared" },
+        { "change": "set", "field": "detail", "to": null, "event": "detail_cleared" },
+        { "change": "set", "field": "out_of_date", "to": false, "event": "place_cleared" }
+      ]
+    },
+    "goes_out_of_date": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        { "need": "linked", "link": "author" },
+        { "need": "state", "field": "out_of_date", "is": false }
+      ],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "out_of_date", "to": true, "event": "went_out_of_date" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:poster",
+    "table": [
+      { "part": "fill", "field": "out_of_date", "do": "tint", "at": { "true": "#d8cfb8", "false": "#fbf7ec" } }
+    ],
+    "shape": {"round":0,"shapes":[{"kind":"box","at":[0,300,2],"size":[400,580,4],"tint":"paper","role":"fill"},{"kind":"box","at":[0,500,5],"size":[300,50,1],"tint":"ink"},{"kind":"box","at":[0,380,5],"size":[320,20,1],"tint":"ink"},{"kind":"box","at":[0,340,5],"size":[260,20,1],"tint":"ink"},{"kind":"box","at":[-180,570,8],"size":[14,14,8],"tint":"pin"},{"kind":"box","at":[180,570,8],"size":[14,14,8],"tint":"pin"}],"palette":{"paper":"#fbf7ec","ink":"#2a2622","pin":"#c0392b"},"tags":["poster","board","object"]}
+  },
+  "text": {
+    "card": "A place for one signed poster; out of date three world days after it goes up.",
+    "poster": "poster",
+    "flyer": "flyer"
+  },
+  "card": { "text": "card", "category": "poster", "synonyms": ["flyer"] }
+}

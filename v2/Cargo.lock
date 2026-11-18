@@ -22,6 +22,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "body-script"
+version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -151,6 +159,7 @@ dependencies = [
  "i_triangle",
  "import-eden",
  "replica",
+ "skills",
  "testworld",
 ]
 

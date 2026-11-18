@@ -1,0 +1,61 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:shop_counter",
+  "owner": "thing",
+  "state": {
+    "apples": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 12,
+      "min": 0,
+      "max": 12,
+      "audience": { "rule": "everyone" }
+    },
+    "open_times": {
+      "n": 2,
+      "type": "schedule",
+      "most": 14,
+      "default": [
+        {
+          "repeat": "weekly",
+          "days": ["mon", "tue", "wed", "thu", "fri", "sat"],
+          "from_us": 32400000000,
+          "to_us": 64800000000
+        }
+      ],
+      "audience": { "rule": "everyone" }
+    }
+  },
+  "points": {
+    "clerk": { "role": "stand", "at_mm": [0, 0, -700], "yaw_mdeg": 0 },
+    "customer": { "role": "stand", "at_mm": [0, 0, 750], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [2060, 1341, 760] },
+  "forms": {
+    "take_apple": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "state", "field": "apples", "at_least": 1 }, { "need": "hand", "free": true }],
+      "steps": [{ "step": "walk_to", "point": "customer" }, { "step": "take" }],
+      "effects": [{ "change": "create", "kind": "eden:apple", "into": "actor_hand", "event": "apple_taken" }]
+    }
+  },
+  "stock": { "apples": { "kind": "eden:apple", "count": "apples", "take": "take_apple" } },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:shop_counter",
+    "shape": {"shapes":[{"kind":"extrude","at":[0,30,0],"polygon":[[-970,-320],[970,-320],[970,320],[-970,320]],"h":940,"tint":"body"},{"kind":"box","at":[0,1020,0],"size":[2060,50,760],"round":0,"tint":"top"},{"kind":"box","at":[0,500,355],"size":[1900,900,10],"round":0,"tint":"panel"},{"kind":"extrude","at":[-550,1070,-50],"polygon":[[-170,-150],[170,-150],[170,150],[-170,150]],"h":100,"tint":"till"},{"kind":"rbox","at":[-550,1260,-120],"size":[300,160,40],"tint":"till","round":30,"pitch":-22918},{"kind":"box","at":[-550,1260,-100],"size":[240,100,5],"round":0,"tint":"screen","pitch":-22918},{"kind":"cyl","at":[550,1060,150],"r":150,"r2":110,"h":60,"segments":12,"tint":"bowl"},{"kind":"sphere","at":[500,1120,120],"r":40,"segments":8,"tint":"apple","role":"fill"},{"kind":"sphere","at":[600,1120,170],"r":40,"segments":8,"tint":"apple","role":"fill"},{"kind":"sphere","at":[560,1120,90],"r":40,"segments":8,"tint":"apple","role":"fill"},{"kind":"sphere","at":[540,1120,190],"r":40,"segments":8,"tint":"apple","role":"fill"}],"palette":{"body":"#5e3d27","top":"#c9b38a","panel":"#6b4a32","till":"#3a3d42","screen":"#7fe0a0","brass":"#b8913f","tap":"#2b2623","beer":"#d9a63a","machine":"#2f3236","chrome":"#c9ccd0","glass":"#d8eef0","cake":"#c47a5a","bowl":"#c9b38a","apple":"#b5322a"},"tags":["furniture","table","shop"]},
+    "table": [{ "part": "fill", "field": "apples", "do": "scale", "range": [0, 12], "to": [0, 1000] }]
+  },
+  "text": {
+    "card": "A shop counter: one serves from behind, apples free to take in front.",
+    "shop": "shop",
+    "till": "till",
+    "serve": "serve",
+    "apples": "apples",
+    "open_times": "open times"
+  },
+  "card": { "text": "card", "category": "shop", "synonyms": ["till", "serve"] }
+}

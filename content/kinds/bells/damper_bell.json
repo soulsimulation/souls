@@ -1,0 +1,94 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:damper_bell",
+  "owner": "thing",
+  "state": {
+    "damped": { "n": 1, "type": "bool", "default": false, "audience": { "rule": "everyone" } },
+    "ringing": { "n": 2, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "rope": { "role": "grip", "at_mm": [250, 1000, 0] },
+    "crown": { "role": "contact", "at_mm": [0, 1900, 0] },
+    "stand": { "role": "stand", "at_mm": [250, 0, 700], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [1000, 2400, 800] },
+  "forms": {
+    "ring": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "damped", "is": false, "says": "remove_damper_first" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "rope" }
+      ],
+      "effects": [
+        { "change": "set", "field": "ringing", "to": true, "event": "rang" },
+        { "change": "timer", "form": "fade", "after_us": 4000000, "event": "will_fade" }
+      ]
+    },
+    "fade": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [{ "need": "state", "field": "ringing", "is": true }],
+      "steps": [],
+      "effects": [{ "change": "set", "field": "ringing", "to": false, "event": "faded" }]
+    },
+    "fit_damper": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "damped", "is": false, "says": "already_fitted" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "crown" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "set", "field": "damped", "to": true, "event": "damper_fitted" }]
+    },
+    "remove_damper": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "damped", "is": true, "says": "already_stored" },
+        { "need": "hand", "empty": true, "says": "empty_hands" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "move", "move": "press", "at": "crown" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [{ "change": "set", "field": "damped", "to": false, "event": "damper_removed" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:damper_bell",
+    "table": [
+      { "part": "lid", "field": "damped", "do": "show", "at": { "true": 1, "false": 0 } },
+      { "part": "flip", "field": "ringing", "do": "rotate", "axis": "z", "at": { "true": 12000, "false": 0 }, "over_us": 300000 },
+      { "field": "ringing", "do": "sound", "sound": "bell", "mode": "once", "reach_mm": 40000, "at": { "true": 1000, "false": 0 } }
+    ],
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[-420,1100,0],"size":[100,2200,100],"tint":"wood"},{"kind":"box","at":[420,1100,0],"size":[100,2200,100],"tint":"wood"},{"kind":"box","at":[0,2250,0],"size":[1000,120,140],"tint":"wood"},{"kind":"lathe","at":[0,1500,0],"profile":[[0,700],[90,690],[160,600],[200,400],[260,120],[300,0],[0,0]],"segments":14,"tint":"bronze","role":"flip","pivot":[0,2200,0]},{"kind":"cyl","at":[0,1900,0],"r":170,"h":160,"segments":12,"tint":"felt","role":"lid"},{"kind":"cyl","at":[250,1500,0],"r":12,"h":1000,"segments":5,"tint":"rope"}],"palette":{"wood":"#5e4630","bronze":"#b0803a","felt":"#7a2f2f","rope":"#c9b48a"},"tags":["bell","sound","object"]}
+  },
+  "text": {
+    "card": "A bronze bell with one felt damper: ring it, or fit the damper to stop a ring.",
+    "remove_damper_first": "Remove the fitted felt damper before pulling this SAME bell rope.",
+    "already_fitted": "The SAME felt damper is already fitted; remove it to restore ringing.",
+    "already_stored": "The felt damper is already stored; fit it before removing it.",
+    "empty_hands": "Empty your hands before fitting or removing the felt damper.",
+    "sound": "sound",
+    "chime": "chime",
+    "muffle": "muffle",
+    "howto_quiet": "With empty hands, fit the felt damper so a pull rings nothing; remove it to ring again."
+  },
+  "card": { "text": "card", "category": "sound", "synonyms": ["chime", "muffle"] },
+  "howtos": {
+    "quiet": { "text": "howto_quiet", "steps": [{ "form": "fit_damper" }, { "form": "remove_damper" }, { "form": "ring" }] }
+  }
+}
