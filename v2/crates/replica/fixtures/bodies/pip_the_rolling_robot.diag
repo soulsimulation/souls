@@ -1,0 +1,11 @@
+# body:pip_the_rolling_robot: a body admitted from the authoring kit by v2/tools/import-body (Engine v2 B13, #2744). Validator asset
+# body_0ac8dd17fab38e64b9367357232b819847bad25254252b5a47921ff1afa23b0f, profile rolling-gripper/1. Footprint and height measured from the mesh across its clips.
+{1: "body:pip_the_rolling_robot", 2: "family", 3: {
+    1: {1: "size", 2: "enum", 3: "large", 4: "public", 5: ["small", "standard", "large"]},
+    2: {1: "height", 2: "int", 3: 1737, 4: "public"},
+    3: {1: "hover", 2: "int", 3: 0, 4: "public"},
+    4: {1: "radius", 2: "int", 3: 422, 4: "public"}},
+  13: {1: [{1: "souls:wheels", 2: 1}, {1: "souls:gripper-left", 2: 2, 3: 1}, {1: "souls:gripper-right", 2: 2, 3: 2}, {1: "souls:eyes", 2: 3}, {1: "souls:voice", 2: 4}],
+    2: ["go", "stand", "turn", "look", "speak", "rest", "wake", "dance", "wave", "pick-up", "put-on", "carry", "lie", "nap"],
+    3: "sha256:950f831c17978607a13ad00ccc8bcbe11f4a58ddb29cc25557816015ebb1bb50",
+    4: "sha256:5e0a5cd1ee357ed049ff875b0f2b363c3eebdb6eb7c1381080e0dc5a27e6b71b"}}
