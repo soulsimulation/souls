@@ -422,6 +422,11 @@
  "geometry": {
   "bounds_mm": [1219, 2438, 76]
  },
+ "children": {
+  "crew": {
+   "kind": "mars:rack_crew"
+  }
+ },
  "motion": {
   "how": "two_hands"
  },

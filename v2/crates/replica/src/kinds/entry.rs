@@ -8,9 +8,11 @@
 //! - **5** points, numbered 1, 2, ... in the file's order: `{1: name, 2: at_mm, 3: role, 4: yaw_mdeg}`, and for a
 //!   `joint` (a connector) `5: connector kind, 6: the kind it mates with`;
 //! - **6** slots, numbered 1, 2, ... in the file's order: `{1: what it admits, 2: at_mm, 3: name}`;
-//! - **7** geometry `{1: bounds_mm}`, **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`.
+//! - **7** geometry `{1: bounds_mm}`, **18** motion `{1: how}`, **19** loose `{1: 1}` (ever) or `{2: us}`;
+//! - **11** children, the list of each named child's `kind` (B19: a frame admits its crew's activity as it holds it);
+//!   a child that states `most` is refused (`entry-section-not-read: children most`), as K3 reads no bound.
 //!
-//! Any other meaning section (forms, children, areas, ...) is refused by name, `entry-section-not-read`, rather than
+//! Any other meaning section (forms, areas, ...) is refused by name, `entry-section-not-read`, rather than
 //! dropped: a kind named without it would be named by less than its meaning. Sections 20 and up (looks, text, card)
 //! sit beside the meaning and are left out.
 
@@ -32,6 +34,7 @@ pub fn entry_to_kind(json: &str) -> Result<String, String> {
             "links" => (4, numbered_by_n(v, link_type)?),
             "points" => (5, in_order(v, point)?),
             "slots" => (6, in_order(v, slot)?),
+            "children" => (11, children(v)?),
             "geometry" => (7, map(&[(1, v.get("bounds_mm").map(diag).transpose()?)])),
             "motion" => (18, map(&[(1, v.get("how").map(quoted).transpose()?)])),
             "loose" => (
@@ -147,6 +150,20 @@ fn point(n: &str, p: &Value) -> Result<String, String> {
         (5, p.get("connector").map(quoted).transpose()?),
         (6, p.get("mates").map(quoted).transpose()?),
     ]))
+}
+
+fn children(v: &Value) -> Result<String, String> {
+    let mut kinds = Vec::new();
+    for (n, c) in v.obj().unwrap_or(&[]) {
+        if c.get("most").is_some() {
+            return Err("entry-section-not-read: children most".into());
+        }
+        let k = c
+            .get("kind")
+            .ok_or(format!("entry-value: child {n} names no kind"))?;
+        kinds.push(quoted(k)?);
+    }
+    Ok(format!("[{}]", kinds.join(", ")))
 }
 
 fn slot(n: &str, s: &Value) -> Result<String, String> {

@@ -45,6 +45,7 @@ use crate::structure::Structure;
 use crate::timers::{DueList, Timer};
 
 pub mod carry;
+pub mod seating;
 
 type R<T> = Result<T, Refusal>;
 
