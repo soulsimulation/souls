@@ -78,7 +78,7 @@ test('causes 1, 3, 4 on an Eden core world: corruption quarantined in place, a h
     t.diagnostic(`1 corruption: quarantined ${at} ms after the fault (${seen[0]}); the same process ticking on (${before} -> ${after}); never down`); }
 
   // 4: the disk under its headroom (the world is told it has 10 MB free). The log says so; the hourly backups' retention rule
-  // runs (eight old hourly files: the six newest are kept, as the rule says, never fewer); the world runs on.
+  // runs (eight old hourly files: the two newest are kept, as the rule says (#2542), never fewer); the world runs on.
   { const pid0 = h.pid(), before = (await h.health()).tick;
     const old = Array.from({ length: 8 }, (_, i) => `backup-20200101${String(i + 1).padStart(2, '0')}.db`);
     for (const f of old) writeFileSync(join(h.dataDir, f), '');
@@ -86,12 +86,12 @@ test('causes 1, 3, 4 on an Eden core world: corruption quarantined in place, a h
     await wait(300);
     assert.match(h.log(), /\[load\] disk\.low: 10 MB free, under the 1024 MB headroom: pruning by the retention rules; the hourly backup waits/);
     const left = readdirSync(h.dataDir).filter((f) => /^backup-2020/.test(f)).sort();
-    assert.deepEqual(left, old.slice(2), 'pruned by the retention rule: the newest six hourly files kept');
+    assert.deepEqual(left, old.slice(6), 'pruned by the retention rule: the newest two hourly files kept');
     assert.equal(await h.fault('kind=disk'), 202); await wait(300);
     assert.match(h.log(), /\[load\] disk\.ok: \d+ MB free/);
     const after = (await h.health()).tick;
     assert.equal(h.pid(), pid0); assert.ok(after > before, `still ticking (${before} -> ${after})`);
-    t.diagnostic(`4 disk: alert and prune at once (2 of 8 old hourly backups removed, 6 kept by the rule); the same process ticking on (${before} -> ${after}); never down`); }
+    t.diagnostic(`4 disk: alert and prune at once (6 of 8 old hourly backups removed, 2 kept by the rule); the same process ticking on (${before} -> ${after}); never down`); }
 
   // 3: another process holds the database's write lock for 12 s. The world's next write waits its 5 s limit (busy_timeout)
   // and the world halts by name; the launcher's guard restarts it, and it serves again once the lock is gone, exactly.
