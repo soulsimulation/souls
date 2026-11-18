@@ -37,8 +37,10 @@ env:
   # Where tools/assets pull keeps its content-addressed download cache (restored by actions/cache below).
   SIM_ASSETS_CACHE: ${{ github.workspace }}/../.sim-assets-cache
 jobs:
+  # scope, repo, merge-group-covered and ci-ok (and the required security, fragment and merge_group proof jobs) run on
+  # CI_LIGHT_RUNNER when set (a label, or a JSON label list), else GitHub-hosted. Unset it to go back to hosted runners.
   scope:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -87,7 +89,7 @@ jobs:
 
   # Fast, dependency-free checks of the repo's own tooling; always runs.
   repo:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -330,7 +332,7 @@ jobs:
   merge-group-covered:
     needs: scope
     if: needs.scope.outputs.covered == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - env:
@@ -340,7 +342,7 @@ jobs:
   # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
   # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing.
   ci-ok:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     needs: [scope, repo, qualify, smoke, merge-group-covered]
     if: always()
     steps:
