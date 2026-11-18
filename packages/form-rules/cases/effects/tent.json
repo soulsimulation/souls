@@ -7,61 +7,212 @@
       "state": {
         "actor": "b1",
         "nodes": {
-          "room": { "loose": ["b1", "b2", "t1"] },
-          "t1": { "kind": "eden:tent", "fields": { "open": true } },
-          "b1": { "hands": { "left": null, "right": null } },
-          "b2": { "hands": { "left": null, "right": null } }
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:tent",
+            "fields": {
+              "open": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
         }
       },
       "do": [
         {
-          "act": { "this": "t1", "form": "sleep", "args": { "place": "inside" } },
+          "act": {
+            "this": "t1",
+            "form": "sleep",
+            "args": {
+              "place": "sleep"
+            }
+          },
           "receipt": "rc1",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "inside" } },
-              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "sleep"
+                }
+              },
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "sleeper",
+                "n": 1,
+                "end": "b1"
+              }
             ],
             "events": [
-              { "event": "eden:fell_asleep", "node": "t1", "changes": [0] },
-              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+              {
+                "event": "eden:fell_asleep",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:lying_in",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
             ]
           }
         },
         {
           "actor": "b2",
-          "act": { "this": "t1", "form": "sleep", "args": { "place": "inside" } },
+          "act": {
+            "this": "t1",
+            "form": "sleep",
+            "args": {
+              "place": "sleep"
+            }
+          },
           "receipt": "rc2",
-          "expect": { "verdict": "no", "reason": "slot_taken", "need": 1, "fix": null }
-        },
-        {
-          "act": { "this": "t1", "form": "get_up" },
-          "receipt": "rc3",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "unlink", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" },
-              { "change": "reparent", "node": "b1", "to": { "node": "room" } }
+              {
+                "change": "reparent",
+                "node": "b2",
+                "to": {
+                  "node": "t1",
+                  "slot": "sleep"
+                }
+              },
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "sleeper",
+                "n": 1,
+                "end": "b2"
+              }
             ],
             "events": [
-              { "event": "eden:got_up", "node": "t1", "changes": [0] },
-              { "event": "eden:stood_by", "node": "t1", "changes": [1] }
+              {
+                "event": "eden:fell_asleep",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:lying_in",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
             ]
           }
         },
         {
-          "act": { "this": "t1", "form": "lie", "args": { "place": "inside" } },
+          "act": {
+            "this": "t1",
+            "form": "get_up"
+          },
+          "receipt": "rc3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "unlink",
+                "node": "t1",
+                "link": "sleeper",
+                "n": 1,
+                "end": "b1"
+              },
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:got_up",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:stood_by",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "lie",
+            "args": {
+              "place": "sleep"
+            }
+          },
           "receipt": "rc4",
           "expect": {
             "verdict": "yes",
             "changes": [
-              { "change": "reparent", "node": "b1", "to": { "node": "t1", "slot": "inside" } },
-              { "change": "link", "node": "t1", "link": "sleeper", "n": 1, "end": "b1" }
+              {
+                "change": "reparent",
+                "node": "b1",
+                "to": {
+                  "node": "t1",
+                  "slot": "sleep"
+                }
+              },
+              {
+                "change": "link",
+                "node": "t1",
+                "link": "sleeper",
+                "n": 1,
+                "end": "b1"
+              }
             ],
             "events": [
-              { "event": "eden:lay_down", "node": "t1", "changes": [0] },
-              { "event": "eden:lying_in", "node": "t1", "changes": [1] }
+              {
+                "event": "eden:lay_down",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:lying_in",
+                "node": "t1",
+                "changes": [
+                  1
+                ]
+              }
             ]
           }
         }
@@ -69,9 +220,21 @@
       "after": {
         "t1": {
           "kind": "eden:tent",
-          "fields": { "open": true },
-          "slots": { "inside": ["b1"] },
-          "links": { "sleeper": ["b1"] }
+          "fields": {
+            "open": true
+          },
+          "slots": {
+            "sleep": [
+              "b2",
+              "b1"
+            ]
+          },
+          "links": {
+            "sleeper": [
+              "b2",
+              "b1"
+            ]
+          }
         }
       }
     },
@@ -80,40 +243,119 @@
       "state": {
         "actor": "b1",
         "nodes": {
-          "room": { "loose": ["b1", "t1"] },
-          "t1": { "kind": "eden:tent" },
-          "b1": { "hands": { "left": null, "right": null }, "effector_mm": [0, 800, 1300] }
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:tent"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              800,
+              1300
+            ]
+          }
         },
-        "moves": { "press": { "reach_mm": 600 } }
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
       },
       "do": [
         {
-          "act": { "this": "t1", "form": "sleep", "args": { "place": "inside" } },
+          "act": {
+            "this": "t1",
+            "form": "sleep",
+            "args": {
+              "place": "sleep"
+            }
+          },
           "receipt": "rc1",
-          "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "fix": { "form": "open_flap" } }
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0,
+            "fix": {
+              "form": "open"
+            }
+          }
         },
         {
-          "act": { "this": "t1", "form": "open_flap" },
+          "act": {
+            "this": "t1",
+            "form": "open"
+          },
           "receipt": "rc2",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "open", "n": 1, "to": 1 }],
-            "events": [{ "event": "eden:flap_opened", "node": "t1", "changes": [0] }],
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "open",
+                "n": 1,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:opened",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
             "timers": []
           }
         },
         {
-          "act": { "this": "t1", "form": "close_flap" },
+          "act": {
+            "this": "t1",
+            "form": "close"
+          },
           "receipt": "rc3",
           "expect": {
             "verdict": "yes",
-            "changes": [{ "change": "set", "node": "t1", "field": "open", "n": 1, "to": 0 }],
-            "events": [{ "event": "eden:flap_closed", "node": "t1", "changes": [0] }],
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "open",
+                "n": 1,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:shut",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
             "timers": []
           }
         }
       ],
-      "after": { "t1": { "kind": "eden:tent", "fields": { "open": 0 } } }
+      "after": {
+        "t1": {
+          "kind": "eden:tent",
+          "fields": {
+            "open": 0
+          }
+        }
+      }
     }
   ]
 }
