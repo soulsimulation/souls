@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { assignLight, changedFiles, CONTENT_JOBS, CONTENT_WEB, contentOnly, FULL_EVENTS, GOD_SKILL_TESTS, greenAtHead, idleRunners, JOBS, jobsFor, LIGHT_LABEL, LOW_RISK, lowRisk, runnerFor, SERVER_READER, serverReaders, smokeFor, WINDOW_LABELS, windowed, windowFor } from './ci-scope.mjs';
+import { CONTENT_JOBS, CONTENT_WEB, FULL_EVENTS, GOD_SKILL_TESTS, JOBS, LIGHT_LABEL, LOW_RISK, SERVER_READER, WINDOW_LABELS, assignLight, changedFiles, contentOnly, greenAtHead, idleRunners, jobsFor, lowRisk, runnerFor, serverReaders, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
