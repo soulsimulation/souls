@@ -5,6 +5,7 @@
 pub mod effects;
 pub mod encode;
 pub mod ids;
+pub mod kinds;
 pub mod pose;
 pub mod time;
 pub mod tree;
