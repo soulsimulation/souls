@@ -7,7 +7,7 @@
 // leaves a full-scope run on main, which the merge train reads as proof that main is green (mainCiState in
 // merge-train.mjs). Pull request and merge_group runs stay scoped to their paths (a merge group's diff is every PR in it).
 // A diff confined to the low-risk paths (LOW_RISK: entry, content, form-rules, docs, changelog fragments) runs only
-// their own tests; any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
+// their own tests and the jobs of what reads them (a content PR: the fixed CONTENT_JOBS lane); any other diff goes through the path map, where paths no rule names (root files, the lockfile, mars/,
 // worlds/, vendor/, .github/, changes/ ...) run every job; docs and tools-only changes run none (ci-ok still reports).
 // No diff, an unreadable one or an empty one runs every job. Writes `matrix`, `any`, `scope` and `smoke` to $GITHUB_OUTPUT.
 // `smoke` (the browser local smoke, e2e/local-smoke.mjs) runs when apps/web, apps/server or e2e change, or with no diff.
@@ -20,11 +20,11 @@
 // ci run (--green-at-head) has nothing left to do. `green --repo o/r --sha <sha> [--self <run id>]` prints whether the
 // head's newest ci run passed.
 import { execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { appendFileSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { REQUIRED_STEPS, scopeFor } from '../../tools/test-harness/release-gate.mjs';
-import { SERVER_SHARDS } from './server-test-files.mjs';
+import { LATENCY_TEST, SERVER_SHARDS, serverShards, serverTestFiles } from './server-test-files.mjs';
 
 // The qualify matrix. `steps` are the gate steps that make a job relevant, and the job runs the same command as that
 // step in tools/test-harness/one-validation.sh (web: V4-web, launcher: V3-launcher-unit, client-cli: V3-client-cli);
@@ -108,10 +108,11 @@ const relevant = (job, steps) => job.steps.some(s => steps.some(step => s.endsWi
 
 const strip = ({ steps, paths, ...job }) => job;
 
-/** The low-risk paths: a change confined to them (every file) needs no server, browser smoke, walk or bundle job. Exact
- * prefixes, plus Markdown at the root other than the agent rules. Nothing in apps/server, the packages the walk audits or
- * the e2e reads them; the readers outside them are the entry and form-rules tests and card-search.test.mjs, which the
- * soul-tools job runs (ci.yml), and apps/web, which imports packages/form-rules/src (LOW_RISK_WEB). */
+/** The low-risk paths: a change confined to them (every file) needs no browser smoke, walk or bundle job, and only the
+ * server jobs that read them. Exact prefixes, plus Markdown at the root other than the agent rules. Nothing the walk
+ * audits or the e2e reads them; the readers outside them are the entry and form-rules tests and the launcher tests that
+ * read content/kinds or form-rules, which the soul-tools job runs (ci.yml), apps/web, which imports
+ * packages/form-rules/src (LOW_RISK_WEB), and the server's forms adapter (LOW_RISK_SERVER, serverReaders). */
 export const LOW_RISK = /^(?:tools\/entry|content\/(?:kinds|asks|moves)|packages\/form-rules|docs|changes)\//;
 const LOW_RISK_ROOT = file => /^[^/]+\.md$/.test(file) && !['AGENTS.md', 'CLAUDE.md'].includes(file);
 export const lowRisk = files => Array.isArray(files) && files.length > 0 && files.every(f => LOW_RISK.test(f) || LOW_RISK_ROOT(f));
@@ -119,15 +120,54 @@ export const lowRisk = files => Array.isArray(files) && files.length > 0 && file
  * typecheck, build and bundle comparison (types-web) and the web unit suite. */
 export const LOW_RISK_WEB = /^packages\/form-rules\/src\//;
 
-/** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A diff
- * confined to the low-risk paths runs only the jobs their own `paths` pick (soul-tools, docs-reference) and, for
+/** The low-risk paths the server reads: the forms adapter (apps/server/src/god/forms-adapter.ts) loads content/kinds,
+ * content/moves and packages/form-rules/cases/kinds and imports packages/form-rules/src, and its tests load kinds with
+ * tools/entry. A low-risk change here also runs the server jobs holding a test that reads them (serverReaders). */
+export const LOW_RISK_SERVER = /^(?:tools\/entry|content\/(?:kinds|asks|moves)|packages\/form-rules)\//;
+/** What in a server test's source (apps/server/src/**\/*.test.ts) marks it as a reader of LOW_RISK_SERVER: a path into
+ * them, the forms adapter, or a def tagged `entry` (the adapter reads content/kinds only for such a def). */
+export const SERVER_READER = /content\/(?:kinds|asks|moves)|form-rules|tools\/entry\/|forms-adapter|tags:\s*\[[^\]]*['"]entry['"]/;
+const SERVER_SRC = fileURLToPath(new URL('../../apps/server/src', import.meta.url));
+
+/** The server jobs (`server-<shard>`, or `latency` for its one file) holding a server test that reads the low-risk
+ * paths, from the tree as it is: a new reader, or shards rebalanced by a new test file, are followed with no edit here. */
+export function serverReaders({ files = serverTestFiles(SERVER_SRC), read = f => readFileSync(join(SERVER_SRC, f), 'utf8') } = {}) {
+  const readers = files.filter(f => SERVER_READER.test(read(f)));
+  if (!readers.length) return [];
+  const shards = serverShards(files);
+  const job = f => f === LATENCY_TEST ? 'latency' : `server-${shards.findIndex(s => s.files.includes(`src/${f}`))}`;
+  return [...new Set(readers.map(job))].sort();
+}
+
+/** The content fast lane. A content PR changes only kinds (content/kinds/<family>/), the form-rules cases and changelog
+ * fragments: the shape of the content batches. It runs exactly these jobs, written out so the list cannot drift
+ * (ci-scope.test.mjs checks each reader of those paths against it):
+ * - `soul-tools` (ci.yml): the entry tests (tools/entry: format, check, look, prove), the form-rules tests, the inline
+ *   check of eden.mjs, and the launcher tests that read content/kinds (card-search, can-i, how);
+ * - the server shard(s) holding a server test that reads content or cases (serverReaders: the forms adapter's tests);
+ * - no web or bundle job: apps/web reads packages/form-rules/src/looks.ts and content/tunes, which a content PR cannot
+ *   change. */
+export const CONTENT = /^(?:content\/kinds\/[^/]+\/|packages\/form-rules\/cases\/|changes\/)/;
+export const CONTENT_JOBS = ['soul-tools'];
+export const CONTENT_WEB = [];
+/** At least one kind or case, and nothing outside CONTENT (fragments alone are not content: they run no job). */
+export const contentOnly = files => Array.isArray(files) && files.every(f => CONTENT.test(f)) && files.some(f => !f.startsWith('changes/'));
+
+/** The jobs a diff needs. No diff (null: no usable base, or an unreadable one) and an empty diff run every job. A content
+ * diff runs the content lane (CONTENT_JOBS and the server readers). A diff confined to the low-risk paths runs only the
+ * jobs their own `paths` pick (soul-tools, docs-reference), the server readers for the paths the server reads and, for
  * form-rules source, the web jobs; any other diff is picked by the release gate's path map, where an unmapped path (the
- * lockfile, .github, changes/ beside other files ...) runs every job. */
-export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff') {
+ * lockfile, .github, changes/ beside other files ...) runs every job. `readers` is serverReaders, injectable for tests. */
+export function jobsFor(files, reason = files === null ? 'no usable base' : 'an empty diff', { readers = serverReaders } = {}) {
   if (!files?.length) return { scope: 'full', steps: [...REQUIRED_STEPS], include: JOBS.map(strip), diff: { reason } };
+  if (contentOnly(files)) {
+    const want = [...CONTENT_JOBS, ...CONTENT_WEB, ...readers()];
+    return { scope: 'content', steps: [], include: JOBS.filter(job => want.includes(job.name)).map(strip), diff: { files: files.length, content: true } };
+  }
   if (lowRisk(files)) {
     const web = files.some(f => LOW_RISK_WEB.test(f)) ? ['types-web', 'web'] : [];
-    const include = JOBS.filter(job => web.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
+    const server = files.some(f => LOW_RISK_SERVER.test(f)) ? readers() : [];
+    const include = JOBS.filter(job => web.includes(job.name) || server.includes(job.name) || files.some(f => job.paths?.test(f))).map(strip);
     return { scope: include.length ? 'low-risk' : 'none', steps: [], include, diff: { files: files.length, lowRisk: true } };
   }
   const scope = scopeFor(files);
