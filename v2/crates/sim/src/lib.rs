@@ -2,8 +2,10 @@
 #![forbid(unsafe_code)]
 
 pub mod clock;
+pub mod controller;
 pub mod frozen;
 pub mod ground;
+pub mod host;
 pub mod links;
 pub mod mover;
 pub mod routes;
