@@ -9,11 +9,15 @@
 //!   supervisor keeps its own. A world started five times in five minutes and not serving is `restart-loop`, with
 //!   its count, its last exit and its next try.
 //!
+//! - **Deploy and roll back** ([`deploy`], O7 #2804): a rehearsal on a scratch copy, a canary watch, and a rollback
+//!   the machine takes on a fault, refused when the old build cannot read what the new one wrote.
+//!
 //! There is no start limit, no breaker and no resting state: systemd retries every failure, with a delay that grows
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
 //!
 //! Moving a live world to another machine (O9, #2828) is [`moving`].
 
+pub mod deploy;
 pub mod folder;
 pub mod health;
 pub mod moving;

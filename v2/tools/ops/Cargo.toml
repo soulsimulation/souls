@@ -3,11 +3,26 @@ name = "ops"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Operations tools in Rust (Engine v2): moving a live world to another machine and its kill table (O9, #2828)."
+description = "Operations tools in Rust (Engine v2, #2635): deploy and roll back one world (O7, #2804); moving a live world to another machine and its kill table (O9, #2828)."
 
 [[bin]]
 name = "ops"
 path = "src/main.rs"
+
+# `deploy <world> <hash> --probe <file>` and `deploy rollback ...`: the commands on a machine with O1's units.
+[[bin]]
+name = "deploy"
+path = "src/deploy.rs"
+
+# The planted bad builds' world: dies at start, stalls, or refuses every act, only when served.
+[[bin]]
+name = "o7-plant"
+path = "src/plant.rs"
+
+# The O7 run: 100 agents through the gateway, three planted builds rolled back, a refused rollback, the rehearsal.
+[[bin]]
+name = "o7-run"
+path = "src/run.rs"
 
 [dependencies]
 replica = { path = "../../crates/replica" }
@@ -23,3 +38,7 @@ supervisor = { path = "../../crates/supervisor" }
 gatewayd = { path = "../../crates/gatewayd" }
 # The benches' scripted world and the shared store (V3, O3).
 archive = { path = "../archive" }
+# O7's run drives 100 agents through the gateway's socket.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }

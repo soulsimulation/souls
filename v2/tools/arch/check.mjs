@@ -62,7 +62,8 @@ export const ALLOWED = {
   // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
   directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
-  supervisor: ['replica', 'directoryd'],
+  // O7 (#2804): the rehearsal reads a world's log and writes its scratch copy (K4's log).
+  supervisor: ['replica', 'directoryd', 'sim'],
   // Uploads (G6, #2747): PNG pixel data inflated with a bound on its output; the child's rlimits on Linux; G1's commit
   // and K4's log in its tests.
   assets: ['replica', 'miniz_oxide', 'libc', 'sim'],

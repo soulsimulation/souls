@@ -627,10 +627,13 @@ version = "0.0.0"
 dependencies = [
  "archive",
  "directoryd",
+ "futures-util",
  "gatewayd",
  "replica",
  "sim",
  "supervisor",
+ "tokio",
+ "tokio-tungstenite",
  "worldd",
 ]
 
@@ -939,6 +942,7 @@ version = "0.0.0"
 dependencies = [
  "directoryd",
  "replica",
+ "sim",
 ]
 
 [[package]]
