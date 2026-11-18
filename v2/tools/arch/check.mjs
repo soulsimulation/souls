@@ -48,7 +48,8 @@ export const ALLOWED = {
   replica: ['wasm-bindgen'],
   // skills: a dev-dependency, so the world host's tests step the built-in skills (K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
-  worldd: ['replica', 'sim'],
+  // skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b, #3156).
+  worldd: ['replica', 'sim', 'skills', 'import-eden', 'testworld'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
   gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
