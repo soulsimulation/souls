@@ -1,10 +1,14 @@
 //! The world process (Engine v2, #2635): so far its clock and watchdog (K7, #2647), and what it tells its service
 //! manager (O1, #2730).
 
+mod gateway_link;
 mod watchdog;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|a| a == "gateway-link") {
+        std::process::exit(gateway_link::run(&args));
+    }
     std::process::exit(watchdog::run(&args));
 }
 
