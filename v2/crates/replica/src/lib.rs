@@ -9,6 +9,8 @@ pub mod bodies;
 pub mod effects;
 pub mod encode;
 pub mod host;
+pub mod apply;
+pub mod hash;
 pub mod ids;
 pub mod intent_decode;
 pub mod intents;
@@ -17,6 +19,11 @@ pub mod refusals;
 pub mod time;
 pub mod tree;
 pub mod views;
+pub mod query;
+pub mod read;
+pub mod rules;
+#[cfg(target_arch = "wasm32")]
+mod wasm;
 pub mod world_model;
 pub mod zones;
 

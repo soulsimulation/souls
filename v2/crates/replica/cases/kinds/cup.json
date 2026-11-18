@@ -1,0 +1,43 @@
+{
+  "format": "souls-entry/1",
+  "kind": "r2:cup",
+  "owner": "thing",
+  "about": "K3's cup for R2's cases (#2685): up to 300 g of water, taken in a free hand, drunk from and poured into another cup while held.",
+  "state": {
+    "water_g": { "n": 1, "type": "int", "unit": "g", "min": 0, "max": 300, "default": 0, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "handle": { "role": "grip", "at_mm": [45, 50, 0] }
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "drink": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "water_g", "at_least": 1 }
+      ],
+      "effects": [{ "change": "set", "field": "water_g", "to": 0, "event": "drunk" }]
+    },
+    "pour": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "into": { "type": "thing" }, "grams": { "type": "int" } },
+      "needs": [{ "need": "held_by_actor" }, { "need": "room" }],
+      "effects": [{ "change": "transfer", "field": "water_g", "from": "this", "into": { "arg": "into" }, "amount": { "arg": "grams" }, "event": "poured" }]
+    },
+    "clink": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "holds": "r2:cup" }],
+      "effects": []
+    }
+  }
+}

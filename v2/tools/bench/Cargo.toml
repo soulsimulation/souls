@@ -3,7 +3,7 @@ name = "bench"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646. `gateway-restart`: I1, #2683."
+description = "Engine v2 benches, run by hand and declared in their task's issue (Engine v2, #2635). `tree`: K2, #2646; `gateway-restart`: I1, #2683; `frozen`: K8, #2671."
 
 [[bin]]
 name = "tree"
@@ -13,9 +13,26 @@ path = "src/tree.rs"
 name = "gateway-restart"
 path = "gateway-restart/main.rs"
 
+# R1, #2684: the replica's native and WASM builds compared (node.mjs beside it), and its three numbers.
+[[bin]]
+name = "replica-equal"
+path = "replica-equal/main.rs"
+
+# K8, #2671: publishing a frozen copy each tick, with and without readers.
+[[bin]]
+name = "frozen"
+path = "src/frozen.rs"
+
+# I3, #2686: the clock's time per committed act, with checks on checker threads.
+[[bin]]
+name = "commit-cost"
+path = "commit-cost/main.rs"
+
 [dependencies]
 replica = { path = "../../crates/replica" }
 gatewayd = { path = "../../crates/gatewayd" }
+sim = { path = "../../crates/sim" }
+worldd = { path = "../../crates/worldd" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }

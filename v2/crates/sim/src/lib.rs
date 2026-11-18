@@ -8,6 +8,8 @@ pub mod mover;
 pub mod routes;
 pub mod unstick;
 pub mod walk;
+pub mod commit;
+pub mod frozen;
 
 #[cfg(test)]
 mod tests {

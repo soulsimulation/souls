@@ -102,3 +102,12 @@ step checker-artifact bash -c 'CARGO_TARGET_DIR=target/checker cargo build -p re
     --target wasm32-unknown-unknown --locked --features checker &&
   CHECKER_WASM="$PWD/target/checker/wasm32-unknown-unknown/release/replica.wasm" \
     cargo test -p replica --test intents --locked the_built_checker_artifact_loads_by_its_hash -- --nocapture'
+# The replica (R1, #2684): T6's fixtures, the query cases and 100,000 effects generated from a seed, natively and the
+# same WASM build in Node, with the same answer at every step; prints effects a second, the .wasm size and start time.
+step replica-equal bash -c 'cargo run -p bench --release --bin replica-equal --locked --quiet -- target/replica-equal &&
+  node tools/bench/replica-equal/node.mjs target/wasm-load/pkg target/replica-equal crates/replica/tests/queries.txt'
+# The form rules (R2, #2685): every case `cargo test` ran (tests/rules.rs: 10,000 generated, and the case files) through
+# the same WASM build in Node, giving the native answers byte for byte.
+step rules-equal node --input-type=module -e '
+  const got = r.rules_run(readFileSync("target/tmp/rules/run.json", "utf8")), want = readFileSync("target/tmp/rules/native.txt", "utf8");
+  console.log(`rules-equal: ${want.split("\n").length - 1} cases, WASM in Node ${process.version}, ${got === want ? "equal to" : "DIFFERENT from"} native`);
