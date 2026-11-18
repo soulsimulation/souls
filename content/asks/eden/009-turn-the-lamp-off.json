@@ -1,1 +1,1 @@
-{"format":"souls-ask/1","n":9,"group":"object","words":"turn the lamp off","obvious":3,"things":{"lamp":"eden:floor_lamp"},"chain":[{"this":"lamp","form":"switch_off"}]}
+{"format":"souls-ask/1","n":9,"group":"object","words":"turn the lamp off","obvious":3,"things":{"lamp":"eden:floor_lamp"},"given":{"lamp":{"level":3}},"chain":[{"this":"lamp","form":"switch_off"}]}

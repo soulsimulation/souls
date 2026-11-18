@@ -275,19 +275,29 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 
 - **who** may: `anyone`, `holder`, `world` (a form a timer starts, and only such a form), or `{"link": <type>}`.
 - **starts**: `act` (a Soul's act) or `timer` (set by a `timer` change).
-- **takes**: named arguments, typed `slot`, `part`, `thing`, `text`, `duration` or `count`. A `slot` or `thing` may
+- **takes**: named arguments, typed `slot`, `part`, `thing`, `text`, `duration`, `count` or `placement` (one of the
+  placement words below, chosen when the form is done; a `put` step's `place.at` may be such an argument). A `slot` or `thing` may
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument.
 - **needs**: `state` (a field `is` or is `not` a value, or an `int` or `duration` field `at_least` and/or `at_most`
+<<<<<<< HEAD
   a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor`, `hand`
   (`{"free": true}`, one hand free; `{"empty": true}`, every hand empty; or `{"holds": "<namespace:name>"}`, a kind
   the hash follows), `linked`, `unlinked`, `room`
+=======
+  a whole number), `slot_free`, `within_reach` (of a point, or of a `thing` argument), `held_by_actor` (this thing,
+  or `{"thing": {"arg": ...}}`), `moves` (`{"thing": {"arg": ...}, "by": "carry" | "push"}`: the thing's kind moves
+  that way by its section 18 `motion.how`; carrying takes as many free hands as it says, a push by one body is refused
+  for `two_souls`; refused as `moves_by`, `motion_unsaid`, `needs_souls` or `no_free_hand`), `hand`
+  (`{"free": true}`, or `{"holds": "<namespace:name>"}`, a kind the hash follows), `linked`, `unlinked`, `room`
+>>>>>>> 4ea032db6
   (no parameters: every amount the form's transfers move has room where it lands, else `no_room`; only on a form with a
   `transfer`), `enough` (no parameters: every amount the form's transfers ask is there to give at the source, else
   `not_enough`, so a pitcher asked for more than it holds refuses rather than pouring less). A range need also takes a
   `timed` field.
+<<<<<<< HEAD
   A `state` need with a `link` reads the **place the thing stands in**: `{"need": "state", "link": "place", "field":
   "rain", "at_least": 101}`, where the link type is declared `{"from": "place", "most": 1}`. The field is the place
   kind's, read by its number and only by its audience; the place is never read from the tree, since a parent means
@@ -300,10 +310,21 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   `water` (grams) out of the tap and into the kettle until it is full, so a need for water on the switch names `fill`
   as its fix. Reach to another thing's point is not a need the rules can read yet, so `fill` holds the kettle and needs
   it empty.
+=======
+  SA-F2 evaluates them. **Reach to another thing** is read in this order: (1) the walk, taken as done: entries store
+  no position for a loose thing (Engine v2 holds poses, and today's adapter walks first), so `within_reach` of a
+  `thing` argument that the form `walk_to`s is met when the thing is in the actor's place, and refused `out_of_reach`
+  when it is elsewhere; (2) else the measured pose: `"of": {"arg": ...}` names the thing whose point it is, placed by
+  that node's `at_mm` in the input; (3) else `unknown`. A kettle's `fill` takes the nearest `eden:tap` (a selector on a
+  kind) and moves toward it: the water comes from a thing in the world, never from a refill the kettle does by itself.
+  Its effect is a `transfer` of `water` (grams) out of the tap and into the kettle until it is full, so a need for water
+  on the switch names `fill` as its fix.
+>>>>>>> 4ea032db6
 - **steps**, each a move or the walk: `walk_to` (a point, or a slot's stand point), `sit`, `rise`, `move` (a move
   by name, `at` a point, `toward` an argument; moves are their own data, SA-D4), `take`, `put`, `use_held`,
   `wait` (`us`), `settle` (`posture`, `sit` or `lie`: a ground posture taken where the body stands, with no slot;
   SA-G3, [#2875](https://github.com/soulsimulation/souls/issues/2875)).
+<<<<<<< HEAD
 - **A timer is named by the form it starts.** Starting a timer replaces the thing's pending timer for the same form
   (Engine v2 T6 rule 15: the engine clears it, a clear being "fired or cancelled"; T5: it is due at a world time in
   microseconds). A crank lamp put out early and lit again goes dark at its new time, not by the earlier timer. The
@@ -311,6 +332,14 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
 - **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor or this thing
   into a slot or the actor's hand: holding is a change of parent), `link`, `unlink`, `create` (a kind, `here`, in a
   slot or in the hand), `remove`, `timer`, `transfer`, `draw`. `packages/form-rules/README.md` ("What a form does")
+=======
+- **effects**, each a generic change plus a named event (contract T6): `set`, `reparent` (the actor, this thing or a
+  `thing` argument, into a slot, the actor's hand or `here`, loose in the actor's place: holding is a change of
+  parent), `link`, `unlink`, `create` (a kind, `here`, in a slot or in the hand), `remove` (the actor, this thing or a
+  `thing` argument), `timer`, `transfer`, `draw`. The body's `pick_up` and `push` reparent a thing argument into a free
+  hand (a push holds the thing while it moves), and its `put` sets a held one down `here` by a placement word and an
+  anchor described by a selector; another body has no `motion`, so it is never picked up or pushed. `packages/form-rules/README.md` ("What a form does")
+>>>>>>> 4ea032db6
   defines what each does. A `set` on a timed value gives no `to` but its new `rate` (a whole number, in the field's unit
   per second): its value is settled at the act's time. The kettle's switch gives its heat a rate and a timer for the
   boil; the timer's form needs the heat at the boil, so it reads boiled at that microsecond and not before. A `set` on
