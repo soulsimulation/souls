@@ -792,7 +792,11 @@ impl Runner {
             }
             self.ended.insert(*who, (self.now, p.clone()));
         }
-        let stepped = self.controller.step(&town.surfaces, self.tick, at);
+        let stepped = {
+            let town = &*town;
+            self.controller
+                .step_on(&|id| town.surfaces_of(id), self.tick, at)
+        };
         refused.extend(stepped.refused);
         // Each refused body's run ends by its first refusal's name; the others' ticks are done already.
         for (who, r) in &refused {
