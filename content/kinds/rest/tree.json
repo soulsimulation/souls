@@ -1,0 +1,85 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tree",
+  "owner": "thing",
+  "points": {
+    "trunk": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1200,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      5500,
+      6900,
+      4400
+    ]
+  },
+  "forms": {
+    "go_to_shade": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "shade"
+        }
+      ],
+      "effects": []
+    }
+  },
+  "areas": {
+    "shade": {
+      "at_mm": [
+        0,
+        0,
+        2500
+      ],
+      "radius_mm": 3000,
+      "allows": {
+        "sit": "on",
+        "lie": "on"
+      }
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:tree",
+    "shape": {"round":20,"shapes":[{"kind":"cyl","at":[0,1400,0],"r":320,"h":2800,"segments":7,"r2":200,"tint":"bark"},{"kind":"cyl","at":[450,3000,100],"r":120,"h":1513,"segments":5,"r2":70,"tint":"bark","pitch":37529,"yaw":77464},{"kind":"cyl","at":[-350,3250,-150],"r":110,"h":1507,"segments":5,"r2":60,"tint":"bark","pitch":30367,"yaw":-113216},{"kind":"sphere","at":[0,4600,0],"r":2200,"segments":8,"tint":"leaf","scale":[1000,850,1000]},{"kind":"sphere","at":[1300,4100,400],"r":1500,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[-1200,4300,-500],"r":1500,"segments":7,"tint":"leaf2"},{"kind":"sphere","at":[200,5600,-600],"r":1300,"segments":7,"tint":"leaf3"}],"palette":{"bark":"#5a3d22","leaf":"#4f7f3a","leaf2":"#5f9142","leaf3":"#6aa152"},"tags":["plant","tree","oak","broadleaf","shade"]}
+  },
+  "text": {
+    "card": "A broadleaf oak about 7 m tall, with shade underneath to rest in.",
+    "plant": "plant",
+    "oak": "oak",
+    "shade": "shade",
+    "howto_rest": "Go to the shade, then sit or lie down under the branches."
+  },
+  "card": {
+    "text": "card",
+    "category": "plant",
+    "synonyms": [
+      "oak",
+      "shade"
+    ]
+  },
+  "howtos": {
+    "rest": {
+      "text": "howto_rest",
+      "steps": [
+        {
+          "form": "go_to_shade"
+        }
+      ]
+    }
+  }
+}

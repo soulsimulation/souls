@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":129,"group":"two-things","words":"load the sacks into the wheelbarrow","obvious":2,"things":{"sack":"eden:sack","wheelbarrow":"eden:wheelbarrow"},"chain":[{"this":"me","form":"pick_up","carry":"sack","args":{"thing":"sack"}},{"this":"me","form":"put","place":{"at":"in","thing":"sack","anchor":"wheelbarrow"},"args":{"thing":"sack"}}]}

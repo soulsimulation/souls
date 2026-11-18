@@ -787,7 +787,8 @@ pub struct Effect {
 }
 
 impl Effect {
-    fn read(v: Value) -> R<Effect> {
+    /// One entry from its value (a history bundle's records are entries, V4).
+    pub(crate) fn read(v: Value) -> R<Effect> {
         let mut r = Rec::of(v, "an effect")?;
         let envelope = Envelope {
             sequence: read_uint(&r.take(1, "an effect")?, "a sequence")?,
@@ -1269,7 +1270,9 @@ impl State {
         Ok(())
     }
 
-    fn apply_entry(&mut self, header: &Header, e: &Effect) -> R<()> {
+    /// Applies one entry of a part already checked whole (R3's view tier keeps a state before and after each entry,
+    /// #2697). Unlike [`State::apply`] a refusal may leave the entry half applied.
+    pub fn apply_entry(&mut self, header: &Header, e: &Effect) -> R<()> {
         if e.envelope.sequence != self.next {
             return refuse(
                 "sequence-gap",

@@ -1,0 +1,70 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:slide. Anyone climbs the ladder and slides down the chute; it needs nothing and the slide does not change.",
+  "cases": [
+    {
+      "name": "slide_down",
+      "act": {
+        "this": "t1",
+        "form": "slide_down"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:slide"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_down_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "slide_down"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:slide"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:toy_blocks"
+          },
+          "x2": {
+            "kind": "eden:toy_blocks"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    }
+  ]
+}

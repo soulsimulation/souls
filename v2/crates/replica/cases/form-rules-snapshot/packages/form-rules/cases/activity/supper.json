@@ -1,0 +1,33 @@
+{
+  "format": "souls-activity-cases/1",
+  "about": "test:supper, the second activity of Step 0. Who may enter which role is the entering form's own rule (SA-F7a): only the supper's owner may host. Host and diners take the chairs within 1500 mm of the table.",
+  "cases": [
+    {
+      "name": "only_the_owner_hosts_and_diners_take_the_next_chairs",
+      "activity": "s1",
+      "state": {
+        "nodes": {
+          "r4": { "loose": ["s1", "h1", "h2", "h3", "h4", "h5", "b1", "b2", "b3"] },
+          "s1": { "kind": "test:supper", "at_mm": [0, 0, 0], "links": { "owner": ["u1"] } },
+          "h1": { "kind": "test:chair", "at_mm": [0, 0, -1000] },
+          "h2": { "kind": "test:chair", "at_mm": [1000, 0, 0] },
+          "h3": { "kind": "test:chair", "at_mm": [0, 0, 1000] },
+          "h4": { "kind": "test:chair", "at_mm": [-1000, 0, 0] },
+          "h5": { "kind": "test:chair", "at_mm": [0, 0, 3000] },
+          "b1": { "hands": {}, "links": { "soul": ["u1"] } },
+          "b2": { "hands": {}, "links": { "soul": ["u2"] } },
+          "b3": { "hands": {}, "links": { "soul": ["u3"] } }
+        }
+      },
+      "enter": [
+        { "actor": "b2", "form": "host", "receipt": "e1", "expect": { "verdict": "no", "reason": "not_permitted", "detail": { "link": "owner", "ends": ["u1"] } } },
+        { "actor": "b1", "form": "host", "receipt": "e2", "expect": { "verdict": "yes", "role": "host", "place": { "node": "h1", "slot": "seat" } } },
+        { "actor": "b2", "form": "join", "receipt": "e3", "expect": { "verdict": "yes", "role": "diner", "place": { "node": "h2", "slot": "seat" } } },
+        { "actor": "b3", "form": "join", "receipt": "e4", "expect": { "verdict": "yes", "role": "diner", "place": { "node": "h3", "slot": "seat" } } }
+      ],
+      "after": {
+        "s1": { "kind": "test:supper", "at_mm": [0, 0, 0], "links": { "owner": ["u1"], "host": ["b1"], "diner": ["b2", "b3"] } }
+      }
+    }
+  ]
+}

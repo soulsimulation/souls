@@ -1,0 +1,34 @@
+{
+  "format": "souls-entry/1",
+  "kind": "r2:seat",
+  "owner": "thing",
+  "about": "K3's seat for R2's cases (#2685): two places for a body, chosen by argument, reached by lowering the body there, and a shelf for two bags.",
+  "state": {},
+  "slots": {
+    "left": { "admits": "body", "most": 1, "at_mm": [-450, 450, 0] },
+    "right": { "admits": "body", "most": 1, "at_mm": [450, 450, 0] },
+    "shelf": { "admits": "bag", "most": 2, "at_mm": [0, 200, -300] }
+  },
+  "forms": {
+    "sit": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "seat": { "type": "slot" } },
+      "needs": [
+        { "need": "slot_free", "slot": { "arg": "seat" } },
+        { "need": "within_reach", "point": { "arg": "seat" } }
+      ],
+      "steps": [
+        { "step": "move", "move": "lower", "at": { "arg": "seat" } },
+        { "step": "sit", "slot": { "arg": "seat" } }
+      ],
+      "effects": [{ "change": "reparent", "what": "actor", "into": { "arg": "seat" }, "event": "sat_down" }]
+    },
+    "stow": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "slot_free", "slot": "shelf" }],
+      "effects": []
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pitcher",
+  "owner": "thing",
+  "state": {
+    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 1000, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip": { "role": "grip", "at_mm": [-135, 150, 0] },
+    "spout": { "role": "outlet", "at_mm": [268, 196, 0], "yaw_mdeg": 0 },
+    "rim": { "role": "contact", "at_mm": [0, 232, 0] }
+  },
+  "geometry": { "bounds_mm": [560, 260, 200] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    },
+    "pour": {
+      "who": "holder",
+      "starts": "act",
+      "takes": {
+        "into": { "type": "thing", "select": { "of": "things", "in": "here", "anchor": "me", "order": "nearest", "rank": 1 } },
+        "amount": { "type": "count" }
+      },
+      "needs": [
+        { "need": "held_by_actor" },
+        { "need": "state", "field": "water", "at_least": 1 },
+        { "need": "enough" },
+        { "need": "room" }
+      ],
+      "steps": [{ "step": "move", "move": "pour", "at": "spout", "toward": { "arg": "into" } }],
+      "effects": [{ "change": "transfer", "field": "water", "from": "this", "into": { "arg": "into" }, "amount": { "arg": "amount" }, "event": "poured" }]
+    }
+  },
+  "motion": { "how": "one_hand" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:pitcher",
+    "table": [
+      { "part": "fill", "field": "water", "do": "scale", "axis": "y", "range": [0, 1000], "to": [0, 1000] }
+    ],
+    "shape": {"round":6,"shapes":[{"kind":"lathe","at":[0,0,0],"profile":[[0,12],[84,12],[90,30],[92,70],[88,160],[78,210],[62,226],[0,229]],"segments":12,"tint":"shell","material":"glass"},{"kind":"cyl","at":[0,7,0],"r":86,"h":14,"segments":12,"tint":"dark"},{"kind":"cyl","at":[0,100,0],"r":80,"h":180,"segments":12,"tint":"water","material":"water","role":"fill","pivot":[0,10,0]},{"kind":"sweep","at":[0,0,0],"path":[[82,110,0],[140,130,0],[205,158,0],[262,192,0]],"r":16,"segments":6,"tint":"shell","material":"glass"},{"kind":"sweep","at":[0,0,0],"path":[[-70,212,0],[-118,222,0],[-137,190,0],[-137,110,0],[-118,70,0],[-84,60,0]],"r":13,"segments":6,"tint":"dark"}],"palette":{"shell":"#c7e3e7","dark":"#2f2b29","water":"#3983b6"},"tags":["camping","item","pitcher","water","object"]}
+  },
+  "text": {
+    "card": "A clear pitcher holding up to a litre: take it, pour water into another.",
+    "water": "water",
+    "jug": "jug",
+    "decant": "decant",
+    "howto_decant": "Take the pitcher and pour an amount you choose into another pitcher; it refuses an amount it lacks or the other cannot hold."
+  },
+  "card": { "text": "card", "category": "water", "synonyms": ["jug", "decant"] },
+  "howtos": {
+    "decant": { "text": "howto_decant", "steps": [{ "form": "take" }, { "form": "pour" }] }
+  }
+}

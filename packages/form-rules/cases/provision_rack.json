@@ -1,0 +1,207 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:provision_rack (from #1498). A fixed camp rack with three bays, one thing each. Stowing needs the thing held and its bay free; a taken bay names a free one, and a full rack (the original's 'container.full' on the fourth item) has no fix. Taking a thing back out is the body's own pick_up. The original's 'item.does-not-fit' is the bay's fits_mm, which placement checks, not a rule. A private rack is the world's ownership rule.",
+ "cases": [
+  {
+   "name": "stow_every_need_met",
+   "act": {
+    "this": "r1",
+    "form": "stow",
+    "args": {
+     "thing": "x1",
+     "bay": "bay_left"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:provision_rack",
+      "slots": {
+       "bay_left": [],
+       "bay_middle": [],
+       "bay_right": []
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "stow_not_holding_it",
+   "act": {
+    "this": "r1",
+    "form": "stow",
+    "args": {
+     "thing": "x1",
+     "bay": "bay_left"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:provision_rack",
+      "slots": {
+       "bay_left": []
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0,
+    "detail": {
+     "thing": "x1"
+    },
+    "fix": {
+     "step": "take",
+     "thing": "x1"
+    }
+   }
+  },
+  {
+   "name": "stow_taken_bay_fixed_by_a_free_one",
+   "act": {
+    "this": "r1",
+    "form": "stow",
+    "args": {
+     "thing": "x1",
+     "bay": "bay_left"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:provision_rack",
+      "slots": {
+       "bay_left": [
+        "y1"
+       ],
+       "bay_middle": [
+        "y2"
+       ],
+       "bay_right": []
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "r1",
+     "slot": "bay_left"
+    },
+    "fix": {
+     "form": "stow",
+     "args": {
+      "thing": "x1",
+      "bay": "bay_right"
+     }
+    }
+   }
+  },
+  {
+   "name": "stow_rack_full_has_no_fix",
+   "act": {
+    "this": "r1",
+    "form": "stow",
+    "args": {
+     "thing": "x1",
+     "bay": "bay_right"
+    }
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "r1": {
+      "kind": "eden:provision_rack",
+      "slots": {
+       "bay_left": [
+        "y1"
+       ],
+       "bay_middle": [
+        "y2"
+       ],
+       "bay_right": [
+        "y3"
+       ]
+      }
+     },
+     "x1": {
+      "kind": "eden:cup"
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "slot_taken",
+    "need": 1,
+    "detail": {
+     "node": "r1",
+     "slot": "bay_right"
+    },
+    "fix": null
+   }
+  }
+ ]
+}

@@ -1,0 +1,370 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:bread_loaf (core/bread-loaf-pack@1, 1 placed): six pieces torn off while held; the last finishes it.",
+ "cases": [
+  {
+   "name": "bread_loaf_tear_off_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "tear_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {
+       "slices": 6
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bread_loaf_tear_off_not_held",
+   "act": {
+    "this": "t1",
+    "form": "tear_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {
+       "slices": 6
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "bread_loaf_tear_off_slices_unmet",
+   "act": {
+    "this": "t1",
+    "form": "tear_off"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {
+       "slices": 1
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1
+   }
+  },
+  {
+   "name": "bread_loaf_finish_every_need_met",
+   "act": {
+    "this": "t1",
+    "form": "finish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {
+       "slices": 1
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "bread_loaf_finish_not_held",
+   "act": {
+    "this": "t1",
+    "form": "finish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {
+       "slices": 1
+      }
+     },
+     "room": {
+      "loose": [
+       "b1",
+       "t1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "not_held",
+    "need": 0
+   }
+  },
+  {
+   "name": "bread_loaf_finish_slices_unmet",
+   "act": {
+    "this": "t1",
+    "form": "finish"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "t1": {
+      "kind": "eden:bread_loaf",
+      "fields": {
+       "slices": 2
+      }
+     },
+     "room": {
+      "loose": [
+       "b1"
+      ]
+     },
+     "b1": {
+      "hands": {
+       "left": "t1",
+       "right": null
+      },
+      "effector_mm": [
+       0,
+       0,
+       200
+      ]
+     }
+    },
+    "moves": {
+     "press": {
+      "reach_mm": 600
+     },
+     "touch": {
+      "reach_mm": 600
+     },
+     "consume": {
+      "reach_mm": 600
+     },
+     "pour": {
+      "reach_mm": 600
+     },
+     "slide": {
+      "reach_mm": 600
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 1
+   }
+  }
+ ]
+}

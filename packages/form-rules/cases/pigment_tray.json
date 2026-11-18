@@ -1,0 +1,276 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:pigment_tray (SA-X7, #2902; from #1673): crush the chalk chunks to coarse pigment, then grind it fine.",
+  "cases": [
+    {
+      "name": "crush_chunks",
+      "act": {
+        "this": "t1",
+        "form": "crush"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "crush_already_coarse",
+      "act": {
+        "this": "t1",
+        "form": "crush"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray",
+            "fields": {
+              "stage": "coarse"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "crush_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "crush"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "grind_coarse",
+      "act": {
+        "this": "t1",
+        "form": "grind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray",
+            "fields": {
+              "stage": "coarse"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "grind_still_chunks",
+      "act": {
+        "this": "t1",
+        "form": "grind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "fix": {
+          "form": "crush"
+        }
+      }
+    },
+    {
+      "name": "grind_already_fine",
+      "act": {
+        "this": "t1",
+        "form": "grind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray",
+            "fields": {
+              "stage": "fine"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "grind_hands_full",
+      "act": {
+        "this": "t1",
+        "form": "grind"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          },
+          "x1": {
+            "kind": "eden:clay_vase"
+          },
+          "x2": {
+            "kind": "eden:clay_vase"
+          },
+          "t1": {
+            "kind": "eden:pigment_tray",
+            "fields": {
+              "stage": "coarse"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    }
+  ]
+}

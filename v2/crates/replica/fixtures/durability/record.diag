@@ -1,0 +1,18 @@
+# A world's directory record (Engine v2 T11, #2665, v2/docs/durability.md rules 9 and 10), the object
+# world/<lineage>/<zone> in the object store. Each field changes only by a write conditional on the version read.
+# A sleeping world, claimed four times since its last checkpoint. Each takeover carries the token its claimant drew
+# from the operating system (stand-ins here); machine-b claimed twice, with two tokens.
+{
+  1: h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',                                          # the lineage: the world's or a fork's
+  2: [h'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 0],                                     # the zone (its root): one per world today
+  3: "souls:machine-a",                                                            # where it runs: a machine, by name
+  4: 4,                                                                            # its epoch, which only grows
+  5: [[1, 0, "souls:machine-a", h'11111111111111111111111111111111'],              # the takeovers since the checkpoint:
+      [2, 310, "souls:machine-b", h'22222222222222222222222222222222'],            # [epoch, from sequence, machine, token]
+      [3, 900, "souls:machine-b", h'33333333333333333333333333333333'],
+      [4, 1200, "souls:machine-a", h'44444444444444444444444444444444']],
+  6: 1834,                                                                         # the off-machine mark: last sequence stored there
+  7: 1795000000000000,                                                             # when it must wake: real time, us since 1970
+  8: h'12208c854707e5559d7b4a982e5c32ff0071e295bba0179f3bddd098d2c9ac239b57',      # its pinned build (a stand-in hash)
+  9: 2210                                                                          # its writes: each changes the bytes and ETag
+}

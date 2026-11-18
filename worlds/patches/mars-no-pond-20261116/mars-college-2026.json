@@ -1,0 +1,34 @@
+{
+ "note": "#1984: Mars College has no swimming pond. Removes the campus-swimming-pond fixture placed on 2026-10-27 and the two descriptions that name it.",
+ "ops": [
+  {
+   "op": "remove",
+   "id": "campus-swimming-pond"
+  },
+  {
+   "op": "set",
+   "id": "water-tank",
+   "about": {
+    "title": "Campus Water Tank",
+    "what": "A storage tank serving the campus garden area. This is stored water infrastructure.",
+    "aliases": [
+     "storage tank",
+     "water storage"
+    ],
+    "kind": "tank",
+    "role": "landmark",
+    "salience": 1
+   }
+  },
+  {
+   "op": "world",
+   "state": {
+    "about": {
+     "title": "Mars College",
+     "what": "A desert campus for shared study, art, making and communal life. Chiba hosts presentations; Mimos offers café, study and tea spaces; the kitchen, workshops and living compounds support everyday activity.",
+     "tour": "Begin with Chiba for an auditorium presentation or gallery visit, Mimos for coffee and a seated conversation, or the campus kitchen for the dining hall. Tool Camp combines workbenches and a reading corner; Freeside and CoLab form the living and workshop compound. The Dojo is for practice and movement. The old tire track is an outdoor landmark beyond the main buildings."
+    }
+   }
+  }
+ ]
+}

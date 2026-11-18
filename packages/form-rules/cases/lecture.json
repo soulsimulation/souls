@@ -1,0 +1,91 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:lecture. Its attend seat is a free slot of its parent; no hall kind exists yet, so a bench (s1) stands in as the parent's seating.",
+  "cases": [
+    {
+      "name": "begin_every_need_met",
+      "act": { "this": "l1", "form": "begin", "args": { "topic": "t_soil" } },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "eden:lecture" }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["l1/field/1", false], ["l1/link/1", 0]] }
+    },
+    {
+      "name": "begin_already_running_has_no_fix",
+      "act": { "this": "l1", "form": "begin", "args": { "topic": "t_soil" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "eden:lecture", "fields": { "running": true }, "links": { "speaker": ["b2"] } }, "b1": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "running", "found": true, "wanted": { "is": false } }, "fix": null }
+    },
+    {
+      "name": "begin_someone_is_the_speaker",
+      "act": { "this": "l1", "form": "begin", "args": { "topic": "t_soil" } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "eden:lecture", "fields": { "running": false }, "links": { "speaker": ["b2"] } }, "b1": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "already_linked", "need": 1, "detail": { "link": "speaker", "count": 1 }, "fix": null }
+    },
+    {
+      "name": "attend_every_need_met",
+      "act": { "this": "l1", "form": "attend", "args": { "seat": { "node": "s1", "slot": "left" } } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": { "kind": "eden:lecture", "fields": { "running": true }, "links": { "speaker": ["b2"] } },
+          "s1": { "kind": "eden:bench", "slots": { "left": [] } },
+          "b1": { "hands": {} }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes", "read": [["l1/field/1", true], ["s1/slot/left", 0]] }
+    },
+    {
+      "name": "attend_not_running_fixed_by_begin",
+      "act": { "this": "l1", "form": "attend", "args": { "seat": { "node": "s1", "slot": "left" } } },
+      "state": {
+        "actor": "b1",
+        "nodes": { "l1": { "kind": "eden:lecture" }, "s1": { "kind": "eden:bench" }, "b1": { "hands": {} } }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "running", "found": false, "wanted": { "is": true } }, "fix": { "form": "begin" } }
+    },
+    {
+      "name": "attend_seat_taken_fixed_by_the_other",
+      "act": { "this": "l1", "form": "attend", "args": { "seat": { "node": "s1", "slot": "left" } } },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "l1": { "kind": "eden:lecture", "fields": { "running": true } },
+          "s1": { "kind": "eden:bench", "slots": { "left": ["b3"] } },
+          "b1": { "hands": {} }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": { "node": "s1", "slot": "left" },
+        "fix": { "form": "attend", "args": { "seat": { "node": "s1", "slot": "right" } } }
+      }
+    },
+    {
+      "name": "finish_while_running",
+      "act": { "this": "l1", "form": "finish" },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "eden:lecture", "fields": { "running": true } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "finish_not_running_fixed_by_begin",
+      "act": { "this": "l1", "form": "finish" },
+      "state": { "actor": "b1", "nodes": { "l1": { "kind": "eden:lecture", "fields": { "running": false } }, "b1": { "hands": {} } } },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "field_differs", "need": 0, "detail": { "field": "running", "found": false, "wanted": { "is": true } }, "fix": { "form": "begin" } }
+    }
+  ]
+}
