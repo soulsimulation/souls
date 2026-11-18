@@ -25,7 +25,7 @@ use super::{Leg, Mark, Pass, World, node_of};
 use crate::ground::scene::FLOOR;
 use crate::ground::{HUMAN_RADIUS, OpenGround};
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, back, ground_doors};
+use crate::links::{Building, Doors, F_OPEN, Open, back, floor_joins, ground_doors};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map};
 use crate::spots::{Ask, CLEAR, Ground, Spots, Target, flat, to_segment};
@@ -137,6 +137,9 @@ impl Town {
             terrain: open.terrain(),
         };
         buildings.push(Building::of_ground(&tree, open, &known)?);
+        for (i, l) in floor_joins(&buildings.iter().collect::<Vec<_>>()) {
+            buildings[i].links.push(l);
+        }
         Ok(Town {
             tree,
             ground,
@@ -162,6 +165,14 @@ impl Town {
 
     fn building(&self, link: Id) -> Option<&Building> {
         self.buildings.iter().find(|b| b.link(link).is_some())
+    }
+
+    /// The frame on the open ground of the building that holds the floor `node`.
+    fn frame_of(&self, node: Id) -> Option<crate::ground::scene::Xform> {
+        self.buildings
+            .iter()
+            .find(|b| b.floors.contains_key(&node))
+            .map(|b| b.place)
     }
 
     /// Whether a straight walk on the body's surface from where it stands reaches `to` (x and z, µm).
@@ -487,7 +498,12 @@ impl World for Town {
                         .map
                         .spot_near(to, e.middle(), AT_EDGE)
                         .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
-                    let stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+                    let mut stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+                    // The open ground's pieces are a plan at 0; a body there stands on its terrain (#3227).
+                    if to == self.ground {
+                        let at = Frame { node: to, slot: None };
+                        stand = self.surface(to)?.place(body.id, at, stand, body.pose.orientation)?.pose.position;
+                    }
                     let last = if to == self.ground {
                         back(&place, stand).map_err(out)?
                     } else {
@@ -502,6 +518,32 @@ impl World for Town {
                     for p in &mut line {
                         *p = place.point(*p).map_err(out)?;
                     }
+                }
+            } else if let Some(b) = self.building(link)
+                && let (Some(ph), Some(pt)) = (self.frame_of(here), self.frame_of(to))
+                && (!b.floors.contains_key(&here) || !b.floors.contains_key(&to))
+            {
+                // A step from one thing's floor onto another's (#3227): the line is followed in the frame of the floor
+                // the body stands on, and ends where it stands on the far floor, as on the open ground above.
+                let out = |e: String| refusal("out-of-range", e);
+                let to_here = |p: Vec3, from: &crate::ground::scene::Xform| {
+                    from.point(p).and_then(|w| back(&ph, w))
+                };
+                if !b.floors.contains_key(&here) {
+                    for p in &mut line {
+                        *p = to_here(*p, &b.place).map_err(out)?;
+                    }
+                }
+                if let Some(e) = far {
+                    let s = self
+                        .map
+                        .spot_near(to, e.middle(), AT_EDGE)
+                        .ok_or_else(|| refusal("link-end-off-ground", show(link)))?;
+                    let stand = Vec3::new(s.at[0] * 1000, s.at[1] * 1000, s.at[2] * 1000);
+                    if let Some(p) = line.last_mut() {
+                        *p = to_here(stand, &pt).map_err(out)?;
+                    }
+                    arrive = Some(stand);
                 }
             }
             let door = l.door;

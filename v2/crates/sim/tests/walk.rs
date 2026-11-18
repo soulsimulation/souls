@@ -667,6 +667,100 @@ fn entry_eden_a_walker_goes_from_the_open_ground_through_a_shut_door_into_a_room
     }
 }
 
+/// Buildings on Eden's terrain (#3227): every crossable doorway to the open ground of a building standing more than
+/// 3 m above the open ground's plan (the hill cottages) is planned through from 2 m outside it into a room; one walker
+/// goes in, from the open ground beside the first, to the room and back out, by the one walk. Every tick stands on a
+/// patch or on a link's line, and no tick moves the body further in the world's frame, height included, than its
+/// speed allows.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn terrain_eden_a_walker_goes_into_a_building_on_a_hill_and_back() {
+    let (mut t, _) = town_of(eden());
+    let ground = t.ground;
+    let reach = SPEED * TICK / 1_000_000;
+    let mut entries: Vec<(Id, Id, i64)> = Vec::new();
+    for b in &t.buildings {
+        for l in &b.links {
+            if l.blocked.is_none()
+                && l.kind == sim::links::Kind::Doorway
+                && l.ends.iter().any(|e| e.is_some_and(|e| e.floor == ground))
+                && l.ends.iter().any(|e| e.is_some_and(|e| e.floor != ground))
+                && b.place.pos.y > 3_000_000
+            {
+                entries.push((l.id, b.thing, b.place.pos.y));
+            }
+        }
+    }
+    entries.sort();
+    let mut planned = Vec::new();
+    for &(entry, thing, y) in &entries {
+        let (from, ..) = either_side(&t, entry, 2_000_000);
+        let frame = Frame { node: ground, slot: None };
+        let Ok(me) = t.surfaces[&ground].place(id(1), frame, from, Quat::IDENTITY) else {
+            println!("  no open ground 2 m outside doorway {} of {}", show(entry), show(thing));
+            continue;
+        };
+        let room = rooms_of(&t, thing).into_iter().find(|(_, floor, goal)| {
+            t.plan(&me, *floor, *goal).is_ok_and(|legs| {
+                legs.iter().find_map(|l| l.link) == Some(entry)
+            })
+        });
+        match room {
+            Some((_, floor, goal)) => planned.push((entry, thing, y, from, floor, goal)),
+            None => println!("  not planned: doorway {} of {}", show(entry), show(thing)),
+        }
+    }
+    println!(
+        "terrain, Eden: {} crossable doorways to the open ground of buildings more than 3 m up, {} planned through \
+         from 2 m outside into a room",
+        entries.len(),
+        planned.len()
+    );
+    let &(entry, thing, y, from, floor, goal) = planned.first().expect("a building on a hill");
+    let me = stand(&t, id(1), ground, from);
+    let mut c = Crowd::new(TICK);
+    c.add(&mut t, me, SPEED, id(2001), floor, goal)
+        .unwrap_or_else(|e| panic!("no plan in: {}: {}", e.name, e.detail));
+    let mut largest = walk_on_ground(&mut t, &mut c);
+    let w = &c.walkers[0];
+    let arrived_in = w.arrived.expect("the walker arrives in the room");
+    assert_eq!(sim::walk::node_of(&w.body), floor, "in: on the room's floor");
+    let inside = world_at(&t, &w.body);
+    let body = w.body;
+    let mut c = Crowd::new(TICK);
+    c.now = arrived_in;
+    c.add(&mut t, body, SPEED, id(2002), ground, from)
+        .unwrap_or_else(|e| panic!("no plan out: {}: {}", e.name, e.detail));
+    largest = largest.max(walk_on_ground(&mut t, &mut c));
+    let w = &c.walkers[0];
+    let arrived_out = w.arrived.expect("the walker arrives back on the open ground");
+    assert_eq!(sim::walk::node_of(&w.body), ground, "out: on the open ground");
+    let out = world_at(&t, &w.body);
+    println!(
+        "  {} ({}, {} mm up): from ({}, {}, {}) mm on the open ground through doorway {} to ({}, {}, {}) mm on {} in \
+         {} ms, and back out in {} ms; largest step in the world's frame {largest} um, bar {reach} um",
+        show(thing),
+        def_of(&t, thing),
+        y / 1000,
+        out.x / 1000,
+        out.y / 1000,
+        out.z / 1000,
+        show(entry),
+        inside.x / 1000,
+        inside.y / 1000,
+        inside.z / 1000,
+        show(floor),
+        arrived_in / 1000,
+        (arrived_out - arrived_in) / 1000
+    );
+    // On the terrain, N11a's mover walks a step again shortened by the cosine of the line it just walked: a step
+    // across a 1 m cell's edge, where the slope changes, may be a few tens of micrometres long (0.03 % here).
+    assert!(
+        largest <= reach + reach / 1000,
+        "no tick longer than speed times the tick, within 0.1 %"
+    );
+}
+
 /// Walks the crowd's one walker until it arrives, checking each tick: off a link, the body stands on its node's patch
 /// (within 2 mm, the grid's rounding); on one, within 2 mm of the link's line in the world's frame. Returns the
 /// largest step it took in the world's frame, µm.
@@ -711,7 +805,7 @@ fn walk_on_ground(t: &mut Town, c: &mut Crowd) -> i64 {
                 .unwrap();
             assert!(
                 off <= 2_000,
-                "on link {}: {off} um off its line",
+                "on link {}: {off} um off its line: at {now:?}, was {was:?}, line {line:?}",
                 show(link)
             );
         } else {
@@ -871,9 +965,20 @@ fn bridges_eden_a_walker_walks_over_each_bridge_end_to_end() {
             to_ground.len()
         );
         let (from, ..) = either_side(&t, to_ground[0], 2_000_000);
-        let (goal_node, goal) = match to_ground.get(1) {
-            Some(&s) => (ground, either_side(&t, s, 2_000_000).0),
-            None => {
+        // A step from the deck onto another thing's floor (#3227: the red bridge onto the tea house's).
+        let onto = t
+            .buildings
+            .iter()
+            .find(|b| b.thing == thing)
+            .unwrap()
+            .links
+            .iter()
+            .find(|l| l.kind == sim::links::Kind::Step && l.nodes[0] == floor && l.nodes[1] != floor && l.nodes[1] != ground)
+            .and_then(|l| l.ends[1]);
+        let (goal_node, goal) = match (to_ground.get(1), onto) {
+            (Some(&s), _) => (ground, either_side(&t, s, 2_000_000).0),
+            (None, Some(e)) => (e.floor, e.middle()),
+            (None, None) => {
                 // The deck's far end: its lowest piece farthest from where the walker starts.
                 let (pieces, ..) = t.map.counts();
                 let place = t.buildings.iter().find(|b| b.thing == thing).unwrap().place;
@@ -923,9 +1028,11 @@ fn bridges_eden_a_walker_walks_over_each_bridge_end_to_end() {
             at.y / 1_000_000,
             at.z / 1_000_000,
             if goal_node == ground {
-                "the ground"
+                "the ground".to_owned()
+            } else if goal_node == floor {
+                "the deck".to_owned()
             } else {
-                "the deck"
+                format!("{}'s floor {}", def_of(&t, t.buildings.iter().find(|b| b.floors.contains_key(&goal_node)).unwrap().thing), show(goal_node))
             },
             links.len(),
             arrived / 1000

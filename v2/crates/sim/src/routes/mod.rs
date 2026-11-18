@@ -36,7 +36,7 @@ use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
 use crate::ground::sizes::too_narrow;
 use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
@@ -425,13 +425,24 @@ impl Map {
         };
         let gates = Building::of_ground(tree, open, &known)?;
         buildings.push((gates, HashMap::new()));
-        for (b, base) in &buildings {
+        // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
+        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+            buildings[i].0.links.push(l);
+        }
+        let all: HashMap<Id, (u32, u32)> = buildings
+            .iter()
+            .flat_map(|(b, base)| {
+                base.iter()
+                    .map(|(f, &q)| (*f, (q, b.floors[f].1.pieces.len() as u32)))
+            })
+            .collect();
+        for (b, _) in &buildings {
             for l in &b.links {
                 let mut ends = [Vec::new(), Vec::new()];
                 // A blocked link's ends are portals too, so a search that comes to it can name it.
                 for (k, e) in l.ends.iter().enumerate() {
                     if let Some(e) = e {
-                        ends[k] = m.end_portals(l, e, k as u8, base, b);
+                        ends[k] = m.end_portals(l, e, k as u8, &all);
                     }
                 }
                 let run: i64 = l
@@ -489,8 +500,7 @@ impl Map {
         l: &Link,
         e: &End,
         k: u8,
-        base: &HashMap<Id, u32>,
-        b: &Building,
+        base: &HashMap<Id, (u32, u32)>,
     ) -> Vec<u32> {
         let li = self.links.len() as u32;
         let (a, b2, mid) = ([mm(e.a.x), mm(e.a.z)], [mm(e.b.x), mm(e.b.z)], e.middle());
@@ -512,8 +522,7 @@ impl Map {
                 .map(|(_, q)| q)
         };
         let mut out = Vec::new();
-        if let Some(&first) = base.get(&e.floor) {
-            let n = b.floors[&e.floor].1.pieces.len() as u32;
+        if let Some(&(first, n)) = base.get(&e.floor) {
             let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {

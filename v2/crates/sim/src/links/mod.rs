@@ -175,6 +175,81 @@ pub struct Building {
     pub floors: BTreeMap<Id, (i64, Patch)>,
     /// The building's frame on the open ground it was read with (the identity when read alone).
     pub place: Xform,
+    /// Its floors' outline steps that meet no open ground beyond (#3227): another thing's floor may lie there
+    /// ([`floor_joins`]).
+    pub loose: Vec<Loose>,
+}
+
+/// An outline step of a building's floor whose far side meets no open ground: its link, its end on the floor (the
+/// building's frame), the unit off the floor (µm per metre), its width (µm) and the radius it was cut for (mm).
+#[derive(Clone, Copy, Debug)]
+pub struct Loose {
+    pub link: Id,
+    pub end: End,
+    pub across: [i64; 2],
+    pub width: i64,
+    pub radius: i64,
+}
+
+/// Steps between two things' floors (#3227): where an outline step of one building's floor ([`Building::loose`])
+/// lies over a floor of another, within [`crate::ground::STEP`] of it (the botanic red bridge's east end over the tea
+/// house's floor, 82 mm below), the step joins the two floors: a [`Kind::Step`] link owned by the first building,
+/// its far end the near end carried across the edge, by twice the clearance it was cut with, onto the other floor's
+/// patch. Each is returned with the index in `bs` of the building that owns it. A step over open ground, or over
+/// nothing a body can stand on, joins nothing.
+pub fn floor_joins(bs: &[&Building]) -> Vec<(usize, Link)> {
+    let mut out = Vec::new();
+    for (i, b) in bs.iter().enumerate() {
+        for s in &b.loose {
+            let d = 2 * (s.radius + MARGIN + 1) * 1000;
+            let over = |p: Vec3| Vec3::new(p.x + s.across[0] * d / 1_000_000, p.y, p.z + s.across[1] * d / 1_000_000);
+            let (Ok(wa), Ok(wb)) = (b.place.point(over(s.end.a)), b.place.point(over(s.end.b))) else {
+                continue;
+            };
+            let found = bs.iter().enumerate().filter(|(j, _)| *j != i).find_map(|(_, c)| {
+                let (a, bb) = (back(&c.place, wa).ok()?, back(&c.place, wb).ok()?);
+                c.floors.iter().find_map(|(&f, (_, patch))| {
+                    // The heights of the floor's pieces within a step of the step's, in that building's frame.
+                    let ys: BTreeSet<i32> = patch
+                        .pieces
+                        .iter()
+                        .filter_map(|pc| pc.vertices.first().map(|v| v[1]))
+                        .filter(|&y| (i64::from(y) * 1000 - a.y).abs() <= crate::ground::STEP * 1000)
+                        .collect();
+                    ys.into_iter().find_map(|y| {
+                        let at = |p: Vec3| Vec3::new(p.x, i64::from(y) * 1000, p.z);
+                        let e = End {
+                            floor: f,
+                            a: at(a),
+                            b: at(bb),
+                        };
+                        on_patch(patch, e.middle(), MEET_ON).then_some((e, c.place))
+                    })
+                })
+            });
+            if let Some((far, place)) = found {
+                let there = place.point(far.middle()).and_then(|p| back(&b.place, p));
+                let Ok(there) = there else {
+                    continue;
+                };
+                out.push((
+                    i,
+                    Link {
+                        id: s.link,
+                        kind: Kind::Step,
+                        nodes: [s.end.floor, far.floor],
+                        owner: s.end.floor,
+                        width: s.width,
+                        ends: [Some(s.end), Some(far)],
+                        line: vec![s.end.middle(), there],
+                        door: None,
+                        blocked: None,
+                    },
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// A meet of one of the open ground's squares, with that square.
@@ -392,6 +467,8 @@ impl Building {
         let mut floors = BTreeMap::new();
         let mut doors: BTreeMap<Id, Id> = BTreeMap::new();
         let mut widths: BTreeMap<Id, i64> = BTreeMap::new();
+        let mut acrosses: BTreeMap<Id, [i64; 2]> = BTreeMap::new();
+        let mut loose = Vec::new();
         let mut all_floors = Vec::new();
         for &c in tree.children(th).ok_or("a node that is gone")? {
             let n = tree.node(c).ok_or("a node that is gone")?;
@@ -405,6 +482,7 @@ impl Building {
                 };
                 for d in &scene.doorways {
                     widths.insert(d.link, d.width);
+                    acrosses.insert(d.link, d.across);
                 }
                 if let Ok(patch) = cut_floor(&scene, radius, Turn::NONE) {
                     floors.insert(n.id(), (level, patch));
@@ -521,6 +599,16 @@ impl Building {
                     && (blocked.is_some()
                         || (!inner && ends[1].is_none_or(|e| Some(e.floor) != ground)))
                 {
+                    // Met on the floor and nothing beyond: another thing's floor may lie there (#3227).
+                    if let (Some(e), None, Some(_), false) = (ends[0], ends[1], ground, inner) {
+                        loose.push(Loose {
+                            link: id,
+                            end: e,
+                            across: acrosses.get(&id).copied().unwrap_or([0, 0]),
+                            width: widths.get(&id).copied().unwrap_or(0),
+                            radius,
+                        });
+                    }
                     continue;
                 }
                 let line = match (blocked, ends) {
@@ -650,6 +738,7 @@ impl Building {
             links,
             floors,
             place: open.map_or(Xform::IDENTITY, |o| o.place),
+            loose,
         })
     }
 
@@ -732,6 +821,7 @@ impl Building {
             links,
             floors: BTreeMap::new(),
             place: Xform::IDENTITY,
+            loose: Vec::new(),
         })
     }
 }

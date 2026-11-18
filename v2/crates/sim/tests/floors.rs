@@ -9,7 +9,8 @@ use replica::world_model::{plain, show};
 use sim::ground::Scene;
 use sim::ground::scene::{FLOOR, Terrain, xform_to};
 use sim::ground::STEP;
-use sim::routes::{ALL, LinkInfo, Map};
+use sim::links::Kind;
+use sim::routes::{ALL, Hop, LinkInfo, Map, Spot};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn eden() -> Import {
@@ -167,16 +168,15 @@ fn a1_cut_off_floors_by_cause() {
         } else if ls.is_empty() {
             format!("no doorway or stair, and its floor is {y} mm up, above a step ({STEP} mm)")
         } else if !outer.is_empty() && y.abs() > STEP {
-            on_terrain.extend(above_terrain(&im, &terrain, f));
-            format!(
-                "stands on the terrain {} the open ground's flat 0 (its doorway {} m off it)",
-                if y > 0 { "above" } else { "below" },
-                match y.abs() {
-                    ..1000 => "0.2 to 1",
-                    1000..3000 => "1 to 3",
-                    _ => "3 or more",
-                }
-            )
+            // On the terrain, off the open ground's plan at 0: how far its doorways stand off the terrain beside them.
+            let off = above_terrain(&im, &terrain, f);
+            on_terrain.extend(&off);
+            match off.iter().map(|h| h.abs()).max() {
+                Some(h) if h > STEP => format!(
+                    "stands on the terrain, a doorway {h} mm off the terrain beside it, more than a step"
+                ),
+                _ => "stands on the terrain, its doorways within a step of it".to_owned(),
+            }
         } else if let Some((l, _)) = outer.iter().find(|(l, _)| l.blocked.is_some()) {
             format!("a doorway to the open ground: {}", l.blocked.unwrap())
         } else if !outer.is_empty() {
@@ -251,6 +251,13 @@ fn a1_cut_off_floors_by_cause() {
                 .join(", ")
         );
     }
+    // #3227's A2: no floor is left cut off by a cause the cut or the import can fix.
+    for cause in table.keys() {
+        assert!(
+            !cause.contains("within a step") && !cause.contains("cycle") && !cause.contains("only links to itself"),
+            "a floor cut off by a cause that is not a feature of Eden: {cause}"
+        );
+    }
     for (cause, fs) in &table {
         println!(
             "{cause}: {}",
@@ -262,3 +269,204 @@ fn a1_cut_off_floors_by_cause() {
     }
 }
 
+/// SplitMix64: the seeded pairs.
+struct Seed(u64);
+
+impl Seed {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+/// The floors of things standing off the open ground's plan at 0 by more than a step (on the terrain), each with its
+/// surfaces' rings in the ground's frame (mm).
+fn on_terrain_rings(im: &Import) -> (BTreeSet<Id>, Vec<Vec<[i64; 2]>>) {
+    let ground = im.nodes["ground"];
+    let gh = im.tree.handle(ground).unwrap();
+    let (mut floors, mut rings) = (BTreeSet::new(), Vec::new());
+    for &c in im.tree.children(gh).unwrap() {
+        let th = c;
+        let place = xform_to(&im.tree, th, gh).unwrap();
+        if place.pos.y.abs() <= STEP * 1000 {
+            continue;
+        }
+        for &f in im.tree.children(th).unwrap() {
+            let fid = im.tree.node(f).unwrap().id();
+            if kind(im, fid) != FLOOR {
+                continue;
+            }
+            floors.insert(fid);
+            if let Ok(s) = Scene::of(&im.tree, fid) {
+                for sf in &s.surfaces {
+                    rings.push(
+                        sf.ring
+                            .iter()
+                            .map(|p| {
+                                let w = place.point(Vec3::new(p[0], 0, p[1])).unwrap();
+                                [w.x / 1000, w.z / 1000]
+                            })
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+    (floors, rings)
+}
+
+fn inside(r: &[[i64; 2]], p: [i64; 2]) -> bool {
+    let mut c = false;
+    for k in 0..r.len() {
+        let (a, b) = (r[k], r[(k + 1) % r.len()]);
+        let lhs = i128::from(p[0] - a[0]) * i128::from(b[1] - a[1]);
+        let rhs = i128::from(b[0] - a[0]) * i128::from(p[1] - a[1]);
+        if (a[1] > p[1]) != (b[1] > p[1]) && ((lhs < rhs) == (b[1] > a[1])) {
+            c = !c;
+        }
+    }
+    c
+}
+
+/// #3227's A3: N5's 10,000 Eden routes (A1's seed, drawn from the largest part) before and after. The first run
+/// writes each pair (node and point, so that a renumbered map finds them again) and its route's length and waypoints
+/// to `.local/routes/a3-3227.tsv`; a later run routes the pairs again and counts the routes that changed, by why:
+/// now over a floor of a building on the terrain (newly joined), or before through such a building's footprint on
+/// the open ground (walked through at the plan's 0, now taken away), or over the step onto another thing's floor.
+#[test]
+#[ignore = "needs the exported Eden facts file"]
+fn a3_eden_routes_before_and_after() {
+    const ROUTES: usize = 10_000;
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../.local/routes/a3-3227.tsv");
+    let im = eden();
+    let ground = im.nodes["ground"];
+    let mut map = Map::build(&im.tree, ground, &|_| 0).expect("the map");
+    let wps = |r: &sim::routes::Route| {
+        r.waypoints
+            .iter()
+            .map(|w| format!("{},{}", w[0], w[2]))
+            .collect::<Vec<_>>()
+            .join(";")
+    };
+    let Ok(before) = std::fs::read_to_string(path) else {
+        let (pieces, ..) = map.counts();
+        let parts = map.parts(ALL);
+        let mut size: BTreeMap<u32, usize> = BTreeMap::new();
+        for &p in &parts {
+            *size.entry(p).or_default() += 1;
+        }
+        let main = *size.iter().max_by_key(|(k, n)| (**n, std::cmp::Reverse(**k))).unwrap().0;
+        let among: Vec<u32> = (0..pieces as u32).filter(|&q| parts[q as usize] == main).collect();
+        let mut seed = Seed(2653);
+        let mut pick = || loop {
+            let q = among[seed.below(among.len())];
+            let st = map.standing(q);
+            if !st.is_empty() {
+                return Spot { piece: q, at: st[seed.below(st.len())] };
+            }
+        };
+        let pairs: Vec<(Spot, Spot)> = (0..ROUTES).map(|_| (pick(), pick())).collect();
+        let mut out = String::new();
+        for (a, b) in pairs {
+            let r = map.route(&im.tree, a, b, ALL).expect("a route");
+            let n = |s: Spot| map.patch_of(s.piece).node;
+            out.push_str(&format!(
+                "{}\t{:?}\t{}\t{:?}\t{}\t{}\n",
+                show(n(a)),
+                a.at,
+                show(n(b)),
+                b.at,
+                r.length,
+                wps(&r)
+            ));
+        }
+        std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+        std::fs::write(path, out).unwrap();
+        println!("A3: {ROUTES} routes written to .local/routes/a3-3227.tsv");
+        return;
+    };
+    let ids: BTreeMap<String, Id> = {
+        let (pieces, ..) = map.counts();
+        (0..pieces as u32).map(|q| map.patch_of(q).node).map(|n| (show(n), n)).collect()
+    };
+    let at = |s: &str| -> Vec3 {
+        let v: Vec<i64> = s.trim_matches(['[', ']']).split(", ").map(|x| x.parse().unwrap()).collect();
+        Vec3::new(v[0] * 1000, v[1] * 1000, v[2] * 1000)
+    };
+    let (hill, rings) = on_terrain_rings(&im);
+    let through_hill = |w: &str| {
+        let pts: Vec<[i64; 2]> = w
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(|p| {
+                let v: Vec<i64> = p.split(',').map(|x| x.parse().unwrap()).collect();
+                [v[0], v[1]]
+            })
+            .collect();
+        pts.windows(2).any(|s| {
+            let (a, b) = (s[0], s[1]);
+            let n = ((b[0] - a[0]).abs().max((b[1] - a[1]).abs()) / 250).max(1);
+            (0..=n).any(|k| {
+                let p = [a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n];
+                rings.iter().any(|r| inside(r, p))
+            })
+        })
+    };
+    let (mut same, mut changed, mut lost) = (0, 0, 0);
+    let (mut onto_hill, mut was_through, mut onto_floor, mut other) = (0, 0, 0, 0);
+    for row in before.lines() {
+        let f: Vec<&str> = row.splitn(6, '\t').collect();
+        let (Some(a), Some(b)) = (
+            map.spot(ids[f[0]], at(f[1])),
+            map.spot(ids[f[2]], at(f[3])),
+        ) else {
+            lost += 1;
+            continue;
+        };
+        let r = match map.route(&im.tree, a, b, ALL) {
+            Ok(r) => r,
+            Err(e) => {
+                println!("  refused now: {row:.120}: {}", e.detail);
+                lost += 1;
+                continue;
+            }
+        };
+        if r.length.to_string() == f[4] && wps(&r) == f[5] {
+            same += 1;
+            continue;
+        }
+        changed += 1;
+        let joined = r.hops.iter().any(|h| matches!(h, Hop::Patch { at, .. } if hill.contains(&at.node)));
+        // A step between two floors, neither the open ground: onto another thing's floor.
+        let step = r.hops.windows(3).any(|w| match w {
+            [Hop::Patch { at: a, .. }, Hop::Link { kind: Kind::Step, .. }, Hop::Patch { at: b, .. }] => {
+                a.node != b.node && a.node != ground && b.node != ground
+            }
+            _ => false,
+        });
+        if joined {
+            onto_hill += 1;
+        } else if through_hill(f[5]) {
+            was_through += 1;
+        } else if step {
+            onto_floor += 1;
+        } else {
+            other += 1;
+            if other <= 5 {
+                println!("  changed otherwise: {row:.160}\n    now {} mm: {:.160}", r.length, wps(&r));
+            }
+        }
+    }
+    println!(
+        "A3: {same} routes unchanged, {changed} changed: {onto_hill} now over a floor of a building on the terrain, \
+         {was_through} were through such a building's footprint on the plan, {onto_floor} over a step onto another thing's floor, \
+         {other} otherwise; {lost} not found or refused"
+    );
+}
