@@ -9,8 +9,9 @@
 //!   open ground one of each square it crosses. A doorway to the open ground is such a link, one end on the
 //!   building's floor and the other on the ground's squares.
 //! - **Coarse.** A search (A*, the heuristic the straight distance in the ground's frame) over portals: within a
-//!   piece, from each portal to each other; across a link, from one end to the other. The distance between two
-//!   portals of one piece is its line inside the piece (below), computed on first use and cached with the piece.
+//!   piece, from each portal to each other; across a link, from one end to the other, never straight back across
+//!   the link just crossed. The distance between two portals of one piece is its line inside the piece (below),
+//!   computed on first use and cached with the piece.
 //! - **Fine.** Inside one piece, a search over its triangles and string pulling (the funnel), done as a walker
 //!   enters it. A route carries the first piece's line; the rest is cut as the body goes. String pulling treats the
 //!   body as a point, which is right here: the patch is the ground already shrunk by the body's radius.
@@ -25,16 +26,24 @@
 //!   cannot use on the route a body with every ability would take, or, when there is none either, of the links the
 //!   search came to and could not use, the one whose far end is nearest the goal.
 //!
-//! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), other body sizes (B12), routes across
-//! water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
+//! - **Sizes** (B12, #2743). A map is built for one size class (`replica::kinds::sizes::Size`), its ground cut for
+//!   that class's radius, and every route it gives carries the class. A link narrower than the class's body with its
+//!   clearance (twice the radius plus [`MARGIN`]) is `link-too-narrow` whatever else stops it, and a body refused
+//!   there is told the link, its door and both widths. A floater routes as a walker of its class.
+//!
+//! Not here: re-routing on edits (G3), other walkers as cost, who may pass (F6), routes across water (N11). Ground cover (Eden's footpaths, lawns, shores and piers) needs nothing here: N3 cuts it as open ground.
+
+pub mod way;
 
 use crate::ground::scene::Xform;
 use crate::ground::scene::{FLOOR, xform_to};
-use crate::ground::{HUMAN_RADIUS, OpenGround, Piece, SQUARE, Scene};
-use crate::links::{Building, End, F_OPEN, Kind, Link, Open, ground_doors};
+use crate::ground::sizes::too_narrow;
+use crate::ground::{MARGIN, OpenGround, Piece, SQUARE};
+use crate::links::{Building, End, F_OPEN, Kind, Link, Open, floor_joins, ground_doors};
 use replica::effects::Refusal;
 use replica::encode::Value;
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::Vec3;
 use replica::tree::Tree;
 use replica::world_model::{plain, show};
@@ -122,6 +131,8 @@ struct LinkRec {
     kind: Kind,
     door: Option<Id>,
     blocked: Option<&'static str>,
+    /// The doorway's or the flight's width, µm (0 when not known).
+    width: i64,
     /// The portals at each end.
     ends: [Vec<u32>; 2],
     /// Crossing it, mm.
@@ -158,6 +169,8 @@ pub enum Hop {
 /// A route: the chain of patches and links, the first piece's line, and what the search cost.
 #[derive(Clone, Debug)]
 pub struct Route {
+    /// The size class it was cut for.
+    pub size: Size,
     pub hops: Vec<Hop>,
     /// The first piece's line, from the start to where the body leaves it (or the goal), mm in its frame.
     pub first_line: Vec<[i64; 2]>,
@@ -182,8 +195,10 @@ impl Route {
     }
 }
 
-/// The map of a world's walkable ground and links for today's walking body.
+/// The map of a world's walkable ground and links for one size class.
 pub struct Map {
+    /// The size class its ground is cut for.
+    pub size: Size,
     frames: Vec<Xform>,
     pieces: Vec<PieceRec>,
     portals: Vec<Portal>,
@@ -259,10 +274,23 @@ pub(crate) fn clip(a: [i64; 2], b: [i64; 2], w: [i64; 4]) -> Option<([i64; 2], [
 
 impl Map {
     /// The map of everything on the open ground `ground`: its squares, and every building on it with its floors and
-    /// links. `version` gives each node's version (a floor's, or the open ground's for all its squares).
+    /// links. `version` gives each node's version (a floor's, or the open ground's for all its squares). For today's
+    /// walking body, the standard size class.
     pub fn build(tree: &Tree, ground: Id, version: &dyn Fn(Id) -> u64) -> Result<Map, String> {
+        Map::build_for(tree, ground, Size::Standard, version)
+    }
+
+    /// As [`Map::build`], for a body of the size class `size`.
+    pub fn build_for(
+        tree: &Tree,
+        ground: Id,
+        size: Size,
+        version: &dyn Fn(Id) -> u64,
+    ) -> Result<Map, String> {
+        let radius = size.radius_mm();
         let gh = tree.handle(ground).ok_or("no such ground")?;
         let mut m = Map {
+            size,
             frames: vec![Xform::IDENTITY],
             pieces: Vec::new(),
             portals: Vec::new(),
@@ -276,7 +304,7 @@ impl Map {
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
-        let open = OpenGround::prepare(&Scene::of(tree, ground)?, HUMAN_RADIUS)?;
+        let open = OpenGround::of(tree, ground, radius)?;
         let gv = version(ground);
         // Edge stretches by line: (true for x = c, c) → (lo, hi, square, piece).
         let mut lines: BTreeMap<(bool, i64), Vec<Stretch>> = BTreeMap::new();
@@ -364,8 +392,9 @@ impl Map {
                 meets: &ground_meets,
                 on: &on,
                 doors: &gdoors,
+                terrain: open.terrain(),
             };
-            let b = match Building::read_on(tree, id, Some(open)) {
+            let b = match Building::read_sized(tree, id, Some(open), radius) {
                 Ok(b) => b,
                 Err(e) => {
                     m.unread.push((id, e));
@@ -395,16 +424,28 @@ impl Map {
             meets: &ground_meets,
             on: &on,
             doors: &gdoors,
+            terrain: open.terrain(),
         };
         let gates = Building::of_ground(tree, open, &known)?;
         buildings.push((gates, HashMap::new()));
-        for (b, base) in &buildings {
+        // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
+        for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
+            buildings[i].0.links.push(l);
+        }
+        let all: HashMap<Id, (u32, u32)> = buildings
+            .iter()
+            .flat_map(|(b, base)| {
+                base.iter()
+                    .map(|(f, &q)| (*f, (q, b.floors[f].1.pieces.len() as u32)))
+            })
+            .collect();
+        for (b, _) in &buildings {
             for l in &b.links {
                 let mut ends = [Vec::new(), Vec::new()];
                 // A blocked link's ends are portals too, so a search that comes to it can name it.
                 for (k, e) in l.ends.iter().enumerate() {
                     if let Some(e) = e {
-                        ends[k] = m.end_portals(l, e, k as u8, base, b);
+                        ends[k] = m.end_portals(l, e, k as u8, &all);
                     }
                 }
                 let run: i64 = l
@@ -413,16 +454,22 @@ impl Map {
                     .map(|w| len3([w[0].x, w[0].y, w[0].z], [w[1].x, w[1].y, w[1].z]))
                     .sum::<i64>()
                     / 1000;
-                let blocked = l.blocked.or(if ends.iter().any(Vec::is_empty) {
-                    Some("link-end-off-ground")
-                } else {
-                    None
-                });
+                // Walked through narrower than the body with its clearance: that is why, whatever else stops it. A
+                // ladder is climbed facing it, so its width is not the body's.
+                let narrow = l.kind != Kind::Ladder && too_narrow(l.width, radius);
+                let blocked = narrow.then_some("link-too-narrow").or(l.blocked).or(
+                    if ends.iter().any(Vec::is_empty) {
+                        Some("link-end-off-ground")
+                    } else {
+                        None
+                    },
+                );
                 m.links.push(LinkRec {
                     id: l.id,
                     kind: l.kind,
                     door: l.door,
                     blocked,
+                    width: l.width,
                     ends,
                     cost: run as u32,
                 });
@@ -456,8 +503,7 @@ impl Map {
         l: &Link,
         e: &End,
         k: u8,
-        base: &HashMap<Id, u32>,
-        b: &Building,
+        base: &HashMap<Id, (u32, u32)>,
     ) -> Vec<u32> {
         let li = self.links.len() as u32;
         let (a, b2, mid) = ([mm(e.a.x), mm(e.a.z)], [mm(e.b.x), mm(e.b.z)], e.middle());
@@ -470,16 +516,16 @@ impl Map {
                 .is_some_and(|v| i64::from(v[1]) == y)
         };
         // The piece among `qs` the segment's middle lies on, within the grid's rounding.
+        // The open ground is one level, its plan at 0, and an end on it stands on its terrain (#3227): any height.
         let on = |m: &Map, qs: &mut dyn Iterator<Item = u32>, mid: [i64; 2]| {
-            qs.filter(|&q| at_y(m, q))
+            qs.filter(|&q| m.pieces[q as usize].at.square.is_some() || at_y(m, q))
                 .map(|q| (m.off_piece(q, mid), q))
                 .min()
                 .filter(|&(d, _)| d <= MEET_OFF)
                 .map(|(_, q)| q)
         };
         let mut out = Vec::new();
-        if let Some(&first) = base.get(&e.floor) {
-            let n = b.floors[&e.floor].1.pieces.len() as u32;
+        if let Some(&(first, n)) = base.get(&e.floor) {
             let q = if matches!(l.kind, Kind::Doorway | Kind::Step) {
                 on(self, &mut (first..first + n), [mm(mid.x), mm(mid.z)])
             } else {
@@ -680,21 +726,35 @@ impl Map {
             p[0].div_euclid(SQUARE) as i32,
             p[1].div_euclid(SQUARE) as i32,
         );
-        let list = self
-            .by_patch
-            .get(&(node, None))
-            .or_else(|| self.by_patch.get(&(node, Some(square))))?;
+        let (list, open) = match self.by_patch.get(&(node, None)) {
+            Some(l) => (l, false),
+            None => (self.by_patch.get(&(node, Some(square)))?, true),
+        };
         let y = mm(at.y);
+        // The open ground is one level, its plan at 0; a body on it stands at the terrain's height (N11a, #2735).
         list.iter()
             .filter(|&&q| {
-                self.pieces[q as usize]
+                open || self.pieces[q as usize]
                     .piece
                     .vertices
                     .first()
                     .is_some_and(|v| i64::from(v[1]) == y)
             })
             .map(|&q| {
-                let (_, d2, near) = self.gap(q, p);
+                let (t, d2, mut near) = self.gap(q, p);
+                // Rounded onto the grid, the nearest point of a slanted edge may lie just off the piece: it is taken
+                // a millimetre at a time towards its triangle's middle until it stands on it.
+                for _ in 0..3 {
+                    if d2 == i64::MAX || self.locate(q, near, y).is_some() {
+                        break;
+                    }
+                    let [a, b, c] = self.tri(q, t);
+                    let m = [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3];
+                    near = [
+                        near[0] + (m[0] - near[0]).signum(),
+                        near[1] + (m[1] - near[1]).signum(),
+                    ];
+                }
                 (d2, q, near)
             })
             .min()
@@ -866,6 +926,26 @@ impl Map {
         d
     }
 
+    /// For a link too narrow for this map's class: its door, if one stands in it, and both widths.
+    fn widths(&self, l: u32, why: &str) -> String {
+        let link = &self.links[l as usize];
+        if why != "link-too-narrow" || link.width == 0 {
+            return String::new();
+        }
+        let r = self.size.radius_mm();
+        let door = link
+            .door
+            .map_or(String::new(), |d| format!(" (door {})", show(d)));
+        format!(
+            ": the {}{door} is {} mm wide; a {} body is {} mm wide, {} mm with its clearance",
+            format!("{:?}", link.kind).to_lowercase(),
+            link.width / 1000,
+            self.size.name(),
+            2 * r,
+            2 * (r + MARGIN)
+        )
+    }
+
     /// Why a body with `has` cannot cross link `l` now, if it cannot.
     fn refuse(&self, tree: &Tree, l: u32, has: Mask) -> Option<&'static str> {
         let link = &self.links[l as usize];
@@ -987,7 +1067,10 @@ impl Map {
                 }
             }
             let (l, side) = (self.portals[u as usize].link, self.portals[u as usize].side);
-            if l != NONE {
+            // Never straight back across the link just crossed: that lands on another portal of the end the body
+            // went in by, a doorway used as a bridge between two squares' pieces of the open ground, which no walk
+            // follows (#3187). Ground there is reached across the pieces.
+            if l != NONE && self.seen[u as usize].3 != LINK | l {
                 if let Some(why) = self.refuse(tree, l, has) {
                     let far = self.links[l as usize].ends[1 - side as usize]
                         .iter()
@@ -1043,6 +1126,7 @@ impl Map {
         if from.piece == to.piece {
             let first_line = self.line(from.piece, start_xz, goal_xz);
             return Ok(Route {
+                size: self.size,
                 hops: vec![Hop::Patch {
                     at: self.pieces[from.piece as usize].at,
                     piece: from.piece,
@@ -1070,7 +1154,11 @@ impl Map {
             let pick =
                 first.or_else(|| failed.iter().min_by_key(|f| (f.2, f.0)).map(|f| (f.0, f.1)));
             let detail = match pick {
-                Some((l, why)) => format!("link {}: {why}", show(self.links[l as usize].id)),
+                Some((l, why)) => format!(
+                    "link {}: {why}{}",
+                    show(self.links[l as usize].id),
+                    self.widths(l, why)
+                ),
                 None => "no link leads on from here".to_owned(),
             };
             return Err(Refusal {
@@ -1112,6 +1200,7 @@ impl Map {
             .map_or(goal_xz, |(p, _)| self.portals[*p as usize].mid());
         let first_line = self.line(from.piece, start_xz, target);
         Ok(Route {
+            size: self.size,
             hops,
             first_line,
             waypoints,

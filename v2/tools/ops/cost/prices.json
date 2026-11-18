@@ -1,0 +1,38 @@
+{
+  "about": "What a world costs (Engine v2 O11, #2721): the one unit-price file. Every price has its date and its source; a price with no date is a bug (cost.test.mjs). The machine's size is the production machine's, from the owner's machine facts; its price is an example the owner replaces with the invoice.",
+  "eur_usd": {
+    "value": 1.0968,
+    "date": "2026-11-18",
+    "source": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+  },
+  "machine": {
+    "eur_month": 79,
+    "cores": 8,
+    "memory_gb": 30.6,
+    "disk_gb": 245,
+    "date": "2026-11-18",
+    "source": "Example price; the owner replaces it with the invoice: EUR 79 a month, the low end of the dedicated-server row in v2/docs/machines.md, 'The goal, priced'. Size: the production machine's facts line of 18 Nov 2026 (v2/tools/ops/machine-facts.sh): 8 cores, 30.6 GB memory, 245 GB SSD"
+  },
+  "split": {
+    "processor": 0.5,
+    "memory": 0.4,
+    "local_disk": 0.1,
+    "date": "2026-11-18",
+    "source": "O11's default share of the machine's fixed price by part (#2721); the owner may change it"
+  },
+  "stored_bytes": {
+    "usd_per_gb_month": 0.015,
+    "date": "2026-11-18",
+    "source": "https://developers.cloudflare.com/r2/pricing/ (storage A in v2/docs/machines.md; the free 10 GB is not netted out)"
+  },
+  "uploads": {
+    "usd_per_million": 4.5,
+    "date": "2026-11-18",
+    "source": "https://developers.cloudflare.com/r2/pricing/ (class A operations; the free million is not netted out)"
+  },
+  "bytes_served": {
+    "eur_per_tb": 1,
+    "date": "2026-11-18",
+    "source": "v2/docs/machines.md, 'The goal, priced': the 10 Gbit link add-on's row (traffic past its 20 TB)"
+  }
+}

@@ -1,0 +1,462 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:folding_desk (from #1652). The desk holds two paper sheets (sheets, a count, 0 to 2) and an out tray for one thing. With empty hands a Soul folds a boat or a bird for ten seconds: a sheet is used and the folded thing is made on the tray. Refused as the original refused: no sheet left ('This folding desk has no supplied paper sheet left.'), the tray taken ('Take the item off the output surface before folding paper.'), something held ('Put down what you are holding before folding paper.'). Nothing restocks the desk, so no fix is named for an empty one; the boat and bird are taken with a free hand.",
+  "cases": [
+    {
+      "name": "fold_boat_every_need_met",
+      "act": {
+        "this": "d1",
+        "form": "fold_boat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fold_boat_no_paper_left",
+      "act": {
+        "this": "d1",
+        "form": "fold_boat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk",
+            "fields": {
+              "sheets": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "sheets",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null,
+        "says": "no_paper"
+      }
+    },
+    {
+      "name": "fold_boat_tray_taken",
+      "act": {
+        "this": "d1",
+        "form": "fold_boat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk",
+            "slots": {
+              "out": [
+                "p1"
+              ]
+            }
+          },
+          "p1": {
+            "kind": "eden:paper_bird"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "d1",
+          "slot": "out"
+        },
+        "fix": null,
+        "says": "clear_tray"
+      }
+    },
+    {
+      "name": "fold_boat_holding_something",
+      "act": {
+        "this": "d1",
+        "form": "fold_boat"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk"
+          },
+          "p1": {
+            "kind": "eden:paper_bird"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "fold_bird_every_need_met",
+      "act": {
+        "this": "d1",
+        "form": "fold_bird"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fold_bird_no_paper_left",
+      "act": {
+        "this": "d1",
+        "form": "fold_bird"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk",
+            "fields": {
+              "sheets": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "sheets",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": null,
+        "says": "no_paper"
+      }
+    },
+    {
+      "name": "fold_bird_tray_taken",
+      "act": {
+        "this": "d1",
+        "form": "fold_bird"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk",
+            "slots": {
+              "out": [
+                "p1"
+              ]
+            }
+          },
+          "p1": {
+            "kind": "eden:paper_boat"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 1,
+        "detail": {
+          "node": "d1",
+          "slot": "out"
+        },
+        "fix": null,
+        "says": "clear_tray"
+      }
+    },
+    {
+      "name": "fold_bird_holding_something",
+      "act": {
+        "this": "d1",
+        "form": "fold_bird"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "d1": {
+            "kind": "eden:folding_desk"
+          },
+          "p1": {
+            "kind": "eden:paper_boat"
+          },
+          "b1": {
+            "hands": {
+              "left": "p1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 2,
+        "detail": {
+          "holding": 1
+        },
+        "fix": {
+          "step": "put"
+        },
+        "says": "put_down"
+      }
+    },
+    {
+      "name": "paper_boat_take_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_boat"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "paper_boat_take_both_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_boat"
+          },
+          "h1": {
+            "kind": "eden:paper_boat"
+          },
+          "h2": {
+            "kind": "eden:paper_boat"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    },
+    {
+      "name": "paper_bird_take_every_need_met",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_bird"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "paper_bird_take_both_hands_full",
+      "act": {
+        "this": "p1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "p1": {
+            "kind": "eden:paper_bird"
+          },
+          "h1": {
+            "kind": "eden:paper_bird"
+          },
+          "h2": {
+            "kind": "eden:paper_bird"
+          },
+          "b1": {
+            "hands": {
+              "left": "h1",
+              "right": "h2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0,
+        "detail": {},
+        "fix": {
+          "step": "put"
+        }
+      }
+    }
+  ]
+}

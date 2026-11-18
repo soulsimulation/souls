@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":256,"group":"over-time","words":"spend the afternoon reading in the library","obvious":3,"when":"in the afternoon","things":{"bookshelf":"eden:bookshelf","book":"eden:book","armchair":"eden:armchair"},"chain":[{"this":"bookshelf","form":"take"},{"this":"me","form":"sit_down","args":{"spot":"armchair"}},{"this":"book","form":"read"}]}

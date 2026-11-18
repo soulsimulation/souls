@@ -1,0 +1,1 @@
+{"format":"souls-ask/1","n":44,"group":"object","words":"have a nap under a tree","obvious":3,"things":{"tree":"eden:tree"},"chain":[{"this":"tree","form":"go_to_shade"},{"this":"me","form":"lie_down","args":{"spot":"tree"}}]}

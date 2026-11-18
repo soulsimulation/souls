@@ -1,0 +1,13 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:round_table",
+  "owner": "thing",
+  "geometry": { "bounds_mm": [1200, 740, 1200], "front": "none" },
+  "motion": { "how": "pushed_by_one" },
+  "loose": { "ever": true },
+  "looks": { "model": "look:round_table" },
+  "text": {
+    "card": "A round table with no front, pushed by one Soul."
+  },
+  "card": { "text": "card" }
+}

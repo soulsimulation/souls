@@ -1,0 +1,23 @@
+{
+  "format": "souls-entry/1",
+  "kind": "test:cup",
+  "owner": "thing",
+  "state": {
+    "water_g": { "n": 1, "type": "int", "unit": "g", "default": 0, "max": 300, "audience": {"rule": "everyone"} }
+  },
+  "points": {
+    "handle": { "role": "grip", "at_mm": [50, 40, 0] }
+  },
+  "geometry": { "bounds_mm": [90, 100, 90] },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [{ "step": "take" }],
+      "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }]
+    }
+  },
+  "text": { "card": "A test cup that holds up to 300 g of water and can be taken from a shelf." },
+  "card": { "text": "card" }
+}

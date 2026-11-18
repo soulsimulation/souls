@@ -1,0 +1,708 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Paper cutting (from #1747): each cut keeps the sheet (now a quarter, half or three quarters) and makes the complementary piece where the Soul stands, in one batch; a second cut is refused. Both pieces are then carried, one in each hand; a quarter, a half and a three-quarter piece lying loose are each taken.",
+  "cases": [
+    {
+      "name": "cut_quarter_then_take_the_three_quarter_piece",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "s1",
+            "form": "cut_quarter"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "part",
+                "n": 1,
+                "to": "quarter"
+              },
+              {
+                "change": "create",
+                "node": "r1.0",
+                "kind": "eden:paper_three_quarter",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sheet_cut",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:piece_cut",
+                "node": "s1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "cut_half"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "r1.0",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "r1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "r1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "take"
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "s1",
+                "to": {
+                  "node": "b1",
+                  "hand": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "s1": {
+          "kind": "eden:cutting_sheet",
+          "fields": {
+            "part": "quarter"
+          }
+        },
+        "r1.0": {
+          "kind": "eden:paper_three_quarter"
+        },
+        "b1": {
+          "hands": {
+            "left": "r1.0",
+            "right": "s1"
+          }
+        }
+      }
+    },
+    {
+      "name": "cut_half_then_take_the_half_piece",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "s1",
+            "form": "cut_half"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "part",
+                "n": 1,
+                "to": "half"
+              },
+              {
+                "change": "create",
+                "node": "r1.0",
+                "kind": "eden:paper_half",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sheet_cut",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:piece_cut",
+                "node": "s1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "cut_half"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "r1.0",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "r1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "r1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "take"
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "s1",
+                "to": {
+                  "node": "b1",
+                  "hand": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "s1": {
+          "kind": "eden:cutting_sheet",
+          "fields": {
+            "part": "half"
+          }
+        },
+        "r1.0": {
+          "kind": "eden:paper_half"
+        },
+        "b1": {
+          "hands": {
+            "left": "r1.0",
+            "right": "s1"
+          }
+        }
+      }
+    },
+    {
+      "name": "cut_three_quarter_then_take_the_quarter_piece",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "s1"
+            ]
+          },
+          "s1": {
+            "kind": "eden:cutting_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "s1",
+            "form": "cut_three_quarter"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "s1",
+                "field": "part",
+                "n": 1,
+                "to": "three_quarter"
+              },
+              {
+                "change": "create",
+                "node": "r1.0",
+                "kind": "eden:paper_quarter",
+                "to": {
+                  "node": "room"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:sheet_cut",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:piece_cut",
+                "node": "s1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "cut_half"
+          },
+          "receipt": "r2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "r1.0",
+            "form": "take"
+          },
+          "receipt": "r3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "r1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "r1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "s1",
+            "form": "take"
+          },
+          "receipt": "r4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "s1",
+                "to": {
+                  "node": "b1",
+                  "hand": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "s1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "s1": {
+          "kind": "eden:cutting_sheet",
+          "fields": {
+            "part": "three_quarter"
+          }
+        },
+        "r1.0": {
+          "kind": "eden:paper_quarter"
+        },
+        "b1": {
+          "hands": {
+            "left": "r1.0",
+            "right": "s1"
+          }
+        }
+      }
+    },
+    {
+      "name": "take_a_paper_quarter",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:paper_quarter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "take"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "p1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "p1": {
+          "kind": "eden:paper_quarter"
+        },
+        "b1": {
+          "hands": {
+            "left": "p1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "take_a_paper_half",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:paper_half"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "take"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "p1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "p1": {
+          "kind": "eden:paper_half"
+        },
+        "b1": {
+          "hands": {
+            "left": "p1",
+            "right": null
+          }
+        }
+      }
+    },
+    {
+      "name": "take_a_paper_three_quarter",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:paper_three_quarter"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "take"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "p1",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "room": {
+          "loose": [
+            "b1"
+          ]
+        },
+        "p1": {
+          "kind": "eden:paper_three_quarter"
+        },
+        "b1": {
+          "hands": {
+            "left": "p1",
+            "right": null
+          }
+        }
+      }
+    }
+  ]
+}
